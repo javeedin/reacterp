@@ -1,5 +1,5 @@
-import React from 'react';
-import { Card, Row, Col, Typography, Space, Statistic, Progress, Divider } from 'antd';
+import React, { useState, useRef, useEffect } from 'react';
+import { Card, Row, Col, Typography, Space, Progress, Divider, Tooltip } from 'antd';
 import {
   AccountBookOutlined,
   ShoppingCartOutlined,
@@ -18,9 +18,12 @@ import {
   CheckCircleOutlined,
   FileTextOutlined,
   BankOutlined,
+  AppstoreOutlined,
+  CloseOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import type { Module } from '../types';
+import Autopilot from '../components/Autopilot';
 
 const { Title, Text } = Typography;
 
@@ -36,6 +39,7 @@ const REDWOOD = {
   neutral600: '#6B6B6B',
   neutral900: '#1A1A1A',
   surface: '#FFFFFF',
+  moduleOrange: '#FA8C16',
 };
 
 // KPI Data (placeholder - will be replaced with API calls)
@@ -255,13 +259,56 @@ const QuickActionCard = ({
 
 const Home: React.FC = () => {
   const navigate = useNavigate();
+  const [isModulesOpen, setIsModulesOpen] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const floatingIconRef = useRef<HTMLDivElement>(null);
+
+  // Click outside handler
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      const isOutsidePanel = panelRef.current && !panelRef.current.contains(target);
+      const isOutsideFloatingIcon = floatingIconRef.current && !floatingIconRef.current.contains(target);
+
+      if (isOutsidePanel && isOutsideFloatingIcon) {
+        closePanel();
+      }
+    };
+
+    if (isModulesOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isModulesOpen]);
+
+  const closePanel = () => {
+    setIsClosing(true);
+    setTimeout(() => {
+      setIsModulesOpen(false);
+      setIsClosing(false);
+    }, 250);
+  };
+
+  const toggleModulesPanel = () => {
+    if (isModulesOpen) {
+      closePanel();
+    } else {
+      setIsClosing(false);
+      setIsModulesOpen(true);
+    }
+  };
 
   const handleModuleClick = (module: Module) => {
+    closePanel();
     navigate(module.path);
   };
 
   return (
-    <div style={{ padding: '24px', background: REDWOOD.neutral100, minHeight: 'calc(100vh - 64px)' }}>
+    <div style={{ padding: '24px', paddingRight: 100, background: REDWOOD.neutral100, minHeight: 'calc(100vh - 64px)' }}>
       {/* Header */}
       <div style={{ marginBottom: 24 }}>
         <Space align="center">
@@ -537,6 +584,206 @@ const Home: React.FC = () => {
           ))}
         </Row>
       </Card>
+
+      {/* Floating Modules Icon */}
+      <div
+        ref={floatingIconRef}
+        style={{
+          position: 'fixed',
+          right: 24,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          zIndex: 1000,
+        }}
+      >
+        <Tooltip title={isModulesOpen ? '' : 'Modules'} placement="left">
+          <div
+            onClick={toggleModulesPanel}
+            style={{
+              width: 56,
+              height: 56,
+              borderRadius: 12,
+              background: isModulesOpen ? REDWOOD.moduleOrange : REDWOOD.surface,
+              border: `2px solid ${REDWOOD.moduleOrange}`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              transition: 'all 0.3s ease',
+              boxShadow: isModulesOpen ? `0 4px 12px ${REDWOOD.moduleOrange}40` : '0 2px 8px rgba(0,0,0,0.1)',
+              color: isModulesOpen ? '#fff' : REDWOOD.moduleOrange,
+              fontSize: 24,
+            }}
+          >
+            <AppstoreOutlined />
+          </div>
+        </Tooltip>
+      </div>
+
+      {/* Backdrop Overlay */}
+      {isModulesOpen && (
+        <div
+          onClick={closePanel}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.3)',
+            zIndex: 1000,
+            animation: isClosing ? 'fadeOut 0.25s ease forwards' : 'fadeIn 0.3s ease forwards',
+          }}
+        />
+      )}
+
+      {/* Modules Slide-out Panel */}
+      {isModulesOpen && (
+        <div
+          ref={panelRef}
+          style={{
+            position: 'fixed',
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: 400,
+            background: REDWOOD.surface,
+            boxShadow: '-4px 0 24px rgba(0,0,0,0.15)',
+            overflow: 'hidden',
+            animation: isClosing ? 'slideOut 0.25s ease-in forwards' : 'slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+            zIndex: 1001,
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          {/* Panel Header */}
+          <div style={{
+            padding: '20px 24px',
+            background: REDWOOD.moduleOrange,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexShrink: 0,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <AppstoreOutlined style={{ fontSize: 22, color: '#fff' }} />
+              <Text strong style={{ color: '#fff', fontSize: 18 }}>Modules</Text>
+            </div>
+            <CloseOutlined
+              style={{ color: '#fff', cursor: 'pointer', fontSize: 16, padding: 8 }}
+              onClick={closePanel}
+            />
+          </div>
+
+          {/* Panel Content */}
+          <div style={{ padding: 16, flex: 1, overflowY: 'auto' }}>
+            {modules.map((module, index) => (
+              <div
+                key={module.id}
+                onClick={() => handleModuleClick(module)}
+                style={{
+                  padding: '16px 20px',
+                  borderRadius: 12,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 16,
+                  transition: 'all 0.2s ease',
+                  marginBottom: 8,
+                  border: `1px solid ${REDWOOD.neutral200}`,
+                  background: REDWOOD.surface,
+                  opacity: 0,
+                  animation: `fadeInItem 0.3s ease-out ${index * 0.03}s forwards`,
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = REDWOOD.neutral100;
+                  e.currentTarget.style.borderColor = module.color;
+                  e.currentTarget.style.transform = 'translateX(-4px)';
+                  e.currentTarget.style.boxShadow = `0 2px 8px ${module.color}20`;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = REDWOOD.surface;
+                  e.currentTarget.style.borderColor = REDWOOD.neutral200;
+                  e.currentTarget.style.transform = 'translateX(0)';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+              >
+                <div style={{
+                  width: 48,
+                  height: 48,
+                  borderRadius: 12,
+                  background: `${module.color}15`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: module.color,
+                  fontSize: 24,
+                  flexShrink: 0,
+                }}>
+                  {React.cloneElement(module.icon as React.ReactElement, { style: { fontSize: 24 } })}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <Text strong style={{ display: 'block', color: REDWOOD.neutral900, fontSize: 15 }}>
+                    {module.name}
+                  </Text>
+                  <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.4 }}>
+                    {module.description}
+                  </Text>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Autopilot Assistant */}
+      <Autopilot />
+
+      {/* CSS Animations */}
+      <style>{`
+        @keyframes slideIn {
+          from {
+            transform: translateX(100%);
+          }
+          to {
+            transform: translateX(0);
+          }
+        }
+        @keyframes slideOut {
+          from {
+            transform: translateX(0);
+          }
+          to {
+            transform: translateX(100%);
+          }
+        }
+        @keyframes fadeIn {
+          from {
+            opacity: 0;
+          }
+          to {
+            opacity: 1;
+          }
+        }
+        @keyframes fadeOut {
+          from {
+            opacity: 1;
+          }
+          to {
+            opacity: 0;
+          }
+        }
+        @keyframes fadeInItem {
+          from {
+            opacity: 0;
+            transform: translateX(20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateX(0);
+          }
+        }
+      `}</style>
     </div>
   );
 };

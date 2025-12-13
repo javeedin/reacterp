@@ -28,6 +28,7 @@ import {
   WarningOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
+import Autopilot from '../../components/Autopilot';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -701,6 +702,9 @@ const GLModule: React.FC = () => {
           )}
         </div>
       </Content>
+
+      {/* Autopilot Assistant */}
+      <Autopilot />
 
       {/* CSS Animations */}
       <style>{`

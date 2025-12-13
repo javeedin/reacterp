@@ -37,6 +37,7 @@ import {
 import { Link } from 'react-router-dom';
 import { SYNC_OBJECTS, ORACLE_FUSION_CONFIG, PROXY_CONFIG, type SyncObjectConfig, type ApiType } from '../../config/api.config';
 import { syncGLJournals, testGLConnection, type SyncProgress, type LogCallback } from '../../services/gl-sync.service';
+import Autopilot from '../../components/Autopilot';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -813,6 +814,9 @@ const SyncData: React.FC = () => {
           </Row>
         </div>
       </Content>
+
+      {/* Autopilot Assistant */}
+      <Autopilot />
     </Layout>
   );
 };
