@@ -86,11 +86,16 @@ const GLModule: React.FC = () => {
   const [activePanel, setActivePanel] = useState<'none' | 'tasks' | 'reports'>('none');
   const [selectedItem, setSelectedItem] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const floatingIconsRef = useRef<HTMLDivElement>(null);
 
   // Click outside handler
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (panelRef.current && !panelRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      const isOutsidePanel = panelRef.current && !panelRef.current.contains(target);
+      const isOutsideFloatingIcons = floatingIconsRef.current && !floatingIconsRef.current.contains(target);
+
+      if (isOutsidePanel && isOutsideFloatingIcons) {
         setActivePanel('none');
       }
     };
@@ -169,15 +174,17 @@ const GLModule: React.FC = () => {
   }) => (
     <div
       style={{
-        position: 'absolute',
-        right: 72,
-        top: 0,
-        width: 320,
+        position: 'fixed',
+        right: 24,
+        top: '50%',
+        transform: 'translateY(-50%)',
+        width: 380,
         background: REDWOOD.surface,
         borderRadius: 12,
-        boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+        boxShadow: '0 12px 32px rgba(0,0,0,0.2)',
         overflow: 'hidden',
-        animation: 'slideIn 0.2s ease-out',
+        animation: 'slideIn 0.25s ease-out',
+        zIndex: 1001,
       }}
     >
       {/* Panel Header */}
@@ -196,44 +203,53 @@ const GLModule: React.FC = () => {
       </div>
 
       {/* Panel Items */}
-      <div style={{ padding: 8, maxHeight: 400, overflowY: 'auto' }}>
+      <div style={{ padding: 12, maxHeight: 480, overflowY: 'auto' }}>
         {items.map((item) => (
           <div
             key={item.key}
             onClick={() => handleMenuItemClick(item.key)}
             style={{
-              padding: '12px 16px',
-              borderRadius: 8,
+              padding: '14px 16px',
+              borderRadius: 10,
               cursor: 'pointer',
               display: 'flex',
-              alignItems: 'flex-start',
-              gap: 12,
-              transition: 'background 0.2s',
-              marginBottom: 4,
+              alignItems: 'center',
+              gap: 14,
+              transition: 'all 0.2s ease',
+              marginBottom: 6,
+              border: `1px solid transparent`,
             }}
-            onMouseEnter={(e) => e.currentTarget.style.background = REDWOOD.neutral100}
-            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = REDWOOD.neutral100;
+              e.currentTarget.style.borderColor = REDWOOD.neutral200;
+              e.currentTarget.style.transform = 'translateX(-4px)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.borderColor = 'transparent';
+              e.currentTarget.style.transform = 'translateX(0)';
+            }}
           >
             <div style={{
-              width: 36,
-              height: 36,
-              borderRadius: 8,
+              width: 42,
+              height: 42,
+              borderRadius: 10,
               background: `${color}15`,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               color: color,
-              fontSize: 18,
+              fontSize: 20,
               flexShrink: 0,
             }}>
               {item.icon}
             </div>
             <div style={{ flex: 1 }}>
-              <Text strong style={{ display: 'block', color: REDWOOD.neutral900 }}>
+              <Text strong style={{ display: 'block', color: REDWOOD.neutral900, fontSize: 14 }}>
                 {item.label}
               </Text>
               {item.description && (
-                <Text type="secondary" style={{ fontSize: 12 }}>
+                <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.4 }}>
                   {item.description}
                 </Text>
               )}
@@ -361,7 +377,7 @@ const GLModule: React.FC = () => {
 
           {/* Floating Connected Icons */}
           <div
-            ref={panelRef}
+            ref={floatingIconsRef}
             style={{
               position: 'fixed',
               right: 24,
@@ -398,8 +414,10 @@ const GLModule: React.FC = () => {
               onClick={() => togglePanel('reports')}
               position="bottom"
             />
+          </div>
 
-            {/* Slide-out Panels */}
+          {/* Slide-out Panels - Rendered outside to overlay floating icons */}
+          <div ref={panelRef}>
             {activePanel === 'tasks' && (
               <SlidePanel
                 title="Tasks"
