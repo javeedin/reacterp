@@ -1,5 +1,6 @@
 -- ============================================================
 -- APEX REST Handlers for Manage Journals API
+-- Tables: RR_GL_JOURNAL_BATCHES, RR_GL_HEADERS, RR_GL_LINES_ALL
 -- Created for ReactERP
 -- ============================================================
 
@@ -53,9 +54,9 @@ DECLARE
     v_first         BOOLEAN := TRUE;
 
     -- Variables for cursor columns
-    v_header_sync_id    NUMBER;
+    v_header_id         NUMBER;
     v_je_header_id      NUMBER;
-    v_je_batch_id       NUMBER;
+    v_batch_id          NUMBER;
     v_journal_name      VARCHAR2(240);
     v_journal_batch     VARCHAR2(4000);
     v_batch_name        VARCHAR2(240);
@@ -127,7 +128,7 @@ BEGIN
 
     LOOP
         FETCH v_cursor INTO
-            v_header_sync_id, v_je_header_id, v_je_batch_id,
+            v_header_id, v_je_header_id, v_batch_id,
             v_journal_name, v_journal_batch, v_batch_name,
             v_period, v_source, v_category,
             v_entered_dr, v_entered_cr, v_accounted_dr, v_accounted_cr,
@@ -143,10 +144,10 @@ BEGIN
 
         v_row_json := ''
         {
-            "key": "'' || v_header_sync_id || ''",
-            "headerSyncId": '' || v_header_sync_id || '',
+            "key": "'' || v_header_id || ''",
+            "headerId": '' || v_header_id || '',
             "jeHeaderId": '' || v_je_header_id || '',
-            "jeBatchId": '' || NVL(v_je_batch_id, 0) || '',
+            "batchId": '' || NVL(v_batch_id, 0) || '',
             "journal": "'' || REPLACE(NVL(v_journal_name, ''''), ''"'', ''\"'') || ''",
             "journalBatch": "'' || REPLACE(NVL(v_journal_batch, ''''), ''"'', ''\"'') || ''",
             "batchName": "'' || REPLACE(NVL(v_batch_name, ''''), ''"'', ''\"'') || ''",
@@ -222,17 +223,25 @@ DECLARE
     v_json          CLOB;
     v_first         BOOLEAN := TRUE;
 
-    v_line_sync_id  NUMBER;
+    v_line_id       NUMBER;
     v_line_num      NUMBER;
     v_header_id     NUMBER;
+    v_batch_id      NUMBER;
     v_account       VARCHAR2(750);
+    v_coa_name      VARCHAR2(240);
     v_description   VARCHAR2(4000);
     v_entered_dr    NUMBER;
     v_entered_cr    NUMBER;
     v_accounted_dr  NUMBER;
     v_accounted_cr  NUMBER;
     v_currency      VARCHAR2(15);
-    v_status        VARCHAR2(80);
+    v_stat_amount   NUMBER;
+    v_ref1          VARCHAR2(240);
+    v_ref2          VARCHAR2(240);
+    v_ref3          VARCHAR2(240);
+    v_ref4          VARCHAR2(240);
+    v_ref5          VARCHAR2(240);
+    v_recon_ref     VARCHAR2(240);
 BEGIN
     v_cursor := RR_MANAGE_JOURNALS_PKG.get_journal_lines(
         p_je_header_id => :id
@@ -245,10 +254,12 @@ BEGIN
 
     LOOP
         FETCH v_cursor INTO
-            v_line_sync_id, v_line_num, v_header_id,
-            v_account, v_description,
+            v_line_id, v_line_num, v_header_id, v_batch_id,
+            v_account, v_coa_name, v_description,
             v_entered_dr, v_entered_cr, v_accounted_dr, v_accounted_cr,
-            v_currency, v_status;
+            v_currency, v_stat_amount,
+            v_ref1, v_ref2, v_ref3, v_ref4, v_ref5,
+            v_recon_ref;
         EXIT WHEN v_cursor%NOTFOUND;
 
         IF NOT v_first THEN
@@ -258,18 +269,26 @@ BEGIN
 
         v_json := v_json || ''
         {
-            "key": "'' || v_line_sync_id || ''",
-            "lineSyncId": '' || v_line_sync_id || '',
+            "key": "'' || v_line_id || ''",
+            "lineId": '' || v_line_id || '',
             "lineNum": '' || v_line_num || '',
             "jeHeaderId": '' || v_header_id || '',
+            "batchId": '' || NVL(v_batch_id, 0) || '',
             "account": "'' || NVL(v_account, '''') || ''",
+            "chartOfAccountsName": "'' || NVL(v_coa_name, '''') || ''",
             "description": "'' || REPLACE(NVL(v_description, ''''), ''"'', ''\"'') || ''",
             "enteredDr": '' || NVL(v_entered_dr, 0) || '',
             "enteredCr": '' || NVL(v_entered_cr, 0) || '',
             "accountedDr": '' || NVL(v_accounted_dr, 0) || '',
             "accountedCr": '' || NVL(v_accounted_cr, 0) || '',
             "currency": "'' || NVL(v_currency, ''USD'') || ''",
-            "status": "'' || NVL(v_status, '''') || ''"
+            "statAmount": '' || NVL(v_stat_amount, 0) || '',
+            "reference1": "'' || REPLACE(NVL(v_ref1, ''''), ''"'', ''\"'') || ''",
+            "reference2": "'' || REPLACE(NVL(v_ref2, ''''), ''"'', ''\"'') || ''",
+            "reference3": "'' || REPLACE(NVL(v_ref3, ''''), ''"'', ''\"'') || ''",
+            "reference4": "'' || REPLACE(NVL(v_ref4, ''''), ''"'', ''\"'') || ''",
+            "reference5": "'' || REPLACE(NVL(v_ref5, ''''), ''"'', ''\"'') || ''",
+            "reconciliationReference": "'' || REPLACE(NVL(v_recon_ref, ''''), ''"'', ''\"'') || ''"
         }'';
     END LOOP;
 
@@ -319,7 +338,7 @@ BEGIN
         p_comments       => 'Get distinct accounting periods for dropdown',
         p_source         => '
             SELECT DISTINCT PERIOD_NAME as "value", PERIOD_NAME as "label"
-            FROM RR_GL_JE_HEADERS
+            FROM RR_GL_HEADERS
             WHERE PERIOD_NAME IS NOT NULL
             ORDER BY PERIOD_NAME DESC
         '
@@ -354,7 +373,7 @@ BEGIN
         p_comments       => 'Get distinct journal sources for dropdown',
         p_source         => '
             SELECT DISTINCT USER_JE_SOURCE_NAME as "value", USER_JE_SOURCE_NAME as "label"
-            FROM RR_GL_JE_HEADERS
+            FROM RR_GL_JOURNAL_BATCHES
             WHERE USER_JE_SOURCE_NAME IS NOT NULL
             ORDER BY USER_JE_SOURCE_NAME
         '
@@ -389,7 +408,7 @@ BEGIN
         p_comments       => 'Get distinct journal categories for dropdown',
         p_source         => '
             SELECT DISTINCT USER_JE_CATEGORY_NAME as "value", USER_JE_CATEGORY_NAME as "label"
-            FROM RR_GL_JE_HEADERS
+            FROM RR_GL_HEADERS
             WHERE USER_JE_CATEGORY_NAME IS NOT NULL
             ORDER BY USER_JE_CATEGORY_NAME
         '
@@ -424,7 +443,7 @@ BEGIN
         p_comments       => 'Get distinct ledgers for dropdown',
         p_source         => '
             SELECT DISTINCT LEDGER_NAME as "value", LEDGER_NAME as "label"
-            FROM RR_GL_JE_HEADERS
+            FROM RR_GL_HEADERS
             WHERE LEDGER_NAME IS NOT NULL
             ORDER BY LEDGER_NAME
         '
