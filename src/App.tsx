@@ -6,6 +6,7 @@ import MainLayout from './layouts/MainLayout';
 import Login from './pages/Login';
 import Home from './pages/Home';
 import GLModule from './pages/gl/GLModule';
+import SyncData from './pages/sync/SyncData';
 
 // Placeholder component for modules under development
 const ComingSoon = ({ moduleName }: { moduleName: string }) => (
@@ -59,6 +60,7 @@ function App() {
               <Route path="manufacturing/*" element={<ComingSoon moduleName="Manufacturing" />} />
               <Route path="reports/*" element={<ComingSoon moduleName="Reports & Analytics" />} />
               <Route path="admin/*" element={<ComingSoon moduleName="Administration" />} />
+              <Route path="sync/*" element={<SyncData />} />
             </Route>
 
             {/* Catch all */}

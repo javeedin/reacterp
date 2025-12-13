@@ -11,6 +11,7 @@ import {
   InboxOutlined,
   TruckOutlined,
   ToolOutlined,
+  SyncOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import type { Module } from '../types';
@@ -97,6 +98,14 @@ const modules: Module[] = [
     icon: <SettingOutlined style={{ fontSize: 40 }} />,
     path: '/admin',
     color: '#595959',
+  },
+  {
+    id: 'sync',
+    name: 'Sync Data',
+    description: 'Sync data from Oracle Fusion ERP',
+    icon: <SyncOutlined style={{ fontSize: 40 }} />,
+    path: '/sync',
+    color: '#08979c',
   },
 ];
 
