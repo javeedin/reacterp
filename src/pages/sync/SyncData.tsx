@@ -42,7 +42,7 @@ const { Content } = Layout;
 const { Title, Text } = Typography;
 const { Option } = Select;
 
-const SYNC_VERSION = '2.0.0'; // Hierarchical sync with Redwood UI
+const SYNC_VERSION = '2.1.0'; // Added proxy status check
 
 // Oracle Redwood Color Palette
 const REDWOOD = {
@@ -67,6 +67,9 @@ interface SyncLog {
   message: string;
 }
 
+// Proxy status type
+type ProxyStatus = 'unknown' | 'checking' | 'online' | 'offline';
+
 const SyncData: React.FC = () => {
   const [form] = Form.useForm();
   const [selectedObject, setSelectedObject] = useState<SyncObjectConfig | null>(null);
@@ -74,6 +77,8 @@ const SyncData: React.FC = () => {
   const [logs, setLogs] = useState<SyncLog[]>([]);
   const [isTesting, setIsTesting] = useState(false);
   const [testMode, setTestMode] = useState(true); // Default to test mode (25 batches)
+  const [proxyStatus, setProxyStatus] = useState<ProxyStatus>('unknown');
+  const [proxyError, setProxyError] = useState<string>('');
   const [progress, setProgress] = useState<SyncProgress>({
     status: 'idle',
     totalBatches: 0,
@@ -108,6 +113,59 @@ const SyncData: React.FC = () => {
     setLogs((prev) => [log, ...prev].slice(0, 500));
   }, []);
 
+  // Check proxy server status
+  const checkProxyStatus = useCallback(async () => {
+    setProxyStatus('checking');
+    setProxyError('');
+    addLog('info', `Checking proxy server at ${PROXY_CONFIG.baseUrl}...`);
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
+      const response = await fetch(`${PROXY_CONFIG.baseUrl}/health`, {
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const data = await response.json();
+        setProxyStatus('online');
+        addLog('success', `✓ Proxy server is ONLINE (${data.timestamp})`);
+        addLog('info', `Proxy URL: ${PROXY_CONFIG.baseUrl}`);
+        return true;
+      } else {
+        setProxyStatus('offline');
+        setProxyError(`HTTP ${response.status}`);
+        addLog('error', `✗ Proxy returned HTTP ${response.status}`);
+        return false;
+      }
+    } catch (error) {
+      setProxyStatus('offline');
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+
+      if (errorMsg.includes('abort')) {
+        setProxyError('Connection timeout (5s)');
+        addLog('error', '✗ Proxy connection timeout after 5 seconds');
+      } else if (errorMsg.includes('Failed to fetch') || errorMsg.includes('NetworkError')) {
+        setProxyError('Cannot connect - server not running?');
+        addLog('error', '✗ Cannot connect to proxy server');
+        addLog('warning', 'Make sure proxy server is running: node server/proxy.cjs');
+      } else {
+        setProxyError(errorMsg);
+        addLog('error', `✗ Proxy error: ${errorMsg}`);
+      }
+
+      addLog('info', '─────────────────────────────────────────');
+      addLog('info', 'To start the proxy server, run in a terminal:');
+      addLog('step', '  cd C:\\FusionApi\\reacterp');
+      addLog('step', '  node server/proxy.cjs');
+      addLog('info', '─────────────────────────────────────────');
+
+      return false;
+    }
+  }, [addLog]);
+
   const handleObjectChange = (objectId: string) => {
     const object = SYNC_OBJECTS.find((o) => o.id === objectId);
     setSelectedObject(object || null);
@@ -134,16 +192,37 @@ const SyncData: React.FC = () => {
   const handleTestConnection = async () => {
     setIsTesting(true);
     setLogs([]);
-    addLog('info', '═══════════════════════════════════════════════════════════');
-    addLog('info', '  Testing Oracle Fusion Connection');
-    addLog('info', '═══════════════════════════════════════════════════════════');
+    addLog('step', '═══════════════════════════════════════════════════════════');
+    addLog('step', '  CONNECTION TEST');
+    addLog('step', '═══════════════════════════════════════════════════════════');
+
+    // Step 1: Check proxy
+    addLog('info', '');
+    addLog('info', '▶ STEP 1: Checking Proxy Server...');
+    const proxyOk = await checkProxyStatus();
+
+    if (!proxyOk) {
+      addLog('error', '');
+      addLog('error', '✗ CONNECTION TEST FAILED - Proxy server not available');
+      setIsTesting(false);
+      return;
+    }
+
+    // Step 2: Test Oracle connection via proxy
+    addLog('info', '');
+    addLog('info', '▶ STEP 2: Testing Oracle Fusion via Proxy...');
 
     const success = await testGLConnection(addLog);
 
+    addLog('info', '');
     if (success) {
-      addLog('success', '✓ Connection test passed');
+      addLog('success', '═══════════════════════════════════════════════════════════');
+      addLog('success', '  ✓ CONNECTION TEST PASSED');
+      addLog('success', '═══════════════════════════════════════════════════════════');
     } else {
-      addLog('error', '✗ Connection test failed');
+      addLog('error', '═══════════════════════════════════════════════════════════');
+      addLog('error', '  ✗ CONNECTION TEST FAILED');
+      addLog('error', '═══════════════════════════════════════════════════════════');
     }
 
     setIsTesting(false);
@@ -457,28 +536,75 @@ const SyncData: React.FC = () => {
                   </Space>
                 </Form>
 
-                {/* Proxy Info */}
+                {/* Proxy Status */}
                 <Divider style={{ margin: '16px 0' }} />
-                <Alert
-                  message="Proxy Server Required"
-                  description={
-                    <div style={{ fontSize: 12 }}>
-                      <code style={{
-                        background: REDWOOD.surfaceSecondary,
-                        padding: '2px 6px',
-                        borderRadius: 4
-                      }}>
-                        npm run server
-                      </code>
-                      <div style={{ marginTop: 4 }}>
-                        <Text type="secondary">{PROXY_CONFIG.baseUrl}</Text>
-                      </div>
+                <div style={{
+                  padding: 16,
+                  background: proxyStatus === 'online' ? '#f6ffed' : proxyStatus === 'offline' ? '#fff2f0' : REDWOOD.surfaceSecondary,
+                  borderRadius: 8,
+                  border: `1px solid ${proxyStatus === 'online' ? '#b7eb8f' : proxyStatus === 'offline' ? '#ffccc7' : REDWOOD.border}`,
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <Text strong>Proxy Server</Text>
+                    <Tag
+                      color={
+                        proxyStatus === 'online' ? 'success' :
+                        proxyStatus === 'offline' ? 'error' :
+                        proxyStatus === 'checking' ? 'processing' : 'default'
+                      }
+                    >
+                      {proxyStatus === 'online' ? '● ONLINE' :
+                       proxyStatus === 'offline' ? '● OFFLINE' :
+                       proxyStatus === 'checking' ? '● CHECKING...' : '● UNKNOWN'}
+                    </Tag>
+                  </div>
+
+                  <div style={{ fontSize: 12, marginBottom: 8 }}>
+                    <Text type="secondary">{PROXY_CONFIG.baseUrl}</Text>
+                  </div>
+
+                  {proxyError && (
+                    <div style={{ fontSize: 11, color: REDWOOD.error, marginBottom: 8 }}>
+                      Error: {proxyError}
                     </div>
-                  }
-                  type="warning"
-                  showIcon
-                  style={{ borderRadius: 8 }}
-                />
+                  )}
+
+                  <Button
+                    size="small"
+                    icon={<ApiOutlined />}
+                    onClick={checkProxyStatus}
+                    loading={proxyStatus === 'checking'}
+                    style={{ marginBottom: 8 }}
+                    block
+                  >
+                    Check Proxy Status
+                  </Button>
+
+                  {proxyStatus === 'offline' && (
+                    <Alert
+                      message="Start proxy server"
+                      description={
+                        <div style={{ fontSize: 11 }}>
+                          <div>Open a terminal and run:</div>
+                          <code style={{
+                            display: 'block',
+                            background: '#fff',
+                            padding: '4px 8px',
+                            borderRadius: 4,
+                            marginTop: 4,
+                            fontSize: 11,
+                          }}>
+                            cd C:\FusionApi\reacterp<br/>
+                            node server/proxy.cjs
+                          </code>
+                        </div>
+                      }
+                      type="error"
+                      showIcon
+                      style={{ borderRadius: 6, marginTop: 8 }}
+                    />
+                  )}
+                </div>
               </Card>
             </Col>
 
