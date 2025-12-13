@@ -29,10 +29,11 @@ import {
   CloseCircleOutlined,
   InfoCircleOutlined,
   WarningOutlined,
+  ApiOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import { SYNC_OBJECTS, type SyncObjectConfig, type ApiType } from '../../config/api.config';
-import { fetchFromOracle, insertToApex, getOracleTotalCount } from '../../services/sync.service';
+import { SYNC_OBJECTS, ORACLE_FUSION_CONFIG, APEX_DB_CONFIG, type SyncObjectConfig, type ApiType } from '../../config/api.config';
+import { fetchFromOracle, insertToApex, getOracleTotalCount, testOracleConnection, buildOracleUrl } from '../../services/sync.service';
 import type { SyncLog, SyncProgress } from '../../types/sync.types';
 
 const { Content } = Layout;
@@ -44,6 +45,7 @@ const SyncData: React.FC = () => {
   const [selectedObject, setSelectedObject] = useState<SyncObjectConfig | null>(null);
   const [, setApiType] = useState<ApiType>('REST');
   const [logs, setLogs] = useState<SyncLog[]>([]);
+  const [isTesting, setIsTesting] = useState(false);
   const [progress, setProgress] = useState<SyncProgress>({
     status: 'idle',
     totalRecordsInSource: 0,
@@ -59,18 +61,67 @@ const SyncData: React.FC = () => {
 
   const addLog = useCallback((type: SyncLog['type'], message: string) => {
     const log: SyncLog = {
-      id: Date.now().toString(),
+      id: Date.now().toString() + Math.random(),
       timestamp: new Date(),
       type,
       message,
     };
-    setLogs((prev) => [log, ...prev].slice(0, 100)); // Keep last 100 logs
+    setLogs((prev) => [log, ...prev].slice(0, 200)); // Keep last 200 logs
   }, []);
 
   const handleObjectChange = (objectId: string) => {
     const object = SYNC_OBJECTS.find((o) => o.id === objectId);
     setSelectedObject(object || null);
     form.resetFields(['parameters']);
+
+    if (object) {
+      addLog('info', `Selected: ${object.name}`);
+      addLog('info', `Oracle Endpoint: ${ORACLE_FUSION_CONFIG.baseUrl}${object.oracleEndpoint}`);
+      addLog('info', `APEX Endpoint: ${APEX_DB_CONFIG.baseUrl}${object.apexEndpoint}`);
+    }
+  };
+
+  const getParameters = (): Record<string, string> => {
+    const values = form.getFieldsValue();
+    const parameters: Record<string, string> = {};
+
+    selectedObject?.parameters.forEach((param) => {
+      if (values[param.key]) {
+        parameters[param.key] = values[param.key];
+      }
+    });
+
+    return parameters;
+  };
+
+  const handleTestConnection = async () => {
+    if (!selectedObject) {
+      addLog('error', 'Please select a sync object first');
+      return;
+    }
+
+    setIsTesting(true);
+    setLogs([]);
+
+    const parameters = getParameters();
+
+    addLog('info', '=== TESTING ORACLE CONNECTION ===');
+    addLog('info', `Object: ${selectedObject.name}`);
+    addLog('info', `Base URL: ${ORACLE_FUSION_CONFIG.baseUrl}`);
+    addLog('info', `User: ${ORACLE_FUSION_CONFIG.username}`);
+
+    const url = buildOracleUrl(selectedObject, parameters, 0, 1);
+    addLog('info', `Full URL: ${url}`);
+
+    const result = await testOracleConnection(selectedObject, parameters, addLog);
+
+    if (result.success) {
+      addLog('success', '=== CONNECTION TEST PASSED ===');
+    } else {
+      addLog('error', '=== CONNECTION TEST FAILED ===');
+    }
+
+    setIsTesting(false);
   };
 
   const handleSync = async () => {
@@ -79,14 +130,7 @@ const SyncData: React.FC = () => {
       return;
     }
 
-    const values = await form.validateFields();
-    const parameters: Record<string, string> = {};
-
-    selectedObject.parameters.forEach((param) => {
-      if (values[param.key]) {
-        parameters[param.key] = values[param.key];
-      }
-    });
+    const parameters = getParameters();
 
     isSyncingRef.current = true;
     abortControllerRef.current = new AbortController();
@@ -104,16 +148,20 @@ const SyncData: React.FC = () => {
     });
 
     setLogs([]);
-    addLog('info', `Starting sync for ${selectedObject.name}...`);
+    addLog('info', '=== STARTING SYNC ===');
+    addLog('info', `Object: ${selectedObject.name}`);
     addLog('info', `Parameters: ${JSON.stringify(parameters)}`);
+    addLog('info', `Oracle URL: ${ORACLE_FUSION_CONFIG.baseUrl}${selectedObject.oracleEndpoint}`);
+    addLog('info', `APEX URL: ${APEX_DB_CONFIG.baseUrl}${selectedObject.apexEndpoint}`);
 
     try {
       // Get total count first
-      addLog('info', 'Fetching total record count from Oracle Fusion...');
-      const totalCount = await getOracleTotalCount(selectedObject, parameters);
+      addLog('info', 'Step 1: Getting total record count from Oracle Fusion...');
+      const totalCount = await getOracleTotalCount(selectedObject, parameters, addLog);
 
       if (totalCount === 0) {
         addLog('warning', 'No records found in Oracle Fusion for the given parameters');
+        addLog('warning', 'This could be due to: CORS blocking, invalid credentials, or no matching data');
         setProgress((prev) => ({ ...prev, status: 'completed', endTime: new Date() }));
         return;
       }
@@ -139,7 +187,7 @@ const SyncData: React.FC = () => {
 
       while (hasMore && isSyncingRef.current) {
         batchNumber++;
-        addLog('info', `Processing batch ${batchNumber}/${totalBatches} (offset: ${offset})...`);
+        addLog('info', `=== BATCH ${batchNumber}/${totalBatches} ===`);
 
         setProgress((prev) => ({
           ...prev,
@@ -148,8 +196,8 @@ const SyncData: React.FC = () => {
         }));
 
         // Fetch from Oracle
-        addLog('info', `Fetching records from Oracle (offset: ${offset}, limit: ${limit})...`);
-        const fetchResult = await fetchFromOracle(selectedObject, parameters, offset, limit);
+        addLog('info', `Fetching from Oracle (offset: ${offset}, limit: ${limit})...`);
+        const fetchResult = await fetchFromOracle(selectedObject, parameters, offset, limit, addLog);
 
         if (!fetchResult.success) {
           addLog('error', `Fetch failed: ${fetchResult.error}`);
@@ -167,7 +215,7 @@ const SyncData: React.FC = () => {
         totalFetched += records.length;
         hasMore = fetchResult.hasMore || false;
 
-        addLog('success', `Fetched ${records.length} records from Oracle`);
+        addLog('success', `Fetched ${records.length} records (total fetched: ${totalFetched})`);
         setProgress((prev) => ({
           ...prev,
           totalFetched,
@@ -178,11 +226,11 @@ const SyncData: React.FC = () => {
           addLog('info', `Inserting ${records.length} records to APEX Database...`);
           setProgress((prev) => ({ ...prev, status: 'inserting' }));
 
-          const insertResult = await insertToApex(selectedObject, records);
+          const insertResult = await insertToApex(selectedObject, records, addLog);
 
           if (insertResult.success) {
             totalInserted += records.length;
-            addLog('success', `Successfully inserted ${records.length} records to APEX`);
+            addLog('success', `Inserted ${records.length} records (total inserted: ${totalInserted})`);
           } else {
             totalFailed += records.length;
             addLog('error', `Insert failed: ${insertResult.error}`);
@@ -197,13 +245,17 @@ const SyncData: React.FC = () => {
         }
 
         offset += limit;
+        addLog('info', `hasMore: ${hasMore}, next offset: ${offset}`);
 
         // Small delay to prevent overwhelming the APIs
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
 
       if (isSyncingRef.current) {
-        addLog('success', `Sync completed! Fetched: ${totalFetched}, Inserted: ${totalInserted}, Failed: ${totalFailed}`);
+        addLog('success', '=== SYNC COMPLETED ===');
+        addLog('success', `Total Fetched: ${totalFetched}`);
+        addLog('success', `Total Inserted: ${totalInserted}`);
+        addLog('success', `Total Failed: ${totalFailed}`);
         setProgress((prev) => ({
           ...prev,
           status: 'completed',
@@ -285,7 +337,7 @@ const SyncData: React.FC = () => {
       render: (message: string, record: SyncLog) => (
         <Space>
           {getLogIcon(record.type)}
-          <Text>{message}</Text>
+          <Text style={{ fontSize: 12, wordBreak: 'break-all' }}>{message}</Text>
         </Space>
       ),
     },
@@ -312,7 +364,7 @@ const SyncData: React.FC = () => {
               <Card
                 title={
                   <Space>
-                    <SyncOutlined spin={isSyncing} />
+                    <SyncOutlined spin={isSyncing || isTesting} />
                     <span>Sync Configuration</span>
                   </Space>
                 }
@@ -326,7 +378,7 @@ const SyncData: React.FC = () => {
                     <Select
                       placeholder="Select object to sync"
                       onChange={handleObjectChange}
-                      disabled={isSyncing}
+                      disabled={isSyncing || isTesting}
                     >
                       {SYNC_OBJECTS.map((obj) => (
                         <Option key={obj.id} value={obj.id}>
@@ -346,7 +398,7 @@ const SyncData: React.FC = () => {
                   )}
 
                   <Form.Item label="API Type" name="apiType" initialValue="REST">
-                    <Select disabled={isSyncing} onChange={(v) => setApiType(v)}>
+                    <Select disabled={isSyncing || isTesting} onChange={(v) => setApiType(v)}>
                       <Option value="REST">REST API</Option>
                       <Option value="SOAP" disabled>
                         SOAP (Coming Soon)
@@ -363,7 +415,7 @@ const SyncData: React.FC = () => {
                       initialValue={param.defaultValue}
                     >
                       {param.type === 'select' ? (
-                        <Select disabled={isSyncing}>
+                        <Select disabled={isSyncing || isTesting}>
                           {param.options?.map((opt) => (
                             <Option key={opt.value} value={opt.value}>
                               {opt.label}
@@ -371,21 +423,32 @@ const SyncData: React.FC = () => {
                           ))}
                         </Select>
                       ) : (
-                        <Input placeholder={`Enter ${param.label}`} disabled={isSyncing} />
+                        <Input placeholder={`Enter ${param.label}`} disabled={isSyncing || isTesting} />
                       )}
                     </Form.Item>
                   ))}
 
                   <Divider />
 
-                  <Space style={{ width: '100%', justifyContent: 'center' }}>
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Button
+                      icon={<ApiOutlined />}
+                      onClick={handleTestConnection}
+                      disabled={!selectedObject || isSyncing || isTesting}
+                      loading={isTesting}
+                      block
+                    >
+                      Test Connection
+                    </Button>
+
                     {!isSyncing ? (
                       <Button
                         type="primary"
                         icon={<PlayCircleOutlined />}
                         size="large"
                         onClick={handleSync}
-                        disabled={!selectedObject}
+                        disabled={!selectedObject || isTesting}
+                        block
                       >
                         Start Sync
                       </Button>
@@ -395,12 +458,26 @@ const SyncData: React.FC = () => {
                         icon={<StopOutlined />}
                         size="large"
                         onClick={handleStop}
+                        block
                       >
                         Stop Sync
                       </Button>
                     )}
                   </Space>
                 </Form>
+
+                {/* API Info */}
+                <Divider />
+                <div style={{ fontSize: 11, color: '#888' }}>
+                  <div><strong>Oracle Host:</strong></div>
+                  <div style={{ wordBreak: 'break-all', marginBottom: 8 }}>
+                    {ORACLE_FUSION_CONFIG.baseUrl}
+                  </div>
+                  <div><strong>APEX Host:</strong></div>
+                  <div style={{ wordBreak: 'break-all' }}>
+                    {APEX_DB_CONFIG.baseUrl}
+                  </div>
+                </div>
               </Card>
             </Col>
 
@@ -536,9 +613,9 @@ const SyncData: React.FC = () => {
                   columns={logColumns}
                   rowKey="id"
                   size="small"
-                  pagination={{ pageSize: 10, size: 'small' }}
-                  scroll={{ y: 300 }}
-                  locale={{ emptyText: 'No sync logs yet. Start a sync to see activity.' }}
+                  pagination={{ pageSize: 15, size: 'small' }}
+                  scroll={{ y: 400 }}
+                  locale={{ emptyText: 'No sync logs yet. Click "Test Connection" or "Start Sync" to see activity.' }}
                 />
               </Card>
             </Col>
