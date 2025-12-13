@@ -40,6 +40,8 @@ const { Content } = Layout;
 const { Text } = Typography;
 const { Option } = Select;
 
+const SYNC_VERSION = '1.1.0'; // Version with proxy support
+
 const SyncData: React.FC = () => {
   const [form] = Form.useForm();
   const [selectedObject, setSelectedObject] = useState<SyncObjectConfig | null>(null);
@@ -366,6 +368,7 @@ const SyncData: React.FC = () => {
                   <Space>
                     <SyncOutlined spin={isSyncing || isTesting} />
                     <span>Sync Configuration</span>
+                    <Tag color="blue">v{SYNC_VERSION}</Tag>
                   </Space>
                 }
               >
