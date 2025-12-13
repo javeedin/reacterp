@@ -136,7 +136,8 @@ app.get('/api/oracle/:endpoint', async (req, res) => {
 });
 
 // Proxy: Insert to APEX Database - supports nested paths like gl/journals/headers
-app.post('/api/apex/*', async (req, res) => {
+// Using regex pattern for Express 5 compatibility
+app.post(/^\/api\/apex\/(.+)$/, async (req, res) => {
   const path = req.params[0]; // Gets everything after /api/apex/
   const url = `${APEX_CONFIG.baseUrl}/${path}`;
 
