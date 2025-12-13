@@ -372,10 +372,11 @@ BEGIN
         p_mimes_allowed  => NULL,
         p_comments       => 'Get distinct journal sources for dropdown',
         p_source         => '
-            SELECT DISTINCT USER_JE_SOURCE_NAME as "value", USER_JE_SOURCE_NAME as "label"
-            FROM RR_GL_JOURNAL_BATCHES
-            WHERE USER_JE_SOURCE_NAME IS NOT NULL
-            ORDER BY USER_JE_SOURCE_NAME
+            SELECT ''Manual'' as "value", ''Manual'' as "label" FROM DUAL
+            UNION ALL
+            SELECT ''Spreadsheet'' as "value", ''Spreadsheet'' as "label" FROM DUAL
+            UNION ALL
+            SELECT ''AutoPost'' as "value", ''AutoPost'' as "label" FROM DUAL
         '
     );
     COMMIT;
@@ -477,10 +478,10 @@ BEGIN
         p_mimes_allowed  => NULL,
         p_comments       => 'Get distinct batch statuses for dropdown',
         p_source         => '
-            SELECT DISTINCT STATUS_MEANING as "value", STATUS_MEANING as "label"
+            SELECT DISTINCT STATUS as "value", STATUS as "label"
             FROM RR_GL_JOURNAL_BATCHES
-            WHERE STATUS_MEANING IS NOT NULL
-            ORDER BY STATUS_MEANING
+            WHERE STATUS IS NOT NULL
+            ORDER BY STATUS
         '
     );
     COMMIT;

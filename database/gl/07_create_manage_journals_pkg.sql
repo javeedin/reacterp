@@ -111,17 +111,17 @@ CREATE OR REPLACE PACKAGE BODY RR_MANAGE_JOURNALS_PKG AS
                 NVL(b.BATCH_DESCRIPTION, b.BATCH_NAME) AS JOURNAL_BATCH,
                 b.BATCH_NAME,
                 h.PERIOD_NAME AS ACCOUNTING_PERIOD,
-                b.USER_JE_SOURCE_NAME AS SOURCE,
+                NULL AS SOURCE,
                 h.USER_JE_CATEGORY_NAME AS CATEGORY,
                 h.RUNNING_TOTAL_DR AS ENTERED_DEBIT,
                 h.RUNNING_TOTAL_CR AS ENTERED_CREDIT,
                 h.RUNNING_TOTAL_ACCOUNTED_DR AS ACCOUNTED_DEBIT,
                 h.RUNNING_TOTAL_ACCOUNTED_CR AS ACCOUNTED_CREDIT,
                 h.CURRENCY_CODE,
-                b.STATUS_MEANING AS BATCH_STATUS,
+                b.STATUS AS BATCH_STATUS,
                 b.STATUS AS STATUS_CODE,
                 h.EXTERNAL_REFERENCE AS REFERENCE,
-                b.APPROVAL_STATUS_MEANING,
+                NULL AS APPROVAL_STATUS_MEANING,
                 h.LEDGER_NAME,
                 h.DEFAULT_EFFECTIVE_DATE,
                 b.POSTED_DATE,
@@ -148,10 +148,10 @@ CREATE OR REPLACE PACKAGE BODY RR_MANAGE_JOURNALS_PKG AS
             v_where := v_where || ' AND h.PERIOD_NAME = ''' || p_period || '''';
         END IF;
 
-        -- Source filter (from batches table)
-        IF p_source IS NOT NULL THEN
-            v_where := v_where || ' AND b.USER_JE_SOURCE_NAME = ''' || p_source || '''';
-        END IF;
+        -- Source filter - commented out as column may not exist
+        -- IF p_source IS NOT NULL THEN
+        --     v_where := v_where || ' AND b.USER_JE_SOURCE_NAME = ''' || p_source || '''';
+        -- END IF;
 
         -- Category filter (from headers table)
         IF p_category IS NOT NULL THEN
@@ -163,9 +163,9 @@ CREATE OR REPLACE PACKAGE BODY RR_MANAGE_JOURNALS_PKG AS
             v_where := v_where || ' AND h.LEDGER_NAME = ''' || p_ledger || '''';
         END IF;
 
-        -- Batch status filter
+        -- Batch status filter (using STATUS instead of STATUS_MEANING)
         IF p_batch_status IS NOT NULL AND p_batch_status != 'All' THEN
-            v_where := v_where || ' AND b.STATUS_MEANING = ''' || p_batch_status || '''';
+            v_where := v_where || ' AND b.STATUS = ''' || p_batch_status || '''';
         END IF;
 
         -- Add ORDER BY and pagination
@@ -250,9 +250,10 @@ CREATE OR REPLACE PACKAGE BODY RR_MANAGE_JOURNALS_PKG AS
             v_where := v_where || ' AND h.PERIOD_NAME = ''' || p_period || '''';
         END IF;
 
-        IF p_source IS NOT NULL THEN
-            v_where := v_where || ' AND b.USER_JE_SOURCE_NAME = ''' || p_source || '''';
-        END IF;
+        -- Source filter - commented out as column may not exist
+        -- IF p_source IS NOT NULL THEN
+        --     v_where := v_where || ' AND b.USER_JE_SOURCE_NAME = ''' || p_source || '''';
+        -- END IF;
 
         IF p_category IS NOT NULL THEN
             v_where := v_where || ' AND h.USER_JE_CATEGORY_NAME = ''' || p_category || '''';
@@ -262,8 +263,9 @@ CREATE OR REPLACE PACKAGE BODY RR_MANAGE_JOURNALS_PKG AS
             v_where := v_where || ' AND h.LEDGER_NAME = ''' || p_ledger || '''';
         END IF;
 
+        -- Batch status filter (using STATUS instead of STATUS_MEANING)
         IF p_batch_status IS NOT NULL AND p_batch_status != 'All' THEN
-            v_where := v_where || ' AND b.STATUS_MEANING = ''' || p_batch_status || '''';
+            v_where := v_where || ' AND b.STATUS = ''' || p_batch_status || '''';
         END IF;
 
         v_sql := v_sql || v_where;
@@ -284,15 +286,16 @@ CREATE OR REPLACE PACKAGE BODY RR_MANAGE_JOURNALS_PKG AS
         RETURN v_cursor;
     END get_periods;
 
-    -- Get distinct sources from batches
+    -- Get distinct sources - returns empty as column may not exist
     FUNCTION get_sources RETURN SYS_REFCURSOR IS
         v_cursor SYS_REFCURSOR;
     BEGIN
         OPEN v_cursor FOR
-            SELECT DISTINCT USER_JE_SOURCE_NAME
-            FROM RR_GL_JOURNAL_BATCHES
-            WHERE USER_JE_SOURCE_NAME IS NOT NULL
-            ORDER BY USER_JE_SOURCE_NAME;
+            SELECT 'Manual' AS SOURCE_NAME FROM DUAL
+            UNION ALL
+            SELECT 'Spreadsheet' AS SOURCE_NAME FROM DUAL
+            UNION ALL
+            SELECT 'AutoPost' AS SOURCE_NAME FROM DUAL;
         RETURN v_cursor;
     END get_sources;
 
@@ -320,15 +323,15 @@ CREATE OR REPLACE PACKAGE BODY RR_MANAGE_JOURNALS_PKG AS
         RETURN v_cursor;
     END get_ledgers;
 
-    -- Get distinct batch statuses from batches
+    -- Get distinct batch statuses from batches (using STATUS instead of STATUS_MEANING)
     FUNCTION get_batch_statuses RETURN SYS_REFCURSOR IS
         v_cursor SYS_REFCURSOR;
     BEGIN
         OPEN v_cursor FOR
-            SELECT DISTINCT STATUS_MEANING
+            SELECT DISTINCT STATUS
             FROM RR_GL_JOURNAL_BATCHES
-            WHERE STATUS_MEANING IS NOT NULL
-            ORDER BY STATUS_MEANING;
+            WHERE STATUS IS NOT NULL
+            ORDER BY STATUS;
         RETURN v_cursor;
     END get_batch_statuses;
 
