@@ -32,7 +32,7 @@ import {
   ApiOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import { SYNC_OBJECTS, ORACLE_FUSION_CONFIG, APEX_DB_CONFIG, type SyncObjectConfig, type ApiType } from '../../config/api.config';
+import { SYNC_OBJECTS, ORACLE_FUSION_CONFIG, APEX_DB_CONFIG, PROXY_CONFIG, type SyncObjectConfig, type ApiType } from '../../config/api.config';
 import { fetchFromOracle, insertToApex, getOracleTotalCount, testOracleConnection, buildOracleUrl } from '../../services/sync.service';
 import type { SyncLog, SyncProgress } from '../../types/sync.types';
 
@@ -466,17 +466,28 @@ const SyncData: React.FC = () => {
                   </Space>
                 </Form>
 
-                {/* API Info */}
+                {/* Proxy Info */}
                 <Divider />
+                <Alert
+                  message="Proxy Server Required"
+                  description={
+                    <div style={{ fontSize: 12 }}>
+                      <div>Run in a separate terminal:</div>
+                      <code style={{ background: '#f5f5f5', padding: '2px 6px', borderRadius: 4 }}>
+                        npm run server
+                      </code>
+                      <div style={{ marginTop: 8 }}>
+                        <strong>Proxy:</strong> {PROXY_CONFIG.baseUrl}
+                      </div>
+                    </div>
+                  }
+                  type="warning"
+                  showIcon
+                  style={{ marginBottom: 12 }}
+                />
                 <div style={{ fontSize: 11, color: '#888' }}>
-                  <div><strong>Oracle Host:</strong></div>
-                  <div style={{ wordBreak: 'break-all', marginBottom: 8 }}>
-                    {ORACLE_FUSION_CONFIG.baseUrl}
-                  </div>
-                  <div><strong>APEX Host:</strong></div>
-                  <div style={{ wordBreak: 'break-all' }}>
-                    {APEX_DB_CONFIG.baseUrl}
-                  </div>
+                  <div><strong>Oracle:</strong> {ORACLE_FUSION_CONFIG.baseUrl.substring(0, 40)}...</div>
+                  <div><strong>APEX:</strong> {APEX_DB_CONFIG.baseUrl.substring(0, 40)}...</div>
                 </div>
               </Card>
             </Col>

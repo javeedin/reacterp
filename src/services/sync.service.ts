@@ -1,16 +1,20 @@
-import { ORACLE_FUSION_CONFIG, APEX_DB_CONFIG, type SyncObjectConfig } from '../config/api.config';
+import { PROXY_CONFIG, ORACLE_FUSION_CONFIG, type SyncObjectConfig } from '../config/api.config';
 import type { SyncResult } from '../types/sync.types';
 
 // Logger callback type
 type LogCallback = (type: 'info' | 'success' | 'error' | 'warning', message: string) => void;
 
-// Create Basic Auth header
-const getOracleAuthHeader = (): string => {
-  const credentials = btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
-  return `Basic ${credentials}`;
+// Check if proxy is available
+export const checkProxyHealth = async (): Promise<boolean> => {
+  try {
+    const response = await fetch(`${PROXY_CONFIG.baseUrl}/health`);
+    return response.ok;
+  } catch {
+    return false;
+  }
 };
 
-// Build Oracle URL
+// Build Oracle URL (for display purposes)
 export const buildOracleUrl = (
   objectConfig: SyncObjectConfig,
   parameters: Record<string, string>,
@@ -31,86 +35,60 @@ export const buildOracleUrl = (
   queryParams.append('offset', offset.toString());
   queryParams.append('limit', limit.toString());
 
-  return `${ORACLE_FUSION_CONFIG.baseUrl}${objectConfig.oracleEndpoint}?${queryParams.toString()}`;
+  return `${ORACLE_FUSION_CONFIG.baseUrl}/${objectConfig.oracleEndpoint}?${queryParams.toString()}`;
 };
 
-// Test Oracle connection
+// Test Oracle connection via proxy
 export const testOracleConnection = async (
-  objectConfig: SyncObjectConfig,
-  parameters: Record<string, string>,
+  _objectConfig: SyncObjectConfig,
+  _parameters: Record<string, string>,
   log?: LogCallback
 ): Promise<SyncResult> => {
-  const url = buildOracleUrl(objectConfig, parameters, 0, 1);
+  log?.('info', 'Testing connection via proxy server...');
+  log?.('info', `Proxy URL: ${PROXY_CONFIG.baseUrl}`);
 
-  log?.('info', `Testing Oracle connection...`);
-  log?.('info', `URL: ${url}`);
-  log?.('info', `User: ${ORACLE_FUSION_CONFIG.username}`);
-
-  try {
-    console.log('=== ORACLE CONNECTION TEST ===');
-    console.log('URL:', url);
-    console.log('Auth Header:', getOracleAuthHeader().substring(0, 20) + '...');
-
-    const startTime = Date.now();
-
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Authorization': getOracleAuthHeader(),
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-    });
-
-    const duration = Date.now() - startTime;
-    console.log('Response Status:', response.status);
-    console.log('Response Time:', duration, 'ms');
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.log('Error Response:', errorText);
-      log?.('error', `Oracle responded with ${response.status}: ${response.statusText}`);
-      log?.('error', `Response: ${errorText.substring(0, 200)}`);
-      return {
-        success: false,
-        error: `HTTP ${response.status}: ${response.statusText}`,
-      };
-    }
-
-    const data = await response.json();
-    console.log('Response Data:', data);
-
-    const count = data.count || data.totalResults || (data.items?.length || 0);
-    log?.('success', `Oracle connection successful! Found ${count} records (${duration}ms)`);
-
-    return {
-      success: true,
-      totalCount: count,
-      data: data.items || [],
-    };
-  } catch (error) {
-    console.error('=== ORACLE CONNECTION ERROR ===');
-    console.error('Error:', error);
-
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-
-    // Check for CORS error
-    if (errorMessage.includes('Failed to fetch') || errorMessage.includes('NetworkError')) {
-      log?.('error', `Network/CORS Error: Browser blocked the request`);
-      log?.('warning', `This is likely a CORS issue. The Oracle API doesn't allow browser requests.`);
-      log?.('info', `Solution: Use a backend proxy server or run sync from server-side`);
-    } else {
-      log?.('error', `Connection failed: ${errorMessage}`);
-    }
-
+  // First check if proxy is running
+  const proxyHealthy = await checkProxyHealth();
+  if (!proxyHealthy) {
+    log?.('error', 'Proxy server is not running!');
+    log?.('warning', 'Please start the proxy server with: npm run server');
+    log?.('info', 'Run in a separate terminal: node server/proxy.js');
     return {
       success: false,
-      error: errorMessage,
+      error: 'Proxy server is not running. Start it with: npm run server',
     };
+  }
+
+  log?.('success', 'Proxy server is running');
+
+  try {
+    const url = `${PROXY_CONFIG.baseUrl}/test/oracle`;
+    log?.('info', `Testing Oracle via: ${url}`);
+
+    const response = await fetch(url);
+    const data = await response.json();
+    console.log('Test Oracle Response:', data);
+
+    if (data.success) {
+      log?.('success', `Oracle connection successful! (${data.duration}ms)`);
+      log?.('success', `Found ${data.count} records, hasMore: ${data.hasMore}`);
+      if (data.sampleKeys?.length > 0) {
+        log?.('info', `Sample fields: ${data.sampleKeys.slice(0, 5).join(', ')}...`);
+      }
+      return { success: true, totalCount: data.count };
+    } else {
+      log?.('error', `Oracle connection failed: ${data.error}`);
+      log?.('error', `Status: ${data.status} ${data.statusText}`);
+      return { success: false, error: data.error };
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    log?.('error', `Connection test failed: ${errorMessage}`);
+    return { success: false, error: errorMessage };
   }
 };
 
-// Fetch data from Oracle Fusion
+// Fetch from Oracle via proxy
 export const fetchFromOracle = async (
   objectConfig: SyncObjectConfig,
   parameters: Record<string, string>,
@@ -118,42 +96,41 @@ export const fetchFromOracle = async (
   limit: number = ORACLE_FUSION_CONFIG.defaultLimit,
   log?: LogCallback
 ): Promise<SyncResult> => {
-  const url = buildOracleUrl(objectConfig, parameters, offset, limit);
-
   try {
-    console.log('=== FETCHING FROM ORACLE ===');
-    console.log('URL:', url);
-    console.log('Offset:', offset, 'Limit:', limit);
+    // Build query params
+    const queryParams = new URLSearchParams();
 
-    log?.('info', `Requesting: ${url}`);
+    const filters = Object.entries(parameters)
+      .filter(([, value]) => value)
+      .map(([key, value]) => `${key}=${value}`)
+      .join(';');
 
-    const startTime = Date.now();
-
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Authorization': getOracleAuthHeader(),
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-    });
-
-    const duration = Date.now() - startTime;
-
-    console.log('Response Status:', response.status);
-    console.log('Response Time:', duration, 'ms');
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.log('Error Response:', errorText);
-      throw new Error(`Oracle API Error: ${response.status} ${response.statusText} - ${errorText.substring(0, 100)}`);
+    if (filters) {
+      queryParams.append('q', filters);
     }
 
+    queryParams.append('offset', offset.toString());
+    queryParams.append('limit', limit.toString());
+
+    const url = `${PROXY_CONFIG.baseUrl}/oracle/${objectConfig.oracleEndpoint}?${queryParams.toString()}`;
+
+    console.log('=== FETCH FROM ORACLE (via proxy) ===');
+    console.log('URL:', url);
+
+    log?.('info', `Fetching via proxy: ${objectConfig.oracleEndpoint}`);
+    log?.('info', `Params: offset=${offset}, limit=${limit}`);
+
+    const startTime = Date.now();
+    const response = await fetch(url);
+    const duration = Date.now() - startTime;
+
     const data = await response.json();
-    console.log('Response Keys:', Object.keys(data));
-    console.log('Items Count:', data.items?.length || 0);
-    console.log('HasMore:', data.hasMore);
-    console.log('TotalResults:', data.totalResults);
+    console.log('Response:', { success: data.success, items: data.items?.length, hasMore: data.hasMore });
+
+    if (!data.success) {
+      log?.('error', `Fetch failed: ${data.error}`);
+      return { success: false, error: data.error };
+    }
 
     const items = data.items || [];
     const hasMore = data.hasMore || false;
@@ -171,95 +148,66 @@ export const fetchFromOracle = async (
       totalCount,
     };
   } catch (error) {
-    console.error('=== ORACLE FETCH ERROR ===');
-    console.error('Error:', error);
-
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-
-    if (errorMessage.includes('Failed to fetch')) {
-      log?.('error', `Network Error: Unable to reach Oracle API`);
-      log?.('warning', `This may be a CORS issue - browser blocking cross-origin request`);
-    } else {
-      log?.('error', `Fetch failed: ${errorMessage}`);
-    }
-
-    return {
-      success: false,
-      error: errorMessage,
-    };
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Fetch error:', error);
+    log?.('error', `Fetch error: ${errorMessage}`);
+    return { success: false, error: errorMessage };
   }
 };
 
-// Insert data to APEX Database
+// Insert to APEX via proxy
 export const insertToApex = async (
   objectConfig: SyncObjectConfig,
   records: unknown[],
   log?: LogCallback
 ): Promise<SyncResult> => {
-  const url = `${APEX_DB_CONFIG.baseUrl}${objectConfig.apexEndpoint}`;
-
   try {
-    console.log('=== INSERTING TO APEX ===');
+    const url = `${PROXY_CONFIG.baseUrl}/apex/${objectConfig.apexEndpoint}`;
+
+    console.log('=== INSERT TO APEX (via proxy) ===');
     console.log('URL:', url);
     console.log('Records:', records.length);
 
-    log?.('info', `Posting to: ${url}`);
-    log?.('info', `Payload size: ${records.length} records`);
+    log?.('info', `Inserting via proxy: ${objectConfig.apexEndpoint}`);
+    log?.('info', `Payload: ${records.length} records`);
 
     const startTime = Date.now();
-
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Accept': 'application/json',
       },
       body: JSON.stringify({ items: records }),
     });
-
     const duration = Date.now() - startTime;
 
-    console.log('Response Status:', response.status);
-    console.log('Response Time:', duration, 'ms');
+    const data = await response.json();
+    console.log('Response:', data);
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.log('Error Response:', errorText);
-      throw new Error(`APEX API Error: ${response.status} - ${errorText.substring(0, 200)}`);
+    if (!data.success) {
+      log?.('error', `Insert failed: ${data.error}`);
+      if (data.details) {
+        log?.('error', `Details: ${data.details.substring(0, 200)}`);
+      }
+      return { success: false, error: data.error };
     }
-
-    const result = await response.json();
-    console.log('Insert Result:', result);
 
     log?.('success', `Inserted ${records.length} records in ${duration}ms`);
 
     return {
       success: true,
       count: records.length,
-      data: result,
+      data: data,
     };
   } catch (error) {
-    console.error('=== APEX INSERT ERROR ===');
-    console.error('Error:', error);
-
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-
-    if (errorMessage.includes('Failed to fetch')) {
-      log?.('error', `Network Error: Unable to reach APEX API`);
-      log?.('warning', `Check if APEX endpoint is accessible`);
-    } else {
-      log?.('error', `Insert failed: ${errorMessage}`);
-    }
-
-    return {
-      success: false,
-      error: errorMessage,
-      count: 0,
-    };
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Insert error:', error);
+    log?.('error', `Insert error: ${errorMessage}`);
+    return { success: false, error: errorMessage, count: 0 };
   }
 };
 
-// Get total count from Oracle
+// Get total count from Oracle via proxy
 export const getOracleTotalCount = async (
   objectConfig: SyncObjectConfig,
   parameters: Record<string, string>,
@@ -281,43 +229,29 @@ export const getOracleTotalCount = async (
     queryParams.append('limit', '1');
     queryParams.append('onlyData', 'true');
 
-    const url = `${ORACLE_FUSION_CONFIG.baseUrl}${objectConfig.oracleEndpoint}?${queryParams.toString()}`;
+    const url = `${PROXY_CONFIG.baseUrl}/oracle/${objectConfig.oracleEndpoint}?${queryParams.toString()}`;
 
-    console.log('=== GETTING ORACLE COUNT ===');
+    console.log('=== GET ORACLE COUNT (via proxy) ===');
     console.log('URL:', url);
 
-    log?.('info', `Getting count from: ${url}`);
+    log?.('info', `Getting count via proxy...`);
 
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Authorization': getOracleAuthHeader(),
-        'Content-Type': 'application/json',
-      },
-    });
+    const response = await fetch(url);
+    const data = await response.json();
 
-    console.log('Response Status:', response.status);
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.log('Error Response:', errorText);
-      throw new Error(`Failed to get count: ${response.status} - ${errorText.substring(0, 100)}`);
+    if (!data.success) {
+      log?.('error', `Failed to get count: ${data.error}`);
+      return 0;
     }
 
-    const data = await response.json();
     const count = data.totalResults || data.count || 0;
-
-    console.log('Total Count:', count);
     log?.('success', `Total records in Oracle: ${count}`);
 
     return count;
   } catch (error) {
-    console.error('=== GET COUNT ERROR ===');
-    console.error('Error:', error);
-
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Get count error:', error);
     log?.('error', `Failed to get count: ${errorMessage}`);
-
     return 0;
   }
 };

@@ -1,3 +1,9 @@
+// Proxy Server Configuration (for bypassing CORS)
+export const PROXY_CONFIG = {
+  baseUrl: 'http://localhost:3001/api',
+  enabled: true, // Set to false to try direct API calls
+};
+
 // Oracle Fusion API Configuration
 export const ORACLE_FUSION_CONFIG = {
   baseUrl: 'https://iaaobn.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05',
@@ -35,8 +41,8 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
     id: 'gl-journal-batches',
     name: 'GL Journal Batches',
     description: 'Sync General Ledger Journal Batches from Oracle Fusion',
-    oracleEndpoint: '/journalBatches',
-    apexEndpoint: '/gl/journalbatches',
+    oracleEndpoint: 'journalBatches',
+    apexEndpoint: 'gl/journalbatches',
     parameters: [
       {
         key: 'DefaultPeriodName',
@@ -51,24 +57,24 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
     id: 'gl-accounts',
     name: 'GL Accounts',
     description: 'Sync Chart of Accounts from Oracle Fusion',
-    oracleEndpoint: '/accounts',
-    apexEndpoint: '/gl/accounts',
+    oracleEndpoint: 'accounts',
+    apexEndpoint: 'gl/accounts',
     parameters: [],
   },
   {
     id: 'suppliers',
     name: 'Suppliers',
     description: 'Sync Suppliers/Vendors from Oracle Fusion',
-    oracleEndpoint: '/suppliers',
-    apexEndpoint: '/ap/suppliers',
+    oracleEndpoint: 'suppliers',
+    apexEndpoint: 'ap/suppliers',
     parameters: [],
   },
   {
     id: 'customers',
     name: 'Customers',
     description: 'Sync Customers from Oracle Fusion',
-    oracleEndpoint: '/customers',
-    apexEndpoint: '/ar/customers',
+    oracleEndpoint: 'customers',
+    apexEndpoint: 'ar/customers',
     parameters: [],
   },
 ];
