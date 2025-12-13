@@ -37,6 +37,55 @@ const getOracleAuth = () => {
   return `Basic ${credentials}`;
 };
 
+// Proxy: Fetch from Oracle Fusion using FULL URL (for child resources)
+app.get('/api/oracle-url', async (req, res) => {
+  const fullUrl = req.query.url;
+
+  if (!fullUrl) {
+    return res.status(400).json({ success: false, error: 'URL parameter required' });
+  }
+
+  console.log('=== ORACLE URL PROXY REQUEST ===');
+  console.log('Full URL:', fullUrl);
+
+  try {
+    const response = await fetch(fullUrl, {
+      method: 'GET',
+      headers: {
+        'Authorization': getOracleAuth(),
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+    });
+
+    console.log('Oracle Response Status:', response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.log('Oracle Error:', errorText.substring(0, 300));
+      return res.status(response.status).json({
+        success: false,
+        error: `Oracle API Error: ${response.status} ${response.statusText}`,
+        details: errorText.substring(0, 500),
+      });
+    }
+
+    const data = await response.json();
+    console.log('Oracle Response - Items:', data.items?.length || 0, 'HasMore:', data.hasMore);
+
+    res.json({
+      success: true,
+      ...data,
+    });
+  } catch (error) {
+    console.error('Oracle URL Proxy Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
 // Proxy: Fetch from Oracle Fusion - single endpoint
 app.get('/api/oracle/:endpoint', async (req, res) => {
   const endpoint = req.params.endpoint;
@@ -86,15 +135,17 @@ app.get('/api/oracle/:endpoint', async (req, res) => {
   }
 });
 
-// Proxy: Insert to APEX Database - with path segments
-app.post('/api/apex/:module/:endpoint', async (req, res) => {
-  const path = `${req.params.module}/${req.params.endpoint}`;
+// Proxy: Insert to APEX Database - supports nested paths like gl/journals/headers
+app.post('/api/apex/*', async (req, res) => {
+  const path = req.params[0]; // Gets everything after /api/apex/
   const url = `${APEX_CONFIG.baseUrl}/${path}`;
 
   console.log('=== APEX PROXY REQUEST ===');
   console.log('Path:', path);
   console.log('Full URL:', url);
   console.log('Records:', req.body.items?.length || 0);
+  console.log('BatchId:', req.body.batchId);
+  console.log('JeHeaderId:', req.body.jeHeaderId);
 
   try {
     const response = await fetch(url, {
@@ -126,7 +177,7 @@ app.post('/api/apex/:module/:endpoint', async (req, res) => {
       });
     }
 
-    console.log('APEX Success');
+    console.log('APEX Success:', data);
     res.json({
       success: true,
       ...data,
@@ -243,16 +294,17 @@ app.get('/api/test/apex', async (req, res) => {
 // Start server
 app.listen(PORT, () => {
   console.log('='.repeat(50));
-  console.log('ReactERP Proxy Server');
+  console.log('ReactERP Proxy Server v1.1.0');
   console.log('='.repeat(50));
   console.log(`Server running on http://localhost:${PORT}`);
   console.log('');
   console.log('Endpoints:');
-  console.log('  GET  /api/health              - Health check');
-  console.log('  GET  /api/test/oracle         - Test Oracle connection');
-  console.log('  GET  /api/test/apex           - Test APEX connection');
-  console.log('  GET  /api/oracle/:endpoint    - Proxy Oracle requests');
-  console.log('  POST /api/apex/:module/:endpoint - Proxy APEX requests');
+  console.log('  GET  /api/health                - Health check');
+  console.log('  GET  /api/test/oracle           - Test Oracle connection');
+  console.log('  GET  /api/test/apex             - Test APEX connection');
+  console.log('  GET  /api/oracle/:endpoint      - Proxy Oracle requests');
+  console.log('  GET  /api/oracle-url?url=...    - Proxy Oracle full URL (for child resources)');
+  console.log('  POST /api/apex/*                - Proxy APEX POST requests');
   console.log('');
   console.log('Oracle Host:', ORACLE_CONFIG.baseUrl);
   console.log('APEX Host:', APEX_CONFIG.baseUrl);

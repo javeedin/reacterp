@@ -1,7 +1,7 @@
 // Proxy Server Configuration (for bypassing CORS)
 export const PROXY_CONFIG = {
   baseUrl: 'http://localhost:3001/api',
-  enabled: true, // Set to false to try direct API calls
+  enabled: true,
 };
 
 // Oracle Fusion API Configuration
@@ -10,11 +10,17 @@ export const ORACLE_FUSION_CONFIG = {
   username: 'ratheesh@buimerccorp.com',
   password: 'BCL#261285',
   defaultLimit: 500,
+  testLimit: 25, // Limit for testing
 };
 
 // APEX Database Configuration
 export const APEX_DB_CONFIG = {
   baseUrl: 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp',
+  endpoints: {
+    journalBatches: 'gl/journalbatches',
+    journalHeaders: 'gl/journals/headers',
+    journalLines: 'gl/journals/lines',
+  },
 };
 
 // Sync Objects Configuration
@@ -25,6 +31,17 @@ export interface SyncObjectConfig {
   oracleEndpoint: string;
   apexEndpoint: string;
   parameters: ParameterConfig[];
+  hasChildren?: boolean;
+  childConfig?: {
+    headers?: {
+      linkName: string;
+      apexEndpoint: string;
+    };
+    lines?: {
+      linkName: string;
+      apexEndpoint: string;
+    };
+  };
 }
 
 export interface ParameterConfig {
@@ -39,10 +56,21 @@ export interface ParameterConfig {
 export const SYNC_OBJECTS: SyncObjectConfig[] = [
   {
     id: 'gl-journal-batches',
-    name: 'GL Journal Batches',
-    description: 'Sync General Ledger Journal Batches from Oracle Fusion',
+    name: 'GL Journals (Full Sync)',
+    description: 'Sync Journal Batches → Headers → Lines from Oracle Fusion',
     oracleEndpoint: 'journalBatches',
     apexEndpoint: 'gl/journalbatches',
+    hasChildren: true,
+    childConfig: {
+      headers: {
+        linkName: 'journalHeaders',
+        apexEndpoint: 'gl/journals/headers',
+      },
+      lines: {
+        linkName: 'journalLines',
+        apexEndpoint: 'gl/journals/lines',
+      },
+    },
     parameters: [
       {
         key: 'DefaultPeriodName',

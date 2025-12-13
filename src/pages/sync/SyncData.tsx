@@ -11,36 +11,61 @@ import {
   Progress,
   Table,
   Tag,
-  Statistic,
   Row,
   Col,
   Divider,
   Alert,
   Breadcrumb,
+  Switch,
+  Tooltip,
 } from 'antd';
 import {
   SyncOutlined,
   PlayCircleOutlined,
   StopOutlined,
   HomeOutlined,
-  CloudDownloadOutlined,
-  CloudUploadOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
   InfoCircleOutlined,
   WarningOutlined,
   ApiOutlined,
+  DatabaseOutlined,
+  FileTextOutlined,
+  UnorderedListOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import { SYNC_OBJECTS, ORACLE_FUSION_CONFIG, APEX_DB_CONFIG, PROXY_CONFIG, type SyncObjectConfig, type ApiType } from '../../config/api.config';
-import { fetchFromOracle, insertToApex, getOracleTotalCount, testOracleConnection, buildOracleUrl } from '../../services/sync.service';
-import type { SyncLog, SyncProgress } from '../../types/sync.types';
+import { SYNC_OBJECTS, ORACLE_FUSION_CONFIG, PROXY_CONFIG, type SyncObjectConfig, type ApiType } from '../../config/api.config';
+import { syncGLJournals, testGLConnection, type SyncProgress, type LogCallback } from '../../services/gl-sync.service';
 
 const { Content } = Layout;
-const { Text } = Typography;
+const { Title, Text } = Typography;
 const { Option } = Select;
 
-const SYNC_VERSION = '1.1.0'; // Version with proxy support
+const SYNC_VERSION = '2.0.0'; // Hierarchical sync with Redwood UI
+
+// Oracle Redwood Color Palette
+const REDWOOD = {
+  primary: '#C74634',      // Oracle Red
+  primaryDark: '#A33B2C',  // Darker red
+  success: '#1D7B4D',      // Green
+  warning: '#D4A800',      // Amber
+  error: '#C74634',        // Red
+  info: '#0572CE',         // Blue
+  neutral: '#383838',      // Dark gray
+  surface: '#FFFFFF',
+  surfaceSecondary: '#F7F7F7',
+  border: '#E5E5E5',
+  textPrimary: '#1A1A1A',
+  textSecondary: '#6B6B6B',
+};
+
+interface SyncLog {
+  id: string;
+  timestamp: Date;
+  type: 'info' | 'success' | 'error' | 'warning' | 'step';
+  message: string;
+}
 
 const SyncData: React.FC = () => {
   const [form] = Form.useForm();
@@ -48,27 +73,39 @@ const SyncData: React.FC = () => {
   const [, setApiType] = useState<ApiType>('REST');
   const [logs, setLogs] = useState<SyncLog[]>([]);
   const [isTesting, setIsTesting] = useState(false);
+  const [testMode, setTestMode] = useState(true); // Default to test mode (25 batches)
   const [progress, setProgress] = useState<SyncProgress>({
     status: 'idle',
-    totalRecordsInSource: 0,
-    totalFetched: 0,
-    totalInserted: 0,
-    totalFailed: 0,
-    currentOffset: 0,
-    currentBatch: 0,
     totalBatches: 0,
+    processedBatches: 0,
+    currentBatchId: null,
+    currentBatchName: '',
+    totalHeaders: 0,
+    processedHeaders: 0,
+    currentHeaderId: null,
+    currentHeaderName: '',
+    totalLines: 0,
+    processedLines: 0,
+    totalBatchesInserted: 0,
+    totalHeadersInserted: 0,
+    totalLinesInserted: 0,
+    errors: 0,
+    lastError: '',
+    startTime: null,
+    endTime: null,
   });
+
   const abortControllerRef = useRef<AbortController | null>(null);
   const isSyncingRef = useRef(false);
 
-  const addLog = useCallback((type: SyncLog['type'], message: string) => {
+  const addLog: LogCallback = useCallback((type, message) => {
     const log: SyncLog = {
       id: Date.now().toString() + Math.random(),
       timestamp: new Date(),
       type,
       message,
     };
-    setLogs((prev) => [log, ...prev].slice(0, 200)); // Keep last 200 logs
+    setLogs((prev) => [log, ...prev].slice(0, 500));
   }, []);
 
   const handleObjectChange = (objectId: string) => {
@@ -78,8 +115,6 @@ const SyncData: React.FC = () => {
 
     if (object) {
       addLog('info', `Selected: ${object.name}`);
-      addLog('info', `Oracle Endpoint: ${ORACLE_FUSION_CONFIG.baseUrl}${object.oracleEndpoint}`);
-      addLog('info', `APEX Endpoint: ${APEX_DB_CONFIG.baseUrl}${object.apexEndpoint}`);
     }
   };
 
@@ -97,30 +132,18 @@ const SyncData: React.FC = () => {
   };
 
   const handleTestConnection = async () => {
-    if (!selectedObject) {
-      addLog('error', 'Please select a sync object first');
-      return;
-    }
-
     setIsTesting(true);
     setLogs([]);
+    addLog('info', '═══════════════════════════════════════════════════════════');
+    addLog('info', '  Testing Oracle Fusion Connection');
+    addLog('info', '═══════════════════════════════════════════════════════════');
 
-    const parameters = getParameters();
+    const success = await testGLConnection(addLog);
 
-    addLog('info', '=== TESTING ORACLE CONNECTION ===');
-    addLog('info', `Object: ${selectedObject.name}`);
-    addLog('info', `Base URL: ${ORACLE_FUSION_CONFIG.baseUrl}`);
-    addLog('info', `User: ${ORACLE_FUSION_CONFIG.username}`);
-
-    const url = buildOracleUrl(selectedObject, parameters, 0, 1);
-    addLog('info', `Full URL: ${url}`);
-
-    const result = await testOracleConnection(selectedObject, parameters, addLog);
-
-    if (result.success) {
-      addLog('success', '=== CONNECTION TEST PASSED ===');
+    if (success) {
+      addLog('success', '✓ Connection test passed');
     } else {
-      addLog('error', '=== CONNECTION TEST FAILED ===');
+      addLog('error', '✗ Connection test failed');
     }
 
     setIsTesting(false);
@@ -137,150 +160,39 @@ const SyncData: React.FC = () => {
     isSyncingRef.current = true;
     abortControllerRef.current = new AbortController();
 
+    setLogs([]);
     setProgress({
-      status: 'fetching',
-      totalRecordsInSource: 0,
-      totalFetched: 0,
-      totalInserted: 0,
-      totalFailed: 0,
-      currentOffset: 0,
-      currentBatch: 0,
+      status: 'fetching_batches',
       totalBatches: 0,
+      processedBatches: 0,
+      currentBatchId: null,
+      currentBatchName: '',
+      totalHeaders: 0,
+      processedHeaders: 0,
+      currentHeaderId: null,
+      currentHeaderName: '',
+      totalLines: 0,
+      processedLines: 0,
+      totalBatchesInserted: 0,
+      totalHeadersInserted: 0,
+      totalLinesInserted: 0,
+      errors: 0,
+      lastError: '',
       startTime: new Date(),
+      endTime: null,
     });
 
-    setLogs([]);
-    addLog('info', '=== STARTING SYNC ===');
-    addLog('info', `Object: ${selectedObject.name}`);
-    addLog('info', `Parameters: ${JSON.stringify(parameters)}`);
-    addLog('info', `Oracle URL: ${ORACLE_FUSION_CONFIG.baseUrl}${selectedObject.oracleEndpoint}`);
-    addLog('info', `APEX URL: ${APEX_DB_CONFIG.baseUrl}${selectedObject.apexEndpoint}`);
+    addLog('step', '═══════════════════════════════════════════════════════════');
+    addLog('step', `  GL JOURNAL SYNC - ${testMode ? 'TEST MODE (25 batches)' : 'FULL SYNC'}`);
+    addLog('step', '═══════════════════════════════════════════════════════════');
 
-    try {
-      // Get total count first
-      addLog('info', 'Step 1: Getting total record count from Oracle Fusion...');
-      const totalCount = await getOracleTotalCount(selectedObject, parameters, addLog);
-
-      if (totalCount === 0) {
-        addLog('warning', 'No records found in Oracle Fusion for the given parameters');
-        addLog('warning', 'This could be due to: CORS blocking, invalid credentials, or no matching data');
-        setProgress((prev) => ({ ...prev, status: 'completed', endTime: new Date() }));
-        return;
-      }
-
-      const limit = 500;
-      const totalBatches = Math.ceil(totalCount / limit);
-
-      addLog('success', `Found ${totalCount} records in Oracle Fusion`);
-      addLog('info', `Will process in ${totalBatches} batches of ${limit} records each`);
-
-      setProgress((prev) => ({
-        ...prev,
-        totalRecordsInSource: totalCount,
-        totalBatches,
-      }));
-
-      let offset = 0;
-      let batchNumber = 0;
-      let totalFetched = 0;
-      let totalInserted = 0;
-      let totalFailed = 0;
-      let hasMore = true;
-
-      while (hasMore && isSyncingRef.current) {
-        batchNumber++;
-        addLog('info', `=== BATCH ${batchNumber}/${totalBatches} ===`);
-
-        setProgress((prev) => ({
-          ...prev,
-          currentBatch: batchNumber,
-          currentOffset: offset,
-        }));
-
-        // Fetch from Oracle
-        addLog('info', `Fetching from Oracle (offset: ${offset}, limit: ${limit})...`);
-        const fetchResult = await fetchFromOracle(selectedObject, parameters, offset, limit, addLog);
-
-        if (!fetchResult.success) {
-          addLog('error', `Fetch failed: ${fetchResult.error}`);
-          totalFailed += limit;
-          setProgress((prev) => ({
-            ...prev,
-            status: 'error',
-            totalFailed,
-            errorMessage: fetchResult.error,
-          }));
-          break;
-        }
-
-        const records = fetchResult.data || [];
-        totalFetched += records.length;
-        hasMore = fetchResult.hasMore || false;
-
-        addLog('success', `Fetched ${records.length} records (total fetched: ${totalFetched})`);
-        setProgress((prev) => ({
-          ...prev,
-          totalFetched,
-        }));
-
-        if (records.length > 0) {
-          // Insert to APEX
-          addLog('info', `Inserting ${records.length} records to APEX Database...`);
-          setProgress((prev) => ({ ...prev, status: 'inserting' }));
-
-          const insertResult = await insertToApex(selectedObject, records, addLog);
-
-          if (insertResult.success) {
-            totalInserted += records.length;
-            addLog('success', `Inserted ${records.length} records (total inserted: ${totalInserted})`);
-          } else {
-            totalFailed += records.length;
-            addLog('error', `Insert failed: ${insertResult.error}`);
-          }
-
-          setProgress((prev) => ({
-            ...prev,
-            status: 'fetching',
-            totalInserted,
-            totalFailed,
-          }));
-        }
-
-        offset += limit;
-        addLog('info', `hasMore: ${hasMore}, next offset: ${offset}`);
-
-        // Small delay to prevent overwhelming the APIs
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
-
-      if (isSyncingRef.current) {
-        addLog('success', '=== SYNC COMPLETED ===');
-        addLog('success', `Total Fetched: ${totalFetched}`);
-        addLog('success', `Total Inserted: ${totalInserted}`);
-        addLog('success', `Total Failed: ${totalFailed}`);
-        setProgress((prev) => ({
-          ...prev,
-          status: 'completed',
-          endTime: new Date(),
-        }));
-      } else {
-        addLog('warning', 'Sync was stopped by user');
-        setProgress((prev) => ({
-          ...prev,
-          status: 'idle',
-          endTime: new Date(),
-        }));
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      addLog('error', `Sync error: ${errorMessage}`);
-      setProgress((prev) => ({
-        ...prev,
-        status: 'error',
-        errorMessage,
-        endTime: new Date(),
-      }));
-    }
+    await syncGLJournals(
+      parameters,
+      testMode,
+      addLog,
+      (newProgress) => setProgress((prev) => ({ ...prev, ...newProgress })),
+      abortControllerRef.current.signal
+    );
 
     isSyncingRef.current = false;
   };
@@ -288,24 +200,41 @@ const SyncData: React.FC = () => {
   const handleStop = () => {
     isSyncingRef.current = false;
     abortControllerRef.current?.abort();
-    addLog('warning', 'Stopping sync...');
+    addLog('warning', '⚠ Stopping sync...');
   };
 
-  const getProgressPercent = () => {
-    if (progress.totalRecordsInSource === 0) return 0;
-    return Math.round((progress.totalFetched / progress.totalRecordsInSource) * 100);
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'completed': return REDWOOD.success;
+      case 'error': return REDWOOD.error;
+      case 'stopped': return REDWOOD.warning;
+      default: return REDWOOD.info;
+    }
+  };
+
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case 'idle': return 'Ready';
+      case 'fetching_batches': return 'Fetching Batches...';
+      case 'processing_batch': return 'Processing Batch...';
+      case 'fetching_headers': return 'Fetching Headers...';
+      case 'processing_header': return 'Processing Header...';
+      case 'fetching_lines': return 'Fetching Lines...';
+      case 'inserting': return 'Inserting to APEX...';
+      case 'completed': return 'Completed';
+      case 'error': return 'Error';
+      case 'stopped': return 'Stopped';
+      default: return status;
+    }
   };
 
   const getLogIcon = (type: SyncLog['type']) => {
     switch (type) {
-      case 'success':
-        return <CheckCircleOutlined style={{ color: '#52c41a' }} />;
-      case 'error':
-        return <CloseCircleOutlined style={{ color: '#ff4d4f' }} />;
-      case 'warning':
-        return <WarningOutlined style={{ color: '#faad14' }} />;
-      default:
-        return <InfoCircleOutlined style={{ color: '#1890ff' }} />;
+      case 'success': return <CheckCircleOutlined style={{ color: REDWOOD.success }} />;
+      case 'error': return <CloseCircleOutlined style={{ color: REDWOOD.error }} />;
+      case 'warning': return <WarningOutlined style={{ color: REDWOOD.warning }} />;
+      case 'step': return <ThunderboltOutlined style={{ color: REDWOOD.primary }} />;
+      default: return <InfoCircleOutlined style={{ color: REDWOOD.info }} />;
     }
   };
 
@@ -314,23 +243,12 @@ const SyncData: React.FC = () => {
       title: 'Time',
       dataIndex: 'timestamp',
       key: 'timestamp',
-      width: 100,
-      render: (date: Date) => date.toLocaleTimeString(),
-    },
-    {
-      title: 'Type',
-      dataIndex: 'type',
-      key: 'type',
-      width: 80,
-      render: (type: SyncLog['type']) => {
-        const colors: Record<string, string> = {
-          info: 'blue',
-          success: 'green',
-          error: 'red',
-          warning: 'orange',
-        };
-        return <Tag color={colors[type]}>{type.toUpperCase()}</Tag>;
-      },
+      width: 90,
+      render: (date: Date) => (
+        <Text style={{ fontSize: 11, color: REDWOOD.textSecondary }}>
+          {date.toLocaleTimeString()}
+        </Text>
+      ),
     },
     {
       title: 'Message',
@@ -339,18 +257,37 @@ const SyncData: React.FC = () => {
       render: (message: string, record: SyncLog) => (
         <Space>
           {getLogIcon(record.type)}
-          <Text style={{ fontSize: 12, wordBreak: 'break-all' }}>{message}</Text>
+          <Text
+            style={{
+              fontSize: 12,
+              fontFamily: record.type === 'step' ? 'monospace' : 'inherit',
+              fontWeight: record.type === 'step' ? 600 : 400,
+              color: record.type === 'step' ? REDWOOD.primary : REDWOOD.textPrimary,
+            }}
+          >
+            {message}
+          </Text>
         </Space>
       ),
     },
   ];
 
-  const isSyncing = progress.status === 'fetching' || progress.status === 'inserting';
+  const isSyncing = !['idle', 'completed', 'error', 'stopped'].includes(progress.status);
+
+  // Calculate progress percentages
+  const batchProgress = progress.totalBatches > 0
+    ? Math.round((progress.processedBatches / progress.totalBatches) * 100)
+    : 0;
 
   return (
-    <Layout style={{ minHeight: 'calc(100vh - 64px)', background: '#f5f5f5' }}>
+    <Layout style={{ minHeight: 'calc(100vh - 64px)', background: REDWOOD.surfaceSecondary }}>
       <Content>
-        <div style={{ padding: '16px 24px', background: '#fff', borderBottom: '1px solid #f0f0f0' }}>
+        {/* Header */}
+        <div style={{
+          padding: '16px 24px',
+          background: REDWOOD.surface,
+          borderBottom: `1px solid ${REDWOOD.border}`
+        }}>
           <Breadcrumb
             items={[
               { title: <Link to="/home"><HomeOutlined /> Home</Link> },
@@ -360,21 +297,49 @@ const SyncData: React.FC = () => {
         </div>
 
         <div style={{ padding: 24 }}>
+          {/* Title Section */}
+          <div style={{ marginBottom: 24 }}>
+            <Space align="center">
+              <div style={{
+                width: 48,
+                height: 48,
+                borderRadius: 8,
+                background: REDWOOD.primary,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+                <SyncOutlined style={{ fontSize: 24, color: '#fff' }} spin={isSyncing || isTesting} />
+              </div>
+              <div>
+                <Title level={3} style={{ margin: 0, color: REDWOOD.textPrimary }}>
+                  Data Synchronization
+                </Title>
+                <Text type="secondary">Oracle Fusion → APEX Database</Text>
+              </div>
+              <Tag color={REDWOOD.primary} style={{ marginLeft: 16 }}>v{SYNC_VERSION}</Tag>
+            </Space>
+          </div>
+
           <Row gutter={24}>
-            {/* Configuration Panel */}
-            <Col xs={24} lg={8}>
+            {/* Left Panel - Configuration */}
+            <Col xs={24} lg={7}>
               <Card
-                title={
-                  <Space>
-                    <SyncOutlined spin={isSyncing || isTesting} />
-                    <span>Sync Configuration</span>
-                    <Tag color="blue">v{SYNC_VERSION}</Tag>
-                  </Space>
-                }
+                style={{
+                  borderRadius: 12,
+                  border: `1px solid ${REDWOOD.border}`,
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                }}
+                bodyStyle={{ padding: 20 }}
               >
+                <Title level={5} style={{ marginBottom: 16, color: REDWOOD.textPrimary }}>
+                  <DatabaseOutlined style={{ marginRight: 8, color: REDWOOD.primary }} />
+                  Configuration
+                </Title>
+
                 <Form form={form} layout="vertical">
                   <Form.Item
-                    label="Sync Object"
+                    label={<Text strong>Sync Object</Text>}
                     name="syncObject"
                     rules={[{ required: true, message: 'Please select a sync object' }]}
                   >
@@ -382,6 +347,7 @@ const SyncData: React.FC = () => {
                       placeholder="Select object to sync"
                       onChange={handleObjectChange}
                       disabled={isSyncing || isTesting}
+                      size="large"
                     >
                       {SYNC_OBJECTS.map((obj) => (
                         <Option key={obj.id} value={obj.id}>
@@ -396,50 +362,65 @@ const SyncData: React.FC = () => {
                       message={selectedObject.description}
                       type="info"
                       showIcon
-                      style={{ marginBottom: 16 }}
+                      style={{ marginBottom: 16, borderRadius: 8 }}
                     />
                   )}
 
-                  <Form.Item label="API Type" name="apiType" initialValue="REST">
+                  <Form.Item label={<Text strong>API Type</Text>} name="apiType" initialValue="REST">
                     <Select disabled={isSyncing || isTesting} onChange={(v) => setApiType(v)}>
                       <Option value="REST">REST API</Option>
-                      <Option value="SOAP" disabled>
-                        SOAP (Coming Soon)
-                      </Option>
+                      <Option value="SOAP" disabled>SOAP (Coming Soon)</Option>
                     </Select>
                   </Form.Item>
 
                   {selectedObject?.parameters.map((param) => (
                     <Form.Item
                       key={param.key}
-                      label={param.label}
+                      label={<Text strong>{param.label}</Text>}
                       name={param.key}
                       rules={[{ required: param.required, message: `Please enter ${param.label}` }]}
                       initialValue={param.defaultValue}
                     >
-                      {param.type === 'select' ? (
-                        <Select disabled={isSyncing || isTesting}>
-                          {param.options?.map((opt) => (
-                            <Option key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </Option>
-                          ))}
-                        </Select>
-                      ) : (
-                        <Input placeholder={`Enter ${param.label}`} disabled={isSyncing || isTesting} />
-                      )}
+                      <Input placeholder={`Enter ${param.label}`} disabled={isSyncing || isTesting} />
                     </Form.Item>
                   ))}
 
-                  <Divider />
+                  <Divider style={{ margin: '16px 0' }} />
 
-                  <Space direction="vertical" style={{ width: '100%' }}>
+                  {/* Test Mode Toggle */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginBottom: 16,
+                    padding: '12px 16px',
+                    background: REDWOOD.surfaceSecondary,
+                    borderRadius: 8,
+                  }}>
+                    <div>
+                      <Text strong>Test Mode</Text>
+                      <br />
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        Limit to {ORACLE_FUSION_CONFIG.testLimit} batches
+                      </Text>
+                    </div>
+                    <Switch
+                      checked={testMode}
+                      onChange={setTestMode}
+                      disabled={isSyncing}
+                      style={{ backgroundColor: testMode ? REDWOOD.primary : undefined }}
+                    />
+                  </div>
+
+                  <Space direction="vertical" style={{ width: '100%' }} size="middle">
                     <Button
                       icon={<ApiOutlined />}
                       onClick={handleTestConnection}
-                      disabled={!selectedObject || isSyncing || isTesting}
+                      disabled={isSyncing || isTesting}
                       loading={isTesting}
                       block
+                      size="large"
+                      style={{ borderRadius: 8 }}
                     >
                       Test Connection
                     </Button>
@@ -452,6 +433,12 @@ const SyncData: React.FC = () => {
                         onClick={handleSync}
                         disabled={!selectedObject || isTesting}
                         block
+                        style={{
+                          borderRadius: 8,
+                          background: REDWOOD.primary,
+                          borderColor: REDWOOD.primary,
+                          height: 48,
+                        }}
                       >
                         Start Sync
                       </Button>
@@ -462,6 +449,7 @@ const SyncData: React.FC = () => {
                         size="large"
                         onClick={handleStop}
                         block
+                        style={{ borderRadius: 8, height: 48 }}
                       >
                         Stop Sync
                       </Button>
@@ -470,142 +458,198 @@ const SyncData: React.FC = () => {
                 </Form>
 
                 {/* Proxy Info */}
-                <Divider />
+                <Divider style={{ margin: '16px 0' }} />
                 <Alert
                   message="Proxy Server Required"
                   description={
                     <div style={{ fontSize: 12 }}>
-                      <div>Run in a separate terminal:</div>
-                      <code style={{ background: '#f5f5f5', padding: '2px 6px', borderRadius: 4 }}>
+                      <code style={{
+                        background: REDWOOD.surfaceSecondary,
+                        padding: '2px 6px',
+                        borderRadius: 4
+                      }}>
                         npm run server
                       </code>
-                      <div style={{ marginTop: 8 }}>
-                        <strong>Proxy:</strong> {PROXY_CONFIG.baseUrl}
+                      <div style={{ marginTop: 4 }}>
+                        <Text type="secondary">{PROXY_CONFIG.baseUrl}</Text>
                       </div>
                     </div>
                   }
                   type="warning"
                   showIcon
-                  style={{ marginBottom: 12 }}
+                  style={{ borderRadius: 8 }}
                 />
-                <div style={{ fontSize: 11, color: '#888' }}>
-                  <div><strong>Oracle:</strong> {ORACLE_FUSION_CONFIG.baseUrl.substring(0, 40)}...</div>
-                  <div><strong>APEX:</strong> {APEX_DB_CONFIG.baseUrl.substring(0, 40)}...</div>
-                </div>
               </Card>
             </Col>
 
-            {/* Progress Panel */}
-            <Col xs={24} lg={16}>
-              <Card title="Sync Progress" style={{ marginBottom: 24 }}>
-                <Row gutter={16}>
-                  <Col span={6}>
-                    <Statistic
-                      title="Total in Source"
-                      value={progress.totalRecordsInSource}
-                      prefix={<CloudDownloadOutlined />}
-                    />
-                  </Col>
-                  <Col span={6}>
-                    <Statistic
-                      title="Fetched"
-                      value={progress.totalFetched}
-                      valueStyle={{ color: '#1890ff' }}
-                      prefix={<CloudDownloadOutlined />}
-                    />
-                  </Col>
-                  <Col span={6}>
-                    <Statistic
-                      title="Inserted"
-                      value={progress.totalInserted}
-                      valueStyle={{ color: '#52c41a' }}
-                      prefix={<CloudUploadOutlined />}
-                    />
-                  </Col>
-                  <Col span={6}>
-                    <Statistic
-                      title="Failed"
-                      value={progress.totalFailed}
-                      valueStyle={{ color: '#ff4d4f' }}
-                      prefix={<CloseCircleOutlined />}
-                    />
-                  </Col>
-                </Row>
-
-                <Divider />
-
-                <div style={{ marginBottom: 16 }}>
-                  <Space style={{ marginBottom: 8 }}>
-                    <Text strong>Overall Progress:</Text>
-                    <Text type="secondary">
-                      Batch {progress.currentBatch} of {progress.totalBatches}
-                    </Text>
-                  </Space>
-                  <Progress
-                    percent={getProgressPercent()}
-                    status={
-                      progress.status === 'error'
-                        ? 'exception'
-                        : progress.status === 'completed'
-                        ? 'success'
-                        : 'active'
-                    }
-                    strokeColor={{
-                      '0%': '#108ee9',
-                      '100%': '#87d068',
+            {/* Right Panel - Progress & Logs */}
+            <Col xs={24} lg={17}>
+              {/* Progress Cards */}
+              <Row gutter={16} style={{ marginBottom: 16 }}>
+                {/* Batches Card */}
+                <Col xs={24} sm={8}>
+                  <Card
+                    style={{
+                      borderRadius: 12,
+                      border: `1px solid ${REDWOOD.border}`,
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
                     }}
-                  />
-                </div>
+                    bodyStyle={{ padding: 16 }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                      <DatabaseOutlined style={{ fontSize: 20, color: REDWOOD.primary, marginRight: 8 }} />
+                      <Text strong>Batches</Text>
+                    </div>
+                    <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                      {progress.processedBatches} / {progress.totalBatches}
+                    </div>
+                    <Progress
+                      percent={batchProgress}
+                      showInfo={false}
+                      strokeColor={REDWOOD.primary}
+                      style={{ marginTop: 8 }}
+                    />
+                    {progress.currentBatchName && (
+                      <Tooltip title={progress.currentBatchName}>
+                        <Text
+                          type="secondary"
+                          style={{ fontSize: 11, display: 'block', marginTop: 4 }}
+                          ellipsis
+                        >
+                          {progress.currentBatchName}
+                        </Text>
+                      </Tooltip>
+                    )}
+                  </Card>
+                </Col>
 
-                <Row gutter={16}>
-                  <Col span={12}>
-                    <Card size="small" style={{ background: '#f6ffed', borderColor: '#b7eb8f' }}>
-                      <Statistic
-                        title="Fetch Progress"
-                        value={progress.totalFetched}
-                        suffix={`/ ${progress.totalRecordsInSource}`}
-                        valueStyle={{ fontSize: 18 }}
-                      />
-                    </Card>
+                {/* Headers Card */}
+                <Col xs={24} sm={8}>
+                  <Card
+                    style={{
+                      borderRadius: 12,
+                      border: `1px solid ${REDWOOD.border}`,
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                    }}
+                    bodyStyle={{ padding: 16 }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                      <FileTextOutlined style={{ fontSize: 20, color: REDWOOD.info, marginRight: 8 }} />
+                      <Text strong>Headers</Text>
+                    </div>
+                    <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                      {progress.totalHeadersInserted}
+                      <Text type="secondary" style={{ fontSize: 14, marginLeft: 8 }}>
+                        / {progress.totalHeaders}
+                      </Text>
+                    </div>
+                    <Progress
+                      percent={progress.totalHeaders > 0 ? Math.round((progress.totalHeadersInserted / progress.totalHeaders) * 100) : 0}
+                      showInfo={false}
+                      strokeColor={REDWOOD.info}
+                      style={{ marginTop: 8 }}
+                    />
+                    {progress.currentHeaderName && (
+                      <Tooltip title={progress.currentHeaderName}>
+                        <Text
+                          type="secondary"
+                          style={{ fontSize: 11, display: 'block', marginTop: 4 }}
+                          ellipsis
+                        >
+                          {progress.currentHeaderName}
+                        </Text>
+                      </Tooltip>
+                    )}
+                  </Card>
+                </Col>
+
+                {/* Lines Card */}
+                <Col xs={24} sm={8}>
+                  <Card
+                    style={{
+                      borderRadius: 12,
+                      border: `1px solid ${REDWOOD.border}`,
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                    }}
+                    bodyStyle={{ padding: 16 }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                      <UnorderedListOutlined style={{ fontSize: 20, color: REDWOOD.success, marginRight: 8 }} />
+                      <Text strong>Lines</Text>
+                    </div>
+                    <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                      {progress.totalLinesInserted}
+                      <Text type="secondary" style={{ fontSize: 14, marginLeft: 8 }}>
+                        / {progress.totalLines}
+                      </Text>
+                    </div>
+                    <Progress
+                      percent={progress.totalLines > 0 ? Math.round((progress.totalLinesInserted / progress.totalLines) * 100) : 0}
+                      showInfo={false}
+                      strokeColor={REDWOOD.success}
+                      style={{ marginTop: 8 }}
+                    />
+                    {progress.errors > 0 && (
+                      <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
+                        {progress.errors} errors
+                      </Text>
+                    )}
+                  </Card>
+                </Col>
+              </Row>
+
+              {/* Status Bar */}
+              <Card
+                style={{
+                  borderRadius: 12,
+                  border: `1px solid ${REDWOOD.border}`,
+                  marginBottom: 16,
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                }}
+                bodyStyle={{ padding: '12px 20px' }}
+              >
+                <Row justify="space-between" align="middle">
+                  <Col>
+                    <Space size="large">
+                      <div>
+                        <Tag
+                          color={getStatusColor(progress.status)}
+                          style={{
+                            padding: '4px 12px',
+                            fontSize: 13,
+                            borderRadius: 16,
+                          }}
+                        >
+                          {getStatusText(progress.status)}
+                        </Tag>
+                      </div>
+                      {progress.startTime && (
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          Started: {progress.startTime.toLocaleTimeString()}
+                        </Text>
+                      )}
+                      {progress.endTime && (
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          Ended: {progress.endTime.toLocaleTimeString()}
+                        </Text>
+                      )}
+                    </Space>
                   </Col>
-                  <Col span={12}>
-                    <Card size="small" style={{ background: '#e6f7ff', borderColor: '#91d5ff' }}>
-                      <Statistic
-                        title="Insert Progress"
-                        value={progress.totalInserted}
-                        suffix={`/ ${progress.totalFetched}`}
-                        valueStyle={{ fontSize: 18 }}
-                      />
-                    </Card>
+                  <Col>
+                    <Space>
+                      <Text type="secondary">
+                        <CheckCircleOutlined style={{ color: REDWOOD.success, marginRight: 4 }} />
+                        {progress.totalBatchesInserted + progress.totalHeadersInserted + progress.totalLinesInserted} inserted
+                      </Text>
+                      {progress.errors > 0 && (
+                        <Text type="danger">
+                          <CloseCircleOutlined style={{ marginRight: 4 }} />
+                          {progress.errors} errors
+                        </Text>
+                      )}
+                    </Space>
                   </Col>
                 </Row>
-
-                {progress.status !== 'idle' && (
-                  <div style={{ marginTop: 16 }}>
-                    <Tag
-                      color={
-                        progress.status === 'completed'
-                          ? 'success'
-                          : progress.status === 'error'
-                          ? 'error'
-                          : 'processing'
-                      }
-                      style={{ padding: '4px 12px', fontSize: 14 }}
-                    >
-                      {progress.status.toUpperCase()}
-                    </Tag>
-                    {progress.startTime && (
-                      <Text type="secondary" style={{ marginLeft: 8 }}>
-                        Started: {progress.startTime.toLocaleTimeString()}
-                      </Text>
-                    )}
-                    {progress.endTime && (
-                      <Text type="secondary" style={{ marginLeft: 8 }}>
-                        | Ended: {progress.endTime.toLocaleTimeString()}
-                      </Text>
-                    )}
-                  </div>
-                )}
               </Card>
 
               {/* Sync Logs */}
@@ -613,23 +657,30 @@ const SyncData: React.FC = () => {
                 title={
                   <Space>
                     <span>Sync Logs</span>
-                    <Tag>{logs.length} entries</Tag>
+                    <Tag style={{ borderRadius: 12 }}>{logs.length}</Tag>
                   </Space>
                 }
                 extra={
                   <Button size="small" onClick={() => setLogs([])}>
-                    Clear Logs
+                    Clear
                   </Button>
                 }
+                style={{
+                  borderRadius: 12,
+                  border: `1px solid ${REDWOOD.border}`,
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                }}
+                bodyStyle={{ padding: 0 }}
               >
                 <Table
                   dataSource={logs}
                   columns={logColumns}
                   rowKey="id"
                   size="small"
-                  pagination={{ pageSize: 15, size: 'small' }}
+                  pagination={{ pageSize: 20, size: 'small' }}
                   scroll={{ y: 400 }}
-                  locale={{ emptyText: 'No sync logs yet. Click "Test Connection" or "Start Sync" to see activity.' }}
+                  locale={{ emptyText: 'No sync logs yet. Click "Test Connection" or "Start Sync" to begin.' }}
+                  style={{ borderRadius: '0 0 12px 12px' }}
                 />
               </Card>
             </Col>
