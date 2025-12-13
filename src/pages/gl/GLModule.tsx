@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Layout, Typography, Card, Breadcrumb, Space, Tooltip } from 'antd';
+import { Layout, Typography, Card, Breadcrumb, Space, Tooltip, Row, Col, Statistic, Progress } from 'antd';
 import {
   HomeOutlined,
   AccountBookOutlined,
@@ -20,6 +20,12 @@ import {
   ProfileOutlined,
   SolutionOutlined,
   CloseOutlined,
+  ArrowUpOutlined,
+  ArrowDownOutlined,
+  ClockCircleOutlined,
+  CheckCircleOutlined,
+  SyncOutlined,
+  WarningOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 
@@ -50,40 +56,52 @@ interface MenuItemType {
   icon: React.ReactNode;
   label: string;
   description?: string;
+  color?: string;
 }
 
 // Task menu items
 const taskMenuItems: MenuItemType[] = [
-  { key: 'journal-entry', icon: <FileTextOutlined />, label: 'Create Journal', description: 'Create manual journal entry' },
-  { key: 'import-journals', icon: <SwapOutlined />, label: 'Import Journals', description: 'Import from spreadsheet' },
-  { key: 'reverse-journal', icon: <ReconciliationOutlined />, label: 'Reverse Journal', description: 'Reverse posted journals' },
-  { key: 'open-period', icon: <CalendarOutlined />, label: 'Open Period', description: 'Open accounting period' },
-  { key: 'close-period', icon: <AuditOutlined />, label: 'Close Period', description: 'Close accounting period' },
-  { key: 'revaluation', icon: <DollarOutlined />, label: 'Run Revaluation', description: 'Foreign currency revaluation' },
+  { key: 'journal-entry', icon: <FileTextOutlined />, label: 'Create Journal', description: 'Create manual journal entry', color: REDWOOD.taskBlue },
+  { key: 'import-journals', icon: <SwapOutlined />, label: 'Import Journals', description: 'Import from spreadsheet', color: REDWOOD.info },
+  { key: 'reverse-journal', icon: <ReconciliationOutlined />, label: 'Reverse Journal', description: 'Reverse posted journals', color: REDWOOD.warning },
+  { key: 'open-period', icon: <CalendarOutlined />, label: 'Open Period', description: 'Open accounting period', color: REDWOOD.success },
+  { key: 'close-period', icon: <AuditOutlined />, label: 'Close Period', description: 'Close accounting period', color: REDWOOD.primaryDark },
+  { key: 'revaluation', icon: <DollarOutlined />, label: 'Run Revaluation', description: 'Foreign currency revaluation', color: REDWOOD.primary },
 ];
 
 // Report menu items
 const reportMenuItems: MenuItemType[] = [
-  { key: 'trial-balance', icon: <ProfileOutlined />, label: 'Trial Balance', description: 'View trial balance report' },
-  { key: 'balance-sheet', icon: <PieChartOutlined />, label: 'Balance Sheet', description: 'Financial position report' },
-  { key: 'income-statement', icon: <LineChartOutlined />, label: 'Income Statement', description: 'Profit and loss report' },
-  { key: 'journal-report', icon: <FileTextOutlined />, label: 'Journal Report', description: 'Posted journals listing' },
-  { key: 'account-analysis', icon: <FundOutlined />, label: 'Account Analysis', description: 'Account detail analysis' },
-  { key: 'gl-balances', icon: <BarChartOutlined />, label: 'GL Balances', description: 'General ledger balances' },
+  { key: 'trial-balance', icon: <ProfileOutlined />, label: 'Trial Balance', description: 'View trial balance report', color: REDWOOD.reportGreen },
+  { key: 'balance-sheet', icon: <PieChartOutlined />, label: 'Balance Sheet', description: 'Financial position report', color: REDWOOD.info },
+  { key: 'income-statement', icon: <LineChartOutlined />, label: 'Income Statement', description: 'Profit and loss report', color: REDWOOD.success },
+  { key: 'journal-report', icon: <FileTextOutlined />, label: 'Journal Report', description: 'Posted journals listing', color: REDWOOD.taskBlue },
+  { key: 'account-analysis', icon: <FundOutlined />, label: 'Account Analysis', description: 'Account detail analysis', color: REDWOOD.warning },
+  { key: 'gl-balances', icon: <BarChartOutlined />, label: 'GL Balances', description: 'General ledger balances', color: REDWOOD.primary },
 ];
 
-// Quick links for the main area
-const quickLinks = [
-  { key: 'chart-of-accounts', icon: <BookOutlined />, label: 'Chart of Accounts', color: REDWOOD.primary },
-  { key: 'ledgers', icon: <AccountBookOutlined />, label: 'Ledgers', color: REDWOOD.info },
-  { key: 'fiscal-calendar', icon: <CalendarOutlined />, label: 'Fiscal Calendar', color: REDWOOD.success },
-  { key: 'currencies', icon: <DollarOutlined />, label: 'Currencies', color: REDWOOD.warning },
-  { key: 'account-combinations', icon: <SettingOutlined />, label: 'Account Combinations', color: REDWOOD.primaryDark },
-  { key: 'cross-validation', icon: <SolutionOutlined />, label: 'Cross Validation', color: REDWOOD.reportGreen },
+// Setup menu items
+const setupMenuItems: MenuItemType[] = [
+  { key: 'chart-of-accounts', icon: <BookOutlined />, label: 'Chart of Accounts', description: 'Manage account structure', color: REDWOOD.primary },
+  { key: 'ledgers', icon: <AccountBookOutlined />, label: 'Ledgers', description: 'Configure ledger settings', color: REDWOOD.info },
+  { key: 'fiscal-calendar', icon: <CalendarOutlined />, label: 'Fiscal Calendar', description: 'Define accounting periods', color: REDWOOD.success },
+  { key: 'currencies', icon: <DollarOutlined />, label: 'Currencies', description: 'Currency configurations', color: REDWOOD.warning },
+  { key: 'account-combinations', icon: <SettingOutlined />, label: 'Account Combinations', description: 'Valid account combinations', color: REDWOOD.primaryDark },
+  { key: 'cross-validation', icon: <SolutionOutlined />, label: 'Cross Validation', description: 'Validation rules setup', color: REDWOOD.reportGreen },
 ];
+
+// GL KPI Data (mock - would come from API)
+const glKpiData = {
+  pendingJournals: { value: 24, trend: 'up', change: 8 },
+  postedJournals: { value: 156, trend: 'up', change: 12 },
+  unpostedBatches: { value: 5, trend: 'down', change: 3 },
+  openPeriods: { value: 2, total: 12 },
+  periodProgress: 67,
+  lastSync: '2 hours ago',
+};
 
 const GLModule: React.FC = () => {
   const [activePanel, setActivePanel] = useState<'none' | 'tasks' | 'reports'>('none');
+  const [isClosing, setIsClosing] = useState(false);
   const [selectedItem, setSelectedItem] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const floatingIconsRef = useRef<HTMLDivElement>(null);
@@ -96,7 +114,7 @@ const GLModule: React.FC = () => {
       const isOutsideFloatingIcons = floatingIconsRef.current && !floatingIconsRef.current.contains(target);
 
       if (isOutsidePanel && isOutsideFloatingIcons) {
-        setActivePanel('none');
+        closePanel();
       }
     };
 
@@ -109,15 +127,27 @@ const GLModule: React.FC = () => {
     };
   }, [activePanel]);
 
+  const closePanel = () => {
+    setIsClosing(true);
+    setTimeout(() => {
+      setActivePanel('none');
+      setIsClosing(false);
+    }, 250);
+  };
+
   const handleMenuItemClick = (key: string) => {
     setSelectedItem(key);
-    setActivePanel('none');
-    // Here you would navigate or load the content
+    closePanel();
     console.log('Selected:', key);
   };
 
   const togglePanel = (panel: 'tasks' | 'reports') => {
-    setActivePanel(activePanel === panel ? 'none' : panel);
+    if (activePanel === panel) {
+      closePanel();
+    } else {
+      setIsClosing(false);
+      setActivePanel(panel);
+    }
   };
 
   // Floating Action Button
@@ -175,81 +205,88 @@ const GLModule: React.FC = () => {
     <div
       style={{
         position: 'fixed',
-        right: 24,
-        top: '50%',
-        transform: 'translateY(-50%)',
-        width: 380,
+        right: 0,
+        top: 0,
+        bottom: 0,
+        width: 400,
         background: REDWOOD.surface,
-        borderRadius: 12,
-        boxShadow: '0 12px 32px rgba(0,0,0,0.2)',
+        boxShadow: '-4px 0 24px rgba(0,0,0,0.15)',
         overflow: 'hidden',
-        animation: 'slideIn 0.25s ease-out',
+        animation: isClosing ? 'slideOut 0.25s ease-in forwards' : 'slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards',
         zIndex: 1001,
+        display: 'flex',
+        flexDirection: 'column',
       }}
     >
       {/* Panel Header */}
       <div style={{
-        padding: '16px 20px',
+        padding: '20px 24px',
         background: color,
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
+        flexShrink: 0,
       }}>
-        <Text strong style={{ color: '#fff', fontSize: 16 }}>{title}</Text>
+        <Text strong style={{ color: '#fff', fontSize: 18 }}>{title}</Text>
         <CloseOutlined
-          style={{ color: '#fff', cursor: 'pointer', fontSize: 14 }}
-          onClick={() => setActivePanel('none')}
+          style={{ color: '#fff', cursor: 'pointer', fontSize: 16, padding: 8 }}
+          onClick={closePanel}
         />
       </div>
 
       {/* Panel Items */}
-      <div style={{ padding: 12, maxHeight: 480, overflowY: 'auto' }}>
-        {items.map((item) => (
+      <div style={{ padding: 16, flex: 1, overflowY: 'auto' }}>
+        {items.map((item, index) => (
           <div
             key={item.key}
             onClick={() => handleMenuItemClick(item.key)}
             style={{
-              padding: '14px 16px',
-              borderRadius: 10,
+              padding: '16px 20px',
+              borderRadius: 12,
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              gap: 14,
+              gap: 16,
               transition: 'all 0.2s ease',
-              marginBottom: 6,
-              border: `1px solid transparent`,
+              marginBottom: 8,
+              border: `1px solid ${REDWOOD.neutral200}`,
+              background: REDWOOD.surface,
+              opacity: 0,
+              animation: `fadeInItem 0.3s ease-out ${index * 0.05}s forwards`,
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.background = REDWOOD.neutral100;
-              e.currentTarget.style.borderColor = REDWOOD.neutral200;
+              e.currentTarget.style.borderColor = color;
               e.currentTarget.style.transform = 'translateX(-4px)';
+              e.currentTarget.style.boxShadow = `0 2px 8px ${color}20`;
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'transparent';
-              e.currentTarget.style.borderColor = 'transparent';
+              e.currentTarget.style.background = REDWOOD.surface;
+              e.currentTarget.style.borderColor = REDWOOD.neutral200;
               e.currentTarget.style.transform = 'translateX(0)';
+              e.currentTarget.style.boxShadow = 'none';
             }}
           >
             <div style={{
-              width: 42,
-              height: 42,
-              borderRadius: 10,
+              width: 46,
+              height: 46,
+              borderRadius: 12,
               background: `${color}15`,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               color: color,
-              fontSize: 20,
+              fontSize: 22,
               flexShrink: 0,
             }}>
               {item.icon}
             </div>
             <div style={{ flex: 1 }}>
-              <Text strong style={{ display: 'block', color: REDWOOD.neutral900, fontSize: 14 }}>
+              <Text strong style={{ display: 'block', color: REDWOOD.neutral900, fontSize: 15 }}>
                 {item.label}
               </Text>
               {item.description && (
-                <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.4 }}>
+                <Text type="secondary" style={{ fontSize: 13, lineHeight: 1.4 }}>
                   {item.description}
                 </Text>
               )}
@@ -257,6 +294,135 @@ const GLModule: React.FC = () => {
           </div>
         ))}
       </div>
+    </div>
+  );
+
+  // KPI Card Component
+  const KpiCard = ({
+    title,
+    value,
+    icon,
+    color,
+    trend,
+    change,
+    suffix
+  }: {
+    title: string;
+    value: number;
+    icon: React.ReactNode;
+    color: string;
+    trend?: 'up' | 'down';
+    change?: number;
+    suffix?: string;
+  }) => (
+    <Card
+      style={{
+        borderRadius: 12,
+        border: 'none',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+      }}
+      bodyStyle={{ padding: 20 }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <Text type="secondary" style={{ fontSize: 13 }}>{title}</Text>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 4 }}>
+            <Statistic
+              value={value}
+              suffix={suffix}
+              valueStyle={{ fontSize: 28, fontWeight: 600, color: REDWOOD.neutral900 }}
+            />
+            {trend && change && (
+              <span style={{
+                color: trend === 'up' ? REDWOOD.success : REDWOOD.primary,
+                fontSize: 12,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 2,
+              }}>
+                {trend === 'up' ? <ArrowUpOutlined /> : <ArrowDownOutlined />}
+                {change}%
+              </span>
+            )}
+          </div>
+        </div>
+        <div style={{
+          width: 48,
+          height: 48,
+          borderRadius: 12,
+          background: `${color}15`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: color,
+          fontSize: 24,
+        }}>
+          {icon}
+        </div>
+      </div>
+    </Card>
+  );
+
+  // Menu Card Component
+  const MenuCard = ({ item }: { item: MenuItemType }) => (
+    <Card
+      hoverable
+      onClick={() => handleMenuItemClick(item.key)}
+      style={{
+        borderRadius: 12,
+        border: `1px solid ${REDWOOD.neutral200}`,
+        cursor: 'pointer',
+        transition: 'all 0.3s ease',
+        height: '100%',
+      }}
+      bodyStyle={{ padding: 20 }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+        <div style={{
+          width: 48,
+          height: 48,
+          borderRadius: 12,
+          background: `${item.color || REDWOOD.primary}15`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: item.color || REDWOOD.primary,
+          fontSize: 24,
+          flexShrink: 0,
+        }}>
+          {item.icon}
+        </div>
+        <div style={{ flex: 1 }}>
+          <Text strong style={{ display: 'block', color: REDWOOD.neutral900, fontSize: 15 }}>
+            {item.label}
+          </Text>
+          {item.description && (
+            <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.5 }}>
+              {item.description}
+            </Text>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+
+  // Section Title Component
+  const SectionTitle = ({ icon, title, color }: { icon: React.ReactNode; title: string; color: string }) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+      <div style={{
+        width: 36,
+        height: 36,
+        borderRadius: 8,
+        background: `${color}15`,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: color,
+        fontSize: 18,
+      }}>
+        {icon}
+      </div>
+      <Text strong style={{ fontSize: 18, color: REDWOOD.neutral900 }}>{title}</Text>
     </div>
   );
 
@@ -278,7 +444,7 @@ const GLModule: React.FC = () => {
         </div>
 
         {/* Main Content Area */}
-        <div style={{ padding: 24, position: 'relative' }}>
+        <div style={{ padding: 24, paddingRight: 100 }}>
           {/* Page Title */}
           <div style={{ marginBottom: 24 }}>
             <Space align="center">
@@ -303,55 +469,138 @@ const GLModule: React.FC = () => {
             </Space>
           </div>
 
-          {/* Quick Links Grid */}
-          <div style={{ marginBottom: 24 }}>
-            <Text strong style={{
-              display: 'block',
-              marginBottom: 16,
-              color: REDWOOD.neutral600,
-              textTransform: 'uppercase',
-              fontSize: 12,
-              letterSpacing: 1,
-            }}>
-              Quick Links
-            </Text>
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-              gap: 16
-            }}>
-              {quickLinks.map((link) => (
-                <Card
-                  key={link.key}
-                  hoverable
-                  style={{
-                    borderRadius: 12,
-                    border: `1px solid ${REDWOOD.neutral200}`,
-                    cursor: 'pointer',
-                    transition: 'all 0.3s ease',
+          {/* KPI Cards Row */}
+          <Row gutter={[16, 16]} style={{ marginBottom: 32 }}>
+            <Col xs={24} sm={12} lg={6}>
+              <KpiCard
+                title="Pending Journals"
+                value={glKpiData.pendingJournals.value}
+                icon={<ClockCircleOutlined />}
+                color={REDWOOD.warning}
+                trend={glKpiData.pendingJournals.trend as 'up' | 'down'}
+                change={glKpiData.pendingJournals.change}
+              />
+            </Col>
+            <Col xs={24} sm={12} lg={6}>
+              <KpiCard
+                title="Posted This Period"
+                value={glKpiData.postedJournals.value}
+                icon={<CheckCircleOutlined />}
+                color={REDWOOD.success}
+                trend={glKpiData.postedJournals.trend as 'up' | 'down'}
+                change={glKpiData.postedJournals.change}
+              />
+            </Col>
+            <Col xs={24} sm={12} lg={6}>
+              <KpiCard
+                title="Unposted Batches"
+                value={glKpiData.unpostedBatches.value}
+                icon={<WarningOutlined />}
+                color={REDWOOD.primary}
+                trend={glKpiData.unpostedBatches.trend as 'up' | 'down'}
+                change={glKpiData.unpostedBatches.change}
+              />
+            </Col>
+            <Col xs={24} sm={12} lg={6}>
+              <KpiCard
+                title="Open Periods"
+                value={glKpiData.openPeriods.value}
+                icon={<CalendarOutlined />}
+                color={REDWOOD.info}
+                suffix={`/ ${glKpiData.openPeriods.total}`}
+              />
+            </Col>
+          </Row>
+
+          {/* Period Progress Card */}
+          <Row gutter={[16, 16]} style={{ marginBottom: 32 }}>
+            <Col xs={24} lg={12}>
+              <Card
+                style={{ borderRadius: 12, border: 'none', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
+                bodyStyle={{ padding: 20 }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <Text strong style={{ fontSize: 15 }}>Period Close Progress</Text>
+                  <Text type="secondary">Dec 2024</Text>
+                </div>
+                <Progress
+                  percent={glKpiData.periodProgress}
+                  strokeColor={{
+                    '0%': REDWOOD.primary,
+                    '100%': REDWOOD.success,
                   }}
-                  bodyStyle={{ padding: 20 }}
-                  onClick={() => handleMenuItemClick(link.key)}
-                >
-                  <Space>
-                    <div style={{
-                      width: 44,
-                      height: 44,
-                      borderRadius: 10,
-                      background: `${link.color}15`,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: link.color,
-                      fontSize: 22,
-                    }}>
-                      {link.icon}
-                    </div>
-                    <Text strong style={{ color: REDWOOD.neutral900 }}>{link.label}</Text>
-                  </Space>
-                </Card>
+                  trailColor={REDWOOD.neutral200}
+                  strokeWidth={12}
+                  style={{ marginBottom: 8 }}
+                />
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {glKpiData.periodProgress}% complete • {100 - glKpiData.periodProgress}% remaining tasks
+                </Text>
+              </Card>
+            </Col>
+            <Col xs={24} lg={12}>
+              <Card
+                style={{ borderRadius: 12, border: 'none', boxShadow: '0 2px 8px rgba(0,0,0,0.06)', height: '100%' }}
+                bodyStyle={{ padding: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+              >
+                <div>
+                  <Text strong style={{ fontSize: 15, display: 'block' }}>Last Data Sync</Text>
+                  <Text type="secondary">{glKpiData.lastSync}</Text>
+                </div>
+                <Link to="/sync">
+                  <div style={{
+                    padding: '10px 20px',
+                    background: REDWOOD.primary,
+                    borderRadius: 8,
+                    color: '#fff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                  }}>
+                    <SyncOutlined />
+                    <span>Sync Now</span>
+                  </div>
+                </Link>
+              </Card>
+            </Col>
+          </Row>
+
+          {/* Tasks Section */}
+          <div style={{ marginBottom: 32 }}>
+            <SectionTitle icon={<CheckSquareOutlined />} title="Tasks" color={REDWOOD.taskBlue} />
+            <Row gutter={[16, 16]}>
+              {taskMenuItems.map((item) => (
+                <Col xs={24} sm={12} lg={8} xl={6} key={item.key}>
+                  <MenuCard item={item} />
+                </Col>
               ))}
-            </div>
+            </Row>
+          </div>
+
+          {/* Reports Section */}
+          <div style={{ marginBottom: 32 }}>
+            <SectionTitle icon={<BarChartOutlined />} title="Reports" color={REDWOOD.reportGreen} />
+            <Row gutter={[16, 16]}>
+              {reportMenuItems.map((item) => (
+                <Col xs={24} sm={12} lg={8} xl={6} key={item.key}>
+                  <MenuCard item={item} />
+                </Col>
+              ))}
+            </Row>
+          </div>
+
+          {/* Setup Section */}
+          <div style={{ marginBottom: 32 }}>
+            <SectionTitle icon={<SettingOutlined />} title="Setup & Configuration" color={REDWOOD.neutral600} />
+            <Row gutter={[16, 16]}>
+              {setupMenuItems.map((item) => (
+                <Col xs={24} sm={12} lg={8} xl={6} key={item.key}>
+                  <MenuCard item={item} />
+                </Col>
+              ))}
+            </Row>
           </div>
 
           {/* Selected Content Area */}
@@ -374,71 +623,120 @@ const GLModule: React.FC = () => {
               </div>
             </Card>
           )}
+        </div>
 
-          {/* Floating Connected Icons */}
+        {/* Floating Connected Icons */}
+        <div
+          ref={floatingIconsRef}
+          style={{
+            position: 'fixed',
+            right: 24,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            zIndex: 1000,
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          {/* Tasks Icon */}
+          <FloatingIcon
+            icon={<CheckSquareOutlined />}
+            label="Tasks"
+            color={REDWOOD.taskBlue}
+            isActive={activePanel === 'tasks'}
+            onClick={() => togglePanel('tasks')}
+            position="top"
+          />
+
+          {/* Connector Line */}
+          <div style={{
+            width: 56,
+            height: 2,
+            background: REDWOOD.neutral200,
+          }} />
+
+          {/* Reports Icon */}
+          <FloatingIcon
+            icon={<BarChartOutlined />}
+            label="Reports"
+            color={REDWOOD.reportGreen}
+            isActive={activePanel === 'reports'}
+            onClick={() => togglePanel('reports')}
+            position="bottom"
+          />
+        </div>
+
+        {/* Backdrop Overlay */}
+        {activePanel !== 'none' && (
           <div
-            ref={floatingIconsRef}
+            onClick={closePanel}
             style={{
               position: 'fixed',
-              right: 24,
-              top: '50%',
-              transform: 'translateY(-50%)',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'rgba(0,0,0,0.3)',
               zIndex: 1000,
-              display: 'flex',
-              flexDirection: 'column',
+              animation: isClosing ? 'fadeOut 0.25s ease forwards' : 'fadeIn 0.3s ease forwards',
             }}
-          >
-            {/* Tasks Icon */}
-            <FloatingIcon
-              icon={<CheckSquareOutlined />}
-              label="Tasks"
+          />
+        )}
+
+        {/* Slide-out Panels - Rendered outside to overlay floating icons */}
+        <div ref={panelRef}>
+          {activePanel === 'tasks' && (
+            <SlidePanel
+              title="Tasks"
+              items={taskMenuItems}
               color={REDWOOD.taskBlue}
-              isActive={activePanel === 'tasks'}
-              onClick={() => togglePanel('tasks')}
-              position="top"
             />
-
-            {/* Connector Line */}
-            <div style={{
-              width: 56,
-              height: 2,
-              background: REDWOOD.neutral200,
-            }} />
-
-            {/* Reports Icon */}
-            <FloatingIcon
-              icon={<BarChartOutlined />}
-              label="Reports"
+          )}
+          {activePanel === 'reports' && (
+            <SlidePanel
+              title="Reports"
+              items={reportMenuItems}
               color={REDWOOD.reportGreen}
-              isActive={activePanel === 'reports'}
-              onClick={() => togglePanel('reports')}
-              position="bottom"
             />
-          </div>
-
-          {/* Slide-out Panels - Rendered outside to overlay floating icons */}
-          <div ref={panelRef}>
-            {activePanel === 'tasks' && (
-              <SlidePanel
-                title="Tasks"
-                items={taskMenuItems}
-                color={REDWOOD.taskBlue}
-              />
-            )}
-            {activePanel === 'reports' && (
-              <SlidePanel
-                title="Reports"
-                items={reportMenuItems}
-                color={REDWOOD.reportGreen}
-              />
-            )}
-          </div>
+          )}
         </div>
       </Content>
 
-      {/* CSS Animation */}
+      {/* CSS Animations */}
       <style>{`
         @keyframes slideIn {
+          from {
+            transform: translateX(100%);
+          }
+          to {
+            transform: translateX(0);
+          }
+        }
+        @keyframes slideOut {
+          from {
+            transform: translateX(0);
+          }
+          to {
+            transform: translateX(100%);
+          }
+        }
+        @keyframes fadeIn {
+          from {
+            opacity: 0;
+          }
+          to {
+            opacity: 1;
+          }
+        }
+        @keyframes fadeOut {
+          from {
+            opacity: 1;
+          }
+          to {
+            opacity: 0;
+          }
+        }
+        @keyframes fadeInItem {
           from {
             opacity: 0;
             transform: translateX(20px);
