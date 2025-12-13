@@ -27,7 +27,7 @@ import {
   SyncOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import Autopilot from '../../components/Autopilot';
 
 const { Content } = Layout;
@@ -58,10 +58,12 @@ interface MenuItemType {
   label: string;
   description?: string;
   color?: string;
+  path?: string;
 }
 
 // Task menu items
 const taskMenuItems: MenuItemType[] = [
+  { key: 'manage-journals', icon: <AccountBookOutlined />, label: 'Manage Journals', description: 'Search and manage journal entries', color: REDWOOD.primary, path: '/gl/manage-journals' },
   { key: 'journal-entry', icon: <FileTextOutlined />, label: 'Create Journal', description: 'Create manual journal entry', color: REDWOOD.taskBlue },
   { key: 'import-journals', icon: <SwapOutlined />, label: 'Import Journals', description: 'Import from spreadsheet', color: REDWOOD.info },
   { key: 'reverse-journal', icon: <ReconciliationOutlined />, label: 'Reverse Journal', description: 'Reverse posted journals', color: REDWOOD.warning },
@@ -101,6 +103,7 @@ const glKpiData = {
 };
 
 const GLModule: React.FC = () => {
+  const navigate = useNavigate();
   const [activePanel, setActivePanel] = useState<'none' | 'tasks' | 'reports'>('none');
   const [isClosing, setIsClosing] = useState(false);
   const [selectedItem, setSelectedItem] = useState<string | null>(null);
@@ -136,9 +139,12 @@ const GLModule: React.FC = () => {
     }, 250);
   };
 
-  const handleMenuItemClick = (key: string) => {
+  const handleMenuItemClick = (key: string, path?: string) => {
     setSelectedItem(key);
     closePanel();
+    if (path) {
+      navigate(path);
+    }
     console.log('Selected:', key);
   };
 
@@ -240,7 +246,7 @@ const GLModule: React.FC = () => {
         {items.map((item, index) => (
           <div
             key={item.key}
-            onClick={() => handleMenuItemClick(item.key)}
+            onClick={() => handleMenuItemClick(item.key, item.path)}
             style={{
               padding: '16px 20px',
               borderRadius: 12,
@@ -368,7 +374,7 @@ const GLModule: React.FC = () => {
   const MenuCard = ({ item }: { item: MenuItemType }) => (
     <Card
       hoverable
-      onClick={() => handleMenuItemClick(item.key)}
+      onClick={() => handleMenuItemClick(item.key, item.path)}
       style={{
         borderRadius: 12,
         border: `1px solid ${REDWOOD.neutral200}`,

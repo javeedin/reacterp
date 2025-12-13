@@ -6,6 +6,7 @@ import MainLayout from './layouts/MainLayout';
 import Login from './pages/Login';
 import Home from './pages/Home';
 import GLModule from './pages/gl/GLModule';
+import ManageJournals from './pages/gl/ManageJournals';
 import SyncData from './pages/sync/SyncData';
 
 // Placeholder component for modules under development
@@ -50,7 +51,8 @@ function App() {
             >
               <Route index element={<Navigate to="/home" replace />} />
               <Route path="home" element={<Home />} />
-              <Route path="gl/*" element={<GLModule />} />
+              <Route path="gl" element={<GLModule />} />
+              <Route path="gl/manage-journals" element={<ManageJournals />} />
               <Route path="ap/*" element={<ComingSoon moduleName="Accounts Payable" />} />
               <Route path="ar/*" element={<ComingSoon moduleName="Accounts Receivable" />} />
               <Route path="inventory/*" element={<ComingSoon moduleName="Inventory" />} />
