@@ -2,41 +2,31 @@
 -- RR_MANAGE_JOURNALS_PKG - Package for Manage Journals API
 -- Created for ReactERP - Oracle Fusion Data Sync
 -- Tables: RR_GL_JOURNAL_BATCHES, RR_GL_HEADERS, RR_GL_LINES_ALL
+-- Returns nested JSON: Batch fields -> Header fields -> Lines array
 -- ============================================================
 
 CREATE OR REPLACE PACKAGE RR_MANAGE_JOURNALS_PKG AS
 
-    -- Search journals with parameters
-    FUNCTION search_journals(
-        p_journal           IN VARCHAR2 DEFAULT NULL,
-        p_journal_operator  IN VARCHAR2 DEFAULT 'Starts with',
-        p_batch             IN VARCHAR2 DEFAULT NULL,
-        p_batch_operator    IN VARCHAR2 DEFAULT 'Starts with',
-        p_period            IN VARCHAR2 DEFAULT NULL,
+    -- Search journals and return nested JSON (batch + header + lines)
+    FUNCTION search_journals_json(
+        p_ledger            IN VARCHAR2,           -- MANDATORY
+        p_period            IN VARCHAR2,           -- MANDATORY
+        p_batch_name        IN VARCHAR2 DEFAULT NULL,
+        p_journal_desc      IN VARCHAR2 DEFAULT NULL,
         p_source            IN VARCHAR2 DEFAULT NULL,
-        p_category          IN VARCHAR2 DEFAULT NULL,
-        p_ledger            IN VARCHAR2 DEFAULT NULL,
-        p_batch_status      IN VARCHAR2 DEFAULT NULL,
+        p_status_meaning    IN VARCHAR2 DEFAULT NULL,
         p_offset            IN NUMBER DEFAULT 0,
         p_limit             IN NUMBER DEFAULT 25
-    ) RETURN SYS_REFCURSOR;
+    ) RETURN CLOB;
 
-    -- Get journal lines by header ID
-    FUNCTION get_journal_lines(
-        p_je_header_id      IN NUMBER
-    ) RETURN SYS_REFCURSOR;
-
-    -- Get journal count for pagination
+    -- Get total count for pagination
     FUNCTION get_journal_count(
-        p_journal           IN VARCHAR2 DEFAULT NULL,
-        p_journal_operator  IN VARCHAR2 DEFAULT 'Starts with',
-        p_batch             IN VARCHAR2 DEFAULT NULL,
-        p_batch_operator    IN VARCHAR2 DEFAULT 'Starts with',
-        p_period            IN VARCHAR2 DEFAULT NULL,
+        p_ledger            IN VARCHAR2,
+        p_period            IN VARCHAR2,
+        p_batch_name        IN VARCHAR2 DEFAULT NULL,
+        p_journal_desc      IN VARCHAR2 DEFAULT NULL,
         p_source            IN VARCHAR2 DEFAULT NULL,
-        p_category          IN VARCHAR2 DEFAULT NULL,
-        p_ledger            IN VARCHAR2 DEFAULT NULL,
-        p_batch_status      IN VARCHAR2 DEFAULT NULL
+        p_status_meaning    IN VARCHAR2 DEFAULT NULL
     ) RETURN NUMBER;
 
     -- Get distinct values for dropdowns
@@ -51,226 +41,204 @@ END RR_MANAGE_JOURNALS_PKG;
 
 CREATE OR REPLACE PACKAGE BODY RR_MANAGE_JOURNALS_PKG AS
 
-    -- Helper function to build WHERE clause condition
-    FUNCTION build_condition(
-        p_column    IN VARCHAR2,
-        p_value     IN VARCHAR2,
-        p_operator  IN VARCHAR2
-    ) RETURN VARCHAR2 IS
-        v_condition VARCHAR2(1000);
+    -- Helper function to escape JSON string
+    FUNCTION escape_json(p_str IN VARCHAR2) RETURN VARCHAR2 IS
     BEGIN
-        IF p_value IS NULL THEN
-            RETURN NULL;
+        IF p_str IS NULL THEN
+            RETURN '';
         END IF;
+        RETURN REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(p_str,
+            '\', '\\'),
+            '"', '\"'),
+            CHR(10), '\n'),
+            CHR(13), '\r'),
+            CHR(9), '\t');
+    END escape_json;
 
-        CASE p_operator
-            WHEN 'Starts with' THEN
-                v_condition := p_column || ' LIKE ''' || p_value || '%''';
-            WHEN 'Ends with' THEN
-                v_condition := p_column || ' LIKE ''%' || p_value || '''';
-            WHEN 'Contains' THEN
-                v_condition := p_column || ' LIKE ''%' || p_value || '%''';
-            WHEN 'Equals' THEN
-                v_condition := p_column || ' = ''' || p_value || '''';
-            ELSE
-                v_condition := p_column || ' LIKE ''' || p_value || '%''';
-        END CASE;
-
-        RETURN v_condition;
-    END build_condition;
-
-    -- Search journals with parameters
-    -- Joins RR_GL_HEADERS with RR_GL_JOURNAL_BATCHES
-    -- Returns: Journal info from headers + BATCH_DESCRIPTION from batches
-    FUNCTION search_journals(
-        p_journal           IN VARCHAR2 DEFAULT NULL,
-        p_journal_operator  IN VARCHAR2 DEFAULT 'Starts with',
-        p_batch             IN VARCHAR2 DEFAULT NULL,
-        p_batch_operator    IN VARCHAR2 DEFAULT 'Starts with',
-        p_period            IN VARCHAR2 DEFAULT NULL,
+    -- Search journals and return nested JSON
+    FUNCTION search_journals_json(
+        p_ledger            IN VARCHAR2,
+        p_period            IN VARCHAR2,
+        p_batch_name        IN VARCHAR2 DEFAULT NULL,
+        p_journal_desc      IN VARCHAR2 DEFAULT NULL,
         p_source            IN VARCHAR2 DEFAULT NULL,
-        p_category          IN VARCHAR2 DEFAULT NULL,
-        p_ledger            IN VARCHAR2 DEFAULT NULL,
-        p_batch_status      IN VARCHAR2 DEFAULT NULL,
+        p_status_meaning    IN VARCHAR2 DEFAULT NULL,
         p_offset            IN NUMBER DEFAULT 0,
         p_limit             IN NUMBER DEFAULT 25
-    ) RETURN SYS_REFCURSOR IS
-        v_cursor SYS_REFCURSOR;
-        v_sql    VARCHAR2(4000);
-        v_where  VARCHAR2(2000) := ' WHERE 1=1';
-        v_cond   VARCHAR2(500);
-    BEGIN
-        -- Build base query
-        -- h = RR_GL_HEADERS, b = RR_GL_JOURNAL_BATCHES
-        v_sql := '
+    ) RETURN CLOB IS
+        v_json          CLOB;
+        v_count         NUMBER;
+        v_first_header  BOOLEAN := TRUE;
+        v_first_line    BOOLEAN;
+
+        -- Header cursor with batch info
+        CURSOR c_headers IS
             SELECT
+                -- Batch fields (from RR_GL_JOURNAL_BATCHES)
+                b.BATCH_SYNC_ID AS BATCH_ID,
+                b.JE_BATCH_ID,
+                b.BATCH_NAME,
+                b.BATCH_DESCRIPTION,
+                b.USER_JE_SOURCE_NAME AS SOURCE,
+                b.STATUS,
+                b.STATUS_MEANING,
+                b.APPROVAL_STATUS_MEANING,
+                b.POSTED_DATE,
+                -- Header fields (from RR_GL_HEADERS)
                 h.HEADER_ID,
                 h.JE_HEADER_ID,
-                h.BATCH_ID,
                 h.JOURNAL_NAME,
-                NVL(b.BATCH_DESCRIPTION, b.BATCH_NAME) AS JOURNAL_BATCH,
-                b.BATCH_NAME,
-                h.PERIOD_NAME AS ACCOUNTING_PERIOD,
-                NULL AS SOURCE,
+                h.JOURNAL_DESCRIPTION,
+                h.PERIOD_NAME,
                 h.USER_JE_CATEGORY_NAME AS CATEGORY,
+                h.LEDGER_NAME,
+                h.LEGAL_ENTITY_NAME,
+                h.CURRENCY_CODE,
                 h.RUNNING_TOTAL_DR AS ENTERED_DEBIT,
                 h.RUNNING_TOTAL_CR AS ENTERED_CREDIT,
                 h.RUNNING_TOTAL_ACCOUNTED_DR AS ACCOUNTED_DEBIT,
                 h.RUNNING_TOTAL_ACCOUNTED_CR AS ACCOUNTED_CREDIT,
-                h.CURRENCY_CODE,
-                b.STATUS AS BATCH_STATUS,
-                b.STATUS AS STATUS_CODE,
-                h.EXTERNAL_REFERENCE AS REFERENCE,
-                NULL AS APPROVAL_STATUS_MEANING,
-                h.LEDGER_NAME,
-                h.DEFAULT_EFFECTIVE_DATE,
-                b.POSTED_DATE,
+                h.DEFAULT_EFFECTIVE_DATE AS EFFECTIVE_DATE,
+                h.EXTERNAL_REFERENCE,
                 h.CREATION_DATE
             FROM RR_GL_HEADERS h
             LEFT JOIN RR_GL_JOURNAL_BATCHES b ON h.BATCH_ID = b.JE_BATCH_ID
-        ';
-
-        -- Build WHERE conditions
-        -- Journal name filter
-        v_cond := build_condition('UPPER(h.JOURNAL_NAME)', UPPER(p_journal), p_journal_operator);
-        IF v_cond IS NOT NULL THEN
-            v_where := v_where || ' AND ' || v_cond;
-        END IF;
-
-        -- Journal batch filter (from BATCH_DESCRIPTION or BATCH_NAME)
-        v_cond := build_condition('UPPER(NVL(b.BATCH_DESCRIPTION, b.BATCH_NAME))', UPPER(p_batch), p_batch_operator);
-        IF v_cond IS NOT NULL THEN
-            v_where := v_where || ' AND ' || v_cond;
-        END IF;
-
-        -- Period filter
-        IF p_period IS NOT NULL THEN
-            v_where := v_where || ' AND h.PERIOD_NAME = ''' || p_period || '''';
-        END IF;
-
-        -- Source filter - commented out as column may not exist
-        -- IF p_source IS NOT NULL THEN
-        --     v_where := v_where || ' AND b.USER_JE_SOURCE_NAME = ''' || p_source || '''';
-        -- END IF;
-
-        -- Category filter (from headers table)
-        IF p_category IS NOT NULL THEN
-            v_where := v_where || ' AND h.USER_JE_CATEGORY_NAME = ''' || p_category || '''';
-        END IF;
-
-        -- Ledger filter
-        IF p_ledger IS NOT NULL THEN
-            v_where := v_where || ' AND h.LEDGER_NAME = ''' || p_ledger || '''';
-        END IF;
-
-        -- Batch status filter (using STATUS instead of STATUS_MEANING)
-        IF p_batch_status IS NOT NULL AND p_batch_status != 'All' THEN
-            v_where := v_where || ' AND b.STATUS = ''' || p_batch_status || '''';
-        END IF;
-
-        -- Add ORDER BY and pagination
-        v_sql := v_sql || v_where || '
+            WHERE h.LEDGER_NAME = p_ledger
+              AND h.PERIOD_NAME = p_period
+              AND (p_batch_name IS NULL OR UPPER(b.BATCH_NAME) LIKE '%' || UPPER(p_batch_name) || '%')
+              AND (p_journal_desc IS NULL OR UPPER(h.JOURNAL_DESCRIPTION) LIKE '%' || UPPER(p_journal_desc) || '%')
+              AND (p_source IS NULL OR b.USER_JE_SOURCE_NAME = p_source)
+              AND (p_status_meaning IS NULL OR b.STATUS_MEANING = p_status_meaning)
             ORDER BY h.CREATION_DATE DESC
-            OFFSET ' || p_offset || ' ROWS FETCH NEXT ' || p_limit || ' ROWS ONLY';
+            OFFSET p_offset ROWS FETCH NEXT p_limit ROWS ONLY;
 
-        OPEN v_cursor FOR v_sql;
-        RETURN v_cursor;
-    END search_journals;
-
-    -- Get journal lines by header ID
-    -- From RR_GL_LINES_ALL table
-    FUNCTION get_journal_lines(
-        p_je_header_id      IN NUMBER
-    ) RETURN SYS_REFCURSOR IS
-        v_cursor SYS_REFCURSOR;
-    BEGIN
-        OPEN v_cursor FOR
+        -- Line cursor
+        CURSOR c_lines(p_je_header_id NUMBER) IS
             SELECT
                 LINE_ID,
-                JE_LINE_NUMBER,
-                JE_HEADER_ID,
-                BATCH_ID,
-                ACCOUNT_COMBINATION,
-                CHART_OF_ACCOUNTS_NAME,
+                JE_LINE_NUMBER AS LINE_NUM,
+                ACCOUNT_COMBINATION AS ACCOUNT,
                 DESCRIPTION,
                 ENTERED_DR,
                 ENTERED_CR,
                 ACCOUNTED_DR,
                 ACCOUNTED_CR,
-                CURRENCY_CODE,
-                STAT_AMOUNT,
-                REFERENCE1,
-                REFERENCE2,
-                REFERENCE3,
-                REFERENCE4,
-                REFERENCE5,
-                RECONCILIATION_REFERENCE
+                CURRENCY_CODE AS CURRENCY
             FROM RR_GL_LINES_ALL
             WHERE JE_HEADER_ID = p_je_header_id
             ORDER BY JE_LINE_NUMBER;
 
-        RETURN v_cursor;
-    END get_journal_lines;
-
-    -- Get journal count for pagination
-    FUNCTION get_journal_count(
-        p_journal           IN VARCHAR2 DEFAULT NULL,
-        p_journal_operator  IN VARCHAR2 DEFAULT 'Starts with',
-        p_batch             IN VARCHAR2 DEFAULT NULL,
-        p_batch_operator    IN VARCHAR2 DEFAULT 'Starts with',
-        p_period            IN VARCHAR2 DEFAULT NULL,
-        p_source            IN VARCHAR2 DEFAULT NULL,
-        p_category          IN VARCHAR2 DEFAULT NULL,
-        p_ledger            IN VARCHAR2 DEFAULT NULL,
-        p_batch_status      IN VARCHAR2 DEFAULT NULL
-    ) RETURN NUMBER IS
-        v_count  NUMBER;
-        v_sql    VARCHAR2(4000);
-        v_where  VARCHAR2(2000) := ' WHERE 1=1';
-        v_cond   VARCHAR2(500);
     BEGIN
-        v_sql := '
-            SELECT COUNT(*)
-            FROM RR_GL_HEADERS h
-            LEFT JOIN RR_GL_JOURNAL_BATCHES b ON h.BATCH_ID = b.JE_BATCH_ID
-        ';
+        -- Get total count
+        v_count := get_journal_count(
+            p_ledger, p_period, p_batch_name,
+            p_journal_desc, p_source, p_status_meaning
+        );
 
-        -- Build same WHERE conditions as search
-        v_cond := build_condition('UPPER(h.JOURNAL_NAME)', UPPER(p_journal), p_journal_operator);
-        IF v_cond IS NOT NULL THEN
-            v_where := v_where || ' AND ' || v_cond;
-        END IF;
+        -- Initialize JSON
+        DBMS_LOB.CREATETEMPORARY(v_json, TRUE);
+        DBMS_LOB.APPEND(v_json, '{
+  "success": true,
+  "totalCount": ' || v_count || ',
+  "offset": ' || p_offset || ',
+  "limit": ' || p_limit || ',
+  "items": [');
 
-        v_cond := build_condition('UPPER(NVL(b.BATCH_DESCRIPTION, b.BATCH_NAME))', UPPER(p_batch), p_batch_operator);
-        IF v_cond IS NOT NULL THEN
-            v_where := v_where || ' AND ' || v_cond;
-        END IF;
+        -- Loop through headers
+        FOR r_header IN c_headers LOOP
+            IF NOT v_first_header THEN
+                DBMS_LOB.APPEND(v_json, ',');
+            END IF;
+            v_first_header := FALSE;
 
-        IF p_period IS NOT NULL THEN
-            v_where := v_where || ' AND h.PERIOD_NAME = ''' || p_period || '''';
-        END IF;
+            -- Start header object with batch fields first
+            DBMS_LOB.APPEND(v_json, '
+    {
+      "batchId": ' || NVL(TO_CHAR(r_header.BATCH_ID), 'null') || ',
+      "jeBatchId": ' || NVL(TO_CHAR(r_header.JE_BATCH_ID), 'null') || ',
+      "batchName": "' || escape_json(r_header.BATCH_NAME) || '",
+      "batchDescription": "' || escape_json(r_header.BATCH_DESCRIPTION) || '",
+      "source": "' || escape_json(r_header.SOURCE) || '",
+      "status": "' || escape_json(r_header.STATUS) || '",
+      "statusMeaning": "' || escape_json(r_header.STATUS_MEANING) || '",
+      "approvalStatusMeaning": "' || escape_json(r_header.APPROVAL_STATUS_MEANING) || '",
+      "postedDate": ' || CASE WHEN r_header.POSTED_DATE IS NULL THEN 'null' ELSE '"' || TO_CHAR(r_header.POSTED_DATE, 'YYYY-MM-DD') || '"' END || ',
+      "headerId": ' || r_header.HEADER_ID || ',
+      "jeHeaderId": ' || r_header.JE_HEADER_ID || ',
+      "journalName": "' || escape_json(r_header.JOURNAL_NAME) || '",
+      "journalDescription": "' || escape_json(r_header.JOURNAL_DESCRIPTION) || '",
+      "periodName": "' || escape_json(r_header.PERIOD_NAME) || '",
+      "category": "' || escape_json(r_header.CATEGORY) || '",
+      "ledgerName": "' || escape_json(r_header.LEDGER_NAME) || '",
+      "legalEntityName": "' || escape_json(r_header.LEGAL_ENTITY_NAME) || '",
+      "currencyCode": "' || escape_json(r_header.CURRENCY_CODE) || '",
+      "enteredDebit": ' || NVL(TO_CHAR(r_header.ENTERED_DEBIT), '0') || ',
+      "enteredCredit": ' || NVL(TO_CHAR(r_header.ENTERED_CREDIT), '0') || ',
+      "accountedDebit": ' || NVL(TO_CHAR(r_header.ACCOUNTED_DEBIT), '0') || ',
+      "accountedCredit": ' || NVL(TO_CHAR(r_header.ACCOUNTED_CREDIT), '0') || ',
+      "effectiveDate": ' || CASE WHEN r_header.EFFECTIVE_DATE IS NULL THEN 'null' ELSE '"' || TO_CHAR(r_header.EFFECTIVE_DATE, 'YYYY-MM-DD') || '"' END || ',
+      "externalReference": "' || escape_json(r_header.EXTERNAL_REFERENCE) || '",
+      "creationDate": "' || TO_CHAR(r_header.CREATION_DATE, 'YYYY-MM-DD"T"HH24:MI:SS') || '",
+      "lines": [');
 
-        -- Source filter - commented out as column may not exist
-        -- IF p_source IS NOT NULL THEN
-        --     v_where := v_where || ' AND b.USER_JE_SOURCE_NAME = ''' || p_source || '''';
-        -- END IF;
+            -- Loop through lines for this header
+            v_first_line := TRUE;
+            FOR r_line IN c_lines(r_header.JE_HEADER_ID) LOOP
+                IF NOT v_first_line THEN
+                    DBMS_LOB.APPEND(v_json, ',');
+                END IF;
+                v_first_line := FALSE;
 
-        IF p_category IS NOT NULL THEN
-            v_where := v_where || ' AND h.USER_JE_CATEGORY_NAME = ''' || p_category || '''';
-        END IF;
+                DBMS_LOB.APPEND(v_json, '
+        {
+          "lineId": ' || r_line.LINE_ID || ',
+          "lineNum": ' || r_line.LINE_NUM || ',
+          "account": "' || escape_json(r_line.ACCOUNT) || '",
+          "description": "' || escape_json(r_line.DESCRIPTION) || '",
+          "enteredDr": ' || NVL(TO_CHAR(r_line.ENTERED_DR), '0') || ',
+          "enteredCr": ' || NVL(TO_CHAR(r_line.ENTERED_CR), '0') || ',
+          "accountedDr": ' || NVL(TO_CHAR(r_line.ACCOUNTED_DR), '0') || ',
+          "accountedCr": ' || NVL(TO_CHAR(r_line.ACCOUNTED_CR), '0') || ',
+          "currency": "' || escape_json(r_line.CURRENCY) || '"
+        }');
+            END LOOP;
 
-        IF p_ledger IS NOT NULL THEN
-            v_where := v_where || ' AND h.LEDGER_NAME = ''' || p_ledger || '''';
-        END IF;
+            -- Close lines array and header object
+            DBMS_LOB.APPEND(v_json, '
+      ]
+    }');
+        END LOOP;
 
-        -- Batch status filter (using STATUS instead of STATUS_MEANING)
-        IF p_batch_status IS NOT NULL AND p_batch_status != 'All' THEN
-            v_where := v_where || ' AND b.STATUS = ''' || p_batch_status || '''';
-        END IF;
+        -- Close items array and root object
+        DBMS_LOB.APPEND(v_json, '
+  ]
+}');
 
-        v_sql := v_sql || v_where;
+        RETURN v_json;
+    END search_journals_json;
 
-        EXECUTE IMMEDIATE v_sql INTO v_count;
+    -- Get total count for pagination
+    FUNCTION get_journal_count(
+        p_ledger            IN VARCHAR2,
+        p_period            IN VARCHAR2,
+        p_batch_name        IN VARCHAR2 DEFAULT NULL,
+        p_journal_desc      IN VARCHAR2 DEFAULT NULL,
+        p_source            IN VARCHAR2 DEFAULT NULL,
+        p_status_meaning    IN VARCHAR2 DEFAULT NULL
+    ) RETURN NUMBER IS
+        v_count NUMBER;
+    BEGIN
+        SELECT COUNT(*)
+        INTO v_count
+        FROM RR_GL_HEADERS h
+        LEFT JOIN RR_GL_JOURNAL_BATCHES b ON h.BATCH_ID = b.JE_BATCH_ID
+        WHERE h.LEDGER_NAME = p_ledger
+          AND h.PERIOD_NAME = p_period
+          AND (p_batch_name IS NULL OR UPPER(b.BATCH_NAME) LIKE '%' || UPPER(p_batch_name) || '%')
+          AND (p_journal_desc IS NULL OR UPPER(h.JOURNAL_DESCRIPTION) LIKE '%' || UPPER(p_journal_desc) || '%')
+          AND (p_source IS NULL OR b.USER_JE_SOURCE_NAME = p_source)
+          AND (p_status_meaning IS NULL OR b.STATUS_MEANING = p_status_meaning);
+
         RETURN v_count;
     END get_journal_count;
 
@@ -286,16 +254,15 @@ CREATE OR REPLACE PACKAGE BODY RR_MANAGE_JOURNALS_PKG AS
         RETURN v_cursor;
     END get_periods;
 
-    -- Get distinct sources - returns empty as column may not exist
+    -- Get distinct sources from batches
     FUNCTION get_sources RETURN SYS_REFCURSOR IS
         v_cursor SYS_REFCURSOR;
     BEGIN
         OPEN v_cursor FOR
-            SELECT 'Manual' AS SOURCE_NAME FROM DUAL
-            UNION ALL
-            SELECT 'Spreadsheet' AS SOURCE_NAME FROM DUAL
-            UNION ALL
-            SELECT 'AutoPost' AS SOURCE_NAME FROM DUAL;
+            SELECT DISTINCT USER_JE_SOURCE_NAME
+            FROM RR_GL_JOURNAL_BATCHES
+            WHERE USER_JE_SOURCE_NAME IS NOT NULL
+            ORDER BY USER_JE_SOURCE_NAME;
         RETURN v_cursor;
     END get_sources;
 
@@ -323,15 +290,15 @@ CREATE OR REPLACE PACKAGE BODY RR_MANAGE_JOURNALS_PKG AS
         RETURN v_cursor;
     END get_ledgers;
 
-    -- Get distinct batch statuses from batches (using STATUS instead of STATUS_MEANING)
+    -- Get distinct batch statuses from batches
     FUNCTION get_batch_statuses RETURN SYS_REFCURSOR IS
         v_cursor SYS_REFCURSOR;
     BEGIN
         OPEN v_cursor FOR
-            SELECT DISTINCT STATUS
+            SELECT DISTINCT STATUS_MEANING
             FROM RR_GL_JOURNAL_BATCHES
-            WHERE STATUS IS NOT NULL
-            ORDER BY STATUS;
+            WHERE STATUS_MEANING IS NOT NULL
+            ORDER BY STATUS_MEANING;
         RETURN v_cursor;
     END get_batch_statuses;
 
