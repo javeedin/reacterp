@@ -1300,6 +1300,13 @@ const EditJournal: React.FC = () => {
                 </a>
               </Space>
               <Space>
+                <Button
+                  size="small"
+                  icon={<PrinterOutlined />}
+                  onClick={handlePrintJournal}
+                >
+                  Print
+                </Button>
                 {!isBatchMode && (
                   <>
                     <Button size="small" icon={<LeftOutlined />} disabled />
@@ -1315,13 +1322,6 @@ const EditJournal: React.FC = () => {
                 )}
                 <Button size="small" icon={<PlusOutlined />} />
                 <Button size="small" icon={<DeleteOutlined />} />
-                <Button
-                  size="small"
-                  icon={<PrinterOutlined />}
-                  onClick={handlePrintJournal}
-                >
-                  Print
-                </Button>
                 <Dropdown menu={{ items: journalActionsMenu }}>
                   <Button size="small">
                     Journal Actions <DownOutlined />
