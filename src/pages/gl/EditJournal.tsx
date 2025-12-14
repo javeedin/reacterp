@@ -261,6 +261,8 @@ const EditJournal: React.FC = () => {
   const [fusionData, setFusionData] = useState<FusionData | null>(null);
   const [fusionError, setFusionError] = useState<string | null>(null);
   const [activeFusionHeaderKey, setActiveFusionHeaderKey] = useState<string>('0');
+  const [activeFusionTab, setActiveFusionTab] = useState<string>('comparison');
+  const [fusionApiLogs, setFusionApiLogs] = useState<Array<{ url: string; proxyUrl: string; status: string; timestamp: string; response?: any }>>([]);
 
   // Load journal data
   useEffect(() => {
@@ -292,17 +294,38 @@ const EditJournal: React.FC = () => {
     }
   };
 
-  // Fetch from Oracle via proxy
-  const fetchFromOracleUrl = async (url: string): Promise<any> => {
+  // Fetch from Oracle via proxy with logging
+  const fetchFromOracleUrl = async (url: string, addLog: (log: any) => void): Promise<any> => {
     const proxyUrl = `${PROXY_CONFIG.baseUrl}/oracle-url?url=${encodeURIComponent(url)}`;
-    const response = await fetch(proxyUrl);
-    const data = await response.json();
+    const timestamp = new Date().toLocaleTimeString();
 
-    if (!data.success) {
-      throw new Error(data.error || 'Fetch failed');
+    try {
+      const response = await fetch(proxyUrl);
+      const data = await response.json();
+
+      addLog({
+        url,
+        proxyUrl,
+        status: data.success ? 'SUCCESS' : 'FAILED',
+        timestamp,
+        response: data.success ? { items: data.items?.length || 0 } : { error: data.error },
+      });
+
+      if (!data.success) {
+        throw new Error(data.error || 'Fetch failed');
+      }
+
+      return data;
+    } catch (error: any) {
+      addLog({
+        url,
+        proxyUrl,
+        status: 'ERROR',
+        timestamp,
+        response: { error: error.message },
+      });
+      throw error;
     }
-
-    return data;
   };
 
   // Check in Fusion handler
@@ -316,12 +339,20 @@ const EditJournal: React.FC = () => {
     setFusionLoading(true);
     setFusionError(null);
     setFusionData(null);
+    setActiveFusionTab('comparison');
+
+    // Clear and build logs
+    const logs: Array<{ url: string; proxyUrl: string; status: string; timestamp: string; response?: any }> = [];
+    const addLog = (log: any) => {
+      logs.push(log);
+      setFusionApiLogs([...logs]);
+    };
 
     try {
       // Fetch headers for this batch via proxy
       const headersUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/journalBatches/${currentJournal.jeBatchId}/child/journalHeaders`;
 
-      const headersResult = await fetchFromOracleUrl(headersUrl);
+      const headersResult = await fetchFromOracleUrl(headersUrl, addLog);
       const headers: FusionJournalHeader[] = headersResult.items || [];
 
       // Fetch lines for each header
@@ -331,7 +362,7 @@ const EditJournal: React.FC = () => {
 
         if (linesLink) {
           try {
-            const linesResult = await fetchFromOracleUrl(linesLink);
+            const linesResult = await fetchFromOracleUrl(linesLink, addLog);
             header.lines = linesResult.items || [];
           } catch (lineErr) {
             console.error('Error fetching lines:', lineErr);
@@ -1165,123 +1196,214 @@ const EditJournal: React.FC = () => {
             </Button>
           ]}
         >
-          {fusionLoading ? (
-            <div style={{ textAlign: 'center', padding: 48 }}>
-              <Spin size="large" />
-              <div style={{ marginTop: 16 }}>
-                <Text type="secondary">Fetching data from Oracle Fusion...</Text>
-              </div>
-            </div>
-          ) : fusionError ? (
-            <Alert
-              type="error"
-              message="Error Connecting to Fusion"
-              description={fusionError}
-              showIcon
-            />
-          ) : fusionData ? (
-            <div>
-              {/* Header tabs if multiple */}
-              {fusionData.headers.length > 1 && (
-                <Tabs
-                  activeKey={activeFusionHeaderKey}
-                  onChange={setActiveFusionHeaderKey}
-                  type="card"
-                  style={{ marginBottom: 16 }}
-                  items={fusionData.headers.map((h, i) => ({
-                    key: String(i),
-                    label: h.JournalName || `Header ${i + 1}`,
-                  }))}
-                />
-              )}
+          <Tabs
+            activeKey={activeFusionTab}
+            onChange={setActiveFusionTab}
+            items={[
+              {
+                key: 'comparison',
+                label: 'Comparison',
+                children: fusionLoading ? (
+                  <div style={{ textAlign: 'center', padding: 48 }}>
+                    <Spin size="large" />
+                    <div style={{ marginTop: 16 }}>
+                      <Text type="secondary">Fetching data from Oracle Fusion...</Text>
+                    </div>
+                  </div>
+                ) : fusionError ? (
+                  <Alert
+                    type="error"
+                    message="Error Connecting to Fusion"
+                    description={fusionError}
+                    showIcon
+                  />
+                ) : fusionData ? (
+                  <div>
+                    {/* Header tabs if multiple */}
+                    {fusionData.headers.length > 1 && (
+                      <Tabs
+                        activeKey={activeFusionHeaderKey}
+                        onChange={setActiveFusionHeaderKey}
+                        type="card"
+                        style={{ marginBottom: 16 }}
+                        items={fusionData.headers.map((h, i) => ({
+                          key: String(i),
+                          label: h.JournalName || `Header ${i + 1}`,
+                        }))}
+                      />
+                    )}
 
-              {/* Comparison View */}
-              {currentFusionHeader && (
-                <>
-                  {/* Header Comparison */}
-                  <Card
-                    size="small"
-                    title="Header Comparison"
-                    style={{ marginBottom: 16, background: REDWOOD.neutral100 }}
-                  >
-                    <Row gutter={8} style={{ marginBottom: 8, fontWeight: 'bold' }}>
-                      <Col span={8}><Text strong>Field</Text></Col>
-                      <Col span={7}><Text strong>Local (Synced)</Text></Col>
-                      <Col span={7}><Text strong>Fusion (Source)</Text></Col>
-                      <Col span={2}><Text strong>Match</Text></Col>
-                    </Row>
-                    <Divider style={{ margin: '8px 0' }} />
-                    {compareValue(currentJournal?.journalName, currentFusionHeader.JournalName, 'Journal Name')}
-                    {compareValue(currentJournal?.journalDescription, currentFusionHeader.JournalDescription, 'Description')}
-                    {compareValue(currentJournal?.ledgerName, currentFusionHeader.LedgerName, 'Ledger')}
-                    {compareValue(currentJournal?.periodName, currentFusionHeader.PeriodName, 'Period')}
-                    {compareValue(currentJournal?.currencyCode, currentFusionHeader.CurrencyCode, 'Currency')}
-                    {compareValue(currentJournal?.category, currentFusionHeader.UserJeCategoryName, 'Category')}
-                    {compareValue(currentJournal?.enteredDebit, currentFusionHeader.RunningTotalDr, 'Entered Debit')}
-                    {compareValue(currentJournal?.enteredCredit, currentFusionHeader.RunningTotalCr, 'Entered Credit')}
-                    {compareValue(currentJournal?.accountedDebit, currentFusionHeader.RunningTotalAccountedDr, 'Accounted Debit')}
-                    {compareValue(currentJournal?.accountedCredit, currentFusionHeader.RunningTotalAccountedCr, 'Accounted Credit')}
-                  </Card>
+                    {/* Comparison View */}
+                    {currentFusionHeader && (
+                      <>
+                        {/* Header Comparison */}
+                        <Card
+                          size="small"
+                          title="Header Comparison"
+                          style={{ marginBottom: 16, background: REDWOOD.neutral100 }}
+                        >
+                          <Row gutter={8} style={{ marginBottom: 8, fontWeight: 'bold' }}>
+                            <Col span={8}><Text strong>Field</Text></Col>
+                            <Col span={7}><Text strong>Local (Synced)</Text></Col>
+                            <Col span={7}><Text strong>Fusion (Source)</Text></Col>
+                            <Col span={2}><Text strong>Match</Text></Col>
+                          </Row>
+                          <Divider style={{ margin: '8px 0' }} />
+                          {compareValue(currentJournal?.journalName, currentFusionHeader.JournalName, 'Journal Name')}
+                          {compareValue(currentJournal?.journalDescription, currentFusionHeader.JournalDescription, 'Description')}
+                          {compareValue(currentJournal?.ledgerName, currentFusionHeader.LedgerName, 'Ledger')}
+                          {compareValue(currentJournal?.periodName, currentFusionHeader.PeriodName, 'Period')}
+                          {compareValue(currentJournal?.currencyCode, currentFusionHeader.CurrencyCode, 'Currency')}
+                          {compareValue(currentJournal?.category, currentFusionHeader.UserJeCategoryName, 'Category')}
+                          {compareValue(currentJournal?.enteredDebit, currentFusionHeader.RunningTotalDr, 'Entered Debit')}
+                          {compareValue(currentJournal?.enteredCredit, currentFusionHeader.RunningTotalCr, 'Entered Credit')}
+                          {compareValue(currentJournal?.accountedDebit, currentFusionHeader.RunningTotalAccountedDr, 'Accounted Debit')}
+                          {compareValue(currentJournal?.accountedCredit, currentFusionHeader.RunningTotalAccountedCr, 'Accounted Credit')}
+                        </Card>
 
-                  {/* Lines from Fusion */}
-                  <Card
-                    size="small"
-                    title={
-                      <Space>
-                        <span>Journal Lines from Fusion</span>
-                        <Tag color={REDWOOD.info}>{currentFusionHeader.lines?.length || 0} lines</Tag>
-                      </Space>
-                    }
-                    style={{ background: REDWOOD.neutral100 }}
-                  >
-                    <Table
-                      columns={fusionLineColumns}
-                      dataSource={(currentFusionHeader.lines || []).map((line, idx) => ({
-                        ...line,
-                        key: String(idx),
-                      }))}
-                      size="small"
-                      pagination={false}
-                      scroll={{ x: 1000 }}
-                      bordered
-                      summary={(pageData) => {
-                        const totals = pageData.reduce(
-                          (acc, line) => ({
-                            enteredDr: acc.enteredDr + (line.EnteredDr || 0),
-                            enteredCr: acc.enteredCr + (line.EnteredCr || 0),
-                            accountedDr: acc.accountedDr + (line.AccountedDr || 0),
-                            accountedCr: acc.accountedCr + (line.AccountedCr || 0),
-                          }),
-                          { enteredDr: 0, enteredCr: 0, accountedDr: 0, accountedCr: 0 }
-                        );
-                        return (
-                          <Table.Summary fixed>
-                            <Table.Summary.Row style={{ background: REDWOOD.neutral200 }}>
-                              <Table.Summary.Cell index={0}><Text strong>Total</Text></Table.Summary.Cell>
-                              <Table.Summary.Cell index={1} />
-                              <Table.Summary.Cell index={2} align="right">
-                                <Text strong>{formatNumber(totals.enteredDr)}</Text>
-                              </Table.Summary.Cell>
-                              <Table.Summary.Cell index={3} align="right">
-                                <Text strong>{formatNumber(totals.enteredCr)}</Text>
-                              </Table.Summary.Cell>
-                              <Table.Summary.Cell index={4} align="right">
-                                <Text strong>{formatNumber(totals.accountedDr)}</Text>
-                              </Table.Summary.Cell>
-                              <Table.Summary.Cell index={5} align="right">
-                                <Text strong>{formatNumber(totals.accountedCr)}</Text>
-                              </Table.Summary.Cell>
-                              <Table.Summary.Cell index={6} />
-                            </Table.Summary.Row>
-                          </Table.Summary>
-                        );
-                      }}
-                    />
-                  </Card>
-                </>
-              )}
-            </div>
-          ) : null}
+                        {/* Lines from Fusion */}
+                        <Card
+                          size="small"
+                          title={
+                            <Space>
+                              <span>Journal Lines from Fusion</span>
+                              <Tag color={REDWOOD.info}>{currentFusionHeader.lines?.length || 0} lines</Tag>
+                            </Space>
+                          }
+                          style={{ background: REDWOOD.neutral100 }}
+                        >
+                          <Table
+                            columns={fusionLineColumns}
+                            dataSource={(currentFusionHeader.lines || []).map((line, idx) => ({
+                              ...line,
+                              key: String(idx),
+                            }))}
+                            size="small"
+                            pagination={false}
+                            scroll={{ x: 1000 }}
+                            bordered
+                            summary={(pageData) => {
+                              const totals = pageData.reduce(
+                                (acc, line) => ({
+                                  enteredDr: acc.enteredDr + (line.EnteredDr || 0),
+                                  enteredCr: acc.enteredCr + (line.EnteredCr || 0),
+                                  accountedDr: acc.accountedDr + (line.AccountedDr || 0),
+                                  accountedCr: acc.accountedCr + (line.AccountedCr || 0),
+                                }),
+                                { enteredDr: 0, enteredCr: 0, accountedDr: 0, accountedCr: 0 }
+                              );
+                              return (
+                                <Table.Summary fixed>
+                                  <Table.Summary.Row style={{ background: REDWOOD.neutral200 }}>
+                                    <Table.Summary.Cell index={0}><Text strong>Total</Text></Table.Summary.Cell>
+                                    <Table.Summary.Cell index={1} />
+                                    <Table.Summary.Cell index={2} align="right">
+                                      <Text strong>{formatNumber(totals.enteredDr)}</Text>
+                                    </Table.Summary.Cell>
+                                    <Table.Summary.Cell index={3} align="right">
+                                      <Text strong>{formatNumber(totals.enteredCr)}</Text>
+                                    </Table.Summary.Cell>
+                                    <Table.Summary.Cell index={4} align="right">
+                                      <Text strong>{formatNumber(totals.accountedDr)}</Text>
+                                    </Table.Summary.Cell>
+                                    <Table.Summary.Cell index={5} align="right">
+                                      <Text strong>{formatNumber(totals.accountedCr)}</Text>
+                                    </Table.Summary.Cell>
+                                    <Table.Summary.Cell index={6} />
+                                  </Table.Summary.Row>
+                                </Table.Summary>
+                              );
+                            }}
+                          />
+                        </Card>
+                      </>
+                    )}
+                  </div>
+                ) : null,
+              },
+              {
+                key: 'log',
+                label: `Log (${fusionApiLogs.length})`,
+                children: (
+                  <div style={{ maxHeight: 500, overflow: 'auto' }}>
+                    {fusionApiLogs.length === 0 ? (
+                      <Alert
+                        type="info"
+                        message="No API calls logged yet"
+                        description="Click 'Check in Fusion' to see the API URLs being called"
+                      />
+                    ) : (
+                      fusionApiLogs.map((log, idx) => (
+                        <Card
+                          key={idx}
+                          size="small"
+                          style={{
+                            marginBottom: 12,
+                            background: log.status === 'SUCCESS' ? '#f6ffed' : log.status === 'ERROR' ? '#fff2f0' : REDWOOD.neutral100,
+                            borderColor: log.status === 'SUCCESS' ? REDWOOD.success : log.status === 'ERROR' ? REDWOOD.primary : REDWOOD.neutral200,
+                          }}
+                        >
+                          <Row gutter={[8, 8]}>
+                            <Col span={24}>
+                              <Space>
+                                <Tag color={log.status === 'SUCCESS' ? 'success' : log.status === 'ERROR' ? 'error' : 'warning'}>
+                                  {log.status}
+                                </Tag>
+                                <Text type="secondary">{log.timestamp}</Text>
+                              </Space>
+                            </Col>
+                            <Col span={24}>
+                              <Text strong>Oracle Fusion URL:</Text>
+                              <div style={{
+                                background: '#f5f5f5',
+                                padding: 8,
+                                borderRadius: 4,
+                                marginTop: 4,
+                                wordBreak: 'break-all',
+                                fontFamily: 'monospace',
+                                fontSize: 12,
+                              }}>
+                                {log.url}
+                              </div>
+                            </Col>
+                            <Col span={24}>
+                              <Text strong>Proxy URL:</Text>
+                              <div style={{
+                                background: '#e6f7ff',
+                                padding: 8,
+                                borderRadius: 4,
+                                marginTop: 4,
+                                wordBreak: 'break-all',
+                                fontFamily: 'monospace',
+                                fontSize: 12,
+                              }}>
+                                {log.proxyUrl}
+                              </div>
+                            </Col>
+                            {log.response && (
+                              <Col span={24}>
+                                <Text strong>Response:</Text>
+                                <div style={{
+                                  background: '#fafafa',
+                                  padding: 8,
+                                  borderRadius: 4,
+                                  marginTop: 4,
+                                  fontFamily: 'monospace',
+                                  fontSize: 12,
+                                }}>
+                                  {JSON.stringify(log.response, null, 2)}
+                                </div>
+                              </Col>
+                            )}
+                          </Row>
+                        </Card>
+                      ))
+                    )}
+                  </div>
+                ),
+              },
+            ]}
+          />
         </Modal>
       </Content>
     </Layout>
