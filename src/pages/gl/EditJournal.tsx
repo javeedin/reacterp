@@ -38,14 +38,11 @@ import {
 } from '@ant-design/icons';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
+import { PROXY_CONFIG, ORACLE_FUSION_CONFIG } from '../../config/api.config';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
 const { Option } = Select;
-
-// Oracle Fusion API Configuration
-const FUSION_API_BASE = 'https://iaaobn.fa.ocs.oraclecloud.com:443/fscmRestApi/resources/11.13.18.05';
-const FUSION_AUTH = btoa('aboracle:Mad#ora*1972'); // Basic auth
 
 // Fusion data interfaces
 interface FusionJournalLine {
@@ -302,6 +299,19 @@ const EditJournal: React.FC = () => {
     }
   };
 
+  // Fetch from Oracle via proxy
+  const fetchFromOracleUrl = async (url: string): Promise<any> => {
+    const proxyUrl = `${PROXY_CONFIG.baseUrl}/oracle-url?url=${encodeURIComponent(url)}`;
+    const response = await fetch(proxyUrl);
+    const data = await response.json();
+
+    if (!data.success) {
+      throw new Error(data.error || 'Fetch failed');
+    }
+
+    return data;
+  };
+
   // Check in Fusion handler
   const handleCheckInFusion = async () => {
     if (!currentJournal?.jeBatchId) {
@@ -315,43 +325,21 @@ const EditJournal: React.FC = () => {
     setFusionData(null);
 
     try {
-      // Fetch headers for this batch
-      const headersUrl = `${FUSION_API_BASE}/journalBatches/${currentJournal.jeBatchId}/child/journalHeaders`;
+      // Fetch headers for this batch via proxy
+      const headersUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/journalBatches/${currentJournal.jeBatchId}/child/journalHeaders`;
 
-      const headersResponse = await fetch(headersUrl, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Basic ${FUSION_AUTH}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!headersResponse.ok) {
-        throw new Error(`Failed to fetch from Fusion: ${headersResponse.status} ${headersResponse.statusText}`);
-      }
-
-      const headersData = await headersResponse.json();
-      const headers: FusionJournalHeader[] = headersData.items || [];
+      const headersResult = await fetchFromOracleUrl(headersUrl);
+      const headers: FusionJournalHeader[] = headersResult.items || [];
 
       // Fetch lines for each header
       for (const header of headers) {
         // Find the journalLines link
-        const linesLink = header.links?.find((l: any) => l.name === 'journalLines')?.href;
+        const linesLink = (header as any).links?.find((l: any) => l.name === 'journalLines')?.href;
 
         if (linesLink) {
           try {
-            const linesResponse = await fetch(linesLink, {
-              method: 'GET',
-              headers: {
-                'Authorization': `Basic ${FUSION_AUTH}`,
-                'Content-Type': 'application/json',
-              },
-            });
-
-            if (linesResponse.ok) {
-              const linesData = await linesResponse.json();
-              header.lines = linesData.items || [];
-            }
+            const linesResult = await fetchFromOracleUrl(linesLink);
+            header.lines = linesResult.items || [];
           } catch (lineErr) {
             console.error('Error fetching lines:', lineErr);
             header.lines = [];
@@ -361,8 +349,8 @@ const EditJournal: React.FC = () => {
 
       setFusionData({
         headers,
-        batchName: headersData.Name || currentJournal.batchName,
-        batchStatus: headersData.Status,
+        batchName: headersResult.Name || currentJournal.batchName,
+        batchStatus: headersResult.Status,
       });
 
       if (headers.length === 0) {
@@ -370,7 +358,11 @@ const EditJournal: React.FC = () => {
       }
     } catch (error: any) {
       console.error('Error fetching from Fusion:', error);
-      setFusionError(error.message || 'Failed to connect to Oracle Fusion');
+      if (error.message?.includes('Failed to fetch')) {
+        setFusionError('Proxy server is not running. Start it with: npm run server');
+      } else {
+        setFusionError(error.message || 'Failed to connect to Oracle Fusion');
+      }
     } finally {
       setFusionLoading(false);
     }
