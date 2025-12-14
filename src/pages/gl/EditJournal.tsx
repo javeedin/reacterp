@@ -44,38 +44,31 @@ const { Content } = Layout;
 const { Title, Text } = Typography;
 const { Option } = Select;
 
-// Fusion data interfaces
+// Fusion data interfaces (matching actual Oracle Fusion API response)
 interface FusionJournalLine {
-  JournalLineNumber: number;
-  Segment1?: string;
-  Segment2?: string;
-  Segment3?: string;
-  Segment4?: string;
-  Segment5?: string;
+  JeLineNumber: number;
   AccountCombination?: string;
-  EnteredDebitAmount: number;
-  EnteredCreditAmount: number;
-  AccountedDebitAmount: number;
-  AccountedCreditAmount: number;
-  LineDescription?: string;
+  EnteredDr: number | null;
+  EnteredCr: number | null;
+  AccountedDr: number | null;
+  AccountedCr: number | null;
+  Description?: string;
   CurrencyCode?: string;
 }
 
 interface FusionJournalHeader {
-  JeHeaderId: number;
-  Name: string;
-  Description?: string;
+  JournalName: string;
+  JournalDescription?: string;
   LedgerName?: string;
   PeriodName?: string;
   CurrencyCode?: string;
-  JournalCategoryName?: string;
-  Status?: string;
-  TotalEnteredDebitAmount?: number;
-  TotalEnteredCreditAmount?: number;
-  TotalAccountedDebitAmount?: number;
-  TotalAccountedCreditAmount?: number;
+  UserJeCategoryName?: string;
+  RunningTotalDr?: number;
+  RunningTotalCr?: number;
+  RunningTotalAccountedDr?: number;
+  RunningTotalAccountedCr?: number;
   lines?: FusionJournalLine[];
-  linesLink?: string;
+  links?: any[];
 }
 
 interface FusionData {
@@ -371,58 +364,56 @@ const EditJournal: React.FC = () => {
   // Get current fusion header
   const currentFusionHeader = fusionData?.headers?.[parseInt(activeFusionHeaderKey)] || null;
 
-  // Fusion line columns
+  // Fusion line columns (using actual Oracle Fusion API field names)
   const fusionLineColumns: ColumnsType<FusionJournalLine> = [
     {
       title: 'Line',
-      dataIndex: 'JournalLineNumber',
-      key: 'JournalLineNumber',
+      dataIndex: 'JeLineNumber',
+      key: 'JeLineNumber',
       width: 60,
     },
     {
       title: 'Account',
-      key: 'account',
+      dataIndex: 'AccountCombination',
+      key: 'AccountCombination',
       width: 280,
-      render: (_, record) => record.AccountCombination ||
-        [record.Segment1, record.Segment2, record.Segment3, record.Segment4, record.Segment5]
-          .filter(Boolean).join('-'),
     },
     {
       title: 'Entered Dr',
-      dataIndex: 'EnteredDebitAmount',
-      key: 'EnteredDebitAmount',
+      dataIndex: 'EnteredDr',
+      key: 'EnteredDr',
       width: 120,
       align: 'right',
       render: (val) => val ? formatNumber(val) : '',
     },
     {
       title: 'Entered Cr',
-      dataIndex: 'EnteredCreditAmount',
-      key: 'EnteredCreditAmount',
+      dataIndex: 'EnteredCr',
+      key: 'EnteredCr',
       width: 120,
       align: 'right',
       render: (val) => val ? formatNumber(val) : '',
     },
     {
       title: 'Accounted Dr',
-      dataIndex: 'AccountedDebitAmount',
-      key: 'AccountedDebitAmount',
+      dataIndex: 'AccountedDr',
+      key: 'AccountedDr',
       width: 120,
       align: 'right',
       render: (val) => val ? formatNumber(val) : '',
     },
     {
       title: 'Accounted Cr',
-      dataIndex: 'AccountedCreditAmount',
-      key: 'AccountedCreditAmount',
+      dataIndex: 'AccountedCr',
+      key: 'AccountedCr',
       width: 120,
       align: 'right',
       render: (val) => val ? formatNumber(val) : '',
     },
     {
       title: 'Description',
-      dataIndex: 'LineDescription',
-      key: 'LineDescription',
+      dataIndex: 'Description',
+      key: 'Description',
       width: 200,
       ellipsis: true,
     },
@@ -1199,7 +1190,7 @@ const EditJournal: React.FC = () => {
                   style={{ marginBottom: 16 }}
                   items={fusionData.headers.map((h, i) => ({
                     key: String(i),
-                    label: h.Name || `Header ${i + 1}`,
+                    label: h.JournalName || `Header ${i + 1}`,
                   }))}
                 />
               )}
@@ -1220,16 +1211,16 @@ const EditJournal: React.FC = () => {
                       <Col span={2}><Text strong>Match</Text></Col>
                     </Row>
                     <Divider style={{ margin: '8px 0' }} />
-                    {compareValue(currentJournal?.journalName, currentFusionHeader.Name, 'Journal Name')}
-                    {compareValue(currentJournal?.journalDescription, currentFusionHeader.Description, 'Description')}
+                    {compareValue(currentJournal?.journalName, currentFusionHeader.JournalName, 'Journal Name')}
+                    {compareValue(currentJournal?.journalDescription, currentFusionHeader.JournalDescription, 'Description')}
                     {compareValue(currentJournal?.ledgerName, currentFusionHeader.LedgerName, 'Ledger')}
                     {compareValue(currentJournal?.periodName, currentFusionHeader.PeriodName, 'Period')}
                     {compareValue(currentJournal?.currencyCode, currentFusionHeader.CurrencyCode, 'Currency')}
-                    {compareValue(currentJournal?.category, currentFusionHeader.JournalCategoryName, 'Category')}
-                    {compareValue(currentJournal?.enteredDebit, currentFusionHeader.TotalEnteredDebitAmount, 'Entered Debit')}
-                    {compareValue(currentJournal?.enteredCredit, currentFusionHeader.TotalEnteredCreditAmount, 'Entered Credit')}
-                    {compareValue(currentJournal?.accountedDebit, currentFusionHeader.TotalAccountedDebitAmount, 'Accounted Debit')}
-                    {compareValue(currentJournal?.accountedCredit, currentFusionHeader.TotalAccountedCreditAmount, 'Accounted Credit')}
+                    {compareValue(currentJournal?.category, currentFusionHeader.UserJeCategoryName, 'Category')}
+                    {compareValue(currentJournal?.enteredDebit, currentFusionHeader.RunningTotalDr, 'Entered Debit')}
+                    {compareValue(currentJournal?.enteredCredit, currentFusionHeader.RunningTotalCr, 'Entered Credit')}
+                    {compareValue(currentJournal?.accountedDebit, currentFusionHeader.RunningTotalAccountedDr, 'Accounted Debit')}
+                    {compareValue(currentJournal?.accountedCredit, currentFusionHeader.RunningTotalAccountedCr, 'Accounted Credit')}
                   </Card>
 
                   {/* Lines from Fusion */}
@@ -1256,10 +1247,10 @@ const EditJournal: React.FC = () => {
                       summary={(pageData) => {
                         const totals = pageData.reduce(
                           (acc, line) => ({
-                            enteredDr: acc.enteredDr + (line.EnteredDebitAmount || 0),
-                            enteredCr: acc.enteredCr + (line.EnteredCreditAmount || 0),
-                            accountedDr: acc.accountedDr + (line.AccountedDebitAmount || 0),
-                            accountedCr: acc.accountedCr + (line.AccountedCreditAmount || 0),
+                            enteredDr: acc.enteredDr + (line.EnteredDr || 0),
+                            enteredCr: acc.enteredCr + (line.EnteredCr || 0),
+                            accountedDr: acc.accountedDr + (line.AccountedDr || 0),
+                            accountedCr: acc.accountedCr + (line.AccountedCr || 0),
                           }),
                           { enteredDr: 0, enteredCr: 0, accountedDr: 0, accountedCr: 0 }
                         );
