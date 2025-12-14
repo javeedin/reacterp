@@ -43,17 +43,26 @@ CREATE OR REPLACE PACKAGE BODY RR_MANAGE_JOURNALS_PKG AS
 
     -- Helper function to escape JSON string
     FUNCTION escape_json(p_str IN VARCHAR2) RETURN VARCHAR2 IS
+        v_result VARCHAR2(32767);
     BEGIN
         IF p_str IS NULL THEN
             RETURN '';
         END IF;
-        RETURN REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(p_str,
-            '\', '\\'),
-            '"', '\"'),
-            CHR(10), '\n'),
-            CHR(13), '\r'),
-            CHR(9), '\t');
+        v_result := REPLACE(p_str, '\', '\\');
+        v_result := REPLACE(v_result, '"', '\"');
+        v_result := REPLACE(v_result, CHR(10), '\n');
+        v_result := REPLACE(v_result, CHR(13), '\r');
+        v_result := REPLACE(v_result, CHR(9), '\t');
+        RETURN v_result;
     END escape_json;
+
+    -- Helper procedure to append to CLOB
+    PROCEDURE append_clob(p_clob IN OUT NOCOPY CLOB, p_text IN VARCHAR2) IS
+    BEGIN
+        IF p_text IS NOT NULL AND LENGTH(p_text) > 0 THEN
+            DBMS_LOB.WRITEAPPEND(p_clob, LENGTH(p_text), p_text);
+        END IF;
+    END append_clob;
 
     -- Search journals and return nested JSON
     FUNCTION search_journals_json(
@@ -135,84 +144,173 @@ CREATE OR REPLACE PACKAGE BODY RR_MANAGE_JOURNALS_PKG AS
             p_journal_desc, p_source, p_status_meaning
         );
 
-        -- Initialize JSON
+        -- Initialize JSON CLOB
         DBMS_LOB.CREATETEMPORARY(v_json, TRUE);
-        DBMS_LOB.APPEND(v_json, '{
-  "success": true,
-  "totalCount": ' || v_count || ',
-  "offset": ' || p_offset || ',
-  "limit": ' || p_limit || ',
-  "items": [');
+
+        -- Build JSON header
+        append_clob(v_json, '{"success": true, "totalCount": ');
+        append_clob(v_json, TO_CHAR(v_count));
+        append_clob(v_json, ', "offset": ');
+        append_clob(v_json, TO_CHAR(p_offset));
+        append_clob(v_json, ', "limit": ');
+        append_clob(v_json, TO_CHAR(p_limit));
+        append_clob(v_json, ', "items": [');
 
         -- Loop through headers
         FOR r_header IN c_headers LOOP
             IF NOT v_first_header THEN
-                DBMS_LOB.APPEND(v_json, ',');
+                append_clob(v_json, ',');
             END IF;
             v_first_header := FALSE;
 
-            -- Start header object with batch fields first
-            DBMS_LOB.APPEND(v_json, '
-    {
-      "batchId": ' || NVL(TO_CHAR(r_header.BATCH_ID), 'null') || ',
-      "jeBatchId": ' || NVL(TO_CHAR(r_header.JE_BATCH_ID), 'null') || ',
-      "batchName": "' || escape_json(r_header.BATCH_NAME) || '",
-      "batchDescription": "' || escape_json(r_header.BATCH_DESCRIPTION) || '",
-      "source": "' || escape_json(r_header.SOURCE) || '",
-      "status": "' || escape_json(r_header.STATUS) || '",
-      "statusMeaning": "' || escape_json(r_header.STATUS_MEANING) || '",
-      "approvalStatusMeaning": "' || escape_json(r_header.APPROVAL_STATUS_MEANING) || '",
-      "postedDate": ' || CASE WHEN r_header.POSTED_DATE IS NULL THEN 'null' ELSE '"' || TO_CHAR(r_header.POSTED_DATE, 'YYYY-MM-DD') || '"' END || ',
-      "headerId": ' || r_header.HEADER_ID || ',
-      "jeHeaderId": ' || r_header.JE_HEADER_ID || ',
-      "journalName": "' || escape_json(r_header.JOURNAL_NAME) || '",
-      "journalDescription": "' || escape_json(r_header.JOURNAL_DESCRIPTION) || '",
-      "periodName": "' || escape_json(r_header.PERIOD_NAME) || '",
-      "category": "' || escape_json(r_header.CATEGORY) || '",
-      "ledgerName": "' || escape_json(r_header.LEDGER_NAME) || '",
-      "legalEntityName": "' || escape_json(r_header.LEGAL_ENTITY_NAME) || '",
-      "currencyCode": "' || escape_json(r_header.CURRENCY_CODE) || '",
-      "enteredDebit": ' || NVL(TO_CHAR(r_header.ENTERED_DEBIT), '0') || ',
-      "enteredCredit": ' || NVL(TO_CHAR(r_header.ENTERED_CREDIT), '0') || ',
-      "accountedDebit": ' || NVL(TO_CHAR(r_header.ACCOUNTED_DEBIT), '0') || ',
-      "accountedCredit": ' || NVL(TO_CHAR(r_header.ACCOUNTED_CREDIT), '0') || ',
-      "effectiveDate": ' || CASE WHEN r_header.EFFECTIVE_DATE IS NULL THEN 'null' ELSE '"' || TO_CHAR(r_header.EFFECTIVE_DATE, 'YYYY-MM-DD') || '"' END || ',
-      "externalReference": "' || escape_json(r_header.EXTERNAL_REFERENCE) || '",
-      "creationDate": "' || TO_CHAR(r_header.CREATION_DATE, 'YYYY-MM-DD"T"HH24:MI:SS') || '",
-      "lines": [');
+            -- Start header object - batch fields first
+            append_clob(v_json, '{"batchId": ');
+            append_clob(v_json, NVL(TO_CHAR(r_header.BATCH_ID), 'null'));
+
+            append_clob(v_json, ', "jeBatchId": ');
+            append_clob(v_json, NVL(TO_CHAR(r_header.JE_BATCH_ID), 'null'));
+
+            append_clob(v_json, ', "batchName": "');
+            append_clob(v_json, escape_json(r_header.BATCH_NAME));
+            append_clob(v_json, '"');
+
+            append_clob(v_json, ', "batchDescription": "');
+            append_clob(v_json, escape_json(r_header.BATCH_DESCRIPTION));
+            append_clob(v_json, '"');
+
+            append_clob(v_json, ', "source": "');
+            append_clob(v_json, escape_json(r_header.SOURCE));
+            append_clob(v_json, '"');
+
+            append_clob(v_json, ', "status": "');
+            append_clob(v_json, escape_json(r_header.STATUS));
+            append_clob(v_json, '"');
+
+            append_clob(v_json, ', "statusMeaning": "');
+            append_clob(v_json, escape_json(r_header.STATUS_MEANING));
+            append_clob(v_json, '"');
+
+            append_clob(v_json, ', "approvalStatusMeaning": "');
+            append_clob(v_json, escape_json(r_header.APPROVAL_STATUS_MEANING));
+            append_clob(v_json, '"');
+
+            append_clob(v_json, ', "postedDate": ');
+            IF r_header.POSTED_DATE IS NULL THEN
+                append_clob(v_json, 'null');
+            ELSE
+                append_clob(v_json, '"' || TO_CHAR(r_header.POSTED_DATE, 'YYYY-MM-DD') || '"');
+            END IF;
+
+            -- Header fields
+            append_clob(v_json, ', "headerId": ');
+            append_clob(v_json, TO_CHAR(r_header.HEADER_ID));
+
+            append_clob(v_json, ', "jeHeaderId": ');
+            append_clob(v_json, TO_CHAR(r_header.JE_HEADER_ID));
+
+            append_clob(v_json, ', "journalName": "');
+            append_clob(v_json, escape_json(r_header.JOURNAL_NAME));
+            append_clob(v_json, '"');
+
+            append_clob(v_json, ', "journalDescription": "');
+            append_clob(v_json, escape_json(r_header.JOURNAL_DESCRIPTION));
+            append_clob(v_json, '"');
+
+            append_clob(v_json, ', "periodName": "');
+            append_clob(v_json, escape_json(r_header.PERIOD_NAME));
+            append_clob(v_json, '"');
+
+            append_clob(v_json, ', "category": "');
+            append_clob(v_json, escape_json(r_header.CATEGORY));
+            append_clob(v_json, '"');
+
+            append_clob(v_json, ', "ledgerName": "');
+            append_clob(v_json, escape_json(r_header.LEDGER_NAME));
+            append_clob(v_json, '"');
+
+            append_clob(v_json, ', "legalEntityName": "');
+            append_clob(v_json, escape_json(r_header.LEGAL_ENTITY_NAME));
+            append_clob(v_json, '"');
+
+            append_clob(v_json, ', "currencyCode": "');
+            append_clob(v_json, escape_json(r_header.CURRENCY_CODE));
+            append_clob(v_json, '"');
+
+            append_clob(v_json, ', "enteredDebit": ');
+            append_clob(v_json, NVL(TO_CHAR(r_header.ENTERED_DEBIT), '0'));
+
+            append_clob(v_json, ', "enteredCredit": ');
+            append_clob(v_json, NVL(TO_CHAR(r_header.ENTERED_CREDIT), '0'));
+
+            append_clob(v_json, ', "accountedDebit": ');
+            append_clob(v_json, NVL(TO_CHAR(r_header.ACCOUNTED_DEBIT), '0'));
+
+            append_clob(v_json, ', "accountedCredit": ');
+            append_clob(v_json, NVL(TO_CHAR(r_header.ACCOUNTED_CREDIT), '0'));
+
+            append_clob(v_json, ', "effectiveDate": ');
+            IF r_header.EFFECTIVE_DATE IS NULL THEN
+                append_clob(v_json, 'null');
+            ELSE
+                append_clob(v_json, '"' || TO_CHAR(r_header.EFFECTIVE_DATE, 'YYYY-MM-DD') || '"');
+            END IF;
+
+            append_clob(v_json, ', "externalReference": "');
+            append_clob(v_json, escape_json(r_header.EXTERNAL_REFERENCE));
+            append_clob(v_json, '"');
+
+            append_clob(v_json, ', "creationDate": "');
+            append_clob(v_json, TO_CHAR(r_header.CREATION_DATE, 'YYYY-MM-DD"T"HH24:MI:SS'));
+            append_clob(v_json, '"');
+
+            -- Start lines array
+            append_clob(v_json, ', "lines": [');
 
             -- Loop through lines for this header
             v_first_line := TRUE;
             FOR r_line IN c_lines(r_header.JE_HEADER_ID) LOOP
                 IF NOT v_first_line THEN
-                    DBMS_LOB.APPEND(v_json, ',');
+                    append_clob(v_json, ',');
                 END IF;
                 v_first_line := FALSE;
 
-                DBMS_LOB.APPEND(v_json, '
-        {
-          "lineId": ' || r_line.LINE_ID || ',
-          "lineNum": ' || r_line.LINE_NUM || ',
-          "account": "' || escape_json(r_line.ACCOUNT) || '",
-          "description": "' || escape_json(r_line.DESCRIPTION) || '",
-          "enteredDr": ' || NVL(TO_CHAR(r_line.ENTERED_DR), '0') || ',
-          "enteredCr": ' || NVL(TO_CHAR(r_line.ENTERED_CR), '0') || ',
-          "accountedDr": ' || NVL(TO_CHAR(r_line.ACCOUNTED_DR), '0') || ',
-          "accountedCr": ' || NVL(TO_CHAR(r_line.ACCOUNTED_CR), '0') || ',
-          "currency": "' || escape_json(r_line.CURRENCY) || '"
-        }');
+                append_clob(v_json, '{"lineId": ');
+                append_clob(v_json, TO_CHAR(r_line.LINE_ID));
+
+                append_clob(v_json, ', "lineNum": ');
+                append_clob(v_json, TO_CHAR(r_line.LINE_NUM));
+
+                append_clob(v_json, ', "account": "');
+                append_clob(v_json, escape_json(r_line.ACCOUNT));
+                append_clob(v_json, '"');
+
+                append_clob(v_json, ', "description": "');
+                append_clob(v_json, escape_json(r_line.DESCRIPTION));
+                append_clob(v_json, '"');
+
+                append_clob(v_json, ', "enteredDr": ');
+                append_clob(v_json, NVL(TO_CHAR(r_line.ENTERED_DR), '0'));
+
+                append_clob(v_json, ', "enteredCr": ');
+                append_clob(v_json, NVL(TO_CHAR(r_line.ENTERED_CR), '0'));
+
+                append_clob(v_json, ', "accountedDr": ');
+                append_clob(v_json, NVL(TO_CHAR(r_line.ACCOUNTED_DR), '0'));
+
+                append_clob(v_json, ', "accountedCr": ');
+                append_clob(v_json, NVL(TO_CHAR(r_line.ACCOUNTED_CR), '0'));
+
+                append_clob(v_json, ', "currency": "');
+                append_clob(v_json, escape_json(r_line.CURRENCY));
+                append_clob(v_json, '"}');
             END LOOP;
 
             -- Close lines array and header object
-            DBMS_LOB.APPEND(v_json, '
-      ]
-    }');
+            append_clob(v_json, ']}');
         END LOOP;
 
         -- Close items array and root object
-        DBMS_LOB.APPEND(v_json, '
-  ]
-}');
+        append_clob(v_json, ']}');
 
         RETURN v_json;
     END search_journals_json;
