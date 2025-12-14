@@ -35,10 +35,13 @@ import {
   CloudSyncOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
+  PrinterOutlined,
 } from '@ant-design/icons';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 import { PROXY_CONFIG, ORACLE_FUSION_CONFIG } from '../../config/api.config';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -497,6 +500,246 @@ const EditJournal: React.FC = () => {
     return value.toLocaleString('en-US', { minimumFractionDigits: 2 });
   };
 
+  // Print Journal - Generate PDF
+  const handlePrintJournal = () => {
+    if (!currentJournal) {
+      message.error('No journal data to print');
+      return;
+    }
+
+    const doc = new jsPDF('landscape', 'mm', 'a4');
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+
+    // Colors
+    const primaryColor: [number, number, number] = [199, 70, 52]; // #C74634
+    const headerBg: [number, number, number] = [245, 245, 245];
+    const textColor: [number, number, number] = [26, 26, 26];
+
+    let yPos = 15;
+
+    // Header Banner
+    doc.setFillColor(...primaryColor);
+    doc.rect(0, 0, pageWidth, 25, 'F');
+
+    // Company Name
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(18);
+    doc.setFont('helvetica', 'bold');
+    doc.text('ReactERP', 14, 12);
+
+    // Report Title
+    doc.setFontSize(14);
+    doc.text('Journal Report', 14, 20);
+
+    // Print Date
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Printed: ${new Date().toLocaleString()}`, pageWidth - 60, 12);
+
+    yPos = 35;
+
+    // Batch Information Section
+    doc.setTextColor(...textColor);
+    doc.setFillColor(...primaryColor);
+    doc.rect(14, yPos, pageWidth - 28, 7, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Journal Batch Information', 17, yPos + 5);
+
+    yPos += 10;
+    doc.setTextColor(...textColor);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+
+    // Batch details in two columns
+    const batchDetails = [
+      ['Batch Name:', currentJournal.batchName],
+      ['Description:', currentJournal.batchDescription || '-'],
+      ['Accounting Period:', currentJournal.periodName],
+      ['Source:', currentJournal.source],
+      ['Status:', currentJournal.statusMeaning],
+      ['Approval Status:', currentJournal.approvalStatusMeaning],
+    ];
+
+    const colWidth = (pageWidth - 28) / 2;
+    batchDetails.forEach((item, idx) => {
+      const col = idx % 2;
+      const row = Math.floor(idx / 2);
+      const x = 14 + (col * colWidth);
+      const y = yPos + (row * 6);
+
+      doc.setFont('helvetica', 'bold');
+      doc.text(item[0], x + 3, y + 4);
+      doc.setFont('helvetica', 'normal');
+      doc.text(item[1], x + 40, y + 4);
+    });
+
+    yPos += 22;
+
+    // Journal Header Section
+    doc.setFillColor(...primaryColor);
+    doc.rect(14, yPos, pageWidth - 28, 7, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Journal Header', 17, yPos + 5);
+
+    yPos += 10;
+    doc.setTextColor(...textColor);
+    doc.setFontSize(9);
+
+    const journalDetails = [
+      ['Journal Name:', currentJournal.journalName],
+      ['Description:', currentJournal.journalDescription || '-'],
+      ['Ledger:', currentJournal.ledgerName],
+      ['Legal Entity:', currentJournal.legalEntityName || '-'],
+      ['Accounting Date:', currentJournal.accountingDate],
+      ['Category:', currentJournal.category],
+      ['Currency:', `${currentJournal.currencyCode} - ${getCurrencyName(currentJournal.currencyCode)}`],
+      ['Conversion Rate:', String(currentJournal.conversionRate)],
+    ];
+
+    journalDetails.forEach((item, idx) => {
+      const col = idx % 2;
+      const row = Math.floor(idx / 2);
+      const x = 14 + (col * colWidth);
+      const y = yPos + (row * 6);
+
+      doc.setFont('helvetica', 'bold');
+      doc.text(item[0], x + 3, y + 4);
+      doc.setFont('helvetica', 'normal');
+      doc.text(item[1], x + 40, y + 4);
+    });
+
+    yPos += 28;
+
+    // Journal Lines Section
+    doc.setFillColor(...primaryColor);
+    doc.rect(14, yPos, pageWidth - 28, 7, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Journal Lines (${currentJournal.lines.length} lines)`, 17, yPos + 5);
+
+    yPos += 10;
+
+    // Lines Table
+    const tableData = currentJournal.lines.map(line => [
+      String(line.lineNum),
+      line.account,
+      line.enteredDr > 0 ? formatNumber(line.enteredDr) : '',
+      line.enteredCr > 0 ? formatNumber(line.enteredCr) : '',
+      line.accountedDr > 0 ? formatNumber(line.accountedDr) : '',
+      line.accountedCr > 0 ? formatNumber(line.accountedCr) : '',
+      line.description || '',
+    ]);
+
+    // Calculate totals
+    const totals = currentJournal.lines.reduce(
+      (acc, line) => ({
+        enteredDr: acc.enteredDr + (line.enteredDr || 0),
+        enteredCr: acc.enteredCr + (line.enteredCr || 0),
+        accountedDr: acc.accountedDr + (line.accountedDr || 0),
+        accountedCr: acc.accountedCr + (line.accountedCr || 0),
+      }),
+      { enteredDr: 0, enteredCr: 0, accountedDr: 0, accountedCr: 0 }
+    );
+
+    // Add totals row
+    tableData.push([
+      '',
+      'TOTAL',
+      formatNumber(totals.enteredDr),
+      formatNumber(totals.enteredCr),
+      formatNumber(totals.accountedDr),
+      formatNumber(totals.accountedCr),
+      '',
+    ]);
+
+    autoTable(doc, {
+      startY: yPos,
+      head: [[
+        'Line',
+        'Account',
+        `Entered Dr (${currentJournal.currencyCode})`,
+        `Entered Cr (${currentJournal.currencyCode})`,
+        'Accounted Dr',
+        'Accounted Cr',
+        'Description',
+      ]],
+      body: tableData,
+      theme: 'grid',
+      headStyles: {
+        fillColor: primaryColor,
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 8,
+        halign: 'center',
+      },
+      bodyStyles: {
+        fontSize: 8,
+        textColor: textColor,
+      },
+      columnStyles: {
+        0: { halign: 'center', cellWidth: 15 },
+        1: { cellWidth: 70 },
+        2: { halign: 'right', cellWidth: 35 },
+        3: { halign: 'right', cellWidth: 35 },
+        4: { halign: 'right', cellWidth: 35 },
+        5: { halign: 'right', cellWidth: 35 },
+        6: { cellWidth: 50 },
+      },
+      alternateRowStyles: {
+        fillColor: [250, 250, 250],
+      },
+      // Style the totals row
+      didParseCell: (data) => {
+        if (data.row.index === tableData.length - 1) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [230, 230, 230];
+        }
+      },
+      margin: { left: 14, right: 14 },
+    });
+
+    // Footer
+    const finalY = (doc as any).lastAutoTable.finalY + 10;
+
+    // Balance check
+    const isBalanced = Math.abs(totals.enteredDr - totals.enteredCr) < 0.01;
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...(isBalanced ? [29, 123, 77] : primaryColor)); // Green if balanced, Red if not
+    doc.text(
+      isBalanced ? '✓ Journal is Balanced' : '✗ Journal is NOT Balanced',
+      14,
+      finalY
+    );
+
+    // Page numbers
+    const pageCount = doc.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setTextColor(100, 100, 100);
+      doc.text(
+        `Page ${i} of ${pageCount}`,
+        pageWidth / 2,
+        pageHeight - 10,
+        { align: 'center' }
+      );
+    }
+
+    // Open PDF in new window
+    const pdfBlob = doc.output('blob');
+    const pdfUrl = URL.createObjectURL(pdfBlob);
+    window.open(pdfUrl, '_blank');
+
+    message.success('PDF generated successfully');
+  };
+
   // Line columns
   const lineColumns: ColumnsType<JournalLine> = [
     {
@@ -896,6 +1139,12 @@ const EditJournal: React.FC = () => {
             >
               Post
             </Dropdown.Button>
+            <Button
+              icon={<PrinterOutlined />}
+              onClick={handlePrintJournal}
+            >
+              Print Journal
+            </Button>
             <Button
               danger
               icon={<CloseOutlined />}
