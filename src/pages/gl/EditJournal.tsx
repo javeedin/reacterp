@@ -1255,10 +1255,10 @@ const EditJournal: React.FC = () => {
                           {compareValue(currentJournal?.periodName, currentFusionHeader.PeriodName, 'Period')}
                           {compareValue(currentJournal?.currencyCode, currentFusionHeader.CurrencyCode, 'Currency')}
                           {compareValue(currentJournal?.category, currentFusionHeader.UserJeCategoryName, 'Category')}
-                          {compareValue(currentJournal?.enteredDebit, currentFusionHeader.RunningTotalDr, 'Entered Debit')}
-                          {compareValue(currentJournal?.enteredCredit, currentFusionHeader.RunningTotalCr, 'Entered Credit')}
-                          {compareValue(currentJournal?.accountedDebit, currentFusionHeader.RunningTotalAccountedDr, 'Accounted Debit')}
-                          {compareValue(currentJournal?.accountedCredit, currentFusionHeader.RunningTotalAccountedCr, 'Accounted Credit')}
+                          {compareValue(lineTotals.enteredDr, currentFusionHeader.RunningTotalDr, 'Entered Debit')}
+                          {compareValue(lineTotals.enteredCr, currentFusionHeader.RunningTotalCr, 'Entered Credit')}
+                          {compareValue(lineTotals.accountedDr, currentFusionHeader.RunningTotalAccountedDr, 'Accounted Debit')}
+                          {compareValue(lineTotals.accountedCr, currentFusionHeader.RunningTotalAccountedCr, 'Accounted Credit')}
                         </Card>
 
                         {/* Lines from Fusion */}
