@@ -15,8 +15,11 @@ import {
   Tooltip,
   Dropdown,
   Tabs,
+  Modal,
   message,
   Spin,
+  Alert,
+  Divider,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -29,6 +32,9 @@ import {
   PaperClipOutlined,
   LeftOutlined,
   RightOutlined,
+  CloudSyncOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
 } from '@ant-design/icons';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -36,6 +42,50 @@ import type { ColumnsType } from 'antd/es/table';
 const { Content } = Layout;
 const { Title, Text } = Typography;
 const { Option } = Select;
+
+// Oracle Fusion API Configuration
+const FUSION_API_BASE = 'https://iaaobn.fa.ocs.oraclecloud.com:443/fscmRestApi/resources/11.13.18.05';
+const FUSION_AUTH = btoa('aboracle:Mad#ora*1972'); // Basic auth
+
+// Fusion data interfaces
+interface FusionJournalLine {
+  JournalLineNumber: number;
+  Segment1?: string;
+  Segment2?: string;
+  Segment3?: string;
+  Segment4?: string;
+  Segment5?: string;
+  AccountCombination?: string;
+  EnteredDebitAmount: number;
+  EnteredCreditAmount: number;
+  AccountedDebitAmount: number;
+  AccountedCreditAmount: number;
+  LineDescription?: string;
+  CurrencyCode?: string;
+}
+
+interface FusionJournalHeader {
+  JeHeaderId: number;
+  Name: string;
+  Description?: string;
+  LedgerName?: string;
+  PeriodName?: string;
+  CurrencyCode?: string;
+  JournalCategoryName?: string;
+  Status?: string;
+  TotalEnteredDebitAmount?: number;
+  TotalEnteredCreditAmount?: number;
+  TotalAccountedDebitAmount?: number;
+  TotalAccountedCreditAmount?: number;
+  lines?: FusionJournalLine[];
+  linesLink?: string;
+}
+
+interface FusionData {
+  headers: FusionJournalHeader[];
+  batchName?: string;
+  batchStatus?: string;
+}
 
 // Oracle Redwood Color Palette
 const REDWOOD = {
@@ -215,6 +265,13 @@ const EditJournal: React.FC = () => {
   // Active detail tab (Journal, Control Total, Sequencing, Reversal)
   const [activeDetailTab, setActiveDetailTab] = useState('journal');
 
+  // Fusion comparison modal state
+  const [fusionModalVisible, setFusionModalVisible] = useState(false);
+  const [fusionLoading, setFusionLoading] = useState(false);
+  const [fusionData, setFusionData] = useState<FusionData | null>(null);
+  const [fusionError, setFusionError] = useState<string | null>(null);
+  const [activeFusionHeaderKey, setActiveFusionHeaderKey] = useState<string>('0');
+
   // Load journal data
   useEffect(() => {
     loadJournalData();
@@ -243,6 +300,163 @@ const EditJournal: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Check in Fusion handler
+  const handleCheckInFusion = async () => {
+    if (!currentJournal?.jeBatchId) {
+      message.error('No batch ID available to check in Fusion');
+      return;
+    }
+
+    setFusionModalVisible(true);
+    setFusionLoading(true);
+    setFusionError(null);
+    setFusionData(null);
+
+    try {
+      // Fetch headers for this batch
+      const headersUrl = `${FUSION_API_BASE}/journalBatches/${currentJournal.jeBatchId}/child/journalHeaders`;
+
+      const headersResponse = await fetch(headersUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Basic ${FUSION_AUTH}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!headersResponse.ok) {
+        throw new Error(`Failed to fetch from Fusion: ${headersResponse.status} ${headersResponse.statusText}`);
+      }
+
+      const headersData = await headersResponse.json();
+      const headers: FusionJournalHeader[] = headersData.items || [];
+
+      // Fetch lines for each header
+      for (const header of headers) {
+        // Find the journalLines link
+        const linesLink = header.links?.find((l: any) => l.name === 'journalLines')?.href;
+
+        if (linesLink) {
+          try {
+            const linesResponse = await fetch(linesLink, {
+              method: 'GET',
+              headers: {
+                'Authorization': `Basic ${FUSION_AUTH}`,
+                'Content-Type': 'application/json',
+              },
+            });
+
+            if (linesResponse.ok) {
+              const linesData = await linesResponse.json();
+              header.lines = linesData.items || [];
+            }
+          } catch (lineErr) {
+            console.error('Error fetching lines:', lineErr);
+            header.lines = [];
+          }
+        }
+      }
+
+      setFusionData({
+        headers,
+        batchName: headersData.Name || currentJournal.batchName,
+        batchStatus: headersData.Status,
+      });
+
+      if (headers.length === 0) {
+        setFusionError('No journal headers found in Fusion for this batch');
+      }
+    } catch (error: any) {
+      console.error('Error fetching from Fusion:', error);
+      setFusionError(error.message || 'Failed to connect to Oracle Fusion');
+    } finally {
+      setFusionLoading(false);
+    }
+  };
+
+  // Get current fusion header
+  const currentFusionHeader = fusionData?.headers?.[parseInt(activeFusionHeaderKey)] || null;
+
+  // Fusion line columns
+  const fusionLineColumns: ColumnsType<FusionJournalLine> = [
+    {
+      title: 'Line',
+      dataIndex: 'JournalLineNumber',
+      key: 'JournalLineNumber',
+      width: 60,
+    },
+    {
+      title: 'Account',
+      key: 'account',
+      width: 280,
+      render: (_, record) => record.AccountCombination ||
+        [record.Segment1, record.Segment2, record.Segment3, record.Segment4, record.Segment5]
+          .filter(Boolean).join('-'),
+    },
+    {
+      title: 'Entered Dr',
+      dataIndex: 'EnteredDebitAmount',
+      key: 'EnteredDebitAmount',
+      width: 120,
+      align: 'right',
+      render: (val) => val ? formatNumber(val) : '',
+    },
+    {
+      title: 'Entered Cr',
+      dataIndex: 'EnteredCreditAmount',
+      key: 'EnteredCreditAmount',
+      width: 120,
+      align: 'right',
+      render: (val) => val ? formatNumber(val) : '',
+    },
+    {
+      title: 'Accounted Dr',
+      dataIndex: 'AccountedDebitAmount',
+      key: 'AccountedDebitAmount',
+      width: 120,
+      align: 'right',
+      render: (val) => val ? formatNumber(val) : '',
+    },
+    {
+      title: 'Accounted Cr',
+      dataIndex: 'AccountedCreditAmount',
+      key: 'AccountedCreditAmount',
+      width: 120,
+      align: 'right',
+      render: (val) => val ? formatNumber(val) : '',
+    },
+    {
+      title: 'Description',
+      dataIndex: 'LineDescription',
+      key: 'LineDescription',
+      width: 200,
+      ellipsis: true,
+    },
+  ];
+
+  // Compare values helper
+  const compareValue = (local: any, fusion: any, label: string) => {
+    const localVal = local ?? '-';
+    const fusionVal = fusion ?? '-';
+    const match = String(localVal) === String(fusionVal) ||
+                  (typeof localVal === 'number' && typeof fusionVal === 'number' &&
+                   Math.abs(localVal - fusionVal) < 0.01);
+
+    return (
+      <Row gutter={8} style={{ marginBottom: 8 }}>
+        <Col span={8}><Text type="secondary">{label}</Text></Col>
+        <Col span={7}><Text>{typeof localVal === 'number' ? formatNumber(localVal) : localVal}</Text></Col>
+        <Col span={7}><Text>{typeof fusionVal === 'number' ? formatNumber(fusionVal) : fusionVal}</Text></Col>
+        <Col span={2}>
+          {match ?
+            <CheckCircleOutlined style={{ color: REDWOOD.success }} /> :
+            <CloseCircleOutlined style={{ color: REDWOOD.primary }} />
+          }
+        </Col>
+      </Row>
+    );
   };
 
   // Save handler
@@ -888,6 +1102,16 @@ const EditJournal: React.FC = () => {
                 <Dropdown menu={{ items: [{ key: 'wrap', label: 'Wrap' }] }}>
                   <Button size="small">Format <DownOutlined /></Button>
                 </Dropdown>
+                <Tooltip title="Check in Fusion">
+                  <Button
+                    size="small"
+                    icon={<CloudSyncOutlined />}
+                    onClick={handleCheckInFusion}
+                    style={{ color: REDWOOD.info }}
+                  >
+                    Check in Fusion
+                  </Button>
+                </Tooltip>
                 <Tooltip title="Add Row">
                   <Button size="small" icon={<PlusOutlined />} />
                 </Tooltip>
@@ -939,6 +1163,143 @@ const EditJournal: React.FC = () => {
             />
           </Card>
         </div>
+
+        {/* Fusion Comparison Modal */}
+        <Modal
+          title={
+            <Space>
+              <CloudSyncOutlined style={{ color: REDWOOD.info }} />
+              <span>Check in Oracle Fusion</span>
+              <Tag color={REDWOOD.info}>Batch ID: {currentJournal?.jeBatchId}</Tag>
+            </Space>
+          }
+          open={fusionModalVisible}
+          onCancel={() => setFusionModalVisible(false)}
+          width={1200}
+          footer={[
+            <Button key="close" onClick={() => setFusionModalVisible(false)}>
+              Close
+            </Button>
+          ]}
+        >
+          {fusionLoading ? (
+            <div style={{ textAlign: 'center', padding: 48 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}>
+                <Text type="secondary">Fetching data from Oracle Fusion...</Text>
+              </div>
+            </div>
+          ) : fusionError ? (
+            <Alert
+              type="error"
+              message="Error Connecting to Fusion"
+              description={fusionError}
+              showIcon
+            />
+          ) : fusionData ? (
+            <div>
+              {/* Header tabs if multiple */}
+              {fusionData.headers.length > 1 && (
+                <Tabs
+                  activeKey={activeFusionHeaderKey}
+                  onChange={setActiveFusionHeaderKey}
+                  type="card"
+                  style={{ marginBottom: 16 }}
+                  items={fusionData.headers.map((h, i) => ({
+                    key: String(i),
+                    label: h.Name || `Header ${i + 1}`,
+                  }))}
+                />
+              )}
+
+              {/* Comparison View */}
+              {currentFusionHeader && (
+                <>
+                  {/* Header Comparison */}
+                  <Card
+                    size="small"
+                    title="Header Comparison"
+                    style={{ marginBottom: 16, background: REDWOOD.neutral100 }}
+                  >
+                    <Row gutter={8} style={{ marginBottom: 8, fontWeight: 'bold' }}>
+                      <Col span={8}><Text strong>Field</Text></Col>
+                      <Col span={7}><Text strong>Local (Synced)</Text></Col>
+                      <Col span={7}><Text strong>Fusion (Source)</Text></Col>
+                      <Col span={2}><Text strong>Match</Text></Col>
+                    </Row>
+                    <Divider style={{ margin: '8px 0' }} />
+                    {compareValue(currentJournal?.journalName, currentFusionHeader.Name, 'Journal Name')}
+                    {compareValue(currentJournal?.journalDescription, currentFusionHeader.Description, 'Description')}
+                    {compareValue(currentJournal?.ledgerName, currentFusionHeader.LedgerName, 'Ledger')}
+                    {compareValue(currentJournal?.periodName, currentFusionHeader.PeriodName, 'Period')}
+                    {compareValue(currentJournal?.currencyCode, currentFusionHeader.CurrencyCode, 'Currency')}
+                    {compareValue(currentJournal?.category, currentFusionHeader.JournalCategoryName, 'Category')}
+                    {compareValue(currentJournal?.enteredDebit, currentFusionHeader.TotalEnteredDebitAmount, 'Entered Debit')}
+                    {compareValue(currentJournal?.enteredCredit, currentFusionHeader.TotalEnteredCreditAmount, 'Entered Credit')}
+                    {compareValue(currentJournal?.accountedDebit, currentFusionHeader.TotalAccountedDebitAmount, 'Accounted Debit')}
+                    {compareValue(currentJournal?.accountedCredit, currentFusionHeader.TotalAccountedCreditAmount, 'Accounted Credit')}
+                  </Card>
+
+                  {/* Lines from Fusion */}
+                  <Card
+                    size="small"
+                    title={
+                      <Space>
+                        <span>Journal Lines from Fusion</span>
+                        <Tag color={REDWOOD.info}>{currentFusionHeader.lines?.length || 0} lines</Tag>
+                      </Space>
+                    }
+                    style={{ background: REDWOOD.neutral100 }}
+                  >
+                    <Table
+                      columns={fusionLineColumns}
+                      dataSource={(currentFusionHeader.lines || []).map((line, idx) => ({
+                        ...line,
+                        key: String(idx),
+                      }))}
+                      size="small"
+                      pagination={false}
+                      scroll={{ x: 1000 }}
+                      bordered
+                      summary={(pageData) => {
+                        const totals = pageData.reduce(
+                          (acc, line) => ({
+                            enteredDr: acc.enteredDr + (line.EnteredDebitAmount || 0),
+                            enteredCr: acc.enteredCr + (line.EnteredCreditAmount || 0),
+                            accountedDr: acc.accountedDr + (line.AccountedDebitAmount || 0),
+                            accountedCr: acc.accountedCr + (line.AccountedCreditAmount || 0),
+                          }),
+                          { enteredDr: 0, enteredCr: 0, accountedDr: 0, accountedCr: 0 }
+                        );
+                        return (
+                          <Table.Summary fixed>
+                            <Table.Summary.Row style={{ background: REDWOOD.neutral200 }}>
+                              <Table.Summary.Cell index={0}><Text strong>Total</Text></Table.Summary.Cell>
+                              <Table.Summary.Cell index={1} />
+                              <Table.Summary.Cell index={2} align="right">
+                                <Text strong>{formatNumber(totals.enteredDr)}</Text>
+                              </Table.Summary.Cell>
+                              <Table.Summary.Cell index={3} align="right">
+                                <Text strong>{formatNumber(totals.enteredCr)}</Text>
+                              </Table.Summary.Cell>
+                              <Table.Summary.Cell index={4} align="right">
+                                <Text strong>{formatNumber(totals.accountedDr)}</Text>
+                              </Table.Summary.Cell>
+                              <Table.Summary.Cell index={5} align="right">
+                                <Text strong>{formatNumber(totals.accountedCr)}</Text>
+                              </Table.Summary.Cell>
+                              <Table.Summary.Cell index={6} />
+                            </Table.Summary.Row>
+                          </Table.Summary>
+                        );
+                      }}
+                    />
+                  </Card>
+                </>
+              )}
+            </div>
+          ) : null}
+        </Modal>
       </Content>
     </Layout>
   );
