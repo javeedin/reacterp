@@ -20,8 +20,6 @@ import {
   Spin,
   Alert,
   Divider,
-  Badge,
-  Avatar,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -37,13 +35,6 @@ import {
   CloudSyncOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
-  HomeOutlined,
-  StarOutlined,
-  HistoryOutlined,
-  BellOutlined,
-  UserOutlined,
-  FlagOutlined,
-  EyeOutlined,
 } from '@ant-design/icons';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -877,62 +868,6 @@ const EditJournal: React.FC = () => {
   return (
     <Layout style={{ minHeight: '100vh', background: REDWOOD.neutral100 }}>
       <Content>
-        {/* Global Toolbar - Oracle Fusion Style */}
-        <div style={{
-          padding: '8px 24px',
-          background: '#3A3631',
-          display: 'flex',
-          justifyContent: 'flex-end',
-          alignItems: 'center',
-          gap: 8,
-        }}>
-          <Tooltip title="Home">
-            <Button
-              type="text"
-              icon={<HomeOutlined style={{ fontSize: 18, color: '#fff' }} />}
-              style={{ color: '#fff' }}
-              onClick={() => navigate('/')}
-            />
-          </Tooltip>
-          <Tooltip title="Favorites">
-            <Button
-              type="text"
-              icon={<StarOutlined style={{ fontSize: 18, color: '#fff' }} />}
-              style={{ color: '#fff' }}
-            />
-          </Tooltip>
-          <Tooltip title="Recent Items">
-            <Button
-              type="text"
-              icon={<FlagOutlined style={{ fontSize: 18, color: '#fff' }} />}
-              style={{ color: '#fff' }}
-            />
-          </Tooltip>
-          <Tooltip title="Watchlist">
-            <Button
-              type="text"
-              icon={<EyeOutlined style={{ fontSize: 18, color: '#fff' }} />}
-              style={{ color: '#fff' }}
-            />
-          </Tooltip>
-          <Tooltip title="Notifications">
-            <Badge count={295} size="small" offset={[-5, 5]}>
-              <Button
-                type="text"
-                icon={<BellOutlined style={{ fontSize: 18, color: '#fff' }} />}
-                style={{ color: '#fff' }}
-              />
-            </Badge>
-          </Tooltip>
-          <Tooltip title="User Profile">
-            <Avatar
-              size={32}
-              icon={<UserOutlined />}
-              style={{ backgroundColor: '#87d068', cursor: 'pointer', marginLeft: 8 }}
-            />
-          </Tooltip>
-        </div>
-
         {/* Action Header */}
         <div style={{
           padding: '12px 24px',
