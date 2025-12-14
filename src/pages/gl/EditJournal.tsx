@@ -267,6 +267,10 @@ const EditJournal: React.FC = () => {
   const [activeFusionTab, setActiveFusionTab] = useState<string>('comparison');
   const [fusionApiLogs, setFusionApiLogs] = useState<Array<{ url: string; proxyUrl: string; status: string; timestamp: string; response?: any }>>([]);
 
+  // PDF Preview Modal state
+  const [pdfModalVisible, setPdfModalVisible] = useState(false);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+
   // Load journal data
   useEffect(() => {
     loadJournalData();
@@ -732,12 +736,20 @@ const EditJournal: React.FC = () => {
       );
     }
 
-    // Open PDF in new window
+    // Show PDF in modal dialog
     const pdfBlob = doc.output('blob');
-    const pdfUrl = URL.createObjectURL(pdfBlob);
-    window.open(pdfUrl, '_blank');
+    const url = URL.createObjectURL(pdfBlob);
+    setPdfUrl(url);
+    setPdfModalVisible(true);
+  };
 
-    message.success('PDF generated successfully');
+  // Close PDF modal and cleanup
+  const handleClosePdfModal = () => {
+    setPdfModalVisible(false);
+    if (pdfUrl) {
+      URL.revokeObjectURL(pdfUrl);
+      setPdfUrl(null);
+    }
   };
 
   // Line columns
@@ -1654,6 +1666,68 @@ const EditJournal: React.FC = () => {
               },
             ]}
           />
+        </Modal>
+
+        {/* PDF Preview Modal */}
+        <Modal
+          title={
+            <Space>
+              <PrinterOutlined />
+              <span>Print Journal - {currentJournal?.journalName}</span>
+            </Space>
+          }
+          open={pdfModalVisible}
+          onCancel={handleClosePdfModal}
+          width="90%"
+          style={{ top: 20 }}
+          footer={[
+            <Button key="close" onClick={handleClosePdfModal}>
+              Close
+            </Button>,
+            <Button
+              key="download"
+              type="primary"
+              style={{ background: REDWOOD.primary }}
+              onClick={() => {
+                if (pdfUrl) {
+                  const link = document.createElement('a');
+                  link.href = pdfUrl;
+                  link.download = `Journal_${currentJournal?.journalName || 'Report'}.pdf`;
+                  link.click();
+                }
+              }}
+            >
+              Download PDF
+            </Button>,
+            <Button
+              key="print"
+              onClick={() => {
+                if (pdfUrl) {
+                  const printWindow = window.open(pdfUrl, '_blank');
+                  if (printWindow) {
+                    printWindow.onload = () => {
+                      printWindow.print();
+                    };
+                  }
+                }
+              }}
+            >
+              Print
+            </Button>,
+          ]}
+        >
+          {pdfUrl && (
+            <iframe
+              src={pdfUrl}
+              style={{
+                width: '100%',
+                height: 'calc(100vh - 200px)',
+                border: 'none',
+                borderRadius: 8,
+              }}
+              title="PDF Preview"
+            />
+          )}
         </Modal>
       </Content>
     </Layout>
