@@ -55,6 +55,7 @@ function App() {
               <Route path="gl" element={<GLModule />} />
               <Route path="gl/manage-journals" element={<ManageJournals />} />
               <Route path="gl/journals/:id/edit" element={<EditJournal />} />
+              <Route path="gl/batch/:batchId/edit" element={<EditJournal />} />
               <Route path="ap/*" element={<ComingSoon moduleName="Accounts Payable" />} />
               <Route path="ar/*" element={<ComingSoon moduleName="Accounts Receivable" />} />
               <Route path="inventory/*" element={<ComingSoon moduleName="Inventory" />} />

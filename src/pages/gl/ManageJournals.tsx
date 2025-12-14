@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Layout,
   Card,
@@ -145,6 +145,9 @@ const batchStatuses = ['Posted', 'Unposted', 'Error', 'Pending', 'All'];
 // Operators
 const operators = ['Starts with', 'Equals', 'Contains', 'Ends with'];
 
+// Session storage key for preserving search data
+const STORAGE_KEY = 'manageJournals_searchData';
+
 const ManageJournals: React.FC = () => {
   const navigate = useNavigate();
   const [form] = Form.useForm();
@@ -153,6 +156,26 @@ const ManageJournals: React.FC = () => {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [searchExpanded, setSearchExpanded] = useState<string[]>(['search']);
+
+  // Restore search data from sessionStorage on mount
+  useEffect(() => {
+    const savedData = sessionStorage.getItem(STORAGE_KEY);
+    if (savedData) {
+      try {
+        const { journals: savedJournals, totalCount: savedTotal, formValues } = JSON.parse(savedData);
+        if (savedJournals && savedJournals.length > 0) {
+          setJournals(savedJournals);
+          setTotalCount(savedTotal);
+          setSearchExpanded([]); // Collapse search when data exists
+          if (formValues) {
+            form.setFieldsValue(formValues);
+          }
+        }
+      } catch (e) {
+        console.error('Error restoring search data:', e);
+      }
+    }
+  }, []);
 
   // Search handler - calls the API
   const handleSearch = async () => {
@@ -203,6 +226,14 @@ const ManageJournals: React.FC = () => {
         }));
         setJournals(mappedData);
         setTotalCount(data.totalCount);
+
+        // Save to sessionStorage for persistence
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
+          journals: mappedData,
+          totalCount: data.totalCount,
+          formValues: values,
+        }));
+
         message.success(`Found ${data.totalCount} journals`);
       } else {
         message.error(data.error || 'Failed to fetch journals');
@@ -225,6 +256,7 @@ const ManageJournals: React.FC = () => {
     setJournals([]);
     setTotalCount(0);
     setSelectedRowKeys([]);
+    sessionStorage.removeItem(STORAGE_KEY);
   };
 
   // Get status tag color
@@ -289,7 +321,21 @@ const ManageJournals: React.FC = () => {
       key: 'batchName',
       width: 250,
       ellipsis: true,
-      render: (text, record) => text || record.batchDescription || '-',
+      render: (text, record) => {
+        const batchName = text || record.batchDescription || '-';
+        // Get all journals in this batch
+        const batchJournals = journals.filter(j => j.jeBatchId === record.jeBatchId);
+        return (
+          <a
+            style={{ color: REDWOOD.info }}
+            onClick={() => navigate(`/gl/batch/${record.jeBatchId}/edit`, {
+              state: { batch: record, batchJournals }
+            })}
+          >
+            {batchName}
+          </a>
+        );
+      },
     },
     {
       title: 'Accounting Period',
