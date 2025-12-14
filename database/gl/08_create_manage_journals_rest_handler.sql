@@ -58,6 +58,9 @@ DECLARE
     v_status        VARCHAR2(80) := :statusMeaning;
     v_offset        NUMBER := NVL(:offset, 0);
     v_limit         NUMBER := NVL(:limit, 25);
+    v_chunk_size    NUMBER := 4000;
+    v_clob_len      NUMBER;
+    v_pos           NUMBER := 1;
 BEGIN
     -- Validate mandatory parameters
     IF v_ledger IS NULL OR v_period IS NULL THEN
@@ -79,7 +82,13 @@ BEGIN
     );
 
     :status := 200;
-    HTP.P(v_json);
+
+    -- Output CLOB in chunks to avoid buffer overflow
+    v_clob_len := DBMS_LOB.GETLENGTH(v_json);
+    WHILE v_pos <= v_clob_len LOOP
+        HTP.PRN(DBMS_LOB.SUBSTR(v_json, v_chunk_size, v_pos));
+        v_pos := v_pos + v_chunk_size;
+    END LOOP;
 
 EXCEPTION
     WHEN OTHERS THEN
