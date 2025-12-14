@@ -276,7 +276,7 @@ const ManageJournals: React.FC = () => {
       render: (text, record) => (
         <a
           style={{ color: REDWOOD.info, fontWeight: 500 }}
-          onClick={() => navigate(`/gl/journals/${record.jeHeaderId}/edit`)}
+          onClick={() => navigate(`/gl/journals/${record.jeHeaderId}/edit`, { state: { journal: record } })}
         >
           {text || '-'}
         </a>
@@ -618,7 +618,7 @@ const ManageJournals: React.FC = () => {
                     onClick={() => {
                       const selectedJournal = journals.find(j => j.key === selectedRowKeys[0]);
                       if (selectedJournal) {
-                        navigate(`/gl/journals/${selectedJournal.jeHeaderId}/edit`);
+                        navigate(`/gl/journals/${selectedJournal.jeHeaderId}/edit`, { state: { journal: selectedJournal } });
                       }
                     }}
                   />

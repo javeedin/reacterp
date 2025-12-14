@@ -34,7 +34,7 @@ import {
   LeftOutlined,
   RightOutlined,
 } from '@ant-design/icons';
-import { Link, useParams, useNavigate } from 'react-router-dom';
+import { Link, useParams, useNavigate, useLocation } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 
 const { Content } = Layout;
@@ -125,11 +125,15 @@ interface JournalData {
 const EditJournal: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [journalData, setJournalData] = useState<JournalData | null>(null);
   const [selectedLineKeys, setSelectedLineKeys] = useState<React.Key[]>([]);
+
+  // Get journal data passed from ManageJournals
+  const passedJournal = (location.state as { journal?: any })?.journal;
 
   // Collapsible states
   const [batchExpanded, setBatchExpanded] = useState(false);
@@ -141,90 +145,97 @@ const EditJournal: React.FC = () => {
   // Load journal data
   useEffect(() => {
     loadJournalData();
-  }, [id]);
+  }, [passedJournal]);
 
   const loadJournalData = async () => {
     setLoading(true);
     try {
-      // In real app, fetch from API using id
-      // For now, simulate with sample data based on Oracle Fusion screenshot
-      const sampleData: JournalData = {
-        batchId: 1,
-        jeBatchId: 6942,
-        batchName: 'FD-BOB-MUMBAI-ADJ-100805-27920300046342 PMS Journals A 6942 3341950 N',
-        batchDescription: 'FD-BOB-MUMBAI-ADJ-100805-27920300046342',
-        balanceType: 'Actual',
-        periodName: 'Jan-25',
-        source: 'PMS Journals',
-        approvalStatusMeaning: 'Not required',
-        statusMeaning: 'Posted',
-        completionStatus: 'Complete',
-        headerId: 1001,
-        jeHeaderId: 3341950,
-        journalName: 'PMS Stock Journals 01061976',
-        journalDescription: 'Journal Import 3341950:',
-        ledgerName: 'SB LEDGER',
-        legalEntityName: 'SIDDHARTH BALACHANDRAN',
-        accountingDate: '20-Jan-2025',
-        category: 'PMS Stock Journals',
-        currencyCode: 'INR',
-        conversionDate: '20-Jan-2025',
-        conversionRateType: 'User',
-        conversionRate: 0.042088,
-        inverseConversionRate: 23.760001,
-        externalReference: 'Journal Import Created',
-        referenceDate: '',
-        enteredDebit: 3669.00,
-        enteredCredit: 3669.00,
-        accountedDebit: 154.42,
-        accountedCredit: 154.42,
-        controlTotal: 0,
-        accountingSequenceName: 'SB LEDGER_GL_LE04 2024',
-        accountingSequenceNumber: '2404003319',
-        reportingSequenceName: '',
-        reportingSequenceNumber: '',
-        reversalPeriod: '',
-        reversalMethod: 'Switch DR or CR',
-        reversalStatus: 'Not reversed',
-        lines: [
-          {
-            key: '1',
-            lineId: 1,
-            lineNum: 1,
-            account: '04-00-00-1222105-4000-000-00-000-000',
-            currency: 'INR Indian Rupee',
-            enteredDr: 3669.00,
-            enteredCr: 0,
-            conversionDate: '20-Jan-2025',
-            accountedDr: 154.42,
-            accountedCr: 0,
-            description: 'FD-BOB-MUMBAI-ADJ-100805-27920300046342',
-            accountDescription: 'SIDDHARTH BALACHANDRAN',
-          },
-          {
-            key: '2',
-            lineId: 2,
-            lineNum: 2,
-            account: '04-00-00-4111105-4000-000-00-000-000',
-            currency: 'INR Indian Rupee',
-            enteredDr: 0,
-            enteredCr: 3669.00,
-            conversionDate: '20-Jan-2025',
-            accountedDr: 0,
-            accountedCr: 154.42,
-            description: 'FD-BOB-MUMBAI-ADJ-100805-27920300046342',
-            accountDescription: 'SIDDHARTH BALACHANDRAN',
-          },
-        ],
-      };
+      if (passedJournal) {
+        // Use journal data passed from ManageJournals
+        const journalFromState: JournalData = {
+          // Batch info
+          batchId: passedJournal.batchId,
+          jeBatchId: passedJournal.jeBatchId,
+          batchName: passedJournal.batchName || '',
+          batchDescription: passedJournal.batchDescription || '',
+          balanceType: 'Actual',
+          periodName: passedJournal.periodName || '',
+          source: passedJournal.source || '',
+          approvalStatusMeaning: passedJournal.approvalStatusMeaning || 'Not required',
+          statusMeaning: passedJournal.statusMeaning || '',
+          completionStatus: passedJournal.statusMeaning === 'Posted' ? 'Complete' : 'Incomplete',
+          // Header info
+          headerId: passedJournal.headerId,
+          jeHeaderId: passedJournal.jeHeaderId,
+          journalName: passedJournal.journalName || '',
+          journalDescription: passedJournal.journalDescription || '',
+          ledgerName: passedJournal.ledgerName || '',
+          legalEntityName: passedJournal.legalEntityName || '',
+          accountingDate: passedJournal.effectiveDate || '',
+          category: passedJournal.category || '',
+          currencyCode: passedJournal.currencyCode || '',
+          conversionDate: passedJournal.effectiveDate || '',
+          conversionRateType: 'User',
+          conversionRate: 1,
+          inverseConversionRate: 1,
+          externalReference: passedJournal.externalReference || '',
+          referenceDate: '',
+          // Totals
+          enteredDebit: passedJournal.enteredDebit || 0,
+          enteredCredit: passedJournal.enteredCredit || 0,
+          accountedDebit: passedJournal.accountedDebit || 0,
+          accountedCredit: passedJournal.accountedCredit || 0,
+          controlTotal: 0,
+          // Sequencing (not in API response yet)
+          accountingSequenceName: '',
+          accountingSequenceNumber: '',
+          reportingSequenceName: '',
+          reportingSequenceNumber: '',
+          // Reversal
+          reversalPeriod: '',
+          reversalMethod: 'Switch DR or CR',
+          reversalStatus: 'Not reversed',
+          // Lines - map from API response
+          lines: (passedJournal.lines || []).map((line: any, index: number) => ({
+            key: String(index + 1),
+            lineId: line.lineId,
+            lineNum: line.lineNum,
+            account: line.account || '',
+            currency: `${passedJournal.currencyCode || ''} ${getCurrencyName(passedJournal.currencyCode)}`,
+            enteredDr: line.enteredDr || 0,
+            enteredCr: line.enteredCr || 0,
+            conversionDate: passedJournal.effectiveDate || '',
+            accountedDr: line.accountedDr || 0,
+            accountedCr: line.accountedCr || 0,
+            description: line.description || '',
+            accountDescription: passedJournal.legalEntityName || '',
+          })),
+        };
 
-      setJournalData(sampleData);
-      form.setFieldsValue(sampleData);
+        setJournalData(journalFromState);
+        form.setFieldsValue(journalFromState);
+      } else {
+        // No data passed - redirect back to manage journals
+        message.warning('No journal data found. Please select a journal from the list.');
+        navigate('/gl/manage-journals');
+      }
     } catch (error) {
       message.error('Failed to load journal data');
     } finally {
       setLoading(false);
     }
+  };
+
+  // Helper to get currency name
+  const getCurrencyName = (code: string) => {
+    const currencies: Record<string, string> = {
+      'INR': 'Indian Rupee',
+      'USD': 'US Dollar',
+      'AED': 'UAE Dirham',
+      'EUR': 'Euro',
+      'GBP': 'British Pound',
+    };
+    return currencies[code] || code;
   };
 
   // Save handler
