@@ -1140,12 +1140,6 @@ const EditJournal: React.FC = () => {
               Post
             </Dropdown.Button>
             <Button
-              icon={<PrinterOutlined />}
-              onClick={handlePrintJournal}
-            >
-              Print Journal
-            </Button>
-            <Button
               danger
               icon={<CloseOutlined />}
               onClick={handleCancel}
@@ -1321,6 +1315,13 @@ const EditJournal: React.FC = () => {
                 )}
                 <Button size="small" icon={<PlusOutlined />} />
                 <Button size="small" icon={<DeleteOutlined />} />
+                <Button
+                  size="small"
+                  icon={<PrinterOutlined />}
+                  onClick={handlePrintJournal}
+                >
+                  Print
+                </Button>
                 <Dropdown menu={{ items: journalActionsMenu }}>
                   <Button size="small">
                     Journal Actions <DownOutlined />
