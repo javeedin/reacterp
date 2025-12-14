@@ -3,12 +3,13 @@
 -- Created for ReactERP - Oracle Fusion Data Sync
 -- Tables: RR_GL_JOURNAL_BATCHES, RR_GL_HEADERS, RR_GL_LINES_ALL
 -- Returns nested JSON: Batch fields -> Header fields -> Lines array
+-- Uses APEX_JSON for clean JSON generation
 -- ============================================================
 
 CREATE OR REPLACE PACKAGE RR_MANAGE_JOURNALS_PKG AS
 
-    -- Search journals and return nested JSON (batch + header + lines)
-    FUNCTION search_journals_json(
+    -- Search journals and write JSON directly to HTP buffer
+    PROCEDURE search_journals_json(
         p_ledger            IN VARCHAR2,           -- MANDATORY
         p_period            IN VARCHAR2,           -- MANDATORY
         p_batch_name        IN VARCHAR2 DEFAULT NULL,
@@ -17,7 +18,7 @@ CREATE OR REPLACE PACKAGE RR_MANAGE_JOURNALS_PKG AS
         p_status_meaning    IN VARCHAR2 DEFAULT NULL,
         p_offset            IN NUMBER DEFAULT 0,
         p_limit             IN NUMBER DEFAULT 25
-    ) RETURN CLOB;
+    );
 
     -- Get total count for pagination
     FUNCTION get_journal_count(
@@ -41,31 +42,8 @@ END RR_MANAGE_JOURNALS_PKG;
 
 CREATE OR REPLACE PACKAGE BODY RR_MANAGE_JOURNALS_PKG AS
 
-    -- Helper function to escape JSON string
-    FUNCTION escape_json(p_str IN VARCHAR2) RETURN VARCHAR2 IS
-        v_result VARCHAR2(32767);
-    BEGIN
-        IF p_str IS NULL THEN
-            RETURN '';
-        END IF;
-        v_result := REPLACE(p_str, '\', '\\');
-        v_result := REPLACE(v_result, '"', '\"');
-        v_result := REPLACE(v_result, CHR(10), '\n');
-        v_result := REPLACE(v_result, CHR(13), '\r');
-        v_result := REPLACE(v_result, CHR(9), '\t');
-        RETURN v_result;
-    END escape_json;
-
-    -- Helper procedure to append to CLOB
-    PROCEDURE append_clob(p_clob IN OUT NOCOPY CLOB, p_text IN VARCHAR2) IS
-    BEGIN
-        IF p_text IS NOT NULL AND LENGTH(p_text) > 0 THEN
-            DBMS_LOB.WRITEAPPEND(p_clob, LENGTH(p_text), p_text);
-        END IF;
-    END append_clob;
-
-    -- Search journals and return nested JSON
-    FUNCTION search_journals_json(
+    -- Search journals and write JSON using APEX_JSON
+    PROCEDURE search_journals_json(
         p_ledger            IN VARCHAR2,
         p_period            IN VARCHAR2,
         p_batch_name        IN VARCHAR2 DEFAULT NULL,
@@ -74,11 +52,8 @@ CREATE OR REPLACE PACKAGE BODY RR_MANAGE_JOURNALS_PKG AS
         p_status_meaning    IN VARCHAR2 DEFAULT NULL,
         p_offset            IN NUMBER DEFAULT 0,
         p_limit             IN NUMBER DEFAULT 25
-    ) RETURN CLOB IS
-        v_json          CLOB;
-        v_count         NUMBER;
-        v_first_header  BOOLEAN := TRUE;
-        v_first_line    BOOLEAN;
+    ) IS
+        v_count NUMBER;
 
         -- Header cursor with batch info
         CURSOR c_headers IS
@@ -144,175 +119,83 @@ CREATE OR REPLACE PACKAGE BODY RR_MANAGE_JOURNALS_PKG AS
             p_journal_desc, p_source, p_status_meaning
         );
 
-        -- Initialize JSON CLOB
-        DBMS_LOB.CREATETEMPORARY(v_json, TRUE);
+        -- Initialize APEX_JSON
+        APEX_JSON.INITIALIZE_OUTPUT;
+        APEX_JSON.OPEN_OBJECT;
 
-        -- Build JSON header
-        append_clob(v_json, '{"success": true, "totalCount": ');
-        append_clob(v_json, TO_CHAR(v_count));
-        append_clob(v_json, ', "offset": ');
-        append_clob(v_json, TO_CHAR(p_offset));
-        append_clob(v_json, ', "limit": ');
-        append_clob(v_json, TO_CHAR(p_limit));
-        append_clob(v_json, ', "items": [');
+        -- Root level properties
+        APEX_JSON.WRITE('success', TRUE);
+        APEX_JSON.WRITE('totalCount', v_count);
+        APEX_JSON.WRITE('offset', p_offset);
+        APEX_JSON.WRITE('limit', p_limit);
+
+        -- Open items array
+        APEX_JSON.OPEN_ARRAY('items');
 
         -- Loop through headers
         FOR r_header IN c_headers LOOP
-            IF NOT v_first_header THEN
-                append_clob(v_json, ',');
-            END IF;
-            v_first_header := FALSE;
+            APEX_JSON.OPEN_OBJECT;
 
-            -- Start header object - batch fields first
-            append_clob(v_json, '{"batchId": ');
-            append_clob(v_json, NVL(TO_CHAR(r_header.BATCH_ID), 'null'));
-
-            append_clob(v_json, ', "jeBatchId": ');
-            append_clob(v_json, NVL(TO_CHAR(r_header.JE_BATCH_ID), 'null'));
-
-            append_clob(v_json, ', "batchName": "');
-            append_clob(v_json, escape_json(r_header.BATCH_NAME));
-            append_clob(v_json, '"');
-
-            append_clob(v_json, ', "batchDescription": "');
-            append_clob(v_json, escape_json(r_header.BATCH_DESCRIPTION));
-            append_clob(v_json, '"');
-
-            append_clob(v_json, ', "source": "');
-            append_clob(v_json, escape_json(r_header.SOURCE));
-            append_clob(v_json, '"');
-
-            append_clob(v_json, ', "status": "');
-            append_clob(v_json, escape_json(r_header.STATUS));
-            append_clob(v_json, '"');
-
-            append_clob(v_json, ', "statusMeaning": "');
-            append_clob(v_json, escape_json(r_header.STATUS_MEANING));
-            append_clob(v_json, '"');
-
-            append_clob(v_json, ', "approvalStatusMeaning": "');
-            append_clob(v_json, escape_json(r_header.APPROVAL_STATUS_MEANING));
-            append_clob(v_json, '"');
-
-            append_clob(v_json, ', "postedDate": ');
-            IF r_header.POSTED_DATE IS NULL THEN
-                append_clob(v_json, 'null');
-            ELSE
-                append_clob(v_json, '"' || TO_CHAR(r_header.POSTED_DATE, 'YYYY-MM-DD') || '"');
-            END IF;
+            -- Batch fields first
+            APEX_JSON.WRITE('batchId', r_header.BATCH_ID);
+            APEX_JSON.WRITE('jeBatchId', r_header.JE_BATCH_ID);
+            APEX_JSON.WRITE('batchName', r_header.BATCH_NAME);
+            APEX_JSON.WRITE('batchDescription', r_header.BATCH_DESCRIPTION);
+            APEX_JSON.WRITE('source', r_header.SOURCE);
+            APEX_JSON.WRITE('status', r_header.STATUS);
+            APEX_JSON.WRITE('statusMeaning', r_header.STATUS_MEANING);
+            APEX_JSON.WRITE('approvalStatusMeaning', r_header.APPROVAL_STATUS_MEANING);
+            APEX_JSON.WRITE('postedDate', TO_CHAR(r_header.POSTED_DATE, 'YYYY-MM-DD'));
 
             -- Header fields
-            append_clob(v_json, ', "headerId": ');
-            append_clob(v_json, TO_CHAR(r_header.HEADER_ID));
+            APEX_JSON.WRITE('headerId', r_header.HEADER_ID);
+            APEX_JSON.WRITE('jeHeaderId', r_header.JE_HEADER_ID);
+            APEX_JSON.WRITE('journalName', r_header.JOURNAL_NAME);
+            APEX_JSON.WRITE('journalDescription', r_header.JOURNAL_DESCRIPTION);
+            APEX_JSON.WRITE('periodName', r_header.PERIOD_NAME);
+            APEX_JSON.WRITE('category', r_header.CATEGORY);
+            APEX_JSON.WRITE('ledgerName', r_header.LEDGER_NAME);
+            APEX_JSON.WRITE('legalEntityName', r_header.LEGAL_ENTITY_NAME);
+            APEX_JSON.WRITE('currencyCode', r_header.CURRENCY_CODE);
+            APEX_JSON.WRITE('enteredDebit', r_header.ENTERED_DEBIT);
+            APEX_JSON.WRITE('enteredCredit', r_header.ENTERED_CREDIT);
+            APEX_JSON.WRITE('accountedDebit', r_header.ACCOUNTED_DEBIT);
+            APEX_JSON.WRITE('accountedCredit', r_header.ACCOUNTED_CREDIT);
+            APEX_JSON.WRITE('effectiveDate', TO_CHAR(r_header.EFFECTIVE_DATE, 'YYYY-MM-DD'));
+            APEX_JSON.WRITE('externalReference', r_header.EXTERNAL_REFERENCE);
+            APEX_JSON.WRITE('creationDate', TO_CHAR(r_header.CREATION_DATE, 'YYYY-MM-DD"T"HH24:MI:SS'));
 
-            append_clob(v_json, ', "jeHeaderId": ');
-            append_clob(v_json, TO_CHAR(r_header.JE_HEADER_ID));
-
-            append_clob(v_json, ', "journalName": "');
-            append_clob(v_json, escape_json(r_header.JOURNAL_NAME));
-            append_clob(v_json, '"');
-
-            append_clob(v_json, ', "journalDescription": "');
-            append_clob(v_json, escape_json(r_header.JOURNAL_DESCRIPTION));
-            append_clob(v_json, '"');
-
-            append_clob(v_json, ', "periodName": "');
-            append_clob(v_json, escape_json(r_header.PERIOD_NAME));
-            append_clob(v_json, '"');
-
-            append_clob(v_json, ', "category": "');
-            append_clob(v_json, escape_json(r_header.CATEGORY));
-            append_clob(v_json, '"');
-
-            append_clob(v_json, ', "ledgerName": "');
-            append_clob(v_json, escape_json(r_header.LEDGER_NAME));
-            append_clob(v_json, '"');
-
-            append_clob(v_json, ', "legalEntityName": "');
-            append_clob(v_json, escape_json(r_header.LEGAL_ENTITY_NAME));
-            append_clob(v_json, '"');
-
-            append_clob(v_json, ', "currencyCode": "');
-            append_clob(v_json, escape_json(r_header.CURRENCY_CODE));
-            append_clob(v_json, '"');
-
-            append_clob(v_json, ', "enteredDebit": ');
-            append_clob(v_json, NVL(TO_CHAR(r_header.ENTERED_DEBIT), '0'));
-
-            append_clob(v_json, ', "enteredCredit": ');
-            append_clob(v_json, NVL(TO_CHAR(r_header.ENTERED_CREDIT), '0'));
-
-            append_clob(v_json, ', "accountedDebit": ');
-            append_clob(v_json, NVL(TO_CHAR(r_header.ACCOUNTED_DEBIT), '0'));
-
-            append_clob(v_json, ', "accountedCredit": ');
-            append_clob(v_json, NVL(TO_CHAR(r_header.ACCOUNTED_CREDIT), '0'));
-
-            append_clob(v_json, ', "effectiveDate": ');
-            IF r_header.EFFECTIVE_DATE IS NULL THEN
-                append_clob(v_json, 'null');
-            ELSE
-                append_clob(v_json, '"' || TO_CHAR(r_header.EFFECTIVE_DATE, 'YYYY-MM-DD') || '"');
-            END IF;
-
-            append_clob(v_json, ', "externalReference": "');
-            append_clob(v_json, escape_json(r_header.EXTERNAL_REFERENCE));
-            append_clob(v_json, '"');
-
-            append_clob(v_json, ', "creationDate": "');
-            append_clob(v_json, TO_CHAR(r_header.CREATION_DATE, 'YYYY-MM-DD"T"HH24:MI:SS'));
-            append_clob(v_json, '"');
-
-            -- Start lines array
-            append_clob(v_json, ', "lines": [');
+            -- Open lines array
+            APEX_JSON.OPEN_ARRAY('lines');
 
             -- Loop through lines for this header
-            v_first_line := TRUE;
             FOR r_line IN c_lines(r_header.JE_HEADER_ID) LOOP
-                IF NOT v_first_line THEN
-                    append_clob(v_json, ',');
-                END IF;
-                v_first_line := FALSE;
-
-                append_clob(v_json, '{"lineId": ');
-                append_clob(v_json, TO_CHAR(r_line.LINE_ID));
-
-                append_clob(v_json, ', "lineNum": ');
-                append_clob(v_json, TO_CHAR(r_line.LINE_NUM));
-
-                append_clob(v_json, ', "account": "');
-                append_clob(v_json, escape_json(r_line.ACCOUNT));
-                append_clob(v_json, '"');
-
-                append_clob(v_json, ', "description": "');
-                append_clob(v_json, escape_json(r_line.DESCRIPTION));
-                append_clob(v_json, '"');
-
-                append_clob(v_json, ', "enteredDr": ');
-                append_clob(v_json, NVL(TO_CHAR(r_line.ENTERED_DR), '0'));
-
-                append_clob(v_json, ', "enteredCr": ');
-                append_clob(v_json, NVL(TO_CHAR(r_line.ENTERED_CR), '0'));
-
-                append_clob(v_json, ', "accountedDr": ');
-                append_clob(v_json, NVL(TO_CHAR(r_line.ACCOUNTED_DR), '0'));
-
-                append_clob(v_json, ', "accountedCr": ');
-                append_clob(v_json, NVL(TO_CHAR(r_line.ACCOUNTED_CR), '0'));
-
-                append_clob(v_json, ', "currency": "');
-                append_clob(v_json, escape_json(r_line.CURRENCY));
-                append_clob(v_json, '"}');
+                APEX_JSON.OPEN_OBJECT;
+                APEX_JSON.WRITE('lineId', r_line.LINE_ID);
+                APEX_JSON.WRITE('lineNum', r_line.LINE_NUM);
+                APEX_JSON.WRITE('account', r_line.ACCOUNT);
+                APEX_JSON.WRITE('description', r_line.DESCRIPTION);
+                APEX_JSON.WRITE('enteredDr', r_line.ENTERED_DR);
+                APEX_JSON.WRITE('enteredCr', r_line.ENTERED_CR);
+                APEX_JSON.WRITE('accountedDr', r_line.ACCOUNTED_DR);
+                APEX_JSON.WRITE('accountedCr', r_line.ACCOUNTED_CR);
+                APEX_JSON.WRITE('currency', r_line.CURRENCY);
+                APEX_JSON.CLOSE_OBJECT;
             END LOOP;
 
-            -- Close lines array and header object
-            append_clob(v_json, ']}');
+            -- Close lines array
+            APEX_JSON.CLOSE_ARRAY;
+
+            -- Close header object
+            APEX_JSON.CLOSE_OBJECT;
         END LOOP;
 
-        -- Close items array and root object
-        append_clob(v_json, ']}');
+        -- Close items array
+        APEX_JSON.CLOSE_ARRAY;
 
-        RETURN v_json;
+        -- Close root object
+        APEX_JSON.CLOSE_OBJECT;
+
     END search_journals_json;
 
     -- Get total count for pagination

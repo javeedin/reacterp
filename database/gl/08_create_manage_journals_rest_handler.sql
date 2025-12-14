@@ -48,52 +48,38 @@ BEGIN
         p_mimes_allowed  => NULL,
         p_comments       => 'Search journals - returns nested JSON (batch + header + lines)',
         p_source         => q'[
-DECLARE
-    v_json          CLOB;
-    v_ledger        VARCHAR2(240) := :ledger;
-    v_period        VARCHAR2(15) := :period;
-    v_batch_name    VARCHAR2(240) := :batchName;
-    v_journal_desc  VARCHAR2(4000) := :journalDesc;
-    v_source        VARCHAR2(80) := :source;
-    v_status        VARCHAR2(80) := :statusMeaning;
-    v_offset        NUMBER := NVL(:offset, 0);
-    v_limit         NUMBER := NVL(:limit, 25);
-    v_chunk_size    NUMBER := 4000;
-    v_clob_len      NUMBER;
-    v_pos           NUMBER := 1;
 BEGIN
     -- Validate mandatory parameters
-    IF v_ledger IS NULL OR v_period IS NULL THEN
+    IF :ledger IS NULL OR :period IS NULL THEN
         :status := 400;
-        HTP.P('{"success": false, "error": "ledger and period are mandatory parameters"}');
+        APEX_JSON.OPEN_OBJECT;
+        APEX_JSON.WRITE('success', FALSE);
+        APEX_JSON.WRITE('error', 'ledger and period are mandatory parameters');
+        APEX_JSON.CLOSE_OBJECT;
         RETURN;
     END IF;
 
-    -- Call package function to get nested JSON
-    v_json := RR_MANAGE_JOURNALS_PKG.search_journals_json(
-        p_ledger         => v_ledger,
-        p_period         => v_period,
-        p_batch_name     => v_batch_name,
-        p_journal_desc   => v_journal_desc,
-        p_source         => v_source,
-        p_status_meaning => v_status,
-        p_offset         => v_offset,
-        p_limit          => v_limit
-    );
-
     :status := 200;
 
-    -- Output CLOB in chunks to avoid buffer overflow
-    v_clob_len := DBMS_LOB.GETLENGTH(v_json);
-    WHILE v_pos <= v_clob_len LOOP
-        HTP.PRN(DBMS_LOB.SUBSTR(v_json, v_chunk_size, v_pos));
-        v_pos := v_pos + v_chunk_size;
-    END LOOP;
+    -- Call package procedure - writes JSON directly
+    RR_MANAGE_JOURNALS_PKG.search_journals_json(
+        p_ledger         => :ledger,
+        p_period         => :period,
+        p_batch_name     => :batchName,
+        p_journal_desc   => :journalDesc,
+        p_source         => :source,
+        p_status_meaning => :statusMeaning,
+        p_offset         => NVL(:offset, 0),
+        p_limit          => NVL(:limit, 25)
+    );
 
 EXCEPTION
     WHEN OTHERS THEN
         :status := 500;
-        HTP.P('{"success": false, "error": "' || REPLACE(SQLERRM, '"', '\"') || '"}');
+        APEX_JSON.OPEN_OBJECT;
+        APEX_JSON.WRITE('success', FALSE);
+        APEX_JSON.WRITE('error', SQLERRM);
+        APEX_JSON.CLOSE_OBJECT;
 END;
 ]'
     );
