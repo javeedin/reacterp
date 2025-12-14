@@ -38,7 +38,7 @@ import {
   ClockCircleOutlined,
   FilterOutlined,
 } from '@ant-design/icons';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 import Autopilot from '../../components/Autopilot';
 
@@ -146,6 +146,7 @@ const batchStatuses = ['Posted', 'Unposted', 'Error', 'Pending', 'All'];
 const operators = ['Starts with', 'Equals', 'Contains', 'Ends with'];
 
 const ManageJournals: React.FC = () => {
+  const navigate = useNavigate();
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [journals, setJournals] = useState<JournalRecord[]>([]);
@@ -272,8 +273,13 @@ const ManageJournals: React.FC = () => {
       key: 'journalName',
       width: 200,
       fixed: 'left',
-      render: (text) => (
-        <a style={{ color: REDWOOD.info, fontWeight: 500 }}>{text || '-'}</a>
+      render: (text, record) => (
+        <a
+          style={{ color: REDWOOD.info, fontWeight: 500 }}
+          onClick={() => navigate(`/gl/journals/${record.jeHeaderId}/edit`)}
+        >
+          {text || '-'}
+        </a>
       ),
       sorter: (a, b) => (a.journalName || '').localeCompare(b.journalName || ''),
     },
@@ -606,7 +612,16 @@ const ManageJournals: React.FC = () => {
                   <Button icon={<PlusOutlined />} />
                 </Tooltip>
                 <Tooltip title="Edit">
-                  <Button icon={<EditOutlined />} disabled={selectedRowKeys.length !== 1} />
+                  <Button
+                    icon={<EditOutlined />}
+                    disabled={selectedRowKeys.length !== 1}
+                    onClick={() => {
+                      const selectedJournal = journals.find(j => j.key === selectedRowKeys[0]);
+                      if (selectedJournal) {
+                        navigate(`/gl/journals/${selectedJournal.jeHeaderId}/edit`);
+                      }
+                    }}
+                  />
                 </Tooltip>
                 <Tooltip title="Delete">
                   <Button icon={<DeleteOutlined />} disabled={selectedRowKeys.length === 0} danger />
