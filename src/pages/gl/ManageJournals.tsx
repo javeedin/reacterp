@@ -15,7 +15,8 @@ import {
   Breadcrumb,
   Tooltip,
   Dropdown,
-  DatePicker,
+  Collapse,
+  message,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -35,6 +36,7 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   ClockCircleOutlined,
+  FilterOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -43,6 +45,7 @@ import Autopilot from '../../components/Autopilot';
 const { Content } = Layout;
 const { Title, Text } = Typography;
 const { Option } = Select;
+const { Panel } = Collapse;
 
 // Oracle Redwood Color Palette
 const REDWOOD = {
@@ -60,90 +63,80 @@ const REDWOOD = {
   surface: '#FFFFFF',
 };
 
-// Journal data interface
-interface JournalRecord {
-  key: string;
-  journal: string;
-  journalBatch: string;
-  accountingPeriod: string;
-  source: string;
-  category: string;
-  journalEnteredDebit: number;
-  journalEnteredCredit: number;
-  batchStatus: 'Posted' | 'Unposted' | 'Error' | 'Pending';
-  reference: string;
-  approvalStatus: 'Approved' | 'Pending' | 'Rejected' | 'Not required';
+// API Base URL
+const API_BASE_URL = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/gl/journals';
+
+// Journal data interface matching API response
+interface JournalLine {
+  lineId: number;
+  lineNum: number;
+  account: string;
+  description: string;
+  enteredDr: number;
+  enteredCr: number;
+  accountedDr: number;
+  accountedCr: number;
   currency: string;
 }
 
-// Mock data
-const mockJournals: JournalRecord[] = [
-  {
-    key: '1',
-    journal: 'PMS Stock Journals 01061976',
-    journalBatch: 'FD-BOB-MUMBAI-ADJ-100805-279203000046...',
-    accountingPeriod: 'Jan-25',
-    source: 'PMS Journals',
-    category: 'PMS St...',
-    journalEnteredDebit: 3669.00,
-    journalEnteredCredit: 3669.00,
-    batchStatus: 'Posted',
-    reference: 'Journal Import Cr...',
-    approvalStatus: 'Not required',
-    currency: 'INR',
-  },
-  {
-    key: '2',
-    journal: 'Manual Journal 01062001',
-    journalBatch: 'GL-MANUAL-JAN25-001',
-    accountingPeriod: 'Jan-25',
-    source: 'Manual',
-    category: 'Adjustment',
-    journalEnteredDebit: 15000.00,
-    journalEnteredCredit: 15000.00,
-    batchStatus: 'Unposted',
-    reference: 'Month End Adj',
-    approvalStatus: 'Pending',
-    currency: 'INR',
-  },
-  {
-    key: '3',
-    journal: 'Payroll Journal 01062002',
-    journalBatch: 'HR-PAYROLL-JAN25-001',
-    accountingPeriod: 'Jan-25',
-    source: 'Payroll',
-    category: 'Payroll',
-    journalEnteredDebit: 250000.00,
-    journalEnteredCredit: 250000.00,
-    batchStatus: 'Posted',
-    reference: 'Jan 2025 Payroll',
-    approvalStatus: 'Approved',
-    currency: 'INR',
-  },
-];
+interface JournalRecord {
+  key: string;
+  // Batch fields
+  batchId: number;
+  jeBatchId: number;
+  batchName: string;
+  batchDescription: string;
+  source: string;
+  status: string;
+  statusMeaning: string;
+  approvalStatusMeaning: string;
+  postedDate: string | null;
+  // Header fields
+  headerId: number;
+  jeHeaderId: number;
+  journalName: string;
+  journalDescription: string;
+  periodName: string;
+  category: string;
+  ledgerName: string;
+  legalEntityName: string;
+  currencyCode: string;
+  enteredDebit: number;
+  enteredCredit: number;
+  accountedDebit: number;
+  accountedCredit: number;
+  effectiveDate: string;
+  externalReference: string;
+  creationDate: string;
+  // Lines
+  lines: JournalLine[];
+}
+
+interface ApiResponse {
+  success: boolean;
+  totalCount: number;
+  offset: number;
+  limit: number;
+  items: JournalRecord[];
+  error?: string;
+}
 
 // Accounting periods
 const accountingPeriods = [
   'Jan-25', 'Feb-25', 'Mar-25', 'Apr-25', 'May-25', 'Jun-25',
   'Jul-25', 'Aug-25', 'Sep-25', 'Oct-25', 'Nov-25', 'Dec-25',
   'Jan-24', 'Feb-24', 'Mar-24', 'Apr-24', 'May-24', 'Jun-24',
+  'Jul-24', 'Aug-24', 'Sep-24', 'Oct-24', 'Nov-24', 'Dec-24',
 ];
 
-// Sources
-const sources = [
-  'Manual', 'PMS Journals', 'Payroll', 'Spreadsheet', 'AutoReverse',
-  'Revaluation', 'Consolidation', 'Intercompany', 'Allocations',
-];
-
-// Categories
-const categories = [
-  'Adjustment', 'PMS St...', 'Payroll', 'Accrual', 'Provision',
-  'Reversal', 'Reclassification', 'Closing', 'Opening',
-];
-
-// Ledgers
+// Ledgers - BUIMERC LEDGER as default
 const ledgers = [
-  'SB LEDGER', 'US LEDGER', 'UK LEDGER', 'APAC LEDGER', 'EMEA LEDGER',
+  'BUIMERC LEDGER',
+  'SB LEDGER',
+  'US LEDGER',
+  'UK LEDGER',
+  'APAC LEDGER',
+  'EMEA LEDGER',
 ];
 
 // Batch statuses
@@ -155,37 +148,97 @@ const operators = ['Starts with', 'Equals', 'Contains', 'Ends with'];
 const ManageJournals: React.FC = () => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
-  const [journals, setJournals] = useState<JournalRecord[]>(mockJournals);
+  const [journals, setJournals] = useState<JournalRecord[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [searchExpanded, setSearchExpanded] = useState<string[]>(['search']);
 
-  // Search handler
-  const handleSearch = () => {
+  // Search handler - calls the API
+  const handleSearch = async () => {
+    const values = form.getFieldsValue();
+
+    // Validate required fields
+    if (!values.ledger) {
+      message.error('Ledger is required');
+      return;
+    }
+    if (!values.accountingPeriod) {
+      message.error('Accounting Period is required');
+      return;
+    }
+
     setLoading(true);
-    // Simulate API call
-    setTimeout(() => {
+
+    try {
+      // Build query parameters
+      const params = new URLSearchParams();
+      params.append('ledger', values.ledger);
+      params.append('period', values.accountingPeriod);
+
+      if (values.journalBatch) {
+        params.append('batchName', values.journalBatch);
+      }
+      if (values.journalDescription) {
+        params.append('journalDesc', values.journalDescription);
+      }
+      if (values.source) {
+        params.append('source', values.source);
+      }
+      if (values.batchStatus && values.batchStatus !== 'All') {
+        params.append('statusMeaning', values.batchStatus);
+      }
+
+      const url = `${API_BASE_URL}/headers?${params.toString()}`;
+      console.log('Fetching:', url);
+
+      const response = await fetch(url);
+      const data: ApiResponse = await response.json();
+
+      if (data.success) {
+        // Map response to table data with keys
+        const mappedData = data.items.map((item, index) => ({
+          ...item,
+          key: item.headerId?.toString() || index.toString(),
+        }));
+        setJournals(mappedData);
+        setTotalCount(data.totalCount);
+        message.success(`Found ${data.totalCount} journals`);
+      } else {
+        message.error(data.error || 'Failed to fetch journals');
+        setJournals([]);
+        setTotalCount(0);
+      }
+    } catch (error) {
+      console.error('Error fetching journals:', error);
+      message.error('Failed to connect to server');
+      setJournals([]);
+      setTotalCount(0);
+    } finally {
       setLoading(false);
-      // In real app, filter based on form values
-    }, 1000);
+    }
   };
 
   // Reset handler
   const handleReset = () => {
     form.resetFields();
-    setJournals(mockJournals);
+    setJournals([]);
+    setTotalCount(0);
+    setSelectedRowKeys([]);
   };
 
   // Get status tag color
   const getBatchStatusTag = (status: string) => {
+    const statusLower = status?.toLowerCase() || '';
     const config: Record<string, { color: string; icon: React.ReactNode }> = {
-      Posted: { color: REDWOOD.success, icon: <CheckCircleOutlined /> },
-      Unposted: { color: REDWOOD.warning, icon: <ClockCircleOutlined /> },
-      Error: { color: REDWOOD.primary, icon: <CloseCircleOutlined /> },
-      Pending: { color: REDWOOD.info, icon: <ClockCircleOutlined /> },
+      posted: { color: REDWOOD.success, icon: <CheckCircleOutlined /> },
+      unposted: { color: REDWOOD.warning, icon: <ClockCircleOutlined /> },
+      error: { color: REDWOOD.primary, icon: <CloseCircleOutlined /> },
+      pending: { color: REDWOOD.info, icon: <ClockCircleOutlined /> },
     };
-    const cfg = config[status] || { color: REDWOOD.neutral600, icon: null };
+    const cfg = config[statusLower] || { color: REDWOOD.neutral600, icon: null };
     return (
       <Tag color={cfg.color} icon={cfg.icon} style={{ borderRadius: 4 }}>
-        {status}
+        {status || 'Unknown'}
       </Tag>
     );
   };
@@ -193,104 +246,120 @@ const ManageJournals: React.FC = () => {
   // Get approval status tag
   const getApprovalStatusTag = (status: string) => {
     const config: Record<string, string> = {
-      Approved: REDWOOD.success,
-      Pending: REDWOOD.warning,
-      Rejected: REDWOOD.primary,
+      'Approved': REDWOOD.success,
+      'Pending': REDWOOD.warning,
+      'Rejected': REDWOOD.primary,
       'Not required': REDWOOD.neutral600,
     };
     return (
       <Tag color={config[status] || REDWOOD.neutral600} style={{ borderRadius: 4 }}>
-        {status}
+        {status || 'Not required'}
       </Tag>
     );
+  };
+
+  // Format currency
+  const formatCurrency = (value: number, currency: string = 'AED') => {
+    if (value === null || value === undefined) return '-';
+    return `${value.toLocaleString('en-US', { minimumFractionDigits: 2 })} ${currency}`;
   };
 
   // Table columns
   const columns: ColumnsType<JournalRecord> = [
     {
       title: 'Journal',
-      dataIndex: 'journal',
-      key: 'journal',
+      dataIndex: 'journalName',
+      key: 'journalName',
       width: 200,
+      fixed: 'left',
       render: (text) => (
-        <a style={{ color: REDWOOD.info, fontWeight: 500 }}>{text}</a>
+        <a style={{ color: REDWOOD.info, fontWeight: 500 }}>{text || '-'}</a>
       ),
-      sorter: (a, b) => a.journal.localeCompare(b.journal),
+      sorter: (a, b) => (a.journalName || '').localeCompare(b.journalName || ''),
     },
     {
       title: 'Journal Batch',
-      dataIndex: 'journalBatch',
-      key: 'journalBatch',
-      width: 280,
+      dataIndex: 'batchName',
+      key: 'batchName',
+      width: 250,
       ellipsis: true,
+      render: (text, record) => text || record.batchDescription || '-',
     },
     {
       title: 'Accounting Period',
-      dataIndex: 'accountingPeriod',
-      key: 'accountingPeriod',
+      dataIndex: 'periodName',
+      key: 'periodName',
       width: 130,
-      sorter: (a, b) => a.accountingPeriod.localeCompare(b.accountingPeriod),
+      sorter: (a, b) => (a.periodName || '').localeCompare(b.periodName || ''),
     },
     {
       title: 'Source',
       dataIndex: 'source',
       key: 'source',
       width: 120,
+      render: (text) => text || '-',
     },
     {
       title: 'Category',
       dataIndex: 'category',
       key: 'category',
       width: 120,
+      render: (text) => text || '-',
     },
     {
-      title: 'Journal Entered Debit',
-      dataIndex: 'journalEnteredDebit',
-      key: 'journalEnteredDebit',
-      width: 160,
+      title: 'Entered Debit',
+      dataIndex: 'enteredDebit',
+      key: 'enteredDebit',
+      width: 150,
       align: 'right',
-      render: (value, record) => (
-        <span>
-          {value.toLocaleString('en-IN', { minimumFractionDigits: 2 })} {record.currency}
-        </span>
-      ),
-      sorter: (a, b) => a.journalEnteredDebit - b.journalEnteredDebit,
+      render: (value, record) => formatCurrency(value, record.currencyCode),
+      sorter: (a, b) => (a.enteredDebit || 0) - (b.enteredDebit || 0),
     },
     {
-      title: 'Journal Entered Credit',
-      dataIndex: 'journalEnteredCredit',
-      key: 'journalEnteredCredit',
-      width: 160,
+      title: 'Entered Credit',
+      dataIndex: 'enteredCredit',
+      key: 'enteredCredit',
+      width: 150,
       align: 'right',
-      render: (value, record) => (
-        <span>
-          {value.toLocaleString('en-IN', { minimumFractionDigits: 2 })} {record.currency}
-        </span>
-      ),
-      sorter: (a, b) => a.journalEnteredCredit - b.journalEnteredCredit,
+      render: (value, record) => formatCurrency(value, record.currencyCode),
+      sorter: (a, b) => (a.enteredCredit || 0) - (b.enteredCredit || 0),
     },
     {
       title: 'Batch Status',
-      dataIndex: 'batchStatus',
-      key: 'batchStatus',
+      dataIndex: 'statusMeaning',
+      key: 'statusMeaning',
       width: 120,
       render: (status) => getBatchStatusTag(status),
       filters: batchStatuses.filter(s => s !== 'All').map(s => ({ text: s, value: s })),
-      onFilter: (value, record) => record.batchStatus === value,
+      onFilter: (value, record) => record.statusMeaning === value,
     },
     {
-      title: 'Reference',
-      dataIndex: 'reference',
-      key: 'reference',
+      title: 'Currency',
+      dataIndex: 'currencyCode',
+      key: 'currencyCode',
+      width: 80,
+      render: (text) => text || '-',
+    },
+    {
+      title: 'Ledger',
+      dataIndex: 'ledgerName',
+      key: 'ledgerName',
       width: 150,
-      ellipsis: true,
+      render: (text) => text || '-',
     },
     {
       title: 'Approval Status',
-      dataIndex: 'approvalStatus',
-      key: 'approvalStatus',
+      dataIndex: 'approvalStatusMeaning',
+      key: 'approvalStatusMeaning',
       width: 130,
       render: (status) => getApprovalStatusTag(status),
+    },
+    {
+      title: 'Posted Date',
+      dataIndex: 'postedDate',
+      key: 'postedDate',
+      width: 110,
+      render: (text) => text || '-',
     },
   ];
 
@@ -366,194 +435,132 @@ const ManageJournals: React.FC = () => {
             </Button>
           </div>
 
-          {/* Search Card */}
-          <Card
+          {/* Collapsible Search Card */}
+          <Collapse
+            activeKey={searchExpanded}
+            onChange={(keys) => setSearchExpanded(keys as string[])}
             style={{
+              marginBottom: 24,
               borderRadius: 12,
               border: `1px solid ${REDWOOD.neutral200}`,
-              marginBottom: 24,
+              background: REDWOOD.surface,
             }}
-            bodyStyle={{ padding: 24 }}
+            expandIconPosition="end"
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <Text strong style={{ fontSize: 16 }}>Search</Text>
-              <Space>
-                <Button size="small">Basic</Button>
-                <Button size="small">Manage Watchlist</Button>
-                <Select defaultValue="all" size="small" style={{ width: 120 }}>
-                  <Option value="all">All Journals</Option>
-                  <Option value="my">My Journals</Option>
-                  <Option value="pending">Pending</Option>
-                </Select>
-              </Space>
-            </div>
-
-            <Form
-              form={form}
-              layout="horizontal"
-              labelCol={{ span: 8 }}
-              wrapperCol={{ span: 16 }}
-              initialValues={{
-                journalOperator: 'Starts with',
-                batchOperator: 'Starts with',
-                periodOperator: 'Equals',
-                sourceOperator: 'Equals',
-                categoryOperator: 'Equals',
-                ledgerOperator: 'Equals',
-                statusOperator: 'Equals',
-              }}
+            <Panel
+              header={
+                <Space>
+                  <FilterOutlined style={{ color: REDWOOD.info }} />
+                  <Text strong style={{ fontSize: 16 }}>Search Parameters</Text>
+                  {!searchExpanded.includes('search') && journals.length > 0 && (
+                    <Tag color={REDWOOD.info}>{totalCount} results</Tag>
+                  )}
+                </Space>
+              }
+              key="search"
+              style={{ borderRadius: 12 }}
             >
-              <Row gutter={24}>
-                <Col span={12}>
-                  {/* Journal */}
-                  <Form.Item label={<span><span style={{ color: REDWOOD.primary }}>**</span> Journal</span>}>
-                    <Space.Compact style={{ width: '100%' }}>
-                      <Form.Item name="journalOperator" noStyle>
-                        <Select style={{ width: 120 }}>
-                          {operators.map(op => <Option key={op} value={op}>{op}</Option>)}
-                        </Select>
-                      </Form.Item>
-                      <Form.Item name="journal" noStyle>
-                        <Input style={{ flex: 1 }} />
-                      </Form.Item>
-                    </Space.Compact>
-                  </Form.Item>
+              <Form
+                form={form}
+                layout="horizontal"
+                labelCol={{ span: 8 }}
+                wrapperCol={{ span: 16 }}
+                initialValues={{
+                  ledger: 'BUIMERC LEDGER',
+                  accountingPeriod: 'May-24',
+                  journalOperator: 'Starts with',
+                  batchOperator: 'Starts with',
+                }}
+              >
+                <Row gutter={24}>
+                  <Col span={12}>
+                    {/* Ledger - Required */}
+                    <Form.Item
+                      label={<span><span style={{ color: REDWOOD.primary }}>*</span> Ledger</span>}
+                      name="ledger"
+                      rules={[{ required: true, message: 'Ledger is required' }]}
+                    >
+                      <Select placeholder="Select ledger">
+                        {ledgers.map(l => <Option key={l} value={l}>{l}</Option>)}
+                      </Select>
+                    </Form.Item>
 
-                  {/* Journal Batch */}
-                  <Form.Item label={<span><span style={{ color: REDWOOD.primary }}>**</span> Journal Batch</span>}>
-                    <Space.Compact style={{ width: '100%' }}>
-                      <Form.Item name="batchOperator" noStyle>
-                        <Select style={{ width: 120 }}>
-                          {operators.map(op => <Option key={op} value={op}>{op}</Option>)}
-                        </Select>
-                      </Form.Item>
-                      <Form.Item name="journalBatch" noStyle>
-                        <Input style={{ flex: 1 }} />
-                      </Form.Item>
-                    </Space.Compact>
-                  </Form.Item>
+                    {/* Accounting Period - Required */}
+                    <Form.Item
+                      label={<span><span style={{ color: REDWOOD.primary }}>*</span> Period</span>}
+                      name="accountingPeriod"
+                      rules={[{ required: true, message: 'Period is required' }]}
+                    >
+                      <Select placeholder="Select period">
+                        {accountingPeriods.map(p => <Option key={p} value={p}>{p}</Option>)}
+                      </Select>
+                    </Form.Item>
 
-                  {/* Accounting Period */}
-                  <Form.Item label={<span><span style={{ color: REDWOOD.primary }}>**</span> Accounting Period</span>}>
-                    <Space.Compact style={{ width: '100%' }}>
-                      <Form.Item name="periodOperator" noStyle>
-                        <Select style={{ width: 120 }}>
-                          <Option value="Equals">Equals</Option>
-                        </Select>
-                      </Form.Item>
-                      <Form.Item name="accountingPeriod" noStyle>
-                        <Select style={{ flex: 1 }} placeholder="Select period">
-                          {accountingPeriods.map(p => <Option key={p} value={p}>{p}</Option>)}
-                        </Select>
-                      </Form.Item>
-                    </Space.Compact>
-                  </Form.Item>
+                    {/* Journal Batch */}
+                    <Form.Item label="Journal Batch">
+                      <Space.Compact style={{ width: '100%' }}>
+                        <Form.Item name="batchOperator" noStyle>
+                          <Select style={{ width: 120 }}>
+                            {operators.map(op => <Option key={op} value={op}>{op}</Option>)}
+                          </Select>
+                        </Form.Item>
+                        <Form.Item name="journalBatch" noStyle>
+                          <Input style={{ flex: 1 }} placeholder="Enter batch name" />
+                        </Form.Item>
+                      </Space.Compact>
+                    </Form.Item>
+                  </Col>
 
-                  {/* Source */}
-                  <Form.Item label="Source">
-                    <Space.Compact style={{ width: '100%' }}>
-                      <Form.Item name="sourceOperator" noStyle>
-                        <Select style={{ width: 120 }}>
-                          <Option value="Equals">Equals</Option>
-                        </Select>
-                      </Form.Item>
-                      <Form.Item name="source" noStyle>
-                        <Select style={{ flex: 1 }} placeholder="Select source" allowClear>
-                          {sources.map(s => <Option key={s} value={s}>{s}</Option>)}
-                        </Select>
-                      </Form.Item>
-                    </Space.Compact>
-                  </Form.Item>
-                </Col>
+                  <Col span={12}>
+                    {/* Journal Description */}
+                    <Form.Item label="Journal Desc">
+                      <Space.Compact style={{ width: '100%' }}>
+                        <Form.Item name="journalOperator" noStyle>
+                          <Select style={{ width: 120 }}>
+                            {operators.map(op => <Option key={op} value={op}>{op}</Option>)}
+                          </Select>
+                        </Form.Item>
+                        <Form.Item name="journalDescription" noStyle>
+                          <Input style={{ flex: 1 }} placeholder="Enter description" />
+                        </Form.Item>
+                      </Space.Compact>
+                    </Form.Item>
 
-                <Col span={12}>
-                  {/* Category */}
-                  <Form.Item label="Category">
-                    <Space.Compact style={{ width: '100%' }}>
-                      <Form.Item name="categoryOperator" noStyle>
-                        <Select style={{ width: 120 }}>
-                          <Option value="Equals">Equals</Option>
-                        </Select>
-                      </Form.Item>
-                      <Form.Item name="category" noStyle>
-                        <Select style={{ flex: 1 }} placeholder="Select category" allowClear>
-                          {categories.map(c => <Option key={c} value={c}>{c}</Option>)}
-                        </Select>
-                      </Form.Item>
-                    </Space.Compact>
-                  </Form.Item>
+                    {/* Source */}
+                    <Form.Item label="Source" name="source">
+                      <Input placeholder="Enter source" allowClear />
+                    </Form.Item>
 
-                  {/* Ledger */}
-                  <Form.Item label="Ledger">
-                    <Space.Compact style={{ width: '100%' }}>
-                      <Form.Item name="ledgerOperator" noStyle>
-                        <Select style={{ width: 120 }}>
-                          <Option value="Equals">Equals</Option>
-                        </Select>
-                      </Form.Item>
-                      <Form.Item name="ledger" noStyle>
-                        <Select style={{ flex: 1 }} placeholder="Select ledger" allowClear>
-                          {ledgers.map(l => <Option key={l} value={l}>{l}</Option>)}
-                        </Select>
-                      </Form.Item>
-                    </Space.Compact>
-                  </Form.Item>
+                    {/* Batch Status */}
+                    <Form.Item label="Batch Status" name="batchStatus">
+                      <Select placeholder="Select status" allowClear>
+                        {batchStatuses.map(s => <Option key={s} value={s}>{s}</Option>)}
+                      </Select>
+                    </Form.Item>
+                  </Col>
+                </Row>
 
-                  {/* Batch Status */}
-                  <Form.Item label={<span><span style={{ color: REDWOOD.primary }}>**</span> Batch Status</span>}>
-                    <Space.Compact style={{ width: '100%' }}>
-                      <Form.Item name="statusOperator" noStyle>
-                        <Select style={{ width: 120 }}>
-                          <Option value="Equals">Equals</Option>
-                        </Select>
-                      </Form.Item>
-                      <Form.Item name="batchStatus" noStyle>
-                        <Select style={{ flex: 1 }} placeholder="Select status" allowClear>
-                          {batchStatuses.map(s => <Option key={s} value={s}>{s}</Option>)}
-                        </Select>
-                      </Form.Item>
-                    </Space.Compact>
-                  </Form.Item>
-
-                  {/* Note about required fields */}
-                  <div style={{ textAlign: 'right', marginTop: 8 }}>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      <span style={{ color: REDWOOD.primary }}>**</span> At least one is required
-                    </Text>
-                  </div>
-                </Col>
-              </Row>
-
-              {/* Action Buttons */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16, gap: 8 }}>
-                <Button
-                  type="primary"
-                  icon={<SearchOutlined />}
-                  onClick={handleSearch}
-                  loading={loading}
-                  style={{ background: REDWOOD.neutral900 }}
-                >
-                  Search
-                </Button>
-                <Button icon={<ReloadOutlined />} onClick={handleReset}>
-                  Reset
-                </Button>
-                <Button icon={<SaveOutlined />}>
-                  Save...
-                </Button>
-                <Dropdown menu={{ items: [
-                  { key: 'period', label: 'Period Range' },
-                  { key: 'amount', label: 'Amount Range' },
-                  { key: 'date', label: 'Creation Date' },
-                ] }}>
-                  <Button>
-                    Add Fields <DownOutlined />
+                {/* Action Buttons */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16, gap: 8 }}>
+                  <Button
+                    type="primary"
+                    icon={<SearchOutlined />}
+                    onClick={handleSearch}
+                    loading={loading}
+                    style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+                  >
+                    Search
                   </Button>
-                </Dropdown>
-                <Button>Reorder</Button>
-              </div>
-            </Form>
-          </Card>
+                  <Button icon={<ReloadOutlined />} onClick={handleReset}>
+                    Reset
+                  </Button>
+                  <Button icon={<SaveOutlined />}>
+                    Save...
+                  </Button>
+                </div>
+              </Form>
+            </Panel>
+          </Collapse>
 
           {/* Results Table */}
           <Card
@@ -606,6 +613,9 @@ const ManageJournals: React.FC = () => {
                 </Tooltip>
               </Space>
               <Space>
+                <Text type="secondary">
+                  {totalCount > 0 ? `${totalCount} journals found` : 'No results'}
+                </Text>
                 <Button
                   type="primary"
                   disabled={selectedRowKeys.length === 0}
@@ -615,9 +625,6 @@ const ManageJournals: React.FC = () => {
                 </Button>
                 <Button disabled={selectedRowKeys.length === 0}>
                   Reverse Batch
-                </Button>
-                <Button disabled={selectedRowKeys.length === 0}>
-                  Reverse Journal
                 </Button>
               </Space>
             </div>
@@ -629,15 +636,18 @@ const ManageJournals: React.FC = () => {
               dataSource={journals}
               loading={loading}
               pagination={{
-                total: journals.length,
-                pageSize: 10,
+                total: totalCount,
+                pageSize: 25,
                 showSizeChanger: true,
                 showQuickJumper: true,
                 showTotal: (total) => `Total ${total} journals`,
               }}
-              scroll={{ x: 1500 }}
+              scroll={{ x: 1800 }}
               size="middle"
               style={{ borderRadius: '0 0 12px 12px' }}
+              locale={{
+                emptyText: 'Click Search to load journals',
+              }}
             />
           </Card>
         </div>
