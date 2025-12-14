@@ -47,7 +47,7 @@ BEGIN
         p_items_per_page => 0,
         p_mimes_allowed  => NULL,
         p_comments       => 'Search journals - returns nested JSON (batch + header + lines)',
-        p_source         => '
+        p_source         => q'[
 DECLARE
     v_json          CLOB;
     v_ledger        VARCHAR2(240) := :ledger;
@@ -62,7 +62,7 @@ BEGIN
     -- Validate mandatory parameters
     IF v_ledger IS NULL OR v_period IS NULL THEN
         :status := 400;
-        HTP.P(''{"success": false, "error": "ledger and period are mandatory parameters"}'');
+        HTP.P('{"success": false, "error": "ledger and period are mandatory parameters"}');
         RETURN;
     END IF;
 
@@ -84,9 +84,9 @@ BEGIN
 EXCEPTION
     WHEN OTHERS THEN
         :status := 500;
-        HTP.P(''{"success": false, "error": "'' || REPLACE(SQLERRM, ''"'', ''\"'') || ''"}'');
+        HTP.P('{"success": false, "error": "' || REPLACE(SQLERRM, '"', '\"') || '"}');
 END;
-'
+]'
     );
     COMMIT;
 END;
