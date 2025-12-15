@@ -445,6 +445,18 @@ const ManageJournals: React.FC = () => {
           // Count actual items returned (not trusting API totalCount)
           const actualItemCount = items.length;
 
+          // Group items by source to see distribution
+          const sourceGroups: Record<string, number> = {};
+          items.forEach((item: any) => {
+            const source = item.source || 'UNKNOWN';
+            sourceGroups[source] = (sourceGroups[source] || 0) + 1;
+          });
+
+          addDebugLog('info', `Page ${pageCount} - Items by Source`, {
+            totalItems: actualItemCount,
+            bySource: sourceGroups,
+          });
+
           // Generate unique keys - use combination of fields to ensure uniqueness
           const mappedItems = items.map((item: any, index: number) => {
             // Try multiple ID fields for uniqueness
@@ -494,6 +506,18 @@ const ManageJournals: React.FC = () => {
       // Final check for unique keys before setting state
       const finalKeys = allItems.map(item => item.key);
       const finalUniqueKeys = new Set(finalKeys);
+
+      // Final summary by source
+      const finalSourceGroups: Record<string, number> = {};
+      allItems.forEach((item: any) => {
+        const source = item.source || 'UNKNOWN';
+        finalSourceGroups[source] = (finalSourceGroups[source] || 0) + 1;
+      });
+
+      addDebugLog('info', `FINAL SUMMARY - All items by Source`, {
+        totalItems: allItems.length,
+        bySource: finalSourceGroups,
+      });
 
       addDebugLog('info', `Setting state with data`, {
         totalItemsToSet: allItems.length,
