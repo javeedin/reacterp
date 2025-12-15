@@ -69,14 +69,16 @@ const findChildLink = (links: any[], linkName: string): string | null => {
 };
 
 // Fetch from Oracle via proxy
-const fetchFromOracleUrl = async (url: string, log?: LogCallback): Promise<any> => {
+const fetchFromOracleUrl = async (url: string, log?: LogCallback, verbose = true): Promise<any> => {
   try {
     // Build proxy URL
     const proxyUrl = `${PROXY_CONFIG.baseUrl}/oracle-url?url=${encodeURIComponent(url)}`;
 
-    log?.('step', '──── [GET] Oracle Fusion ────');
-    log?.('info', `GET URL: ${url}`);
-    log?.('info', `Proxy URL: ${proxyUrl}`);
+    if (verbose) {
+      log?.('step', '──── [GET] Oracle Fusion ────');
+      log?.('info', `GET URL: ${url}`);
+      log?.('info', `Proxy URL: ${proxyUrl}`);
+    }
 
     const response = await fetch(proxyUrl);
     const data = await response.json();
@@ -85,7 +87,9 @@ const fetchFromOracleUrl = async (url: string, log?: LogCallback): Promise<any> 
       throw new Error(data.error || 'Fetch failed');
     }
 
-    log?.('success', `GET Response: ${JSON.stringify(data)}`);
+    if (verbose) {
+      log?.('success', `GET Response: ${JSON.stringify(data)}`);
+    }
     return data;
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
@@ -98,16 +102,19 @@ const fetchFromOracleUrl = async (url: string, log?: LogCallback): Promise<any> 
 const fetchFromOracle = async (
   endpoint: string,
   params: Record<string, string> = {},
-  log?: LogCallback
+  log?: LogCallback,
+  verbose = true
 ): Promise<any> => {
   try {
     const queryParams = new URLSearchParams(params);
     const proxyUrl = `${PROXY_CONFIG.baseUrl}/oracle/${endpoint}?${queryParams.toString()}`;
     const oracleUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/${endpoint}?${queryParams.toString()}`;
 
-    log?.('step', '──── [GET] Oracle Fusion ────');
-    log?.('info', `Oracle URL: ${oracleUrl}`);
-    log?.('info', `Proxy URL: ${proxyUrl}`);
+    if (verbose) {
+      log?.('step', '──── [GET] Oracle Fusion ────');
+      log?.('info', `Oracle URL: ${oracleUrl}`);
+      log?.('info', `Proxy URL: ${proxyUrl}`);
+    }
 
     const response = await fetch(proxyUrl);
     const data = await response.json();
@@ -116,7 +123,9 @@ const fetchFromOracle = async (
       throw new Error(data.error || 'Fetch failed');
     }
 
-    log?.('success', `GET Response: ${JSON.stringify(data)}`);
+    if (verbose) {
+      log?.('success', `GET Response: ${JSON.stringify(data)}`);
+    }
     return data;
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
@@ -129,16 +138,19 @@ const fetchFromOracle = async (
 const insertToApex = async (
   endpoint: string,
   payload: any,
-  log?: LogCallback
+  log?: LogCallback,
+  verbose = true
 ): Promise<any> => {
   try {
     const url = `${PROXY_CONFIG.baseUrl}/apex/${endpoint}`;
     const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${endpoint}`;
 
-    log?.('step', '──── [POST] APEX Database ────');
-    log?.('info', `APEX URL: ${apexUrl}`);
-    log?.('info', `Proxy URL: ${url}`);
-    log?.('info', `POST Payload: ${JSON.stringify(payload)}`);
+    if (verbose) {
+      log?.('step', '──── [POST] APEX Database ────');
+      log?.('info', `APEX URL: ${apexUrl}`);
+      log?.('info', `Proxy URL: ${url}`);
+      log?.('info', `POST Payload: ${JSON.stringify(payload)}`);
+    }
 
     const response = await fetch(url, {
       method: 'POST',
@@ -148,7 +160,9 @@ const insertToApex = async (
 
     const data = await response.json();
 
-    log?.('success', `POST Response: ${JSON.stringify(data)}`);
+    if (verbose) {
+      log?.('success', `POST Response: ${JSON.stringify(data)}`);
+    }
 
     return data;
   } catch (error) {
@@ -193,6 +207,9 @@ export const syncGLJournals = async (
     onProgress?.(progress);
   };
 
+  // Verbose logging only for test/single mode, not full sync
+  const verbose = testMode !== false;
+
   try {
     // ========================================
     // STEP 1: Fetch Journal Batches
@@ -224,8 +241,11 @@ export const syncGLJournals = async (
 
     log?.('info', `Parameters: ${JSON.stringify(parameters)}`);
     log?.('info', `Limit: ${limit} batches (${modeLabel})`);
+    if (!verbose) {
+      log?.('info', 'Full sync mode - detailed logging disabled for performance');
+    }
 
-    const batchResult = await fetchFromOracle('journalBatches', batchParams, log);
+    const batchResult = await fetchFromOracle('journalBatches', batchParams, log, verbose);
     const batches = batchResult.items || [];
 
     updateProgress({ totalBatches: batches.length });
@@ -257,9 +277,12 @@ export const syncGLJournals = async (
         processedBatches: batchIndex,
       });
 
-      log?.('step', '───────────────────────────────────────────────────────────');
-      log?.('info', `Processing Batch ${batchIndex + 1}/${batches.length}: ${batch.JournalName || 'Unnamed'}`);
-      log?.('info', `Batch ID: ${batchId}`);
+      // In full sync, only log every 10th batch or first/last for high-level progress
+      const shouldLogBatch = verbose || batchIndex === 0 || batchIndex === batches.length - 1 || (batchIndex + 1) % 10 === 0;
+
+      if (shouldLogBatch) {
+        log?.('info', `Processing Batch ${batchIndex + 1}/${batches.length}: ${batch.JournalName || 'Unnamed'}`);
+      }
 
       // Find journalHeaders child link
       const headersHref = findChildLink(batch.links, 'journalHeaders');
@@ -272,13 +295,14 @@ export const syncGLJournals = async (
       // STEP 2a: Fetch Headers for this Batch
       // ========================================
       updateProgress({ status: 'fetching_headers' });
-      log?.('info', 'Fetching journal headers...');
 
-      const headersResult = await fetchFromOracleUrl(headersHref, log);
+      const headersResult = await fetchFromOracleUrl(headersHref, log, verbose);
       const headers = headersResult.items || [];
 
       updateProgress({ totalHeaders: progress.totalHeaders + headers.length });
-      log?.('success', `Found ${headers.length} headers in this batch`);
+      if (verbose) {
+        log?.('success', `Found ${headers.length} headers in this batch`);
+      }
 
       // ========================================
       // STEP 2b: Process Each Header
@@ -299,7 +323,9 @@ export const syncGLJournals = async (
           processedHeaders: progress.processedHeaders,
         });
 
-        log?.('info', `  Header ${headerIndex + 1}/${headers.length}: ${header.JournalName || 'Unnamed'} (ID: ${headerId})`);
+        if (verbose) {
+          log?.('info', `  Header ${headerIndex + 1}/${headers.length}: ${header.JournalName || 'Unnamed'} (ID: ${headerId})`);
+        }
 
         // Find journalLines child link
         const linesHref = findChildLink(header.links, 'journalLines');
@@ -310,14 +336,15 @@ export const syncGLJournals = async (
         let lines: any[] = [];
         if (linesHref) {
           updateProgress({ status: 'fetching_lines' });
-          log?.('info', '    Fetching journal lines...');
 
           try {
-            const linesResult = await fetchFromOracleUrl(linesHref, log);
+            const linesResult = await fetchFromOracleUrl(linesHref, log, verbose);
             lines = linesResult.items || [];
 
             updateProgress({ totalLines: progress.totalLines + lines.length });
-            log?.('success', `    Found ${lines.length} lines`);
+            if (verbose) {
+              log?.('success', `    Found ${lines.length} lines`);
+            }
           } catch (error) {
             log?.('warning', `    Could not fetch lines: ${error}`);
           }
@@ -338,10 +365,12 @@ export const syncGLJournals = async (
         };
 
         try {
-          const headerInsertResult = await insertToApex(APEX_DB_CONFIG.endpoints.journalHeaders, headerPayload, log);
+          const headerInsertResult = await insertToApex(APEX_DB_CONFIG.endpoints.journalHeaders, headerPayload, log, verbose);
           if (headerInsertResult.success || headerInsertResult.inserted > 0) {
             updateProgress({ totalHeadersInserted: progress.totalHeadersInserted + 1 });
-            log?.('success', `    ✓ Header inserted`);
+            if (verbose) {
+              log?.('success', `    ✓ Header inserted`);
+            }
           } else {
             updateProgress({ errors: progress.errors + 1, lastError: headerInsertResult.error || 'Header insert failed' });
             log?.('error', `    ✗ Header insert failed: ${headerInsertResult.lastError || headerInsertResult.error}`);
@@ -361,11 +390,13 @@ export const syncGLJournals = async (
           };
 
           try {
-            const linesInsertResult = await insertToApex(APEX_DB_CONFIG.endpoints.journalLines, linesPayload, log);
+            const linesInsertResult = await insertToApex(APEX_DB_CONFIG.endpoints.journalLines, linesPayload, log, verbose);
             if (linesInsertResult.success || linesInsertResult.inserted > 0) {
               const insertedCount = linesInsertResult.inserted || lines.length;
               updateProgress({ totalLinesInserted: progress.totalLinesInserted + insertedCount });
-              log?.('success', `    ✓ ${insertedCount} lines inserted`);
+              if (verbose) {
+                log?.('success', `    ✓ ${insertedCount} lines inserted`);
+              }
             } else {
               updateProgress({ errors: progress.errors + 1, lastError: linesInsertResult.error || 'Lines insert failed' });
               log?.('error', `    ✗ Lines insert failed: ${linesInsertResult.lastError || linesInsertResult.error}`);
@@ -384,7 +415,9 @@ export const syncGLJournals = async (
       // ========================================
       // STEP 2f: Insert Batch to APEX
       // ========================================
-      log?.('step', '──── Inserting Batch to APEX ────');
+      if (verbose) {
+        log?.('step', '──── Inserting Batch to APEX ────');
+      }
 
       // Build batch payload with all fields from Oracle Fusion response
       const batchPayload = {
@@ -430,35 +463,44 @@ export const syncGLJournals = async (
       };
 
       try {
-        // Notify callback with batch payload before POST
         const batchName = batch.JournalBatchName || batch.JournalName || `Batch ${batchId}`;
-        onBatchPayload?.(batchId, batchName, batchPayload);
 
-        const batchInsertResult = await insertToApex(APEX_DB_CONFIG.endpoints.journalBatches, batchPayload, log);
+        // Only track batch payloads in verbose mode (test/single) to avoid memory overhead
+        if (verbose) {
+          onBatchPayload?.(batchId, batchName, batchPayload);
+        }
+
+        const batchInsertResult = await insertToApex(APEX_DB_CONFIG.endpoints.journalBatches, batchPayload, log, verbose);
         if (batchInsertResult.success || batchInsertResult.inserted > 0) {
           updateProgress({ totalBatchesInserted: progress.totalBatchesInserted + 1 });
-          log?.('success', `  ✓ Batch inserted to APEX`);
-          // Update callback with success
-          onBatchPayload?.(batchId, batchName, batchPayload, batchInsertResult);
+          if (verbose) {
+            log?.('success', `  ✓ Batch inserted to APEX`);
+            onBatchPayload?.(batchId, batchName, batchPayload, batchInsertResult);
+          }
         } else {
           const errorMsg = batchInsertResult.lastError || batchInsertResult.error || 'Unknown error';
           updateProgress({ errors: progress.errors + 1, lastError: batchInsertResult.error || 'Batch insert failed' });
           log?.('error', `  ✗ Batch insert failed: ${errorMsg || JSON.stringify(batchInsertResult)}`);
-          // Update callback with error
-          onBatchPayload?.(batchId, batchName, batchPayload, batchInsertResult, errorMsg);
+          if (verbose) {
+            onBatchPayload?.(batchId, batchName, batchPayload, batchInsertResult, errorMsg);
+          }
         }
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
         updateProgress({ errors: progress.errors + 1, lastError: errorMsg });
         log?.('error', `  ✗ Batch insert error: ${error}`);
-        // Update callback with error
-        const batchName = batch.JournalBatchName || batch.JournalName || `Batch ${batchId}`;
-        onBatchPayload?.(batchId, batchName, batchPayload, undefined, errorMsg);
+        if (verbose) {
+          const batchName = batch.JournalBatchName || batch.JournalName || `Batch ${batchId}`;
+          onBatchPayload?.(batchId, batchName, batchPayload, undefined, errorMsg);
+        }
       }
 
       updateProgress({ processedBatches: batchIndex + 1 });
 
-      log?.('success', `✓ Batch ${batchIndex + 1}/${batches.length} completed`);
+      // Log batch completion - in full sync only log every 10th or last batch
+      if (shouldLogBatch) {
+        log?.('success', `✓ Batch ${batchIndex + 1}/${batches.length} completed`);
+      }
 
       // Small delay between batches
       await new Promise(resolve => setTimeout(resolve, 200));

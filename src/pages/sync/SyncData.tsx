@@ -136,11 +136,14 @@ const SyncData: React.FC = () => {
       message,
     };
 
-    // Debug: Log to console so we can see all logs even if UI misses some
-    console.log(`[LOG #${logNumber}] [${type.toUpperCase()}] ${message}`);
+    // Only log to console in test modes (verbose), not full sync for performance
+    // Full sync will have minimal logs from the service anyway
+    if (testMode !== false) {
+      console.log(`[LOG #${logNumber}] [${type.toUpperCase()}] ${message}`);
+    }
 
     setLogs((prev) => [log, ...prev].slice(0, 500));
-  }, []);
+  }, [testMode]);
 
   // Update batch payload status after POST
   const updateBatchPayloadStatus = useCallback((batchId: number, status: 'success' | 'error', postResult?: any, errorMessage?: string) => {
