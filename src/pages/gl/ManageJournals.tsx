@@ -475,14 +475,10 @@ const ManageJournals: React.FC = () => {
       ellipsis: true,
       render: (text, record) => {
         const batchName = text || record.batchDescription || '-';
-        // Get all journals in this batch
-        const batchJournals = journals.filter(j => j.jeBatchId === record.jeBatchId);
         return (
           <a
             style={{ color: REDWOOD.info }}
-            onClick={() => navigate(`/gl/batch/${record.jeBatchId}/edit`, {
-              state: { batch: record, batchJournals }
-            })}
+            onClick={() => openJournalTab(record)}
           >
             {batchName}
           </a>
@@ -793,21 +789,28 @@ const ManageJournals: React.FC = () => {
           onChange={onTabChange}
           onEdit={onTabEdit}
           hideAdd
-          size="small"
           style={{ background: REDWOOD.surface }}
           tabBarStyle={{
             margin: 0,
-            padding: '0 16px',
-            background: REDWOOD.neutral100,
-            borderBottom: `1px solid ${REDWOOD.neutral200}`,
+            padding: '4px 16px 0',
+            background: REDWOOD.neutral200,
+            borderBottom: `2px solid ${REDWOOD.info}`,
           }}
           items={[
             {
               key: 'search',
               label: (
-                <span style={{ fontSize: 11 }}>
-                  <SearchOutlined /> Search
-                  {totalCount > 0 && <Tag color={REDWOOD.info} style={{ fontSize: 9, marginLeft: 6 }}>{totalCount}</Tag>}
+                <span style={{
+                  fontSize: 12,
+                  fontWeight: activeTabKey === 'search' ? 600 : 400,
+                  color: activeTabKey === 'search' ? REDWOOD.info : REDWOOD.neutral600,
+                  padding: '4px 8px',
+                }}>
+                  <SearchOutlined style={{ marginRight: 6 }} />
+                  Search
+                  {totalCount > 0 && (
+                    <Tag color={REDWOOD.info} style={{ fontSize: 10, marginLeft: 8 }}>{totalCount}</Tag>
+                  )}
                 </span>
               ),
               closable: false,
@@ -824,13 +827,12 @@ const ManageJournals: React.FC = () => {
               background: REDWOOD.surface,
             }}
             expandIconPosition="end"
-            size="small"
           >
             <Panel
               header={
                 <Space>
-                  <FilterOutlined style={{ color: REDWOOD.info, fontSize: 12 }} />
-                  <Text strong style={{ fontSize: 12 }}>Search Parameters</Text>
+                  <FilterOutlined style={{ color: REDWOOD.info, fontSize: 14 }} />
+                  <Text strong style={{ fontSize: 13 }}>Search Parameters</Text>
                   {!searchExpanded.includes('search') && journals.length > 0 && (
                     <Tag color={REDWOOD.info} style={{ fontSize: 11 }}>{totalCount} results</Tag>
                   )}
@@ -844,7 +846,6 @@ const ManageJournals: React.FC = () => {
                 layout="horizontal"
                 labelCol={{ span: 8 }}
                 wrapperCol={{ span: 16 }}
-                size="small"
                 initialValues={{
                   ledger: 'BUIMERC LEDGER',
                   accountingPeriod: 'May-24',
@@ -1050,8 +1051,14 @@ const ManageJournals: React.FC = () => {
             ...openJournalTabs.map(tab => ({
               key: tab.key,
               label: (
-                <span style={{ fontSize: 11 }}>
-                  <FileTextOutlined /> {tab.journal.journalName}
+                <span style={{
+                  fontSize: 12,
+                  fontWeight: activeTabKey === tab.key ? 600 : 400,
+                  color: activeTabKey === tab.key ? REDWOOD.primary : REDWOOD.neutral600,
+                  padding: '4px 8px',
+                }}>
+                  <FileTextOutlined style={{ marginRight: 6, color: REDWOOD.primary }} />
+                  {tab.journal.journalName}
                 </span>
               ),
               closable: true,

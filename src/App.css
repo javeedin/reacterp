@@ -43,23 +43,38 @@
 
 /* Compact table styles */
 .compact-table .ant-table-thead > tr > th {
-  font-size: 10px !important;
-  padding: 6px 6px !important;
+  font-size: 11px !important;
+  padding: 8px 8px !important;
+  background: #f5f5f5 !important;
 }
 
 .compact-table .ant-table-tbody > tr > td {
-  font-size: 10px !important;
-  padding: 4px 6px !important;
+  font-size: 11px !important;
+  padding: 6px 8px !important;
 }
 
 .compact-table .ant-table-pagination {
-  font-size: 10px !important;
+  font-size: 11px !important;
 }
 
 .compact-table .ant-tag {
-  font-size: 9px !important;
+  font-size: 10px !important;
 }
 
 .compact-table .ant-table-cell {
-  font-size: 10px !important;
+  font-size: 11px !important;
+}
+
+/* Tab styling */
+.ant-tabs-tab {
+  padding: 8px 16px !important;
+}
+
+.ant-tabs-tab-active {
+  background: #fff !important;
+  border-bottom: 2px solid #0572CE !important;
+}
+
+.ant-tabs-tab-btn {
+  font-size: 12px !important;
 }
