@@ -16,7 +16,6 @@ import {
   Divider,
   Alert,
   Breadcrumb,
-  Switch,
   Tooltip,
 } from 'antd';
 import {
@@ -77,7 +76,7 @@ const SyncData: React.FC = () => {
   const [, setApiType] = useState<ApiType>('REST');
   const [logs, setLogs] = useState<SyncLog[]>([]);
   const [isTesting, setIsTesting] = useState(false);
-  const [testMode, setTestMode] = useState(true); // Default to test mode (25 batches)
+  const [testMode, setTestMode] = useState<boolean | 'single'>(true); // true=25, false=full, 'single'=1
   const [proxyStatus, setProxyStatus] = useState<ProxyStatus>('unknown');
   const [proxyError, setProxyError] = useState<string>('');
   const [progress, setProgress] = useState<SyncProgress>({
@@ -262,8 +261,9 @@ const SyncData: React.FC = () => {
       endTime: null,
     });
 
+    const modeLabel = testMode === 'single' ? 'SINGLE RECORD DEBUG' : (testMode ? 'TEST MODE (25 batches)' : 'FULL SYNC');
     addLog('step', '═══════════════════════════════════════════════════════════');
-    addLog('step', `  GL JOURNAL SYNC - ${testMode ? 'TEST MODE (25 batches)' : 'FULL SYNC'}`);
+    addLog('step', `  GL JOURNAL SYNC - ${modeLabel}`);
     addLog('step', '═══════════════════════════════════════════════════════════');
 
     await syncGLJournals(
@@ -467,29 +467,37 @@ const SyncData: React.FC = () => {
 
                   <Divider style={{ margin: '16px 0' }} />
 
-                  {/* Test Mode Toggle */}
+                  {/* Sync Mode Selection */}
                   <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
                     marginBottom: 16,
                     padding: '12px 16px',
                     background: REDWOOD.surfaceSecondary,
                     borderRadius: 8,
                   }}>
-                    <div>
-                      <Text strong>Test Mode</Text>
-                      <br />
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        Limit to {ORACLE_FUSION_CONFIG.testLimit} batches
-                      </Text>
-                    </div>
-                    <Switch
-                      checked={testMode}
-                      onChange={setTestMode}
+                    <Text strong style={{ display: 'block', marginBottom: 8 }}>Sync Mode</Text>
+                    <Select
+                      value={testMode}
+                      onChange={(value) => setTestMode(value)}
                       disabled={isSyncing}
-                      style={{ backgroundColor: testMode ? REDWOOD.primary : undefined }}
-                    />
+                      style={{ width: '100%' }}
+                    >
+                      <Option value="single">
+                        <span style={{ color: REDWOOD.warning }}>●</span> Single Record (Debug)
+                      </Option>
+                      <Option value={true}>
+                        <span style={{ color: REDWOOD.info }}>●</span> Test Mode ({ORACLE_FUSION_CONFIG.testLimit} batches)
+                      </Option>
+                      <Option value={false}>
+                        <span style={{ color: REDWOOD.success }}>●</span> Full Sync (All records)
+                      </Option>
+                    </Select>
+                    <Text type="secondary" style={{ fontSize: 11, marginTop: 4, display: 'block' }}>
+                      {testMode === 'single'
+                        ? 'Debug mode: Sync only 1 batch with full logging'
+                        : testMode
+                        ? `Limited to ${ORACLE_FUSION_CONFIG.testLimit} batches for testing`
+                        : 'Full sync - all matching records'}
+                    </Text>
                   </div>
 
                   <Space direction="vertical" style={{ width: '100%' }} size="middle">

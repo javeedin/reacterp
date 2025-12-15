@@ -11,6 +11,7 @@ export const ORACLE_FUSION_CONFIG = {
   password: 'BCL#261285',
   defaultLimit: 500,
   testLimit: 25, // Limit for testing
+  singleRecordLimit: 1, // Limit for single record debugging
 };
 
 // APEX Database Configuration

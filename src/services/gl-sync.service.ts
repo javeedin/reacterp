@@ -130,6 +130,9 @@ const insertToApex = async (
   try {
     const url = `${PROXY_CONFIG.baseUrl}/apex/${endpoint}`;
 
+    log?.('info', `  [POST] ${url}`);
+    log?.('info', `  Payload: ${JSON.stringify(payload).substring(0, 200)}...`);
+
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -137,6 +140,9 @@ const insertToApex = async (
     });
 
     const data = await response.json();
+
+    log?.('info', `  Response: ${JSON.stringify(data).substring(0, 200)}`);
+
     return data;
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
@@ -148,7 +154,7 @@ const insertToApex = async (
 // Main GL Journal Sync Function
 export const syncGLJournals = async (
   parameters: Record<string, string>,
-  testMode: boolean = true,
+  testMode: boolean | 'single' = true, // true=25, false=full, 'single'=1
   log?: LogCallback,
   onProgress?: ProgressCallback,
   abortSignal?: AbortSignal
@@ -188,11 +194,15 @@ export const syncGLJournals = async (
     log?.('step', '  STEP 1: Fetching Journal Batches from Oracle Fusion');
     log?.('step', '═══════════════════════════════════════════════════════════');
 
-    const limit = testMode ? ORACLE_FUSION_CONFIG.testLimit : ORACLE_FUSION_CONFIG.defaultLimit;
+    const limit = testMode === 'single'
+      ? ORACLE_FUSION_CONFIG.singleRecordLimit
+      : (testMode ? ORACLE_FUSION_CONFIG.testLimit : ORACLE_FUSION_CONFIG.defaultLimit);
     const batchParams: Record<string, string> = {
       limit: limit.toString(),
       offset: '0',
     };
+
+    const modeLabel = testMode === 'single' ? 'SINGLE RECORD DEBUG' : (testMode ? 'TEST MODE (25 batches)' : 'FULL SYNC');
 
     // Add filter parameters
     const filters = Object.entries(parameters)
@@ -205,7 +215,11 @@ export const syncGLJournals = async (
     }
 
     log?.('info', `Parameters: ${JSON.stringify(parameters)}`);
-    log?.('info', `Limit: ${limit} batches (${testMode ? 'TEST MODE' : 'FULL SYNC'})`);
+    log?.('info', `Limit: ${limit} batches (${modeLabel})`);
+
+    // Log the full Oracle URL being used
+    const oracleBatchUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/journalBatches?${new URLSearchParams(batchParams).toString()}`;
+    log?.('info', `Oracle URL: ${oracleBatchUrl}`);
 
     const batchResult = await fetchFromOracle('journalBatches', batchParams, log);
     const batches = batchResult.items || [];
@@ -364,12 +378,45 @@ export const syncGLJournals = async (
       }
 
       // ========================================
-      // STEP 2f: Insert Batch to APEX (optional - if you want to track batches too)
+      // STEP 2f: Insert Batch to APEX
       // ========================================
-      updateProgress({
-        processedBatches: batchIndex + 1,
-        totalBatchesInserted: progress.totalBatchesInserted + 1,
-      });
+      log?.('info', '  Inserting batch to APEX...');
+
+      const batchPayload = {
+        items: [{
+          BatchId: batchId,
+          JournalBatchName: batch.JournalBatchName || batch.JournalName,
+          JournalName: batch.JournalName,
+          LedgerId: batch.LedgerId,
+          LedgerName: batch.LedgerName,
+          AccountingPeriodName: batch.AccountingPeriodName || batch.DefaultPeriodName,
+          DefaultPeriodName: batch.DefaultPeriodName,
+          Status: batch.Status,
+          ApprovalStatus: batch.ApprovalStatus,
+          PostedDate: batch.PostedDate,
+          CreationDate: batch.CreationDate,
+          CreatedBy: batch.CreatedBy,
+          LastUpdateDate: batch.LastUpdateDate,
+          LastUpdatedBy: batch.LastUpdatedBy,
+          Description: batch.Description,
+        }],
+      };
+
+      try {
+        const batchInsertResult = await insertToApex(APEX_DB_CONFIG.endpoints.journalBatches, batchPayload, log);
+        if (batchInsertResult.success || batchInsertResult.inserted > 0) {
+          updateProgress({ totalBatchesInserted: progress.totalBatchesInserted + 1 });
+          log?.('success', `  ✓ Batch inserted to APEX`);
+        } else {
+          updateProgress({ errors: progress.errors + 1, lastError: batchInsertResult.error || 'Batch insert failed' });
+          log?.('error', `  ✗ Batch insert failed: ${batchInsertResult.lastError || batchInsertResult.error || JSON.stringify(batchInsertResult)}`);
+        }
+      } catch (error) {
+        updateProgress({ errors: progress.errors + 1, lastError: String(error) });
+        log?.('error', `  ✗ Batch insert error: ${error}`);
+      }
+
+      updateProgress({ processedBatches: batchIndex + 1 });
 
       log?.('success', `✓ Batch ${batchIndex + 1}/${batches.length} completed`);
 
