@@ -419,12 +419,23 @@ const ManageJournals: React.FC = () => {
         const response = await fetch(url);
         const data: ApiResponse = await response.json();
 
+        // Log first 3 items to see the data structure
+        const sampleItems = (data.items || []).slice(0, 3).map((item: any) => ({
+          batchId: item.batchId,
+          jeBatchId: item.jeBatchId,
+          headerId: item.headerId,
+          jeHeaderId: item.jeHeaderId,
+          batchName: item.batchName,
+          journalName: item.journalName,
+        }));
+
         addDebugLog('response', `Page ${pageCount} - Response received`, {
           success: data.success,
           itemsReturnedFromApi: data.items?.length || 0,
           apiTotalCount: data.totalCount,
           apiOffset: data.offset,
           apiLimit: data.limit,
+          sampleItems: sampleItems,
           note: 'API totalCount may be wrong - we count actual items instead',
         });
 
@@ -434,16 +445,30 @@ const ManageJournals: React.FC = () => {
           // Count actual items returned (not trusting API totalCount)
           const actualItemCount = items.length;
 
-          allItems = [...allItems, ...items.map((item, index) => ({
-            ...item,
-            key: item.headerId?.toString() || `${offset + index}`,
-          }))];
+          // Generate unique keys - use combination of fields to ensure uniqueness
+          const mappedItems = items.map((item: any, index: number) => {
+            // Try multiple ID fields for uniqueness
+            const uniqueKey = item.headerId || item.jeHeaderId || item.batchId || item.jeBatchId || `page${pageCount}_idx${index}`;
+            return {
+              ...item,
+              key: `${uniqueKey}_${offset + index}`, // Always append index to guarantee uniqueness
+            };
+          });
+
+          allItems = [...allItems, ...mappedItems];
+
+          // Check for duplicate keys
+          const keys = allItems.map(item => item.key);
+          const uniqueKeys = new Set(keys);
+          const hasDuplicates = keys.length !== uniqueKeys.size;
 
           addDebugLog('info', `Page ${pageCount} processed`, {
             actualItemsThisPage: actualItemCount,
             totalItemsSoFar: allItems.length,
+            uniqueKeysCount: uniqueKeys.size,
+            hasDuplicateKeys: hasDuplicates,
             apiReportedTotal: data.totalCount,
-            note: actualItemCount !== data.totalCount ? 'API totalCount is WRONG!' : 'API totalCount matches',
+            note: hasDuplicates ? 'WARNING: Duplicate keys detected!' : 'Keys are unique',
           });
 
           // Check if there are more pages
@@ -466,6 +491,18 @@ const ManageJournals: React.FC = () => {
         }
       }
 
+      // Final check for unique keys before setting state
+      const finalKeys = allItems.map(item => item.key);
+      const finalUniqueKeys = new Set(finalKeys);
+
+      addDebugLog('info', `Setting state with data`, {
+        totalItemsToSet: allItems.length,
+        uniqueKeys: finalUniqueKeys.size,
+        hasDuplicates: finalKeys.length !== finalUniqueKeys.size,
+        firstFewKeys: finalKeys.slice(0, 5),
+        lastFewKeys: finalKeys.slice(-3),
+      });
+
       // Set all fetched data
       setJournals(allItems);
       setTotalCount(allItems.length);
@@ -473,6 +510,7 @@ const ManageJournals: React.FC = () => {
       addDebugLog('info', `Search complete`, {
         totalPages: pageCount,
         actualTotalRecords: allItems.length,
+        note: 'Data set to state - check React DevTools if UI shows fewer rows',
       });
 
       // Save to sessionStorage for persistence
@@ -653,6 +691,27 @@ const ManageJournals: React.FC = () => {
       key: 'postedDate',
       width: 110,
       render: (text) => text || '-',
+    },
+    {
+      title: 'JE Batch ID',
+      dataIndex: 'jeBatchId',
+      key: 'jeBatchId',
+      width: 120,
+      render: (text) => <Text code>{text || '-'}</Text>,
+    },
+    {
+      title: 'Batch ID',
+      dataIndex: 'batchId',
+      key: 'batchId',
+      width: 100,
+      render: (text) => <Text code>{text || '-'}</Text>,
+    },
+    {
+      title: 'Header ID',
+      dataIndex: 'headerId',
+      key: 'headerId',
+      width: 100,
+      render: (text) => <Text code>{text || '-'}</Text>,
     },
   ];
 
