@@ -417,7 +417,15 @@ const ManageJournals: React.FC = () => {
         addDebugLog('request', `Page ${pageCount} - GET Request`, { url, offset, limit: PAGE_SIZE });
 
         const response = await fetch(url);
-        const data: ApiResponse = await response.json();
+        const responseText = await response.text();
+
+        addDebugLog('response', `Page ${pageCount} - Raw response`, {
+          responseLength: responseText.length,
+          first500Chars: responseText.substring(0, 500),
+          last200Chars: responseText.substring(responseText.length - 200),
+        });
+
+        const data: ApiResponse = JSON.parse(responseText);
 
         // Log first 3 items to see the data structure
         const sampleItems = (data.items || []).slice(0, 3).map((item: any) => ({
