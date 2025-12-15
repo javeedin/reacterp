@@ -758,6 +758,61 @@ const ManageJournals: React.FC = () => {
             bordered
             className="compact-table"
             locale={{ emptyText: 'No journal lines' }}
+            summary={() => {
+              const lines = journal.lines || [];
+              const totals = lines.reduce(
+                (acc, line) => ({
+                  enteredDr: acc.enteredDr + (line.enteredDr || 0),
+                  enteredCr: acc.enteredCr + (line.enteredCr || 0),
+                  accountedDr: acc.accountedDr + (line.accountedDr || 0),
+                  accountedCr: acc.accountedCr + (line.accountedCr || 0),
+                }),
+                { enteredDr: 0, enteredCr: 0, accountedDr: 0, accountedCr: 0 }
+              );
+              const isBalanced = Math.abs(totals.enteredDr - totals.enteredCr) < 0.01;
+
+              return (
+                <Table.Summary fixed>
+                  <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
+                    <Table.Summary.Cell index={0} />
+                    <Table.Summary.Cell index={1}>
+                      <Text strong style={{ fontSize: 11 }}>Total</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={2} />
+                    <Table.Summary.Cell index={3} />
+                    <Table.Summary.Cell index={4} align="right">
+                      <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>{formatNumber(totals.enteredDr)}</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={5} align="right">
+                      <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>{formatNumber(totals.enteredCr)}</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={6} align="right">
+                      <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>{formatNumber(totals.accountedDr)}</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={7} align="right">
+                      <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>{formatNumber(totals.accountedCr)}</Text>
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                  <Table.Summary.Row style={{ background: isBalanced ? '#e6f7e6' : '#fff2f0' }}>
+                    <Table.Summary.Cell index={0} colSpan={4}>
+                      <Text strong style={{ fontSize: 11 }}>
+                        {isBalanced ? '✓ Balanced' : '⚠ Out of Balance'}
+                      </Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={4} colSpan={2} align="right">
+                      <Text style={{ fontSize: 11 }}>
+                        Difference: {formatNumber(Math.abs(totals.enteredDr - totals.enteredCr))}
+                      </Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={6} colSpan={2} align="right">
+                      <Text style={{ fontSize: 11 }}>
+                        Difference: {formatNumber(Math.abs(totals.accountedDr - totals.accountedCr))}
+                      </Text>
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                </Table.Summary>
+              );
+            }}
           />
         </Card>
       </div>
