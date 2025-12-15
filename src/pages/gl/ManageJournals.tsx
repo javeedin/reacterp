@@ -400,7 +400,6 @@ const ManageJournals: React.FC = () => {
       const PAGE_SIZE = 500; // ORDS default max
       let offset = 0;
       let allItems: JournalRecord[] = [];
-      let totalFromApi = 0;
       let hasMore = true;
       let pageCount = 0;
 
@@ -422,39 +421,43 @@ const ManageJournals: React.FC = () => {
 
         addDebugLog('response', `Page ${pageCount} - Response received`, {
           success: data.success,
-          itemsReturned: data.items?.length || 0,
-          totalCount: data.totalCount,
-          offset: data.offset,
-          limit: data.limit,
-          hasMoreField: data.hasMore,
+          itemsReturnedFromApi: data.items?.length || 0,
+          apiTotalCount: data.totalCount,
+          apiOffset: data.offset,
+          apiLimit: data.limit,
+          note: 'API totalCount may be wrong - we count actual items instead',
         });
 
         if (data.success) {
           const items = data.items || [];
+
+          // Count actual items returned (not trusting API totalCount)
+          const actualItemCount = items.length;
+
           allItems = [...allItems, ...items.map((item, index) => ({
             ...item,
             key: item.headerId?.toString() || `${offset + index}`,
           }))];
 
-          totalFromApi = data.totalCount || allItems.length;
-
           addDebugLog('info', `Page ${pageCount} processed`, {
-            itemsThisPage: items.length,
-            totalSoFar: allItems.length,
-            apiTotalCount: totalFromApi,
+            actualItemsThisPage: actualItemCount,
+            totalItemsSoFar: allItems.length,
+            apiReportedTotal: data.totalCount,
+            note: actualItemCount !== data.totalCount ? 'API totalCount is WRONG!' : 'API totalCount matches',
           });
 
           // Check if there are more pages
-          // Stop if: returned less than requested, or we have all records
-          if (items.length < PAGE_SIZE || allItems.length >= totalFromApi) {
+          // ONLY stop if we got LESS than PAGE_SIZE items (meaning no more data)
+          if (actualItemCount < PAGE_SIZE) {
             hasMore = false;
-            addDebugLog('info', `Pagination complete - stopping`, {
-              reason: items.length < PAGE_SIZE ? 'items < PAGE_SIZE' : 'allItems >= totalFromApi',
+            addDebugLog('info', `Pagination complete - no more pages`, {
+              reason: `Got ${actualItemCount} items (less than PAGE_SIZE=${PAGE_SIZE})`,
               finalCount: allItems.length,
             });
           } else {
+            // Got full page, there might be more
             offset += PAGE_SIZE;
-            addDebugLog('info', `More pages needed, next offset: ${offset}`);
+            addDebugLog('info', `Got full page (${actualItemCount} items), fetching more at offset: ${offset}`);
           }
         } else {
           addDebugLog('error', 'API returned error', { error: data.error });
@@ -469,8 +472,7 @@ const ManageJournals: React.FC = () => {
 
       addDebugLog('info', `Search complete`, {
         totalPages: pageCount,
-        totalRecords: allItems.length,
-        apiReportedTotal: totalFromApi,
+        actualTotalRecords: allItems.length,
       });
 
       // Save to sessionStorage for persistence
@@ -480,7 +482,7 @@ const ManageJournals: React.FC = () => {
         formValues: values,
       }));
 
-      message.success(`Found ${allItems.length} journals (API reported: ${totalFromApi})`);
+      message.success(`Found ${allItems.length} journals`);
 
     } catch (error) {
       addDebugLog('error', 'Fetch error', { error: String(error) });
