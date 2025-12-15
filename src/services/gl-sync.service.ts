@@ -77,7 +77,8 @@ const fetchFromOracleUrl = async (url: string, log?: LogCallback): Promise<any> 
     // Build proxy URL
     const proxyUrl = `${PROXY_CONFIG.baseUrl}/oracle-url?url=${encodeURIComponent(url)}`;
 
-    log?.('info', `Fetching: ${relativePath.substring(0, 80)}...`);
+    log?.('info', `Fetching: ${relativePath}`);
+    log?.('info', `  Full URL: ${proxyUrl}`);
 
     const response = await fetch(proxyUrl);
     const data = await response.json();
@@ -131,7 +132,7 @@ const insertToApex = async (
     const url = `${PROXY_CONFIG.baseUrl}/apex/${endpoint}`;
 
     log?.('info', `  [POST] ${url}`);
-    log?.('info', `  Payload: ${JSON.stringify(payload).substring(0, 200)}...`);
+    log?.('info', `  Payload: ${JSON.stringify(payload)}`);
 
     const response = await fetch(url, {
       method: 'POST',
@@ -141,7 +142,7 @@ const insertToApex = async (
 
     const data = await response.json();
 
-    log?.('info', `  Response: ${JSON.stringify(data).substring(0, 200)}`);
+    log?.('info', `  Response: ${JSON.stringify(data)}`);
 
     return data;
   } catch (error) {
