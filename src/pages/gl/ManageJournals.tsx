@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Layout,
   Card,
@@ -17,7 +17,6 @@ import {
   Dropdown,
   Collapse,
   message,
-  FloatButton,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -38,10 +37,19 @@ import {
   CloseCircleOutlined,
   ClockCircleOutlined,
   FilterOutlined,
-  SyncOutlined,
-  SettingOutlined,
-  MenuOutlined,
-  FileAddOutlined,
+  CheckSquareOutlined,
+  BarChartOutlined,
+  FileTextOutlined,
+  SwapOutlined,
+  ReconciliationOutlined,
+  CalendarOutlined,
+  AuditOutlined,
+  DollarOutlined,
+  ProfileOutlined,
+  PieChartOutlined,
+  LineChartOutlined,
+  FundOutlined,
+  CloseOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -66,7 +74,40 @@ const REDWOOD = {
   neutral600: '#6B6B6B',
   neutral900: '#1A1A1A',
   surface: '#FFFFFF',
+  taskBlue: '#0572CE',
+  reportGreen: '#1D7B4D',
 };
+
+// Menu item type for floating panels
+interface FloatingMenuItem {
+  key: string;
+  icon: React.ReactNode;
+  label: string;
+  description?: string;
+  color?: string;
+  path?: string;
+}
+
+// Task menu items
+const taskMenuItems: FloatingMenuItem[] = [
+  { key: 'manage-journals', icon: <AccountBookOutlined />, label: 'Manage Journals', description: 'Search and manage journal entries', color: REDWOOD.primary, path: '/gl/manage-journals' },
+  { key: 'journal-entry', icon: <FileTextOutlined />, label: 'Create Journal', description: 'Create manual journal entry', color: REDWOOD.taskBlue },
+  { key: 'import-journals', icon: <SwapOutlined />, label: 'Import Journals', description: 'Import from spreadsheet', color: REDWOOD.info },
+  { key: 'reverse-journal', icon: <ReconciliationOutlined />, label: 'Reverse Journal', description: 'Reverse posted journals', color: REDWOOD.warning },
+  { key: 'open-period', icon: <CalendarOutlined />, label: 'Open Period', description: 'Open accounting period', color: REDWOOD.success },
+  { key: 'close-period', icon: <AuditOutlined />, label: 'Close Period', description: 'Close accounting period', color: REDWOOD.primaryDark },
+  { key: 'revaluation', icon: <DollarOutlined />, label: 'Run Revaluation', description: 'Foreign currency revaluation', color: REDWOOD.primary },
+];
+
+// Report menu items
+const reportMenuItems: FloatingMenuItem[] = [
+  { key: 'trial-balance', icon: <ProfileOutlined />, label: 'Trial Balance', description: 'View trial balance report', color: REDWOOD.reportGreen },
+  { key: 'balance-sheet', icon: <PieChartOutlined />, label: 'Balance Sheet', description: 'Financial position report', color: REDWOOD.info },
+  { key: 'income-statement', icon: <LineChartOutlined />, label: 'Income Statement', description: 'Profit and loss report', color: REDWOOD.success },
+  { key: 'journal-report', icon: <FileTextOutlined />, label: 'Journal Report', description: 'Posted journals listing', color: REDWOOD.taskBlue },
+  { key: 'account-analysis', icon: <FundOutlined />, label: 'Account Analysis', description: 'Account detail analysis', color: REDWOOD.warning },
+  { key: 'gl-balances', icon: <BarChartOutlined />, label: 'GL Balances', description: 'General ledger balances', color: REDWOOD.primary },
+];
 
 // API Base URL
 const API_BASE_URL = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/gl/journals';
@@ -162,6 +203,12 @@ const ManageJournals: React.FC = () => {
   const [totalCount, setTotalCount] = useState(0);
   const [searchExpanded, setSearchExpanded] = useState<string[]>(['search']);
 
+  // Floating panel state
+  const [activePanel, setActivePanel] = useState<'none' | 'tasks' | 'reports'>('none');
+  const [isClosing, setIsClosing] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const floatingIconsRef = useRef<HTMLDivElement>(null);
+
   // Restore search data from sessionStorage on mount
   useEffect(() => {
     const savedData = sessionStorage.getItem(STORAGE_KEY);
@@ -181,6 +228,51 @@ const ManageJournals: React.FC = () => {
       }
     }
   }, []);
+
+  // Click outside handler for floating panels
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      const isOutsidePanel = panelRef.current && !panelRef.current.contains(target);
+      const isOutsideFloatingIcons = floatingIconsRef.current && !floatingIconsRef.current.contains(target);
+
+      if (isOutsidePanel && isOutsideFloatingIcons) {
+        closePanel();
+      }
+    };
+
+    if (activePanel !== 'none') {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [activePanel]);
+
+  const closePanel = () => {
+    setIsClosing(true);
+    setTimeout(() => {
+      setActivePanel('none');
+      setIsClosing(false);
+    }, 250);
+  };
+
+  const togglePanel = (panel: 'tasks' | 'reports') => {
+    if (activePanel === panel) {
+      closePanel();
+    } else {
+      setIsClosing(false);
+      setActivePanel(panel);
+    }
+  };
+
+  const handleMenuItemClick = (key: string, path?: string) => {
+    closePanel();
+    if (path) {
+      navigate(path);
+    }
+  };
 
   // Search handler - calls the API
   const handleSearch = async () => {
@@ -691,39 +783,301 @@ const ManageJournals: React.FC = () => {
         </div>
       </Content>
 
-      {/* Floating Menu Icons */}
-      <FloatButton.Group
-        trigger="hover"
-        type="primary"
-        style={{ right: 24, bottom: 24 }}
-        icon={<MenuOutlined />}
+      {/* Floating Connected Icons */}
+      <div
+        ref={floatingIconsRef}
+        style={{
+          position: 'fixed',
+          right: 24,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          zIndex: 1000,
+          display: 'flex',
+          flexDirection: 'column',
+        }}
       >
-        <FloatButton
-          icon={<HomeOutlined />}
-          tooltip="Home"
-          onClick={() => navigate('/home')}
+        {/* Tasks Icon */}
+        <Tooltip title={activePanel !== 'tasks' ? 'Tasks' : ''} placement="left">
+          <div
+            onClick={() => togglePanel('tasks')}
+            style={{
+              width: 56,
+              height: 56,
+              borderRadius: '12px 12px 0 0',
+              background: activePanel === 'tasks' ? REDWOOD.taskBlue : REDWOOD.surface,
+              border: `2px solid ${REDWOOD.taskBlue}`,
+              borderBottom: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              transition: 'all 0.3s ease',
+              boxShadow: activePanel === 'tasks' ? `0 4px 12px ${REDWOOD.taskBlue}40` : '0 2px 8px rgba(0,0,0,0.1)',
+              color: activePanel === 'tasks' ? '#fff' : REDWOOD.taskBlue,
+              fontSize: 24,
+            }}
+          >
+            <CheckSquareOutlined />
+          </div>
+        </Tooltip>
+
+        {/* Connector Line */}
+        <div style={{
+          width: 56,
+          height: 2,
+          background: REDWOOD.neutral200,
+        }} />
+
+        {/* Reports Icon */}
+        <Tooltip title={activePanel !== 'reports' ? 'Reports' : ''} placement="left">
+          <div
+            onClick={() => togglePanel('reports')}
+            style={{
+              width: 56,
+              height: 56,
+              borderRadius: '0 0 12px 12px',
+              background: activePanel === 'reports' ? REDWOOD.reportGreen : REDWOOD.surface,
+              border: `2px solid ${REDWOOD.reportGreen}`,
+              borderTop: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              transition: 'all 0.3s ease',
+              boxShadow: activePanel === 'reports' ? `0 4px 12px ${REDWOOD.reportGreen}40` : '0 2px 8px rgba(0,0,0,0.1)',
+              color: activePanel === 'reports' ? '#fff' : REDWOOD.reportGreen,
+              fontSize: 24,
+            }}
+          >
+            <BarChartOutlined />
+          </div>
+        </Tooltip>
+      </div>
+
+      {/* Backdrop Overlay */}
+      {activePanel !== 'none' && (
+        <div
+          onClick={closePanel}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.3)',
+            zIndex: 1000,
+            animation: isClosing ? 'fadeOut 0.25s ease forwards' : 'fadeIn 0.3s ease forwards',
+          }}
         />
-        <FloatButton
-          icon={<FileAddOutlined />}
-          tooltip="Create Journal"
-          onClick={() => message.info('Create Journal - Coming soon')}
-        />
-        <FloatButton
-          icon={<SyncOutlined />}
-          tooltip="Sync Data"
-          onClick={() => navigate('/sync')}
-        />
-        <FloatButton
-          icon={<PrinterOutlined />}
-          tooltip="Print"
-          onClick={() => message.info('Print - Coming soon')}
-        />
-        <FloatButton
-          icon={<SettingOutlined />}
-          tooltip="Settings"
-          onClick={() => message.info('Settings - Coming soon')}
-        />
-      </FloatButton.Group>
+      )}
+
+      {/* Slide-out Panels */}
+      <div ref={panelRef}>
+        {activePanel === 'tasks' && (
+          <div
+            style={{
+              position: 'fixed',
+              right: 0,
+              top: 0,
+              bottom: 0,
+              width: 400,
+              background: REDWOOD.surface,
+              boxShadow: '-4px 0 24px rgba(0,0,0,0.15)',
+              overflow: 'hidden',
+              animation: isClosing ? 'slideOut 0.25s ease-in forwards' : 'slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+              zIndex: 1001,
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            <div style={{
+              padding: '20px 24px',
+              background: REDWOOD.taskBlue,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexShrink: 0,
+            }}>
+              <Text strong style={{ color: '#fff', fontSize: 18 }}>Tasks</Text>
+              <CloseOutlined
+                style={{ color: '#fff', cursor: 'pointer', fontSize: 16, padding: 8 }}
+                onClick={closePanel}
+              />
+            </div>
+            <div style={{ padding: 16, flex: 1, overflowY: 'auto' }}>
+              {taskMenuItems.map((item, index) => (
+                <div
+                  key={item.key}
+                  onClick={() => handleMenuItemClick(item.key, item.path)}
+                  style={{
+                    padding: '16px 20px',
+                    borderRadius: 12,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 16,
+                    transition: 'all 0.2s ease',
+                    marginBottom: 8,
+                    border: `1px solid ${REDWOOD.neutral200}`,
+                    background: REDWOOD.surface,
+                    opacity: 0,
+                    animation: `fadeInItem 0.3s ease-out ${index * 0.05}s forwards`,
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = REDWOOD.neutral100;
+                    e.currentTarget.style.borderColor = item.color || REDWOOD.taskBlue;
+                    e.currentTarget.style.transform = 'translateX(-4px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = REDWOOD.surface;
+                    e.currentTarget.style.borderColor = REDWOOD.neutral200;
+                    e.currentTarget.style.transform = 'translateX(0)';
+                  }}
+                >
+                  <div style={{
+                    width: 46,
+                    height: 46,
+                    borderRadius: 12,
+                    background: `${item.color || REDWOOD.taskBlue}15`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: item.color || REDWOOD.taskBlue,
+                    fontSize: 22,
+                    flexShrink: 0,
+                  }}>
+                    {item.icon}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <Text strong style={{ display: 'block', color: REDWOOD.neutral900, fontSize: 15 }}>
+                      {item.label}
+                    </Text>
+                    {item.description && (
+                      <Text type="secondary" style={{ fontSize: 13, lineHeight: 1.4 }}>
+                        {item.description}
+                      </Text>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {activePanel === 'reports' && (
+          <div
+            style={{
+              position: 'fixed',
+              right: 0,
+              top: 0,
+              bottom: 0,
+              width: 400,
+              background: REDWOOD.surface,
+              boxShadow: '-4px 0 24px rgba(0,0,0,0.15)',
+              overflow: 'hidden',
+              animation: isClosing ? 'slideOut 0.25s ease-in forwards' : 'slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+              zIndex: 1001,
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            <div style={{
+              padding: '20px 24px',
+              background: REDWOOD.reportGreen,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexShrink: 0,
+            }}>
+              <Text strong style={{ color: '#fff', fontSize: 18 }}>Reports</Text>
+              <CloseOutlined
+                style={{ color: '#fff', cursor: 'pointer', fontSize: 16, padding: 8 }}
+                onClick={closePanel}
+              />
+            </div>
+            <div style={{ padding: 16, flex: 1, overflowY: 'auto' }}>
+              {reportMenuItems.map((item, index) => (
+                <div
+                  key={item.key}
+                  onClick={() => handleMenuItemClick(item.key, item.path)}
+                  style={{
+                    padding: '16px 20px',
+                    borderRadius: 12,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 16,
+                    transition: 'all 0.2s ease',
+                    marginBottom: 8,
+                    border: `1px solid ${REDWOOD.neutral200}`,
+                    background: REDWOOD.surface,
+                    opacity: 0,
+                    animation: `fadeInItem 0.3s ease-out ${index * 0.05}s forwards`,
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = REDWOOD.neutral100;
+                    e.currentTarget.style.borderColor = item.color || REDWOOD.reportGreen;
+                    e.currentTarget.style.transform = 'translateX(-4px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = REDWOOD.surface;
+                    e.currentTarget.style.borderColor = REDWOOD.neutral200;
+                    e.currentTarget.style.transform = 'translateX(0)';
+                  }}
+                >
+                  <div style={{
+                    width: 46,
+                    height: 46,
+                    borderRadius: 12,
+                    background: `${item.color || REDWOOD.reportGreen}15`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: item.color || REDWOOD.reportGreen,
+                    fontSize: 22,
+                    flexShrink: 0,
+                  }}>
+                    {item.icon}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <Text strong style={{ display: 'block', color: REDWOOD.neutral900, fontSize: 15 }}>
+                      {item.label}
+                    </Text>
+                    {item.description && (
+                      <Text type="secondary" style={{ fontSize: 13, lineHeight: 1.4 }}>
+                        {item.description}
+                      </Text>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* CSS Animations */}
+      <style>{`
+        @keyframes slideIn {
+          from { transform: translateX(100%); }
+          to { transform: translateX(0); }
+        }
+        @keyframes slideOut {
+          from { transform: translateX(0); }
+          to { transform: translateX(100%); }
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes fadeOut {
+          from { opacity: 1; }
+          to { opacity: 0; }
+        }
+        @keyframes fadeInItem {
+          from { opacity: 0; transform: translateX(20px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+      `}</style>
 
       {/* Autopilot */}
       <Autopilot />
