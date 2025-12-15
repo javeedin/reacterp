@@ -65,6 +65,16 @@
   font-size: 11px !important;
 }
 
+/* Summary row styles */
+.compact-table .ant-table-summary .ant-table-cell {
+  font-size: 11px !important;
+  padding: 6px 8px !important;
+}
+
+.compact-table .ant-table-summary .ant-typography {
+  font-size: 11px !important;
+}
+
 /* Tab styling */
 .ant-tabs-tab {
   padding: 8px 16px !important;
