@@ -17,6 +17,7 @@ import {
   Dropdown,
   Collapse,
   message,
+  Tabs,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -194,6 +195,12 @@ const operators = ['Starts with', 'Equals', 'Contains', 'Ends with'];
 // Session storage key for preserving search data
 const STORAGE_KEY = 'manageJournals_searchData';
 
+// Interface for open journal tabs
+interface OpenJournalTab {
+  key: string;
+  journal: JournalRecord;
+}
+
 const ManageJournals: React.FC = () => {
   const navigate = useNavigate();
   const [form] = Form.useForm();
@@ -202,6 +209,10 @@ const ManageJournals: React.FC = () => {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [searchExpanded, setSearchExpanded] = useState<string[]>(['search']);
+
+  // Tab management state
+  const [activeTabKey, setActiveTabKey] = useState('search');
+  const [openJournalTabs, setOpenJournalTabs] = useState<OpenJournalTab[]>([]);
 
   // Floating panel state
   const [activePanel, setActivePanel] = useState<'none' | 'tasks' | 'reports'>('none');
@@ -271,6 +282,50 @@ const ManageJournals: React.FC = () => {
     closePanel();
     if (path) {
       navigate(path);
+    }
+  };
+
+  // Open journal in a new tab
+  const openJournalTab = (journal: JournalRecord) => {
+    const tabKey = `journal-${journal.jeHeaderId}`;
+
+    // Check if tab is already open
+    const existingTab = openJournalTabs.find(tab => tab.key === tabKey);
+    if (existingTab) {
+      // Just switch to existing tab
+      setActiveTabKey(tabKey);
+      return;
+    }
+
+    // Add new tab
+    setOpenJournalTabs(prev => [...prev, { key: tabKey, journal }]);
+    setActiveTabKey(tabKey);
+  };
+
+  // Close journal tab
+  const closeJournalTab = (tabKey: string) => {
+    const newTabs = openJournalTabs.filter(tab => tab.key !== tabKey);
+    setOpenJournalTabs(newTabs);
+
+    // If closing active tab, switch to search or last tab
+    if (activeTabKey === tabKey) {
+      if (newTabs.length > 0) {
+        setActiveTabKey(newTabs[newTabs.length - 1].key);
+      } else {
+        setActiveTabKey('search');
+      }
+    }
+  };
+
+  // Handle tab change
+  const onTabChange = (key: string) => {
+    setActiveTabKey(key);
+  };
+
+  // Handle tab edit (close)
+  const onTabEdit = (targetKey: React.MouseEvent | React.KeyboardEvent | string, action: 'add' | 'remove') => {
+    if (action === 'remove' && typeof targetKey === 'string') {
+      closeJournalTab(targetKey);
     }
   };
 
@@ -405,7 +460,7 @@ const ManageJournals: React.FC = () => {
       render: (text, record) => (
         <a
           style={{ color: REDWOOD.info, fontWeight: 500 }}
-          onClick={() => navigate(`/gl/journals/${record.jeHeaderId}/edit`, { state: { journal: record } })}
+          onClick={() => openJournalTab(record)}
         >
           {text || '-'}
         </a>
@@ -530,12 +585,195 @@ const ManageJournals: React.FC = () => {
     onChange: (keys: React.Key[]) => setSelectedRowKeys(keys),
   };
 
+  // Render Journal Edit Panel (for tab content)
+  const renderJournalEditPanel = (journal: JournalRecord) => {
+    const formatNumber = (num: number | null | undefined) => {
+      if (num === null || num === undefined) return '';
+      return num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    };
+
+    return (
+      <div style={{ padding: 16 }}>
+        {/* Journal Header Card */}
+        <Card
+          style={{ marginBottom: 12, borderRadius: 6 }}
+          bodyStyle={{ padding: 0 }}
+        >
+          <div
+            style={{
+              padding: '8px 12px',
+              background: REDWOOD.neutral100,
+              borderBottom: `1px solid ${REDWOOD.neutral200}`,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
+            <Space>
+              <Text strong style={{ fontSize: 11 }}>
+                Journal Batch: {journal.batchName}
+              </Text>
+            </Space>
+            <Space size="small">
+              <Dropdown.Button
+                type="primary"
+                size="small"
+                style={{ background: REDWOOD.success }}
+              >
+                Save
+              </Dropdown.Button>
+              <Button size="small" style={{ background: '#1890ff', color: '#fff', fontSize: 10 }}>
+                Post
+              </Button>
+            </Space>
+          </div>
+
+          <div style={{ padding: 10 }}>
+            <Row gutter={[16, 6]}>
+              <Col span={12}>
+                <Row gutter={[6, 5]}>
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Journal Batch</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 10 }}>{journal.batchName}</Text></Col>
+
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Description</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 10 }}>{journal.batchDescription}</Text></Col>
+
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Period</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 10 }}>{journal.periodName}</Text></Col>
+
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Source</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 10 }}>{journal.source}</Text></Col>
+                </Row>
+              </Col>
+              <Col span={12}>
+                <Row gutter={[6, 5]}>
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Ledger</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 10 }}>{journal.ledger}</Text></Col>
+
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Currency</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 10 }}>{journal.currency}</Text></Col>
+
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Status</Text></Col>
+                  <Col span={16}>
+                    <Tag style={{ fontSize: 9 }} color={journal.statusMeaning === 'Posted' ? REDWOOD.success : REDWOOD.warning}>
+                      {journal.statusMeaning}
+                    </Tag>
+                  </Col>
+
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Approval</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 10 }}>{journal.approvalStatusMeaning}</Text></Col>
+                </Row>
+              </Col>
+            </Row>
+          </div>
+        </Card>
+
+        {/* Journal Details Card */}
+        <Card
+          style={{ marginBottom: 12, borderRadius: 6 }}
+          bodyStyle={{ padding: 0 }}
+        >
+          <div
+            style={{
+              padding: '8px 12px',
+              background: REDWOOD.neutral100,
+              borderBottom: `1px solid ${REDWOOD.neutral200}`,
+            }}
+          >
+            <Text strong style={{ fontSize: 11 }}>Journal: {journal.journalName}</Text>
+          </div>
+
+          <div style={{ padding: 10 }}>
+            <Row gutter={[16, 6]}>
+              <Col span={12}>
+                <Row gutter={[6, 5]}>
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Journal</Text></Col>
+                  <Col span={16}><Text strong style={{ fontSize: 10 }}>{journal.journalName}</Text></Col>
+
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Description</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 10 }}>{journal.journalDescription || '-'}</Text></Col>
+
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Category</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 10 }}>{journal.category}</Text></Col>
+
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Accounting Date</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 10 }}>{journal.defaultEffectiveDate}</Text></Col>
+                </Row>
+              </Col>
+              <Col span={12}>
+                <Row gutter={[6, 5]}>
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Entered Dr</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(journal.runningTotalEnteredDr)}</Text></Col>
+
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Entered Cr</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(journal.runningTotalEnteredCr)}</Text></Col>
+
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Accounted Dr</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(journal.runningTotalAccountedDr)}</Text></Col>
+
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Accounted Cr</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(journal.runningTotalAccountedCr)}</Text></Col>
+                </Row>
+              </Col>
+            </Row>
+          </div>
+        </Card>
+
+        {/* Journal Lines Card */}
+        <Card
+          style={{ borderRadius: 6 }}
+          bodyStyle={{ padding: 0 }}
+        >
+          <div
+            style={{
+              padding: '8px 12px',
+              background: REDWOOD.neutral100,
+              borderBottom: `1px solid ${REDWOOD.neutral200}`,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
+            <Text strong style={{ fontSize: 11 }}>Journal Lines</Text>
+            <Space size="small">
+              <Dropdown menu={{ items: [{ key: 'add', label: 'Add Row' }] }}>
+                <Button size="small" style={{ fontSize: 10 }}>Actions <DownOutlined /></Button>
+              </Dropdown>
+              <Button size="small" icon={<PlusOutlined />} />
+              <Button size="small" icon={<DeleteOutlined />} />
+            </Space>
+          </div>
+
+          <Table
+            columns={[
+              { title: 'Line', dataIndex: 'lineNum', key: 'lineNum', width: 60 },
+              { title: 'Account', dataIndex: 'account', key: 'account', width: 200 },
+              { title: 'Description', dataIndex: 'description', key: 'description', width: 200, ellipsis: true },
+              { title: 'Currency', dataIndex: 'currency', key: 'currency', width: 80 },
+              { title: 'Entered Dr', dataIndex: 'enteredDr', key: 'enteredDr', width: 100, align: 'right' as const, render: (v: number) => v > 0 ? formatNumber(v) : '' },
+              { title: 'Entered Cr', dataIndex: 'enteredCr', key: 'enteredCr', width: 100, align: 'right' as const, render: (v: number) => v > 0 ? formatNumber(v) : '' },
+              { title: 'Accounted Dr', dataIndex: 'accountedDr', key: 'accountedDr', width: 100, align: 'right' as const, render: (v: number) => v > 0 ? formatNumber(v) : '' },
+              { title: 'Accounted Cr', dataIndex: 'accountedCr', key: 'accountedCr', width: 100, align: 'right' as const, render: (v: number) => v > 0 ? formatNumber(v) : '' },
+            ]}
+            dataSource={journal.lines?.map((line, idx) => ({ ...line, key: idx })) || []}
+            pagination={false}
+            scroll={{ x: 1000 }}
+            size="small"
+            bordered
+            className="compact-table"
+            locale={{ emptyText: 'No journal lines' }}
+          />
+        </Card>
+      </div>
+    );
+  };
+
   return (
     <Layout style={{ minHeight: 'calc(100vh - 64px)', background: REDWOOD.neutral100 }}>
       <Content>
         {/* Breadcrumb Header */}
         <div style={{
-          padding: '16px 24px',
+          padding: '12px 24px',
           background: REDWOOD.surface,
           borderBottom: `1px solid ${REDWOOD.neutral200}`
         }}>
@@ -548,8 +786,33 @@ const ManageJournals: React.FC = () => {
           />
         </div>
 
-        {/* Main Content */}
-        <div style={{ padding: 16 }}>
+        {/* Tabbed Content */}
+        <Tabs
+          type="editable-card"
+          activeKey={activeTabKey}
+          onChange={onTabChange}
+          onEdit={onTabEdit}
+          hideAdd
+          size="small"
+          style={{ background: REDWOOD.surface }}
+          tabBarStyle={{
+            margin: 0,
+            padding: '0 16px',
+            background: REDWOOD.neutral100,
+            borderBottom: `1px solid ${REDWOOD.neutral200}`,
+          }}
+          items={[
+            {
+              key: 'search',
+              label: (
+                <span style={{ fontSize: 11 }}>
+                  <SearchOutlined /> Search
+                  {totalCount > 0 && <Tag color={REDWOOD.info} style={{ fontSize: 9, marginLeft: 6 }}>{totalCount}</Tag>}
+                </span>
+              ),
+              closable: false,
+              children: (
+                <div style={{ padding: 16 }}>
           {/* Collapsible Search Card */}
           <Collapse
             activeKey={searchExpanded}
@@ -730,7 +993,7 @@ const ManageJournals: React.FC = () => {
                     onClick={() => {
                       const selectedJournal = journals.find(j => j.key === selectedRowKeys[0]);
                       if (selectedJournal) {
-                        navigate(`/gl/journals/${selectedJournal.jeHeaderId}/edit`, { state: { journal: selectedJournal } });
+                        openJournalTab(selectedJournal);
                       }
                     }}
                   />
@@ -780,7 +1043,22 @@ const ManageJournals: React.FC = () => {
               }}
             />
           </Card>
-        </div>
+                </div>
+              ),
+            },
+            // Dynamic journal tabs
+            ...openJournalTabs.map(tab => ({
+              key: tab.key,
+              label: (
+                <span style={{ fontSize: 11 }}>
+                  <FileTextOutlined /> {tab.journal.journalName}
+                </span>
+              ),
+              closable: true,
+              children: renderJournalEditPanel(tab.journal),
+            })),
+          ]}
+        />
       </Content>
 
       {/* Floating Connected Icons */}
