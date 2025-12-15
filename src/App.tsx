@@ -10,6 +10,7 @@ import ManageJournals from './pages/gl/ManageJournals';
 import EditJournal from './pages/gl/EditJournal';
 import AccountAnalysis from './pages/gl/AccountAnalysis';
 import SyncData from './pages/sync/SyncData';
+import JobsMonitor from './pages/sync/JobsMonitor';
 
 // Placeholder component for modules under development
 const ComingSoon = ({ moduleName }: { moduleName: string }) => (
@@ -67,7 +68,8 @@ function App() {
               <Route path="manufacturing/*" element={<ComingSoon moduleName="Manufacturing" />} />
               <Route path="reports/*" element={<ComingSoon moduleName="Reports & Analytics" />} />
               <Route path="admin/*" element={<ComingSoon moduleName="Administration" />} />
-              <Route path="sync/*" element={<SyncData />} />
+              <Route path="sync" element={<SyncData />} />
+              <Route path="sync/jobs" element={<JobsMonitor />} />
             </Route>
 
             {/* Catch all */}

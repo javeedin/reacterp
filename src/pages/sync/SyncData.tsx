@@ -37,6 +37,7 @@ import {
   DownloadOutlined,
   SendOutlined,
   BugOutlined,
+  RocketOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { SYNC_OBJECTS, ORACLE_FUSION_CONFIG, PROXY_CONFIG, APEX_DB_CONFIG, type SyncObjectConfig, type ApiType } from '../../config/api.config';
@@ -617,6 +618,15 @@ const SyncData: React.FC = () => {
                 <Text type="secondary">Oracle Fusion → APEX Database</Text>
               </div>
               <Tag color={REDWOOD.primary} style={{ marginLeft: 16 }}>v{SYNC_VERSION}</Tag>
+              <Link to="/sync/jobs">
+                <Button
+                  type="default"
+                  icon={<RocketOutlined />}
+                  style={{ marginLeft: 16 }}
+                >
+                  Background Jobs
+                </Button>
+              </Link>
             </Space>
           </div>
 
