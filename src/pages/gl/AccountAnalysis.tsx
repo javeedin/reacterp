@@ -6,6 +6,7 @@ import {
   Breadcrumb,
   Button,
   Select,
+  Input,
   Table,
   Space,
   Tooltip,
@@ -743,14 +744,13 @@ const AccountAnalysis: React.FC = () => {
           </Col>
           <Col xs={24} sm={12} md={4}>
             <Text style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Account</Text>
-            <Select
+            <Input
               allowClear
-              value={segmentFilters.find((f) => f.segment === 'account')?.selected}
-              onChange={(v) => handleSegmentFilterChange('account', v)}
+              value={segmentFilters.find((f) => f.segment === 'account')?.selected || ''}
+              onChange={(e) => handleSegmentFilterChange('account', e.target.value || null)}
               style={{ width: '100%' }}
               size="small"
-              placeholder="All"
-              showSearch
+              placeholder="e.g. 1116100"
             />
           </Col>
           <Col xs={24} sm={12} md={6}>
