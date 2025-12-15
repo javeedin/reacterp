@@ -17,6 +17,7 @@ import {
   Dropdown,
   Collapse,
   message,
+  FloatButton,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -37,6 +38,10 @@ import {
   CloseCircleOutlined,
   ClockCircleOutlined,
   FilterOutlined,
+  SyncOutlined,
+  SettingOutlined,
+  MenuOutlined,
+  FileAddOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -685,6 +690,40 @@ const ManageJournals: React.FC = () => {
           </Card>
         </div>
       </Content>
+
+      {/* Floating Menu Icons */}
+      <FloatButton.Group
+        trigger="hover"
+        type="primary"
+        style={{ right: 24, bottom: 24 }}
+        icon={<MenuOutlined />}
+      >
+        <FloatButton
+          icon={<HomeOutlined />}
+          tooltip="Home"
+          onClick={() => navigate('/home')}
+        />
+        <FloatButton
+          icon={<FileAddOutlined />}
+          tooltip="Create Journal"
+          onClick={() => message.info('Create Journal - Coming soon')}
+        />
+        <FloatButton
+          icon={<SyncOutlined />}
+          tooltip="Sync Data"
+          onClick={() => navigate('/sync')}
+        />
+        <FloatButton
+          icon={<PrinterOutlined />}
+          tooltip="Print"
+          onClick={() => message.info('Print - Coming soon')}
+        />
+        <FloatButton
+          icon={<SettingOutlined />}
+          tooltip="Settings"
+          onClick={() => message.info('Settings - Coming soon')}
+        />
+      </FloatButton.Group>
 
       {/* Autopilot */}
       <Autopilot />
