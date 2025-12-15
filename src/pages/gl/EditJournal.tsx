@@ -1064,45 +1064,45 @@ const EditJournal: React.FC = () => {
     if (!currentJournal) return null;
 
     return (
-      <div style={{ padding: 16 }}>
-        <Row gutter={[24, 12]}>
+      <div style={{ padding: 12 }}>
+        <Row gutter={[16, 8]}>
           <Col span={12}>
-            <Row gutter={[8, 8]}>
-              <Col span={8}><Text type="secondary">Journal</Text></Col>
-              <Col span={16}><Text strong>{currentJournal.journalName}</Text></Col>
+            <Row gutter={[6, 6]}>
+              <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Journal</Text></Col>
+              <Col span={16}><Text strong style={{ fontSize: 11 }}>{currentJournal.journalName}</Text></Col>
 
-              <Col span={8}><Text type="secondary">Description</Text></Col>
-              <Col span={16}><Text>{currentJournal.journalDescription}</Text></Col>
+              <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Description</Text></Col>
+              <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal.journalDescription}</Text></Col>
 
-              <Col span={8}><Text type="secondary"><span style={{ color: REDWOOD.primary }}>*</span> Ledger</Text></Col>
-              <Col span={16}><Text>{currentJournal.ledgerName}</Text></Col>
+              <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}><span style={{ color: REDWOOD.primary }}>*</span> Ledger</Text></Col>
+              <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal.ledgerName}</Text></Col>
 
-              <Col span={8}><Text type="secondary"><span style={{ color: REDWOOD.primary }}>*</span> Legal Entity</Text></Col>
-              <Col span={16}><Text>{currentJournal.legalEntityName}</Text></Col>
+              <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}><span style={{ color: REDWOOD.primary }}>*</span> Legal Entity</Text></Col>
+              <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal.legalEntityName}</Text></Col>
 
-              <Col span={8}><Text type="secondary">Accounting Date</Text></Col>
-              <Col span={16}><Text>{currentJournal.accountingDate}</Text></Col>
+              <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Accounting Date</Text></Col>
+              <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal.accountingDate}</Text></Col>
 
-              <Col span={8}><Text type="secondary"><span style={{ color: REDWOOD.primary }}>*</span> Category</Text></Col>
-              <Col span={16}><Text>{currentJournal.category}</Text></Col>
+              <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}><span style={{ color: REDWOOD.primary }}>*</span> Category</Text></Col>
+              <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal.category}</Text></Col>
             </Row>
           </Col>
           <Col span={12}>
-            <Row gutter={[8, 8]}>
-              <Col span={10}><Text type="secondary">Currency</Text></Col>
-              <Col span={14}><Text>{currentJournal.currencyCode} {getCurrencyName(currentJournal.currencyCode)}</Text></Col>
+            <Row gutter={[6, 6]}>
+              <Col span={10}><Text type="secondary" style={{ fontSize: 11 }}>Currency</Text></Col>
+              <Col span={14}><Text style={{ fontSize: 11 }}>{currentJournal.currencyCode} {getCurrencyName(currentJournal.currencyCode)}</Text></Col>
 
-              <Col span={10}><Text type="secondary">Conversion Date</Text></Col>
-              <Col span={14}><Text>{currentJournal.conversionDate}</Text></Col>
+              <Col span={10}><Text type="secondary" style={{ fontSize: 11 }}>Conversion Date</Text></Col>
+              <Col span={14}><Text style={{ fontSize: 11 }}>{currentJournal.conversionDate}</Text></Col>
 
-              <Col span={10}><Text type="secondary">Conversion Rate Type</Text></Col>
-              <Col span={14}><Text>{currentJournal.conversionRateType}</Text></Col>
+              <Col span={10}><Text type="secondary" style={{ fontSize: 11 }}>Conversion Rate Type</Text></Col>
+              <Col span={14}><Text style={{ fontSize: 11 }}>{currentJournal.conversionRateType}</Text></Col>
 
-              <Col span={10}><Text type="secondary">Conversion Rate</Text></Col>
-              <Col span={14}><Text>{currentJournal.conversionRate}</Text></Col>
+              <Col span={10}><Text type="secondary" style={{ fontSize: 11 }}>Conversion Rate</Text></Col>
+              <Col span={14}><Text style={{ fontSize: 11 }}>{currentJournal.conversionRate}</Text></Col>
 
-              <Col span={10}><Text type="secondary">Inverse Rate</Text></Col>
-              <Col span={14}><Text>{currentJournal.inverseConversionRate}</Text></Col>
+              <Col span={10}><Text type="secondary" style={{ fontSize: 11 }}>Inverse Rate</Text></Col>
+              <Col span={14}><Text style={{ fontSize: 11 }}>{currentJournal.inverseConversionRate}</Text></Col>
             </Row>
           </Col>
         </Row>
@@ -1123,9 +1123,9 @@ const EditJournal: React.FC = () => {
   return (
     <Layout style={{ minHeight: '100vh', background: REDWOOD.neutral100 }}>
       <Content>
-        {/* Action Header */}
+        {/* Action Header with Title */}
         <div style={{
-          padding: '12px 24px',
+          padding: '8px 24px',
           background: REDWOOD.surface,
           borderBottom: `1px solid ${REDWOOD.neutral200}`,
           display: 'flex',
@@ -1133,11 +1133,21 @@ const EditJournal: React.FC = () => {
           alignItems: 'center',
         }}>
           <Space>
-            <Text type="secondary">Data Access Set: {currentJournal?.ledgerName}</Text>
+            <FileTextOutlined style={{ fontSize: 18, color: REDWOOD.primary }} />
+            <Title level={5} style={{ margin: 0, fontSize: 14 }}>
+              {isBatchMode ? 'Edit Journal Batch' : 'Edit Journal'}
+            </Title>
+            {isBatchMode && (
+              <Tag color={REDWOOD.info} style={{ fontSize: 11 }}>{allJournals.length} Journals</Tag>
+            )}
+            <Text type="secondary" style={{ fontSize: 11, marginLeft: 16 }}>
+              Data Access Set: {currentJournal?.ledgerName}
+            </Text>
           </Space>
-          <Space>
+          <Space size="small">
             <Dropdown.Button
               type="primary"
+              size="small"
               menu={{ items: saveMenu }}
               onClick={handleSave}
               loading={saving}
@@ -1146,47 +1156,32 @@ const EditJournal: React.FC = () => {
               <SaveOutlined /> Save
             </Dropdown.Button>
             <Dropdown.Button
+              size="small"
               menu={{ items: postMenu }}
-              style={{ background: REDWOOD.info, color: '#fff' }}
+              style={{ background: '#1890ff', color: '#fff' }}
             >
               Post
             </Dropdown.Button>
             <Button
-              danger
+              size="small"
               icon={<CloseOutlined />}
               onClick={handleCancel}
+              style={{ background: '#f5f5f5', borderColor: '#d9d9d9' }}
             >
               Cancel
             </Button>
           </Space>
         </div>
 
-        {/* Page Title - Balances box hidden */}
-        <div style={{
-          padding: '16px 24px',
-          background: REDWOOD.surface,
-          borderBottom: `1px solid ${REDWOOD.neutral200}`,
-        }}>
-          <Space>
-            <FileTextOutlined style={{ fontSize: 20 }} />
-            <Title level={4} style={{ margin: 0 }}>
-              {isBatchMode ? 'Edit Journal Batch' : 'Edit Journal'}
-            </Title>
-            {isBatchMode && (
-              <Tag color={REDWOOD.info}>{allJournals.length} Journals</Tag>
-            )}
-          </Space>
-        </div>
-
-        <div style={{ padding: 24 }}>
+        <div style={{ padding: 16 }}>
           {/* Journal Batch Section */}
           <Card
-            style={{ marginBottom: 16, borderRadius: 8 }}
+            style={{ marginBottom: 12, borderRadius: 6 }}
             bodyStyle={{ padding: 0 }}
           >
             <div
               style={{
-                padding: '12px 16px',
+                padding: '8px 12px',
                 background: REDWOOD.neutral100,
                 borderBottom: `1px solid ${REDWOOD.neutral200}`,
                 display: 'flex',
@@ -1196,67 +1191,67 @@ const EditJournal: React.FC = () => {
               }}
             >
               <Space>
-                <Text strong style={{ fontSize: 14 }}>
+                <Text strong style={{ fontSize: 12 }}>
                   Journal Batch: {currentJournal?.batchName}
                 </Text>
                 <a
                   onClick={() => setBatchExpanded(!batchExpanded)}
-                  style={{ color: REDWOOD.info, fontSize: 12 }}
+                  style={{ color: REDWOOD.info, fontSize: 11 }}
                 >
                   {batchExpanded ? 'Show Less' : 'Show More'}
                 </a>
               </Space>
               <Dropdown menu={{ items: batchActionsMenu }}>
-                <Button size="small">
+                <Button size="small" style={{ fontSize: 11 }}>
                   Batch Actions <DownOutlined />
                 </Button>
               </Dropdown>
             </div>
 
-            <div style={{ padding: 16 }}>
-              <Row gutter={[24, 12]}>
+            <div style={{ padding: 12 }}>
+              <Row gutter={[16, 8]}>
                 <Col span={12}>
-                  <Row gutter={[8, 8]}>
-                    <Col span={8}><Text type="secondary">Journal Batch</Text></Col>
-                    <Col span={16}><Text>{currentJournal?.batchName}</Text></Col>
+                  <Row gutter={[6, 6]}>
+                    <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Journal Batch</Text></Col>
+                    <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal?.batchName}</Text></Col>
 
-                    <Col span={8}><Text type="secondary">Description</Text></Col>
-                    <Col span={16}><Text>{currentJournal?.batchDescription}</Text></Col>
+                    <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Description</Text></Col>
+                    <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal?.batchDescription}</Text></Col>
 
-                    <Col span={8}><Text type="secondary">Balance Type</Text></Col>
-                    <Col span={16}><Text>{currentJournal?.balanceType}</Text></Col>
+                    <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Balance Type</Text></Col>
+                    <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal?.balanceType}</Text></Col>
 
-                    <Col span={8}><Text type="secondary"><span style={{ color: REDWOOD.primary }}>*</span> Accounting Period</Text></Col>
-                    <Col span={16}><Text>{currentJournal?.periodName}</Text></Col>
+                    <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}><span style={{ color: REDWOOD.primary }}>*</span> Accounting Period</Text></Col>
+                    <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal?.periodName}</Text></Col>
 
-                    <Col span={8}><Text type="secondary">Attachments</Text></Col>
+                    <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Attachments</Text></Col>
                     <Col span={16}>
                       <Space>
-                        <Text>None</Text>
-                        <PaperClipOutlined style={{ color: REDWOOD.info }} />
+                        <Text style={{ fontSize: 11 }}>None</Text>
+                        <PaperClipOutlined style={{ color: REDWOOD.info, fontSize: 11 }} />
                       </Space>
                     </Col>
                   </Row>
                 </Col>
                 <Col span={12}>
-                  <Row gutter={[8, 8]}>
-                    <Col span={8}><Text type="secondary">Source</Text></Col>
-                    <Col span={16}><Text>{currentJournal?.source}</Text></Col>
+                  <Row gutter={[6, 6]}>
+                    <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Source</Text></Col>
+                    <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal?.source}</Text></Col>
 
-                    <Col span={8}><Text type="secondary">Approval Status</Text></Col>
-                    <Col span={16}><Text>{currentJournal?.approvalStatusMeaning}</Text></Col>
+                    <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Approval Status</Text></Col>
+                    <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal?.approvalStatusMeaning}</Text></Col>
 
-                    <Col span={8}><Text type="secondary">Batch Status</Text></Col>
+                    <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Batch Status</Text></Col>
                     <Col span={16}>
-                      <Tag color={currentJournal?.statusMeaning === 'Posted' ? REDWOOD.success : REDWOOD.warning}>
+                      <Tag style={{ fontSize: 10 }} color={currentJournal?.statusMeaning === 'Posted' ? REDWOOD.success : REDWOOD.warning}>
                         {currentJournal?.statusMeaning}
                       </Tag>
                     </Col>
 
                     {batchExpanded && (
                       <>
-                        <Col span={8}><Text type="secondary">Completion Status</Text></Col>
-                        <Col span={16}><Text>{currentJournal?.completionStatus}</Text></Col>
+                        <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Completion Status</Text></Col>
+                        <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal?.completionStatus}</Text></Col>
                       </>
                     )}
                   </Row>
@@ -1289,12 +1284,12 @@ const EditJournal: React.FC = () => {
 
           {/* Journal Section */}
           <Card
-            style={{ marginBottom: 16, borderRadius: 8 }}
+            style={{ marginBottom: 12, borderRadius: 6 }}
             bodyStyle={{ padding: 0 }}
           >
             <div
               style={{
-                padding: '12px 16px',
+                padding: '8px 12px',
                 background: REDWOOD.neutral100,
                 borderBottom: `1px solid ${REDWOOD.neutral200}`,
                 display: 'flex',
@@ -1303,19 +1298,20 @@ const EditJournal: React.FC = () => {
               }}
             >
               <Space>
-                <Text strong style={{ fontSize: 14 }}>Journal</Text>
+                <Text strong style={{ fontSize: 12 }}>Journal</Text>
                 <a
                   onClick={() => setJournalExpanded(!journalExpanded)}
-                  style={{ color: REDWOOD.info, fontSize: 12 }}
+                  style={{ color: REDWOOD.info, fontSize: 11 }}
                 >
                   {journalExpanded ? 'Show Less' : 'Show More'}
                 </a>
               </Space>
-              <Space>
+              <Space size="small">
                 <Button
                   size="small"
                   icon={<PrinterOutlined />}
                   onClick={handlePrintJournal}
+                  style={{ fontSize: 11 }}
                 >
                   Print
                 </Button>
@@ -1324,7 +1320,7 @@ const EditJournal: React.FC = () => {
                     <Button size="small" icon={<LeftOutlined />} disabled />
                     <Select
                       value={currentJournal?.journalName}
-                      style={{ width: 250 }}
+                      style={{ width: 200, fontSize: 11 }}
                       size="small"
                     >
                       <Option value={currentJournal?.journalName}>{currentJournal?.journalName}</Option>
@@ -1335,7 +1331,7 @@ const EditJournal: React.FC = () => {
                 <Button size="small" icon={<PlusOutlined />} />
                 <Button size="small" icon={<DeleteOutlined />} />
                 <Dropdown menu={{ items: journalActionsMenu }}>
-                  <Button size="small">
+                  <Button size="small" style={{ fontSize: 11 }}>
                     Journal Actions <DownOutlined />
                   </Button>
                 </Dropdown>
@@ -1347,43 +1343,43 @@ const EditJournal: React.FC = () => {
 
           {/* Journal Lines Section */}
           <Card
-            style={{ borderRadius: 8 }}
+            style={{ borderRadius: 6 }}
             bodyStyle={{ padding: 0 }}
           >
             <div
               style={{
-                padding: '12px 16px',
+                padding: '8px 12px',
                 background: REDWOOD.neutral100,
                 borderBottom: `1px solid ${REDWOOD.neutral200}`,
               }}
             >
-              <Text strong style={{ fontSize: 14 }}>Journal Lines</Text>
+              <Text strong style={{ fontSize: 12 }}>Journal Lines</Text>
             </div>
 
             {/* Lines Toolbar */}
             <div style={{
-              padding: '8px 16px',
+              padding: '6px 12px',
               borderBottom: `1px solid ${REDWOOD.neutral200}`,
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
             }}>
-              <Space>
+              <Space size="small">
                 <Dropdown menu={{ items: [{ key: 'add', label: 'Add Row' }] }}>
-                  <Button size="small">Actions <DownOutlined /></Button>
+                  <Button size="small" style={{ fontSize: 11 }}>Actions <DownOutlined /></Button>
                 </Dropdown>
                 <Dropdown menu={{ items: [{ key: 'columns', label: 'Columns' }] }}>
-                  <Button size="small">View <DownOutlined /></Button>
+                  <Button size="small" style={{ fontSize: 11 }}>View <DownOutlined /></Button>
                 </Dropdown>
                 <Dropdown menu={{ items: [{ key: 'wrap', label: 'Wrap' }] }}>
-                  <Button size="small">Format <DownOutlined /></Button>
+                  <Button size="small" style={{ fontSize: 11 }}>Format <DownOutlined /></Button>
                 </Dropdown>
                 <Tooltip title="Check in Fusion">
                   <Button
                     size="small"
                     icon={<CloudSyncOutlined />}
                     onClick={handleCheckInFusion}
-                    style={{ color: REDWOOD.info }}
+                    style={{ color: REDWOOD.info, fontSize: 11 }}
                   >
                     Check in Fusion
                   </Button>
@@ -1394,8 +1390,8 @@ const EditJournal: React.FC = () => {
                 <Tooltip title="Delete Row">
                   <Button size="small" icon={<DeleteOutlined />} disabled={selectedLineKeys.length === 0} />
                 </Tooltip>
-                <Button size="small">Detach</Button>
-                <Button size="small">Wrap</Button>
+                <Button size="small" style={{ fontSize: 11 }}>Detach</Button>
+                <Button size="small" style={{ fontSize: 11 }}>Wrap</Button>
               </Space>
             </div>
 
