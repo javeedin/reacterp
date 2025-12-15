@@ -17,6 +17,7 @@ import {
   Alert,
   Breadcrumb,
   Tooltip,
+  Modal,
 } from 'antd';
 import {
   SyncOutlined,
@@ -32,6 +33,7 @@ import {
   FileTextOutlined,
   UnorderedListOutlined,
   ThunderboltOutlined,
+  ExpandOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { SYNC_OBJECTS, ORACLE_FUSION_CONFIG, PROXY_CONFIG, type SyncObjectConfig, type ApiType } from '../../config/api.config';
@@ -79,6 +81,8 @@ const SyncData: React.FC = () => {
   const [testMode, setTestMode] = useState<boolean | 'single'>(true); // true=25, false=full, 'single'=1
   const [proxyStatus, setProxyStatus] = useState<ProxyStatus>('unknown');
   const [proxyError, setProxyError] = useState<string>('');
+  const [logDetailVisible, setLogDetailVisible] = useState(false);
+  const [selectedLog, setSelectedLog] = useState<SyncLog | null>(null);
   const [progress, setProgress] = useState<SyncProgress>({
     status: 'idle',
     totalBatches: 0,
@@ -318,6 +322,59 @@ const SyncData: React.FC = () => {
     }
   };
 
+  const handleViewLog = (log: SyncLog) => {
+    setSelectedLog(log);
+    setLogDetailVisible(true);
+  };
+
+  // Try to format JSON if the message contains JSON
+  const formatLogMessage = (message: string) => {
+    // Check if message contains JSON object or array
+    const jsonMatch = message.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        const before = message.substring(0, jsonMatch.index);
+        const after = message.substring((jsonMatch.index || 0) + jsonMatch[0].length);
+        return (
+          <>
+            {before && <div style={{ marginBottom: 8 }}>{before}</div>}
+            <pre style={{
+              background: REDWOOD.surfaceSecondary,
+              padding: 12,
+              borderRadius: 8,
+              overflow: 'auto',
+              maxHeight: 400,
+              fontSize: 12,
+              fontFamily: 'monospace',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}>
+              {JSON.stringify(parsed, null, 2)}
+            </pre>
+            {after && <div style={{ marginTop: 8 }}>{after}</div>}
+          </>
+        );
+      } catch {
+        // Not valid JSON, return as-is
+      }
+    }
+    // Check for URLs
+    if (message.includes('http://') || message.includes('https://')) {
+      return (
+        <div style={{
+          wordBreak: 'break-all',
+          fontFamily: 'monospace',
+          fontSize: 12,
+          lineHeight: 1.6,
+        }}>
+          {message}
+        </div>
+      );
+    }
+    return message;
+  };
+
   const logColumns = [
     {
       title: 'Time',
@@ -343,11 +400,31 @@ const SyncData: React.FC = () => {
               fontFamily: record.type === 'step' ? 'monospace' : 'inherit',
               fontWeight: record.type === 'step' ? 600 : 400,
               color: record.type === 'step' ? REDWOOD.primary : REDWOOD.textPrimary,
+              maxWidth: 600,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              display: 'inline-block',
             }}
           >
             {message}
           </Text>
         </Space>
+      ),
+    },
+    {
+      title: '',
+      key: 'action',
+      width: 40,
+      render: (_: unknown, record: SyncLog) => (
+        <Tooltip title="View full message">
+          <Button
+            type="text"
+            size="small"
+            icon={<ExpandOutlined style={{ color: REDWOOD.info }} />}
+            onClick={() => handleViewLog(record)}
+          />
+        </Tooltip>
       ),
     },
   ];
@@ -825,6 +902,69 @@ const SyncData: React.FC = () => {
 
       {/* Autopilot Assistant */}
       <Autopilot />
+
+      {/* Log Detail Modal */}
+      <Modal
+        title={
+          <Space>
+            {selectedLog && getLogIcon(selectedLog.type)}
+            <span>Log Details</span>
+            {selectedLog && (
+              <Tag
+                color={
+                  selectedLog.type === 'success' ? 'success' :
+                  selectedLog.type === 'error' ? 'error' :
+                  selectedLog.type === 'warning' ? 'warning' :
+                  selectedLog.type === 'step' ? 'volcano' : 'blue'
+                }
+              >
+                {selectedLog.type.toUpperCase()}
+              </Tag>
+            )}
+          </Space>
+        }
+        open={logDetailVisible}
+        onCancel={() => setLogDetailVisible(false)}
+        footer={[
+          <Button key="copy" onClick={() => {
+            if (selectedLog) {
+              navigator.clipboard.writeText(selectedLog.message);
+            }
+          }}>
+            Copy to Clipboard
+          </Button>,
+          <Button key="close" type="primary" onClick={() => setLogDetailVisible(false)}>
+            Close
+          </Button>,
+        ]}
+        width={700}
+      >
+        {selectedLog && (
+          <div>
+            <div style={{
+              marginBottom: 12,
+              padding: '8px 12px',
+              background: REDWOOD.surfaceSecondary,
+              borderRadius: 6,
+              fontSize: 12,
+            }}>
+              <Text type="secondary">Time: </Text>
+              <Text strong>{selectedLog.timestamp.toLocaleString()}</Text>
+            </div>
+            <div style={{
+              padding: 16,
+              background: '#fafafa',
+              borderRadius: 8,
+              border: `1px solid ${REDWOOD.border}`,
+              minHeight: 100,
+              maxHeight: 500,
+              overflow: 'auto',
+            }}>
+              {formatLogMessage(selectedLog.message)}
+            </div>
+          </div>
+        )}
+      </Modal>
     </Layout>
   );
 };
