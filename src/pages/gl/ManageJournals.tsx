@@ -18,6 +18,7 @@ import {
   Collapse,
   message,
   Tabs,
+  Modal,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -51,6 +52,7 @@ import {
   LineChartOutlined,
   FundOutlined,
   CloseOutlined,
+  BugOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -201,6 +203,14 @@ interface OpenJournalTab {
   journal: JournalRecord;
 }
 
+// Debug log entry
+interface DebugLogEntry {
+  timestamp: string;
+  type: 'request' | 'response' | 'info' | 'error';
+  message: string;
+  data?: any;
+}
+
 const ManageJournals: React.FC = () => {
   const navigate = useNavigate();
   const [form] = Form.useForm();
@@ -209,6 +219,10 @@ const ManageJournals: React.FC = () => {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [searchExpanded, setSearchExpanded] = useState<string[]>(['search']);
+
+  // Debug log state
+  const [debugLogs, setDebugLogs] = useState<DebugLogEntry[]>([]);
+  const [debugModalVisible, setDebugModalVisible] = useState(false);
 
   // Tab management state
   const [activeTabKey, setActiveTabKey] = useState('search');
@@ -329,9 +343,24 @@ const ManageJournals: React.FC = () => {
     }
   };
 
+  // Add debug log helper
+  const addDebugLog = (type: DebugLogEntry['type'], message: string, data?: any) => {
+    const entry: DebugLogEntry = {
+      timestamp: new Date().toISOString(),
+      type,
+      message,
+      data,
+    };
+    setDebugLogs(prev => [...prev, entry]);
+    console.log(`[DEBUG ${type.toUpperCase()}] ${message}`, data || '');
+  };
+
   // Search handler - calls the API with pagination to get ALL records
   const handleSearch = async () => {
     const values = form.getFieldsValue();
+
+    // Clear previous debug logs
+    setDebugLogs([]);
 
     // Validate required fields
     if (!values.ledger) {
@@ -345,6 +374,8 @@ const ManageJournals: React.FC = () => {
 
     setLoading(true);
     setJournals([]); // Clear existing data
+
+    addDebugLog('info', 'Starting search...', values);
 
     try {
       // Build base query parameters
@@ -371,20 +402,32 @@ const ManageJournals: React.FC = () => {
       let allItems: JournalRecord[] = [];
       let totalFromApi = 0;
       let hasMore = true;
+      let pageCount = 0;
 
-      console.log('Starting paginated fetch...');
+      addDebugLog('info', `Starting paginated fetch with PAGE_SIZE=${PAGE_SIZE}`);
 
       while (hasMore) {
+        pageCount++;
         // Add pagination params
         const params = new URLSearchParams(baseParams);
         params.append('offset', offset.toString());
         params.append('limit', PAGE_SIZE.toString());
 
         const url = `${API_BASE_URL}/headers?${params.toString()}`;
-        console.log(`Fetching page at offset ${offset}:`, url);
+
+        addDebugLog('request', `Page ${pageCount} - GET Request`, { url, offset, limit: PAGE_SIZE });
 
         const response = await fetch(url);
         const data: ApiResponse = await response.json();
+
+        addDebugLog('response', `Page ${pageCount} - Response received`, {
+          success: data.success,
+          itemsReturned: data.items?.length || 0,
+          totalCount: data.totalCount,
+          offset: data.offset,
+          limit: data.limit,
+          hasMoreField: data.hasMore,
+        });
 
         if (data.success) {
           const items = data.items || [];
@@ -395,15 +438,26 @@ const ManageJournals: React.FC = () => {
 
           totalFromApi = data.totalCount || allItems.length;
 
-          console.log(`Fetched ${items.length} items (offset: ${offset}, total so far: ${allItems.length}, API total: ${totalFromApi})`);
+          addDebugLog('info', `Page ${pageCount} processed`, {
+            itemsThisPage: items.length,
+            totalSoFar: allItems.length,
+            apiTotalCount: totalFromApi,
+          });
 
           // Check if there are more pages
+          // Stop if: returned less than requested, or we have all records
           if (items.length < PAGE_SIZE || allItems.length >= totalFromApi) {
             hasMore = false;
+            addDebugLog('info', `Pagination complete - stopping`, {
+              reason: items.length < PAGE_SIZE ? 'items < PAGE_SIZE' : 'allItems >= totalFromApi',
+              finalCount: allItems.length,
+            });
           } else {
             offset += PAGE_SIZE;
+            addDebugLog('info', `More pages needed, next offset: ${offset}`);
           }
         } else {
+          addDebugLog('error', 'API returned error', { error: data.error });
           message.error(data.error || 'Failed to fetch journals');
           hasMore = false;
         }
@@ -412,6 +466,12 @@ const ManageJournals: React.FC = () => {
       // Set all fetched data
       setJournals(allItems);
       setTotalCount(allItems.length);
+
+      addDebugLog('info', `Search complete`, {
+        totalPages: pageCount,
+        totalRecords: allItems.length,
+        apiReportedTotal: totalFromApi,
+      });
 
       // Save to sessionStorage for persistence
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
@@ -423,6 +483,7 @@ const ManageJournals: React.FC = () => {
       message.success(`Found ${allItems.length} journals (API reported: ${totalFromApi})`);
 
     } catch (error) {
+      addDebugLog('error', 'Fetch error', { error: String(error) });
       console.error('Error fetching journals:', error);
       message.error('Failed to connect to server');
       setJournals([]);
@@ -1023,6 +1084,13 @@ const ManageJournals: React.FC = () => {
                   <Button icon={<SaveOutlined />}>
                     Save...
                   </Button>
+                  <Button
+                    icon={<BugOutlined />}
+                    onClick={() => setDebugModalVisible(true)}
+                    disabled={debugLogs.length === 0}
+                  >
+                    Debug Log ({debugLogs.length})
+                  </Button>
                 </div>
               </Form>
             </Panel>
@@ -1451,6 +1519,87 @@ const ManageJournals: React.FC = () => {
 
       {/* Autopilot */}
       <Autopilot />
+
+      {/* Debug Log Modal */}
+      <Modal
+        title={
+          <Space>
+            <BugOutlined style={{ color: REDWOOD.warning }} />
+            <span>Debug Log - API Calls</span>
+          </Space>
+        }
+        open={debugModalVisible}
+        onCancel={() => setDebugModalVisible(false)}
+        footer={[
+          <Button key="clear" onClick={() => setDebugLogs([])}>
+            Clear Logs
+          </Button>,
+          <Button key="close" type="primary" onClick={() => setDebugModalVisible(false)}>
+            Close
+          </Button>,
+        ]}
+        width={900}
+      >
+        <div style={{ maxHeight: 500, overflow: 'auto' }}>
+          {debugLogs.length === 0 ? (
+            <Text type="secondary">No logs yet. Run a search to see API calls.</Text>
+          ) : (
+            debugLogs.map((log, index) => (
+              <div
+                key={index}
+                style={{
+                  padding: '8px 12px',
+                  marginBottom: 8,
+                  borderRadius: 6,
+                  background:
+                    log.type === 'error' ? '#fff2f0' :
+                    log.type === 'request' ? '#e6f7ff' :
+                    log.type === 'response' ? '#f6ffed' :
+                    '#fafafa',
+                  border: `1px solid ${
+                    log.type === 'error' ? '#ffccc7' :
+                    log.type === 'request' ? '#91d5ff' :
+                    log.type === 'response' ? '#b7eb8f' :
+                    '#d9d9d9'
+                  }`,
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <Tag
+                    color={
+                      log.type === 'error' ? 'error' :
+                      log.type === 'request' ? 'processing' :
+                      log.type === 'response' ? 'success' :
+                      'default'
+                    }
+                  >
+                    {log.type.toUpperCase()}
+                  </Tag>
+                  <Text type="secondary" style={{ fontSize: 11 }}>
+                    {new Date(log.timestamp).toLocaleTimeString()}
+                  </Text>
+                </div>
+                <Text strong style={{ display: 'block', marginBottom: 4 }}>{log.message}</Text>
+                {log.data && (
+                  <pre
+                    style={{
+                      margin: 0,
+                      padding: 8,
+                      background: '#f5f5f5',
+                      borderRadius: 4,
+                      fontSize: 11,
+                      overflow: 'auto',
+                      maxHeight: 200,
+                    }}
+                  >
+                    {typeof log.data === 'string' ? log.data : JSON.stringify(log.data, null, 2)}
+                  </pre>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      </Modal>
     </Layout>
   );
 };
