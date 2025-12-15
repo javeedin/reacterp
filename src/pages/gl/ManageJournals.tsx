@@ -329,7 +329,7 @@ const ManageJournals: React.FC = () => {
     }
   };
 
-  // Search handler - calls the API
+  // Search handler - calls the API with pagination to get ALL records
   const handleSearch = async () => {
     const values = form.getFieldsValue();
 
@@ -344,54 +344,84 @@ const ManageJournals: React.FC = () => {
     }
 
     setLoading(true);
+    setJournals([]); // Clear existing data
 
     try {
-      // Build query parameters
-      const params = new URLSearchParams();
-      params.append('ledger', values.ledger);
-      params.append('period', values.accountingPeriod);
+      // Build base query parameters
+      const baseParams = new URLSearchParams();
+      baseParams.append('ledger', values.ledger);
+      baseParams.append('period', values.accountingPeriod);
 
       if (values.journalBatch) {
-        params.append('batchName', values.journalBatch);
+        baseParams.append('batchName', values.journalBatch);
       }
       if (values.journalDescription) {
-        params.append('journalDesc', values.journalDescription);
+        baseParams.append('journalDesc', values.journalDescription);
       }
       if (values.source) {
-        params.append('source', values.source);
+        baseParams.append('source', values.source);
       }
       if (values.batchStatus && values.batchStatus !== 'All') {
-        params.append('statusMeaning', values.batchStatus);
+        baseParams.append('statusMeaning', values.batchStatus);
       }
 
-      const url = `${API_BASE_URL}/headers?${params.toString()}`;
-      console.log('Fetching:', url);
+      // Fetch with pagination - get ALL records
+      const PAGE_SIZE = 500; // ORDS default max
+      let offset = 0;
+      let allItems: JournalRecord[] = [];
+      let totalFromApi = 0;
+      let hasMore = true;
 
-      const response = await fetch(url);
-      const data: ApiResponse = await response.json();
+      console.log('Starting paginated fetch...');
 
-      if (data.success) {
-        // Map response to table data with keys
-        const mappedData = data.items.map((item, index) => ({
-          ...item,
-          key: item.headerId?.toString() || index.toString(),
-        }));
-        setJournals(mappedData);
-        setTotalCount(data.totalCount);
+      while (hasMore) {
+        // Add pagination params
+        const params = new URLSearchParams(baseParams);
+        params.append('offset', offset.toString());
+        params.append('limit', PAGE_SIZE.toString());
 
-        // Save to sessionStorage for persistence
-        sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
-          journals: mappedData,
-          totalCount: data.totalCount,
-          formValues: values,
-        }));
+        const url = `${API_BASE_URL}/headers?${params.toString()}`;
+        console.log(`Fetching page at offset ${offset}:`, url);
 
-        message.success(`Found ${data.totalCount} journals`);
-      } else {
-        message.error(data.error || 'Failed to fetch journals');
-        setJournals([]);
-        setTotalCount(0);
+        const response = await fetch(url);
+        const data: ApiResponse = await response.json();
+
+        if (data.success) {
+          const items = data.items || [];
+          allItems = [...allItems, ...items.map((item, index) => ({
+            ...item,
+            key: item.headerId?.toString() || `${offset + index}`,
+          }))];
+
+          totalFromApi = data.totalCount || allItems.length;
+
+          console.log(`Fetched ${items.length} items (offset: ${offset}, total so far: ${allItems.length}, API total: ${totalFromApi})`);
+
+          // Check if there are more pages
+          if (items.length < PAGE_SIZE || allItems.length >= totalFromApi) {
+            hasMore = false;
+          } else {
+            offset += PAGE_SIZE;
+          }
+        } else {
+          message.error(data.error || 'Failed to fetch journals');
+          hasMore = false;
+        }
       }
+
+      // Set all fetched data
+      setJournals(allItems);
+      setTotalCount(allItems.length);
+
+      // Save to sessionStorage for persistence
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
+        journals: allItems,
+        totalCount: allItems.length,
+        formValues: values,
+      }));
+
+      message.success(`Found ${allItems.length} journals (API reported: ${totalFromApi})`);
+
     } catch (error) {
       console.error('Error fetching journals:', error);
       message.error('Failed to connect to server');
