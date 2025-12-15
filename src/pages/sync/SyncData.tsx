@@ -106,14 +106,22 @@ const SyncData: React.FC = () => {
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const isSyncingRef = useRef(false);
+  const logCounterRef = useRef(0); // Track total logs generated for debugging
 
   const addLog: LogCallback = useCallback((type, message) => {
+    logCounterRef.current += 1;
+    const logNumber = logCounterRef.current;
+
     const log: SyncLog = {
-      id: Date.now().toString() + Math.random(),
+      id: `${logNumber}-${Date.now()}`,
       timestamp: new Date(),
       type,
       message,
     };
+
+    // Debug: Log to console so we can see all logs even if UI misses some
+    console.log(`[LOG #${logNumber}] [${type.toUpperCase()}] ${message}`);
+
     setLogs((prev) => [log, ...prev].slice(0, 500));
   }, []);
 
@@ -869,13 +877,24 @@ const SyncData: React.FC = () => {
                 title={
                   <Space>
                     <span>Sync Logs</span>
-                    <Tag style={{ borderRadius: 12 }}>{logs.length}</Tag>
+                    <Tag style={{ borderRadius: 12 }}>{logs.length} displayed</Tag>
+                    <Tag color="blue" style={{ borderRadius: 12 }}>{logCounterRef.current} generated</Tag>
+                    {logCounterRef.current !== logs.length && logCounterRef.current > 0 && (
+                      <Tag color="warning" style={{ borderRadius: 12 }}>
+                        {logCounterRef.current - logs.length} missing!
+                      </Tag>
+                    )}
                   </Space>
                 }
                 extra={
-                  <Button size="small" onClick={() => setLogs([])}>
-                    Clear
-                  </Button>
+                  <Space>
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      Check browser console (F12) for all logs
+                    </Text>
+                    <Button size="small" onClick={() => { setLogs([]); logCounterRef.current = 0; }}>
+                      Clear
+                    </Button>
+                  </Space>
                 }
                 style={{
                   borderRadius: 12,
