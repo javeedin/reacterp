@@ -452,71 +452,39 @@ const ManageJournals: React.FC = () => {
         </div>
 
         {/* Main Content */}
-        <div style={{ padding: 24 }}>
-          {/* Page Header */}
-          <div style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Space align="center">
-              <div style={{
-                width: 48,
-                height: 48,
-                borderRadius: 10,
-                background: `linear-gradient(135deg, ${REDWOOD.info} 0%, ${REDWOOD.info}CC 100%)`,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                boxShadow: `0 4px 12px ${REDWOOD.info}40`,
-              }}>
-                <AccountBookOutlined style={{ fontSize: 24, color: '#fff' }} />
-              </div>
-              <div>
-                <Title level={3} style={{ margin: 0, color: REDWOOD.neutral900 }}>
-                  Manage Journals
-                </Title>
-                <Text type="secondary">Search and manage journal entries</Text>
-              </div>
-            </Space>
-            <Button
-              type="primary"
-              style={{
-                background: REDWOOD.primary,
-                borderColor: REDWOOD.primary,
-                borderRadius: 6,
-              }}
-            >
-              Done
-            </Button>
-          </div>
-
+        <div style={{ padding: 16 }}>
           {/* Collapsible Search Card */}
           <Collapse
             activeKey={searchExpanded}
             onChange={(keys) => setSearchExpanded(keys as string[])}
             style={{
-              marginBottom: 24,
-              borderRadius: 12,
+              marginBottom: 16,
+              borderRadius: 8,
               border: `1px solid ${REDWOOD.neutral200}`,
               background: REDWOOD.surface,
             }}
             expandIconPosition="end"
+            size="small"
           >
             <Panel
               header={
                 <Space>
-                  <FilterOutlined style={{ color: REDWOOD.info }} />
-                  <Text strong style={{ fontSize: 16 }}>Search Parameters</Text>
+                  <FilterOutlined style={{ color: REDWOOD.info, fontSize: 12 }} />
+                  <Text strong style={{ fontSize: 12 }}>Search Parameters</Text>
                   {!searchExpanded.includes('search') && journals.length > 0 && (
-                    <Tag color={REDWOOD.info}>{totalCount} results</Tag>
+                    <Tag color={REDWOOD.info} style={{ fontSize: 11 }}>{totalCount} results</Tag>
                   )}
                 </Space>
               }
               key="search"
-              style={{ borderRadius: 12 }}
+              style={{ borderRadius: 8 }}
             >
               <Form
                 form={form}
                 layout="horizontal"
                 labelCol={{ span: 8 }}
                 wrapperCol={{ span: 16 }}
+                size="small"
                 initialValues={{
                   ledger: 'BUIMERC LEDGER',
                   accountingPeriod: 'May-24',
@@ -617,23 +585,23 @@ const ManageJournals: React.FC = () => {
           {/* Results Table */}
           <Card
             style={{
-              borderRadius: 12,
+              borderRadius: 8,
               border: `1px solid ${REDWOOD.neutral200}`,
             }}
             bodyStyle={{ padding: 0 }}
           >
             {/* Toolbar */}
             <div style={{
-              padding: '12px 16px',
+              padding: '8px 12px',
               borderBottom: `1px solid ${REDWOOD.neutral200}`,
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
               background: REDWOOD.neutral100,
             }}>
-              <Space>
+              <Space size="small">
                 <Dropdown menu={{ items: actionsMenu }}>
-                  <Button>
+                  <Button size="small" style={{ fontSize: 11 }}>
                     Actions <DownOutlined />
                   </Button>
                 </Dropdown>
@@ -642,7 +610,7 @@ const ManageJournals: React.FC = () => {
                   { key: 'detach', label: 'Detach' },
                   { key: 'sort', label: 'Sort' },
                 ] }}>
-                  <Button>
+                  <Button size="small" style={{ fontSize: 11 }}>
                     View <DownOutlined />
                   </Button>
                 </Dropdown>
@@ -650,15 +618,16 @@ const ManageJournals: React.FC = () => {
                   { key: 'wrap', label: 'Wrap' },
                   { key: 'resize', label: 'Resize Columns' },
                 ] }}>
-                  <Button>
+                  <Button size="small" style={{ fontSize: 11 }}>
                     Format <DownOutlined />
                   </Button>
                 </Dropdown>
                 <Tooltip title="Create Journal">
-                  <Button icon={<PlusOutlined />} />
+                  <Button size="small" icon={<PlusOutlined />} />
                 </Tooltip>
                 <Tooltip title="Edit">
                   <Button
+                    size="small"
                     icon={<EditOutlined />}
                     disabled={selectedRowKeys.length !== 1}
                     onClick={() => {
@@ -670,21 +639,22 @@ const ManageJournals: React.FC = () => {
                   />
                 </Tooltip>
                 <Tooltip title="Delete">
-                  <Button icon={<DeleteOutlined />} disabled={selectedRowKeys.length === 0} danger />
+                  <Button size="small" icon={<DeleteOutlined />} disabled={selectedRowKeys.length === 0} danger />
                 </Tooltip>
               </Space>
-              <Space>
-                <Text type="secondary">
+              <Space size="small">
+                <Text type="secondary" style={{ fontSize: 11 }}>
                   {totalCount > 0 ? `${totalCount} journals found` : 'No results'}
                 </Text>
                 <Button
+                  size="small"
                   type="primary"
                   disabled={selectedRowKeys.length === 0}
-                  style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+                  style={{ background: REDWOOD.success, borderColor: REDWOOD.success, fontSize: 11 }}
                 >
                   Post Batch
                 </Button>
-                <Button disabled={selectedRowKeys.length === 0}>
+                <Button size="small" disabled={selectedRowKeys.length === 0} style={{ fontSize: 11 }}>
                   Reverse Batch
                 </Button>
               </Space>
@@ -702,10 +672,12 @@ const ManageJournals: React.FC = () => {
                 showSizeChanger: true,
                 showQuickJumper: true,
                 showTotal: (total) => `Total ${total} journals`,
+                size: 'small',
               }}
               scroll={{ x: 1800 }}
-              size="middle"
-              style={{ borderRadius: '0 0 12px 12px' }}
+              size="small"
+              style={{ borderRadius: '0 0 12px 12px', fontSize: 12 }}
+              className="compact-table"
               locale={{
                 emptyText: 'Click Search to load journals',
               }}

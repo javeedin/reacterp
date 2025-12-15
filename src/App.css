@@ -40,3 +40,22 @@
 .read-the-docs {
   color: #888;
 }
+
+/* Compact table styles */
+.compact-table .ant-table-thead > tr > th {
+  font-size: 11px !important;
+  padding: 8px 8px !important;
+}
+
+.compact-table .ant-table-tbody > tr > td {
+  font-size: 11px !important;
+  padding: 6px 8px !important;
+}
+
+.compact-table .ant-table-pagination {
+  font-size: 11px !important;
+}
+
+.compact-table .ant-tag {
+  font-size: 10px !important;
+}
