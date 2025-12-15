@@ -628,36 +628,36 @@ const ManageJournals: React.FC = () => {
             <Row gutter={[16, 6]}>
               <Col span={12}>
                 <Row gutter={[6, 5]}>
-                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Journal Batch</Text></Col>
-                  <Col span={16}><Text style={{ fontSize: 10 }}>{journal.batchName}</Text></Col>
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Journal Batch</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 11 }}>{journal.batchName}</Text></Col>
 
-                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Description</Text></Col>
-                  <Col span={16}><Text style={{ fontSize: 10 }}>{journal.batchDescription}</Text></Col>
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Description</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 11 }}>{journal.batchDescription}</Text></Col>
 
-                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Period</Text></Col>
-                  <Col span={16}><Text style={{ fontSize: 10 }}>{journal.periodName}</Text></Col>
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Period</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 11 }}>{journal.periodName}</Text></Col>
 
-                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Source</Text></Col>
-                  <Col span={16}><Text style={{ fontSize: 10 }}>{journal.source}</Text></Col>
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Source</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 11 }}>{journal.source}</Text></Col>
                 </Row>
               </Col>
               <Col span={12}>
                 <Row gutter={[6, 5]}>
-                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Ledger</Text></Col>
-                  <Col span={16}><Text style={{ fontSize: 10 }}>{journal.ledger}</Text></Col>
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Ledger</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 11 }}>{journal.ledger}</Text></Col>
 
-                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Currency</Text></Col>
-                  <Col span={16}><Text style={{ fontSize: 10 }}>{journal.currency}</Text></Col>
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Currency</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 11 }}>{journal.currency}</Text></Col>
 
-                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Status</Text></Col>
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Status</Text></Col>
                   <Col span={16}>
-                    <Tag style={{ fontSize: 9 }} color={journal.statusMeaning === 'Posted' ? REDWOOD.success : REDWOOD.warning}>
+                    <Tag style={{ fontSize: 10 }} color={journal.statusMeaning === 'Posted' ? REDWOOD.success : REDWOOD.warning}>
                       {journal.statusMeaning}
                     </Tag>
                   </Col>
 
-                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Approval</Text></Col>
-                  <Col span={16}><Text style={{ fontSize: 10 }}>{journal.approvalStatusMeaning}</Text></Col>
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Approval</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 11 }}>{journal.approvalStatusMeaning}</Text></Col>
                 </Row>
               </Col>
             </Row>
@@ -683,32 +683,32 @@ const ManageJournals: React.FC = () => {
             <Row gutter={[16, 6]}>
               <Col span={12}>
                 <Row gutter={[6, 5]}>
-                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Journal</Text></Col>
-                  <Col span={16}><Text strong style={{ fontSize: 10 }}>{journal.journalName}</Text></Col>
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Journal</Text></Col>
+                  <Col span={16}><Text strong style={{ fontSize: 11 }}>{journal.journalName}</Text></Col>
 
-                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Description</Text></Col>
-                  <Col span={16}><Text style={{ fontSize: 10 }}>{journal.journalDescription || '-'}</Text></Col>
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Description</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 11 }}>{journal.journalDescription || '-'}</Text></Col>
 
-                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Category</Text></Col>
-                  <Col span={16}><Text style={{ fontSize: 10 }}>{journal.category}</Text></Col>
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Category</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 11 }}>{journal.category}</Text></Col>
 
-                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Accounting Date</Text></Col>
-                  <Col span={16}><Text style={{ fontSize: 10 }}>{journal.defaultEffectiveDate}</Text></Col>
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Accounting Date</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 11 }}>{journal.defaultEffectiveDate}</Text></Col>
                 </Row>
               </Col>
               <Col span={12}>
                 <Row gutter={[6, 5]}>
-                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Entered Dr</Text></Col>
-                  <Col span={16}><Text style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(journal.runningTotalEnteredDr)}</Text></Col>
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Entered Dr</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 11, color: REDWOOD.success }}>{formatNumber(journal.runningTotalEnteredDr)}</Text></Col>
 
-                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Entered Cr</Text></Col>
-                  <Col span={16}><Text style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(journal.runningTotalEnteredCr)}</Text></Col>
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Entered Cr</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 11, color: REDWOOD.primary }}>{formatNumber(journal.runningTotalEnteredCr)}</Text></Col>
 
-                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Accounted Dr</Text></Col>
-                  <Col span={16}><Text style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(journal.runningTotalAccountedDr)}</Text></Col>
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Accounted Dr</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 11, color: REDWOOD.success }}>{formatNumber(journal.runningTotalAccountedDr)}</Text></Col>
 
-                  <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Accounted Cr</Text></Col>
-                  <Col span={16}><Text style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(journal.runningTotalAccountedCr)}</Text></Col>
+                  <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Accounted Cr</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 11, color: REDWOOD.primary }}>{formatNumber(journal.runningTotalAccountedCr)}</Text></Col>
                 </Row>
               </Col>
             </Row>
@@ -730,10 +730,10 @@ const ManageJournals: React.FC = () => {
               alignItems: 'center',
             }}
           >
-            <Text strong style={{ fontSize: 11 }}>Journal Lines</Text>
+            <Text strong style={{ fontSize: 12 }}>Journal Lines</Text>
             <Space size="small">
               <Dropdown menu={{ items: [{ key: 'add', label: 'Add Row' }] }}>
-                <Button size="small" style={{ fontSize: 10 }}>Actions <DownOutlined /></Button>
+                <Button size="small" style={{ fontSize: 11 }}>Actions <DownOutlined /></Button>
               </Dropdown>
               <Button size="small" icon={<PlusOutlined />} />
               <Button size="small" icon={<DeleteOutlined />} />
