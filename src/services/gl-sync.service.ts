@@ -36,6 +36,7 @@ export interface SyncProgress {
 
 export type LogCallback = (type: 'info' | 'success' | 'error' | 'warning' | 'step', message: string) => void;
 export type ProgressCallback = (progress: Partial<SyncProgress>) => void;
+export type BatchPayloadCallback = (batchId: number, batchName: string, payload: any, result?: any, error?: string) => void;
 
 // Extract ID from Oracle Fusion href link
 const extractIdFromHref = (href: string): number | null => {
@@ -163,7 +164,8 @@ export const syncGLJournals = async (
   testMode: boolean | 'single' = true, // true=25, false=full, 'single'=1
   log?: LogCallback,
   onProgress?: ProgressCallback,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  onBatchPayload?: BatchPayloadCallback
 ): Promise<SyncProgress> => {
   const progress: SyncProgress = {
     status: 'idle',
@@ -428,17 +430,30 @@ export const syncGLJournals = async (
       };
 
       try {
+        // Notify callback with batch payload before POST
+        const batchName = batch.JournalBatchName || batch.JournalName || `Batch ${batchId}`;
+        onBatchPayload?.(batchId, batchName, batchPayload);
+
         const batchInsertResult = await insertToApex(APEX_DB_CONFIG.endpoints.journalBatches, batchPayload, log);
         if (batchInsertResult.success || batchInsertResult.inserted > 0) {
           updateProgress({ totalBatchesInserted: progress.totalBatchesInserted + 1 });
           log?.('success', `  ✓ Batch inserted to APEX`);
+          // Update callback with success
+          onBatchPayload?.(batchId, batchName, batchPayload, batchInsertResult);
         } else {
+          const errorMsg = batchInsertResult.lastError || batchInsertResult.error || 'Unknown error';
           updateProgress({ errors: progress.errors + 1, lastError: batchInsertResult.error || 'Batch insert failed' });
-          log?.('error', `  ✗ Batch insert failed: ${batchInsertResult.lastError || batchInsertResult.error || JSON.stringify(batchInsertResult)}`);
+          log?.('error', `  ✗ Batch insert failed: ${errorMsg || JSON.stringify(batchInsertResult)}`);
+          // Update callback with error
+          onBatchPayload?.(batchId, batchName, batchPayload, batchInsertResult, errorMsg);
         }
       } catch (error) {
-        updateProgress({ errors: progress.errors + 1, lastError: String(error) });
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        updateProgress({ errors: progress.errors + 1, lastError: errorMsg });
         log?.('error', `  ✗ Batch insert error: ${error}`);
+        // Update callback with error
+        const batchName = batch.JournalBatchName || batch.JournalName || `Batch ${batchId}`;
+        onBatchPayload?.(batchId, batchName, batchPayload, undefined, errorMsg);
       }
 
       updateProgress({ processedBatches: batchIndex + 1 });

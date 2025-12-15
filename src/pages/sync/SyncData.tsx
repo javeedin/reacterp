@@ -34,10 +34,13 @@ import {
   UnorderedListOutlined,
   ThunderboltOutlined,
   ExpandOutlined,
+  DownloadOutlined,
+  SendOutlined,
+  BugOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import { SYNC_OBJECTS, ORACLE_FUSION_CONFIG, PROXY_CONFIG, type SyncObjectConfig, type ApiType } from '../../config/api.config';
-import { syncGLJournals, testGLConnection, type SyncProgress, type LogCallback } from '../../services/gl-sync.service';
+import { SYNC_OBJECTS, ORACLE_FUSION_CONFIG, PROXY_CONFIG, APEX_DB_CONFIG, type SyncObjectConfig, type ApiType } from '../../config/api.config';
+import { syncGLJournals, testGLConnection, type SyncProgress, type LogCallback, type BatchPayloadCallback } from '../../services/gl-sync.service';
 import Autopilot from '../../components/Autopilot';
 
 const { Content } = Layout;
@@ -69,6 +72,16 @@ interface SyncLog {
   message: string;
 }
 
+// Interface for batch payload debugging
+interface BatchPayloadLog {
+  batchId: number;
+  batchName: string;
+  payload: any;
+  postResult?: any;
+  status: 'pending' | 'success' | 'error';
+  errorMessage?: string;
+}
+
 // Proxy status type
 type ProxyStatus = 'unknown' | 'checking' | 'online' | 'offline';
 
@@ -83,6 +96,10 @@ const SyncData: React.FC = () => {
   const [proxyError, setProxyError] = useState<string>('');
   const [logDetailVisible, setLogDetailVisible] = useState(false);
   const [selectedLog, setSelectedLog] = useState<SyncLog | null>(null);
+  const [batchPayloads, setBatchPayloads] = useState<BatchPayloadLog[]>([]);
+  const [batchDebugVisible, setBatchDebugVisible] = useState(false);
+  const [selectedBatchPayload, setSelectedBatchPayload] = useState<BatchPayloadLog | null>(null);
+  const [isPostingBatch, setIsPostingBatch] = useState(false);
   const [progress, setProgress] = useState<SyncProgress>({
     status: 'idle',
     totalBatches: 0,
@@ -124,6 +141,85 @@ const SyncData: React.FC = () => {
 
     setLogs((prev) => [log, ...prev].slice(0, 500));
   }, []);
+
+  // Update batch payload status after POST
+  const updateBatchPayloadStatus = useCallback((batchId: number, status: 'success' | 'error', postResult?: any, errorMessage?: string) => {
+    setBatchPayloads((prev) => prev.map((bp) =>
+      bp.batchId === batchId
+        ? { ...bp, status, postResult, errorMessage }
+        : bp
+    ));
+  }, []);
+
+  // Download batch payloads as log file
+  const downloadBatchPayloads = useCallback(() => {
+    let content = `BATCH PAYLOADS LOG\n`;
+    content += `Generated: ${new Date().toLocaleString()}\n`;
+    content += `Total Batches: ${batchPayloads.length}\n`;
+    content += `${'='.repeat(80)}\n\n`;
+
+    batchPayloads.forEach((bp, index) => {
+      content += `BATCH #${index + 1}\n`;
+      content += `${'─'.repeat(40)}\n`;
+      content += `Batch ID: ${bp.batchId}\n`;
+      content += `Batch Name: ${bp.batchName}\n`;
+      content += `Status: ${bp.status.toUpperCase()}\n`;
+      if (bp.errorMessage) {
+        content += `Error: ${bp.errorMessage}\n`;
+      }
+      content += `\nPOST Payload:\n`;
+      content += JSON.stringify(bp.payload, null, 2);
+      content += `\n`;
+      if (bp.postResult) {
+        content += `\nPOST Response:\n`;
+        content += JSON.stringify(bp.postResult, null, 2);
+      }
+      content += `\n${'─'.repeat(40)}\n\n`;
+    });
+
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `batch-payloads-${new Date().toISOString().slice(0, 10)}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [batchPayloads]);
+
+  // POST a single batch manually
+  const postSingleBatch = useCallback(async (batchPayload: BatchPayloadLog) => {
+    setIsPostingBatch(true);
+    addLog('step', `──── Manual POST for Batch ${batchPayload.batchId} ────`);
+
+    try {
+      const url = `${PROXY_CONFIG.baseUrl}/apex/${APEX_DB_CONFIG.endpoints.journalBatches}`;
+      addLog('info', `POST URL: ${url}`);
+      addLog('info', `POST Payload: ${JSON.stringify(batchPayload.payload)}`);
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(batchPayload.payload),
+      });
+
+      const data = await response.json();
+      addLog('success', `POST Response: ${JSON.stringify(data)}`);
+
+      if (data.success || data.inserted > 0) {
+        updateBatchPayloadStatus(batchPayload.batchId, 'success', data);
+        addLog('success', `✓ Batch ${batchPayload.batchId} posted successfully!`);
+      } else {
+        updateBatchPayloadStatus(batchPayload.batchId, 'error', data, data.error || data.lastError || 'Unknown error');
+        addLog('error', `✗ Batch ${batchPayload.batchId} failed: ${data.error || data.lastError || JSON.stringify(data)}`);
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      updateBatchPayloadStatus(batchPayload.batchId, 'error', undefined, errorMsg);
+      addLog('error', `✗ Batch ${batchPayload.batchId} error: ${errorMsg}`);
+    }
+
+    setIsPostingBatch(false);
+  }, [addLog, updateBatchPayloadStatus]);
 
   // Check proxy server status
   const checkProxyStatus = useCallback(async () => {
@@ -240,6 +336,36 @@ const SyncData: React.FC = () => {
     setIsTesting(false);
   };
 
+  // Batch payload callback handler
+  const handleBatchPayload: BatchPayloadCallback = useCallback((batchId, batchName, payload, result, error) => {
+    setBatchPayloads((prev) => {
+      const existing = prev.find((bp) => bp.batchId === batchId);
+      if (existing) {
+        // Update existing entry
+        return prev.map((bp) =>
+          bp.batchId === batchId
+            ? {
+                ...bp,
+                postResult: result,
+                status: error ? 'error' : (result ? 'success' : 'pending'),
+                errorMessage: error,
+              }
+            : bp
+        );
+      } else {
+        // Add new entry
+        return [...prev, {
+          batchId,
+          batchName,
+          payload,
+          postResult: result,
+          status: error ? 'error' : (result ? 'success' : 'pending'),
+          errorMessage: error,
+        }];
+      }
+    });
+  }, []);
+
   const handleSync = async () => {
     if (!selectedObject) {
       addLog('error', 'Please select a sync object');
@@ -251,7 +377,11 @@ const SyncData: React.FC = () => {
     isSyncingRef.current = true;
     abortControllerRef.current = new AbortController();
 
+    // Clear previous data
     setLogs([]);
+    setBatchPayloads([]);
+    logCounterRef.current = 0;
+
     setProgress({
       status: 'fetching_batches',
       totalBatches: 0,
@@ -283,7 +413,8 @@ const SyncData: React.FC = () => {
       testMode,
       addLog,
       (newProgress) => setProgress((prev) => ({ ...prev, ...newProgress })),
-      abortControllerRef.current.signal
+      abortControllerRef.current.signal,
+      handleBatchPayload
     );
 
     isSyncingRef.current = false;
@@ -872,6 +1003,117 @@ const SyncData: React.FC = () => {
                 </Row>
               </Card>
 
+              {/* Batch Debug Section */}
+              {batchPayloads.length > 0 && (
+                <Card
+                  title={
+                    <Space>
+                      <BugOutlined style={{ color: REDWOOD.warning }} />
+                      <span>Batch Debug</span>
+                      <Tag style={{ borderRadius: 12 }}>{batchPayloads.length} batches</Tag>
+                      <Tag color="success" style={{ borderRadius: 12 }}>
+                        {batchPayloads.filter((bp) => bp.status === 'success').length} success
+                      </Tag>
+                      <Tag color="error" style={{ borderRadius: 12 }}>
+                        {batchPayloads.filter((bp) => bp.status === 'error').length} errors
+                      </Tag>
+                    </Space>
+                  }
+                  extra={
+                    <Space>
+                      <Button
+                        size="small"
+                        icon={<DownloadOutlined />}
+                        onClick={downloadBatchPayloads}
+                      >
+                        Download Log
+                      </Button>
+                      <Button size="small" onClick={() => setBatchPayloads([])}>
+                        Clear
+                      </Button>
+                    </Space>
+                  }
+                  style={{
+                    borderRadius: 12,
+                    border: `1px solid ${REDWOOD.border}`,
+                    marginBottom: 16,
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                  }}
+                  bodyStyle={{ padding: 0 }}
+                >
+                  <Table
+                    dataSource={batchPayloads}
+                    rowKey="batchId"
+                    size="small"
+                    pagination={false}
+                    scroll={{ y: 200 }}
+                    columns={[
+                      {
+                        title: 'Batch ID',
+                        dataIndex: 'batchId',
+                        key: 'batchId',
+                        width: 100,
+                        render: (id: number) => <Text code>{id}</Text>,
+                      },
+                      {
+                        title: 'Batch Name',
+                        dataIndex: 'batchName',
+                        key: 'batchName',
+                        ellipsis: true,
+                      },
+                      {
+                        title: 'Status',
+                        dataIndex: 'status',
+                        key: 'status',
+                        width: 100,
+                        render: (status: string) => (
+                          <Tag color={status === 'success' ? 'success' : status === 'error' ? 'error' : 'default'}>
+                            {status.toUpperCase()}
+                          </Tag>
+                        ),
+                      },
+                      {
+                        title: 'Error',
+                        dataIndex: 'errorMessage',
+                        key: 'errorMessage',
+                        width: 200,
+                        ellipsis: true,
+                        render: (error: string) => error ? <Text type="danger" style={{ fontSize: 11 }}>{error}</Text> : '-',
+                      },
+                      {
+                        title: 'Actions',
+                        key: 'actions',
+                        width: 140,
+                        render: (_: unknown, record: BatchPayloadLog) => (
+                          <Space size="small">
+                            <Tooltip title="View Payload">
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<ExpandOutlined style={{ color: REDWOOD.info }} />}
+                                onClick={() => {
+                                  setSelectedBatchPayload(record);
+                                  setBatchDebugVisible(true);
+                                }}
+                              />
+                            </Tooltip>
+                            <Tooltip title="POST this batch">
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<SendOutlined style={{ color: REDWOOD.primary }} />}
+                                onClick={() => postSingleBatch(record)}
+                                loading={isPostingBatch}
+                              />
+                            </Tooltip>
+                          </Space>
+                        ),
+                      },
+                    ]}
+                  />
+                </Card>
+              )}
+
               {/* Sync Logs */}
               <Card
                 title={
@@ -981,6 +1223,128 @@ const SyncData: React.FC = () => {
             }}>
               {formatLogMessage(selectedLog.message)}
             </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Batch Debug Modal */}
+      <Modal
+        title={
+          <Space>
+            <BugOutlined style={{ color: REDWOOD.warning }} />
+            <span>Batch Payload Debug</span>
+            {selectedBatchPayload && (
+              <Tag
+                color={
+                  selectedBatchPayload.status === 'success' ? 'success' :
+                  selectedBatchPayload.status === 'error' ? 'error' : 'default'
+                }
+              >
+                {selectedBatchPayload.status.toUpperCase()}
+              </Tag>
+            )}
+          </Space>
+        }
+        open={batchDebugVisible}
+        onCancel={() => setBatchDebugVisible(false)}
+        footer={[
+          <Button
+            key="copy"
+            onClick={() => {
+              if (selectedBatchPayload) {
+                navigator.clipboard.writeText(JSON.stringify(selectedBatchPayload.payload, null, 2));
+              }
+            }}
+          >
+            Copy Payload
+          </Button>,
+          <Button
+            key="post"
+            type="primary"
+            icon={<SendOutlined />}
+            loading={isPostingBatch}
+            onClick={() => {
+              if (selectedBatchPayload) {
+                postSingleBatch(selectedBatchPayload);
+              }
+            }}
+            style={{ background: REDWOOD.primary }}
+          >
+            POST This Batch
+          </Button>,
+          <Button key="close" onClick={() => setBatchDebugVisible(false)}>
+            Close
+          </Button>,
+        ]}
+        width={800}
+      >
+        {selectedBatchPayload && (
+          <div>
+            <Row gutter={16} style={{ marginBottom: 16 }}>
+              <Col span={12}>
+                <div style={{
+                  padding: '8px 12px',
+                  background: REDWOOD.surfaceSecondary,
+                  borderRadius: 6,
+                  fontSize: 12,
+                }}>
+                  <Text type="secondary">Batch ID: </Text>
+                  <Text strong code>{selectedBatchPayload.batchId}</Text>
+                </div>
+              </Col>
+              <Col span={12}>
+                <div style={{
+                  padding: '8px 12px',
+                  background: REDWOOD.surfaceSecondary,
+                  borderRadius: 6,
+                  fontSize: 12,
+                }}>
+                  <Text type="secondary">Batch Name: </Text>
+                  <Text strong>{selectedBatchPayload.batchName}</Text>
+                </div>
+              </Col>
+            </Row>
+
+            {selectedBatchPayload.errorMessage && (
+              <Alert
+                type="error"
+                message="Error"
+                description={selectedBatchPayload.errorMessage}
+                style={{ marginBottom: 16 }}
+              />
+            )}
+
+            <Divider style={{ margin: '12px 0' }}>POST Payload</Divider>
+            <pre style={{
+              background: '#fafafa',
+              padding: 16,
+              borderRadius: 8,
+              border: `1px solid ${REDWOOD.border}`,
+              maxHeight: 300,
+              overflow: 'auto',
+              fontSize: 12,
+              fontFamily: 'monospace',
+            }}>
+              {JSON.stringify(selectedBatchPayload.payload, null, 2)}
+            </pre>
+
+            {selectedBatchPayload.postResult && (
+              <>
+                <Divider style={{ margin: '12px 0' }}>POST Response</Divider>
+                <pre style={{
+                  background: selectedBatchPayload.status === 'success' ? '#f6ffed' : '#fff2f0',
+                  padding: 16,
+                  borderRadius: 8,
+                  border: `1px solid ${selectedBatchPayload.status === 'success' ? '#b7eb8f' : '#ffccc7'}`,
+                  maxHeight: 200,
+                  overflow: 'auto',
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                }}>
+                  {JSON.stringify(selectedBatchPayload.postResult, null, 2)}
+                </pre>
+              </>
+            )}
           </div>
         )}
       </Modal>
