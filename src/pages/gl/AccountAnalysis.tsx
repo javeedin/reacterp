@@ -18,6 +18,8 @@ import {
   Empty,
   Divider,
   message,
+  Modal,
+  Descriptions,
 } from 'antd';
 import {
   HomeOutlined,
@@ -31,6 +33,8 @@ import {
   DownloadOutlined,
   TableOutlined,
   DragOutlined,
+  UnorderedListOutlined,
+  EyeOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -109,7 +113,10 @@ interface PivotDataRow {
 interface AccountTab {
   key: string;
   account: string;
+  company: string;
   concatenatedSegments: string;
+  data: JournalLineSegment[];
+  loading: boolean;
 }
 
 interface SegmentFilter {
@@ -145,6 +152,9 @@ const reportMenuItems: MenuItemType[] = [
 // Available ledgers
 const availableLedgers = ['BUIMERC LEDGER'];
 
+// Available companies
+const availableCompanies = ['01', '02', '03'];
+
 // Available periods (can be loaded from API)
 const availablePeriods = [
   'Jan-24', 'Feb-24', 'Mar-24', 'Apr-24', 'May-24', 'Jun-24',
@@ -162,9 +172,11 @@ const AccountAnalysis: React.FC = () => {
 
   // Search filters - default ledger is BUIMERC LEDGER
   const [selectedLedger, setSelectedLedger] = useState<string>('BUIMERC LEDGER');
+  const [selectedCompany, setSelectedCompany] = useState<string>('01');
   const [selectedPeriods, setSelectedPeriods] = useState<string[]>([]);
+  const [accountFilter, setAccountFilter] = useState<string>('');
 
-  // Segment filters
+  // Segment filters for pivot
   const [segmentFilters, setSegmentFilters] = useState<SegmentFilter[]>([
     { segment: 'company', label: 'Company', values: [], selected: null, isDropped: false },
     { segment: 'lob', label: 'LOB', values: [], selected: null, isDropped: false },
@@ -183,6 +195,11 @@ const AccountAnalysis: React.FC = () => {
 
   // Pivot view state
   const [droppedSegments, setDroppedSegments] = useState<string[]>([]);
+
+  // Journal detail modal state
+  const [journalModalVisible, setJournalModalVisible] = useState(false);
+  const [journalModalData, setJournalModalData] = useState<JournalLineSegment[]>([]);
+  const [journalModalTitle, setJournalModalTitle] = useState('');
 
   // Click outside handler for floating panel
   useEffect(() => {
@@ -235,13 +252,12 @@ const AccountAnalysis: React.FC = () => {
       const params = new URLSearchParams();
       params.append('ledger_name', selectedLedger);
       params.append('period_names', selectedPeriods.join(','));
+      params.append('company', selectedCompany);
 
-      // Add segment filters if selected
-      segmentFilters.forEach((filter) => {
-        if (filter.selected) {
-          params.append(filter.segment, filter.selected);
-        }
-      });
+      // Add account filter if provided
+      if (accountFilter) {
+        params.append('account', accountFilter);
+      }
 
       const response = await fetch(`${API_BASE_URL}/accountanalysis?${params.toString()}`);
 
@@ -271,36 +287,76 @@ const AccountAnalysis: React.FC = () => {
     }
   };
 
+  // Fetch account data for drill-down
+  const fetchAccountData = async (account: string, company: string): Promise<JournalLineSegment[]> => {
+    try {
+      const params = new URLSearchParams();
+      params.append('ledger_name', selectedLedger);
+      params.append('period_names', selectedPeriods.join(','));
+      params.append('company', company);
+      params.append('account', account);
+
+      const response = await fetch(`${API_BASE_URL}/accountanalysis?${params.toString()}`);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      return (data.items || []).map((item: any, index: number) => ({
+        ...item,
+        key: `${index}`,
+        concatenatedSegments: `${item.company}-${item.lob}-${item.department}-${item.account}-${item.subAccount}-${item.analysis}-${item.intercompany}`,
+      }));
+    } catch (error) {
+      console.error('Error fetching account data:', error);
+      message.error('Failed to fetch account data');
+      return [];
+    }
+  };
+
   // Reset filters
   const handleReset = () => {
     setSelectedLedger('BUIMERC LEDGER');
+    setSelectedCompany('01');
     setSelectedPeriods([]);
-    setSegmentFilters(
-      segmentFilters.map((f) => ({ ...f, selected: null }))
-    );
+    setAccountFilter('');
     setSearchData([]);
     setTotalCount(0);
   };
 
-  // Open account in new tab
-  const openAccountTab = (record: JournalLineSegment) => {
+  // Open account in new tab - re-query API
+  const openAccountTab = async (record: JournalLineSegment) => {
     const concatenatedSegments = record.concatenatedSegments ||
       `${record.company}-${record.lob}-${record.department}-${record.account}-${record.subAccount}-${record.analysis}-${record.intercompany}`;
 
     const existingTab = accountTabs.find(
-      (tab) => tab.concatenatedSegments === concatenatedSegments
+      (tab) => tab.account === record.account && tab.company === record.company
     );
 
     if (existingTab) {
       setActiveTabKey(existingTab.key);
     } else {
+      const tabKey = `account-${Date.now()}`;
       const newTab: AccountTab = {
-        key: `account-${Date.now()}`,
+        key: tabKey,
         account: record.account,
+        company: record.company,
         concatenatedSegments,
+        data: [],
+        loading: true,
       };
       setAccountTabs([...accountTabs, newTab]);
-      setActiveTabKey(newTab.key);
+      setActiveTabKey(tabKey);
+
+      // Fetch fresh data for this account
+      const freshData = await fetchAccountData(record.account, record.company);
+      setAccountTabs((prev) =>
+        prev.map((tab) =>
+          tab.key === tabKey ? { ...tab, data: freshData, loading: false } : tab
+        )
+      );
     }
   };
 
@@ -366,15 +422,31 @@ const AccountAnalysis: React.FC = () => {
     });
   };
 
-  // Generate pivot data for account tab
-  const generatePivotData = (accountSegments: string): PivotDataRow[] => {
-    const accountData = searchData.filter(
-      (d) => d.concatenatedSegments === accountSegments
+  // Calculate totals
+  const calculateTotals = (data: JournalLineSegment[]) => {
+    return data.reduce(
+      (acc, row) => ({
+        enteredDr: acc.enteredDr + (row.enteredDr || 0),
+        enteredCr: acc.enteredCr + (row.enteredCr || 0),
+        accountedDr: acc.accountedDr + (row.accountedDr || 0),
+        accountedCr: acc.accountedCr + (row.accountedCr || 0),
+      }),
+      { enteredDr: 0, enteredCr: 0, accountedDr: 0, accountedCr: 0 }
     );
+  };
 
+  // Show all journals modal
+  const showAllJournals = (tab: AccountTab) => {
+    setJournalModalData(tab.data);
+    setJournalModalTitle(`All Journals - Account: ${tab.account}`);
+    setJournalModalVisible(true);
+  };
+
+  // Generate pivot data for account tab
+  const generatePivotData = (data: JournalLineSegment[]): PivotDataRow[] => {
     const pivotMap = new Map<string, PivotDataRow>();
 
-    accountData.forEach((row) => {
+    data.forEach((row) => {
       const key = row.concatenatedSegments || '';
       if (!pivotMap.has(key)) {
         pivotMap.set(key, {
@@ -398,43 +470,6 @@ const AccountAnalysis: React.FC = () => {
 
     return Array.from(pivotMap.values());
   };
-
-  // Get all unique accounts from search data for pivot
-  const getAllPivotData = useMemo((): PivotDataRow[] => {
-    const pivotMap = new Map<string, PivotDataRow>();
-
-    searchData.forEach((row) => {
-      // Apply segment filters
-      const matchesFilters = segmentFilters.every((filter) => {
-        if (!filter.selected) return true;
-        return (row as any)[filter.segment] === filter.selected;
-      });
-
-      if (!matchesFilters) return;
-
-      const key = row.concatenatedSegments || '';
-      if (!pivotMap.has(key)) {
-        pivotMap.set(key, {
-          key,
-          account: row.account,
-          company: row.company,
-          lob: row.lob,
-          department: row.department,
-          subAccount: row.subAccount,
-          analysis: row.analysis,
-          intercompany: row.intercompany,
-          concatenatedSegments: key,
-        });
-      }
-
-      const pivotRow = pivotMap.get(key)!;
-      const periodKey = row.defaultPeriodName;
-      const netAmount = (row.accountedDr || 0) - (row.accountedCr || 0);
-      pivotRow[periodKey] = ((pivotRow[periodKey] as number) || 0) + netAmount;
-    });
-
-    return Array.from(pivotMap.values());
-  }, [searchData, segmentFilters]);
 
   // Search tab columns
   const searchColumns: ColumnsType<JournalLineSegment> = [
@@ -544,6 +579,52 @@ const AccountAnalysis: React.FC = () => {
         );
       },
     },
+  ];
+
+  // Journal detail modal columns
+  const journalDetailColumns: ColumnsType<JournalLineSegment> = [
+    { title: 'Line', dataIndex: 'jeLineNumber', key: 'jeLineNumber', width: 60 },
+    { title: 'Period', dataIndex: 'defaultPeriodName', key: 'defaultPeriodName', width: 80 },
+    { title: 'Batch Name', dataIndex: 'batchName', key: 'batchName', width: 180, ellipsis: true },
+    { title: 'Source', dataIndex: 'userJeSourceName', key: 'userJeSourceName', width: 100 },
+    { title: 'Category', dataIndex: 'userJeCategoryName', key: 'userJeCategoryName', width: 120 },
+    { title: 'Status', dataIndex: 'approvalStatusMeaning', key: 'approvalStatusMeaning', width: 100 },
+    { title: 'Actual', dataIndex: 'actualFlagMeaning', key: 'actualFlagMeaning', width: 80 },
+    { title: 'Currency', dataIndex: 'currencyCode', key: 'currencyCode', width: 70 },
+    {
+      title: 'Entered Dr',
+      dataIndex: 'enteredDr',
+      key: 'enteredDr',
+      width: 110,
+      align: 'right',
+      render: (v: number) => <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span>,
+    },
+    {
+      title: 'Entered Cr',
+      dataIndex: 'enteredCr',
+      key: 'enteredCr',
+      width: 110,
+      align: 'right',
+      render: (v: number) => <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span>,
+    },
+    {
+      title: 'Accounted Dr',
+      dataIndex: 'accountedDr',
+      key: 'accountedDr',
+      width: 110,
+      align: 'right',
+      render: (v: number) => <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span>,
+    },
+    {
+      title: 'Accounted Cr',
+      dataIndex: 'accountedCr',
+      key: 'accountedCr',
+      width: 110,
+      align: 'right',
+      render: (v: number) => <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span>,
+    },
+    { title: 'Ledger', dataIndex: 'ledgerName', key: 'ledgerName', width: 140 },
+    { title: 'Legal Entity', dataIndex: 'legalEntityName', key: 'legalEntityName', width: 140 },
   ];
 
   // Floating Action Button component
@@ -701,123 +782,174 @@ const AccountAnalysis: React.FC = () => {
   );
 
   // Render Search tab content
-  const renderSearchTab = () => (
-    <div style={{ padding: 16 }}>
-      {/* Search Filters */}
-      <Card
-        style={{ marginBottom: 16, borderRadius: 8 }}
-        bodyStyle={{ padding: 16 }}
-      >
-        <Row gutter={[16, 12]} align="middle">
-          <Col xs={24} sm={12} md={6}>
-            <Text style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Ledger</Text>
-            <Select
-              value={selectedLedger}
-              onChange={setSelectedLedger}
-              style={{ width: '100%' }}
-              size="small"
-            >
-              {availableLedgers.map((ledger) => (
-                <Option key={ledger} value={ledger}>
-                  {ledger}
-                </Option>
-              ))}
-            </Select>
-          </Col>
-          <Col xs={24} sm={12} md={8}>
-            <Text style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Periods (Multiple)</Text>
-            <Select
-              mode="multiple"
-              value={selectedPeriods}
-              onChange={setSelectedPeriods}
-              style={{ width: '100%' }}
-              size="small"
-              maxTagCount={3}
-              placeholder="Select periods"
-            >
-              {availablePeriods.map((period) => (
-                <Option key={period} value={period}>
-                  {period}
-                </Option>
-              ))}
-            </Select>
-          </Col>
-          <Col xs={24} sm={12} md={4}>
-            <Text style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Account</Text>
-            <Input
-              allowClear
-              value={segmentFilters.find((f) => f.segment === 'account')?.selected || ''}
-              onChange={(e) => handleSegmentFilterChange('account', e.target.value || null)}
-              style={{ width: '100%' }}
-              size="small"
-              placeholder="e.g. 1116100"
-            />
-          </Col>
-          <Col xs={24} sm={12} md={6}>
-            <Text style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>&nbsp;</Text>
-            <Space>
-              <Button
-                type="primary"
-                icon={<SearchOutlined />}
-                onClick={handleSearch}
-                loading={loading}
-                size="small"
-                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
-              >
-                Search
-              </Button>
-              <Button icon={<ReloadOutlined />} size="small" onClick={handleReset}>
-                Reset
-              </Button>
-            </Space>
-          </Col>
-        </Row>
-      </Card>
-
-      {/* Results Table */}
-      <Card style={{ borderRadius: 8 }} bodyStyle={{ padding: 0 }}>
-        <div
-          style={{
-            padding: '10px 16px',
-            background: REDWOOD.neutral100,
-            borderBottom: `1px solid ${REDWOOD.neutral200}`,
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}
-        >
-          <Text strong style={{ fontSize: 12 }}>
-            Journal Lines ({totalCount} records)
-          </Text>
-          <Space size="small">
-            <Button size="small" icon={<DownloadOutlined />}>
-              Export
-            </Button>
-          </Space>
-        </div>
-
-        <Spin spinning={loading}>
-          <Table
-            columns={searchColumns}
-            dataSource={searchData}
-            pagination={{ pageSize: 20, size: 'small', showSizeChanger: true, showTotal: (total) => `Total ${total} records` }}
-            scroll={{ x: 1400 }}
-            size="small"
-            className="compact-table"
-            locale={{ emptyText: <Empty description="Click Search to load data" /> }}
-          />
-        </Spin>
-      </Card>
-    </div>
-  );
-
-  // Render Account Detail tab with pivot view
-  const renderAccountTab = (tab: AccountTab) => {
-    const pivotData = generatePivotData(tab.concatenatedSegments);
+  const renderSearchTab = () => {
+    const totals = calculateTotals(searchData);
 
     return (
       <div style={{ padding: 16 }}>
-        {/* Account Header with Segment Filters */}
+        {/* Search Filters */}
+        <Card
+          style={{ marginBottom: 16, borderRadius: 8 }}
+          bodyStyle={{ padding: 16 }}
+        >
+          <Row gutter={[16, 12]} align="middle">
+            <Col xs={24} sm={12} md={4}>
+              <Text style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Ledger</Text>
+              <Select
+                value={selectedLedger}
+                onChange={setSelectedLedger}
+                style={{ width: '100%' }}
+                size="small"
+              >
+                {availableLedgers.map((ledger) => (
+                  <Option key={ledger} value={ledger}>
+                    {ledger}
+                  </Option>
+                ))}
+              </Select>
+            </Col>
+            <Col xs={24} sm={12} md={3}>
+              <Text style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Company</Text>
+              <Select
+                value={selectedCompany}
+                onChange={setSelectedCompany}
+                style={{ width: '100%' }}
+                size="small"
+              >
+                {availableCompanies.map((company) => (
+                  <Option key={company} value={company}>
+                    {company}
+                  </Option>
+                ))}
+              </Select>
+            </Col>
+            <Col xs={24} sm={12} md={6}>
+              <Text style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Periods (Multiple)</Text>
+              <Select
+                mode="multiple"
+                value={selectedPeriods}
+                onChange={setSelectedPeriods}
+                style={{ width: '100%' }}
+                size="small"
+                maxTagCount={3}
+                placeholder="Select periods"
+              >
+                {availablePeriods.map((period) => (
+                  <Option key={period} value={period}>
+                    {period}
+                  </Option>
+                ))}
+              </Select>
+            </Col>
+            <Col xs={24} sm={12} md={4}>
+              <Text style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Account</Text>
+              <Input
+                allowClear
+                value={accountFilter}
+                onChange={(e) => setAccountFilter(e.target.value)}
+                style={{ width: '100%' }}
+                size="small"
+                placeholder="e.g. 1116100"
+              />
+            </Col>
+            <Col xs={24} sm={12} md={7}>
+              <Text style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>&nbsp;</Text>
+              <Space>
+                <Button
+                  type="primary"
+                  icon={<SearchOutlined />}
+                  onClick={handleSearch}
+                  loading={loading}
+                  size="small"
+                  style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+                >
+                  Search
+                </Button>
+                <Button icon={<ReloadOutlined />} size="small" onClick={handleReset}>
+                  Reset
+                </Button>
+              </Space>
+            </Col>
+          </Row>
+        </Card>
+
+        {/* Results Table */}
+        <Card style={{ borderRadius: 8 }} bodyStyle={{ padding: 0 }}>
+          <div
+            style={{
+              padding: '10px 16px',
+              background: REDWOOD.neutral100,
+              borderBottom: `1px solid ${REDWOOD.neutral200}`,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
+            <Text strong style={{ fontSize: 12 }}>
+              Journal Lines ({totalCount} records)
+            </Text>
+            <Space size="small">
+              <Button size="small" icon={<DownloadOutlined />}>
+                Export
+              </Button>
+            </Space>
+          </div>
+
+          <Spin spinning={loading}>
+            <Table
+              columns={searchColumns}
+              dataSource={searchData}
+              pagination={{ pageSize: 20, size: 'small', showSizeChanger: true, showTotal: (total) => `Total ${total} records` }}
+              scroll={{ x: 1400 }}
+              size="small"
+              className="compact-table"
+              locale={{ emptyText: <Empty description="Click Search to load data" /> }}
+              summary={() =>
+                searchData.length > 0 ? (
+                  <Table.Summary fixed>
+                    <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
+                      <Table.Summary.Cell index={0} colSpan={6}>
+                        <Text strong style={{ fontSize: 11 }}>Total</Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={6} align="right">
+                        <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>
+                          {formatNumber(totals.enteredDr)}
+                        </Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={7} align="right">
+                        <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>
+                          {formatNumber(totals.enteredCr)}
+                        </Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={8} align="right">
+                        <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>
+                          {formatNumber(totals.accountedDr)}
+                        </Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={9} align="right">
+                        <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>
+                          {formatNumber(totals.accountedCr)}
+                        </Text>
+                      </Table.Summary.Cell>
+                    </Table.Summary.Row>
+                  </Table.Summary>
+                ) : null
+              }
+            />
+          </Spin>
+        </Card>
+      </div>
+    );
+  };
+
+  // Render Account Detail tab with pivot view
+  const renderAccountTab = (tab: AccountTab) => {
+    const pivotData = generatePivotData(tab.data);
+    const totals = calculateTotals(tab.data);
+
+    return (
+      <div style={{ padding: 16 }}>
+        {/* Account Header */}
         <Card
           style={{ marginBottom: 16, borderRadius: 8 }}
           bodyStyle={{ padding: 12 }}
@@ -827,16 +959,66 @@ const AccountAnalysis: React.FC = () => {
               <Space split={<Divider type="vertical" />}>
                 <div>
                   <Text type="secondary" style={{ fontSize: 10 }}>Account</Text>
-                  <Text strong style={{ fontSize: 12, display: 'block' }}>{tab.concatenatedSegments}</Text>
+                  <Text strong style={{ fontSize: 12, display: 'block' }}>{tab.account}</Text>
+                </div>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 10 }}>Company</Text>
+                  <Text style={{ fontSize: 12, display: 'block' }}>{tab.company}</Text>
+                </div>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 10 }}>Records</Text>
+                  <Text style={{ fontSize: 12, display: 'block' }}>{tab.data.length}</Text>
                 </div>
               </Space>
             </Col>
             <Col>
               <Space size="small">
+                <Button
+                  size="small"
+                  icon={<UnorderedListOutlined />}
+                  onClick={() => showAllJournals(tab)}
+                >
+                  Show All Journals
+                </Button>
                 <Button size="small" icon={<DownloadOutlined />}>
                   Export
                 </Button>
               </Space>
+            </Col>
+          </Row>
+
+          {/* Totals Summary */}
+          <Divider style={{ margin: '12px 0' }} />
+          <Row gutter={[24, 8]}>
+            <Col>
+              <Text type="secondary" style={{ fontSize: 10 }}>Entered Dr</Text>
+              <Text strong style={{ fontSize: 12, display: 'block', color: REDWOOD.success }}>
+                {formatNumber(totals.enteredDr)}
+              </Text>
+            </Col>
+            <Col>
+              <Text type="secondary" style={{ fontSize: 10 }}>Entered Cr</Text>
+              <Text strong style={{ fontSize: 12, display: 'block', color: REDWOOD.primary }}>
+                {formatNumber(totals.enteredCr)}
+              </Text>
+            </Col>
+            <Col>
+              <Text type="secondary" style={{ fontSize: 10 }}>Accounted Dr</Text>
+              <Text strong style={{ fontSize: 12, display: 'block', color: REDWOOD.success }}>
+                {formatNumber(totals.accountedDr)}
+              </Text>
+            </Col>
+            <Col>
+              <Text type="secondary" style={{ fontSize: 10 }}>Accounted Cr</Text>
+              <Text strong style={{ fontSize: 12, display: 'block', color: REDWOOD.primary }}>
+                {formatNumber(totals.accountedCr)}
+              </Text>
+            </Col>
+            <Col>
+              <Text type="secondary" style={{ fontSize: 10 }}>Net Balance</Text>
+              <Text strong style={{ fontSize: 12, display: 'block', color: (totals.accountedDr - totals.accountedCr) >= 0 ? REDWOOD.success : REDWOOD.primary }}>
+                {formatNumber(totals.accountedDr - totals.accountedCr)}
+              </Text>
             </Col>
           </Row>
 
@@ -863,12 +1045,11 @@ const AccountAnalysis: React.FC = () => {
               >
                 <DragOutlined style={{ marginRight: 4 }} />
                 {filter.label}
-                {filter.selected && `: ${filter.selected}`}
               </Tag>
             ))}
           </div>
 
-          {/* Dropped segments for pivot grouping */}
+          {/* Dropped segments */}
           {droppedSegments.length > 0 && (
             <div
               style={{
@@ -930,47 +1111,49 @@ const AccountAnalysis: React.FC = () => {
             </Text>
           </div>
 
-          <Table
-            columns={pivotColumns}
-            dataSource={pivotData}
-            pagination={false}
-            scroll={{ x: 800 }}
-            size="small"
-            className="compact-table"
-            summary={() => {
-              const totals: { [key: string]: number } = {};
-              selectedPeriods.forEach((period) => {
-                totals[period] = pivotData.reduce(
-                  (sum, row) => sum + ((row[period] as number) || 0),
-                  0
-                );
-              });
-              const grandTotal = Object.values(totals).reduce((a, b) => a + b, 0);
+          <Spin spinning={tab.loading}>
+            <Table
+              columns={pivotColumns}
+              dataSource={pivotData}
+              pagination={false}
+              scroll={{ x: 800 }}
+              size="small"
+              className="compact-table"
+              summary={() => {
+                const periodTotals: { [key: string]: number } = {};
+                selectedPeriods.forEach((period) => {
+                  periodTotals[period] = pivotData.reduce(
+                    (sum, row) => sum + ((row[period] as number) || 0),
+                    0
+                  );
+                });
+                const grandTotal = Object.values(periodTotals).reduce((a, b) => a + b, 0);
 
-              return (
-                <Table.Summary fixed>
-                  <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
-                    <Table.Summary.Cell index={0}>
-                      <Text strong style={{ fontSize: 11 }}>Total</Text>
-                    </Table.Summary.Cell>
-                    <Table.Summary.Cell index={1} />
-                    {selectedPeriods.map((period, idx) => (
-                      <Table.Summary.Cell key={period} index={idx + 2} align="right">
-                        <Text strong style={{ fontSize: 11, color: totals[period] >= 0 ? REDWOOD.success : REDWOOD.primary }}>
-                          {formatNumber(totals[period])}
+                return (
+                  <Table.Summary fixed>
+                    <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
+                      <Table.Summary.Cell index={0}>
+                        <Text strong style={{ fontSize: 11 }}>Total</Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={1} />
+                      {selectedPeriods.map((period, idx) => (
+                        <Table.Summary.Cell key={period} index={idx + 2} align="right">
+                          <Text strong style={{ fontSize: 11, color: periodTotals[period] >= 0 ? REDWOOD.success : REDWOOD.primary }}>
+                            {formatNumber(periodTotals[period])}
+                          </Text>
+                        </Table.Summary.Cell>
+                      ))}
+                      <Table.Summary.Cell index={selectedPeriods.length + 2} align="right">
+                        <Text strong style={{ fontSize: 11, color: grandTotal >= 0 ? REDWOOD.success : REDWOOD.primary }}>
+                          {formatNumber(grandTotal)}
                         </Text>
                       </Table.Summary.Cell>
-                    ))}
-                    <Table.Summary.Cell index={selectedPeriods.length + 2} align="right">
-                      <Text strong style={{ fontSize: 11, color: grandTotal >= 0 ? REDWOOD.success : REDWOOD.primary }}>
-                        {formatNumber(grandTotal)}
-                      </Text>
-                    </Table.Summary.Cell>
-                  </Table.Summary.Row>
-                </Table.Summary>
-              );
-            }}
-          />
+                    </Table.Summary.Row>
+                  </Table.Summary>
+                );
+              }}
+            />
+          </Spin>
         </Card>
       </div>
     );
@@ -1096,6 +1279,58 @@ const AccountAnalysis: React.FC = () => {
             <SlidePanel title="Reports" items={reportMenuItems} color={REDWOOD.reportGreen} />
           )}
         </div>
+
+        {/* Journal Detail Modal */}
+        <Modal
+          title={journalModalTitle}
+          open={journalModalVisible}
+          onCancel={() => setJournalModalVisible(false)}
+          footer={null}
+          width={1200}
+          style={{ top: 20 }}
+        >
+          <Table
+            columns={journalDetailColumns}
+            dataSource={journalModalData}
+            pagination={{ pageSize: 15, size: 'small' }}
+            scroll={{ x: 1600 }}
+            size="small"
+            className="compact-table"
+            summary={() => {
+              const totals = calculateTotals(journalModalData);
+              return (
+                <Table.Summary fixed>
+                  <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
+                    <Table.Summary.Cell index={0} colSpan={8}>
+                      <Text strong style={{ fontSize: 11 }}>Total</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={8} align="right">
+                      <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>
+                        {formatNumber(totals.enteredDr)}
+                      </Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={9} align="right">
+                      <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>
+                        {formatNumber(totals.enteredCr)}
+                      </Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={10} align="right">
+                      <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>
+                        {formatNumber(totals.accountedDr)}
+                      </Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={11} align="right">
+                      <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>
+                        {formatNumber(totals.accountedCr)}
+                      </Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={12} colSpan={2} />
+                  </Table.Summary.Row>
+                </Table.Summary>
+              );
+            }}
+          />
+        </Modal>
       </Content>
 
       {/* CSS Animations */}
