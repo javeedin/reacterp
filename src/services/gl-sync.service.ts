@@ -70,15 +70,12 @@ const findChildLink = (links: any[], linkName: string): string | null => {
 // Fetch from Oracle via proxy
 const fetchFromOracleUrl = async (url: string, log?: LogCallback): Promise<any> => {
   try {
-    // Convert full Oracle URL to proxy URL
-    const oracleBase = ORACLE_FUSION_CONFIG.baseUrl;
-    const relativePath = url.replace(oracleBase.replace('/fscmRestApi', ''), '').replace('https://iaaobn.fa.ocs.oraclecloud.com:443', '');
-
     // Build proxy URL
     const proxyUrl = `${PROXY_CONFIG.baseUrl}/oracle-url?url=${encodeURIComponent(url)}`;
 
-    log?.('info', `Fetching: ${relativePath}`);
-    log?.('info', `  Full URL: ${proxyUrl}`);
+    log?.('step', '──── [GET] Oracle Fusion ────');
+    log?.('info', `GET URL: ${url}`);
+    log?.('info', `Proxy URL: ${proxyUrl}`);
 
     const response = await fetch(proxyUrl);
     const data = await response.json();
@@ -87,10 +84,11 @@ const fetchFromOracleUrl = async (url: string, log?: LogCallback): Promise<any> 
       throw new Error(data.error || 'Fetch failed');
     }
 
+    log?.('success', `GET Response: ${JSON.stringify(data)}`);
     return data;
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    log?.('error', `Fetch error: ${errorMsg}`);
+    log?.('error', `GET Error: ${errorMsg}`);
     throw error;
   }
 };
@@ -103,21 +101,25 @@ const fetchFromOracle = async (
 ): Promise<any> => {
   try {
     const queryParams = new URLSearchParams(params);
-    const url = `${PROXY_CONFIG.baseUrl}/oracle/${endpoint}?${queryParams.toString()}`;
+    const proxyUrl = `${PROXY_CONFIG.baseUrl}/oracle/${endpoint}?${queryParams.toString()}`;
+    const oracleUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/${endpoint}?${queryParams.toString()}`;
 
-    log?.('info', `Fetching: ${endpoint}`);
+    log?.('step', '──── [GET] Oracle Fusion ────');
+    log?.('info', `Oracle URL: ${oracleUrl}`);
+    log?.('info', `Proxy URL: ${proxyUrl}`);
 
-    const response = await fetch(url);
+    const response = await fetch(proxyUrl);
     const data = await response.json();
 
     if (!data.success) {
       throw new Error(data.error || 'Fetch failed');
     }
 
+    log?.('success', `GET Response: ${JSON.stringify(data)}`);
     return data;
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    log?.('error', `Fetch error: ${errorMsg}`);
+    log?.('error', `GET Error: ${errorMsg}`);
     throw error;
   }
 };
@@ -130,9 +132,12 @@ const insertToApex = async (
 ): Promise<any> => {
   try {
     const url = `${PROXY_CONFIG.baseUrl}/apex/${endpoint}`;
+    const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${endpoint}`;
 
-    log?.('info', `  [POST] ${url}`);
-    log?.('info', `  Payload: ${JSON.stringify(payload)}`);
+    log?.('step', '──── [POST] APEX Database ────');
+    log?.('info', `APEX URL: ${apexUrl}`);
+    log?.('info', `Proxy URL: ${url}`);
+    log?.('info', `POST Payload: ${JSON.stringify(payload)}`);
 
     const response = await fetch(url, {
       method: 'POST',
@@ -142,12 +147,12 @@ const insertToApex = async (
 
     const data = await response.json();
 
-    log?.('info', `  Response: ${JSON.stringify(data)}`);
+    log?.('success', `POST Response: ${JSON.stringify(data)}`);
 
     return data;
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    log?.('error', `Insert error: ${errorMsg}`);
+    log?.('error', `POST Error: ${errorMsg}`);
     throw error;
   }
 };
@@ -217,10 +222,6 @@ export const syncGLJournals = async (
 
     log?.('info', `Parameters: ${JSON.stringify(parameters)}`);
     log?.('info', `Limit: ${limit} batches (${modeLabel})`);
-
-    // Log the full Oracle URL being used
-    const oracleBatchUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/journalBatches?${new URLSearchParams(batchParams).toString()}`;
-    log?.('info', `Oracle URL: ${oracleBatchUrl}`);
 
     const batchResult = await fetchFromOracle('journalBatches', batchParams, log);
     const batches = batchResult.items || [];
@@ -381,25 +382,48 @@ export const syncGLJournals = async (
       // ========================================
       // STEP 2f: Insert Batch to APEX
       // ========================================
-      log?.('info', '  Inserting batch to APEX...');
+      log?.('step', '──── Inserting Batch to APEX ────');
 
+      // Build batch payload with all fields from Oracle Fusion response
       const batchPayload = {
         items: [{
-          BatchId: batchId,
-          JournalBatchName: batch.JournalBatchName || batch.JournalName,
-          JournalName: batch.JournalName,
-          LedgerId: batch.LedgerId,
-          LedgerName: batch.LedgerName,
-          AccountingPeriodName: batch.AccountingPeriodName || batch.DefaultPeriodName,
+          JeBatchId: batchId,
+          AccountedPeriodType: batch.AccountedPeriodType,
           DefaultPeriodName: batch.DefaultPeriodName,
+          BatchName: batch.JournalBatchName || batch.JournalName,
           Status: batch.Status,
-          ApprovalStatus: batch.ApprovalStatus,
+          ControlTotal: batch.ControlTotal,
+          BatchDescription: batch.Description || batch.BatchDescription,
+          ErrorMessage: batch.ErrorMessage,
           PostedDate: batch.PostedDate,
-          CreationDate: batch.CreationDate,
+          PostingRunId: batch.PostingRunId,
+          RequestId: batch.RequestId,
+          RunningTotalAccountedCr: batch.RunningTotalAccountedCr,
+          RunningTotalAccountedDr: batch.RunningTotalAccountedDr,
+          RunningTotalCr: batch.RunningTotalCr,
+          RunningTotalDr: batch.RunningTotalDr,
           CreatedBy: batch.CreatedBy,
+          CreationDate: batch.CreationDate,
           LastUpdateDate: batch.LastUpdateDate,
           LastUpdatedBy: batch.LastUpdatedBy,
-          Description: batch.Description,
+          ActualFlagMeaning: batch.ActualFlagMeaning,
+          ApprovalStatusMeaning: batch.ApprovalStatusMeaning,
+          ApproverEmployeeName: batch.ApproverEmployeeName,
+          FundsStatusMeaning: batch.FundsStatusMeaning,
+          ParentJeBatchName: batch.ParentJeBatchName,
+          ChartOfAccountsName: batch.ChartOfAccountsName,
+          StatusMeaning: batch.StatusMeaning,
+          CompletionStatusMeaning: batch.CompletionStatusMeaning,
+          UserPeriodSetName: batch.UserPeriodSetName,
+          UserJeSourceName: batch.UserJeSourceName,
+          ReversalDate: batch.ReversalDate,
+          ReversalPeriod: batch.ReversalPeriod,
+          ReversalFlag: batch.ReversalFlag,
+          ReversalMethodMeaning: batch.ReversalMethodMeaning,
+          // Legacy field names for backwards compatibility
+          LedgerId: batch.LedgerId,
+          LedgerName: batch.LedgerName,
+          JournalName: batch.JournalName,
         }],
       };
 
