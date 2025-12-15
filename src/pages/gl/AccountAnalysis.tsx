@@ -199,6 +199,7 @@ const AccountAnalysis: React.FC = () => {
   const [journalModalVisible, setJournalModalVisible] = useState(false);
   const [journalModalData, setJournalModalData] = useState<JournalLineSegment[]>([]);
   const [journalModalTitle, setJournalModalTitle] = useState('');
+  const [journalModalFilters, setJournalModalFilters] = useState<Record<string, string>>({});
 
   // Click outside handler for floating panel
   useEffect(() => {
@@ -439,7 +440,33 @@ const AccountAnalysis: React.FC = () => {
   const showAllJournals = (tab: AccountTab) => {
     setJournalModalData(tab.data);
     setJournalModalTitle(`All Journals - Account: ${tab.account}`);
+    setJournalModalFilters({}); // Reset filters
     setJournalModalVisible(true);
+  };
+
+  // Handle modal filter change
+  const handleModalFilterChange = (column: string, value: string) => {
+    setJournalModalFilters((prev) => ({
+      ...prev,
+      [column]: value,
+    }));
+  };
+
+  // Clear all modal filters
+  const clearModalFilters = () => {
+    setJournalModalFilters({});
+  };
+
+  // Filter modal data based on filters
+  const getFilteredModalData = () => {
+    return journalModalData.filter((row) => {
+      return Object.entries(journalModalFilters).every(([column, filterValue]) => {
+        if (!filterValue) return true;
+        const cellValue = (row as any)[column];
+        if (cellValue === null || cellValue === undefined) return false;
+        return String(cellValue).toLowerCase().includes(filterValue.toLowerCase());
+      });
+    });
   };
 
   // Generate pivot data for account tab - groups by dropped segments + account
@@ -603,50 +630,67 @@ const AccountAnalysis: React.FC = () => {
     },
   ];
 
-  // Journal detail modal columns
+  // Create column title with filter input
+  const createFilterableColumn = (
+    title: string,
+    dataIndex: string,
+    width: number,
+    options?: {
+      align?: 'left' | 'right' | 'center';
+      ellipsis?: boolean;
+      render?: (v: any) => React.ReactNode;
+    }
+  ) => ({
+    title: (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <span>{title}</span>
+        <Input
+          size="small"
+          placeholder="Filter..."
+          value={journalModalFilters[dataIndex] || ''}
+          onChange={(e) => handleModalFilterChange(dataIndex, e.target.value)}
+          onClick={(e) => e.stopPropagation()}
+          style={{ fontSize: 10, padding: '2px 6px' }}
+          allowClear
+        />
+      </div>
+    ),
+    dataIndex,
+    key: dataIndex,
+    width,
+    align: options?.align,
+    ellipsis: options?.ellipsis,
+    render: options?.render,
+  });
+
+  // Journal detail modal columns with filters
   const journalDetailColumns: ColumnsType<JournalLineSegment> = [
-    { title: 'Line', dataIndex: 'jeLineNumber', key: 'jeLineNumber', width: 60 },
-    { title: 'Period', dataIndex: 'defaultPeriodName', key: 'defaultPeriodName', width: 80 },
-    { title: 'Batch Name', dataIndex: 'batchName', key: 'batchName', width: 180, ellipsis: true },
-    { title: 'Source', dataIndex: 'userJeSourceName', key: 'userJeSourceName', width: 100 },
-    { title: 'Category', dataIndex: 'userJeCategoryName', key: 'userJeCategoryName', width: 120 },
-    { title: 'Status', dataIndex: 'approvalStatusMeaning', key: 'approvalStatusMeaning', width: 100 },
-    { title: 'Actual', dataIndex: 'actualFlagMeaning', key: 'actualFlagMeaning', width: 80 },
-    { title: 'Currency', dataIndex: 'currencyCode', key: 'currencyCode', width: 70 },
-    {
-      title: 'Entered Dr',
-      dataIndex: 'enteredDr',
-      key: 'enteredDr',
-      width: 110,
+    createFilterableColumn('Line', 'jeLineNumber', 70),
+    createFilterableColumn('Period', 'defaultPeriodName', 90),
+    createFilterableColumn('Batch Name', 'batchName', 180, { ellipsis: true }),
+    createFilterableColumn('Source', 'userJeSourceName', 100),
+    createFilterableColumn('Category', 'userJeCategoryName', 120),
+    createFilterableColumn('Status', 'approvalStatusMeaning', 100),
+    createFilterableColumn('Actual', 'actualFlagMeaning', 80),
+    createFilterableColumn('Currency', 'currencyCode', 80),
+    createFilterableColumn('Entered Dr', 'enteredDr', 110, {
       align: 'right',
       render: (v: number) => <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span>,
-    },
-    {
-      title: 'Entered Cr',
-      dataIndex: 'enteredCr',
-      key: 'enteredCr',
-      width: 110,
+    }),
+    createFilterableColumn('Entered Cr', 'enteredCr', 110, {
       align: 'right',
       render: (v: number) => <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span>,
-    },
-    {
-      title: 'Accounted Dr',
-      dataIndex: 'accountedDr',
-      key: 'accountedDr',
-      width: 110,
+    }),
+    createFilterableColumn('Accounted Dr', 'accountedDr', 110, {
       align: 'right',
       render: (v: number) => <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span>,
-    },
-    {
-      title: 'Accounted Cr',
-      dataIndex: 'accountedCr',
-      key: 'accountedCr',
-      width: 110,
+    }),
+    createFilterableColumn('Accounted Cr', 'accountedCr', 110, {
       align: 'right',
       render: (v: number) => <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span>,
-    },
-    { title: 'Ledger', dataIndex: 'ledgerName', key: 'ledgerName', width: 140 },
-    { title: 'Legal Entity', dataIndex: 'legalEntityName', key: 'legalEntityName', width: 140 },
+    }),
+    createFilterableColumn('Ledger', 'ledgerName', 140),
+    createFilterableColumn('Legal Entity', 'legalEntityName', 140),
   ];
 
   // Floating Action Button component
@@ -1387,27 +1431,42 @@ const AccountAnalysis: React.FC = () => {
 
         {/* Journal Detail Modal */}
         <Modal
-          title={journalModalTitle}
+          title={
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingRight: 24 }}>
+              <span>{journalModalTitle}</span>
+              <Space size="small">
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                  Showing {getFilteredModalData().length} of {journalModalData.length} records
+                </Text>
+                {Object.keys(journalModalFilters).some(k => journalModalFilters[k]) && (
+                  <Button size="small" onClick={clearModalFilters}>
+                    Clear Filters
+                  </Button>
+                )}
+              </Space>
+            </div>
+          }
           open={journalModalVisible}
           onCancel={() => setJournalModalVisible(false)}
           footer={null}
-          width={1200}
+          width={1400}
           style={{ top: 20 }}
         >
           <Table
             columns={journalDetailColumns}
-            dataSource={journalModalData}
-            pagination={{ pageSize: 15, size: 'small' }}
-            scroll={{ x: 1600 }}
+            dataSource={getFilteredModalData()}
+            pagination={{ pageSize: 15, size: 'small', showTotal: (total) => `${total} records` }}
+            scroll={{ x: 1700 }}
             size="small"
             className="compact-table"
             summary={() => {
-              const totals = calculateTotals(journalModalData);
+              const filteredData = getFilteredModalData();
+              const totals = calculateTotals(filteredData);
               return (
                 <Table.Summary fixed>
                   <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
                     <Table.Summary.Cell index={0} colSpan={8}>
-                      <Text strong style={{ fontSize: 11 }}>Total</Text>
+                      <Text strong style={{ fontSize: 11 }}>Total (filtered)</Text>
                     </Table.Summary.Cell>
                     <Table.Summary.Cell index={8} align="right">
                       <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>
