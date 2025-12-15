@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Layout,
   Typography,
@@ -19,7 +19,6 @@ import {
   Divider,
   message,
   Modal,
-  Descriptions,
 } from 'antd';
 import {
   HomeOutlined,
@@ -34,7 +33,6 @@ import {
   TableOutlined,
   DragOutlined,
   UnorderedListOutlined,
-  EyeOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -193,8 +191,9 @@ const AccountAnalysis: React.FC = () => {
   const panelRef = useRef<HTMLDivElement>(null);
   const floatingIconsRef = useRef<HTMLDivElement>(null);
 
-  // Pivot view state
-  const [droppedSegments, setDroppedSegments] = useState<string[]>([]);
+  // Pivot view state - segments before and after Account column
+  const [segmentsBeforeAccount, setSegmentsBeforeAccount] = useState<string[]>([]);
+  const [segmentsAfterAccount, setSegmentsAfterAccount] = useState<string[]>([]);
 
   // Journal detail modal state
   const [journalModalVisible, setJournalModalVisible] = useState(false);
@@ -382,20 +381,20 @@ const AccountAnalysis: React.FC = () => {
     }
   };
 
-  // Handle segment filter change
-  const handleSegmentFilterChange = (segment: string, value: string | null) => {
-    setSegmentFilters(
-      segmentFilters.map((f) =>
-        f.segment === segment ? { ...f, selected: value } : f
-      )
-    );
-  };
-
   // Handle segment drop (for pivot refresh)
-  const handleSegmentDrop = (segment: string) => {
-    if (!droppedSegments.includes(segment)) {
-      setDroppedSegments([...droppedSegments, segment]);
+  const handleSegmentDrop = (segment: string, position: 'before' | 'after') => {
+    // Remove from both arrays first if it exists
+    const newBefore = segmentsBeforeAccount.filter((s) => s !== segment);
+    const newAfter = segmentsAfterAccount.filter((s) => s !== segment);
+
+    if (position === 'before') {
+      setSegmentsBeforeAccount([...newBefore, segment]);
+      setSegmentsAfterAccount(newAfter);
+    } else {
+      setSegmentsBeforeAccount(newBefore);
+      setSegmentsAfterAccount([...newAfter, segment]);
     }
+
     setSegmentFilters(
       segmentFilters.map((f) =>
         f.segment === segment ? { ...f, isDropped: true } : f
@@ -405,7 +404,8 @@ const AccountAnalysis: React.FC = () => {
 
   // Remove dropped segment
   const removeDroppedSegment = (segment: string) => {
-    setDroppedSegments(droppedSegments.filter((s) => s !== segment));
+    setSegmentsBeforeAccount(segmentsBeforeAccount.filter((s) => s !== segment));
+    setSegmentsAfterAccount(segmentsAfterAccount.filter((s) => s !== segment));
     setSegmentFilters(
       segmentFilters.map((f) =>
         f.segment === segment ? { ...f, isDropped: false } : f
@@ -442,14 +442,20 @@ const AccountAnalysis: React.FC = () => {
     setJournalModalVisible(true);
   };
 
-  // Generate pivot data for account tab
+  // Generate pivot data for account tab - groups by dropped segments + account
   const generatePivotData = (data: JournalLineSegment[]): PivotDataRow[] => {
     const pivotMap = new Map<string, PivotDataRow>();
 
+    // Segments to group by: before segments + account + after segments
+    const groupBySegments = [...segmentsBeforeAccount, 'account', ...segmentsAfterAccount];
+
     data.forEach((row) => {
-      const key = row.concatenatedSegments || '';
+      // Build key from selected segments only
+      const keyParts = groupBySegments.map((seg) => (row as any)[seg] || '');
+      const key = keyParts.join('-');
+
       if (!pivotMap.has(key)) {
-        pivotMap.set(key, {
+        const pivotRow: PivotDataRow = {
           key,
           account: row.account,
           company: row.company,
@@ -459,7 +465,8 @@ const AccountAnalysis: React.FC = () => {
           analysis: row.analysis,
           intercompany: row.intercompany,
           concatenatedSegments: key,
-        });
+        };
+        pivotMap.set(key, pivotRow);
       }
 
       const pivotRow = pivotMap.get(key)!;
@@ -527,23 +534,38 @@ const AccountAnalysis: React.FC = () => {
     },
   ];
 
-  // Pivot columns (dynamic based on selected periods)
+  // Get segment label by key
+  const getSegmentLabel = (segment: string): string => {
+    const filter = segmentFilters.find((f) => f.segment === segment);
+    return filter?.label || segment;
+  };
+
+  // Pivot columns (dynamic based on dropped segments and selected periods)
   const pivotColumns: ColumnsType<PivotDataRow> = [
+    // Segments before Account
+    ...segmentsBeforeAccount.map((segment) => ({
+      title: getSegmentLabel(segment),
+      dataIndex: segment,
+      key: segment,
+      width: 100,
+      fixed: 'left' as const,
+    })),
+    // Account column (always present)
     {
       title: 'Account',
       dataIndex: 'account',
       key: 'account',
       width: 100,
-      fixed: 'left',
+      fixed: 'left' as const,
     },
-    {
-      title: 'Segments',
-      dataIndex: 'concatenatedSegments',
-      key: 'concatenatedSegments',
-      width: 250,
-      fixed: 'left',
-      ellipsis: true,
-    },
+    // Segments after Account
+    ...segmentsAfterAccount.map((segment) => ({
+      title: getSegmentLabel(segment),
+      dataIndex: segment,
+      key: segment,
+      width: 100,
+      fixed: 'left' as const,
+    })),
     // Dynamic period columns
     ...selectedPeriods.map((period) => ({
       title: period,
@@ -1049,48 +1071,129 @@ const AccountAnalysis: React.FC = () => {
             ))}
           </div>
 
-          {/* Dropped segments */}
-          {droppedSegments.length > 0 && (
+          {/* Dropped segments with drop zones */}
+          <div
+            style={{
+              marginTop: 12,
+              padding: 8,
+              background: `${REDWOOD.info}08`,
+              borderRadius: 6,
+              border: `1px dashed ${REDWOOD.info}`,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              flexWrap: 'wrap',
+            }}
+          >
+            <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Pivot columns:</Text>
+
+            {/* Drop zone BEFORE Account */}
             <div
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const segment = e.dataTransfer.getData('segment');
+                if (segment) handleSegmentDrop(segment, 'before');
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.currentTarget.style.background = `${REDWOOD.info}30`;
+              }}
+              onDragLeave={(e) => {
+                e.currentTarget.style.background = `${REDWOOD.info}10`;
+              }}
               style={{
-                marginTop: 12,
-                padding: 8,
-                background: `${REDWOOD.info}08`,
-                borderRadius: 6,
+                minWidth: 80,
+                minHeight: 28,
+                padding: '4px 8px',
+                background: `${REDWOOD.info}10`,
                 border: `1px dashed ${REDWOOD.info}`,
+                borderRadius: 4,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                flexWrap: 'wrap',
               }}
             >
-              <Text style={{ fontSize: 11, marginRight: 8 }}>Pivot by:</Text>
-              {droppedSegments.map((segment) => {
-                const filter = segmentFilters.find((f) => f.segment === segment);
-                return (
-                  <Tag
-                    key={segment}
-                    closable
-                    onClose={() => removeDroppedSegment(segment)}
-                    style={{ fontSize: 11 }}
-                    color="blue"
-                  >
-                    {filter?.label}
-                  </Tag>
-                );
-              })}
+              {segmentsBeforeAccount.length === 0 && (
+                <Text type="secondary" style={{ fontSize: 10 }}>Drop here (before)</Text>
+              )}
+              {segmentsBeforeAccount.map((segment) => (
+                <Tag
+                  key={segment}
+                  closable
+                  onClose={() => removeDroppedSegment(segment)}
+                  style={{ fontSize: 11, margin: 0 }}
+                  color="blue"
+                >
+                  {getSegmentLabel(segment)}
+                </Tag>
+              ))}
             </div>
-          )}
+
+            {/* Account (fixed) */}
+            <Tag style={{ fontSize: 11, margin: 0, fontWeight: 'bold' }} color="gold">
+              Account
+            </Tag>
+
+            {/* Drop zone AFTER Account */}
+            <div
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const segment = e.dataTransfer.getData('segment');
+                if (segment) handleSegmentDrop(segment, 'after');
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.currentTarget.style.background = `${REDWOOD.info}30`;
+              }}
+              onDragLeave={(e) => {
+                e.currentTarget.style.background = `${REDWOOD.info}10`;
+              }}
+              style={{
+                minWidth: 80,
+                minHeight: 28,
+                padding: '4px 8px',
+                background: `${REDWOOD.info}10`,
+                border: `1px dashed ${REDWOOD.info}`,
+                borderRadius: 4,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                flexWrap: 'wrap',
+              }}
+            >
+              {segmentsAfterAccount.length === 0 && (
+                <Text type="secondary" style={{ fontSize: 10 }}>Drop here (after)</Text>
+              )}
+              {segmentsAfterAccount.map((segment) => (
+                <Tag
+                  key={segment}
+                  closable
+                  onClose={() => removeDroppedSegment(segment)}
+                  style={{ fontSize: 11, margin: 0 }}
+                  color="cyan"
+                >
+                  {getSegmentLabel(segment)}
+                </Tag>
+              ))}
+            </div>
+
+            {/* Period columns indicator */}
+            <Tag style={{ fontSize: 11, margin: 0 }} color="green">
+              Periods ({selectedPeriods.length})
+            </Tag>
+            <Tag style={{ fontSize: 11, margin: 0 }} color="orange">
+              Total
+            </Tag>
+          </div>
         </Card>
 
         {/* Pivot Table */}
         <Card
           style={{ borderRadius: 8 }}
           bodyStyle={{ padding: 0 }}
-          onDrop={(e) => {
-            e.preventDefault();
-            const segment = e.dataTransfer.getData('segment');
-            if (segment) {
-              handleSegmentDrop(segment);
-            }
-          }}
-          onDragOver={(e) => e.preventDefault()}
         >
           <div
             style={{
@@ -1129,21 +1232,23 @@ const AccountAnalysis: React.FC = () => {
                 });
                 const grandTotal = Object.values(periodTotals).reduce((a, b) => a + b, 0);
 
+                // Calculate number of segment columns (before + account + after)
+                const segmentColCount = segmentsBeforeAccount.length + 1 + segmentsAfterAccount.length;
+
                 return (
                   <Table.Summary fixed>
                     <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
-                      <Table.Summary.Cell index={0}>
+                      <Table.Summary.Cell index={0} colSpan={segmentColCount}>
                         <Text strong style={{ fontSize: 11 }}>Total</Text>
                       </Table.Summary.Cell>
-                      <Table.Summary.Cell index={1} />
                       {selectedPeriods.map((period, idx) => (
-                        <Table.Summary.Cell key={period} index={idx + 2} align="right">
+                        <Table.Summary.Cell key={period} index={segmentColCount + idx} align="right">
                           <Text strong style={{ fontSize: 11, color: periodTotals[period] >= 0 ? REDWOOD.success : REDWOOD.primary }}>
                             {formatNumber(periodTotals[period])}
                           </Text>
                         </Table.Summary.Cell>
                       ))}
-                      <Table.Summary.Cell index={selectedPeriods.length + 2} align="right">
+                      <Table.Summary.Cell index={segmentColCount + selectedPeriods.length} align="right">
                         <Text strong style={{ fontSize: 11, color: grandTotal >= 0 ? REDWOOD.success : REDWOOD.primary }}>
                           {formatNumber(grandTotal)}
                         </Text>
