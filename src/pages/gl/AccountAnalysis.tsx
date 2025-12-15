@@ -16,7 +16,7 @@ import {
   Spin,
   Empty,
   Divider,
-  Dropdown,
+  message,
 } from 'antd';
 import {
   HomeOutlined,
@@ -29,19 +29,17 @@ import {
   ReloadOutlined,
   DownloadOutlined,
   TableOutlined,
-  ExpandOutlined,
-  CompressOutlined,
   DragOutlined,
-  CloseCircleOutlined,
-  PlusOutlined,
-  DownOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 
 const { Content } = Layout;
-const { Title, Text } = Typography;
+const { Text } = Typography;
 const { Option } = Select;
+
+// API Base URL
+const API_BASE_URL = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/gl';
 
 // Oracle Redwood Color Palette
 const REDWOOD = {
@@ -61,16 +59,29 @@ const REDWOOD = {
   reportGreen: '#1D7B4D',
 };
 
-// Types
+// Types matching API response
 interface JournalLineSegment {
   key: string;
-  jeLineNum: number;
+  batchId: number;
   jeHeaderId: number;
-  jeBatchId: number;
+  jeLineNumber: number;
+  currencyCode: string;
+  company: string;
+  lob: string;
+  department: string;
+  account: string;
+  subAccount: string;
+  analysis: string;
+  intercompany: string;
+  future1: string;
+  future2: string;
+  enteredDr: number;
+  enteredCr: number;
+  accountedDr: number;
+  accountedCr: number;
+  chartOfAccountsName: string;
   defaultPeriodName: string;
   batchName: string;
-  journalName: string;
-  journalDescription: string;
   actualFlagMeaning: string;
   approvalStatusMeaning: string;
   userPeriodSetName: string;
@@ -78,46 +89,25 @@ interface JournalLineSegment {
   ledgerName: string;
   legalEntityName: string;
   userJeCategoryName: string;
-  currencyCode: string;
-  accountedDr: number;
-  accountedCr: number;
-  enteredDr: number;
-  enteredCr: number;
-  segment1: string;
-  segment2: string;
-  segment3: string;
-  segment4: string;
-  segment5: string;
-  segment6: string;
-  segment7: string;
-  segment8: string;
-  segment9: string;
-  segment10: string;
-  codeCombinationId: number;
-  concatenatedSegments: string;
-  description: string;
-  lineDescription: string;
-  effectiveDate: string;
-  creationDate: string;
+  concatenatedSegments?: string;
 }
 
 interface PivotDataRow {
   key: string;
-  accountNumber: string;
-  description: string;
-  segment1: string;
-  segment2: string;
-  segment3: string;
-  segment4: string;
-  segment5: string;
+  account: string;
+  company: string;
+  lob: string;
+  department: string;
+  subAccount: string;
+  analysis: string;
+  intercompany: string;
   concatenatedSegments: string;
-  [key: string]: string | number; // Period amounts
+  [key: string]: string | number;
 }
 
 interface AccountTab {
   key: string;
-  accountNumber: string;
-  description: string;
+  account: string;
   concatenatedSegments: string;
 }
 
@@ -151,85 +141,15 @@ const reportMenuItems: MenuItemType[] = [
   { key: 'account-analysis', icon: <FundOutlined />, label: 'Account Analysis', description: 'Account detail analysis', color: REDWOOD.warning, path: '/gl/account-analysis' },
 ];
 
-// Mock data for periods
-const mockPeriods = [
+// Available ledgers
+const availableLedgers = ['BUIMERC LEDGER'];
+
+// Available periods (can be loaded from API)
+const availablePeriods = [
   'Jan-24', 'Feb-24', 'Mar-24', 'Apr-24', 'May-24', 'Jun-24',
   'Jul-24', 'Aug-24', 'Sep-24', 'Oct-24', 'Nov-24', 'Dec-24',
+  'Jan-25', 'Feb-25', 'Mar-25', 'Apr-25', 'May-25', 'Jun-25',
 ];
-
-// Mock data for ledgers
-const mockLedgers = ['US Primary Ledger', 'UK Secondary Ledger', 'EU Reporting Ledger'];
-
-// Mock segment values
-const mockSegments = {
-  segment1: ['01', '02', '03', '04', '05'],
-  segment2: ['100', '200', '300', '400', '500'],
-  segment3: ['1001', '1002', '1003', '2001', '2002', '3001', '4001', '5001'],
-  segment4: ['0000', '1000', '2000', '3000'],
-  segment5: ['00', '01', '02', '03'],
-};
-
-// Generate mock journal line data
-const generateMockData = (periods: string[]): JournalLineSegment[] => {
-  const data: JournalLineSegment[] = [];
-  const accounts = [
-    { seg3: '1001', desc: 'Cash - Operating' },
-    { seg3: '1002', desc: 'Cash - Payroll' },
-    { seg3: '1003', desc: 'Petty Cash' },
-    { seg3: '2001', desc: 'Accounts Receivable' },
-    { seg3: '2002', desc: 'Allowance for Doubtful Accounts' },
-    { seg3: '3001', desc: 'Accounts Payable' },
-    { seg3: '4001', desc: 'Revenue - Product Sales' },
-    { seg3: '5001', desc: 'Cost of Goods Sold' },
-  ];
-
-  let key = 0;
-  periods.forEach(period => {
-    accounts.forEach(acc => {
-      const amt = Math.floor(Math.random() * 10000) + 100;
-      data.push({
-        key: `${key++}`,
-        jeLineNum: key,
-        jeHeaderId: 1000 + key,
-        jeBatchId: 500 + Math.floor(key / 10),
-        defaultPeriodName: period,
-        batchName: `Batch-${period}`,
-        journalName: `JE-${period}-${acc.seg3}`,
-        journalDescription: `Journal entry for ${period}`,
-        actualFlagMeaning: 'Actual',
-        approvalStatusMeaning: 'Approved',
-        userPeriodSetName: 'Fiscal Year 2024',
-        userJeSourceName: 'Manual',
-        ledgerName: 'US Primary Ledger',
-        legalEntityName: 'ABC Corporation',
-        userJeCategoryName: 'Adjustment',
-        currencyCode: 'USD',
-        accountedDr: key % 2 === 0 ? amt : 0,
-        accountedCr: key % 2 !== 0 ? amt : 0,
-        enteredDr: key % 2 === 0 ? amt : 0,
-        enteredCr: key % 2 !== 0 ? amt : 0,
-        segment1: '01',
-        segment2: '100',
-        segment3: acc.seg3,
-        segment4: '0000',
-        segment5: '00',
-        segment6: '',
-        segment7: '',
-        segment8: '',
-        segment9: '',
-        segment10: '',
-        codeCombinationId: 100000 + key,
-        concatenatedSegments: `01-100-${acc.seg3}-0000-00`,
-        description: acc.desc,
-        lineDescription: `Line for ${acc.desc}`,
-        effectiveDate: '2024-01-15',
-        creationDate: '2024-01-10',
-      });
-    });
-  });
-
-  return data;
-};
 
 const AccountAnalysis: React.FC = () => {
   // State
@@ -237,18 +157,21 @@ const AccountAnalysis: React.FC = () => {
   const [accountTabs, setAccountTabs] = useState<AccountTab[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchData, setSearchData] = useState<JournalLineSegment[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
 
-  // Search filters
-  const [selectedLedger, setSelectedLedger] = useState<string>('US Primary Ledger');
-  const [selectedPeriods, setSelectedPeriods] = useState<string[]>(['May-24', 'Jun-24']);
+  // Search filters - default ledger is BUIMERC LEDGER
+  const [selectedLedger, setSelectedLedger] = useState<string>('BUIMERC LEDGER');
+  const [selectedPeriods, setSelectedPeriods] = useState<string[]>([]);
 
   // Segment filters
   const [segmentFilters, setSegmentFilters] = useState<SegmentFilter[]>([
-    { segment: 'segment1', label: 'Company', values: mockSegments.segment1, selected: null, isDropped: false },
-    { segment: 'segment2', label: 'Cost Center', values: mockSegments.segment2, selected: null, isDropped: false },
-    { segment: 'segment3', label: 'Account', values: mockSegments.segment3, selected: null, isDropped: false },
-    { segment: 'segment4', label: 'Sub-Account', values: mockSegments.segment4, selected: null, isDropped: false },
-    { segment: 'segment5', label: 'Intercompany', values: mockSegments.segment5, selected: null, isDropped: false },
+    { segment: 'company', label: 'Company', values: [], selected: null, isDropped: false },
+    { segment: 'lob', label: 'LOB', values: [], selected: null, isDropped: false },
+    { segment: 'department', label: 'Department', values: [], selected: null, isDropped: false },
+    { segment: 'account', label: 'Account', values: [], selected: null, isDropped: false },
+    { segment: 'subAccount', label: 'Sub Account', values: [], selected: null, isDropped: false },
+    { segment: 'analysis', label: 'Analysis', values: [], selected: null, isDropped: false },
+    { segment: 'intercompany', label: 'Intercompany', values: [], selected: null, isDropped: false },
   ]);
 
   // Floating panel state
@@ -258,7 +181,6 @@ const AccountAnalysis: React.FC = () => {
   const floatingIconsRef = useRef<HTMLDivElement>(null);
 
   // Pivot view state
-  const [pivotGroupBy, setPivotGroupBy] = useState<string>('segment3');
   const [droppedSegments, setDroppedSegments] = useState<string[]>([]);
 
   // Click outside handler for floating panel
@@ -299,30 +221,82 @@ const AccountAnalysis: React.FC = () => {
     }
   };
 
-  // Search function
-  const handleSearch = () => {
+  // Search function - calls real API
+  const handleSearch = async () => {
+    if (selectedPeriods.length === 0) {
+      message.warning('Please select at least one period');
+      return;
+    }
+
     setLoading(true);
-    setTimeout(() => {
-      const data = generateMockData(selectedPeriods);
-      setSearchData(data);
+    try {
+      // Build query parameters
+      const params = new URLSearchParams();
+      params.append('ledger_name', selectedLedger);
+      params.append('period_names', selectedPeriods.join(','));
+
+      // Add segment filters if selected
+      segmentFilters.forEach((filter) => {
+        if (filter.selected) {
+          params.append(filter.segment, filter.selected);
+        }
+      });
+
+      const response = await fetch(`${API_BASE_URL}/accountanalysis?${params.toString()}`);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // Map API response to component format
+      const items = (data.items || []).map((item: any, index: number) => ({
+        ...item,
+        key: `${index}`,
+        concatenatedSegments: `${item.company}-${item.lob}-${item.department}-${item.account}-${item.subAccount}-${item.analysis}-${item.intercompany}`,
+      }));
+
+      setSearchData(items);
+      setTotalCount(data.totalCount || items.length);
+      message.success(`Found ${items.length} records`);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      message.error('Failed to fetch data. Please try again.');
+      setSearchData([]);
+      setTotalCount(0);
+    } finally {
       setLoading(false);
-    }, 500);
+    }
+  };
+
+  // Reset filters
+  const handleReset = () => {
+    setSelectedLedger('BUIMERC LEDGER');
+    setSelectedPeriods([]);
+    setSegmentFilters(
+      segmentFilters.map((f) => ({ ...f, selected: null }))
+    );
+    setSearchData([]);
+    setTotalCount(0);
   };
 
   // Open account in new tab
   const openAccountTab = (record: JournalLineSegment) => {
+    const concatenatedSegments = record.concatenatedSegments ||
+      `${record.company}-${record.lob}-${record.department}-${record.account}-${record.subAccount}-${record.analysis}-${record.intercompany}`;
+
     const existingTab = accountTabs.find(
-      (tab) => tab.concatenatedSegments === record.concatenatedSegments
+      (tab) => tab.concatenatedSegments === concatenatedSegments
     );
 
     if (existingTab) {
       setActiveTabKey(existingTab.key);
     } else {
       const newTab: AccountTab = {
-        key: `account-${record.codeCombinationId}`,
-        accountNumber: record.segment3,
-        description: record.description,
-        concatenatedSegments: record.concatenatedSegments,
+        key: `account-${Date.now()}`,
+        account: record.account,
+        concatenatedSegments,
       };
       setAccountTabs([...accountTabs, newTab]);
       setActiveTabKey(newTab.key);
@@ -400,18 +374,18 @@ const AccountAnalysis: React.FC = () => {
     const pivotMap = new Map<string, PivotDataRow>();
 
     accountData.forEach((row) => {
-      const key = row.concatenatedSegments;
+      const key = row.concatenatedSegments || '';
       if (!pivotMap.has(key)) {
         pivotMap.set(key, {
           key,
-          accountNumber: row.segment3,
-          description: row.description,
-          segment1: row.segment1,
-          segment2: row.segment2,
-          segment3: row.segment3,
-          segment4: row.segment4,
-          segment5: row.segment5,
-          concatenatedSegments: row.concatenatedSegments,
+          account: row.account,
+          company: row.company,
+          lob: row.lob,
+          department: row.department,
+          subAccount: row.subAccount,
+          analysis: row.analysis,
+          intercompany: row.intercompany,
+          concatenatedSegments: key,
         });
       }
 
@@ -437,18 +411,18 @@ const AccountAnalysis: React.FC = () => {
 
       if (!matchesFilters) return;
 
-      const key = row.concatenatedSegments;
+      const key = row.concatenatedSegments || '';
       if (!pivotMap.has(key)) {
         pivotMap.set(key, {
           key,
-          accountNumber: row.segment3,
-          description: row.description,
-          segment1: row.segment1,
-          segment2: row.segment2,
-          segment3: row.segment3,
-          segment4: row.segment4,
-          segment5: row.segment5,
-          concatenatedSegments: row.concatenatedSegments,
+          account: row.account,
+          company: row.company,
+          lob: row.lob,
+          department: row.department,
+          subAccount: row.subAccount,
+          analysis: row.analysis,
+          intercompany: row.intercompany,
+          concatenatedSegments: key,
         });
       }
 
@@ -467,28 +441,27 @@ const AccountAnalysis: React.FC = () => {
       title: 'Account',
       dataIndex: 'concatenatedSegments',
       key: 'concatenatedSegments',
-      width: 200,
+      width: 280,
       fixed: 'left',
       render: (text: string, record: JournalLineSegment) => (
         <a
           onClick={() => openAccountTab(record)}
-          style={{ color: REDWOOD.info, cursor: 'pointer' }}
+          style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 11 }}
         >
-          {text}
+          {text || `${record.company}-${record.lob}-${record.department}-${record.account}-${record.subAccount}-${record.analysis}-${record.intercompany}`}
         </a>
       ),
     },
-    { title: 'Description', dataIndex: 'description', key: 'description', width: 180, ellipsis: true },
     { title: 'Period', dataIndex: 'defaultPeriodName', key: 'defaultPeriodName', width: 80 },
-    { title: 'Journal', dataIndex: 'journalName', key: 'journalName', width: 150 },
-    { title: 'Batch', dataIndex: 'batchName', key: 'batchName', width: 120 },
-    { title: 'Source', dataIndex: 'userJeSourceName', key: 'userJeSourceName', width: 80 },
-    { title: 'Category', dataIndex: 'userJeCategoryName', key: 'userJeCategoryName', width: 100 },
+    { title: 'Batch', dataIndex: 'batchName', key: 'batchName', width: 150, ellipsis: true },
+    { title: 'Source', dataIndex: 'userJeSourceName', key: 'userJeSourceName', width: 100 },
+    { title: 'Category', dataIndex: 'userJeCategoryName', key: 'userJeCategoryName', width: 120 },
+    { title: 'Currency', dataIndex: 'currencyCode', key: 'currencyCode', width: 70 },
     {
       title: 'Entered Dr',
       dataIndex: 'enteredDr',
       key: 'enteredDr',
-      width: 100,
+      width: 110,
       align: 'right',
       render: (v: number) => <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span>,
     },
@@ -496,7 +469,7 @@ const AccountAnalysis: React.FC = () => {
       title: 'Entered Cr',
       dataIndex: 'enteredCr',
       key: 'enteredCr',
-      width: 100,
+      width: 110,
       align: 'right',
       render: (v: number) => <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span>,
     },
@@ -522,16 +495,16 @@ const AccountAnalysis: React.FC = () => {
   const pivotColumns: ColumnsType<PivotDataRow> = [
     {
       title: 'Account',
-      dataIndex: 'accountNumber',
-      key: 'accountNumber',
+      dataIndex: 'account',
+      key: 'account',
       width: 100,
       fixed: 'left',
     },
     {
-      title: 'Description',
-      dataIndex: 'description',
-      key: 'description',
-      width: 180,
+      title: 'Segments',
+      dataIndex: 'concatenatedSegments',
+      key: 'concatenatedSegments',
+      width: 250,
       fixed: 'left',
       ellipsis: true,
     },
@@ -540,7 +513,7 @@ const AccountAnalysis: React.FC = () => {
       title: period,
       dataIndex: period,
       key: period,
-      width: 100,
+      width: 110,
       align: 'right' as const,
       render: (v: number) => {
         const formatted = formatNumber(v);
@@ -743,7 +716,7 @@ const AccountAnalysis: React.FC = () => {
               style={{ width: '100%' }}
               size="small"
             >
-              {mockLedgers.map((ledger) => (
+              {availableLedgers.map((ledger) => (
                 <Option key={ledger} value={ledger}>
                   {ledger}
                 </Option>
@@ -761,7 +734,7 @@ const AccountAnalysis: React.FC = () => {
               maxTagCount={3}
               placeholder="Select periods"
             >
-              {mockPeriods.map((period) => (
+              {availablePeriods.map((period) => (
                 <Option key={period} value={period}>
                   {period}
                 </Option>
@@ -772,18 +745,13 @@ const AccountAnalysis: React.FC = () => {
             <Text style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Account</Text>
             <Select
               allowClear
-              value={segmentFilters.find((f) => f.segment === 'segment3')?.selected}
-              onChange={(v) => handleSegmentFilterChange('segment3', v)}
+              value={segmentFilters.find((f) => f.segment === 'account')?.selected}
+              onChange={(v) => handleSegmentFilterChange('account', v)}
               style={{ width: '100%' }}
               size="small"
               placeholder="All"
-            >
-              {mockSegments.segment3.map((val) => (
-                <Option key={val} value={val}>
-                  {val}
-                </Option>
-              ))}
-            </Select>
+              showSearch
+            />
           </Col>
           <Col xs={24} sm={12} md={6}>
             <Text style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>&nbsp;</Text>
@@ -792,12 +760,13 @@ const AccountAnalysis: React.FC = () => {
                 type="primary"
                 icon={<SearchOutlined />}
                 onClick={handleSearch}
+                loading={loading}
                 size="small"
                 style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
               >
                 Search
               </Button>
-              <Button icon={<ReloadOutlined />} size="small">
+              <Button icon={<ReloadOutlined />} size="small" onClick={handleReset}>
                 Reset
               </Button>
             </Space>
@@ -818,7 +787,7 @@ const AccountAnalysis: React.FC = () => {
           }}
         >
           <Text strong style={{ fontSize: 12 }}>
-            Journal Lines ({searchData.length} records)
+            Journal Lines ({totalCount} records)
           </Text>
           <Space size="small">
             <Button size="small" icon={<DownloadOutlined />}>
@@ -831,7 +800,7 @@ const AccountAnalysis: React.FC = () => {
           <Table
             columns={searchColumns}
             dataSource={searchData}
-            pagination={{ pageSize: 20, size: 'small', showSizeChanger: true }}
+            pagination={{ pageSize: 20, size: 'small', showSizeChanger: true, showTotal: (total) => `Total ${total} records` }}
             scroll={{ x: 1400 }}
             size="small"
             className="compact-table"
@@ -859,10 +828,6 @@ const AccountAnalysis: React.FC = () => {
                 <div>
                   <Text type="secondary" style={{ fontSize: 10 }}>Account</Text>
                   <Text strong style={{ fontSize: 12, display: 'block' }}>{tab.concatenatedSegments}</Text>
-                </div>
-                <div>
-                  <Text type="secondary" style={{ fontSize: 10 }}>Description</Text>
-                  <Text style={{ fontSize: 12, display: 'block' }}>{tab.description}</Text>
                 </div>
               </Space>
             </Col>
@@ -1029,7 +994,7 @@ const AccountAnalysis: React.FC = () => {
       label: (
         <span style={{ fontSize: 12 }}>
           <FundOutlined style={{ marginRight: 6 }} />
-          {tab.accountNumber}
+          {tab.account}
         </span>
       ),
       children: renderAccountTab(tab),
