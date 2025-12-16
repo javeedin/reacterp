@@ -63,6 +63,7 @@ interface MenuItemType {
 
 // Task menu items
 const taskMenuItems: MenuItemType[] = [
+  { key: 'account-analysis', icon: <FundOutlined />, label: 'Account Analysis', description: 'Account detail analysis', color: REDWOOD.warning, path: '/gl/account-analysis' },
   { key: 'manage-journals', icon: <AccountBookOutlined />, label: 'Manage Journals', description: 'Search and manage journal entries', color: REDWOOD.primary, path: '/gl/manage-journals' },
   { key: 'journal-entry', icon: <FileTextOutlined />, label: 'Create Journal', description: 'Create manual journal entry', color: REDWOOD.taskBlue },
   { key: 'import-journals', icon: <SwapOutlined />, label: 'Import Journals', description: 'Import from spreadsheet', color: REDWOOD.info },
@@ -177,9 +178,9 @@ const GLModule: React.FC = () => {
       <div
         onClick={onClick}
         style={{
-          width: 56,
-          height: 56,
-          borderRadius: position === 'top' ? '12px 12px 0 0' : '0 0 12px 12px',
+          width: 40,
+          height: 40,
+          borderRadius: position === 'top' ? '8px 8px 0 0' : '0 0 8px 8px',
           background: isActive ? color : REDWOOD.surface,
           border: `2px solid ${color}`,
           borderBottom: position === 'top' ? 'none' : `2px solid ${color}`,
@@ -191,7 +192,7 @@ const GLModule: React.FC = () => {
           transition: 'all 0.3s ease',
           boxShadow: isActive ? `0 4px 12px ${color}40` : '0 2px 8px rgba(0,0,0,0.1)',
           color: isActive ? '#fff' : color,
-          fontSize: 24,
+          fontSize: 18,
         }}
       >
         {icon}
@@ -215,7 +216,7 @@ const GLModule: React.FC = () => {
         right: 0,
         top: 0,
         bottom: 0,
-        width: 400,
+        width: 300,
         background: REDWOOD.surface,
         boxShadow: '-4px 0 24px rgba(0,0,0,0.15)',
         overflow: 'hidden',
@@ -227,35 +228,35 @@ const GLModule: React.FC = () => {
     >
       {/* Panel Header */}
       <div style={{
-        padding: '20px 24px',
+        padding: '10px 14px',
         background: color,
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
         flexShrink: 0,
       }}>
-        <Text strong style={{ color: '#fff', fontSize: 18 }}>{title}</Text>
+        <Text strong style={{ color: '#fff', fontSize: 14 }}>{title}</Text>
         <CloseOutlined
-          style={{ color: '#fff', cursor: 'pointer', fontSize: 16, padding: 8 }}
+          style={{ color: '#fff', cursor: 'pointer', fontSize: 14, padding: 4 }}
           onClick={closePanel}
         />
       </div>
 
       {/* Panel Items */}
-      <div style={{ padding: 16, flex: 1, overflowY: 'auto' }}>
+      <div style={{ padding: 10, flex: 1, overflowY: 'auto' }}>
         {items.map((item, index) => (
           <div
             key={item.key}
             onClick={() => handleMenuItemClick(item.key, item.path)}
             style={{
-              padding: '16px 20px',
-              borderRadius: 12,
+              padding: '8px 10px',
+              borderRadius: 8,
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              gap: 16,
+              gap: 10,
               transition: 'all 0.2s ease',
-              marginBottom: 8,
+              marginBottom: 6,
               border: `1px solid ${REDWOOD.neutral200}`,
               background: REDWOOD.surface,
               opacity: 0,
@@ -275,25 +276,25 @@ const GLModule: React.FC = () => {
             }}
           >
             <div style={{
-              width: 46,
-              height: 46,
-              borderRadius: 12,
+              width: 32,
+              height: 32,
+              borderRadius: 8,
               background: `${color}15`,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               color: color,
-              fontSize: 22,
+              fontSize: 16,
               flexShrink: 0,
             }}>
               {item.icon}
             </div>
             <div style={{ flex: 1 }}>
-              <Text strong style={{ display: 'block', color: REDWOOD.neutral900, fontSize: 15 }}>
+              <Text strong style={{ display: 'block', color: REDWOOD.neutral900, fontSize: 12 }}>
                 {item.label}
               </Text>
               {item.description && (
-                <Text type="secondary" style={{ fontSize: 13, lineHeight: 1.4 }}>
+                <Text type="secondary" style={{ fontSize: 10, lineHeight: 1.3 }}>
                   {item.description}
                 </Text>
               )}
@@ -657,7 +658,7 @@ const GLModule: React.FC = () => {
 
           {/* Connector Line */}
           <div style={{
-            width: 56,
+            width: 40,
             height: 2,
             background: REDWOOD.neutral200,
           }} />
