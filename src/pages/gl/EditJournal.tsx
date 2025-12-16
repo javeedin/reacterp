@@ -1060,54 +1060,161 @@ const EditJournal: React.FC = () => {
     );
   };
 
-  // Render collapsed journal summary
+  // Render collapsed journal summary with compact tabs
   const renderCollapsedJournal = () => {
     if (!currentJournal) return null;
 
     return (
-      <div style={{ padding: 10 }}>
-        <Row gutter={[16, 6]}>
-          <Col span={12}>
-            <Row gutter={[6, 5]}>
-              <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Journal</Text></Col>
-              <Col span={16}><Text strong style={{ fontSize: 10 }}>{currentJournal.journalName}</Text></Col>
+      <Tabs
+        activeKey={activeDetailTab}
+        onChange={setActiveDetailTab}
+        size="small"
+        style={{ padding: '0 10px' }}
+        items={[
+          {
+            key: 'journal',
+            label: <span style={{ fontSize: 10 }}>Journal</span>,
+            children: (
+              <div style={{ padding: '6px 0' }}>
+                <Row gutter={[16, 5]}>
+                  <Col span={12}>
+                    <Row gutter={[6, 5]}>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Journal</Text></Col>
+                      <Col span={16}><Text strong style={{ fontSize: 10 }}>{currentJournal.journalName}</Text></Col>
 
-              <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Description</Text></Col>
-              <Col span={16}><Text style={{ fontSize: 10 }}>{currentJournal.journalDescription}</Text></Col>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Description</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 10 }}>{currentJournal.journalDescription}</Text></Col>
 
-              <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}><span style={{ color: REDWOOD.primary }}>*</span> Ledger</Text></Col>
-              <Col span={16}><Text style={{ fontSize: 10 }}>{currentJournal.ledgerName}</Text></Col>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}><span style={{ color: REDWOOD.primary }}>*</span> Ledger</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 10 }}>{currentJournal.ledgerName}</Text></Col>
 
-              <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}><span style={{ color: REDWOOD.primary }}>*</span> Legal Entity</Text></Col>
-              <Col span={16}><Text style={{ fontSize: 10 }}>{currentJournal.legalEntityName}</Text></Col>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}><span style={{ color: REDWOOD.primary }}>*</span> Legal Entity</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 10 }}>{currentJournal.legalEntityName}</Text></Col>
 
-              <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Accounting Date</Text></Col>
-              <Col span={16}><Text style={{ fontSize: 10 }}>{currentJournal.accountingDate}</Text></Col>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Accounting Date</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 10 }}>{currentJournal.accountingDate}</Text></Col>
 
-              <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}><span style={{ color: REDWOOD.primary }}>*</span> Category</Text></Col>
-              <Col span={16}><Text style={{ fontSize: 10 }}>{currentJournal.category}</Text></Col>
-            </Row>
-          </Col>
-          <Col span={12}>
-            <Row gutter={[6, 5]}>
-              <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Currency</Text></Col>
-              <Col span={14}><Text style={{ fontSize: 10 }}>{currentJournal.currencyCode} {getCurrencyName(currentJournal.currencyCode)}</Text></Col>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}><span style={{ color: REDWOOD.primary }}>*</span> Category</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 10 }}>{currentJournal.category}</Text></Col>
+                    </Row>
+                  </Col>
+                  <Col span={12}>
+                    <Row gutter={[6, 5]}>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Currency</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 10 }}>{currentJournal.currencyCode} {getCurrencyName(currentJournal.currencyCode)}</Text></Col>
 
-              <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Conversion Date</Text></Col>
-              <Col span={14}><Text style={{ fontSize: 10 }}>{currentJournal.conversionDate}</Text></Col>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Conversion Date</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 10 }}>{currentJournal.conversionDate}</Text></Col>
 
-              <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Conversion Rate Type</Text></Col>
-              <Col span={14}><Text style={{ fontSize: 10 }}>{currentJournal.conversionRateType}</Text></Col>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Conversion Rate Type</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 10 }}>{currentJournal.conversionRateType}</Text></Col>
 
-              <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Conversion Rate</Text></Col>
-              <Col span={14}><Text style={{ fontSize: 10 }}>{currentJournal.conversionRate}</Text></Col>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Conversion Rate</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 10 }}>{currentJournal.conversionRate}</Text></Col>
 
-              <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Inverse Rate</Text></Col>
-              <Col span={14}><Text style={{ fontSize: 10 }}>{currentJournal.inverseConversionRate}</Text></Col>
-            </Row>
-          </Col>
-        </Row>
-      </div>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Inverse Rate</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 10 }}>{currentJournal.inverseConversionRate}</Text></Col>
+                    </Row>
+                  </Col>
+                </Row>
+              </div>
+            ),
+          },
+          {
+            key: 'controlTotal',
+            label: <span style={{ fontSize: 10 }}>Control Total</span>,
+            children: (
+              <div style={{ padding: '6px 0' }}>
+                <Row gutter={[24, 5]}>
+                  <Col span={12}>
+                    <Row gutter={[6, 5]}>
+                      <Col span={12}><Text type="secondary" style={{ fontSize: 10 }}>Total Entered Debit</Text></Col>
+                      <Col span={12}><Text style={{ fontSize: 10 }}>{formatNumber(currentJournal.enteredDebit)}</Text></Col>
+
+                      <Col span={12}><Text type="secondary" style={{ fontSize: 10 }}>Total Entered Credit</Text></Col>
+                      <Col span={12}><Text style={{ fontSize: 10 }}>{formatNumber(currentJournal.enteredCredit)}</Text></Col>
+                    </Row>
+                  </Col>
+                  <Col span={12}>
+                    <Row gutter={[6, 5]}>
+                      <Col span={12}><a style={{ color: REDWOOD.info, fontSize: 10 }}>Total Accounted Debit</a></Col>
+                      <Col span={12}><Text style={{ fontSize: 10 }}>{formatNumber(currentJournal.accountedDebit)}</Text></Col>
+
+                      <Col span={12}><a style={{ color: REDWOOD.info, fontSize: 10 }}>Total Accounted Credit</a></Col>
+                      <Col span={12}><Text style={{ fontSize: 10 }}>{formatNumber(currentJournal.accountedCredit)}</Text></Col>
+                    </Row>
+                  </Col>
+                </Row>
+              </div>
+            ),
+          },
+          {
+            key: 'sequencing',
+            label: <span style={{ fontSize: 10 }}>Sequencing</span>,
+            children: (
+              <div style={{ padding: '6px 0' }}>
+                <Row gutter={[24, 5]}>
+                  <Col span={12}>
+                    <Text strong style={{ fontSize: 10, color: REDWOOD.info }}>Accounting Sequence</Text>
+                    <Row gutter={[6, 5]} style={{ marginTop: 4 }}>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Name</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 10 }}>{currentJournal.accountingSequenceName || '-'}</Text></Col>
+
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Number</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 10 }}>{currentJournal.accountingSequenceNumber || '-'}</Text></Col>
+                    </Row>
+                  </Col>
+                  <Col span={12}>
+                    <Text strong style={{ fontSize: 10, color: REDWOOD.info }}>Reporting Sequence</Text>
+                    <Row gutter={[6, 5]} style={{ marginTop: 4 }}>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Name</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 10 }}>{currentJournal.reportingSequenceName || '-'}</Text></Col>
+
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Number</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 10 }}>{currentJournal.reportingSequenceNumber || '-'}</Text></Col>
+                    </Row>
+                  </Col>
+                </Row>
+              </div>
+            ),
+          },
+          {
+            key: 'reversal',
+            label: <span style={{ fontSize: 10 }}>Reversal</span>,
+            children: (
+              <div style={{ padding: '6px 0' }}>
+                <Row gutter={[24, 5]}>
+                  <Col span={12}>
+                    <Row gutter={[6, 5]}>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Reversal Period</Text></Col>
+                      <Col span={14}>
+                        <Select placeholder="Select" size="small" style={{ width: 130, fontSize: 10 }} allowClear>
+                          <Option value="Feb-25">Feb-25</Option>
+                          <Option value="Mar-25">Mar-25</Option>
+                        </Select>
+                      </Col>
+
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Reversal Method</Text></Col>
+                      <Col span={14}>
+                        <Select defaultValue="switchDrCr" size="small" style={{ width: 130, fontSize: 10 }}>
+                          <Option value="switchDrCr">Switch DR or CR</Option>
+                          <Option value="changeSign">Change Sign</Option>
+                        </Select>
+                      </Col>
+                    </Row>
+                  </Col>
+                  <Col span={12}>
+                    <Row gutter={[6, 5]}>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Reversal Status</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 10 }}>{currentJournal.reversalStatus}</Text></Col>
+                    </Row>
+                  </Col>
+                </Row>
+              </div>
+            ),
+          },
+        ]}
+      />
     );
   };
 
