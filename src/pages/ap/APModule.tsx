@@ -201,14 +201,24 @@ const APModule: React.FC = () => {
     }
   };
 
-  // Floating Action Button
+  // Get panel width based on active panel
+  const getPanelWidth = () => {
+    if (activePanel === 'match') return 360;
+    if (activePanel === 'tasks') return 320;
+    if (activePanel === 'search') return 320;
+    if (activePanel === 'reports') return 320;
+    return 0;
+  };
+
+  // Floating Action Button - connected to panel
   const FloatingIcon = ({
     icon,
     label,
     color,
     isActive,
     onClick,
-    position
+    position,
+    panelOpen
   }: {
     icon: React.ReactNode;
     label: string;
@@ -216,32 +226,49 @@ const APModule: React.FC = () => {
     isActive: boolean;
     onClick: () => void;
     position: 'first' | 'middle' | 'last';
-  }) => (
-    <Tooltip title={!isActive ? label : ''} placement="left">
-      <div
-        onClick={onClick}
-        style={{
-          width: 40,
-          height: 40,
-          borderRadius: position === 'first' ? '8px 8px 0 0' : position === 'last' ? '0 0 8px 8px' : '0',
-          background: isActive ? color : REDWOOD.surface,
-          border: `2px solid ${color}`,
-          borderBottom: position !== 'last' ? 'none' : `2px solid ${color}`,
-          borderTop: position !== 'first' ? 'none' : `2px solid ${color}`,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          cursor: 'pointer',
-          transition: 'all 0.3s ease',
-          boxShadow: isActive ? `0 4px 12px ${color}40` : '0 2px 8px rgba(0,0,0,0.1)',
-          color: isActive ? '#fff' : color,
-          fontSize: 18,
-        }}
-      >
-        {icon}
-      </div>
-    </Tooltip>
-  );
+    panelOpen: boolean;
+  }) => {
+    // When panel is open, icons connect to panel edge (rounded only on left)
+    const getBorderRadius = () => {
+      if (panelOpen) {
+        if (position === 'first') return '8px 0 0 0';
+        if (position === 'last') return '0 0 0 8px';
+        return '0';
+      } else {
+        if (position === 'first') return '8px 8px 0 0';
+        if (position === 'last') return '0 0 8px 8px';
+        return '0';
+      }
+    };
+
+    return (
+      <Tooltip title={!isActive ? label : ''} placement="left">
+        <div
+          onClick={onClick}
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: getBorderRadius(),
+            background: isActive ? color : REDWOOD.surface,
+            border: `2px solid ${panelOpen ? REDWOOD.neutral200 : color}`,
+            borderBottom: position !== 'last' ? 'none' : `2px solid ${panelOpen ? REDWOOD.neutral200 : color}`,
+            borderTop: position !== 'first' ? 'none' : `2px solid ${panelOpen ? REDWOOD.neutral200 : color}`,
+            borderRight: panelOpen ? 'none' : `2px solid ${color}`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            transition: 'all 0.3s ease',
+            boxShadow: isActive ? `0 4px 12px ${color}40` : (panelOpen ? 'none' : '0 2px 8px rgba(0,0,0,0.1)'),
+            color: isActive ? '#fff' : color,
+            fontSize: 18,
+          }}
+        >
+          {icon}
+        </div>
+      </Tooltip>
+    );
+  };
 
   // Tasks Slide Panel with sections
   const TasksSlidePanel = () => (
@@ -899,12 +926,13 @@ const APModule: React.FC = () => {
           ref={floatingIconsRef}
           style={{
             position: 'fixed',
-            right: 24,
+            right: activePanel !== 'none' && !isClosing ? getPanelWidth() : 24,
             top: '50%',
             transform: 'translateY(-50%)',
-            zIndex: 1000,
+            zIndex: 1002,
             display: 'flex',
             flexDirection: 'column',
+            transition: 'right 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
           }}
         >
           {/* Tasks Icon */}
@@ -915,6 +943,7 @@ const APModule: React.FC = () => {
             isActive={activePanel === 'tasks'}
             onClick={() => togglePanel('tasks')}
             position="first"
+            panelOpen={activePanel !== 'none' && !isClosing}
           />
 
           {/* Search Icon */}
@@ -925,6 +954,7 @@ const APModule: React.FC = () => {
             isActive={activePanel === 'search'}
             onClick={() => togglePanel('search')}
             position="middle"
+            panelOpen={activePanel !== 'none' && !isClosing}
           />
 
           {/* Reports Icon */}
@@ -935,6 +965,7 @@ const APModule: React.FC = () => {
             isActive={activePanel === 'reports'}
             onClick={() => togglePanel('reports')}
             position="middle"
+            panelOpen={activePanel !== 'none' && !isClosing}
           />
 
           {/* Match in Full Icon */}
@@ -945,6 +976,7 @@ const APModule: React.FC = () => {
             isActive={activePanel === 'match'}
             onClick={() => togglePanel('match')}
             position="last"
+            panelOpen={activePanel !== 'none' && !isClosing}
           />
         </div>
 
