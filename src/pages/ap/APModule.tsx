@@ -174,11 +174,16 @@ const APModule: React.FC = () => {
   // Click outside handler
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as Node;
+      const target = event.target as HTMLElement;
       const isOutsidePanel = panelRef.current && !panelRef.current.contains(target);
       const isOutsideFloatingIcons = floatingIconsRef.current && !floatingIconsRef.current.contains(target);
 
-      if (isOutsidePanel && isOutsideFloatingIcons) {
+      // Check if click is on a dropdown portal (Ant Design dropdowns render in portals)
+      const isDropdownClick = target.closest('.ant-select-dropdown') ||
+                              target.closest('.ant-picker-dropdown') ||
+                              target.closest('.ant-dropdown');
+
+      if (isOutsidePanel && isOutsideFloatingIcons && !isDropdownClick) {
         closePanel();
       }
     };
