@@ -150,10 +150,26 @@ const APModule: React.FC = () => {
   const [activePanel, setActivePanel] = useState<'none' | 'tasks' | 'search' | 'reports' | 'match'>('none');
   const [isClosing, setIsClosing] = useState(false);
   const [selectedItem, setSelectedItem] = useState<string | null>(null);
+  const [selectedTaskSection, setSelectedTaskSection] = useState<string>('invoices');
   const panelRef = useRef<HTMLDivElement>(null);
   const floatingIconsRef = useRef<HTMLDivElement>(null);
   const [searchForm] = Form.useForm();
   const [matchForm] = Form.useForm();
+
+  // Task sections for dropdown
+  const taskSections = [
+    { key: 'invoices', label: 'Invoices', items: invoiceTaskItems },
+    { key: 'accounting', label: 'Accounting', items: accountingTaskItems },
+    { key: 'assets', label: 'Assets', items: assetsTaskItems },
+    { key: 'periods', label: 'Payables Periods', items: periodsTaskItems },
+    { key: 'payments', label: 'Payments', items: paymentTaskItems },
+  ];
+
+  // Get current section items
+  const getCurrentSectionItems = () => {
+    const section = taskSections.find(s => s.key === selectedTaskSection);
+    return section?.items || [];
+  };
 
   // Click outside handler
   useEffect(() => {
@@ -270,13 +286,13 @@ const APModule: React.FC = () => {
     );
   };
 
-  // Tasks Slide Panel with sections
+  // Tasks Slide Panel with dropdown filter
   const TasksSlidePanel = () => (
     <div
       style={{
         position: 'fixed',
         right: 0,
-        top: 0,
+        top: 64,
         bottom: 0,
         width: 320,
         background: REDWOOD.surface,
@@ -304,35 +320,23 @@ const APModule: React.FC = () => {
         />
       </div>
 
-      {/* Panel Items with sections */}
+      {/* Section Dropdown */}
+      <div style={{ padding: '12px 14px', borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
+        <Select
+          value={selectedTaskSection}
+          onChange={setSelectedTaskSection}
+          style={{ width: '100%' }}
+          size="middle"
+        >
+          {taskSections.map(section => (
+            <Option key={section.key} value={section.key}>{section.label}</Option>
+          ))}
+        </Select>
+      </div>
+
+      {/* Panel Items - filtered by selected section */}
       <div style={{ padding: 10, flex: 1, overflowY: 'auto' }}>
-        {/* Invoices Section */}
-        <Text strong style={{ fontSize: 13, color: REDWOOD.neutral900, display: 'block', marginBottom: 8, marginTop: 4 }}>Invoices</Text>
-        {invoiceTaskItems.map((item, index) => (
-          <TaskMenuItem key={item.key} item={item} index={index} />
-        ))}
-
-        {/* Accounting Section */}
-        <Text strong style={{ fontSize: 13, color: REDWOOD.neutral900, display: 'block', marginBottom: 8, marginTop: 16 }}>Accounting</Text>
-        {accountingTaskItems.map((item, index) => (
-          <TaskMenuItem key={item.key} item={item} index={index} />
-        ))}
-
-        {/* Assets Section */}
-        <Text strong style={{ fontSize: 13, color: REDWOOD.neutral900, display: 'block', marginBottom: 8, marginTop: 16 }}>Assets</Text>
-        {assetsTaskItems.map((item, index) => (
-          <TaskMenuItem key={item.key} item={item} index={index} />
-        ))}
-
-        {/* Payables Periods Section */}
-        <Text strong style={{ fontSize: 13, color: REDWOOD.neutral900, display: 'block', marginBottom: 8, marginTop: 16 }}>Payables Periods</Text>
-        {periodsTaskItems.map((item, index) => (
-          <TaskMenuItem key={item.key} item={item} index={index} />
-        ))}
-
-        {/* Payments Section */}
-        <Text strong style={{ fontSize: 13, color: REDWOOD.neutral900, display: 'block', marginBottom: 8, marginTop: 16 }}>Payments</Text>
-        {paymentTaskItems.map((item, index) => (
+        {getCurrentSectionItems().map((item, index) => (
           <TaskMenuItem key={item.key} item={item} index={index} />
         ))}
       </div>
@@ -379,7 +383,7 @@ const APModule: React.FC = () => {
       style={{
         position: 'fixed',
         right: 0,
-        top: 0,
+        top: 64,
         bottom: 0,
         width: 320,
         background: REDWOOD.surface,
@@ -456,7 +460,7 @@ const APModule: React.FC = () => {
       style={{
         position: 'fixed',
         right: 0,
-        top: 0,
+        top: 64,
         bottom: 0,
         width: 320,
         background: REDWOOD.surface,
@@ -510,7 +514,7 @@ const APModule: React.FC = () => {
       style={{
         position: 'fixed',
         right: 0,
-        top: 0,
+        top: 64,
         bottom: 0,
         width: 360,
         background: REDWOOD.surface,
