@@ -898,61 +898,61 @@ const EditJournal: React.FC = () => {
         items={[
           {
             key: 'journal',
-            label: <span style={{ fontSize: 12 }}>Journal</span>,
+            label: <span style={{ fontSize: 13 }}>Journal</span>,
             children: (
               <div style={{ padding: '12px 0' }}>
                 <Row gutter={[32, 8]}>
                   <Col span={12}>
                     <Row gutter={[6, 8]}>
-                      <Col span={10}><Text type="secondary" style={{ fontSize: 11 }}>Journal</Text></Col>
-                      <Col span={14}><Text strong style={{ fontSize: 11 }}>{currentJournal.journalName}</Text></Col>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 12 }}>Journal</Text></Col>
+                      <Col span={14}><Text strong style={{ fontSize: 12 }}>{currentJournal.journalName}</Text></Col>
 
-                      <Col span={10}><Text type="secondary" style={{ fontSize: 11 }}>Description</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 11 }}>{currentJournal.journalDescription}</Text></Col>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 12 }}>Description</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 12 }}>{currentJournal.journalDescription}</Text></Col>
 
-                      <Col span={10}><Text type="secondary" style={{ fontSize: 11 }}><span style={{ color: REDWOOD.primary }}>*</span> Ledger</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 11 }}>{currentJournal.ledgerName}</Text></Col>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 12 }}><span style={{ color: REDWOOD.primary }}>*</span> Ledger</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 12 }}>{currentJournal.ledgerName}</Text></Col>
 
-                      <Col span={10}><Text type="secondary" style={{ fontSize: 11 }}><span style={{ color: REDWOOD.primary }}>*</span> Legal Entity</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 11 }}>{currentJournal.legalEntityName}</Text></Col>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 12 }}><span style={{ color: REDWOOD.primary }}>*</span> Legal Entity</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 12 }}>{currentJournal.legalEntityName}</Text></Col>
 
-                      <Col span={10}><Text type="secondary" style={{ fontSize: 11 }}>Accounting Date</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 11 }}>{currentJournal.accountingDate}</Text></Col>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 12 }}>Accounting Date</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 12 }}>{currentJournal.accountingDate}</Text></Col>
 
-                      <Col span={10}><Text type="secondary" style={{ fontSize: 11 }}><span style={{ color: REDWOOD.primary }}>*</span> Category</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 11 }}>{currentJournal.category}</Text></Col>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 12 }}><span style={{ color: REDWOOD.primary }}>*</span> Category</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 12 }}>{currentJournal.category}</Text></Col>
 
-                      <Col span={10}><Text type="secondary" style={{ fontSize: 11 }}>Attachments</Text></Col>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 12 }}>Attachments</Text></Col>
                       <Col span={14}>
                         <Space>
-                          <Text style={{ fontSize: 11 }}>None</Text>
-                          <PaperClipOutlined style={{ color: REDWOOD.info, fontSize: 11 }} />
+                          <Text style={{ fontSize: 12 }}>None</Text>
+                          <PaperClipOutlined style={{ color: REDWOOD.info, fontSize: 12 }} />
                         </Space>
                       </Col>
                     </Row>
                   </Col>
                   <Col span={12}>
                     <Row gutter={[6, 8]}>
-                      <Col span={10}><Text type="secondary" style={{ fontSize: 11 }}>Currency</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 11 }}>{currentJournal.currencyCode} {getCurrencyName(currentJournal.currencyCode)}</Text></Col>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 12 }}>Currency</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 12 }}>{currentJournal.currencyCode} {getCurrencyName(currentJournal.currencyCode)}</Text></Col>
 
-                      <Col span={10}><Text type="secondary" style={{ fontSize: 11 }}>Conversion Date</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 11 }}>{currentJournal.conversionDate}</Text></Col>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 12 }}>Conversion Date</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 12 }}>{currentJournal.conversionDate}</Text></Col>
 
-                      <Col span={10}><Text type="secondary" style={{ fontSize: 11 }}>Conversion Rate Type</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 11 }}>{currentJournal.conversionRateType}</Text></Col>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 12 }}>Conversion Rate Type</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 12 }}>{currentJournal.conversionRateType}</Text></Col>
 
-                      <Col span={10}><Text type="secondary" style={{ fontSize: 11 }}>Conversion Rate</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 11 }}>{currentJournal.conversionRate}</Text></Col>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 12 }}>Conversion Rate</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 12 }}>{currentJournal.conversionRate}</Text></Col>
 
-                      <Col span={10}><Text type="secondary" style={{ fontSize: 11 }}>Inverse Rate</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 11 }}>{currentJournal.inverseConversionRate}</Text></Col>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 12 }}>Inverse Rate</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 12 }}>{currentJournal.inverseConversionRate}</Text></Col>
 
-                      <Col span={10}><Text type="secondary" style={{ fontSize: 11 }}>Reference</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 11 }}>{currentJournal.externalReference}</Text></Col>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 12 }}>Reference</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 12 }}>{currentJournal.externalReference}</Text></Col>
 
-                      <Col span={10}><Text type="secondary" style={{ fontSize: 11 }}>Reference Date</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 11 }}>{currentJournal.referenceDate || '-'}</Text></Col>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 12 }}>Reference Date</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 12 }}>{currentJournal.referenceDate || '-'}</Text></Col>
                     </Row>
                   </Col>
                 </Row>
@@ -961,28 +961,28 @@ const EditJournal: React.FC = () => {
           },
           {
             key: 'controlTotal',
-            label: <span style={{ fontSize: 12 }}>Control Total</span>,
+            label: <span style={{ fontSize: 13 }}>Control Total</span>,
             children: (
               <div style={{ padding: '12px 0' }}>
                 <Row gutter={[32, 12]}>
                   <Col span={12}>
-                    <Text strong style={{ fontSize: 12, marginBottom: 8, display: 'block' }}>Control Total</Text>
+                    <Text strong style={{ fontSize: 13, marginBottom: 8, display: 'block' }}>Control Total</Text>
                     <Row gutter={[6, 8]}>
-                      <Col span={12}><Text type="secondary" style={{ fontSize: 11 }}>Total Entered Debit</Text></Col>
-                      <Col span={12}><Text style={{ fontSize: 11 }}>{formatNumber(currentJournal.enteredDebit)}</Text></Col>
+                      <Col span={12}><Text type="secondary" style={{ fontSize: 12 }}>Total Entered Debit</Text></Col>
+                      <Col span={12}><Text style={{ fontSize: 12 }}>{formatNumber(currentJournal.enteredDebit)}</Text></Col>
 
-                      <Col span={12}><Text type="secondary" style={{ fontSize: 11 }}>Total Entered Credit</Text></Col>
-                      <Col span={12}><Text style={{ fontSize: 11 }}>{formatNumber(currentJournal.enteredCredit)}</Text></Col>
+                      <Col span={12}><Text type="secondary" style={{ fontSize: 12 }}>Total Entered Credit</Text></Col>
+                      <Col span={12}><Text style={{ fontSize: 12 }}>{formatNumber(currentJournal.enteredCredit)}</Text></Col>
                     </Row>
                   </Col>
                   <Col span={12}>
                     <div style={{ marginTop: 20 }}>
                       <Row gutter={[6, 8]}>
-                        <Col span={12}><a style={{ color: REDWOOD.info, fontSize: 11 }}>Total Accounted Debit</a></Col>
-                        <Col span={12}><Text style={{ fontSize: 11 }}>{formatNumber(currentJournal.accountedDebit)}</Text></Col>
+                        <Col span={12}><a style={{ color: REDWOOD.info, fontSize: 12 }}>Total Accounted Debit</a></Col>
+                        <Col span={12}><Text style={{ fontSize: 12 }}>{formatNumber(currentJournal.accountedDebit)}</Text></Col>
 
-                        <Col span={12}><a style={{ color: REDWOOD.info, fontSize: 11 }}>Total Accounted Credit</a></Col>
-                        <Col span={12}><Text style={{ fontSize: 11 }}>{formatNumber(currentJournal.accountedCredit)}</Text></Col>
+                        <Col span={12}><a style={{ color: REDWOOD.info, fontSize: 12 }}>Total Accounted Credit</a></Col>
+                        <Col span={12}><Text style={{ fontSize: 12 }}>{formatNumber(currentJournal.accountedCredit)}</Text></Col>
                       </Row>
                     </div>
                   </Col>
@@ -992,28 +992,28 @@ const EditJournal: React.FC = () => {
           },
           {
             key: 'sequencing',
-            label: <span style={{ fontSize: 12 }}>Sequencing</span>,
+            label: <span style={{ fontSize: 13 }}>Sequencing</span>,
             children: (
               <div style={{ padding: '12px 0' }}>
                 <Row gutter={[32, 12]}>
                   <Col span={12}>
-                    <a style={{ color: REDWOOD.info, fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 8 }}>Accounting Sequence</a>
+                    <a style={{ color: REDWOOD.info, fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 8 }}>Accounting Sequence</a>
                     <Row gutter={[6, 8]}>
-                      <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Name</Text></Col>
-                      <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal.accountingSequenceName || '-'}</Text></Col>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}>Name</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 12 }}>{currentJournal.accountingSequenceName || '-'}</Text></Col>
 
-                      <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Number</Text></Col>
-                      <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal.accountingSequenceNumber || '-'}</Text></Col>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}>Number</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 12 }}>{currentJournal.accountingSequenceNumber || '-'}</Text></Col>
                     </Row>
                   </Col>
                   <Col span={12}>
-                    <a style={{ color: REDWOOD.info, fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 8 }}>Reporting Sequence</a>
+                    <a style={{ color: REDWOOD.info, fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 8 }}>Reporting Sequence</a>
                     <Row gutter={[6, 8]}>
-                      <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Name</Text></Col>
-                      <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal.reportingSequenceName || '-'}</Text></Col>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}>Name</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 12 }}>{currentJournal.reportingSequenceName || '-'}</Text></Col>
 
-                      <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Number</Text></Col>
-                      <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal.reportingSequenceNumber || '-'}</Text></Col>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}>Number</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 12 }}>{currentJournal.reportingSequenceNumber || '-'}</Text></Col>
                     </Row>
                   </Col>
                 </Row>
@@ -1022,23 +1022,23 @@ const EditJournal: React.FC = () => {
           },
           {
             key: 'reversal',
-            label: <span style={{ fontSize: 12 }}>Reversal</span>,
+            label: <span style={{ fontSize: 13 }}>Reversal</span>,
             children: (
               <div style={{ padding: '12px 0' }}>
                 <Row gutter={[32, 12]}>
                   <Col span={12}>
                     <Row gutter={[6, 8]}>
-                      <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Reversal Period</Text></Col>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}>Reversal Period</Text></Col>
                       <Col span={16}>
-                        <Select placeholder="Select period" style={{ width: 160, fontSize: 11 }} size="small" allowClear>
+                        <Select placeholder="Select period" style={{ width: 160, fontSize: 12 }} size="small" allowClear>
                           <Option value="Feb-25">Feb-25</Option>
                           <Option value="Mar-25">Mar-25</Option>
                         </Select>
                       </Col>
 
-                      <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Reversal Method</Text></Col>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}>Reversal Method</Text></Col>
                       <Col span={16}>
-                        <Select defaultValue="switchDrCr" style={{ width: 160, fontSize: 11 }} size="small">
+                        <Select defaultValue="switchDrCr" style={{ width: 160, fontSize: 12 }} size="small">
                           <Option value="switchDrCr">Switch DR or CR</Option>
                           <Option value="changeSign">Change Sign</Option>
                         </Select>
@@ -1047,8 +1047,8 @@ const EditJournal: React.FC = () => {
                   </Col>
                   <Col span={12}>
                     <Row gutter={[6, 8]}>
-                      <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Reversal Status</Text></Col>
-                      <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal.reversalStatus}</Text></Col>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}>Reversal Status</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 12 }}>{currentJournal.reversalStatus}</Text></Col>
                     </Row>
                   </Col>
                 </Row>
@@ -1073,47 +1073,47 @@ const EditJournal: React.FC = () => {
         items={[
           {
             key: 'journal',
-            label: <span style={{ fontSize: 11 }}>Journal</span>,
+            label: <span style={{ fontSize: 12 }}>Journal</span>,
             children: (
               <div style={{ padding: '6px 0' }}>
                 <Row gutter={[16, 5]}>
                   <Col span={12}>
                     <Row gutter={[6, 5]}>
-                      <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Journal</Text></Col>
-                      <Col span={16}><Text strong style={{ fontSize: 11 }}>{currentJournal.journalName}</Text></Col>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}>Journal</Text></Col>
+                      <Col span={16}><Text strong style={{ fontSize: 12 }}>{currentJournal.journalName}</Text></Col>
 
-                      <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Description</Text></Col>
-                      <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal.journalDescription}</Text></Col>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}>Description</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 12 }}>{currentJournal.journalDescription}</Text></Col>
 
-                      <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}><span style={{ color: REDWOOD.primary }}>*</span> Ledger</Text></Col>
-                      <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal.ledgerName}</Text></Col>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}><span style={{ color: REDWOOD.primary }}>*</span> Ledger</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 12 }}>{currentJournal.ledgerName}</Text></Col>
 
-                      <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}><span style={{ color: REDWOOD.primary }}>*</span> Legal Entity</Text></Col>
-                      <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal.legalEntityName}</Text></Col>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}><span style={{ color: REDWOOD.primary }}>*</span> Legal Entity</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 12 }}>{currentJournal.legalEntityName}</Text></Col>
 
-                      <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Accounting Date</Text></Col>
-                      <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal.accountingDate}</Text></Col>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}>Accounting Date</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 12 }}>{currentJournal.accountingDate}</Text></Col>
 
-                      <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}><span style={{ color: REDWOOD.primary }}>*</span> Category</Text></Col>
-                      <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal.category}</Text></Col>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}><span style={{ color: REDWOOD.primary }}>*</span> Category</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 12 }}>{currentJournal.category}</Text></Col>
                     </Row>
                   </Col>
                   <Col span={12}>
                     <Row gutter={[6, 5]}>
-                      <Col span={10}><Text type="secondary" style={{ fontSize: 11 }}>Currency</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 11 }}>{currentJournal.currencyCode} {getCurrencyName(currentJournal.currencyCode)}</Text></Col>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 12 }}>Currency</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 12 }}>{currentJournal.currencyCode} {getCurrencyName(currentJournal.currencyCode)}</Text></Col>
 
-                      <Col span={10}><Text type="secondary" style={{ fontSize: 11 }}>Conversion Date</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 11 }}>{currentJournal.conversionDate}</Text></Col>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 12 }}>Conversion Date</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 12 }}>{currentJournal.conversionDate}</Text></Col>
 
-                      <Col span={10}><Text type="secondary" style={{ fontSize: 11 }}>Conversion Rate Type</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 11 }}>{currentJournal.conversionRateType}</Text></Col>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 12 }}>Conversion Rate Type</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 12 }}>{currentJournal.conversionRateType}</Text></Col>
 
-                      <Col span={10}><Text type="secondary" style={{ fontSize: 11 }}>Conversion Rate</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 11 }}>{currentJournal.conversionRate}</Text></Col>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 12 }}>Conversion Rate</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 12 }}>{currentJournal.conversionRate}</Text></Col>
 
-                      <Col span={10}><Text type="secondary" style={{ fontSize: 11 }}>Inverse Rate</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 11 }}>{currentJournal.inverseConversionRate}</Text></Col>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 12 }}>Inverse Rate</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 12 }}>{currentJournal.inverseConversionRate}</Text></Col>
                     </Row>
                   </Col>
                 </Row>
@@ -1122,26 +1122,26 @@ const EditJournal: React.FC = () => {
           },
           {
             key: 'controlTotal',
-            label: <span style={{ fontSize: 11 }}>Control Total</span>,
+            label: <span style={{ fontSize: 12 }}>Control Total</span>,
             children: (
               <div style={{ padding: '6px 0' }}>
                 <Row gutter={[24, 5]}>
                   <Col span={12}>
                     <Row gutter={[6, 5]}>
-                      <Col span={12}><Text type="secondary" style={{ fontSize: 11 }}>Total Entered Debit</Text></Col>
-                      <Col span={12}><Text style={{ fontSize: 11 }}>{formatNumber(currentJournal.enteredDebit)}</Text></Col>
+                      <Col span={12}><Text type="secondary" style={{ fontSize: 12 }}>Total Entered Debit</Text></Col>
+                      <Col span={12}><Text style={{ fontSize: 12 }}>{formatNumber(currentJournal.enteredDebit)}</Text></Col>
 
-                      <Col span={12}><Text type="secondary" style={{ fontSize: 11 }}>Total Entered Credit</Text></Col>
-                      <Col span={12}><Text style={{ fontSize: 11 }}>{formatNumber(currentJournal.enteredCredit)}</Text></Col>
+                      <Col span={12}><Text type="secondary" style={{ fontSize: 12 }}>Total Entered Credit</Text></Col>
+                      <Col span={12}><Text style={{ fontSize: 12 }}>{formatNumber(currentJournal.enteredCredit)}</Text></Col>
                     </Row>
                   </Col>
                   <Col span={12}>
                     <Row gutter={[6, 5]}>
-                      <Col span={12}><a style={{ color: REDWOOD.info, fontSize: 11 }}>Total Accounted Debit</a></Col>
-                      <Col span={12}><Text style={{ fontSize: 11 }}>{formatNumber(currentJournal.accountedDebit)}</Text></Col>
+                      <Col span={12}><a style={{ color: REDWOOD.info, fontSize: 12 }}>Total Accounted Debit</a></Col>
+                      <Col span={12}><Text style={{ fontSize: 12 }}>{formatNumber(currentJournal.accountedDebit)}</Text></Col>
 
-                      <Col span={12}><a style={{ color: REDWOOD.info, fontSize: 11 }}>Total Accounted Credit</a></Col>
-                      <Col span={12}><Text style={{ fontSize: 11 }}>{formatNumber(currentJournal.accountedCredit)}</Text></Col>
+                      <Col span={12}><a style={{ color: REDWOOD.info, fontSize: 12 }}>Total Accounted Credit</a></Col>
+                      <Col span={12}><Text style={{ fontSize: 12 }}>{formatNumber(currentJournal.accountedCredit)}</Text></Col>
                     </Row>
                   </Col>
                 </Row>
@@ -1150,28 +1150,28 @@ const EditJournal: React.FC = () => {
           },
           {
             key: 'sequencing',
-            label: <span style={{ fontSize: 11 }}>Sequencing</span>,
+            label: <span style={{ fontSize: 12 }}>Sequencing</span>,
             children: (
               <div style={{ padding: '6px 0' }}>
                 <Row gutter={[24, 5]}>
                   <Col span={12}>
-                    <Text strong style={{ fontSize: 11, color: REDWOOD.info }}>Accounting Sequence</Text>
+                    <Text strong style={{ fontSize: 12, color: REDWOOD.info }}>Accounting Sequence</Text>
                     <Row gutter={[6, 5]} style={{ marginTop: 4 }}>
-                      <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Name</Text></Col>
-                      <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal.accountingSequenceName || '-'}</Text></Col>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}>Name</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 12 }}>{currentJournal.accountingSequenceName || '-'}</Text></Col>
 
-                      <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Number</Text></Col>
-                      <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal.accountingSequenceNumber || '-'}</Text></Col>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}>Number</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 12 }}>{currentJournal.accountingSequenceNumber || '-'}</Text></Col>
                     </Row>
                   </Col>
                   <Col span={12}>
-                    <Text strong style={{ fontSize: 11, color: REDWOOD.info }}>Reporting Sequence</Text>
+                    <Text strong style={{ fontSize: 12, color: REDWOOD.info }}>Reporting Sequence</Text>
                     <Row gutter={[6, 5]} style={{ marginTop: 4 }}>
-                      <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Name</Text></Col>
-                      <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal.reportingSequenceName || '-'}</Text></Col>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}>Name</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 12 }}>{currentJournal.reportingSequenceName || '-'}</Text></Col>
 
-                      <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Number</Text></Col>
-                      <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal.reportingSequenceNumber || '-'}</Text></Col>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}>Number</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 12 }}>{currentJournal.reportingSequenceNumber || '-'}</Text></Col>
                     </Row>
                   </Col>
                 </Row>
@@ -1180,23 +1180,23 @@ const EditJournal: React.FC = () => {
           },
           {
             key: 'reversal',
-            label: <span style={{ fontSize: 11 }}>Reversal</span>,
+            label: <span style={{ fontSize: 12 }}>Reversal</span>,
             children: (
               <div style={{ padding: '6px 0' }}>
                 <Row gutter={[24, 5]}>
                   <Col span={12}>
                     <Row gutter={[6, 5]}>
-                      <Col span={10}><Text type="secondary" style={{ fontSize: 11 }}>Reversal Period</Text></Col>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 12 }}>Reversal Period</Text></Col>
                       <Col span={14}>
-                        <Select placeholder="Select" size="small" style={{ width: 130, fontSize: 11 }} allowClear>
+                        <Select placeholder="Select" size="small" style={{ width: 130, fontSize: 12 }} allowClear>
                           <Option value="Feb-25">Feb-25</Option>
                           <Option value="Mar-25">Mar-25</Option>
                         </Select>
                       </Col>
 
-                      <Col span={10}><Text type="secondary" style={{ fontSize: 11 }}>Reversal Method</Text></Col>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 12 }}>Reversal Method</Text></Col>
                       <Col span={14}>
-                        <Select defaultValue="switchDrCr" size="small" style={{ width: 130, fontSize: 11 }}>
+                        <Select defaultValue="switchDrCr" size="small" style={{ width: 130, fontSize: 12 }}>
                           <Option value="switchDrCr">Switch DR or CR</Option>
                           <Option value="changeSign">Change Sign</Option>
                         </Select>
@@ -1205,8 +1205,8 @@ const EditJournal: React.FC = () => {
                   </Col>
                   <Col span={12}>
                     <Row gutter={[6, 5]}>
-                      <Col span={10}><Text type="secondary" style={{ fontSize: 11 }}>Reversal Status</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 11 }}>{currentJournal.reversalStatus}</Text></Col>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 12 }}>Reversal Status</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 12 }}>{currentJournal.reversalStatus}</Text></Col>
                     </Row>
                   </Col>
                 </Row>
@@ -1317,46 +1317,46 @@ const EditJournal: React.FC = () => {
               <Row gutter={[16, 6]}>
                 <Col span={12}>
                   <Row gutter={[6, 5]}>
-                    <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Journal Batch</Text></Col>
-                    <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal?.batchName}</Text></Col>
+                    <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}>Journal Batch</Text></Col>
+                    <Col span={16}><Text style={{ fontSize: 12 }}>{currentJournal?.batchName}</Text></Col>
 
-                    <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Description</Text></Col>
-                    <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal?.batchDescription}</Text></Col>
+                    <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}>Description</Text></Col>
+                    <Col span={16}><Text style={{ fontSize: 12 }}>{currentJournal?.batchDescription}</Text></Col>
 
-                    <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Balance Type</Text></Col>
-                    <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal?.balanceType}</Text></Col>
+                    <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}>Balance Type</Text></Col>
+                    <Col span={16}><Text style={{ fontSize: 12 }}>{currentJournal?.balanceType}</Text></Col>
 
-                    <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}><span style={{ color: REDWOOD.primary }}>*</span> Accounting Period</Text></Col>
-                    <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal?.periodName}</Text></Col>
+                    <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}><span style={{ color: REDWOOD.primary }}>*</span> Accounting Period</Text></Col>
+                    <Col span={16}><Text style={{ fontSize: 12 }}>{currentJournal?.periodName}</Text></Col>
 
-                    <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Attachments</Text></Col>
+                    <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}>Attachments</Text></Col>
                     <Col span={16}>
                       <Space>
-                        <Text style={{ fontSize: 11 }}>None</Text>
-                        <PaperClipOutlined style={{ color: REDWOOD.info, fontSize: 11 }} />
+                        <Text style={{ fontSize: 12 }}>None</Text>
+                        <PaperClipOutlined style={{ color: REDWOOD.info, fontSize: 12 }} />
                       </Space>
                     </Col>
                   </Row>
                 </Col>
                 <Col span={12}>
                   <Row gutter={[6, 5]}>
-                    <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Source</Text></Col>
-                    <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal?.source}</Text></Col>
+                    <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}>Source</Text></Col>
+                    <Col span={16}><Text style={{ fontSize: 12 }}>{currentJournal?.source}</Text></Col>
 
-                    <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Approval Status</Text></Col>
-                    <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal?.approvalStatusMeaning}</Text></Col>
+                    <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}>Approval Status</Text></Col>
+                    <Col span={16}><Text style={{ fontSize: 12 }}>{currentJournal?.approvalStatusMeaning}</Text></Col>
 
-                    <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Batch Status</Text></Col>
+                    <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}>Batch Status</Text></Col>
                     <Col span={16}>
-                      <Tag style={{ fontSize: 10 }} color={currentJournal?.statusMeaning === 'Posted' ? REDWOOD.success : REDWOOD.warning}>
+                      <Tag style={{ fontSize: 11 }} color={currentJournal?.statusMeaning === 'Posted' ? REDWOOD.success : REDWOOD.warning}>
                         {currentJournal?.statusMeaning}
                       </Tag>
                     </Col>
 
                     {batchExpanded && (
                       <>
-                        <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Completion Status</Text></Col>
-                        <Col span={16}><Text style={{ fontSize: 11 }}>{currentJournal?.completionStatus}</Text></Col>
+                        <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}>Completion Status</Text></Col>
+                        <Col span={16}><Text style={{ fontSize: 12 }}>{currentJournal?.completionStatus}</Text></Col>
                       </>
                     )}
                   </Row>
