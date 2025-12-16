@@ -228,6 +228,10 @@ const ManageJournals: React.FC = () => {
   const [activeTabKey, setActiveTabKey] = useState('search');
   const [openJournalTabs, setOpenJournalTabs] = useState<OpenJournalTab[]>([]);
 
+  // Journal panel expanded/collapsed state per tab (for Show More/Show Less)
+  const [journalExpandedState, setJournalExpandedState] = useState<Record<string, boolean>>({});
+  const [activeDetailTabState, setActiveDetailTabState] = useState<Record<string, string>>({});
+
   // Floating panel state
   const [activePanel, setActivePanel] = useState<'none' | 'tasks' | 'reports'>('none');
   const [isClosing, setIsClosing] = useState(false);
@@ -765,16 +769,356 @@ const ManageJournals: React.FC = () => {
     onChange: (keys: React.Key[]) => setSelectedRowKeys(keys),
   };
 
+  // Helper function to get currency name
+  const getCurrencyName = (code: string) => {
+    const currencies: Record<string, string> = {
+      'INR': 'Indian Rupee',
+      'USD': 'US Dollar',
+      'AED': 'UAE Dirham',
+      'EUR': 'Euro',
+      'GBP': 'British Pound',
+    };
+    return currencies[code] || code;
+  };
+
   // Render Journal Edit Panel (for tab content)
-  const renderJournalEditPanel = (journal: JournalRecord) => {
+  const renderJournalEditPanel = (journal: JournalRecord, tabKey: string) => {
     const formatNumber = (num: number | null | undefined) => {
       if (num === null || num === undefined) return '';
       return num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     };
 
+    // Get expanded state for this tab
+    const isJournalExpanded = journalExpandedState[tabKey] || false;
+    const activeDetailTab = activeDetailTabState[tabKey] || 'journal';
+
+    // Toggle expanded state for this tab
+    const toggleJournalExpanded = () => {
+      setJournalExpandedState(prev => ({ ...prev, [tabKey]: !prev[tabKey] }));
+    };
+
+    // Set active detail tab for this tab
+    const setActiveDetailTab = (tab: string) => {
+      setActiveDetailTabState(prev => ({ ...prev, [tabKey]: tab }));
+    };
+
+    // Render expanded tabs (full details)
+    const renderDetailTabs = () => (
+      <Tabs
+        activeKey={activeDetailTab}
+        onChange={setActiveDetailTab}
+        style={{ padding: '0 12px' }}
+        size="small"
+        items={[
+          {
+            key: 'journal',
+            label: <span style={{ fontSize: 11 }}>Journal</span>,
+            children: (
+              <div style={{ padding: '12px 0' }}>
+                <Row gutter={[32, 8]}>
+                  <Col span={12}>
+                    <Row gutter={[6, 8]}>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Journal</Text></Col>
+                      <Col span={14}><Text strong style={{ fontSize: 10 }}>{journal.journalName}</Text></Col>
+
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Description</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 10 }}>{journal.journalDescription || '-'}</Text></Col>
+
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}><span style={{ color: REDWOOD.primary }}>*</span> Ledger</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 10 }}>{journal.ledgerName}</Text></Col>
+
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}><span style={{ color: REDWOOD.primary }}>*</span> Legal Entity</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 10 }}>{journal.legalEntityName || '-'}</Text></Col>
+
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Accounting Date</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 10 }}>{journal.effectiveDate}</Text></Col>
+
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}><span style={{ color: REDWOOD.primary }}>*</span> Category</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 10 }}>{journal.category}</Text></Col>
+                    </Row>
+                  </Col>
+                  <Col span={12}>
+                    <Row gutter={[6, 8]}>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Currency</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 10 }}>{journal.currencyCode} {getCurrencyName(journal.currencyCode)}</Text></Col>
+
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Conversion Date</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 10 }}>{journal.effectiveDate}</Text></Col>
+
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Conversion Rate Type</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 10 }}>User</Text></Col>
+
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Conversion Rate</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 10 }}>1</Text></Col>
+
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Inverse Rate</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 10 }}>1</Text></Col>
+
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Reference</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 10 }}>{journal.externalReference || '-'}</Text></Col>
+                    </Row>
+                  </Col>
+                </Row>
+              </div>
+            ),
+          },
+          {
+            key: 'controlTotal',
+            label: <span style={{ fontSize: 11 }}>Control Total</span>,
+            children: (
+              <div style={{ padding: '12px 0' }}>
+                <Row gutter={[32, 12]}>
+                  <Col span={12}>
+                    <Text strong style={{ fontSize: 11, marginBottom: 8, display: 'block' }}>Control Total</Text>
+                    <Row gutter={[6, 8]}>
+                      <Col span={12}><Text type="secondary" style={{ fontSize: 10 }}>Total Entered Debit</Text></Col>
+                      <Col span={12}><Text style={{ fontSize: 10 }}>{formatNumber(journal.enteredDebit)}</Text></Col>
+
+                      <Col span={12}><Text type="secondary" style={{ fontSize: 10 }}>Total Entered Credit</Text></Col>
+                      <Col span={12}><Text style={{ fontSize: 10 }}>{formatNumber(journal.enteredCredit)}</Text></Col>
+                    </Row>
+                  </Col>
+                  <Col span={12}>
+                    <div style={{ marginTop: 20 }}>
+                      <Row gutter={[6, 8]}>
+                        <Col span={12}><a style={{ color: REDWOOD.info, fontSize: 10 }}>Total Accounted Debit</a></Col>
+                        <Col span={12}><Text style={{ fontSize: 10 }}>{formatNumber(journal.accountedDebit)}</Text></Col>
+
+                        <Col span={12}><a style={{ color: REDWOOD.info, fontSize: 10 }}>Total Accounted Credit</a></Col>
+                        <Col span={12}><Text style={{ fontSize: 10 }}>{formatNumber(journal.accountedCredit)}</Text></Col>
+                      </Row>
+                    </div>
+                  </Col>
+                </Row>
+              </div>
+            ),
+          },
+          {
+            key: 'sequencing',
+            label: <span style={{ fontSize: 11 }}>Sequencing</span>,
+            children: (
+              <div style={{ padding: '12px 0' }}>
+                <Row gutter={[32, 12]}>
+                  <Col span={12}>
+                    <a style={{ color: REDWOOD.info, fontSize: 11, fontWeight: 600, display: 'block', marginBottom: 8 }}>Accounting Sequence</a>
+                    <Row gutter={[6, 8]}>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Name</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 10 }}>-</Text></Col>
+
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Number</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 10 }}>-</Text></Col>
+                    </Row>
+                  </Col>
+                  <Col span={12}>
+                    <a style={{ color: REDWOOD.info, fontSize: 11, fontWeight: 600, display: 'block', marginBottom: 8 }}>Reporting Sequence</a>
+                    <Row gutter={[6, 8]}>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Name</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 10 }}>-</Text></Col>
+
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Number</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 10 }}>-</Text></Col>
+                    </Row>
+                  </Col>
+                </Row>
+              </div>
+            ),
+          },
+          {
+            key: 'reversal',
+            label: <span style={{ fontSize: 11 }}>Reversal</span>,
+            children: (
+              <div style={{ padding: '12px 0' }}>
+                <Row gutter={[32, 12]}>
+                  <Col span={12}>
+                    <Row gutter={[6, 8]}>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Reversal Period</Text></Col>
+                      <Col span={16}>
+                        <Select placeholder="Select period" style={{ width: 160, fontSize: 10 }} size="small" allowClear>
+                          <Option value="Feb-25">Feb-25</Option>
+                          <Option value="Mar-25">Mar-25</Option>
+                        </Select>
+                      </Col>
+
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Reversal Method</Text></Col>
+                      <Col span={16}>
+                        <Select defaultValue="switchDrCr" style={{ width: 160, fontSize: 10 }} size="small">
+                          <Option value="switchDrCr">Switch DR or CR</Option>
+                          <Option value="changeSign">Change Sign</Option>
+                        </Select>
+                      </Col>
+                    </Row>
+                  </Col>
+                  <Col span={12}>
+                    <Row gutter={[6, 8]}>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Reversal Status</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 10 }}>Not reversed</Text></Col>
+                    </Row>
+                  </Col>
+                </Row>
+              </div>
+            ),
+          },
+        ]}
+      />
+    );
+
+    // Render collapsed tabs (compact view)
+    const renderCollapsedJournal = () => (
+      <Tabs
+        activeKey={activeDetailTab}
+        onChange={setActiveDetailTab}
+        size="small"
+        style={{ padding: '0 10px' }}
+        items={[
+          {
+            key: 'journal',
+            label: <span style={{ fontSize: 10 }}>Journal</span>,
+            children: (
+              <div style={{ padding: '6px 0' }}>
+                <Row gutter={[16, 5]}>
+                  <Col span={12}>
+                    <Row gutter={[6, 5]}>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Journal</Text></Col>
+                      <Col span={16}><Text strong style={{ fontSize: 10 }}>{journal.journalName}</Text></Col>
+
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Description</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 10 }}>{journal.journalDescription || '-'}</Text></Col>
+
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}><span style={{ color: REDWOOD.primary }}>*</span> Ledger</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 10 }}>{journal.ledgerName}</Text></Col>
+
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}><span style={{ color: REDWOOD.primary }}>*</span> Legal Entity</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 10 }}>{journal.legalEntityName || '-'}</Text></Col>
+
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Accounting Date</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 10 }}>{journal.effectiveDate}</Text></Col>
+
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}><span style={{ color: REDWOOD.primary }}>*</span> Category</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 10 }}>{journal.category}</Text></Col>
+                    </Row>
+                  </Col>
+                  <Col span={12}>
+                    <Row gutter={[6, 5]}>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Currency</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 10 }}>{journal.currencyCode} {getCurrencyName(journal.currencyCode)}</Text></Col>
+
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Conversion Date</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 10 }}>{journal.effectiveDate}</Text></Col>
+
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Conversion Rate Type</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 10 }}>User</Text></Col>
+
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Conversion Rate</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 10 }}>1</Text></Col>
+
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Inverse Rate</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 10 }}>1</Text></Col>
+                    </Row>
+                  </Col>
+                </Row>
+              </div>
+            ),
+          },
+          {
+            key: 'controlTotal',
+            label: <span style={{ fontSize: 10 }}>Control Total</span>,
+            children: (
+              <div style={{ padding: '6px 0' }}>
+                <Row gutter={[24, 5]}>
+                  <Col span={12}>
+                    <Row gutter={[6, 5]}>
+                      <Col span={12}><Text type="secondary" style={{ fontSize: 10 }}>Total Entered Debit</Text></Col>
+                      <Col span={12}><Text style={{ fontSize: 10 }}>{formatNumber(journal.enteredDebit)}</Text></Col>
+
+                      <Col span={12}><Text type="secondary" style={{ fontSize: 10 }}>Total Entered Credit</Text></Col>
+                      <Col span={12}><Text style={{ fontSize: 10 }}>{formatNumber(journal.enteredCredit)}</Text></Col>
+                    </Row>
+                  </Col>
+                  <Col span={12}>
+                    <Row gutter={[6, 5]}>
+                      <Col span={12}><a style={{ color: REDWOOD.info, fontSize: 10 }}>Total Accounted Debit</a></Col>
+                      <Col span={12}><Text style={{ fontSize: 10 }}>{formatNumber(journal.accountedDebit)}</Text></Col>
+
+                      <Col span={12}><a style={{ color: REDWOOD.info, fontSize: 10 }}>Total Accounted Credit</a></Col>
+                      <Col span={12}><Text style={{ fontSize: 10 }}>{formatNumber(journal.accountedCredit)}</Text></Col>
+                    </Row>
+                  </Col>
+                </Row>
+              </div>
+            ),
+          },
+          {
+            key: 'sequencing',
+            label: <span style={{ fontSize: 10 }}>Sequencing</span>,
+            children: (
+              <div style={{ padding: '6px 0' }}>
+                <Row gutter={[24, 5]}>
+                  <Col span={12}>
+                    <Text strong style={{ fontSize: 10, color: REDWOOD.info }}>Accounting Sequence</Text>
+                    <Row gutter={[6, 5]} style={{ marginTop: 4 }}>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Name</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 10 }}>-</Text></Col>
+
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Number</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 10 }}>-</Text></Col>
+                    </Row>
+                  </Col>
+                  <Col span={12}>
+                    <Text strong style={{ fontSize: 10, color: REDWOOD.info }}>Reporting Sequence</Text>
+                    <Row gutter={[6, 5]} style={{ marginTop: 4 }}>
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Name</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 10 }}>-</Text></Col>
+
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 10 }}>Number</Text></Col>
+                      <Col span={16}><Text style={{ fontSize: 10 }}>-</Text></Col>
+                    </Row>
+                  </Col>
+                </Row>
+              </div>
+            ),
+          },
+          {
+            key: 'reversal',
+            label: <span style={{ fontSize: 10 }}>Reversal</span>,
+            children: (
+              <div style={{ padding: '6px 0' }}>
+                <Row gutter={[24, 5]}>
+                  <Col span={12}>
+                    <Row gutter={[6, 5]}>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Reversal Period</Text></Col>
+                      <Col span={14}>
+                        <Select placeholder="Select" size="small" style={{ width: 130, fontSize: 10 }} allowClear>
+                          <Option value="Feb-25">Feb-25</Option>
+                          <Option value="Mar-25">Mar-25</Option>
+                        </Select>
+                      </Col>
+
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Reversal Method</Text></Col>
+                      <Col span={14}>
+                        <Select defaultValue="switchDrCr" size="small" style={{ width: 130, fontSize: 10 }}>
+                          <Option value="switchDrCr">Switch DR or CR</Option>
+                          <Option value="changeSign">Change Sign</Option>
+                        </Select>
+                      </Col>
+                    </Row>
+                  </Col>
+                  <Col span={12}>
+                    <Row gutter={[6, 5]}>
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 10 }}>Reversal Status</Text></Col>
+                      <Col span={14}><Text style={{ fontSize: 10 }}>Not reversed</Text></Col>
+                    </Row>
+                  </Col>
+                </Row>
+              </div>
+            ),
+          },
+        ]}
+      />
+    );
+
     return (
       <div style={{ padding: 16 }}>
-        {/* Journal Header Card */}
+        {/* Journal Batch Card */}
         <Card
           style={{ marginBottom: 12, borderRadius: 6 }}
           bodyStyle={{ padding: 0 }}
@@ -828,10 +1172,10 @@ const ManageJournals: React.FC = () => {
               <Col span={12}>
                 <Row gutter={[6, 5]}>
                   <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Ledger</Text></Col>
-                  <Col span={16}><Text style={{ fontSize: 11 }}>{journal.ledger}</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 11 }}>{journal.ledgerName}</Text></Col>
 
                   <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Currency</Text></Col>
-                  <Col span={16}><Text style={{ fontSize: 11 }}>{journal.currency}</Text></Col>
+                  <Col span={16}><Text style={{ fontSize: 11 }}>{journal.currencyCode}</Text></Col>
 
                   <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Status</Text></Col>
                   <Col span={16}>
@@ -848,7 +1192,7 @@ const ManageJournals: React.FC = () => {
           </div>
         </Card>
 
-        {/* Journal Details Card */}
+        {/* Journal Section with Show More/Show Less */}
         <Card
           style={{ marginBottom: 12, borderRadius: 6 }}
           bodyStyle={{ padding: 0 }}
@@ -858,45 +1202,32 @@ const ManageJournals: React.FC = () => {
               padding: '8px 12px',
               background: REDWOOD.neutral100,
               borderBottom: `1px solid ${REDWOOD.neutral200}`,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
             }}
           >
-            <Text strong style={{ fontSize: 11 }}>Journal: {journal.journalName}</Text>
+            <Space>
+              <Text strong style={{ fontSize: 11 }}>Journal</Text>
+              <a
+                onClick={toggleJournalExpanded}
+                style={{ color: REDWOOD.info, fontSize: 10 }}
+              >
+                {isJournalExpanded ? 'Show Less' : 'Show More'}
+              </a>
+            </Space>
+            <Space size="small">
+              <Button size="small" icon={<PlusOutlined />} />
+              <Button size="small" icon={<DeleteOutlined />} />
+              <Dropdown menu={{ items: [{ key: 'copy', label: 'Copy' }, { key: 'reverse', label: 'Reverse' }, { key: 'delete', label: 'Delete' }] }}>
+                <Button size="small" style={{ fontSize: 10 }}>
+                  Journal Actions <DownOutlined />
+                </Button>
+              </Dropdown>
+            </Space>
           </div>
 
-          <div style={{ padding: 10 }}>
-            <Row gutter={[16, 6]}>
-              <Col span={12}>
-                <Row gutter={[6, 5]}>
-                  <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Journal</Text></Col>
-                  <Col span={16}><Text strong style={{ fontSize: 11 }}>{journal.journalName}</Text></Col>
-
-                  <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Description</Text></Col>
-                  <Col span={16}><Text style={{ fontSize: 11 }}>{journal.journalDescription || '-'}</Text></Col>
-
-                  <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Category</Text></Col>
-                  <Col span={16}><Text style={{ fontSize: 11 }}>{journal.category}</Text></Col>
-
-                  <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Accounting Date</Text></Col>
-                  <Col span={16}><Text style={{ fontSize: 11 }}>{journal.defaultEffectiveDate}</Text></Col>
-                </Row>
-              </Col>
-              <Col span={12}>
-                <Row gutter={[6, 5]}>
-                  <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Entered Dr</Text></Col>
-                  <Col span={16}><Text style={{ fontSize: 11, color: REDWOOD.success }}>{formatNumber(journal.runningTotalEnteredDr)}</Text></Col>
-
-                  <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Entered Cr</Text></Col>
-                  <Col span={16}><Text style={{ fontSize: 11, color: REDWOOD.primary }}>{formatNumber(journal.runningTotalEnteredCr)}</Text></Col>
-
-                  <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Accounted Dr</Text></Col>
-                  <Col span={16}><Text style={{ fontSize: 11, color: REDWOOD.success }}>{formatNumber(journal.runningTotalAccountedDr)}</Text></Col>
-
-                  <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Accounted Cr</Text></Col>
-                  <Col span={16}><Text style={{ fontSize: 11, color: REDWOOD.primary }}>{formatNumber(journal.runningTotalAccountedCr)}</Text></Col>
-                </Row>
-              </Col>
-            </Row>
-          </div>
+          {isJournalExpanded ? renderDetailTabs() : renderCollapsedJournal()}
         </Card>
 
         {/* Journal Lines Card */}
@@ -1308,7 +1639,7 @@ const ManageJournals: React.FC = () => {
                 </span>
               ),
               closable: true,
-              children: renderJournalEditPanel(tab.journal),
+              children: renderJournalEditPanel(tab.journal, tab.key),
             })),
           ]}
         />
