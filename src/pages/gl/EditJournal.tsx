@@ -1254,19 +1254,16 @@ const EditJournal: React.FC = () => {
           </Space>
           <Space size="small">
             <Dropdown.Button
-              type="primary"
               size="small"
               menu={{ items: saveMenu }}
               onClick={handleSave}
               loading={saving}
-              style={{ background: REDWOOD.success }}
             >
               <SaveOutlined /> Save
             </Dropdown.Button>
             <Dropdown.Button
               size="small"
               menu={{ items: postMenu }}
-              style={{ background: '#1890ff', color: '#fff' }}
             >
               Post
             </Dropdown.Button>
@@ -1791,8 +1788,6 @@ const EditJournal: React.FC = () => {
             </Button>,
             <Button
               key="download"
-              type="primary"
-              style={{ background: REDWOOD.primary }}
               onClick={() => {
                 if (pdfUrl) {
                   const link = document.createElement('a');

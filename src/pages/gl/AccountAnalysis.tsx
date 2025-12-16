@@ -1003,12 +1003,10 @@ const AccountAnalysis: React.FC = () => {
               <Text style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>&nbsp;</Text>
               <Space>
                 <Button
-                  type="primary"
                   icon={<SearchOutlined />}
                   onClick={handleSearch}
                   loading={loading}
                   size="small"
-                  style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
                 >
                   Search
                 </Button>
@@ -1041,11 +1039,6 @@ const AccountAnalysis: React.FC = () => {
                 icon={<PieChartOutlined />}
                 onClick={openAllAccountsPivot}
                 disabled={searchData.length === 0}
-                style={{
-                  background: searchData.length > 0 ? REDWOOD.info : undefined,
-                  borderColor: searchData.length > 0 ? REDWOOD.info : undefined,
-                  color: searchData.length > 0 ? '#fff' : undefined,
-                }}
               >
                 View Pivot for All Accounts
               </Button>

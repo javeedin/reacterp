@@ -1141,13 +1141,12 @@ const ManageJournals: React.FC = () => {
             </Space>
             <Space size="small">
               <Dropdown.Button
-                type="primary"
                 size="small"
-                style={{ background: REDWOOD.success }}
+                style={{ }}
               >
                 Save
               </Dropdown.Button>
-              <Button size="small" style={{ background: '#1890ff', color: '#fff', fontSize: 10 }}>
+              <Button size="small" style={{ fontSize: 10 }}>
                 Post
               </Button>
             </Space>
@@ -1495,11 +1494,9 @@ const ManageJournals: React.FC = () => {
                 {/* Action Buttons */}
                 <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16, gap: 8 }}>
                   <Button
-                    type="primary"
                     icon={<SearchOutlined />}
                     onClick={handleSearch}
                     loading={loading}
-                    style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
                   >
                     Search
                   </Button>
@@ -1578,7 +1575,7 @@ const ManageJournals: React.FC = () => {
                   />
                 </Tooltip>
                 <Tooltip title="Delete">
-                  <Button size="small" icon={<DeleteOutlined />} disabled={selectedRowKeys.length === 0} danger />
+                  <Button size="small" icon={<DeleteOutlined />} disabled={selectedRowKeys.length === 0} />
                 </Tooltip>
               </Space>
               <Space size="small">
@@ -1587,9 +1584,8 @@ const ManageJournals: React.FC = () => {
                 </Text>
                 <Button
                   size="small"
-                  type="primary"
                   disabled={selectedRowKeys.length === 0}
-                  style={{ background: REDWOOD.success, borderColor: REDWOOD.success, fontSize: 11 }}
+                  style={{ fontSize: 11 }}
                 >
                   Post Batch
                 </Button>

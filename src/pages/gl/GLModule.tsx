@@ -558,9 +558,10 @@ const GLModule: React.FC = () => {
                 <Link to="/sync">
                   <div style={{
                     padding: '10px 20px',
-                    background: REDWOOD.primary,
+                    background: REDWOOD.surface,
+                    border: `1px solid ${REDWOOD.neutral200}`,
                     borderRadius: 8,
-                    color: '#fff',
+                    color: REDWOOD.neutral600,
                     display: 'flex',
                     alignItems: 'center',
                     gap: 8,
