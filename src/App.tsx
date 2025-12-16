@@ -9,6 +9,7 @@ import GLModule from './pages/gl/GLModule';
 import ManageJournals from './pages/gl/ManageJournals';
 import EditJournal from './pages/gl/EditJournal';
 import AccountAnalysis from './pages/gl/AccountAnalysis';
+import { APModule } from './pages/ap';
 import SyncData from './pages/sync/SyncData';
 
 // Placeholder component for modules under development
@@ -58,7 +59,8 @@ function App() {
               <Route path="gl/account-analysis" element={<AccountAnalysis />} />
               <Route path="gl/journals/:id/edit" element={<EditJournal />} />
               <Route path="gl/batch/:batchId/edit" element={<EditJournal />} />
-              <Route path="ap/*" element={<ComingSoon moduleName="Accounts Payable" />} />
+              <Route path="ap" element={<APModule />} />
+              <Route path="ap/*" element={<APModule />} />
               <Route path="ar/*" element={<ComingSoon moduleName="Accounts Receivable" />} />
               <Route path="inventory/*" element={<ComingSoon moduleName="Inventory" />} />
               <Route path="procurement/*" element={<ComingSoon moduleName="Procurement" />} />
