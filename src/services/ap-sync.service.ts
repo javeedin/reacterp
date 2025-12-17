@@ -150,13 +150,13 @@ const insertInvoiceLinesToApex = async (
     const url = `${PROXY_CONFIG.baseUrl}/apex/${APEX_CREATE_INVOICE_LINES_ENDPOINT}`;
     const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_CREATE_INVOICE_LINES_ENDPOINT}`;
 
-    // Add InvoiceId and InvoiceNumber to each line, remove links
+    // Add InvoiceId and InvoiceNumber FIRST to each line, then rest of properties, remove links
     const linesWithInvoiceInfo = lines.map(line => {
       const { links, ...lineWithoutLinks } = line as any;
       return {
-        ...lineWithoutLinks,
         InvoiceId: invoiceId,
         InvoiceNumber: invoiceNumber,
+        ...lineWithoutLinks,
       };
     });
 
