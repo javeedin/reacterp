@@ -350,12 +350,13 @@ export const syncAPInvoices = async (
     // STEP 1: Fetch Invoices from Oracle Fusion
     // ========================================
     updateProgress({ status: 'fetching', totalPages });
-    log?.('step', '═══════════════════════════════════════════════════════════');
-    log?.('step', `  AP INVOICES SYNC - ${modeLabel}`);
-    log?.('step', '═══════════════════════════════════════════════════════════');
-
-    log?.('info', `Parameters: ${JSON.stringify(parameters)}`);
-    log?.('info', `Max Records: ${maxRecords}, Page Size: ${pageSize}, Total Pages: ${totalPages}`);
+    if (verbose) {
+      log?.('step', '═══════════════════════════════════════════════════════════');
+      log?.('step', `  AP INVOICES SYNC - ${modeLabel}`);
+      log?.('step', '═══════════════════════════════════════════════════════════');
+      log?.('info', `Parameters: ${JSON.stringify(parameters)}`);
+      log?.('info', `Max Records: ${maxRecords}, Page Size: ${pageSize}, Total Pages: ${totalPages}`);
+    }
 
     let allInvoices: APInvoice[] = [];
     let currentPage = 0;
@@ -370,7 +371,9 @@ export const syncAPInvoices = async (
       const remainingNeeded = maxRecords - allInvoices.length;
       const fetchLimit = Math.min(pageSize, remainingNeeded);
 
-      log?.('info', `Page ${currentPage}/${totalPages}: Fetching offset=${offset}, limit=${fetchLimit}`);
+      if (verbose) {
+        log?.('info', `Page ${currentPage}/${totalPages}: Fetching offset=${offset}, limit=${fetchLimit}`);
+      }
 
       // Build query parameters
       const queryParams: Record<string, string> = {
@@ -400,7 +403,9 @@ export const syncAPInvoices = async (
       }
 
       if (result.items.length === 0) {
-        log?.('info', 'No more invoices to fetch');
+        if (verbose) {
+          log?.('info', 'No more invoices to fetch');
+        }
         hasMore = false;
         break;
       }
@@ -408,7 +413,9 @@ export const syncAPInvoices = async (
       allInvoices = [...allInvoices, ...result.items];
       hasMore = result.hasMore && allInvoices.length < maxRecords;
 
-      log?.('success', `Page ${currentPage}: Fetched ${result.items.length} invoices (Total: ${allInvoices.length})`);
+      if (verbose) {
+        log?.('success', `Page ${currentPage}: Fetched ${result.items.length} invoices (Total: ${allInvoices.length})`);
+      }
 
       // Small delay between pages
       if (hasMore) {
@@ -447,12 +454,16 @@ export const syncAPInvoices = async (
       totalDistributions,
     });
 
-    log?.('success', `Total invoices fetched: ${allInvoices.length}`);
-    log?.('info', `Estimated: ${totalHeaders} headers, ${totalLines} lines, ${totalDistributions} distributions`);
+    if (verbose) {
+      log?.('success', `Total invoices fetched: ${allInvoices.length}`);
+      log?.('info', `Estimated: ${totalHeaders} headers, ${totalLines} lines, ${totalDistributions} distributions`);
+    }
 
     if (allInvoices.length === 0) {
       updateProgress({ status: 'completed', endTime: new Date() });
-      log?.('warning', 'No invoices found for the given parameters');
+      if (verbose) {
+        log?.('warning', 'No invoices found for the given parameters');
+      }
       return progress;
     }
 
@@ -460,10 +471,12 @@ export const syncAPInvoices = async (
     // STEP 2: Insert Invoices to APEX
     // ========================================
     updateProgress({ status: 'inserting' });
-    log?.('step', '═══════════════════════════════════════════════════════════');
-    log?.('step', '  STEP 2: Inserting AP Invoices to APEX Database');
-    log?.('step', '═══════════════════════════════════════════════════════════');
-    log?.('info', `POST Endpoint: ${APEX_DB_CONFIG.baseUrl}/${APEX_CREATE_INVOICE_ENDPOINT}`);
+    if (verbose) {
+      log?.('step', '═══════════════════════════════════════════════════════════');
+      log?.('step', '  STEP 2: Inserting AP Invoices to APEX Database');
+      log?.('step', '═══════════════════════════════════════════════════════════');
+      log?.('info', `POST Endpoint: ${APEX_DB_CONFIG.baseUrl}/${APEX_CREATE_INVOICE_ENDPOINT}`);
+    }
 
     // Process invoices one by one
     for (let i = 0; i < allInvoices.length; i++) {
@@ -481,7 +494,9 @@ export const syncAPInvoices = async (
         currentInvoiceNumber: invoiceNum,
       });
 
-      log?.('info', `[${i + 1}/${allInvoices.length}] Processing: ${invoiceNum} (ID: ${invoice.InvoiceId})`);
+      if (verbose) {
+        log?.('info', `[${i + 1}/${allInvoices.length}] Processing: ${invoiceNum} (ID: ${invoice.InvoiceId})`);
+      }
 
       // Record payload before POST for debugging
       onInvoicePayload?.(invoice.InvoiceId, invoiceNum, invoice);
@@ -579,13 +594,21 @@ export const syncAPInvoices = async (
       endTime: new Date(),
     });
 
-    log?.('step', '═══════════════════════════════════════════════════════════');
-    log?.('step', '  SYNC COMPLETED');
-    log?.('step', '═══════════════════════════════════════════════════════════');
-    log?.('success', `Total Invoices Processed: ${progress.processedInvoices}`);
-    log?.('success', `Total Invoices Inserted: ${progress.insertedInvoices}`);
-    log?.('success', `Headers: ${progress.processedHeaders}, Lines: ${progress.processedLines}, Distributions: ${progress.processedDistributions}`);
-    log?.('info', `Errors: ${progress.errors}`);
+    // Always show brief completion summary
+    log?.('success', `✓ Sync completed: ${progress.insertedInvoices} invoices, ${progress.processedLines} lines inserted`);
+    if (progress.errors > 0) {
+      log?.('warning', `⚠ ${progress.errors} errors occurred`);
+    }
+
+    if (verbose) {
+      log?.('step', '═══════════════════════════════════════════════════════════');
+      log?.('step', '  SYNC COMPLETED');
+      log?.('step', '═══════════════════════════════════════════════════════════');
+      log?.('success', `Total Invoices Processed: ${progress.processedInvoices}`);
+      log?.('success', `Total Invoices Inserted: ${progress.insertedInvoices}`);
+      log?.('success', `Headers: ${progress.processedHeaders}, Lines: ${progress.processedLines}, Distributions: ${progress.processedDistributions}`);
+      log?.('info', `Errors: ${progress.errors}`);
+    }
 
     return progress;
 
