@@ -19,6 +19,7 @@ import {
   message,
   DatePicker,
   InputNumber,
+  Tabs,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -32,17 +33,13 @@ import {
   DownOutlined,
   ExportOutlined,
   PrinterOutlined,
-  EyeOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
-  ClockCircleOutlined,
   FilterOutlined,
   DownloadOutlined,
-  UploadOutlined,
   PaperClipOutlined,
   FileTextOutlined,
   DollarOutlined,
-  CheckSquareOutlined,
   StopOutlined,
   SendOutlined,
   BankOutlined,
@@ -50,13 +47,13 @@ import {
   CopyOutlined,
   ScissorOutlined,
 } from '@ant-design/icons';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
+import InvoiceDetail from './InvoiceDetail';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
 const { Option } = Select;
-const { Panel } = Collapse;
 
 // Oracle Redwood Color Palette
 const REDWOOD = {
@@ -100,8 +97,12 @@ interface InvoiceRecord {
   supplierNumber: string;
 }
 
-// API Base URL
-const API_BASE_URL = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/ap';
+// Tab item interface
+interface InvoiceTab {
+  key: string;
+  label: string;
+  invoice: InvoiceRecord;
+}
 
 // Proxy config
 const PROXY_CONFIG = {
@@ -143,18 +144,59 @@ const mapApiToInvoiceRecord = (item: any, index: number): InvoiceRecord => ({
 });
 
 const ManageInvoices: React.FC = () => {
-  const navigate = useNavigate();
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [searchCollapsed, setSearchCollapsed] = useState(false);
 
-  // Load all invoices on mount
-  useEffect(() => {
-    // Optionally load invoices on page load
-    // handleSearch({});
-  }, []);
+  // Tab management state
+  const [activeTab, setActiveTab] = useState('search');
+  const [openTabs, setOpenTabs] = useState<InvoiceTab[]>([]);
+
+  // Open invoice in new tab
+  const openInvoiceTab = (record: InvoiceRecord) => {
+    const tabKey = `invoice-${record.invoiceId}`;
+
+    // Check if tab already exists
+    const existingTab = openTabs.find((tab) => tab.key === tabKey);
+    if (existingTab) {
+      setActiveTab(tabKey);
+      return;
+    }
+
+    // Add new tab
+    const newTab: InvoiceTab = {
+      key: tabKey,
+      label: record.invoiceNumber,
+      invoice: record,
+    };
+    setOpenTabs([...openTabs, newTab]);
+    setActiveTab(tabKey);
+  };
+
+  // Close invoice tab
+  const closeInvoiceTab = (tabKey: string) => {
+    const newTabs = openTabs.filter((tab) => tab.key !== tabKey);
+    setOpenTabs(newTabs);
+
+    // If closing active tab, switch to search
+    if (activeTab === tabKey) {
+      setActiveTab('search');
+    }
+  };
+
+  // Handle tab change
+  const onTabChange = (key: string) => {
+    setActiveTab(key);
+  };
+
+  // Handle tab edit (close)
+  const onTabEdit = (targetKey: React.MouseEvent | React.KeyboardEvent | string, action: 'add' | 'remove') => {
+    if (action === 'remove' && typeof targetKey === 'string') {
+      closeInvoiceTab(targetKey);
+    }
+  };
 
   // Search invoices from API
   const handleSearch = async (values: any) => {
@@ -202,7 +244,6 @@ const ManageInvoices: React.FC = () => {
     } catch (error) {
       console.error('Search error:', error);
       message.error(`Failed to search invoices: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      // Keep existing data on error
     } finally {
       setLoading(false);
     }
@@ -282,9 +323,12 @@ const ManageInvoices: React.FC = () => {
       width: 150,
       fixed: 'left',
       render: (text: string, record: InvoiceRecord) => (
-        <Link to={`/ap/invoice/${record.invoiceId}`} style={{ color: REDWOOD.info }}>
+        <a
+          onClick={() => openInvoiceTab(record)}
+          style={{ color: REDWOOD.info, cursor: 'pointer' }}
+        >
           {text}
-        </Link>
+        </a>
       ),
       sorter: (a, b) => a.invoiceNumber.localeCompare(b.invoiceNumber),
     },
@@ -438,38 +482,14 @@ const ManageInvoices: React.FC = () => {
     onChange: (keys: React.Key[]) => setSelectedRowKeys(keys),
   };
 
-  return (
-    <Layout style={{ minHeight: 'calc(100vh - 64px)', background: REDWOOD.neutral100 }}>
-      <Content>
-        {/* Breadcrumb Header */}
-        <div style={{
-          padding: '12px 24px',
-          background: REDWOOD.surface,
-          borderBottom: `1px solid ${REDWOOD.neutral200}`,
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}>
-          <Breadcrumb
-            items={[
-              { title: <Link to="/home"><HomeOutlined /> Home</Link> },
-              { title: <Link to="/ap">Payables</Link> },
-              { title: 'Manage Invoices' },
-            ]}
-          />
-          <Button type="primary" style={{ background: REDWOOD.primary }}>
-            Done
-          </Button>
-        </div>
-
+  // Build tab items
+  const tabItems = [
+    {
+      key: 'search',
+      label: 'Search Results',
+      closable: false,
+      children: (
         <div style={{ padding: 16 }}>
-          {/* Page Title */}
-          <div style={{ marginBottom: 16 }}>
-            <Title level={4} style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <BankOutlined /> Manage Invoices
-            </Title>
-          </div>
-
           {/* Search Section */}
           <Card
             style={{
@@ -477,7 +497,7 @@ const ManageInvoices: React.FC = () => {
               borderRadius: 8,
               border: `1px solid ${REDWOOD.neutral200}`,
             }}
-            bodyStyle={{ padding: searchCollapsed ? 0 : 16 }}
+            styles={{ body: { padding: searchCollapsed ? 0 : 16 } }}
           >
             <Collapse
               ghost
@@ -606,7 +626,7 @@ const ManageInvoices: React.FC = () => {
               borderRadius: 8,
               border: `1px solid ${REDWOOD.neutral200}`,
             }}
-            bodyStyle={{ padding: 0 }}
+            styles={{ body: { padding: 0 } }}
           >
             {/* Action Toolbar */}
             <div style={{
@@ -688,11 +708,75 @@ const ManageInvoices: React.FC = () => {
               size="small"
               rowClassName={(record, index) => index % 2 === 0 ? '' : 'table-row-light'}
               onRow={(record) => ({
-                onDoubleClick: () => navigate(`/ap/invoice/${record.invoiceId}`),
+                onDoubleClick: () => openInvoiceTab(record),
                 style: { cursor: 'pointer' },
               })}
             />
           </Card>
+        </div>
+      ),
+    },
+    // Add open invoice tabs
+    ...openTabs.map((tab) => ({
+      key: tab.key,
+      label: tab.label,
+      closable: true,
+      children: (
+        <InvoiceDetail
+          invoice={tab.invoice}
+          onClose={() => closeInvoiceTab(tab.key)}
+        />
+      ),
+    })),
+  ];
+
+  return (
+    <Layout style={{ minHeight: 'calc(100vh - 64px)', background: REDWOOD.neutral100 }}>
+      <Content>
+        {/* Breadcrumb Header */}
+        <div style={{
+          padding: '12px 24px',
+          background: REDWOOD.surface,
+          borderBottom: `1px solid ${REDWOOD.neutral200}`,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}>
+          <Breadcrumb
+            items={[
+              { title: <Link to="/home"><HomeOutlined /> Home</Link> },
+              { title: <Link to="/ap">Payables</Link> },
+              { title: 'Manage Invoices' },
+            ]}
+          />
+          <Button type="primary" style={{ background: REDWOOD.primary }}>
+            Done
+          </Button>
+        </div>
+
+        {/* Page Title and Tabs */}
+        <div style={{ background: REDWOOD.surface, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
+          <div style={{ padding: '8px 16px 0 16px' }}>
+            <Title level={4} style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <BankOutlined /> Manage Invoices
+            </Title>
+          </div>
+
+          {/* Tab Navigation */}
+          <Tabs
+            type="editable-card"
+            activeKey={activeTab}
+            onChange={onTabChange}
+            onEdit={onTabEdit}
+            hideAdd
+            items={tabItems}
+            style={{ marginBottom: 0 }}
+            tabBarStyle={{
+              margin: 0,
+              padding: '0 16px',
+              background: REDWOOD.surface,
+            }}
+          />
         </div>
 
         {/* Custom styles */}
@@ -720,6 +804,19 @@ const ManageInvoices: React.FC = () => {
           .ant-form-item-label > label {
             font-size: 12px;
             color: ${REDWOOD.neutral600};
+          }
+          .ant-tabs-tab {
+            border-radius: 4px 4px 0 0 !important;
+          }
+          .ant-tabs-tab-active {
+            background: ${REDWOOD.surface} !important;
+            border-bottom: 2px solid ${REDWOOD.primary} !important;
+          }
+          .ant-tabs-nav {
+            margin-bottom: 0 !important;
+          }
+          .ant-tabs-content-holder {
+            background: ${REDWOOD.neutral100};
           }
         `}</style>
       </Content>
