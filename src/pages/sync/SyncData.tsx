@@ -321,25 +321,36 @@ const SyncData: React.FC = () => {
 
     try {
       const url = `${PROXY_CONFIG.baseUrl}/apex/ap/createinvoice`;
+
+      // Wrap invoice in expected bulk format (invoices array)
+      const wrappedPayload = {
+        invoices: [invoicePayload.payload]
+      };
+
       addLog('info', `POST URL: ${url}`);
-      addLog('info', `POST Payload: ${JSON.stringify(invoicePayload.payload)}`);
+      addLog('step', `──── POST PAYLOAD ────`);
+      addLog('info', JSON.stringify(wrappedPayload, null, 2));
 
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(invoicePayload.payload),
+        body: JSON.stringify(wrappedPayload),
       });
 
       const data = await response.json();
+      addLog('step', `──── POST RESPONSE ────`);
       addLog('info', `HTTP Status: ${response.status}`);
-      addLog('success', `POST Response: ${JSON.stringify(data)}`);
+      addLog('success', JSON.stringify(data, null, 2));
 
-      if (data.success || data.status === 'SUCCESS') {
+      // Check if successCount > 0 for bulk endpoint
+      const isSuccess = data.status === 'SUCCESS' && (data.successCount > 0 || data.success === true);
+
+      if (isSuccess) {
         updateInvoicePayloadStatus(invoicePayload.invoiceId, 'success', data);
-        addLog('success', `✓ Invoice ${invoicePayload.invoiceNumber} posted successfully!`);
+        addLog('success', `✓ Invoice ${invoicePayload.invoiceNumber} posted successfully! (${data.successCount} inserted)`);
       } else {
-        updateInvoicePayloadStatus(invoicePayload.invoiceId, 'error', data, data.error || data.message || 'Unknown error');
-        addLog('error', `✗ Invoice ${invoicePayload.invoiceNumber} failed: ${data.error || data.message || JSON.stringify(data)}`);
+        updateInvoicePayloadStatus(invoicePayload.invoiceId, 'error', data, data.error || data.message || 'No invoices inserted');
+        addLog('error', `✗ Invoice ${invoicePayload.invoiceNumber} failed: ${data.error || data.message || 'successCount=0'}`);
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';

@@ -114,10 +114,15 @@ const insertInvoiceToApex = async (
   invoice: APInvoice,
   log?: LogCallback,
   verbose = true
-): Promise<{ success: boolean; error?: string; response?: any }> => {
+): Promise<{ success: boolean; error?: string; response?: any; payload?: any }> => {
   try {
     const url = `${PROXY_CONFIG.baseUrl}/apex/${APEX_CREATE_INVOICE_ENDPOINT}`;
     const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_CREATE_INVOICE_ENDPOINT}`;
+
+    // Wrap invoice in expected bulk format (invoices array)
+    const payload = {
+      invoices: [invoice]
+    };
 
     if (verbose) {
       log?.('step', `──── [POST] APEX - Invoice ${invoice.InvoiceNumber} (ID: ${invoice.InvoiceId}) ────`);
@@ -127,26 +132,32 @@ const insertInvoiceToApex = async (
       log?.('info', `Invoice Number: ${invoice.InvoiceNumber}`);
       log?.('info', `Supplier: ${invoice.Supplier}`);
       log?.('info', `Amount: ${invoice.InvoiceAmount} ${invoice.InvoiceCurrency}`);
-      log?.('info', `POST Payload: ${JSON.stringify(invoice)}`);
+      log?.('step', `──── POST PAYLOAD ────`);
+      log?.('info', JSON.stringify(payload, null, 2));
     }
 
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(invoice),
+      body: JSON.stringify(payload),
     });
 
     const data = await response.json();
 
     if (verbose) {
+      log?.('step', `──── POST RESPONSE ────`);
       log?.('info', `HTTP Status: ${response.status}`);
-      log?.('success', `POST Response: ${JSON.stringify(data)}`);
+      log?.('success', JSON.stringify(data, null, 2));
     }
 
+    // Check if successCount > 0 for bulk endpoint
+    const isSuccess = data.status === 'SUCCESS' && (data.successCount > 0 || data.success === true);
+
     return {
-      success: data.status === 'SUCCESS' || data.success === true,
-      error: data.message || data.error,
+      success: isSuccess,
+      error: isSuccess ? undefined : (data.message || data.error || 'No invoices inserted'),
       response: data,
+      payload: payload,
     };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
