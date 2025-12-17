@@ -119,9 +119,12 @@ const insertInvoiceToApex = async (
     const url = `${PROXY_CONFIG.baseUrl}/apex/${APEX_CREATE_INVOICE_ENDPOINT}`;
     const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_CREATE_INVOICE_ENDPOINT}`;
 
-    // Wrap invoice in expected bulk format (invoices array)
+    // Remove links property from invoice (not needed for insert)
+    const { links, ...invoiceWithoutLinks } = invoice as any;
+
+    // Wrap invoice in expected format (items array)
     const payload = {
-      invoices: [invoice]
+      items: [invoiceWithoutLinks]
     };
 
     if (verbose) {

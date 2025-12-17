@@ -322,9 +322,10 @@ const SyncData: React.FC = () => {
     try {
       const url = `${PROXY_CONFIG.baseUrl}/apex/ap/createinvoice`;
 
-      // Wrap invoice in expected bulk format (invoices array)
+      // Remove links property and wrap in expected format (items array)
+      const { links, ...invoiceWithoutLinks } = invoicePayload.payload as any;
       const wrappedPayload = {
-        invoices: [invoicePayload.payload]
+        items: [invoiceWithoutLinks]
       };
 
       addLog('info', `POST URL: ${url}`);
