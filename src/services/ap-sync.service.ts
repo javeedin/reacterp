@@ -90,12 +90,14 @@ const fetchInvoiceLinesFromOracle = async (
   verbose = true
 ): Promise<{ success: boolean; items: APInvoiceLine[]; error?: string }> => {
   try {
-    const proxyUrl = `${PROXY_CONFIG.baseUrl}/oracle/invoices/${invoiceId}/child/invoiceLines`;
     const oracleUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/invoices/${invoiceId}/child/invoiceLines`;
+    // Use oracle-url endpoint for child resources (nested paths)
+    const proxyUrl = `${PROXY_CONFIG.baseUrl}/oracle-url?url=${encodeURIComponent(oracleUrl)}`;
 
     if (verbose) {
       log?.('info', `Fetching lines for Invoice ${invoiceId}...`);
       log?.('info', `Oracle URL: ${oracleUrl}`);
+      log?.('info', `Proxy URL: ${proxyUrl}`);
     }
 
     const response = await fetch(proxyUrl);
