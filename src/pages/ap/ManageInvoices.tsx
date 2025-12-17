@@ -103,6 +103,45 @@ interface InvoiceRecord {
 // API Base URL
 const API_BASE_URL = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/ap';
 
+// Proxy config
+const PROXY_CONFIG = {
+  baseUrl: 'http://localhost:3001/api',
+};
+
+// Helper function to format date
+const formatDate = (dateStr: string | null): string => {
+  if (!dateStr) return '';
+  try {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  } catch {
+    return dateStr;
+  }
+};
+
+// Map API response to InvoiceRecord
+const mapApiToInvoiceRecord = (item: any, index: number): InvoiceRecord => ({
+  key: item.INVOICE_ID?.toString() || index.toString(),
+  invoiceId: item.INVOICE_ID,
+  invoiceNumber: item.INVOICE_NUMBER || '',
+  invoiceDate: formatDate(item.INVOICE_DATE),
+  creationDate: formatDate(item.CREATION_DATE || item.FUSION_CREATION_DATE),
+  supplierOrParty: item.SUPPLIER || item.PARTY || '',
+  supplierSite: item.SUPPLIER_SITE || '',
+  unpaidAmount: (item.INVOICE_AMOUNT || 0) - (item.AMOUNT_PAID || 0),
+  invoiceAmount: item.INVOICE_AMOUNT || 0,
+  appliedPrepayments: 0, // Not in API response
+  invoiceType: item.INVOICE_TYPE || 'Standard',
+  attachments: 'None',
+  notes: item.DESCRIPTION || '',
+  validationStatus: item.VALIDATION_STATUS || 'Never validated',
+  approvalStatus: item.APPROVAL_STATUS || 'Not required',
+  holdPaidStatus: item.PAID_STATUS || 'Not paid',
+  businessUnit: item.BUSINESS_UNIT || '',
+  invoiceCurrency: item.INVOICE_CURRENCY || 'AED',
+  supplierNumber: item.SUPPLIER_NUMBER || '',
+});
+
 const ManageInvoices: React.FC = () => {
   const navigate = useNavigate();
   const [form] = Form.useForm();
@@ -111,141 +150,59 @@ const ManageInvoices: React.FC = () => {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [searchCollapsed, setSearchCollapsed] = useState(false);
 
-  // Mock data for demonstration
+  // Load all invoices on mount
   useEffect(() => {
-    loadMockData();
+    // Optionally load invoices on page load
+    // handleSearch({});
   }, []);
-
-  const loadMockData = () => {
-    const mockData: InvoiceRecord[] = [
-      {
-        key: '1',
-        invoiceId: 300000087800001,
-        invoiceNumber: 'H23-1983',
-        invoiceDate: '28-Jul-2023',
-        creationDate: '10-Sep-2023',
-        supplierOrParty: 'HOLZ TIMBER TRADING L.L.C.',
-        supplierSite: 'SHARJAH',
-        unpaidAmount: 0.00,
-        invoiceAmount: 0.08,
-        appliedPrepayments: 0.00,
-        invoiceType: 'Standard',
-        attachments: 'None',
-        notes: '',
-        validationStatus: 'Validated',
-        approvalStatus: 'Not required',
-        holdPaidStatus: 'Fully paid',
-        businessUnit: 'BUIMERC CORP FZE_JAFZA',
-        invoiceCurrency: 'AED',
-        supplierNumber: 'H014',
-      },
-      {
-        key: '2',
-        invoiceId: 300000087800002,
-        invoiceNumber: 'H23-1983 CR Nt Adjust',
-        invoiceDate: '31-Mar-2024',
-        creationDate: '16-May-2024',
-        supplierOrParty: 'HOLZ TIMBER TRADING L.L.C.',
-        supplierSite: 'SHARJAH',
-        unpaidAmount: 0.00,
-        invoiceAmount: -0.08,
-        appliedPrepayments: 0.00,
-        invoiceType: 'Credit memo',
-        attachments: 'None',
-        notes: '',
-        validationStatus: 'Validated',
-        approvalStatus: 'Manually approved',
-        holdPaidStatus: 'Fully paid',
-        businessUnit: 'BUIMERC CORP FZE_JAFZA',
-        invoiceCurrency: 'AED',
-        supplierNumber: 'H014',
-      },
-      {
-        key: '3',
-        invoiceId: 300000087800003,
-        invoiceNumber: 'H23-1983_Adju',
-        invoiceDate: '31-Mar-2024',
-        creationDate: '16-May-2024',
-        supplierOrParty: 'HOLZ TIMBER TRADING L.L.C.',
-        supplierSite: 'SHARJAH',
-        unpaidAmount: 0.00,
-        invoiceAmount: 0.00,
-        appliedPrepayments: 0.00,
-        invoiceType: 'Credit memo',
-        attachments: 'None',
-        notes: '',
-        validationStatus: 'Canceled',
-        approvalStatus: 'Not required',
-        holdPaidStatus: 'Not paid',
-        businessUnit: 'BUIMERC CORP FZE_JAFZA',
-        invoiceCurrency: 'AED',
-        supplierNumber: 'H014',
-      },
-      {
-        key: '4',
-        invoiceId: 300000087800004,
-        invoiceNumber: 'H23-1983_Adjustment',
-        invoiceDate: '31-Mar-2024',
-        creationDate: '16-May-2024',
-        supplierOrParty: 'HOLZ TIMBER TRADING L.L.C.',
-        supplierSite: 'SHARJAH',
-        unpaidAmount: 0.00,
-        invoiceAmount: 0.00,
-        appliedPrepayments: 0.00,
-        invoiceType: 'Credit memo',
-        attachments: 'None',
-        notes: '',
-        validationStatus: 'Canceled',
-        approvalStatus: 'Not required',
-        holdPaidStatus: 'Not paid',
-        businessUnit: 'BUIMERC CORP FZE_JAFZA',
-        invoiceCurrency: 'AED',
-        supplierNumber: 'H014',
-      },
-      {
-        key: '5',
-        invoiceId: 300000087800005,
-        invoiceNumber: 'H23-3176',
-        invoiceDate: '28-Nov-2023',
-        creationDate: '6-Dec-2023',
-        supplierOrParty: 'HOLZ TIMBER TRADING L.L.C.',
-        supplierSite: 'SHARJAH',
-        unpaidAmount: 0.00,
-        invoiceAmount: 20002.50,
-        appliedPrepayments: 0.00,
-        invoiceType: 'Standard',
-        attachments: 'None',
-        notes: '',
-        validationStatus: 'Validated',
-        approvalStatus: 'Manually approved',
-        holdPaidStatus: 'Fully paid',
-        businessUnit: 'BUIMERC CORP FZE_JAFZA',
-        invoiceCurrency: 'AED',
-        supplierNumber: 'H014',
-      },
-    ];
-    setInvoices(mockData);
-  };
 
   // Search invoices from API
   const handleSearch = async (values: any) => {
     setLoading(true);
     try {
-      // Build query parameters
-      const params = new URLSearchParams();
-      if (values.supplierNumber) params.append('q', `SupplierNumber=${values.supplierNumber}`);
-      if (values.businessUnit) params.append('businessUnit', values.businessUnit);
-      if (values.invoiceNumber) params.append('invoiceNumber', values.invoiceNumber);
+      // Build query string for filtering
+      const filters: string[] = [];
+      if (values.supplierNumber) filters.push(`SUPPLIER_NUMBER=${values.supplierNumber}`);
+      if (values.businessUnit) filters.push(`BUSINESS_UNIT=${values.businessUnit}`);
+      if (values.invoiceNumber) filters.push(`INVOICE_NUMBER=${values.invoiceNumber}`);
 
-      // For now, use mock data
-      // const response = await fetch(`${API_BASE_URL}/invoices?${params.toString()}`);
-      // const data = await response.json();
+      // Build proxy URL - call via proxy to avoid CORS
+      let proxyUrl = `${PROXY_CONFIG.baseUrl}/apex/ap/createinvoice`;
+      if (filters.length > 0) {
+        proxyUrl += `?q=${encodeURIComponent(filters.join(';'))}`;
+      }
 
-      message.success('Search completed');
-      loadMockData();
+      console.log('Fetching invoices from:', proxyUrl);
+
+      const response = await fetch(proxyUrl, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('API Response:', data);
+
+      // Handle response - could be { items: [...] } or direct array
+      const items = data.items || data || [];
+
+      if (Array.isArray(items) && items.length > 0) {
+        const mappedInvoices = items.map(mapApiToInvoiceRecord);
+        setInvoices(mappedInvoices);
+        message.success(`Found ${mappedInvoices.length} invoices`);
+      } else {
+        setInvoices([]);
+        message.info('No invoices found');
+      }
     } catch (error) {
-      message.error('Failed to search invoices');
-      console.error(error);
+      console.error('Search error:', error);
+      message.error(`Failed to search invoices: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      // Keep existing data on error
     } finally {
       setLoading(false);
     }
