@@ -67,6 +67,123 @@ export type InvoicePayloadCallback = (
 
 // APEX endpoint for creating invoices
 const APEX_CREATE_INVOICE_ENDPOINT = 'ap/createinvoice';
+const APEX_CREATE_INVOICE_LINES_ENDPOINT = 'ap/invoicelines';
+
+// Invoice Lines type
+export interface APInvoiceLine {
+  InvoiceId: number;
+  InvoiceNumber?: string;
+  LineNumber: number;
+  LineAmount: number;
+  LineType: string;
+  Description: string;
+  AccountingDate: string;
+  DistributionCombination: string;
+  [key: string]: any;
+}
+
+// Fetch invoice lines from Oracle Fusion via proxy
+const fetchInvoiceLinesFromOracle = async (
+  invoiceId: number,
+  log?: LogCallback,
+  verbose = true
+): Promise<{ success: boolean; items: APInvoiceLine[]; error?: string }> => {
+  try {
+    const proxyUrl = `${PROXY_CONFIG.baseUrl}/oracle/invoices/${invoiceId}/child/invoiceLines`;
+    const oracleUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/invoices/${invoiceId}/child/invoiceLines`;
+
+    if (verbose) {
+      log?.('info', `Fetching lines for Invoice ${invoiceId}...`);
+      log?.('info', `Oracle URL: ${oracleUrl}`);
+    }
+
+    const response = await fetch(proxyUrl);
+    const data = await response.json();
+
+    if (!data.success && !data.items) {
+      throw new Error(data.error || 'Fetch lines failed');
+    }
+
+    const items = data.items || data || [];
+
+    if (verbose) {
+      log?.('success', `Fetched ${items.length} lines for Invoice ${invoiceId}`);
+    }
+
+    return {
+      success: true,
+      items: Array.isArray(items) ? items : [],
+    };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    log?.('error', `Fetch Lines Error: ${errorMsg}`);
+    return { success: false, items: [], error: errorMsg };
+  }
+};
+
+// Insert invoice lines to APEX via proxy
+const insertInvoiceLinesToApex = async (
+  invoiceId: number,
+  invoiceNumber: string,
+  lines: APInvoiceLine[],
+  log?: LogCallback,
+  verbose = true
+): Promise<{ success: boolean; error?: string; response?: any; successCount: number }> => {
+  try {
+    if (lines.length === 0) {
+      return { success: true, successCount: 0 };
+    }
+
+    const url = `${PROXY_CONFIG.baseUrl}/apex/${APEX_CREATE_INVOICE_LINES_ENDPOINT}`;
+    const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_CREATE_INVOICE_LINES_ENDPOINT}`;
+
+    // Add InvoiceId and InvoiceNumber to each line, remove links
+    const linesWithInvoiceInfo = lines.map(line => {
+      const { links, ...lineWithoutLinks } = line as any;
+      return {
+        ...lineWithoutLinks,
+        InvoiceId: invoiceId,
+        InvoiceNumber: invoiceNumber,
+      };
+    });
+
+    const payload = {
+      items: linesWithInvoiceInfo
+    };
+
+    if (verbose) {
+      log?.('step', `──── [POST] APEX - Invoice Lines for ${invoiceNumber} (${lines.length} lines) ────`);
+      log?.('info', `APEX URL: ${apexUrl}`);
+      log?.('info', `Lines count: ${lines.length}`);
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+
+    if (verbose) {
+      log?.('info', `HTTP Status: ${response.status}`);
+      log?.('success', `Lines POST Response: ${JSON.stringify(data)}`);
+    }
+
+    const isSuccess = data.status === 'SUCCESS' && (data.successCount > 0 || data.success === true);
+
+    return {
+      success: isSuccess,
+      error: isSuccess ? undefined : (data.message || data.error || 'No lines inserted'),
+      response: data,
+      successCount: data.successCount || 0,
+    };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    log?.('error', `POST Lines Error: ${errorMsg}`);
+    return { success: false, error: errorMsg, successCount: 0 };
+  }
+};
 
 // Fetch invoices from Oracle Fusion via proxy
 const fetchInvoicesFromOracle = async (
@@ -358,8 +475,6 @@ export const syncAPInvoices = async (
         updateProgress({
           insertedInvoices: progress.insertedInvoices + 1,
           processedHeaders: progress.processedHeaders + 1,
-          processedLines: progress.processedLines + 2,
-          processedDistributions: progress.processedDistributions + 2,
         });
 
         // Update payload callback with success result
@@ -367,6 +482,46 @@ export const syncAPInvoices = async (
 
         if (verbose) {
           log?.('success', `✓ Invoice ${invoiceNum} (ID: ${invoice.InvoiceId}) inserted successfully`);
+        }
+
+        // ========================================
+        // STEP 2b: Fetch and POST Invoice Lines
+        // ========================================
+        const linesResult = await fetchInvoiceLinesFromOracle(invoice.InvoiceId, log, verbose);
+
+        if (linesResult.success && linesResult.items.length > 0) {
+          // Update total lines count with actual count
+          updateProgress({
+            totalLines: progress.totalLines + linesResult.items.length,
+          });
+
+          // POST lines to APEX
+          const linesInsertResult = await insertInvoiceLinesToApex(
+            invoice.InvoiceId,
+            invoiceNum,
+            linesResult.items,
+            log,
+            verbose
+          );
+
+          if (linesInsertResult.success) {
+            updateProgress({
+              processedLines: progress.processedLines + linesInsertResult.successCount,
+            });
+            if (verbose) {
+              log?.('success', `✓ ${linesInsertResult.successCount} lines inserted for ${invoiceNum}`);
+            }
+          } else {
+            updateProgress({
+              errors: progress.errors + 1,
+              lastError: linesInsertResult.error || 'Lines insert failed',
+            });
+            log?.('error', `✗ Lines failed for ${invoiceNum}: ${linesInsertResult.error}`);
+          }
+        } else if (linesResult.items.length === 0) {
+          if (verbose) {
+            log?.('info', `No lines found for ${invoiceNum}`);
+          }
         }
       } else {
         updateProgress({
