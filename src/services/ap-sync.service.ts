@@ -9,105 +9,55 @@ export interface APInvoice {
   InvoiceAmount: number;
   InvoiceDate: string;
   BusinessUnit: string;
-  LegalEntity: string;
-  LegalEntityIdentifier: string;
   Supplier: string;
   SupplierNumber: string;
   SupplierSite: string;
-  SupplierTaxRegistrationNumber: string;
-  SupplierIBAN: string;
-  Party: string;
-  PartySite: string;
-  ProcurementBU: string;
-  PurchaseOrderNumber: string;
-  RequesterId: number;
-  Requester: string;
-  InvoiceGroup: string;
-  InvoiceSourceCode: string;
-  InvoiceSource: string;
   InvoiceType: string;
   Description: string;
-  ConversionRateType: string;
-  ConversionDate: string;
-  ConversionRate: number;
-  BaseAmount: number;
-  AccountingDate: string;
-  TermsDate: string;
-  GoodsReceivedDate: string;
-  InvoiceReceivedDate: string;
-  ApplyAfterDate: string;
-  BudgetDate: string;
-  PayGroup: string;
-  PaymentTerms: string;
-  PaymentMethodCode: string;
-  PaymentMethod: string;
-  PayAloneFlag: string;
-  AmountPaid: number;
-  ControlAmount: number;
-  PaymentReasonCode: string;
-  PaymentReason: string;
-  PaymentReasonComments: string;
-  RemittanceMessageOne: string;
-  RemittanceMessageTwo: string;
-  RemittanceMessageThree: string;
-  UniqueRemittanceIdentifier: string;
-  UniqueRemittanceIdCheckDigit: string;
-  DeliveryChannelCode: string;
-  DeliveryChannel: string;
-  FirstPartyTaxRegistrationId: number;
-  FirstPartyTaxRegistrationNum: string;
-  TaxationCountry: string;
-  DocFiscalClassificationCodePath: string;
-  LiabilityDistribution: string;
-  DocumentCategory: string;
-  DocumentSequence: number;
-  VoucherNumber: string;
   ValidationStatus: string;
   ApprovalStatus: string;
   PaidStatus: string;
   AccountingStatus: string;
-  AccountCodingStatus: string;
-  FundsStatus: string;
-  CanceledFlag: string;
-  CanceledDate: string;
-  CanceledBy: string;
-  BankAccount: string;
-  ExternalBankAccountId: number;
-  BankChargeBearer: string;
-  SettlementPriority: string;
-  DigitalPaymentAccount: string;
-  RoutingAttribute1: string;
-  RoutingAttribute2: string;
-  RoutingAttribute3: string;
-  RoutingAttribute4: string;
-  RoutingAttribute5: string;
-  ReferenceKeyOne: string;
-  ReferenceKeyTwo: string;
-  ReferenceKeyThree: string;
-  ReferenceKeyFour: string;
-  ReferenceKeyFive: string;
-  ProductTable: string;
-  ImageDocumentNumber: string;
-  CreatedBy: string;
-  CreationDate: string;
-  LastUpdatedBy: string;
-  LastUpdateDate: string;
-  LastUpdateLogin: string;
+  // Child counts (from links)
+  invoiceHeaders?: any[];
+  invoiceLines?: any[];
+  invoiceDistributions?: any[];
+  links?: any[];
+  [key: string]: any;
 }
 
 export interface APSyncProgress {
   status: 'idle' | 'fetching' | 'inserting' | 'completed' | 'error' | 'stopped';
+  // Invoices
   totalInvoices: number;
   processedInvoices: number;
   insertedInvoices: number;
+  currentInvoiceNumber: string;
+  // Headers (child data)
+  totalHeaders: number;
+  processedHeaders: number;
+  // Lines (child data)
+  totalLines: number;
+  processedLines: number;
+  // Distributions (child data)
+  totalDistributions: number;
+  processedDistributions: number;
+  // Pagination
+  currentPage: number;
+  totalPages: number;
+  // Errors
   errors: number;
   lastError: string;
+  // Timing
   startTime: Date | null;
   endTime: Date | null;
 }
 
 export type LogCallback = (type: 'info' | 'success' | 'error' | 'warning' | 'step', message: string) => void;
 export type ProgressCallback = (progress: Partial<APSyncProgress>) => void;
+
+// APEX endpoint for creating invoices
+const APEX_CREATE_INVOICE_ENDPOINT = 'ap/createinvoice';
 
 // Fetch invoices from Oracle Fusion via proxy
 const fetchInvoicesFromOracle = async (
@@ -150,64 +100,19 @@ const fetchInvoicesFromOracle = async (
   }
 };
 
-// Insert invoices to APEX via proxy (bulk)
-const insertInvoicesToApex = async (
-  invoices: APInvoice[],
-  log?: LogCallback,
-  verbose = true
-): Promise<{ success: boolean; successCount?: number; errorCount?: number; error?: string }> => {
-  try {
-    const url = `${PROXY_CONFIG.baseUrl}/apex/${APEX_DB_CONFIG.endpoints.apInvoicesBulk}`;
-    const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.apInvoicesBulk}`;
-
-    const payload = { items: invoices };
-
-    if (verbose) {
-      log?.('step', '──── [POST] APEX Database - AP Invoices Bulk ────');
-      log?.('info', `APEX URL: ${apexUrl}`);
-      log?.('info', `Proxy URL: ${url}`);
-      log?.('info', `Payload: ${invoices.length} invoices`);
-    }
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    const data = await response.json();
-
-    if (verbose) {
-      log?.('success', `POST Response: ${JSON.stringify(data)}`);
-    }
-
-    return {
-      success: data.status === 'SUCCESS' || data.status === 'PARTIAL',
-      successCount: data.successCount,
-      errorCount: data.errorCount,
-      error: data.message,
-    };
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    log?.('error', `POST Error: ${errorMsg}`);
-    return { success: false, error: errorMsg };
-  }
-};
-
 // Insert single invoice to APEX via proxy
-const insertSingleInvoiceToApex = async (
+const insertInvoiceToApex = async (
   invoice: APInvoice,
   log?: LogCallback,
   verbose = true
 ): Promise<{ success: boolean; error?: string }> => {
   try {
-    const url = `${PROXY_CONFIG.baseUrl}/apex/${APEX_DB_CONFIG.endpoints.apInvoices}`;
-    const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.apInvoices}`;
+    const url = `${PROXY_CONFIG.baseUrl}/apex/${APEX_CREATE_INVOICE_ENDPOINT}`;
+    const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_CREATE_INVOICE_ENDPOINT}`;
 
     if (verbose) {
-      log?.('step', '──── [POST] APEX Database - AP Invoice ────');
+      log?.('step', `──── [POST] APEX - Invoice ${invoice.InvoiceNumber} ────`);
       log?.('info', `APEX URL: ${apexUrl}`);
-      log?.('info', `Invoice: ${invoice.InvoiceNumber}`);
     }
 
     const response = await fetch(url, {
@@ -223,8 +128,8 @@ const insertSingleInvoiceToApex = async (
     }
 
     return {
-      success: data.status === 'SUCCESS',
-      error: data.message,
+      success: data.status === 'SUCCESS' || data.success === true,
+      error: data.message || data.error,
     };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
@@ -246,6 +151,15 @@ export const syncAPInvoices = async (
     totalInvoices: 0,
     processedInvoices: 0,
     insertedInvoices: 0,
+    currentInvoiceNumber: '',
+    totalHeaders: 0,
+    processedHeaders: 0,
+    totalLines: 0,
+    processedLines: 0,
+    totalDistributions: 0,
+    processedDistributions: 0,
+    currentPage: 0,
+    totalPages: 0,
     errors: 0,
     lastError: '',
     startTime: new Date(),
@@ -257,50 +171,56 @@ export const syncAPInvoices = async (
     onProgress?.(progress);
   };
 
+  // Determine limits based on mode
+  const pageSize = 25; // Always fetch 25 per page
+  const maxRecords = testMode === 'single' ? 1 : (testMode ? 25 : 500);
+  const totalPages = Math.ceil(maxRecords / pageSize);
   const verbose = testMode !== false;
-  const batchSize = 100; // Process invoices in batches of 100
+
+  const modeLabel = testMode === 'single' ? 'SINGLE RECORD DEBUG' : (testMode ? 'TEST MODE (25 invoices)' : 'FULL SYNC (500 invoices)');
 
   try {
     // ========================================
     // STEP 1: Fetch Invoices from Oracle Fusion
     // ========================================
-    updateProgress({ status: 'fetching' });
+    updateProgress({ status: 'fetching', totalPages });
     log?.('step', '═══════════════════════════════════════════════════════════');
-    log?.('step', '  STEP 1: Fetching AP Invoices from Oracle Fusion');
+    log?.('step', `  AP INVOICES SYNC - ${modeLabel}`);
     log?.('step', '═══════════════════════════════════════════════════════════');
-
-    const limit = testMode === 'single'
-      ? ORACLE_FUSION_CONFIG.singleRecordLimit
-      : (testMode ? ORACLE_FUSION_CONFIG.testLimit : ORACLE_FUSION_CONFIG.defaultLimit);
-
-    const modeLabel = testMode === 'single' ? 'SINGLE RECORD DEBUG' : (testMode ? 'TEST MODE (25 invoices)' : 'FULL SYNC');
-
-    // Build query parameters
-    const queryParams: Record<string, string> = {
-      limit: limit.toString(),
-      offset: '0',
-    };
-
-    // Add filter parameters
-    const filters = Object.entries(parameters)
-      .filter(([, value]) => value)
-      .map(([key, value]) => `${key}=${value}`)
-      .join(';');
-
-    if (filters) {
-      queryParams.q = filters;
-    }
 
     log?.('info', `Parameters: ${JSON.stringify(parameters)}`);
-    log?.('info', `Limit: ${limit} invoices (${modeLabel})`);
+    log?.('info', `Max Records: ${maxRecords}, Page Size: ${pageSize}, Total Pages: ${totalPages}`);
 
     let allInvoices: APInvoice[] = [];
+    let currentPage = 0;
     let hasMore = true;
-    let offset = 0;
 
-    // Fetch all invoices (with pagination for full sync)
-    while (hasMore && !abortSignal?.aborted) {
-      queryParams.offset = offset.toString();
+    // Fetch with pagination
+    while (hasMore && allInvoices.length < maxRecords && !abortSignal?.aborted) {
+      currentPage++;
+      updateProgress({ currentPage });
+
+      const offset = (currentPage - 1) * pageSize;
+      const remainingNeeded = maxRecords - allInvoices.length;
+      const fetchLimit = Math.min(pageSize, remainingNeeded);
+
+      log?.('info', `Page ${currentPage}/${totalPages}: Fetching offset=${offset}, limit=${fetchLimit}`);
+
+      // Build query parameters
+      const queryParams: Record<string, string> = {
+        limit: fetchLimit.toString(),
+        offset: offset.toString(),
+      };
+
+      // Add filter parameters
+      const filters = Object.entries(parameters)
+        .filter(([, value]) => value)
+        .map(([key, value]) => `${key}=${value}`)
+        .join(';');
+
+      if (filters) {
+        queryParams.q = filters;
+      }
 
       const result = await fetchInvoicesFromOracle(queryParams, log, verbose);
 
@@ -313,17 +233,56 @@ export const syncAPInvoices = async (
         return progress;
       }
 
-      allInvoices = [...allInvoices, ...result.items];
-      hasMore = result.hasMore && testMode === false; // Only paginate in full sync mode
-      offset += limit;
+      if (result.items.length === 0) {
+        log?.('info', 'No more invoices to fetch');
+        hasMore = false;
+        break;
+      }
 
-      if (!verbose && allInvoices.length % 100 === 0) {
-        log?.('info', `Fetched ${allInvoices.length} invoices so far...`);
+      allInvoices = [...allInvoices, ...result.items];
+      hasMore = result.hasMore && allInvoices.length < maxRecords;
+
+      log?.('success', `Page ${currentPage}: Fetched ${result.items.length} invoices (Total: ${allInvoices.length})`);
+
+      // Small delay between pages
+      if (hasMore) {
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
     }
 
-    updateProgress({ totalInvoices: allInvoices.length });
+    // Count child records (headers, lines, distributions) from links
+    let totalHeaders = 0;
+    let totalLines = 0;
+    let totalDistributions = 0;
+
+    allInvoices.forEach(invoice => {
+      // Count based on links if available
+      if (invoice.links && Array.isArray(invoice.links)) {
+        const headerLink = invoice.links.find((l: any) => l.name === 'invoiceHeaders');
+        const lineLink = invoice.links.find((l: any) => l.name === 'invoiceLines');
+        const distLink = invoice.links.find((l: any) => l.name === 'invoiceDistributions');
+
+        // Estimate 1 header per invoice, varies for lines/distributions
+        if (headerLink) totalHeaders++;
+        if (lineLink) totalLines++;
+        if (distLink) totalDistributions++;
+      } else {
+        // Default estimate: 1 header, 2 lines, 2 distributions per invoice
+        totalHeaders += 1;
+        totalLines += 2;
+        totalDistributions += 2;
+      }
+    });
+
+    updateProgress({
+      totalInvoices: allInvoices.length,
+      totalHeaders,
+      totalLines,
+      totalDistributions,
+    });
+
     log?.('success', `Total invoices fetched: ${allInvoices.length}`);
+    log?.('info', `Estimated: ${totalHeaders} headers, ${totalLines} lines, ${totalDistributions} distributions`);
 
     if (allInvoices.length === 0) {
       updateProgress({ status: 'completed', endTime: new Date() });
@@ -338,49 +297,55 @@ export const syncAPInvoices = async (
     log?.('step', '═══════════════════════════════════════════════════════════');
     log?.('step', '  STEP 2: Inserting AP Invoices to APEX Database');
     log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('info', `POST Endpoint: ${APEX_DB_CONFIG.baseUrl}/${APEX_CREATE_INVOICE_ENDPOINT}`);
 
-    // Process in batches
-    for (let i = 0; i < allInvoices.length; i += batchSize) {
+    // Process invoices one by one
+    for (let i = 0; i < allInvoices.length; i++) {
       if (abortSignal?.aborted) {
         updateProgress({ status: 'stopped' });
         log?.('warning', 'Sync stopped by user');
         break;
       }
 
-      const batch = allInvoices.slice(i, i + batchSize);
-      const batchNum = Math.floor(i / batchSize) + 1;
-      const totalBatches = Math.ceil(allInvoices.length / batchSize);
+      const invoice = allInvoices[i];
+      const invoiceNum = invoice.InvoiceNumber || `Invoice ${i + 1}`;
 
-      log?.('info', `Processing batch ${batchNum}/${totalBatches} (${batch.length} invoices)`);
+      updateProgress({
+        processedInvoices: i,
+        currentInvoiceNumber: invoiceNum,
+      });
 
-      const insertResult = await insertInvoicesToApex(batch, log, verbose);
+      log?.('info', `[${i + 1}/${allInvoices.length}] Processing: ${invoiceNum}`);
+
+      const insertResult = await insertInvoiceToApex(invoice, log, verbose);
 
       if (insertResult.success) {
-        const inserted = insertResult.successCount || batch.length;
-        const errors = insertResult.errorCount || 0;
-
         updateProgress({
-          processedInvoices: Math.min(i + batchSize, allInvoices.length),
-          insertedInvoices: progress.insertedInvoices + inserted,
-          errors: progress.errors + errors,
+          insertedInvoices: progress.insertedInvoices + 1,
+          processedHeaders: progress.processedHeaders + 1,
+          processedLines: progress.processedLines + 2,
+          processedDistributions: progress.processedDistributions + 2,
         });
 
-        log?.('success', `✓ Batch ${batchNum} completed: ${inserted} inserted, ${errors} errors`);
+        if (verbose) {
+          log?.('success', `✓ Invoice ${invoiceNum} inserted successfully`);
+        }
       } else {
         updateProgress({
-          processedInvoices: Math.min(i + batchSize, allInvoices.length),
-          errors: progress.errors + batch.length,
-          lastError: insertResult.error || 'Batch insert failed',
+          errors: progress.errors + 1,
+          lastError: insertResult.error || 'Insert failed',
         });
 
-        log?.('error', `✗ Batch ${batchNum} failed: ${insertResult.error}`);
+        log?.('error', `✗ Invoice ${invoiceNum} failed: ${insertResult.error}`);
       }
 
-      // Small delay between batches to prevent API throttling
-      if (i + batchSize < allInvoices.length) {
-        await new Promise(resolve => setTimeout(resolve, 200));
+      // Small delay between inserts to prevent API throttling
+      if (i < allInvoices.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 50));
       }
     }
+
+    updateProgress({ processedInvoices: allInvoices.length });
 
     // ========================================
     // COMPLETE
@@ -395,6 +360,7 @@ export const syncAPInvoices = async (
     log?.('step', '═══════════════════════════════════════════════════════════');
     log?.('success', `Total Invoices Processed: ${progress.processedInvoices}`);
     log?.('success', `Total Invoices Inserted: ${progress.insertedInvoices}`);
+    log?.('success', `Headers: ${progress.processedHeaders}, Lines: ${progress.processedLines}, Distributions: ${progress.processedDistributions}`);
     log?.('info', `Errors: ${progress.errors}`);
 
     return progress;

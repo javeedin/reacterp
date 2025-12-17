@@ -41,7 +41,11 @@ import {
 import { Link } from 'react-router-dom';
 import { SYNC_OBJECTS, ORACLE_FUSION_CONFIG, PROXY_CONFIG, APEX_DB_CONFIG, type SyncObjectConfig, type ApiType } from '../../config/api.config';
 import { syncGLJournals, testGLConnection, type SyncProgress, type LogCallback, type BatchPayloadCallback } from '../../services/gl-sync.service';
+import { syncAPInvoices, testAPConnection, type APSyncProgress } from '../../services/ap-sync.service';
 import Autopilot from '../../components/Autopilot';
+
+// Icon imports for AP
+import { FileSearchOutlined, BranchesOutlined } from '@ant-design/icons';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -100,6 +104,8 @@ const SyncData: React.FC = () => {
   const [batchDebugVisible, setBatchDebugVisible] = useState(false);
   const [selectedBatchPayload, setSelectedBatchPayload] = useState<BatchPayloadLog | null>(null);
   const [isPostingBatch, setIsPostingBatch] = useState(false);
+
+  // GL Progress State
   const [progress, setProgress] = useState<SyncProgress>({
     status: 'idle',
     totalBatches: 0,
@@ -120,6 +126,30 @@ const SyncData: React.FC = () => {
     startTime: null,
     endTime: null,
   });
+
+  // AP Progress State
+  const [apProgress, setApProgress] = useState<APSyncProgress>({
+    status: 'idle',
+    totalInvoices: 0,
+    processedInvoices: 0,
+    insertedInvoices: 0,
+    currentInvoiceNumber: '',
+    totalHeaders: 0,
+    processedHeaders: 0,
+    totalLines: 0,
+    processedLines: 0,
+    totalDistributions: 0,
+    processedDistributions: 0,
+    currentPage: 0,
+    totalPages: 0,
+    errors: 0,
+    lastError: '',
+    startTime: null,
+    endTime: null,
+  });
+
+  // Determine if AP Invoices is selected
+  const isAPInvoices = selectedObject?.id === 'ap-invoices';
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const isSyncingRef = useRef(false);
@@ -323,7 +353,15 @@ const SyncData: React.FC = () => {
     addLog('info', '');
     addLog('info', '▶ STEP 2: Testing Oracle Fusion via Proxy...');
 
-    const success = await testGLConnection(addLog);
+    // Test based on selected object type
+    let success = false;
+    if (isAPInvoices) {
+      addLog('info', 'Testing AP Invoices endpoint...');
+      success = await testAPConnection(addLog);
+    } else {
+      addLog('info', 'Testing GL Journals endpoint...');
+      success = await testGLConnection(addLog);
+    }
 
     addLog('info', '');
     if (success) {
@@ -385,40 +423,72 @@ const SyncData: React.FC = () => {
     setBatchPayloads([]);
     logCounterRef.current = 0;
 
-    setProgress({
-      status: 'fetching_batches',
-      totalBatches: 0,
-      processedBatches: 0,
-      currentBatchId: null,
-      currentBatchName: '',
-      totalHeaders: 0,
-      processedHeaders: 0,
-      currentHeaderId: null,
-      currentHeaderName: '',
-      totalLines: 0,
-      processedLines: 0,
-      totalBatchesInserted: 0,
-      totalHeadersInserted: 0,
-      totalLinesInserted: 0,
-      errors: 0,
-      lastError: '',
-      startTime: new Date(),
-      endTime: null,
-    });
+    if (isAPInvoices) {
+      // AP Invoices Sync
+      setApProgress({
+        status: 'fetching',
+        totalInvoices: 0,
+        processedInvoices: 0,
+        insertedInvoices: 0,
+        currentInvoiceNumber: '',
+        totalHeaders: 0,
+        processedHeaders: 0,
+        totalLines: 0,
+        processedLines: 0,
+        totalDistributions: 0,
+        processedDistributions: 0,
+        currentPage: 0,
+        totalPages: 0,
+        errors: 0,
+        lastError: '',
+        startTime: new Date(),
+        endTime: null,
+      });
 
-    const modeLabel = testMode === 'single' ? 'SINGLE RECORD DEBUG' : (testMode ? 'TEST MODE (25 batches)' : 'FULL SYNC');
-    addLog('step', '═══════════════════════════════════════════════════════════');
-    addLog('step', `  GL JOURNAL SYNC - ${modeLabel}`);
-    addLog('step', '═══════════════════════════════════════════════════════════');
+      await syncAPInvoices(
+        parameters,
+        testMode,
+        addLog,
+        (newProgress) => setApProgress((prev) => ({ ...prev, ...newProgress })),
+        abortControllerRef.current.signal
+      );
+    } else {
+      // GL Journals Sync
+      setProgress({
+        status: 'fetching_batches',
+        totalBatches: 0,
+        processedBatches: 0,
+        currentBatchId: null,
+        currentBatchName: '',
+        totalHeaders: 0,
+        processedHeaders: 0,
+        currentHeaderId: null,
+        currentHeaderName: '',
+        totalLines: 0,
+        processedLines: 0,
+        totalBatchesInserted: 0,
+        totalHeadersInserted: 0,
+        totalLinesInserted: 0,
+        errors: 0,
+        lastError: '',
+        startTime: new Date(),
+        endTime: null,
+      });
 
-    await syncGLJournals(
-      parameters,
-      testMode,
-      addLog,
-      (newProgress) => setProgress((prev) => ({ ...prev, ...newProgress })),
-      abortControllerRef.current.signal,
-      handleBatchPayload
-    );
+      const modeLabel = testMode === 'single' ? 'SINGLE RECORD DEBUG' : (testMode ? 'TEST MODE (25 batches)' : 'FULL SYNC');
+      addLog('step', '═══════════════════════════════════════════════════════════');
+      addLog('step', `  GL JOURNAL SYNC - ${modeLabel}`);
+      addLog('step', '═══════════════════════════════════════════════════════════');
+
+      await syncGLJournals(
+        parameters,
+        testMode,
+        addLog,
+        (newProgress) => setProgress((prev) => ({ ...prev, ...newProgress })),
+        abortControllerRef.current.signal,
+        handleBatchPayload
+      );
+    }
 
     isSyncingRef.current = false;
   };
@@ -571,11 +641,18 @@ const SyncData: React.FC = () => {
     },
   ];
 
-  const isSyncing = !['idle', 'completed', 'error', 'stopped'].includes(progress.status);
+  // Check if syncing based on current object type
+  const currentStatus = isAPInvoices ? apProgress.status : progress.status;
+  const isSyncing = !['idle', 'completed', 'error', 'stopped'].includes(currentStatus);
 
-  // Calculate progress percentages
+  // Calculate progress percentages for GL
   const batchProgress = progress.totalBatches > 0
     ? Math.round((progress.processedBatches / progress.totalBatches) * 100)
+    : 0;
+
+  // Calculate progress percentages for AP
+  const invoiceProgress = apProgress.totalInvoices > 0
+    ? Math.round((apProgress.processedInvoices / apProgress.totalInvoices) * 100)
     : 0;
 
   return (
@@ -704,17 +781,19 @@ const SyncData: React.FC = () => {
                         <span style={{ color: REDWOOD.warning }}>●</span> Single Record (Debug)
                       </Option>
                       <Option value={true}>
-                        <span style={{ color: REDWOOD.info }}>●</span> Test Mode ({ORACLE_FUSION_CONFIG.testLimit} batches)
+                        <span style={{ color: REDWOOD.info }}>●</span> Test Mode (25 {isAPInvoices ? 'invoices' : 'batches'})
                       </Option>
                       <Option value={false}>
-                        <span style={{ color: REDWOOD.success }}>●</span> Full Sync (All records)
+                        <span style={{ color: REDWOOD.success }}>●</span> Full Sync ({isAPInvoices ? '500 invoices' : 'All records'})
                       </Option>
                     </Select>
                     <Text type="secondary" style={{ fontSize: 11, marginTop: 4, display: 'block' }}>
                       {testMode === 'single'
-                        ? 'Debug mode: Sync only 1 batch with full logging'
+                        ? `Debug mode: Sync only 1 ${isAPInvoices ? 'invoice' : 'batch'} with full logging`
                         : testMode
-                        ? `Limited to ${ORACLE_FUSION_CONFIG.testLimit} batches for testing`
+                        ? `Limited to 25 ${isAPInvoices ? 'invoices' : 'batches'} for testing`
+                        : isAPInvoices
+                        ? 'Full sync - 500 invoices (paginated 25 per page)'
                         : 'Full sync - all matching records'}
                     </Text>
                   </div>
@@ -838,119 +917,259 @@ const SyncData: React.FC = () => {
 
             {/* Right Panel - Progress & Logs */}
             <Col xs={24} lg={17}>
-              {/* Progress Cards */}
-              <Row gutter={16} style={{ marginBottom: 16 }}>
-                {/* Batches Card */}
-                <Col xs={24} sm={8}>
-                  <Card
-                    style={{
-                      borderRadius: 12,
-                      border: `1px solid ${REDWOOD.border}`,
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
-                    }}
-                    bodyStyle={{ padding: 16 }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
-                      <DatabaseOutlined style={{ fontSize: 20, color: REDWOOD.primary, marginRight: 8 }} />
-                      <Text strong>Batches</Text>
-                    </div>
-                    <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
-                      {progress.processedBatches} / {progress.totalBatches}
-                    </div>
-                    <Progress
-                      percent={batchProgress}
-                      showInfo={false}
-                      strokeColor={REDWOOD.primary}
-                      style={{ marginTop: 8 }}
-                    />
-                    {progress.currentBatchName && (
-                      <Tooltip title={progress.currentBatchName}>
-                        <Text
-                          type="secondary"
-                          style={{ fontSize: 11, display: 'block', marginTop: 4 }}
-                          ellipsis
-                        >
-                          {progress.currentBatchName}
+              {/* Progress Cards - Conditional based on sync type */}
+              {isAPInvoices ? (
+                /* AP Invoices KPI Cards */
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  {/* Invoices Card */}
+                  <Col xs={24} sm={6}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <FileSearchOutlined style={{ fontSize: 20, color: REDWOOD.primary, marginRight: 8 }} />
+                        <Text strong>Invoices</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {apProgress.insertedInvoices} / {apProgress.totalInvoices}
+                      </div>
+                      <Progress
+                        percent={invoiceProgress}
+                        showInfo={false}
+                        strokeColor={REDWOOD.primary}
+                        style={{ marginTop: 8 }}
+                      />
+                      {apProgress.currentInvoiceNumber && (
+                        <Tooltip title={apProgress.currentInvoiceNumber}>
+                          <Text
+                            type="secondary"
+                            style={{ fontSize: 11, display: 'block', marginTop: 4 }}
+                            ellipsis
+                          >
+                            {apProgress.currentInvoiceNumber}
+                          </Text>
+                        </Tooltip>
+                      )}
+                      {apProgress.currentPage > 0 && (
+                        <Text type="secondary" style={{ fontSize: 10, display: 'block' }}>
+                          Page {apProgress.currentPage}/{apProgress.totalPages}
                         </Text>
-                      </Tooltip>
-                    )}
-                  </Card>
-                </Col>
+                      )}
+                    </Card>
+                  </Col>
 
-                {/* Headers Card */}
-                <Col xs={24} sm={8}>
-                  <Card
-                    style={{
-                      borderRadius: 12,
-                      border: `1px solid ${REDWOOD.border}`,
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
-                    }}
-                    bodyStyle={{ padding: 16 }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
-                      <FileTextOutlined style={{ fontSize: 20, color: REDWOOD.info, marginRight: 8 }} />
-                      <Text strong>Headers</Text>
-                    </div>
-                    <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
-                      {progress.totalHeadersInserted}
-                      <Text type="secondary" style={{ fontSize: 14, marginLeft: 8 }}>
-                        / {progress.totalHeaders}
-                      </Text>
-                    </div>
-                    <Progress
-                      percent={progress.totalHeaders > 0 ? Math.round((progress.totalHeadersInserted / progress.totalHeaders) * 100) : 0}
-                      showInfo={false}
-                      strokeColor={REDWOOD.info}
-                      style={{ marginTop: 8 }}
-                    />
-                    {progress.currentHeaderName && (
-                      <Tooltip title={progress.currentHeaderName}>
-                        <Text
-                          type="secondary"
-                          style={{ fontSize: 11, display: 'block', marginTop: 4 }}
-                          ellipsis
-                        >
-                          {progress.currentHeaderName}
+                  {/* Headers Card */}
+                  <Col xs={24} sm={6}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <FileTextOutlined style={{ fontSize: 20, color: REDWOOD.info, marginRight: 8 }} />
+                        <Text strong>Headers</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {apProgress.processedHeaders}
+                        <Text type="secondary" style={{ fontSize: 14, marginLeft: 8 }}>
+                          / {apProgress.totalHeaders}
                         </Text>
-                      </Tooltip>
-                    )}
-                  </Card>
-                </Col>
+                      </div>
+                      <Progress
+                        percent={apProgress.totalHeaders > 0 ? Math.round((apProgress.processedHeaders / apProgress.totalHeaders) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.info}
+                        style={{ marginTop: 8 }}
+                      />
+                    </Card>
+                  </Col>
 
-                {/* Lines Card */}
-                <Col xs={24} sm={8}>
-                  <Card
-                    style={{
-                      borderRadius: 12,
-                      border: `1px solid ${REDWOOD.border}`,
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
-                    }}
-                    bodyStyle={{ padding: 16 }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
-                      <UnorderedListOutlined style={{ fontSize: 20, color: REDWOOD.success, marginRight: 8 }} />
-                      <Text strong>Lines</Text>
-                    </div>
-                    <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
-                      {progress.totalLinesInserted}
-                      <Text type="secondary" style={{ fontSize: 14, marginLeft: 8 }}>
-                        / {progress.totalLines}
-                      </Text>
-                    </div>
-                    <Progress
-                      percent={progress.totalLines > 0 ? Math.round((progress.totalLinesInserted / progress.totalLines) * 100) : 0}
-                      showInfo={false}
-                      strokeColor={REDWOOD.success}
-                      style={{ marginTop: 8 }}
-                    />
-                    {progress.errors > 0 && (
-                      <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
-                        {progress.errors} errors
-                      </Text>
-                    )}
-                  </Card>
-                </Col>
-              </Row>
+                  {/* Lines Card */}
+                  <Col xs={24} sm={6}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <UnorderedListOutlined style={{ fontSize: 20, color: REDWOOD.success, marginRight: 8 }} />
+                        <Text strong>Lines</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {apProgress.processedLines}
+                        <Text type="secondary" style={{ fontSize: 14, marginLeft: 8 }}>
+                          / {apProgress.totalLines}
+                        </Text>
+                      </div>
+                      <Progress
+                        percent={apProgress.totalLines > 0 ? Math.round((apProgress.processedLines / apProgress.totalLines) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.success}
+                        style={{ marginTop: 8 }}
+                      />
+                    </Card>
+                  </Col>
+
+                  {/* Distributions Card */}
+                  <Col xs={24} sm={6}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <BranchesOutlined style={{ fontSize: 20, color: REDWOOD.warning, marginRight: 8 }} />
+                        <Text strong>Distributions</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {apProgress.processedDistributions}
+                        <Text type="secondary" style={{ fontSize: 14, marginLeft: 8 }}>
+                          / {apProgress.totalDistributions}
+                        </Text>
+                      </div>
+                      <Progress
+                        percent={apProgress.totalDistributions > 0 ? Math.round((apProgress.processedDistributions / apProgress.totalDistributions) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.warning}
+                        style={{ marginTop: 8 }}
+                      />
+                      {apProgress.errors > 0 && (
+                        <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
+                          {apProgress.errors} errors
+                        </Text>
+                      )}
+                    </Card>
+                  </Col>
+                </Row>
+              ) : (
+                /* GL Journals KPI Cards */
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  {/* Batches Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <DatabaseOutlined style={{ fontSize: 20, color: REDWOOD.primary, marginRight: 8 }} />
+                        <Text strong>Batches</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {progress.processedBatches} / {progress.totalBatches}
+                      </div>
+                      <Progress
+                        percent={batchProgress}
+                        showInfo={false}
+                        strokeColor={REDWOOD.primary}
+                        style={{ marginTop: 8 }}
+                      />
+                      {progress.currentBatchName && (
+                        <Tooltip title={progress.currentBatchName}>
+                          <Text
+                            type="secondary"
+                            style={{ fontSize: 11, display: 'block', marginTop: 4 }}
+                            ellipsis
+                          >
+                            {progress.currentBatchName}
+                          </Text>
+                        </Tooltip>
+                      )}
+                    </Card>
+                  </Col>
+
+                  {/* Headers Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <FileTextOutlined style={{ fontSize: 20, color: REDWOOD.info, marginRight: 8 }} />
+                        <Text strong>Headers</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {progress.totalHeadersInserted}
+                        <Text type="secondary" style={{ fontSize: 14, marginLeft: 8 }}>
+                          / {progress.totalHeaders}
+                        </Text>
+                      </div>
+                      <Progress
+                        percent={progress.totalHeaders > 0 ? Math.round((progress.totalHeadersInserted / progress.totalHeaders) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.info}
+                        style={{ marginTop: 8 }}
+                      />
+                      {progress.currentHeaderName && (
+                        <Tooltip title={progress.currentHeaderName}>
+                          <Text
+                            type="secondary"
+                            style={{ fontSize: 11, display: 'block', marginTop: 4 }}
+                            ellipsis
+                          >
+                            {progress.currentHeaderName}
+                          </Text>
+                        </Tooltip>
+                      )}
+                    </Card>
+                  </Col>
+
+                  {/* Lines Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <UnorderedListOutlined style={{ fontSize: 20, color: REDWOOD.success, marginRight: 8 }} />
+                        <Text strong>Lines</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {progress.totalLinesInserted}
+                        <Text type="secondary" style={{ fontSize: 14, marginLeft: 8 }}>
+                          / {progress.totalLines}
+                        </Text>
+                      </div>
+                      <Progress
+                        percent={progress.totalLines > 0 ? Math.round((progress.totalLinesInserted / progress.totalLines) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.success}
+                        style={{ marginTop: 8 }}
+                      />
+                      {progress.errors > 0 && (
+                        <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
+                          {progress.errors} errors
+                        </Text>
+                      )}
+                    </Card>
+                  </Col>
+                </Row>
+              )}
 
               {/* Status Bar */}
               <Card
@@ -967,24 +1186,24 @@ const SyncData: React.FC = () => {
                     <Space size="large">
                       <div>
                         <Tag
-                          color={getStatusColor(progress.status)}
+                          color={getStatusColor(currentStatus)}
                           style={{
                             padding: '4px 12px',
                             fontSize: 13,
                             borderRadius: 16,
                           }}
                         >
-                          {getStatusText(progress.status)}
+                          {getStatusText(currentStatus)}
                         </Tag>
                       </div>
-                      {progress.startTime && (
+                      {(isAPInvoices ? apProgress.startTime : progress.startTime) && (
                         <Text type="secondary" style={{ fontSize: 12 }}>
-                          Started: {progress.startTime.toLocaleTimeString()}
+                          Started: {(isAPInvoices ? apProgress.startTime : progress.startTime)?.toLocaleTimeString()}
                         </Text>
                       )}
-                      {progress.endTime && (
+                      {(isAPInvoices ? apProgress.endTime : progress.endTime) && (
                         <Text type="secondary" style={{ fontSize: 12 }}>
-                          Ended: {progress.endTime.toLocaleTimeString()}
+                          Ended: {(isAPInvoices ? apProgress.endTime : progress.endTime)?.toLocaleTimeString()}
                         </Text>
                       )}
                     </Space>
@@ -993,12 +1212,15 @@ const SyncData: React.FC = () => {
                     <Space>
                       <Text type="secondary">
                         <CheckCircleOutlined style={{ color: REDWOOD.success, marginRight: 4 }} />
-                        {progress.totalBatchesInserted + progress.totalHeadersInserted + progress.totalLinesInserted} inserted
+                        {isAPInvoices
+                          ? `${apProgress.insertedInvoices} invoices inserted`
+                          : `${progress.totalBatchesInserted + progress.totalHeadersInserted + progress.totalLinesInserted} inserted`
+                        }
                       </Text>
-                      {progress.errors > 0 && (
+                      {(isAPInvoices ? apProgress.errors : progress.errors) > 0 && (
                         <Text type="danger">
                           <CloseCircleOutlined style={{ marginRight: 4 }} />
-                          {progress.errors} errors
+                          {isAPInvoices ? apProgress.errors : progress.errors} errors
                         </Text>
                       )}
                     </Space>
