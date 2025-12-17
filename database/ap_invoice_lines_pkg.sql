@@ -423,32 +423,43 @@ CREATE OR REPLACE PACKAGE BODY XXAP_INVOICE_LINES_PKG AS
         l_line_id       NUMBER;
         l_line_status   VARCHAR2(20);
         l_line_error    VARCHAR2(4000);
+        l_last_error    VARCHAR2(4000);
+        l_line_number   NUMBER;
     BEGIN
         p_success_count := 0;
         p_error_count := 0;
+        l_last_error := NULL;
 
         -- Process each item in the items array
         FOR rec IN (
-            SELECT jt.invoice_id, jt.line_json
+            SELECT jt.invoice_id, jt.line_number, jt.line_json
             FROM JSON_TABLE(p_json, '$.items[*]'
                 COLUMNS (
                     invoice_id NUMBER PATH '$.InvoiceId',
+                    line_number NUMBER PATH '$.LineNumber',
                     line_json CLOB FORMAT JSON PATH '$'
                 )
             ) jt
         ) LOOP
-            save_invoice_line(
-                p_invoice_id    => rec.invoice_id,
-                p_line_json     => rec.line_json,
-                p_line_id       => l_line_id,
-                p_status        => l_line_status,
-                p_error_message => l_line_error
-            );
-
-            IF l_line_status = 'SUCCESS' THEN
-                p_success_count := p_success_count + 1;
-            ELSE
+            -- Check if InvoiceId is present
+            IF rec.invoice_id IS NULL THEN
                 p_error_count := p_error_count + 1;
+                l_last_error := 'Line ' || NVL(rec.line_number, 0) || ': InvoiceId is required but missing';
+            ELSE
+                save_invoice_line(
+                    p_invoice_id    => rec.invoice_id,
+                    p_line_json     => rec.line_json,
+                    p_line_id       => l_line_id,
+                    p_status        => l_line_status,
+                    p_error_message => l_line_error
+                );
+
+                IF l_line_status = 'SUCCESS' THEN
+                    p_success_count := p_success_count + 1;
+                ELSE
+                    p_error_count := p_error_count + 1;
+                    l_last_error := 'Line ' || NVL(rec.line_number, 0) || ': ' || l_line_error;
+                END IF;
             END IF;
         END LOOP;
 
@@ -458,16 +469,16 @@ CREATE OR REPLACE PACKAGE BODY XXAP_INVOICE_LINES_PKG AS
             p_message := 'All ' || p_success_count || ' lines saved successfully';
         ELSIF p_success_count = 0 THEN
             p_status := 'ERROR';
-            p_message := 'All ' || p_error_count || ' lines failed';
+            p_message := 'All ' || p_error_count || ' lines failed. Last error: ' || NVL(l_last_error, 'Unknown');
         ELSE
             p_status := 'PARTIAL';
-            p_message := p_success_count || ' lines saved, ' || p_error_count || ' failed';
+            p_message := p_success_count || ' lines saved, ' || p_error_count || ' failed. Last error: ' || NVL(l_last_error, 'Unknown');
         END IF;
 
     EXCEPTION
         WHEN OTHERS THEN
             p_status := 'ERROR';
-            p_message := SQLERRM;
+            p_message := 'Exception: ' || SQLERRM;
     END save_lines_from_items;
 
 END XXAP_INVOICE_LINES_PKG;
