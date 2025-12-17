@@ -18,9 +18,14 @@ export const ORACLE_FUSION_CONFIG = {
 export const APEX_DB_CONFIG = {
   baseUrl: 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp',
   endpoints: {
+    // GL Endpoints
     journalBatches: 'gl/journalbatches',
     journalHeaders: 'gl/journals/headers',
     journalLines: 'gl/journals/lines',
+    // AP Endpoints
+    apInvoices: 'ap/invoices',
+    apInvoicesBulk: 'ap/invoices/bulk',
+    apInvoicesStats: 'ap/invoices/stats',
   },
 };
 
@@ -79,6 +84,39 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
         type: 'text',
         required: true,
         defaultValue: 'May-24',
+      },
+    ],
+  },
+  {
+    id: 'ap-invoices',
+    name: 'AP Invoices',
+    description: 'Sync AP Invoices from Oracle Fusion',
+    oracleEndpoint: 'invoices',
+    apexEndpoint: 'ap/invoices',
+    parameters: [
+      {
+        key: 'BusinessUnit',
+        label: 'Business Unit',
+        type: 'text',
+        required: false,
+      },
+      {
+        key: 'Supplier',
+        label: 'Supplier',
+        type: 'text',
+        required: false,
+      },
+      {
+        key: 'InvoiceDateFrom',
+        label: 'Invoice Date From',
+        type: 'date',
+        required: false,
+      },
+      {
+        key: 'InvoiceDateTo',
+        label: 'Invoice Date To',
+        type: 'date',
+        required: false,
       },
     ],
   },
