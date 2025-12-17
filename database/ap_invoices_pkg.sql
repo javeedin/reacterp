@@ -272,9 +272,16 @@ CREATE OR REPLACE PACKAGE BODY XXAP_INVOICES_PKG AS
         l_legal_entity_identifier := JSON_VALUE(p_invoice_json, '$.LegalEntityIdentifier');
         l_purchase_order_number := JSON_VALUE(p_invoice_json, '$.PurchaseOrderNumber');
         l_fusion_created_by := JSON_VALUE(p_invoice_json, '$.CreatedBy');
-        l_fusion_creation_date := TO_TIMESTAMP(JSON_VALUE(p_invoice_json, '$.CreationDate'), 'YYYY-MM-DD"T"HH24:MI:SS');
+        -- Handle timestamp with timezone (strip timezone portion if present)
+        l_fusion_creation_date := TO_TIMESTAMP(
+            REGEXP_REPLACE(JSON_VALUE(p_invoice_json, '$.CreationDate'), '[+-]\d{2}:\d{2}$', ''),
+            'YYYY-MM-DD"T"HH24:MI:SS'
+        );
         l_fusion_last_updated_by := JSON_VALUE(p_invoice_json, '$.LastUpdatedBy');
-        l_fusion_last_update_date := TO_TIMESTAMP(JSON_VALUE(p_invoice_json, '$.LastUpdateDate'), 'YYYY-MM-DD"T"HH24:MI:SS');
+        l_fusion_last_update_date := TO_TIMESTAMP(
+            REGEXP_REPLACE(JSON_VALUE(p_invoice_json, '$.LastUpdateDate'), '[+-]\d{2}:\d{2}$', ''),
+            'YYYY-MM-DD"T"HH24:MI:SS'
+        );
         l_fusion_last_update_login := JSON_VALUE(p_invoice_json, '$.LastUpdateLogin');
 
         -- Merge (Insert or Update)
