@@ -157,33 +157,55 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose, onSave 
       const data = await response.json();
       console.log('Invoice Lines Response:', data);
 
-      // Map API response to InvoiceLine format (lowercase snake_case)
+      // Map API response - separate by line_type
       const items = data.items || data || [];
       if (Array.isArray(items) && items.length > 0) {
-        const mappedLines = items.map((item: any, index: number) => ({
-          key: item.line_number?.toString() || index.toString(),
+        // Filter Item lines (line_type = 'Item')
+        const itemLines = items.filter((item: any) => item.line_type === 'Item');
+        const mappedItemLines = itemLines.map((item: any, index: number) => ({
+          key: item.line_id?.toString() || index.toString(),
           lineNumber: item.line_number || index + 1,
-          amount: item.amount || 0,
+          amount: item.line_amount || 0,
           description: item.description || '',
           quantity: item.quantity || 0,
           price: item.unit_price || 0,
-          uomName: item.uom_name || item.uom || '',
-          poNumber: item.po_number || '',
-          poLine: item.po_line || 0,
-          poSchedule: item.po_schedule || 0,
+          uomName: item.uom || '',
+          poNumber: item.purchase_order_number || '',
+          poLine: item.purchase_order_line_number || 0,
+          poSchedule: item.purchase_order_schedule_line_number || 0,
           receiptNumber: item.receipt_number || '',
-          receiptLine: item.receipt_line || 0,
+          receiptLine: item.receipt_line_number || 0,
           consumptionAdviceNumber: item.consumption_advice_number || '',
-          consumptionAdviceLine: item.consumption_advice_line || 0,
+          consumptionAdviceLine: item.consumption_advice_line_number || 0,
           shipToLocation: item.ship_to_location || '',
-          startDate: formatDate(item.start_date),
-          endDate: formatDate(item.end_date),
-          accrualAccount: item.accrual_account || '',
+          startDate: formatDate(item.multiperiod_start_date),
+          endDate: formatDate(item.multiperiod_end_date),
+          accrualAccount: item.multiperiod_accrual_account || '',
         }));
-        setLines(mappedLines);
-        message.success(`Loaded ${mappedLines.length} invoice lines`);
+        setLines(mappedItemLines);
+
+        // Filter Tax lines (line_type = 'Tax')
+        const taxItems = items.filter((item: any) => item.line_type === 'Tax');
+        const mappedTaxLines = taxItems.map((item: any, index: number) => ({
+          key: item.line_id?.toString() || `tax-${index}`,
+          lineNumber: item.line_number || index + 1,
+          rateName: item.tax_rate_code || item.tax_rate_name || '',
+          rate: item.tax_rate || 0,
+          amount: item.line_amount || 0,
+          canceled: item.canceled_flag === 'Y' ? 'Yes' : '',
+          inclusive: '', // Not in API response
+          selfAssessed: '', // Not in API response
+          taxOnlyLine: item.line_source === 'Tax' ? 'Yes' : '',
+          regime: 'UAE VAT REGIME', // Default for UAE
+          taxName: 'UAE VAT',
+          taxJurisdiction: 'AE_VAT',
+        }));
+        setTaxLines(mappedTaxLines);
+
+        message.success(`Loaded ${mappedItemLines.length} item lines, ${mappedTaxLines.length} tax lines`);
       } else {
         setLines([]);
+        setTaxLines([]);
         message.info('No invoice lines found');
       }
     } catch (error) {
@@ -229,7 +251,7 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose, onSave 
       title: 'Amount',
       dataIndex: 'amount',
       key: 'amount',
-      width: 100,
+      width: 120,
       align: 'right',
       render: (value: number) => value.toLocaleString('en-US', { minimumFractionDigits: 2 }),
     },
@@ -246,7 +268,7 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose, onSave 
       key: 'quantity',
       width: 80,
       align: 'right',
-      render: (value: number) => value.toLocaleString(),
+      render: (value: number) => value ? value.toLocaleString() : '',
     },
     {
       title: 'Price',
@@ -254,7 +276,7 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose, onSave 
       key: 'price',
       width: 80,
       align: 'right',
-      render: (value: number) => value.toFixed(2),
+      render: (value: number) => value ? value.toFixed(2) : '',
     },
     {
       title: 'UOM Name',
@@ -280,6 +302,7 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose, onSave 
           key: 'poLine',
           width: 60,
           align: 'center',
+          render: (value: number) => value || '',
         },
         {
           title: 'Schedule',
@@ -287,6 +310,7 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose, onSave 
           key: 'poSchedule',
           width: 70,
           align: 'center',
+          render: (value: number) => value || '',
         },
       ],
     },
@@ -308,6 +332,7 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose, onSave 
           key: 'receiptLine',
           width: 60,
           align: 'center',
+          render: (value: number) => value || '',
         },
       ],
     },
@@ -326,6 +351,7 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose, onSave 
           key: 'consumptionAdviceLine',
           width: 60,
           align: 'center',
+          render: (value: number) => value || '',
         },
       ],
     },
