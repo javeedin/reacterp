@@ -100,6 +100,12 @@ const fetchInvoiceLinesFromOracle = async (
     const response = await fetch(proxyUrl);
     const data = await response.json();
 
+    if (verbose) {
+      log?.('step', `──── [GET] Invoice Lines Response for Invoice ${invoiceId} ────`);
+      log?.('info', `HTTP Status: ${response.status}`);
+      log?.('info', `GET Response: ${JSON.stringify(data, null, 2)}`);
+    }
+
     if (!data.success && !data.items) {
       throw new Error(data.error || 'Fetch lines failed');
     }
@@ -108,6 +114,10 @@ const fetchInvoiceLinesFromOracle = async (
 
     if (verbose) {
       log?.('success', `Fetched ${items.length} lines for Invoice ${invoiceId}`);
+      // Log each line summary
+      items.forEach((line: any, idx: number) => {
+        log?.('info', `  Line ${idx + 1}: LineNumber=${line.LineNumber}, Amount=${line.LineAmount}, Type=${line.LineTypeLookupCode || line.LineType}`);
+      });
     }
 
     return {
@@ -154,7 +164,10 @@ const insertInvoiceLinesToApex = async (
     if (verbose) {
       log?.('step', `──── [POST] APEX - Invoice Lines for ${invoiceNumber} (${lines.length} lines) ────`);
       log?.('info', `APEX URL: ${apexUrl}`);
+      log?.('info', `Proxy URL: ${url}`);
       log?.('info', `Lines count: ${lines.length}`);
+      log?.('step', `──── POST PAYLOAD ────`);
+      log?.('info', JSON.stringify(payload, null, 2));
     }
 
     const response = await fetch(url, {
@@ -166,8 +179,9 @@ const insertInvoiceLinesToApex = async (
     const data = await response.json();
 
     if (verbose) {
+      log?.('step', `──── POST RESPONSE ────`);
       log?.('info', `HTTP Status: ${response.status}`);
-      log?.('success', `Lines POST Response: ${JSON.stringify(data)}`);
+      log?.('success', `Response: ${JSON.stringify(data, null, 2)}`);
     }
 
     const isSuccess = data.status === 'SUCCESS' && (data.successCount > 0 || data.success === true);
