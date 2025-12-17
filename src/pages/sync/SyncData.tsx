@@ -94,6 +94,10 @@ interface InvoicePayloadLog {
   postResult?: any;
   status: 'pending' | 'success' | 'error';
   errorMessage?: string;
+  // Lines info
+  linesFetched: number;
+  linesInserted: number;
+  linesError?: string;
 }
 
 // Proxy status type
@@ -363,7 +367,7 @@ const SyncData: React.FC = () => {
   }, [addLog, updateInvoicePayloadStatus]);
 
   // Invoice payload callback handler
-  const handleInvoicePayload: InvoicePayloadCallback = useCallback((invoiceId, invoiceNumber, payload, result, error) => {
+  const handleInvoicePayload: InvoicePayloadCallback = useCallback((invoiceId, invoiceNumber, payload, result, error, linesInfo) => {
     setInvoicePayloads((prev) => {
       const existing = prev.find((ip) => ip.invoiceId === invoiceId);
       if (existing) {
@@ -375,6 +379,9 @@ const SyncData: React.FC = () => {
                 postResult: result,
                 status: error ? 'error' : (result ? 'success' : 'pending'),
                 errorMessage: error,
+                linesFetched: linesInfo?.fetched ?? ip.linesFetched,
+                linesInserted: linesInfo?.inserted ?? ip.linesInserted,
+                linesError: linesInfo?.linesError ?? ip.linesError,
               }
             : ip
         );
@@ -387,6 +394,9 @@ const SyncData: React.FC = () => {
           postResult: result,
           status: error ? 'error' : (result ? 'success' : 'pending'),
           errorMessage: error,
+          linesFetched: linesInfo?.fetched ?? 0,
+          linesInserted: linesInfo?.inserted ?? 0,
+          linesError: linesInfo?.linesError,
         }];
       }
     });
@@ -1535,14 +1545,14 @@ const SyncData: React.FC = () => {
                         title: 'Invoice Number',
                         dataIndex: 'invoiceNumber',
                         key: 'invoiceNumber',
-                        width: 150,
+                        width: 130,
                         ellipsis: true,
                       },
                       {
                         title: 'Status',
                         dataIndex: 'status',
                         key: 'status',
-                        width: 100,
+                        width: 90,
                         render: (status: string) => (
                           <Tag color={status === 'success' ? 'success' : status === 'error' ? 'error' : 'default'}>
                             {status.toUpperCase()}
@@ -1550,17 +1560,37 @@ const SyncData: React.FC = () => {
                         ),
                       },
                       {
+                        title: 'Lines',
+                        key: 'lines',
+                        width: 100,
+                        render: (_: unknown, record: InvoicePayloadLog) => {
+                          const hasError = !!record.linesError;
+                          const color = hasError ? REDWOOD.error : (record.linesInserted > 0 ? REDWOOD.success : REDWOOD.textSecondary);
+                          return (
+                            <Tooltip title={record.linesError || `Fetched: ${record.linesFetched}, Inserted: ${record.linesInserted}`}>
+                              <span style={{ fontSize: 12, color }}>
+                                {record.linesInserted}/{record.linesFetched}
+                                {hasError && <CloseCircleOutlined style={{ marginLeft: 4, color: REDWOOD.error }} />}
+                              </span>
+                            </Tooltip>
+                          );
+                        },
+                      },
+                      {
                         title: 'Error',
                         dataIndex: 'errorMessage',
                         key: 'errorMessage',
-                        width: 200,
+                        width: 160,
                         ellipsis: true,
-                        render: (error: string) => error ? <Text type="danger" style={{ fontSize: 11 }}>{error}</Text> : '-',
+                        render: (error: string, record: InvoicePayloadLog) => {
+                          const displayError = error || record.linesError;
+                          return displayError ? <Text type="danger" style={{ fontSize: 11 }}>{displayError}</Text> : '-';
+                        },
                       },
                       {
                         title: 'Actions',
                         key: 'actions',
-                        width: 140,
+                        width: 100,
                         render: (_: unknown, record: InvoicePayloadLog) => (
                           <Space size="small">
                             <Tooltip title="View Payload">

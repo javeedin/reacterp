@@ -62,7 +62,8 @@ export type InvoicePayloadCallback = (
   invoiceNumber: string,
   payload: any,
   result?: any,
-  error?: string
+  error?: string,
+  linesInfo?: { fetched: number; inserted: number; linesError?: string }
 ) => void;
 
 // APEX endpoint for creating invoices
@@ -491,9 +492,6 @@ export const syncAPInvoices = async (
           processedHeaders: progress.processedHeaders + 1,
         });
 
-        // Update payload callback with success result
-        onInvoicePayload?.(invoice.InvoiceId, invoiceNum, invoice, insertResult.response);
-
         if (verbose) {
           log?.('success', `✓ Invoice ${invoiceNum} (ID: ${invoice.InvoiceId}) inserted successfully`);
         }
@@ -503,7 +501,12 @@ export const syncAPInvoices = async (
         // ========================================
         const linesResult = await fetchInvoiceLinesFromOracle(invoice.InvoiceId, log, verbose);
 
+        // Track lines info for debug callback
+        let linesInfo = { fetched: 0, inserted: 0, linesError: undefined as string | undefined };
+
         if (linesResult.success && linesResult.items.length > 0) {
+          linesInfo.fetched = linesResult.items.length;
+
           // Update total lines count with actual count
           updateProgress({
             totalLines: progress.totalLines + linesResult.items.length,
@@ -519,6 +522,7 @@ export const syncAPInvoices = async (
           );
 
           if (linesInsertResult.success) {
+            linesInfo.inserted = linesInsertResult.successCount;
             updateProgress({
               processedLines: progress.processedLines + linesInsertResult.successCount,
             });
@@ -526,17 +530,25 @@ export const syncAPInvoices = async (
               log?.('success', `✓ ${linesInsertResult.successCount} lines inserted for ${invoiceNum}`);
             }
           } else {
+            linesInfo.linesError = linesInsertResult.error || 'Lines insert failed';
             updateProgress({
               errors: progress.errors + 1,
               lastError: linesInsertResult.error || 'Lines insert failed',
             });
             log?.('error', `✗ Lines failed for ${invoiceNum}: ${linesInsertResult.error}`);
           }
-        } else if (linesResult.items.length === 0) {
+        } else if (linesResult.success && linesResult.items.length === 0) {
           if (verbose) {
             log?.('info', `No lines found for ${invoiceNum}`);
           }
+        } else if (!linesResult.success) {
+          linesInfo.linesError = linesResult.error || 'Failed to fetch lines';
+          log?.('error', `✗ Failed to fetch lines for ${invoiceNum}: ${linesResult.error}`);
         }
+
+        // Update payload callback with success result AND lines info
+        onInvoicePayload?.(invoice.InvoiceId, invoiceNum, invoice, insertResult.response, undefined, linesInfo);
+
       } else {
         updateProgress({
           errors: progress.errors + 1,
