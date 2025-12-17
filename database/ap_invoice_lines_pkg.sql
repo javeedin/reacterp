@@ -89,6 +89,7 @@ CREATE OR REPLACE PACKAGE BODY XXAP_INVOICE_LINES_PKG AS
 
             -- Update existing line
             UPDATE XXAP_INVOICE_LINES_STG SET
+                INVOICE_NUMBER                  = JSON_VALUE(p_line_json, '$.InvoiceNumber'),
                 LINE_TYPE                       = JSON_VALUE(p_line_json, '$.LineType'),
                 LINE_SOURCE                     = JSON_VALUE(p_line_json, '$.LineSource'),
                 LINE_AMOUNT                     = JSON_VALUE(p_line_json, '$.LineAmount' RETURNING NUMBER),
@@ -176,6 +177,7 @@ CREATE OR REPLACE PACKAGE BODY XXAP_INVOICE_LINES_PKG AS
                 -- Insert new line
                 INSERT INTO XXAP_INVOICE_LINES_STG (
                     INVOICE_ID,
+                    INVOICE_NUMBER,
                     LINE_NUMBER,
                     LINE_TYPE,
                     LINE_SOURCE,
@@ -255,6 +257,7 @@ CREATE OR REPLACE PACKAGE BODY XXAP_INVOICE_LINES_PKG AS
                     PROCESS_STATUS
                 ) VALUES (
                     p_invoice_id,
+                    JSON_VALUE(p_line_json, '$.InvoiceNumber'),
                     l_line_number,
                     JSON_VALUE(p_line_json, '$.LineType'),
                     JSON_VALUE(p_line_json, '$.LineSource'),

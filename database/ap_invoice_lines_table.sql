@@ -14,6 +14,7 @@ CREATE TABLE XXAP_INVOICE_LINES_STG (
 
     -- Foreign Key to Invoice Header
     INVOICE_ID                          NUMBER NOT NULL,
+    INVOICE_NUMBER                      VARCHAR2(50),
 
     -- Line Identification
     LINE_NUMBER                         NUMBER,
