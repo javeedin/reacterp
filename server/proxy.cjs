@@ -135,6 +135,57 @@ app.get('/api/oracle/:endpoint', async (req, res) => {
   }
 });
 
+// Proxy: GET from APEX Database - supports nested paths like ap/createinvoice
+app.get(/^\/api\/apex\/(.+)$/, async (req, res) => {
+  const path = req.params[0]; // Gets everything after /api/apex/
+  const queryString = Object.keys(req.query).length > 0
+    ? '?' + new URLSearchParams(req.query).toString()
+    : '';
+  const url = `${APEX_CONFIG.baseUrl}/${path}${queryString}`;
+
+  console.log('=== APEX GET REQUEST ===');
+  console.log('Path:', path);
+  console.log('Full URL:', url);
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+      },
+    });
+
+    console.log('APEX Response Status:', response.status);
+
+    const responseText = await response.text();
+    let data;
+
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      data = { rawResponse: responseText.substring(0, 500) };
+    }
+
+    if (!response.ok) {
+      console.log('APEX Error:', responseText.substring(0, 500));
+      return res.status(response.status).json({
+        success: false,
+        error: `APEX API Error: ${response.status}`,
+        details: responseText.substring(0, 500),
+      });
+    }
+
+    console.log('APEX Success - Items:', data.items?.length || 0);
+    res.json(data);
+  } catch (error) {
+    console.error('APEX GET Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
 // Proxy: Insert to APEX Database - supports nested paths like gl/journals/headers
 // Using regex pattern for Express 5 compatibility
 app.post(/^\/api\/apex\/(.+)$/, async (req, res) => {

@@ -119,27 +119,27 @@ const formatDate = (dateStr: string | null): string => {
   }
 };
 
-// Map API response to InvoiceRecord
+// Map API response to InvoiceRecord (API returns lowercase snake_case field names)
 const mapApiToInvoiceRecord = (item: any, index: number): InvoiceRecord => ({
-  key: item.INVOICE_ID?.toString() || index.toString(),
-  invoiceId: item.INVOICE_ID,
-  invoiceNumber: item.INVOICE_NUMBER || '',
-  invoiceDate: formatDate(item.INVOICE_DATE),
-  creationDate: formatDate(item.CREATION_DATE || item.FUSION_CREATION_DATE),
-  supplierOrParty: item.SUPPLIER || item.PARTY || '',
-  supplierSite: item.SUPPLIER_SITE || '',
-  unpaidAmount: (item.INVOICE_AMOUNT || 0) - (item.AMOUNT_PAID || 0),
-  invoiceAmount: item.INVOICE_AMOUNT || 0,
+  key: item.invoice_id?.toString() || index.toString(),
+  invoiceId: item.invoice_id,
+  invoiceNumber: item.invoice_number || '',
+  invoiceDate: formatDate(item.invoice_date),
+  creationDate: formatDate(item.creation_date || item.fusion_creation_date),
+  supplierOrParty: item.supplier || item.party || '',
+  supplierSite: item.supplier_site || '',
+  unpaidAmount: (item.invoice_amount || 0) - (item.amount_paid || 0),
+  invoiceAmount: item.invoice_amount || 0,
   appliedPrepayments: 0, // Not in API response
-  invoiceType: item.INVOICE_TYPE || 'Standard',
+  invoiceType: item.invoice_type || 'Standard',
   attachments: 'None',
-  notes: item.DESCRIPTION || '',
-  validationStatus: item.VALIDATION_STATUS || 'Never validated',
-  approvalStatus: item.APPROVAL_STATUS || 'Not required',
-  holdPaidStatus: item.PAID_STATUS || 'Not paid',
-  businessUnit: item.BUSINESS_UNIT || '',
-  invoiceCurrency: item.INVOICE_CURRENCY || 'AED',
-  supplierNumber: item.SUPPLIER_NUMBER || '',
+  notes: item.description || '',
+  validationStatus: item.validation_status || 'Never validated',
+  approvalStatus: item.approval_status || 'Not required',
+  holdPaidStatus: item.paid_status || 'Not paid',
+  businessUnit: item.business_unit || '',
+  invoiceCurrency: item.invoice_currency || 'AED',
+  supplierNumber: item.supplier_number || '',
 });
 
 const ManageInvoices: React.FC = () => {
