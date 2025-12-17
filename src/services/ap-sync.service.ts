@@ -56,6 +56,15 @@ export interface APSyncProgress {
 export type LogCallback = (type: 'info' | 'success' | 'error' | 'warning' | 'step', message: string) => void;
 export type ProgressCallback = (progress: Partial<APSyncProgress>) => void;
 
+// Invoice payload callback for debugging
+export type InvoicePayloadCallback = (
+  invoiceId: number,
+  invoiceNumber: string,
+  payload: any,
+  result?: any,
+  error?: string
+) => void;
+
 // APEX endpoint for creating invoices
 const APEX_CREATE_INVOICE_ENDPOINT = 'ap/createinvoice';
 
@@ -105,14 +114,20 @@ const insertInvoiceToApex = async (
   invoice: APInvoice,
   log?: LogCallback,
   verbose = true
-): Promise<{ success: boolean; error?: string }> => {
+): Promise<{ success: boolean; error?: string; response?: any }> => {
   try {
     const url = `${PROXY_CONFIG.baseUrl}/apex/${APEX_CREATE_INVOICE_ENDPOINT}`;
     const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_CREATE_INVOICE_ENDPOINT}`;
 
     if (verbose) {
-      log?.('step', `──── [POST] APEX - Invoice ${invoice.InvoiceNumber} ────`);
+      log?.('step', `──── [POST] APEX - Invoice ${invoice.InvoiceNumber} (ID: ${invoice.InvoiceId}) ────`);
       log?.('info', `APEX URL: ${apexUrl}`);
+      log?.('info', `Proxy URL: ${url}`);
+      log?.('info', `Invoice ID: ${invoice.InvoiceId}`);
+      log?.('info', `Invoice Number: ${invoice.InvoiceNumber}`);
+      log?.('info', `Supplier: ${invoice.Supplier}`);
+      log?.('info', `Amount: ${invoice.InvoiceAmount} ${invoice.InvoiceCurrency}`);
+      log?.('info', `POST Payload: ${JSON.stringify(invoice)}`);
     }
 
     const response = await fetch(url, {
@@ -124,12 +139,14 @@ const insertInvoiceToApex = async (
     const data = await response.json();
 
     if (verbose) {
+      log?.('info', `HTTP Status: ${response.status}`);
       log?.('success', `POST Response: ${JSON.stringify(data)}`);
     }
 
     return {
       success: data.status === 'SUCCESS' || data.success === true,
       error: data.message || data.error,
+      response: data,
     };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
@@ -144,7 +161,8 @@ export const syncAPInvoices = async (
   testMode: boolean | 'single' = true,
   log?: LogCallback,
   onProgress?: ProgressCallback,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  onInvoicePayload?: InvoicePayloadCallback
 ): Promise<APSyncProgress> => {
   const progress: APSyncProgress = {
     status: 'idle',
@@ -315,7 +333,10 @@ export const syncAPInvoices = async (
         currentInvoiceNumber: invoiceNum,
       });
 
-      log?.('info', `[${i + 1}/${allInvoices.length}] Processing: ${invoiceNum}`);
+      log?.('info', `[${i + 1}/${allInvoices.length}] Processing: ${invoiceNum} (ID: ${invoice.InvoiceId})`);
+
+      // Record payload before POST for debugging
+      onInvoicePayload?.(invoice.InvoiceId, invoiceNum, invoice);
 
       const insertResult = await insertInvoiceToApex(invoice, log, verbose);
 
@@ -327,8 +348,11 @@ export const syncAPInvoices = async (
           processedDistributions: progress.processedDistributions + 2,
         });
 
+        // Update payload callback with success result
+        onInvoicePayload?.(invoice.InvoiceId, invoiceNum, invoice, insertResult.response);
+
         if (verbose) {
-          log?.('success', `✓ Invoice ${invoiceNum} inserted successfully`);
+          log?.('success', `✓ Invoice ${invoiceNum} (ID: ${invoice.InvoiceId}) inserted successfully`);
         }
       } else {
         updateProgress({
@@ -336,7 +360,10 @@ export const syncAPInvoices = async (
           lastError: insertResult.error || 'Insert failed',
         });
 
-        log?.('error', `✗ Invoice ${invoiceNum} failed: ${insertResult.error}`);
+        // Update payload callback with error
+        onInvoicePayload?.(invoice.InvoiceId, invoiceNum, invoice, insertResult.response, insertResult.error);
+
+        log?.('error', `✗ Invoice ${invoiceNum} (ID: ${invoice.InvoiceId}) failed: ${insertResult.error}`);
       }
 
       // Small delay between inserts to prevent API throttling

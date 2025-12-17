@@ -41,7 +41,7 @@ import {
 import { Link } from 'react-router-dom';
 import { SYNC_OBJECTS, ORACLE_FUSION_CONFIG, PROXY_CONFIG, APEX_DB_CONFIG, type SyncObjectConfig, type ApiType } from '../../config/api.config';
 import { syncGLJournals, testGLConnection, type SyncProgress, type LogCallback, type BatchPayloadCallback } from '../../services/gl-sync.service';
-import { syncAPInvoices, testAPConnection, type APSyncProgress } from '../../services/ap-sync.service';
+import { syncAPInvoices, testAPConnection, type APSyncProgress, type InvoicePayloadCallback } from '../../services/ap-sync.service';
 import Autopilot from '../../components/Autopilot';
 
 // Icon imports for AP
@@ -86,6 +86,16 @@ interface BatchPayloadLog {
   errorMessage?: string;
 }
 
+// Interface for invoice payload debugging
+interface InvoicePayloadLog {
+  invoiceId: number;
+  invoiceNumber: string;
+  payload: any;
+  postResult?: any;
+  status: 'pending' | 'success' | 'error';
+  errorMessage?: string;
+}
+
 // Proxy status type
 type ProxyStatus = 'unknown' | 'checking' | 'online' | 'offline';
 
@@ -104,6 +114,12 @@ const SyncData: React.FC = () => {
   const [batchDebugVisible, setBatchDebugVisible] = useState(false);
   const [selectedBatchPayload, setSelectedBatchPayload] = useState<BatchPayloadLog | null>(null);
   const [isPostingBatch, setIsPostingBatch] = useState(false);
+
+  // Invoice payload state (for AP Invoices debug)
+  const [invoicePayloads, setInvoicePayloads] = useState<InvoicePayloadLog[]>([]);
+  const [invoiceDebugVisible, setInvoiceDebugVisible] = useState(false);
+  const [selectedInvoicePayload, setSelectedInvoicePayload] = useState<InvoicePayloadLog | null>(null);
+  const [isPostingInvoice, setIsPostingInvoice] = useState(false);
 
   // GL Progress State
   const [progress, setProgress] = useState<SyncProgress>({
@@ -253,6 +269,116 @@ const SyncData: React.FC = () => {
 
     setIsPostingBatch(false);
   }, [addLog, updateBatchPayloadStatus]);
+
+  // Update invoice payload status after POST
+  const updateInvoicePayloadStatus = useCallback((invoiceId: number, status: 'success' | 'error', postResult?: any, errorMessage?: string) => {
+    setInvoicePayloads((prev) => prev.map((ip) =>
+      ip.invoiceId === invoiceId
+        ? { ...ip, status, postResult, errorMessage }
+        : ip
+    ));
+  }, []);
+
+  // Download invoice payloads as log file
+  const downloadInvoicePayloads = useCallback(() => {
+    let content = `INVOICE PAYLOADS LOG\n`;
+    content += `Generated: ${new Date().toLocaleString()}\n`;
+    content += `Total Invoices: ${invoicePayloads.length}\n`;
+    content += `${'='.repeat(80)}\n\n`;
+
+    invoicePayloads.forEach((ip, index) => {
+      content += `INVOICE #${index + 1}\n`;
+      content += `${'─'.repeat(40)}\n`;
+      content += `Invoice ID: ${ip.invoiceId}\n`;
+      content += `Invoice Number: ${ip.invoiceNumber}\n`;
+      content += `Status: ${ip.status.toUpperCase()}\n`;
+      if (ip.errorMessage) {
+        content += `Error: ${ip.errorMessage}\n`;
+      }
+      content += `\nPOST Payload:\n`;
+      content += JSON.stringify(ip.payload, null, 2);
+      content += `\n`;
+      if (ip.postResult) {
+        content += `\nPOST Response:\n`;
+        content += JSON.stringify(ip.postResult, null, 2);
+      }
+      content += `\n${'─'.repeat(40)}\n\n`;
+    });
+
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `invoice-payloads-${new Date().toISOString().slice(0, 10)}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [invoicePayloads]);
+
+  // POST a single invoice manually
+  const postSingleInvoice = useCallback(async (invoicePayload: InvoicePayloadLog) => {
+    setIsPostingInvoice(true);
+    addLog('step', `──── Manual POST for Invoice ${invoicePayload.invoiceNumber} (ID: ${invoicePayload.invoiceId}) ────`);
+
+    try {
+      const url = `${PROXY_CONFIG.baseUrl}/apex/ap/createinvoice`;
+      addLog('info', `POST URL: ${url}`);
+      addLog('info', `POST Payload: ${JSON.stringify(invoicePayload.payload)}`);
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(invoicePayload.payload),
+      });
+
+      const data = await response.json();
+      addLog('info', `HTTP Status: ${response.status}`);
+      addLog('success', `POST Response: ${JSON.stringify(data)}`);
+
+      if (data.success || data.status === 'SUCCESS') {
+        updateInvoicePayloadStatus(invoicePayload.invoiceId, 'success', data);
+        addLog('success', `✓ Invoice ${invoicePayload.invoiceNumber} posted successfully!`);
+      } else {
+        updateInvoicePayloadStatus(invoicePayload.invoiceId, 'error', data, data.error || data.message || 'Unknown error');
+        addLog('error', `✗ Invoice ${invoicePayload.invoiceNumber} failed: ${data.error || data.message || JSON.stringify(data)}`);
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      updateInvoicePayloadStatus(invoicePayload.invoiceId, 'error', undefined, errorMsg);
+      addLog('error', `✗ Invoice ${invoicePayload.invoiceNumber} error: ${errorMsg}`);
+    }
+
+    setIsPostingInvoice(false);
+  }, [addLog, updateInvoicePayloadStatus]);
+
+  // Invoice payload callback handler
+  const handleInvoicePayload: InvoicePayloadCallback = useCallback((invoiceId, invoiceNumber, payload, result, error) => {
+    setInvoicePayloads((prev) => {
+      const existing = prev.find((ip) => ip.invoiceId === invoiceId);
+      if (existing) {
+        // Update existing entry
+        return prev.map((ip) =>
+          ip.invoiceId === invoiceId
+            ? {
+                ...ip,
+                postResult: result,
+                status: error ? 'error' : (result ? 'success' : 'pending'),
+                errorMessage: error,
+              }
+            : ip
+        );
+      } else {
+        // Add new entry
+        return [...prev, {
+          invoiceId,
+          invoiceNumber,
+          payload,
+          postResult: result,
+          status: error ? 'error' : (result ? 'success' : 'pending'),
+          errorMessage: error,
+        }];
+      }
+    });
+  }, []);
 
   // Check proxy server status
   const checkProxyStatus = useCallback(async () => {
@@ -421,6 +547,7 @@ const SyncData: React.FC = () => {
     // Clear previous data
     setLogs([]);
     setBatchPayloads([]);
+    setInvoicePayloads([]);
     logCounterRef.current = 0;
 
     if (isAPInvoices) {
@@ -450,7 +577,8 @@ const SyncData: React.FC = () => {
         testMode,
         addLog,
         (newProgress) => setApProgress((prev) => ({ ...prev, ...newProgress })),
-        abortControllerRef.current.signal
+        abortControllerRef.current.signal,
+        handleInvoicePayload
       );
     } else {
       // GL Journals Sync
@@ -1339,6 +1467,118 @@ const SyncData: React.FC = () => {
                 </Card>
               )}
 
+              {/* Invoice Debug Section (for AP Invoices) */}
+              {invoicePayloads.length > 0 && (
+                <Card
+                  title={
+                    <Space>
+                      <BugOutlined style={{ color: REDWOOD.warning }} />
+                      <span>Invoice Debug</span>
+                      <Tag style={{ borderRadius: 12 }}>{invoicePayloads.length} invoices</Tag>
+                      <Tag color="success" style={{ borderRadius: 12 }}>
+                        {invoicePayloads.filter((ip) => ip.status === 'success').length} success
+                      </Tag>
+                      <Tag color="error" style={{ borderRadius: 12 }}>
+                        {invoicePayloads.filter((ip) => ip.status === 'error').length} errors
+                      </Tag>
+                    </Space>
+                  }
+                  extra={
+                    <Space>
+                      <Button
+                        size="small"
+                        icon={<DownloadOutlined />}
+                        onClick={downloadInvoicePayloads}
+                      >
+                        Download Log
+                      </Button>
+                      <Button size="small" onClick={() => setInvoicePayloads([])}>
+                        Clear
+                      </Button>
+                    </Space>
+                  }
+                  style={{
+                    borderRadius: 12,
+                    border: `1px solid ${REDWOOD.border}`,
+                    marginBottom: 16,
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                  }}
+                  bodyStyle={{ padding: 0 }}
+                >
+                  <Table
+                    dataSource={invoicePayloads}
+                    rowKey="invoiceId"
+                    size="small"
+                    pagination={false}
+                    scroll={{ y: 200 }}
+                    columns={[
+                      {
+                        title: 'Invoice ID',
+                        dataIndex: 'invoiceId',
+                        key: 'invoiceId',
+                        width: 100,
+                        render: (id: number) => <Text code>{id}</Text>,
+                      },
+                      {
+                        title: 'Invoice Number',
+                        dataIndex: 'invoiceNumber',
+                        key: 'invoiceNumber',
+                        width: 150,
+                        ellipsis: true,
+                      },
+                      {
+                        title: 'Status',
+                        dataIndex: 'status',
+                        key: 'status',
+                        width: 100,
+                        render: (status: string) => (
+                          <Tag color={status === 'success' ? 'success' : status === 'error' ? 'error' : 'default'}>
+                            {status.toUpperCase()}
+                          </Tag>
+                        ),
+                      },
+                      {
+                        title: 'Error',
+                        dataIndex: 'errorMessage',
+                        key: 'errorMessage',
+                        width: 200,
+                        ellipsis: true,
+                        render: (error: string) => error ? <Text type="danger" style={{ fontSize: 11 }}>{error}</Text> : '-',
+                      },
+                      {
+                        title: 'Actions',
+                        key: 'actions',
+                        width: 140,
+                        render: (_: unknown, record: InvoicePayloadLog) => (
+                          <Space size="small">
+                            <Tooltip title="View Payload">
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<ExpandOutlined style={{ color: REDWOOD.info }} />}
+                                onClick={() => {
+                                  setSelectedInvoicePayload(record);
+                                  setInvoiceDebugVisible(true);
+                                }}
+                              />
+                            </Tooltip>
+                            <Tooltip title="POST this invoice">
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<SendOutlined style={{ color: REDWOOD.primary }} />}
+                                onClick={() => postSingleInvoice(record)}
+                                loading={isPostingInvoice}
+                              />
+                            </Tooltip>
+                          </Space>
+                        ),
+                      },
+                    ]}
+                  />
+                </Card>
+              )}
+
               {/* Sync Logs */}
               <Card
                 title={
@@ -1567,6 +1807,175 @@ const SyncData: React.FC = () => {
                   fontFamily: 'monospace',
                 }}>
                   {JSON.stringify(selectedBatchPayload.postResult, null, 2)}
+                </pre>
+              </>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      {/* Invoice Debug Modal (for AP Invoices) */}
+      <Modal
+        title={
+          <Space>
+            <BugOutlined style={{ color: REDWOOD.warning }} />
+            <span>Invoice Payload Debug</span>
+            {selectedInvoicePayload && (
+              <Tag
+                color={
+                  selectedInvoicePayload.status === 'success' ? 'success' :
+                  selectedInvoicePayload.status === 'error' ? 'error' : 'default'
+                }
+              >
+                {selectedInvoicePayload.status.toUpperCase()}
+              </Tag>
+            )}
+          </Space>
+        }
+        open={invoiceDebugVisible}
+        onCancel={() => setInvoiceDebugVisible(false)}
+        footer={[
+          <Button
+            key="copy"
+            onClick={() => {
+              if (selectedInvoicePayload) {
+                navigator.clipboard.writeText(JSON.stringify(selectedInvoicePayload.payload, null, 2));
+              }
+            }}
+          >
+            Copy Payload
+          </Button>,
+          <Button
+            key="post"
+            type="primary"
+            icon={<SendOutlined />}
+            loading={isPostingInvoice}
+            onClick={() => {
+              if (selectedInvoicePayload) {
+                postSingleInvoice(selectedInvoicePayload);
+              }
+            }}
+            style={{ background: REDWOOD.primary }}
+          >
+            POST This Invoice
+          </Button>,
+          <Button key="close" onClick={() => setInvoiceDebugVisible(false)}>
+            Close
+          </Button>,
+        ]}
+        width={800}
+      >
+        {selectedInvoicePayload && (
+          <div>
+            <Row gutter={16} style={{ marginBottom: 16 }}>
+              <Col span={8}>
+                <div style={{
+                  padding: '8px 12px',
+                  background: REDWOOD.surfaceSecondary,
+                  borderRadius: 6,
+                  fontSize: 12,
+                }}>
+                  <Text type="secondary">Invoice ID: </Text>
+                  <Text strong code>{selectedInvoicePayload.invoiceId}</Text>
+                </div>
+              </Col>
+              <Col span={8}>
+                <div style={{
+                  padding: '8px 12px',
+                  background: REDWOOD.surfaceSecondary,
+                  borderRadius: 6,
+                  fontSize: 12,
+                }}>
+                  <Text type="secondary">Invoice Number: </Text>
+                  <Text strong>{selectedInvoicePayload.invoiceNumber}</Text>
+                </div>
+              </Col>
+              <Col span={8}>
+                <div style={{
+                  padding: '8px 12px',
+                  background: REDWOOD.surfaceSecondary,
+                  borderRadius: 6,
+                  fontSize: 12,
+                }}>
+                  <Text type="secondary">Supplier: </Text>
+                  <Text strong>{selectedInvoicePayload.payload?.Supplier || '-'}</Text>
+                </div>
+              </Col>
+            </Row>
+
+            <Row gutter={16} style={{ marginBottom: 16 }}>
+              <Col span={8}>
+                <div style={{
+                  padding: '8px 12px',
+                  background: REDWOOD.surfaceSecondary,
+                  borderRadius: 6,
+                  fontSize: 12,
+                }}>
+                  <Text type="secondary">Amount: </Text>
+                  <Text strong>{selectedInvoicePayload.payload?.InvoiceAmount} {selectedInvoicePayload.payload?.InvoiceCurrency}</Text>
+                </div>
+              </Col>
+              <Col span={8}>
+                <div style={{
+                  padding: '8px 12px',
+                  background: REDWOOD.surfaceSecondary,
+                  borderRadius: 6,
+                  fontSize: 12,
+                }}>
+                  <Text type="secondary">Invoice Date: </Text>
+                  <Text strong>{selectedInvoicePayload.payload?.InvoiceDate || '-'}</Text>
+                </div>
+              </Col>
+              <Col span={8}>
+                <div style={{
+                  padding: '8px 12px',
+                  background: REDWOOD.surfaceSecondary,
+                  borderRadius: 6,
+                  fontSize: 12,
+                }}>
+                  <Text type="secondary">Business Unit: </Text>
+                  <Text strong>{selectedInvoicePayload.payload?.BusinessUnit || '-'}</Text>
+                </div>
+              </Col>
+            </Row>
+
+            {selectedInvoicePayload.errorMessage && (
+              <Alert
+                type="error"
+                message="Error"
+                description={selectedInvoicePayload.errorMessage}
+                style={{ marginBottom: 16 }}
+              />
+            )}
+
+            <Divider style={{ margin: '12px 0' }}>POST Payload</Divider>
+            <pre style={{
+              background: '#fafafa',
+              padding: 16,
+              borderRadius: 8,
+              border: `1px solid ${REDWOOD.border}`,
+              maxHeight: 300,
+              overflow: 'auto',
+              fontSize: 12,
+              fontFamily: 'monospace',
+            }}>
+              {JSON.stringify(selectedInvoicePayload.payload, null, 2)}
+            </pre>
+
+            {selectedInvoicePayload.postResult && (
+              <>
+                <Divider style={{ margin: '12px 0' }}>POST Response</Divider>
+                <pre style={{
+                  background: selectedInvoicePayload.status === 'success' ? '#f6ffed' : '#fff2f0',
+                  padding: 16,
+                  borderRadius: 8,
+                  border: `1px solid ${selectedInvoicePayload.status === 'success' ? '#b7eb8f' : '#ffccc7'}`,
+                  maxHeight: 200,
+                  overflow: 'auto',
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                }}>
+                  {JSON.stringify(selectedInvoicePayload.postResult, null, 2)}
                 </pre>
               </>
             )}
