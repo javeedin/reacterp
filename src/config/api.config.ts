@@ -101,8 +101,8 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
         required: false,
       },
       {
-        key: 'Supplier',
-        label: 'Supplier',
+        key: 'SupplierNumber',
+        label: 'Supplier Number',
         type: 'text',
         required: false,
       },
