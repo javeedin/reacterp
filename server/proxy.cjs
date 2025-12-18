@@ -135,6 +135,56 @@ app.get('/api/oracle/:endpoint', async (req, res) => {
   }
 });
 
+// Proxy: Fetch from Oracle Fusion - supports nested paths like /fscmRestApi/resources/...
+app.get(/^\/api\/fusion\/(.+)$/, async (req, res) => {
+  const path = req.params[0]; // Gets everything after /api/fusion/
+  const queryString = Object.keys(req.query).length > 0
+    ? '?' + new URLSearchParams(req.query).toString()
+    : '';
+
+  // Construct URL - the path already includes /fscmRestApi/...
+  const url = `https://iaaobn.fa.ocs.oraclecloud.com:443/${path}${queryString}`;
+
+  console.log('=== FUSION PROXY REQUEST ===');
+  console.log('Path:', path);
+  console.log('Query:', req.query);
+  console.log('Full URL:', url);
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': getOracleAuth(),
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+    });
+
+    console.log('Fusion Response Status:', response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.log('Fusion Error:', errorText.substring(0, 300));
+      return res.status(response.status).json({
+        success: false,
+        error: `Fusion API Error: ${response.status} ${response.statusText}`,
+        details: errorText.substring(0, 500),
+      });
+    }
+
+    const data = await response.json();
+    console.log('Fusion Response - Items:', data.items?.length || 0, 'HasMore:', data.hasMore);
+
+    res.json(data);
+  } catch (error) {
+    console.error('Fusion Proxy Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
 // Proxy: GET from APEX Database - supports nested paths like ap/createinvoice
 app.get(/^\/api\/apex\/(.+)$/, async (req, res) => {
   const path = req.params[0]; // Gets everything after /api/apex/
@@ -356,6 +406,8 @@ app.listen(PORT, () => {
   console.log('  GET  /api/test/apex             - Test APEX connection');
   console.log('  GET  /api/oracle/:endpoint      - Proxy Oracle requests');
   console.log('  GET  /api/oracle-url?url=...    - Proxy Oracle full URL (for child resources)');
+  console.log('  GET  /api/fusion/*              - Proxy Fusion REST API requests');
+  console.log('  GET  /api/apex/*                - Proxy APEX GET requests');
   console.log('  POST /api/apex/*                - Proxy APEX POST requests');
   console.log('');
   console.log('Oracle Host:', ORACLE_CONFIG.baseUrl);
