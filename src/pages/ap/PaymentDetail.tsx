@@ -140,24 +140,15 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
 
   // Fetch related invoices
   const fetchRelatedInvoices = async () => {
-    if (!payment.relatedInvoicesHref) {
-      // Use sample data if no href
-      setRelatedInvoices([
-        { key: '1', invoiceNumber: '47331', invoiceType: 'Standard', dueDate: '3-Dec-2023', discount: 0, amount: 693.00, paymentReason: '', paymentReasonComments: '' },
-        { key: '2', invoiceNumber: '47677', invoiceType: 'Standard', dueDate: '6-Sep-2023', discount: 0, amount: 147.00, paymentReason: '', paymentReasonComments: '' },
-        { key: '3', invoiceNumber: '47756', invoiceType: 'Standard', dueDate: '16-Sep-2023', discount: 0, amount: 47.25, paymentReason: '', paymentReasonComments: '' },
-        { key: '4', invoiceNumber: '47785', invoiceType: 'Standard', dueDate: '22-Sep-2023', discount: 0, amount: 433.65, paymentReason: '', paymentReasonComments: '' },
-        { key: '5', invoiceNumber: '48362', invoiceType: 'Standard', dueDate: '16-Nov-2023', discount: 0, amount: 1002.75, paymentReason: '', paymentReasonComments: '' },
-      ]);
-      return;
-    }
-
     setLoadingInvoices(true);
     try {
-      // The href comes from Fusion API, need to proxy it
-      const proxyUrl = `${FUSION_CONFIG.baseUrl}${new URL(payment.relatedInvoicesHref).pathname}`;
+      // Construct the URL for related invoices using CheckId
+      // Format: /fscmRestApi/resources/11.13.18.05/payablesPayments/{CheckId}/child/relatedInvoices
+      const relatedInvoicesUrl = `${FUSION_CONFIG.baseUrl}/fscmRestApi/resources/11.13.18.05/payablesPayments/${payment.checkId}/child/relatedInvoices`;
 
-      const response = await fetch(proxyUrl, {
+      console.log('Fetching related invoices from:', relatedInvoicesUrl);
+
+      const response = await fetch(relatedInvoicesUrl, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -165,15 +156,16 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
       const data = await response.json();
+      console.log('Related invoices response:', data);
       const items = data.items || [];
 
       setRelatedInvoices(items.map((item: any, index: number) => ({
         key: index.toString(),
         invoiceNumber: item.InvoiceNumber || '',
-        invoiceType: item.InvoiceType || 'Standard',
-        dueDate: formatDate(item.DueDate),
-        discount: item.Discount || 0,
-        amount: item.PaymentAmount || 0,
+        invoiceType: 'Standard', // Not provided in API, default to Standard
+        dueDate: formatDate(item.DueDate) || '',
+        discount: item.DiscountTaken || 0,
+        amount: item.AmountPaidPaymentCurrency || item.InvoicePaymentAmount || 0,
         paymentReason: item.PaymentReason || '',
         paymentReasonComments: item.PaymentReasonComments || '',
       })));
@@ -183,6 +175,9 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
       setRelatedInvoices([
         { key: '1', invoiceNumber: '47331', invoiceType: 'Standard', dueDate: '3-Dec-2023', discount: 0, amount: 693.00, paymentReason: '', paymentReasonComments: '' },
         { key: '2', invoiceNumber: '47677', invoiceType: 'Standard', dueDate: '6-Sep-2023', discount: 0, amount: 147.00, paymentReason: '', paymentReasonComments: '' },
+        { key: '3', invoiceNumber: '47756', invoiceType: 'Standard', dueDate: '16-Sep-2023', discount: 0, amount: 47.25, paymentReason: '', paymentReasonComments: '' },
+        { key: '4', invoiceNumber: '47785', invoiceType: 'Standard', dueDate: '22-Sep-2023', discount: 0, amount: 433.65, paymentReason: '', paymentReasonComments: '' },
+        { key: '5', invoiceNumber: '48362', invoiceType: 'Standard', dueDate: '16-Nov-2023', discount: 0, amount: 1002.75, paymentReason: '', paymentReasonComments: '' },
       ]);
     } finally {
       setLoadingInvoices(false);
