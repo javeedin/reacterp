@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Layout, Dropdown, Avatar, Space, Typography, Tooltip, Badge, Button } from 'antd';
 import {
   UserOutlined,
@@ -10,10 +10,17 @@ import {
   FlagOutlined,
   EyeOutlined,
   BellOutlined,
+  DownloadOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import type { MenuProps } from 'antd';
+
+// Type for BeforeInstallPromptEvent
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
 
 const { Content } = Layout;
 const { Text } = Typography;
@@ -24,6 +31,46 @@ const REDWOOD_PRIMARY = '#C74634';
 const MainLayout: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [isInstalled, setIsInstalled] = useState(false);
+
+  // Listen for PWA install prompt
+  useEffect(() => {
+    // Check if already installed
+    if (window.matchMedia('(display-mode: standalone)').matches) {
+      setIsInstalled(true);
+      return;
+    }
+
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setInstallPrompt(e as BeforeInstallPromptEvent);
+    };
+
+    const handleAppInstalled = () => {
+      setIsInstalled(true);
+      setInstallPrompt(null);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!installPrompt) return;
+
+    await installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+
+    if (outcome === 'accepted') {
+      setInstallPrompt(null);
+    }
+  };
 
   const handleLogout = () => {
     logout();
@@ -72,6 +119,21 @@ const MainLayout: React.FC = () => {
 
         {/* Right side - Icons */}
         <Space size={4}>
+          {/* Install App Button - only shows when installable */}
+          {installPrompt && !isInstalled && (
+            <Tooltip title="Install Desktop App">
+              <Button
+                type="text"
+                icon={<DownloadOutlined style={{ fontSize: 18, color: '#fff' }} />}
+                style={{
+                  color: '#fff',
+                  background: 'rgba(255,255,255,0.15)',
+                  borderRadius: 4,
+                }}
+                onClick={handleInstallClick}
+              />
+            </Tooltip>
+          )}
           <Tooltip title="Home">
             <Button
               type="text"
