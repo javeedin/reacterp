@@ -6,9 +6,28 @@
 -- Endpoint: /ap/invoices/installments
 -- =====================================================
 
--- Note: The 'ap' module should already be defined in ap_invoices_ords_rest.sql
--- If not, uncomment the following block:
-/*
+-- =====================================================
+-- Step 1: Ensure ORDS is enabled for the schema
+-- =====================================================
+BEGIN
+    ORDS.ENABLE_SCHEMA(
+        p_enabled             => TRUE,
+        p_schema              => USER,
+        p_url_mapping_type    => 'BASE_PATH',
+        p_url_mapping_pattern => LOWER(USER),
+        p_auto_rest_auth      => FALSE
+    );
+    COMMIT;
+EXCEPTION
+    WHEN OTHERS THEN
+        -- Schema may already be enabled
+        NULL;
+END;
+/
+
+-- =====================================================
+-- Step 2: Create or update the 'ap' module
+-- =====================================================
 BEGIN
     ORDS.DEFINE_MODULE(
         p_module_name    => 'ap',
@@ -18,12 +37,79 @@ BEGIN
         p_comments       => 'AP REST API'
     );
     COMMIT;
+EXCEPTION
+    WHEN OTHERS THEN
+        -- Module may already exist, that's OK
+        DBMS_OUTPUT.PUT_LINE('Module ap may already exist: ' || SQLERRM);
 END;
 /
-*/
 
 -- =====================================================
--- Template: /ap/invoices/installments
+-- Step 3: Delete existing installments handlers/templates (clean slate)
+-- =====================================================
+BEGIN
+    -- Delete handlers first
+    FOR rec IN (
+        SELECT h.id AS handler_id
+        FROM user_ords_handlers h
+        JOIN user_ords_templates t ON h.template_id = t.id
+        JOIN user_ords_modules m ON t.module_id = m.id
+        WHERE m.name = 'ap'
+          AND t.uri_template LIKE '%installments%'
+    ) LOOP
+        BEGIN
+            ORDS.DELETE_HANDLER(
+                p_module_name => 'ap',
+                p_pattern     => NULL,
+                p_method      => NULL
+            );
+        EXCEPTION
+            WHEN OTHERS THEN NULL;
+        END;
+    END LOOP;
+    COMMIT;
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('Cleanup handlers: ' || SQLERRM);
+END;
+/
+
+-- Delete templates
+BEGIN
+    ORDS.DELETE_TEMPLATE(
+        p_module_name => 'ap',
+        p_pattern     => 'invoices/installments/:invoice_id/:installment_number'
+    );
+    COMMIT;
+EXCEPTION
+    WHEN OTHERS THEN NULL;
+END;
+/
+
+BEGIN
+    ORDS.DELETE_TEMPLATE(
+        p_module_name => 'ap',
+        p_pattern     => 'invoices/installments/:invoice_id'
+    );
+    COMMIT;
+EXCEPTION
+    WHEN OTHERS THEN NULL;
+END;
+/
+
+BEGIN
+    ORDS.DELETE_TEMPLATE(
+        p_module_name => 'ap',
+        p_pattern     => 'invoices/installments'
+    );
+    COMMIT;
+EXCEPTION
+    WHEN OTHERS THEN NULL;
+END;
+/
+
+-- =====================================================
+-- Step 4: Create Template - /ap/invoices/installments
 -- =====================================================
 BEGIN
     ORDS.DEFINE_TEMPLATE(
@@ -39,7 +125,7 @@ END;
 /
 
 -- =====================================================
--- POST /ap/invoices/installments - Create/Update Installments (Bulk)
+-- Step 5: POST /ap/invoices/installments - Create/Update Installments (Bulk)
 -- =====================================================
 BEGIN
     ORDS.DEFINE_HANDLER(
@@ -88,7 +174,7 @@ END;
 /
 
 -- =====================================================
--- GET /ap/invoices/installments - Get All Installments
+-- Step 6: GET /ap/invoices/installments - Get All Installments
 -- =====================================================
 BEGIN
     ORDS.DEFINE_HANDLER(
@@ -143,7 +229,7 @@ END;
 /
 
 -- =====================================================
--- Template: /ap/invoices/installments/:invoice_id
+-- Step 7: Create Template - /ap/invoices/installments/:invoice_id
 -- =====================================================
 BEGIN
     ORDS.DEFINE_TEMPLATE(
@@ -159,7 +245,7 @@ END;
 /
 
 -- =====================================================
--- POST /ap/invoices/installments/:invoice_id - Create Installments for specific Invoice
+-- Step 8: POST /ap/invoices/installments/:invoice_id
 -- =====================================================
 BEGIN
     ORDS.DEFINE_HANDLER(
@@ -219,7 +305,7 @@ END;
 /
 
 -- =====================================================
--- GET /ap/invoices/installments/:invoice_id - Get Installments for Invoice
+-- Step 9: GET /ap/invoices/installments/:invoice_id
 -- =====================================================
 BEGIN
     ORDS.DEFINE_HANDLER(
@@ -277,7 +363,7 @@ END;
 /
 
 -- =====================================================
--- DELETE /ap/invoices/installments/:invoice_id - Delete Installments for Invoice
+-- Step 10: DELETE /ap/invoices/installments/:invoice_id
 -- =====================================================
 BEGIN
     ORDS.DEFINE_HANDLER(
@@ -315,7 +401,7 @@ END;
 /
 
 -- =====================================================
--- Template: /ap/invoices/installments/:invoice_id/:installment_number
+-- Step 11: Create Template - /ap/invoices/installments/:invoice_id/:installment_number
 -- =====================================================
 BEGIN
     ORDS.DEFINE_TEMPLATE(
@@ -331,7 +417,7 @@ END;
 /
 
 -- =====================================================
--- GET /ap/invoices/installments/:invoice_id/:installment_number - Get Single Installment
+-- Step 12: GET /ap/invoices/installments/:invoice_id/:installment_number
 -- =====================================================
 BEGIN
     ORDS.DEFINE_HANDLER(
@@ -389,7 +475,7 @@ END;
 /
 
 -- =====================================================
--- DELETE /ap/invoices/installments/:invoice_id/:installment_number - Delete Single Installment
+-- Step 13: DELETE /ap/invoices/installments/:invoice_id/:installment_number
 -- =====================================================
 BEGIN
     ORDS.DEFINE_HANDLER(
@@ -473,66 +559,5 @@ ENDPOINTS:
 
 7. DELETE /invoices/installments/:invoice_id/:installment_number
    - Delete a single installment
-
-*/
-
--- =====================================================
--- Sample curl commands for testing:
--- =====================================================
-/*
-
--- POST Installments (bulk with invoice_id in each item)
-curl -X POST "https://your-server/ords/schema/ap/invoices/installments" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "items": [
-      {
-        "InvoiceId": 1021,
-        "InstallmentNumber": 1,
-        "UnpaidAmount": 0,
-        "DueDate": "2023-08-12",
-        "GrossAmount": 3590,
-        "PaymentPriority": 99,
-        "HoldFlag": false,
-        "PaymentMethod": "Check",
-        "PaymentMethodCode": "CHECK",
-        "CreatedBy": "user@example.com",
-        "CreationDate": "2023-09-10T08:52:08+00:00"
-      }
-    ]
-  }'
-
--- POST Installments for specific invoice
-curl -X POST "https://your-server/ords/schema/ap/invoices/installments/1021" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "items": [
-      {
-        "InstallmentNumber": 1,
-        "UnpaidAmount": 0,
-        "DueDate": "2023-08-12",
-        "GrossAmount": 3590,
-        "PaymentPriority": 99,
-        "HoldFlag": false,
-        "PaymentMethod": "Check",
-        "PaymentMethodCode": "CHECK"
-      }
-    ]
-  }'
-
--- GET All Installments
-curl "https://your-server/ords/schema/ap/invoices/installments"
-
--- GET Installments for Invoice
-curl "https://your-server/ords/schema/ap/invoices/installments/1021"
-
--- GET Single Installment
-curl "https://your-server/ords/schema/ap/invoices/installments/1021/1"
-
--- DELETE Installments for Invoice
-curl -X DELETE "https://your-server/ords/schema/ap/invoices/installments/1021"
-
--- DELETE Single Installment
-curl -X DELETE "https://your-server/ords/schema/ap/invoices/installments/1021/1"
 
 */
