@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Layout, Typography, Card, Breadcrumb, Space, Tooltip, Row, Col, Statistic, Progress, Input, Select, Button, Form, DatePicker } from 'antd';
+import { Layout, Typography, Card, Breadcrumb, Space, Tooltip, Row, Col, Statistic, Input, Select, Button, Form, DatePicker } from 'antd';
 import {
   HomeOutlined,
   FileTextOutlined,
@@ -13,7 +13,6 @@ import {
   DollarOutlined,
   PieChartOutlined,
   FolderOutlined,
-  FolderOpenOutlined,
   CloseOutlined,
   ArrowUpOutlined,
   ArrowDownOutlined,
@@ -72,12 +71,6 @@ interface MenuItemType {
   path?: string;
 }
 
-// Section type for grouped items
-interface TaskSection {
-  title: string;
-  items: MenuItemType[];
-}
-
 // Invoice task items
 const invoiceTaskItems: MenuItemType[] = [
   { key: 'create-invoice', icon: <FileAddOutlined />, label: 'Create Invoice', description: 'Create new supplier invoice', color: REDWOOD.taskBlue, path: '/ap/create-invoice' },
@@ -127,12 +120,6 @@ const paymentTaskItems: MenuItemType[] = [
   { key: 'retrieve-acknowledgments', icon: <CheckCircleOutlined />, label: 'Retrieve Disbursement Acknowledgments', description: 'Get bank responses', color: REDWOOD.warning },
 ];
 
-// Report menu items
-const reportMenuItems: MenuItemType[] = [
-  { key: 'my-folders', icon: <FolderOutlined />, label: 'My Folders', description: 'Personal report folders', color: REDWOOD.reportGreen },
-  { key: 'shared-reports', icon: <FolderOpenOutlined />, label: 'Shared Reports and Analytics', description: 'Team reports', color: REDWOOD.info },
-];
-
 // AP KPI Data (mock)
 const apKpiData = {
   pendingInvoices: { value: 48, trend: 'up', change: 12 },
@@ -148,7 +135,7 @@ const APModule: React.FC = () => {
   const navigate = useNavigate();
   const [activePanel, setActivePanel] = useState<'none' | 'tasks' | 'search' | 'reports' | 'match'>('none');
   const [isClosing, setIsClosing] = useState(false);
-  const [selectedItem, setSelectedItem] = useState<string | null>(null);
+  const [, setSelectedItem] = useState<string | null>(null);
   const [selectedTaskSection, setSelectedTaskSection] = useState<string>('invoices');
   const panelRef = useRef<HTMLDivElement>(null);
   const floatingIconsRef = useRef<HTMLDivElement>(null);
@@ -340,15 +327,15 @@ const APModule: React.FC = () => {
 
       {/* Panel Items - filtered by selected section */}
       <div style={{ padding: 10, flex: 1, overflowY: 'auto' }}>
-        {getCurrentSectionItems().map((item, index) => (
-          <TaskMenuItem key={item.key} item={item} index={index} />
+        {getCurrentSectionItems().map((item) => (
+          <TaskMenuItem key={item.key} item={item} />
         ))}
       </div>
     </div>
   );
 
   // Task Menu Item Component
-  const TaskMenuItem = ({ item, index }: { item: MenuItemType; index: number }) => (
+  const TaskMenuItem = ({ item }: { item: MenuItemType }) => (
     <div
       onClick={() => handleMenuItemClick(item.key, item.path)}
       style={{
