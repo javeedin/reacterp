@@ -165,10 +165,66 @@ function createWindow() {
   } else {
     // In production, load from the dist folder relative to app root
     const indexPath = path.join(app.getAppPath(), 'dist', 'index.html');
-    console.log('App path:', app.getAppPath());
-    console.log('Loading local file:', indexPath);
-    console.log('File exists:', fs.existsSync(indexPath));
-    mainWindow.loadFile(indexPath);
+    const appPath = app.getAppPath();
+
+    // Create debug info
+    const debugInfo = {
+      appPath: appPath,
+      indexPath: indexPath,
+      indexExists: fs.existsSync(indexPath),
+      dirname: __dirname,
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath || 'N/A',
+    };
+
+    // List files in app directory
+    try {
+      debugInfo.appFiles = fs.readdirSync(appPath);
+      const distPath = path.join(appPath, 'dist');
+      if (fs.existsSync(distPath)) {
+        debugInfo.distFiles = fs.readdirSync(distPath);
+      } else {
+        debugInfo.distFiles = 'dist folder NOT FOUND';
+      }
+    } catch (e) {
+      debugInfo.error = e.message;
+    }
+
+    console.log('Debug Info:', JSON.stringify(debugInfo, null, 2));
+
+    if (fs.existsSync(indexPath)) {
+      mainWindow.loadFile(indexPath);
+    } else {
+      // Show debug page if index.html not found
+      const debugHtml = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>ReactERP - Debug Info</title>
+          <style>
+            body { font-family: monospace; padding: 20px; background: #1a1a1a; color: #00ff00; }
+            h1 { color: #ff6b6b; }
+            pre { background: #2a2a2a; padding: 15px; border-radius: 5px; overflow: auto; }
+            .error { color: #ff6b6b; }
+            .success { color: #00ff00; }
+          </style>
+        </head>
+        <body>
+          <h1>⚠️ ReactERP - Loading Error</h1>
+          <p class="error">Could not find index.html</p>
+          <h2>Debug Information:</h2>
+          <pre>${JSON.stringify(debugInfo, null, 2)}</pre>
+          <h2>Possible Solutions:</h2>
+          <ul>
+            <li>Make sure 'dist' folder is included in the build</li>
+            <li>Run 'npm run build' before 'npm run electron:build:win'</li>
+            <li>Check electron-builder 'files' configuration in package.json</li>
+          </ul>
+        </body>
+        </html>
+      `;
+      mainWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(debugHtml));
+    }
   }
 
   // Always open DevTools for debugging (remove this line later)
