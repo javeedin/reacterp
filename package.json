@@ -61,7 +61,7 @@
       "public/**/*"
     ],
     "win": {
-      "target": "nsis",
+      "target": ["portable"],
       "icon": "public/icon-512.png"
     },
     "mac": {
