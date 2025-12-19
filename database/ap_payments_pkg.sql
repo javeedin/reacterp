@@ -46,237 +46,443 @@ END XXAP_PAYMENTS_PKG;
 
 CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
 
-    -- Helper function to parse date from ISO format
-    FUNCTION parse_date(p_date_str IN VARCHAR2) RETURN DATE IS
-        v_date DATE;
-    BEGIN
-        IF p_date_str IS NULL THEN
-            RETURN NULL;
-        END IF;
-
-        -- Try ISO format first (YYYY-MM-DD)
-        BEGIN
-            v_date := TO_DATE(SUBSTR(p_date_str, 1, 10), 'YYYY-MM-DD');
-            RETURN v_date;
-        EXCEPTION
-            WHEN OTHERS THEN
-                RETURN NULL;
-        END;
-    END parse_date;
-
-    -- Helper function to parse timestamp from ISO format
-    FUNCTION parse_timestamp(p_ts_str IN VARCHAR2) RETURN TIMESTAMP WITH TIME ZONE IS
-        v_ts TIMESTAMP WITH TIME ZONE;
-    BEGIN
-        IF p_ts_str IS NULL THEN
-            RETURN NULL;
-        END IF;
-
-        BEGIN
-            v_ts := TO_TIMESTAMP_TZ(p_ts_str, 'YYYY-MM-DD"T"HH24:MI:SS.FF3TZH:TZM');
-            RETURN v_ts;
-        EXCEPTION
-            WHEN OTHERS THEN
-                BEGIN
-                    v_ts := TO_TIMESTAMP_TZ(p_ts_str, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM');
-                    RETURN v_ts;
-                EXCEPTION
-                    WHEN OTHERS THEN
-                        RETURN NULL;
-                END;
-        END;
-    END parse_timestamp;
-
     -- Save single payment
     PROCEDURE save_payment(
         p_json_data IN CLOB,
         p_result OUT VARCHAR2
     ) IS
+        -- Payment identification
         v_check_id NUMBER;
+        v_payment_id NUMBER;
+        v_payment_reference NUMBER;
+        v_paper_document_number NUMBER;
+        v_payment_number NUMBER;
+        v_payment_file_reference NUMBER;
+        v_payment_process_request VARCHAR2(500);
+        v_voucher_number NUMBER;
+
+        -- Amounts
+        v_payment_amount NUMBER;
+        v_payment_base_amount NUMBER;
+        v_withheld_amount NUMBER;
+        v_bank_charge_amount NUMBER;
+
+        -- Dates
+        v_payment_date DATE;
+        v_accounting_date DATE;
+        v_maturity_date DATE;
+        v_anticipated_value_date DATE;
+        v_stop_date DATE;
+        v_void_date DATE;
+        v_void_accounting_date DATE;
+        v_conversion_date DATE;
+        v_clearing_date DATE;
+        v_clearing_conversion_date DATE;
+        v_clearing_value_date DATE;
+        v_maturity_conversion_date DATE;
+
+        -- Timestamps
+        v_creation_date TIMESTAMP WITH TIME ZONE;
+        v_last_update_date TIMESTAMP WITH TIME ZONE;
+
+        -- Details
+        v_payment_description VARCHAR2(500);
+        v_payment_status VARCHAR2(50);
+        v_payment_type VARCHAR2(50);
+        v_payment_mode VARCHAR2(50);
+        v_payment_function VARCHAR2(100);
+
+        -- Currency
+        v_payment_currency VARCHAR2(15);
+        v_payment_base_currency VARCHAR2(15);
+        v_conversion_rate NUMBER;
+        v_conversion_rate_type VARCHAR2(50);
+        v_cross_currency_rate_type VARCHAR2(50);
+
+        -- Clearing
+        v_clearing_amount NUMBER;
+        v_clearing_ledger_amount NUMBER;
+        v_clearing_conversion_rate NUMBER;
+        v_clearing_conv_rate_type VARCHAR2(50);
+
+        -- Maturity
+        v_maturity_conv_rate_type VARCHAR2(50);
+        v_maturity_conversion_rate NUMBER;
+
+        -- Status
+        v_accounting_status VARCHAR2(50);
+        v_reconciled_flag VARCHAR2(1);
+        v_separate_remit_advice VARCHAR2(1);
+        v_iby_payment_status VARCHAR2(50);
+
+        -- Organization
+        v_legal_entity VARCHAR2(240);
+        v_business_unit VARCHAR2(240);
+        v_procurement_bu VARCHAR2(240);
+
+        -- Payee
+        v_payee VARCHAR2(360);
+        v_party_id NUMBER;
+        v_payee_site VARCHAR2(240);
+        v_supplier_number VARCHAR2(100);
+        v_employee_address VARCHAR2(500);
+        v_third_party_supplier VARCHAR2(360);
+        v_third_party_address_name VARCHAR2(240);
+
+        -- Bank
+        v_external_bank_account_id NUMBER;
+        v_remit_to_account_number VARCHAR2(100);
+        v_disb_bank_account_number VARCHAR2(100);
+        v_disb_bank_account_name VARCHAR2(240);
+        v_funding_card_account VARCHAR2(100);
+        v_digital_payment_account VARCHAR2(100);
+
+        -- Payment method
+        v_payment_method_code VARCHAR2(50);
+        v_payment_method VARCHAR2(100);
+        v_payment_document VARCHAR2(240);
+        v_payment_process_profile_code VARCHAR2(100);
+        v_payment_process_profile VARCHAR2(240);
+
+        -- Document
+        v_document_category VARCHAR2(100);
+        v_document_sequence VARCHAR2(100);
+
+        -- Address
+        v_address_line1 VARCHAR2(240);
+        v_address_line2 VARCHAR2(240);
+        v_address_line3 VARCHAR2(240);
+        v_address_line4 VARCHAR2(240);
+        v_city VARCHAR2(100);
+        v_county VARCHAR2(100);
+        v_province VARCHAR2(100);
+        v_state VARCHAR2(100);
+        v_country VARCHAR2(10);
+        v_zip VARCHAR2(50);
+
+        -- Stop/Void
+        v_stop_reason VARCHAR2(500);
+        v_stop_reference VARCHAR2(240);
+
+        -- Audit
+        v_created_by VARCHAR2(100);
+        v_last_updated_by VARCHAR2(100);
+        v_last_update_login VARCHAR2(100);
+
+        -- Temp variables for parsing
+        v_temp_str VARCHAR2(100);
+        v_reconciled_raw VARCHAR2(10);
+
     BEGIN
-        -- Extract Check ID
-        SELECT JSON_VALUE(p_json_data, '$.CheckId' RETURNING NUMBER)
-        INTO v_check_id
+        -- Extract all values from JSON
+        SELECT
+            JSON_VALUE(p_json_data, '$.CheckId' RETURNING NUMBER),
+            JSON_VALUE(p_json_data, '$.PaymentId' RETURNING NUMBER),
+            JSON_VALUE(p_json_data, '$.PaymentReference' RETURNING NUMBER),
+            JSON_VALUE(p_json_data, '$.PaperDocumentNumber' RETURNING NUMBER),
+            JSON_VALUE(p_json_data, '$.PaymentNumber' RETURNING NUMBER),
+            JSON_VALUE(p_json_data, '$.PaymentFileReference' RETURNING NUMBER),
+            JSON_VALUE(p_json_data, '$.PaymentProcessRequest'),
+            JSON_VALUE(p_json_data, '$.VoucherNumber' RETURNING NUMBER),
+            JSON_VALUE(p_json_data, '$.PaymentAmount' RETURNING NUMBER),
+            JSON_VALUE(p_json_data, '$.PaymentBaseAmount' RETURNING NUMBER),
+            JSON_VALUE(p_json_data, '$.WithheldAmount' RETURNING NUMBER),
+            JSON_VALUE(p_json_data, '$.BankChargeAmount' RETURNING NUMBER),
+            JSON_VALUE(p_json_data, '$.PaymentDescription'),
+            JSON_VALUE(p_json_data, '$.PaymentStatus'),
+            JSON_VALUE(p_json_data, '$.PaymentType'),
+            JSON_VALUE(p_json_data, '$.PaymentMode'),
+            JSON_VALUE(p_json_data, '$.PaymentFunction'),
+            JSON_VALUE(p_json_data, '$.PaymentCurrency'),
+            JSON_VALUE(p_json_data, '$.PaymentBaseCurrency'),
+            JSON_VALUE(p_json_data, '$.ConversionRate' RETURNING NUMBER),
+            JSON_VALUE(p_json_data, '$.ConversionRateType'),
+            JSON_VALUE(p_json_data, '$.CrossCurrencyRateType'),
+            JSON_VALUE(p_json_data, '$.ClearingAmount' RETURNING NUMBER),
+            JSON_VALUE(p_json_data, '$.ClearingLedgerAmount' RETURNING NUMBER),
+            JSON_VALUE(p_json_data, '$.ClearingConversionRate' RETURNING NUMBER),
+            JSON_VALUE(p_json_data, '$.ClearingConversionRateType'),
+            JSON_VALUE(p_json_data, '$.MaturityConversionRateType'),
+            JSON_VALUE(p_json_data, '$.MaturityConversionRate' RETURNING NUMBER),
+            JSON_VALUE(p_json_data, '$.AccountingStatus'),
+            JSON_VALUE(p_json_data, '$.ReconciledFlag'),
+            JSON_VALUE(p_json_data, '$.SeparateRemittanceAdviceCreated'),
+            JSON_VALUE(p_json_data, '$.IbyPaymentStatus'),
+            JSON_VALUE(p_json_data, '$.LegalEntity'),
+            JSON_VALUE(p_json_data, '$.BusinessUnit'),
+            JSON_VALUE(p_json_data, '$.ProcurementBU'),
+            JSON_VALUE(p_json_data, '$.Payee'),
+            JSON_VALUE(p_json_data, '$.PartyId' RETURNING NUMBER),
+            JSON_VALUE(p_json_data, '$.PayeeSite'),
+            JSON_VALUE(p_json_data, '$.SupplierNumber'),
+            JSON_VALUE(p_json_data, '$.EmployeeAddress'),
+            JSON_VALUE(p_json_data, '$.ThirdPartySupplier'),
+            JSON_VALUE(p_json_data, '$.ThirdPartyAddressName'),
+            JSON_VALUE(p_json_data, '$.ExternalBankAccountId' RETURNING NUMBER),
+            JSON_VALUE(p_json_data, '$.RemitToAccountNumber'),
+            JSON_VALUE(p_json_data, '$.DisbursementBankAccountNumber'),
+            JSON_VALUE(p_json_data, '$.DisbursementBankAccountName'),
+            JSON_VALUE(p_json_data, '$.FundingCardAccount'),
+            JSON_VALUE(p_json_data, '$.DigitalPaymentAccount'),
+            JSON_VALUE(p_json_data, '$.PaymentMethodCode'),
+            JSON_VALUE(p_json_data, '$.PaymentMethod'),
+            JSON_VALUE(p_json_data, '$.PaymentDocument'),
+            JSON_VALUE(p_json_data, '$.PaymentProcessProfileCode'),
+            JSON_VALUE(p_json_data, '$.PaymentProcessProfile'),
+            JSON_VALUE(p_json_data, '$.DocumentCategory'),
+            JSON_VALUE(p_json_data, '$.DocumentSequence'),
+            JSON_VALUE(p_json_data, '$.AddressLine1'),
+            JSON_VALUE(p_json_data, '$.AddressLine2'),
+            JSON_VALUE(p_json_data, '$.AddressLine3'),
+            JSON_VALUE(p_json_data, '$.AddressLine4'),
+            JSON_VALUE(p_json_data, '$.City'),
+            JSON_VALUE(p_json_data, '$.County'),
+            JSON_VALUE(p_json_data, '$.Province'),
+            JSON_VALUE(p_json_data, '$.State'),
+            JSON_VALUE(p_json_data, '$.Country'),
+            JSON_VALUE(p_json_data, '$.Zip'),
+            JSON_VALUE(p_json_data, '$.StopReason'),
+            JSON_VALUE(p_json_data, '$.StopReference'),
+            JSON_VALUE(p_json_data, '$.CreatedBy'),
+            JSON_VALUE(p_json_data, '$.LastUpdatedBy'),
+            JSON_VALUE(p_json_data, '$.LastUpdateLogin')
+        INTO
+            v_check_id, v_payment_id, v_payment_reference, v_paper_document_number,
+            v_payment_number, v_payment_file_reference, v_payment_process_request, v_voucher_number,
+            v_payment_amount, v_payment_base_amount, v_withheld_amount, v_bank_charge_amount,
+            v_payment_description, v_payment_status, v_payment_type, v_payment_mode, v_payment_function,
+            v_payment_currency, v_payment_base_currency, v_conversion_rate, v_conversion_rate_type,
+            v_cross_currency_rate_type, v_clearing_amount, v_clearing_ledger_amount,
+            v_clearing_conversion_rate, v_clearing_conv_rate_type, v_maturity_conv_rate_type,
+            v_maturity_conversion_rate, v_accounting_status, v_reconciled_raw, v_separate_remit_advice,
+            v_iby_payment_status, v_legal_entity, v_business_unit, v_procurement_bu,
+            v_payee, v_party_id, v_payee_site, v_supplier_number, v_employee_address,
+            v_third_party_supplier, v_third_party_address_name, v_external_bank_account_id,
+            v_remit_to_account_number, v_disb_bank_account_number, v_disb_bank_account_name,
+            v_funding_card_account, v_digital_payment_account, v_payment_method_code, v_payment_method,
+            v_payment_document, v_payment_process_profile_code, v_payment_process_profile,
+            v_document_category, v_document_sequence, v_address_line1, v_address_line2,
+            v_address_line3, v_address_line4, v_city, v_county, v_province, v_state,
+            v_country, v_zip, v_stop_reason, v_stop_reference, v_created_by, v_last_updated_by,
+            v_last_update_login
         FROM DUAL;
+
+        -- Parse reconciled flag
+        v_reconciled_flag := CASE WHEN UPPER(v_reconciled_raw) IN ('TRUE', 'Y', '1') THEN 'Y' ELSE 'N' END;
+
+        -- Parse dates
+        BEGIN
+            v_temp_str := JSON_VALUE(p_json_data, '$.PaymentDate');
+            IF v_temp_str IS NOT NULL THEN
+                v_payment_date := TO_DATE(SUBSTR(v_temp_str, 1, 10), 'YYYY-MM-DD');
+            END IF;
+        EXCEPTION WHEN OTHERS THEN v_payment_date := NULL;
+        END;
+
+        BEGIN
+            v_temp_str := JSON_VALUE(p_json_data, '$.AccountingDate');
+            IF v_temp_str IS NOT NULL THEN
+                v_accounting_date := TO_DATE(SUBSTR(v_temp_str, 1, 10), 'YYYY-MM-DD');
+            END IF;
+        EXCEPTION WHEN OTHERS THEN v_accounting_date := NULL;
+        END;
+
+        BEGIN
+            v_temp_str := JSON_VALUE(p_json_data, '$.MaturityDate');
+            IF v_temp_str IS NOT NULL THEN
+                v_maturity_date := TO_DATE(SUBSTR(v_temp_str, 1, 10), 'YYYY-MM-DD');
+            END IF;
+        EXCEPTION WHEN OTHERS THEN v_maturity_date := NULL;
+        END;
+
+        BEGIN
+            v_temp_str := JSON_VALUE(p_json_data, '$.AnticipatedValueDate');
+            IF v_temp_str IS NOT NULL THEN
+                v_anticipated_value_date := TO_DATE(SUBSTR(v_temp_str, 1, 10), 'YYYY-MM-DD');
+            END IF;
+        EXCEPTION WHEN OTHERS THEN v_anticipated_value_date := NULL;
+        END;
+
+        BEGIN
+            v_temp_str := JSON_VALUE(p_json_data, '$.StopDate');
+            IF v_temp_str IS NOT NULL THEN
+                v_stop_date := TO_DATE(SUBSTR(v_temp_str, 1, 10), 'YYYY-MM-DD');
+            END IF;
+        EXCEPTION WHEN OTHERS THEN v_stop_date := NULL;
+        END;
+
+        BEGIN
+            v_temp_str := JSON_VALUE(p_json_data, '$.VoidDate');
+            IF v_temp_str IS NOT NULL THEN
+                v_void_date := TO_DATE(SUBSTR(v_temp_str, 1, 10), 'YYYY-MM-DD');
+            END IF;
+        EXCEPTION WHEN OTHERS THEN v_void_date := NULL;
+        END;
+
+        BEGIN
+            v_temp_str := JSON_VALUE(p_json_data, '$.VoidAccountingDate');
+            IF v_temp_str IS NOT NULL THEN
+                v_void_accounting_date := TO_DATE(SUBSTR(v_temp_str, 1, 10), 'YYYY-MM-DD');
+            END IF;
+        EXCEPTION WHEN OTHERS THEN v_void_accounting_date := NULL;
+        END;
+
+        BEGIN
+            v_temp_str := JSON_VALUE(p_json_data, '$.ConversionDate');
+            IF v_temp_str IS NOT NULL THEN
+                v_conversion_date := TO_DATE(SUBSTR(v_temp_str, 1, 10), 'YYYY-MM-DD');
+            END IF;
+        EXCEPTION WHEN OTHERS THEN v_conversion_date := NULL;
+        END;
+
+        BEGIN
+            v_temp_str := JSON_VALUE(p_json_data, '$.ClearingDate');
+            IF v_temp_str IS NOT NULL THEN
+                v_clearing_date := TO_DATE(SUBSTR(v_temp_str, 1, 10), 'YYYY-MM-DD');
+            END IF;
+        EXCEPTION WHEN OTHERS THEN v_clearing_date := NULL;
+        END;
+
+        BEGIN
+            v_temp_str := JSON_VALUE(p_json_data, '$.ClearingConversionDate');
+            IF v_temp_str IS NOT NULL THEN
+                v_clearing_conversion_date := TO_DATE(SUBSTR(v_temp_str, 1, 10), 'YYYY-MM-DD');
+            END IF;
+        EXCEPTION WHEN OTHERS THEN v_clearing_conversion_date := NULL;
+        END;
+
+        BEGIN
+            v_temp_str := JSON_VALUE(p_json_data, '$.ClearingValueDate');
+            IF v_temp_str IS NOT NULL THEN
+                v_clearing_value_date := TO_DATE(SUBSTR(v_temp_str, 1, 10), 'YYYY-MM-DD');
+            END IF;
+        EXCEPTION WHEN OTHERS THEN v_clearing_value_date := NULL;
+        END;
+
+        BEGIN
+            v_temp_str := JSON_VALUE(p_json_data, '$.MaturityConversionDate');
+            IF v_temp_str IS NOT NULL THEN
+                v_maturity_conversion_date := TO_DATE(SUBSTR(v_temp_str, 1, 10), 'YYYY-MM-DD');
+            END IF;
+        EXCEPTION WHEN OTHERS THEN v_maturity_conversion_date := NULL;
+        END;
+
+        -- Parse timestamps
+        BEGIN
+            v_temp_str := JSON_VALUE(p_json_data, '$.CreationDate');
+            IF v_temp_str IS NOT NULL THEN
+                v_creation_date := TO_TIMESTAMP_TZ(v_temp_str, 'YYYY-MM-DD"T"HH24:MI:SS.FF3TZH:TZM');
+            END IF;
+        EXCEPTION WHEN OTHERS THEN
+            BEGIN
+                v_creation_date := TO_TIMESTAMP_TZ(v_temp_str, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM');
+            EXCEPTION WHEN OTHERS THEN v_creation_date := NULL;
+            END;
+        END;
+
+        BEGIN
+            v_temp_str := JSON_VALUE(p_json_data, '$.LastUpdateDate');
+            IF v_temp_str IS NOT NULL THEN
+                v_last_update_date := TO_TIMESTAMP_TZ(v_temp_str, 'YYYY-MM-DD"T"HH24:MI:SS.FF3TZH:TZM');
+            END IF;
+        EXCEPTION WHEN OTHERS THEN
+            BEGIN
+                v_last_update_date := TO_TIMESTAMP_TZ(v_temp_str, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM');
+            EXCEPTION WHEN OTHERS THEN v_last_update_date := NULL;
+            END;
+        END;
 
         -- Merge (upsert) payment data
         MERGE INTO RR_AP_PAYMENTS_ALL tgt
-        USING (
-            SELECT
-                JSON_VALUE(p_json_data, '$.CheckId' RETURNING NUMBER) AS CHECK_ID,
-                JSON_VALUE(p_json_data, '$.PaymentId' RETURNING NUMBER) AS PAYMENT_ID,
-                JSON_VALUE(p_json_data, '$.PaymentReference' RETURNING NUMBER) AS PAYMENT_REFERENCE,
-                JSON_VALUE(p_json_data, '$.PaperDocumentNumber' RETURNING NUMBER) AS PAPER_DOCUMENT_NUMBER,
-                JSON_VALUE(p_json_data, '$.PaymentNumber' RETURNING NUMBER) AS PAYMENT_NUMBER,
-                JSON_VALUE(p_json_data, '$.PaymentFileReference' RETURNING NUMBER) AS PAYMENT_FILE_REFERENCE,
-                JSON_VALUE(p_json_data, '$.PaymentProcessRequest') AS PAYMENT_PROCESS_REQUEST,
-                JSON_VALUE(p_json_data, '$.VoucherNumber' RETURNING NUMBER) AS VOUCHER_NUMBER,
-                JSON_VALUE(p_json_data, '$.PaymentAmount' RETURNING NUMBER) AS PAYMENT_AMOUNT,
-                JSON_VALUE(p_json_data, '$.PaymentBaseAmount' RETURNING NUMBER) AS PAYMENT_BASE_AMOUNT,
-                JSON_VALUE(p_json_data, '$.WithheldAmount' RETURNING NUMBER) AS WITHHELD_AMOUNT,
-                JSON_VALUE(p_json_data, '$.BankChargeAmount' RETURNING NUMBER) AS BANK_CHARGE_AMOUNT,
-                JSON_VALUE(p_json_data, '$.PaymentDate') AS PAYMENT_DATE_STR,
-                JSON_VALUE(p_json_data, '$.AccountingDate') AS ACCOUNTING_DATE_STR,
-                JSON_VALUE(p_json_data, '$.MaturityDate') AS MATURITY_DATE_STR,
-                JSON_VALUE(p_json_data, '$.AnticipatedValueDate') AS ANTICIPATED_VALUE_DATE_STR,
-                JSON_VALUE(p_json_data, '$.StopDate') AS STOP_DATE_STR,
-                JSON_VALUE(p_json_data, '$.VoidDate') AS VOID_DATE_STR,
-                JSON_VALUE(p_json_data, '$.VoidAccountingDate') AS VOID_ACCOUNTING_DATE_STR,
-                JSON_VALUE(p_json_data, '$.PaymentDescription') AS PAYMENT_DESCRIPTION,
-                JSON_VALUE(p_json_data, '$.PaymentStatus') AS PAYMENT_STATUS,
-                JSON_VALUE(p_json_data, '$.PaymentType') AS PAYMENT_TYPE,
-                JSON_VALUE(p_json_data, '$.PaymentMode') AS PAYMENT_MODE,
-                JSON_VALUE(p_json_data, '$.PaymentFunction') AS PAYMENT_FUNCTION,
-                JSON_VALUE(p_json_data, '$.PaymentCurrency') AS PAYMENT_CURRENCY,
-                JSON_VALUE(p_json_data, '$.PaymentBaseCurrency') AS PAYMENT_BASE_CURRENCY,
-                JSON_VALUE(p_json_data, '$.ConversionRate' RETURNING NUMBER) AS CONVERSION_RATE,
-                JSON_VALUE(p_json_data, '$.ConversionDate') AS CONVERSION_DATE_STR,
-                JSON_VALUE(p_json_data, '$.ConversionRateType') AS CONVERSION_RATE_TYPE,
-                JSON_VALUE(p_json_data, '$.CrossCurrencyRateType') AS CROSS_CURRENCY_RATE_TYPE,
-                JSON_VALUE(p_json_data, '$.ClearingDate') AS CLEARING_DATE_STR,
-                JSON_VALUE(p_json_data, '$.ClearingAmount' RETURNING NUMBER) AS CLEARING_AMOUNT,
-                JSON_VALUE(p_json_data, '$.ClearingLedgerAmount' RETURNING NUMBER) AS CLEARING_LEDGER_AMOUNT,
-                JSON_VALUE(p_json_data, '$.ClearingConversionRate' RETURNING NUMBER) AS CLEARING_CONVERSION_RATE,
-                JSON_VALUE(p_json_data, '$.ClearingConversionDate') AS CLEARING_CONVERSION_DATE_STR,
-                JSON_VALUE(p_json_data, '$.ClearingConversionRateType') AS CLEARING_CONVERSION_RATE_TYPE,
-                JSON_VALUE(p_json_data, '$.ClearingValueDate') AS CLEARING_VALUE_DATE_STR,
-                JSON_VALUE(p_json_data, '$.MaturityConversionRateType') AS MATURITY_CONVERSION_RATE_TYPE,
-                JSON_VALUE(p_json_data, '$.MaturityConversionDate') AS MATURITY_CONVERSION_DATE_STR,
-                JSON_VALUE(p_json_data, '$.MaturityConversionRate' RETURNING NUMBER) AS MATURITY_CONVERSION_RATE,
-                JSON_VALUE(p_json_data, '$.AccountingStatus') AS ACCOUNTING_STATUS,
-                JSON_VALUE(p_json_data, '$.ReconciledFlag') AS RECONCILED_FLAG_RAW,
-                JSON_VALUE(p_json_data, '$.SeparateRemittanceAdviceCreated') AS SEPARATE_REMITTANCE_ADVICE_CREATED,
-                JSON_VALUE(p_json_data, '$.IbyPaymentStatus') AS IBY_PAYMENT_STATUS,
-                JSON_VALUE(p_json_data, '$.LegalEntity') AS LEGAL_ENTITY,
-                JSON_VALUE(p_json_data, '$.BusinessUnit') AS BUSINESS_UNIT,
-                JSON_VALUE(p_json_data, '$.ProcurementBU') AS PROCUREMENT_BU,
-                JSON_VALUE(p_json_data, '$.Payee') AS PAYEE,
-                JSON_VALUE(p_json_data, '$.PartyId' RETURNING NUMBER) AS PARTY_ID,
-                JSON_VALUE(p_json_data, '$.PayeeSite') AS PAYEE_SITE,
-                JSON_VALUE(p_json_data, '$.SupplierNumber') AS SUPPLIER_NUMBER,
-                JSON_VALUE(p_json_data, '$.EmployeeAddress') AS EMPLOYEE_ADDRESS,
-                JSON_VALUE(p_json_data, '$.ThirdPartySupplier') AS THIRD_PARTY_SUPPLIER,
-                JSON_VALUE(p_json_data, '$.ThirdPartyAddressName') AS THIRD_PARTY_ADDRESS_NAME,
-                JSON_VALUE(p_json_data, '$.ExternalBankAccountId' RETURNING NUMBER) AS EXTERNAL_BANK_ACCOUNT_ID,
-                JSON_VALUE(p_json_data, '$.RemitToAccountNumber') AS REMIT_TO_ACCOUNT_NUMBER,
-                JSON_VALUE(p_json_data, '$.DisbursementBankAccountNumber') AS DISBURSEMENT_BANK_ACCOUNT_NUMBER,
-                JSON_VALUE(p_json_data, '$.DisbursementBankAccountName') AS DISBURSEMENT_BANK_ACCOUNT_NAME,
-                JSON_VALUE(p_json_data, '$.FundingCardAccount') AS FUNDING_CARD_ACCOUNT,
-                JSON_VALUE(p_json_data, '$.DigitalPaymentAccount') AS DIGITAL_PAYMENT_ACCOUNT,
-                JSON_VALUE(p_json_data, '$.PaymentMethodCode') AS PAYMENT_METHOD_CODE,
-                JSON_VALUE(p_json_data, '$.PaymentMethod') AS PAYMENT_METHOD,
-                JSON_VALUE(p_json_data, '$.PaymentDocument') AS PAYMENT_DOCUMENT,
-                JSON_VALUE(p_json_data, '$.PaymentProcessProfileCode') AS PAYMENT_PROCESS_PROFILE_CODE,
-                JSON_VALUE(p_json_data, '$.PaymentProcessProfile') AS PAYMENT_PROCESS_PROFILE,
-                JSON_VALUE(p_json_data, '$.DocumentCategory') AS DOCUMENT_CATEGORY,
-                JSON_VALUE(p_json_data, '$.DocumentSequence') AS DOCUMENT_SEQUENCE,
-                JSON_VALUE(p_json_data, '$.AddressLine1') AS ADDRESS_LINE1,
-                JSON_VALUE(p_json_data, '$.AddressLine2') AS ADDRESS_LINE2,
-                JSON_VALUE(p_json_data, '$.AddressLine3') AS ADDRESS_LINE3,
-                JSON_VALUE(p_json_data, '$.AddressLine4') AS ADDRESS_LINE4,
-                JSON_VALUE(p_json_data, '$.City') AS CITY,
-                JSON_VALUE(p_json_data, '$.County') AS COUNTY,
-                JSON_VALUE(p_json_data, '$.Province') AS PROVINCE,
-                JSON_VALUE(p_json_data, '$.State') AS STATE,
-                JSON_VALUE(p_json_data, '$.Country') AS COUNTRY,
-                JSON_VALUE(p_json_data, '$.Zip') AS ZIP,
-                JSON_VALUE(p_json_data, '$.StopReason') AS STOP_REASON,
-                JSON_VALUE(p_json_data, '$.StopReference') AS STOP_REFERENCE,
-                JSON_VALUE(p_json_data, '$.CreatedBy') AS CREATED_BY,
-                JSON_VALUE(p_json_data, '$.CreationDate') AS CREATION_DATE_STR,
-                JSON_VALUE(p_json_data, '$.LastUpdatedBy') AS LAST_UPDATED_BY,
-                JSON_VALUE(p_json_data, '$.LastUpdateDate') AS LAST_UPDATE_DATE_STR,
-                JSON_VALUE(p_json_data, '$.LastUpdateLogin') AS LAST_UPDATE_LOGIN
-            FROM DUAL
-        ) src
+        USING (SELECT v_check_id AS CHECK_ID FROM DUAL) src
         ON (tgt.CHECK_ID = src.CHECK_ID)
         WHEN MATCHED THEN
             UPDATE SET
-                tgt.PAYMENT_ID = src.PAYMENT_ID,
-                tgt.PAYMENT_REFERENCE = src.PAYMENT_REFERENCE,
-                tgt.PAPER_DOCUMENT_NUMBER = src.PAPER_DOCUMENT_NUMBER,
-                tgt.PAYMENT_NUMBER = src.PAYMENT_NUMBER,
-                tgt.PAYMENT_FILE_REFERENCE = src.PAYMENT_FILE_REFERENCE,
-                tgt.PAYMENT_PROCESS_REQUEST = src.PAYMENT_PROCESS_REQUEST,
-                tgt.VOUCHER_NUMBER = src.VOUCHER_NUMBER,
-                tgt.PAYMENT_AMOUNT = src.PAYMENT_AMOUNT,
-                tgt.PAYMENT_BASE_AMOUNT = src.PAYMENT_BASE_AMOUNT,
-                tgt.WITHHELD_AMOUNT = src.WITHHELD_AMOUNT,
-                tgt.BANK_CHARGE_AMOUNT = src.BANK_CHARGE_AMOUNT,
-                tgt.PAYMENT_DATE = parse_date(src.PAYMENT_DATE_STR),
-                tgt.ACCOUNTING_DATE = parse_date(src.ACCOUNTING_DATE_STR),
-                tgt.MATURITY_DATE = parse_date(src.MATURITY_DATE_STR),
-                tgt.ANTICIPATED_VALUE_DATE = parse_date(src.ANTICIPATED_VALUE_DATE_STR),
-                tgt.STOP_DATE = parse_date(src.STOP_DATE_STR),
-                tgt.VOID_DATE = parse_date(src.VOID_DATE_STR),
-                tgt.VOID_ACCOUNTING_DATE = parse_date(src.VOID_ACCOUNTING_DATE_STR),
-                tgt.PAYMENT_DESCRIPTION = src.PAYMENT_DESCRIPTION,
-                tgt.PAYMENT_STATUS = src.PAYMENT_STATUS,
-                tgt.PAYMENT_TYPE = src.PAYMENT_TYPE,
-                tgt.PAYMENT_MODE = src.PAYMENT_MODE,
-                tgt.PAYMENT_FUNCTION = src.PAYMENT_FUNCTION,
-                tgt.PAYMENT_CURRENCY = src.PAYMENT_CURRENCY,
-                tgt.PAYMENT_BASE_CURRENCY = src.PAYMENT_BASE_CURRENCY,
-                tgt.CONVERSION_RATE = src.CONVERSION_RATE,
-                tgt.CONVERSION_DATE = parse_date(src.CONVERSION_DATE_STR),
-                tgt.CONVERSION_RATE_TYPE = src.CONVERSION_RATE_TYPE,
-                tgt.CROSS_CURRENCY_RATE_TYPE = src.CROSS_CURRENCY_RATE_TYPE,
-                tgt.CLEARING_DATE = parse_date(src.CLEARING_DATE_STR),
-                tgt.CLEARING_AMOUNT = src.CLEARING_AMOUNT,
-                tgt.CLEARING_LEDGER_AMOUNT = src.CLEARING_LEDGER_AMOUNT,
-                tgt.CLEARING_CONVERSION_RATE = src.CLEARING_CONVERSION_RATE,
-                tgt.CLEARING_CONVERSION_DATE = parse_date(src.CLEARING_CONVERSION_DATE_STR),
-                tgt.CLEARING_CONVERSION_RATE_TYPE = src.CLEARING_CONVERSION_RATE_TYPE,
-                tgt.CLEARING_VALUE_DATE = parse_date(src.CLEARING_VALUE_DATE_STR),
-                tgt.MATURITY_CONVERSION_RATE_TYPE = src.MATURITY_CONVERSION_RATE_TYPE,
-                tgt.MATURITY_CONVERSION_DATE = parse_date(src.MATURITY_CONVERSION_DATE_STR),
-                tgt.MATURITY_CONVERSION_RATE = src.MATURITY_CONVERSION_RATE,
-                tgt.ACCOUNTING_STATUS = src.ACCOUNTING_STATUS,
-                tgt.RECONCILED_FLAG = CASE WHEN UPPER(src.RECONCILED_FLAG_RAW) IN ('TRUE', 'Y', '1') THEN 'Y' ELSE 'N' END,
-                tgt.SEPARATE_REMITTANCE_ADVICE_CREATED = src.SEPARATE_REMITTANCE_ADVICE_CREATED,
-                tgt.IBY_PAYMENT_STATUS = src.IBY_PAYMENT_STATUS,
-                tgt.LEGAL_ENTITY = src.LEGAL_ENTITY,
-                tgt.BUSINESS_UNIT = src.BUSINESS_UNIT,
-                tgt.PROCUREMENT_BU = src.PROCUREMENT_BU,
-                tgt.PAYEE = src.PAYEE,
-                tgt.PARTY_ID = src.PARTY_ID,
-                tgt.PAYEE_SITE = src.PAYEE_SITE,
-                tgt.SUPPLIER_NUMBER = src.SUPPLIER_NUMBER,
-                tgt.EMPLOYEE_ADDRESS = src.EMPLOYEE_ADDRESS,
-                tgt.THIRD_PARTY_SUPPLIER = src.THIRD_PARTY_SUPPLIER,
-                tgt.THIRD_PARTY_ADDRESS_NAME = src.THIRD_PARTY_ADDRESS_NAME,
-                tgt.EXTERNAL_BANK_ACCOUNT_ID = src.EXTERNAL_BANK_ACCOUNT_ID,
-                tgt.REMIT_TO_ACCOUNT_NUMBER = src.REMIT_TO_ACCOUNT_NUMBER,
-                tgt.DISBURSEMENT_BANK_ACCOUNT_NUMBER = src.DISBURSEMENT_BANK_ACCOUNT_NUMBER,
-                tgt.DISBURSEMENT_BANK_ACCOUNT_NAME = src.DISBURSEMENT_BANK_ACCOUNT_NAME,
-                tgt.FUNDING_CARD_ACCOUNT = src.FUNDING_CARD_ACCOUNT,
-                tgt.DIGITAL_PAYMENT_ACCOUNT = src.DIGITAL_PAYMENT_ACCOUNT,
-                tgt.PAYMENT_METHOD_CODE = src.PAYMENT_METHOD_CODE,
-                tgt.PAYMENT_METHOD = src.PAYMENT_METHOD,
-                tgt.PAYMENT_DOCUMENT = src.PAYMENT_DOCUMENT,
-                tgt.PAYMENT_PROCESS_PROFILE_CODE = src.PAYMENT_PROCESS_PROFILE_CODE,
-                tgt.PAYMENT_PROCESS_PROFILE = src.PAYMENT_PROCESS_PROFILE,
-                tgt.DOCUMENT_CATEGORY = src.DOCUMENT_CATEGORY,
-                tgt.DOCUMENT_SEQUENCE = src.DOCUMENT_SEQUENCE,
-                tgt.ADDRESS_LINE1 = src.ADDRESS_LINE1,
-                tgt.ADDRESS_LINE2 = src.ADDRESS_LINE2,
-                tgt.ADDRESS_LINE3 = src.ADDRESS_LINE3,
-                tgt.ADDRESS_LINE4 = src.ADDRESS_LINE4,
-                tgt.CITY = src.CITY,
-                tgt.COUNTY = src.COUNTY,
-                tgt.PROVINCE = src.PROVINCE,
-                tgt.STATE = src.STATE,
-                tgt.COUNTRY = src.COUNTRY,
-                tgt.ZIP = src.ZIP,
-                tgt.STOP_REASON = src.STOP_REASON,
-                tgt.STOP_REFERENCE = src.STOP_REFERENCE,
-                tgt.CREATED_BY = src.CREATED_BY,
-                tgt.CREATION_DATE = parse_timestamp(src.CREATION_DATE_STR),
-                tgt.LAST_UPDATED_BY = src.LAST_UPDATED_BY,
-                tgt.LAST_UPDATE_DATE = parse_timestamp(src.LAST_UPDATE_DATE_STR),
-                tgt.LAST_UPDATE_LOGIN = src.LAST_UPDATE_LOGIN,
-                tgt.LOCAL_UPDATED_DATE = SYSTIMESTAMP,
-                tgt.SYNC_STATUS = 'SYNCED'
+                PAYMENT_ID = v_payment_id,
+                PAYMENT_REFERENCE = v_payment_reference,
+                PAPER_DOCUMENT_NUMBER = v_paper_document_number,
+                PAYMENT_NUMBER = v_payment_number,
+                PAYMENT_FILE_REFERENCE = v_payment_file_reference,
+                PAYMENT_PROCESS_REQUEST = v_payment_process_request,
+                VOUCHER_NUMBER = v_voucher_number,
+                PAYMENT_AMOUNT = v_payment_amount,
+                PAYMENT_BASE_AMOUNT = v_payment_base_amount,
+                WITHHELD_AMOUNT = v_withheld_amount,
+                BANK_CHARGE_AMOUNT = v_bank_charge_amount,
+                PAYMENT_DATE = v_payment_date,
+                ACCOUNTING_DATE = v_accounting_date,
+                MATURITY_DATE = v_maturity_date,
+                ANTICIPATED_VALUE_DATE = v_anticipated_value_date,
+                STOP_DATE = v_stop_date,
+                VOID_DATE = v_void_date,
+                VOID_ACCOUNTING_DATE = v_void_accounting_date,
+                PAYMENT_DESCRIPTION = v_payment_description,
+                PAYMENT_STATUS = v_payment_status,
+                PAYMENT_TYPE = v_payment_type,
+                PAYMENT_MODE = v_payment_mode,
+                PAYMENT_FUNCTION = v_payment_function,
+                PAYMENT_CURRENCY = v_payment_currency,
+                PAYMENT_BASE_CURRENCY = v_payment_base_currency,
+                CONVERSION_RATE = v_conversion_rate,
+                CONVERSION_DATE = v_conversion_date,
+                CONVERSION_RATE_TYPE = v_conversion_rate_type,
+                CROSS_CURRENCY_RATE_TYPE = v_cross_currency_rate_type,
+                CLEARING_DATE = v_clearing_date,
+                CLEARING_AMOUNT = v_clearing_amount,
+                CLEARING_LEDGER_AMOUNT = v_clearing_ledger_amount,
+                CLEARING_CONVERSION_RATE = v_clearing_conversion_rate,
+                CLEARING_CONVERSION_DATE = v_clearing_conversion_date,
+                CLEARING_CONVERSION_RATE_TYPE = v_clearing_conv_rate_type,
+                CLEARING_VALUE_DATE = v_clearing_value_date,
+                MATURITY_CONVERSION_RATE_TYPE = v_maturity_conv_rate_type,
+                MATURITY_CONVERSION_DATE = v_maturity_conversion_date,
+                MATURITY_CONVERSION_RATE = v_maturity_conversion_rate,
+                ACCOUNTING_STATUS = v_accounting_status,
+                RECONCILED_FLAG = v_reconciled_flag,
+                SEPARATE_REMITTANCE_ADVICE_CREATED = v_separate_remit_advice,
+                IBY_PAYMENT_STATUS = v_iby_payment_status,
+                LEGAL_ENTITY = v_legal_entity,
+                BUSINESS_UNIT = v_business_unit,
+                PROCUREMENT_BU = v_procurement_bu,
+                PAYEE = v_payee,
+                PARTY_ID = v_party_id,
+                PAYEE_SITE = v_payee_site,
+                SUPPLIER_NUMBER = v_supplier_number,
+                EMPLOYEE_ADDRESS = v_employee_address,
+                THIRD_PARTY_SUPPLIER = v_third_party_supplier,
+                THIRD_PARTY_ADDRESS_NAME = v_third_party_address_name,
+                EXTERNAL_BANK_ACCOUNT_ID = v_external_bank_account_id,
+                REMIT_TO_ACCOUNT_NUMBER = v_remit_to_account_number,
+                DISBURSEMENT_BANK_ACCOUNT_NUMBER = v_disb_bank_account_number,
+                DISBURSEMENT_BANK_ACCOUNT_NAME = v_disb_bank_account_name,
+                FUNDING_CARD_ACCOUNT = v_funding_card_account,
+                DIGITAL_PAYMENT_ACCOUNT = v_digital_payment_account,
+                PAYMENT_METHOD_CODE = v_payment_method_code,
+                PAYMENT_METHOD = v_payment_method,
+                PAYMENT_DOCUMENT = v_payment_document,
+                PAYMENT_PROCESS_PROFILE_CODE = v_payment_process_profile_code,
+                PAYMENT_PROCESS_PROFILE = v_payment_process_profile,
+                DOCUMENT_CATEGORY = v_document_category,
+                DOCUMENT_SEQUENCE = v_document_sequence,
+                ADDRESS_LINE1 = v_address_line1,
+                ADDRESS_LINE2 = v_address_line2,
+                ADDRESS_LINE3 = v_address_line3,
+                ADDRESS_LINE4 = v_address_line4,
+                CITY = v_city,
+                COUNTY = v_county,
+                PROVINCE = v_province,
+                STATE = v_state,
+                COUNTRY = v_country,
+                ZIP = v_zip,
+                STOP_REASON = v_stop_reason,
+                STOP_REFERENCE = v_stop_reference,
+                CREATED_BY = v_created_by,
+                CREATION_DATE = v_creation_date,
+                LAST_UPDATED_BY = v_last_updated_by,
+                LAST_UPDATE_DATE = v_last_update_date,
+                LAST_UPDATE_LOGIN = v_last_update_login,
+                LOCAL_UPDATED_DATE = SYSTIMESTAMP,
+                SYNC_STATUS = 'SYNCED'
         WHEN NOT MATCHED THEN
             INSERT (
                 CHECK_ID, PAYMENT_ID, PAYMENT_REFERENCE, PAPER_DOCUMENT_NUMBER,
@@ -306,36 +512,30 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
                 LOCAL_CREATED_DATE, LOCAL_UPDATED_DATE, SYNC_STATUS
             )
             VALUES (
-                src.CHECK_ID, src.PAYMENT_ID, src.PAYMENT_REFERENCE, src.PAPER_DOCUMENT_NUMBER,
-                src.PAYMENT_NUMBER, src.PAYMENT_FILE_REFERENCE, src.PAYMENT_PROCESS_REQUEST, src.VOUCHER_NUMBER,
-                src.PAYMENT_AMOUNT, src.PAYMENT_BASE_AMOUNT, src.WITHHELD_AMOUNT, src.BANK_CHARGE_AMOUNT,
-                parse_date(src.PAYMENT_DATE_STR), parse_date(src.ACCOUNTING_DATE_STR),
-                parse_date(src.MATURITY_DATE_STR), parse_date(src.ANTICIPATED_VALUE_DATE_STR),
-                parse_date(src.STOP_DATE_STR), parse_date(src.VOID_DATE_STR), parse_date(src.VOID_ACCOUNTING_DATE_STR),
-                src.PAYMENT_DESCRIPTION, src.PAYMENT_STATUS, src.PAYMENT_TYPE, src.PAYMENT_MODE, src.PAYMENT_FUNCTION,
-                src.PAYMENT_CURRENCY, src.PAYMENT_BASE_CURRENCY, src.CONVERSION_RATE,
-                parse_date(src.CONVERSION_DATE_STR), src.CONVERSION_RATE_TYPE, src.CROSS_CURRENCY_RATE_TYPE,
-                parse_date(src.CLEARING_DATE_STR), src.CLEARING_AMOUNT, src.CLEARING_LEDGER_AMOUNT,
-                src.CLEARING_CONVERSION_RATE, parse_date(src.CLEARING_CONVERSION_DATE_STR),
-                src.CLEARING_CONVERSION_RATE_TYPE, parse_date(src.CLEARING_VALUE_DATE_STR),
-                src.MATURITY_CONVERSION_RATE_TYPE, parse_date(src.MATURITY_CONVERSION_DATE_STR),
-                src.MATURITY_CONVERSION_RATE,
-                src.ACCOUNTING_STATUS,
-                CASE WHEN UPPER(src.RECONCILED_FLAG_RAW) IN ('TRUE', 'Y', '1') THEN 'Y' ELSE 'N' END,
-                src.SEPARATE_REMITTANCE_ADVICE_CREATED, src.IBY_PAYMENT_STATUS,
-                src.LEGAL_ENTITY, src.BUSINESS_UNIT, src.PROCUREMENT_BU,
-                src.PAYEE, src.PARTY_ID, src.PAYEE_SITE, src.SUPPLIER_NUMBER, src.EMPLOYEE_ADDRESS,
-                src.THIRD_PARTY_SUPPLIER, src.THIRD_PARTY_ADDRESS_NAME,
-                src.EXTERNAL_BANK_ACCOUNT_ID, src.REMIT_TO_ACCOUNT_NUMBER, src.DISBURSEMENT_BANK_ACCOUNT_NUMBER,
-                src.DISBURSEMENT_BANK_ACCOUNT_NAME, src.FUNDING_CARD_ACCOUNT, src.DIGITAL_PAYMENT_ACCOUNT,
-                src.PAYMENT_METHOD_CODE, src.PAYMENT_METHOD, src.PAYMENT_DOCUMENT,
-                src.PAYMENT_PROCESS_PROFILE_CODE, src.PAYMENT_PROCESS_PROFILE,
-                src.DOCUMENT_CATEGORY, src.DOCUMENT_SEQUENCE,
-                src.ADDRESS_LINE1, src.ADDRESS_LINE2, src.ADDRESS_LINE3, src.ADDRESS_LINE4,
-                src.CITY, src.COUNTY, src.PROVINCE, src.STATE, src.COUNTRY, src.ZIP,
-                src.STOP_REASON, src.STOP_REFERENCE,
-                src.CREATED_BY, parse_timestamp(src.CREATION_DATE_STR),
-                src.LAST_UPDATED_BY, parse_timestamp(src.LAST_UPDATE_DATE_STR), src.LAST_UPDATE_LOGIN,
+                v_check_id, v_payment_id, v_payment_reference, v_paper_document_number,
+                v_payment_number, v_payment_file_reference, v_payment_process_request, v_voucher_number,
+                v_payment_amount, v_payment_base_amount, v_withheld_amount, v_bank_charge_amount,
+                v_payment_date, v_accounting_date, v_maturity_date, v_anticipated_value_date,
+                v_stop_date, v_void_date, v_void_accounting_date,
+                v_payment_description, v_payment_status, v_payment_type, v_payment_mode, v_payment_function,
+                v_payment_currency, v_payment_base_currency, v_conversion_rate, v_conversion_date, v_conversion_rate_type,
+                v_cross_currency_rate_type,
+                v_clearing_date, v_clearing_amount, v_clearing_ledger_amount, v_clearing_conversion_rate,
+                v_clearing_conversion_date, v_clearing_conv_rate_type, v_clearing_value_date,
+                v_maturity_conv_rate_type, v_maturity_conversion_date, v_maturity_conversion_rate,
+                v_accounting_status, v_reconciled_flag, v_separate_remit_advice, v_iby_payment_status,
+                v_legal_entity, v_business_unit, v_procurement_bu,
+                v_payee, v_party_id, v_payee_site, v_supplier_number, v_employee_address,
+                v_third_party_supplier, v_third_party_address_name,
+                v_external_bank_account_id, v_remit_to_account_number, v_disb_bank_account_number,
+                v_disb_bank_account_name, v_funding_card_account, v_digital_payment_account,
+                v_payment_method_code, v_payment_method, v_payment_document,
+                v_payment_process_profile_code, v_payment_process_profile,
+                v_document_category, v_document_sequence,
+                v_address_line1, v_address_line2, v_address_line3, v_address_line4,
+                v_city, v_county, v_province, v_state, v_country, v_zip,
+                v_stop_reason, v_stop_reference,
+                v_created_by, v_creation_date, v_last_updated_by, v_last_update_date, v_last_update_login,
                 SYSTIMESTAMP, SYSTIMESTAMP, 'SYNCED'
             );
 
@@ -355,7 +555,6 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
     ) IS
         v_count NUMBER := 0;
         v_errors NUMBER := 0;
-        v_payment_json CLOB;
         v_result VARCHAR2(4000);
     BEGIN
         -- Loop through JSON array
