@@ -283,17 +283,27 @@ const insertPaymentToApex = async (
       items: [paymentWithoutLinks]
     };
 
+    // ALWAYS log the URLs being called (for debugging 404 issues)
+    log?.('step', `════════════════════════════════════════════════════════════`);
+    log?.('step', `  POSTING PAYMENT: ${payment.PaymentNumber || payment.CheckNumber} (ID: ${payment.CheckId})`);
+    log?.('step', `════════════════════════════════════════════════════════════`);
+    log?.('info', `FULL APEX URL: ${apexUrl}`);
+    log?.('info', `FULL PROXY URL: ${url}`);
+    log?.('info', `Check ID: ${payment.CheckId}`);
+    log?.('info', `Payment Number: ${payment.PaymentNumber || payment.CheckNumber}`);
+    log?.('info', `Payee: ${payment.Payee}`);
+    log?.('info', `Supplier Number: ${payment.SupplierNumber}`);
+    log?.('info', `Amount: ${payment.PaymentAmount} ${payment.PaymentCurrency}`);
+    log?.('info', `Payment Date: ${payment.PaymentDate}`);
+    log?.('info', `Payment Status: ${payment.PaymentStatus}`);
+    log?.('info', `Business Unit: ${payment.BusinessUnit}`);
+
     if (verbose) {
-      log?.('step', `──── [POST] APEX - Payment ${payment.PaymentNumber || payment.CheckNumber} (ID: ${payment.CheckId}) ────`);
-      log?.('info', `APEX URL: ${apexUrl}`);
-      log?.('info', `Proxy URL: ${url}`);
-      log?.('info', `Check ID: ${payment.CheckId}`);
-      log?.('info', `Payment Number: ${payment.PaymentNumber || payment.CheckNumber}`);
-      log?.('info', `Payee: ${payment.Payee}`);
-      log?.('info', `Amount: ${payment.PaymentAmount} ${payment.PaymentCurrency}`);
-      log?.('step', `──── POST PAYLOAD ────`);
+      log?.('step', `──── POST PAYLOAD (Full JSON) ────`);
       log?.('info', JSON.stringify(payload, null, 2));
     }
+
+    log?.('info', `Sending POST request...`);
 
     const response = await fetch(url, {
       method: 'POST',
@@ -303,11 +313,9 @@ const insertPaymentToApex = async (
 
     const data = await response.json();
 
-    if (verbose) {
-      log?.('step', `──── POST RESPONSE ────`);
-      log?.('info', `HTTP Status: ${response.status}`);
-      log?.('success', JSON.stringify(data, null, 2));
-    }
+    log?.('step', `──── POST RESPONSE ────`);
+    log?.('info', `HTTP Status: ${response.status}`);
+    log?.(response.status === 200 || response.status === 201 ? 'success' : 'error', `Response: ${JSON.stringify(data, null, 2)}`);
 
     // Check for success
     const isSuccess = data.status === 'success' || data.status === 'SUCCESS' ||
@@ -316,7 +324,7 @@ const insertPaymentToApex = async (
 
     return {
       success: isSuccess,
-      error: isSuccess ? undefined : (data.message || data.error || 'No payments inserted'),
+      error: isSuccess ? undefined : (data.message || data.error || data.details || `HTTP ${response.status}: No payments inserted`),
       response: data,
       payload: payload,
     };
