@@ -186,7 +186,10 @@ const insertRelatedInvoicesToApex = async (
     if (verbose) {
       log?.('step', `──── [POST] APEX - Related Invoices for Payment ${checkId} (${invoices.length} invoices) ────`);
       log?.('info', `APEX URL: ${apexUrl}`);
+      log?.('info', `Proxy URL: ${url}`);
       log?.('info', `Invoices count: ${invoices.length}`);
+      log?.('step', `──── POST PAYLOAD ────`);
+      log?.('info', JSON.stringify(payload, null, 2));
     }
 
     const response = await fetch(url, {
@@ -283,10 +286,13 @@ const insertPaymentToApex = async (
     if (verbose) {
       log?.('step', `──── [POST] APEX - Payment ${payment.PaymentNumber || payment.CheckNumber} (ID: ${payment.CheckId}) ────`);
       log?.('info', `APEX URL: ${apexUrl}`);
+      log?.('info', `Proxy URL: ${url}`);
       log?.('info', `Check ID: ${payment.CheckId}`);
       log?.('info', `Payment Number: ${payment.PaymentNumber || payment.CheckNumber}`);
       log?.('info', `Payee: ${payment.Payee}`);
       log?.('info', `Amount: ${payment.PaymentAmount} ${payment.PaymentCurrency}`);
+      log?.('step', `──── POST PAYLOAD ────`);
+      log?.('info', JSON.stringify(payload, null, 2));
     }
 
     const response = await fetch(url, {
