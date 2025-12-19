@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Layout, Dropdown, Avatar, Space, Typography, Tooltip, Badge, Button } from 'antd';
+import { Layout, Dropdown, Avatar, Space, Typography, Tooltip, Badge, Button, Modal } from 'antd';
 import {
   UserOutlined,
   LogoutOutlined,
@@ -11,6 +11,8 @@ import {
   EyeOutlined,
   BellOutlined,
   DownloadOutlined,
+  ShareAltOutlined,
+  PlusSquareOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -21,6 +23,18 @@ interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
 }
+
+// Detect iOS device
+const isIOS = () => {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+};
+
+// Detect if in standalone mode (already installed)
+const isInStandaloneMode = () => {
+  return window.matchMedia('(display-mode: standalone)').matches ||
+    (window.navigator as any).standalone === true;
+};
 
 const { Content } = Layout;
 const { Text } = Typography;
@@ -33,23 +47,33 @@ const MainLayout: React.FC = () => {
   const navigate = useNavigate();
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
+  const [showIOSModal, setShowIOSModal] = useState(false);
+  const [showInstallButton, setShowInstallButton] = useState(false);
 
   // Listen for PWA install prompt
   useEffect(() => {
     // Check if already installed
-    if (window.matchMedia('(display-mode: standalone)').matches) {
+    if (isInStandaloneMode()) {
       setIsInstalled(true);
+      return;
+    }
+
+    // Show install button for iOS (manual instructions needed)
+    if (isIOS()) {
+      setShowInstallButton(true);
       return;
     }
 
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
       setInstallPrompt(e as BeforeInstallPromptEvent);
+      setShowInstallButton(true);
     };
 
     const handleAppInstalled = () => {
       setIsInstalled(true);
       setInstallPrompt(null);
+      setShowInstallButton(false);
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
@@ -62,6 +86,13 @@ const MainLayout: React.FC = () => {
   }, []);
 
   const handleInstallClick = async () => {
+    // iOS - show instructions modal
+    if (isIOS()) {
+      setShowIOSModal(true);
+      return;
+    }
+
+    // Android/Desktop - use native prompt
     if (!installPrompt) return;
 
     await installPrompt.prompt();
@@ -69,6 +100,7 @@ const MainLayout: React.FC = () => {
 
     if (outcome === 'accepted') {
       setInstallPrompt(null);
+      setShowInstallButton(false);
     }
   };
 
@@ -119,9 +151,9 @@ const MainLayout: React.FC = () => {
 
         {/* Right side - Icons */}
         <Space size={4}>
-          {/* Install App Button - only shows when installable */}
-          {installPrompt && !isInstalled && (
-            <Tooltip title="Install Desktop App">
+          {/* Install App Button - shows on iOS, Android, and Desktop when installable */}
+          {showInstallButton && !isInstalled && (
+            <Tooltip title="Install App">
               <Button
                 type="text"
                 icon={<DownloadOutlined style={{ fontSize: 18, color: '#fff' }} />}
@@ -187,6 +219,88 @@ const MainLayout: React.FC = () => {
       <Content>
         <Outlet />
       </Content>
+
+      {/* iOS Install Instructions Modal */}
+      <Modal
+        title="Install ReactERP App"
+        open={showIOSModal}
+        onCancel={() => setShowIOSModal(false)}
+        footer={[
+          <Button key="close" type="primary" onClick={() => setShowIOSModal(false)}>
+            Got it!
+          </Button>
+        ]}
+      >
+        <div style={{ textAlign: 'center', padding: '20px 0' }}>
+          <Text style={{ fontSize: 16, display: 'block', marginBottom: 24 }}>
+            Install ReactERP on your iPhone/iPad:
+          </Text>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20, textAlign: 'left' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <div style={{
+                width: 40,
+                height: 40,
+                borderRadius: 8,
+                background: '#f0f0f0',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+                <ShareAltOutlined style={{ fontSize: 20, color: '#0572CE' }} />
+              </div>
+              <div>
+                <Text strong>Step 1:</Text>
+                <Text style={{ display: 'block' }}>
+                  Tap the <ShareAltOutlined /> Share button in Safari
+                </Text>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <div style={{
+                width: 40,
+                height: 40,
+                borderRadius: 8,
+                background: '#f0f0f0',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+                <PlusSquareOutlined style={{ fontSize: 20, color: '#0572CE' }} />
+              </div>
+              <div>
+                <Text strong>Step 2:</Text>
+                <Text style={{ display: 'block' }}>
+                  Scroll down and tap "Add to Home Screen"
+                </Text>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <div style={{
+                width: 40,
+                height: 40,
+                borderRadius: 8,
+                background: REDWOOD_PRIMARY,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#fff',
+                fontWeight: 'bold',
+              }}>
+                R
+              </div>
+              <div>
+                <Text strong>Step 3:</Text>
+                <Text style={{ display: 'block' }}>
+                  Tap "Add" to install the app
+                </Text>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Modal>
     </Layout>
   );
 };
