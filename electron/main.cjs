@@ -130,7 +130,7 @@ function createWindow() {
     height: 900,
     minWidth: 1024,
     minHeight: 768,
-    icon: path.join(__dirname, '../public/icon-512.png'),
+    icon: path.join(__dirname, '../public/icons/icon-512.png'),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -404,7 +404,7 @@ function showNotification(title, body, type = 'info') {
     const notification = new Notification({
       title: title,
       body: body,
-      icon: path.join(__dirname, '../public/icon-512.png'),
+      icon: path.join(__dirname, '../public/icons/icon-512.png'),
       silent: false,
     });
 
