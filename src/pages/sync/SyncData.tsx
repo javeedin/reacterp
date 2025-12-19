@@ -44,6 +44,7 @@ import { syncGLJournals, testGLConnection, type SyncProgress, type LogCallback, 
 import { syncAPInvoices, testAPConnection, type APSyncProgress, type InvoicePayloadCallback } from '../../services/ap-sync.service';
 import { syncAPPayments, testAPPaymentsConnection, type APPaymentsSyncProgress, type PaymentPayloadCallback } from '../../services/ap-payments-sync.service';
 import Autopilot from '../../components/Autopilot';
+import { useElectron } from '../../hooks/useElectron';
 
 // Icon imports for AP
 import { FileSearchOutlined, BranchesOutlined } from '@ant-design/icons';
@@ -142,6 +143,9 @@ const SyncData: React.FC = () => {
 
   // Payment payload state (for AP Payments debug - reserved for future use)
   const [, setPaymentPayloads] = useState<PaymentPayloadLog[]>([]);
+
+  // Electron notifications
+  const { notifySyncStarted, notifySyncCompleted, notifySyncError, notifySyncProgress } = useElectron();
 
   // GL Progress State
   const [progress, setProgress] = useState<SyncProgress>({
@@ -648,6 +652,12 @@ const SyncData: React.FC = () => {
     setPaymentPayloads([]);
     logCounterRef.current = 0;
 
+    // Notify Electron that sync started
+    const syncTypeName = selectedObject?.name || 'Data';
+    notifySyncStarted(syncTypeName);
+
+    let syncResult: { inserted: number; errors: number; type: string } = { inserted: 0, errors: 0, type: '' };
+
     if (isAPPayments) {
       // AP Payments Sync
       setApPaymentsProgress({
@@ -666,14 +676,21 @@ const SyncData: React.FC = () => {
         endTime: null,
       });
 
-      await syncAPPayments(
+      const result = await syncAPPayments(
         parameters,
         testMode,
         addLog,
-        (newProgress) => setApPaymentsProgress((prev) => ({ ...prev, ...newProgress })),
+        (newProgress) => {
+          setApPaymentsProgress((prev) => ({ ...prev, ...newProgress }));
+          // Update tray with progress
+          if (newProgress.processedPayments !== undefined && newProgress.totalPayments) {
+            notifySyncProgress(`${newProgress.processedPayments}/${newProgress.totalPayments} payments`);
+          }
+        },
         abortControllerRef.current.signal,
         handlePaymentPayload
       );
+      syncResult = { inserted: result.insertedPayments, errors: result.errors, type: 'payments' };
     } else if (isAPInvoices) {
       // AP Invoices Sync
       setApProgress({
@@ -696,14 +713,20 @@ const SyncData: React.FC = () => {
         endTime: null,
       });
 
-      await syncAPInvoices(
+      const result = await syncAPInvoices(
         parameters,
         testMode,
         addLog,
-        (newProgress) => setApProgress((prev) => ({ ...prev, ...newProgress })),
+        (newProgress) => {
+          setApProgress((prev) => ({ ...prev, ...newProgress }));
+          if (newProgress.processedInvoices !== undefined && newProgress.totalInvoices) {
+            notifySyncProgress(`${newProgress.processedInvoices}/${newProgress.totalInvoices} invoices`);
+          }
+        },
         abortControllerRef.current.signal,
         handleInvoicePayload
       );
+      syncResult = { inserted: result.insertedInvoices, errors: result.errors, type: 'invoices' };
     } else {
       // GL Journals Sync
       setProgress({
@@ -732,14 +755,27 @@ const SyncData: React.FC = () => {
       addLog('step', `  GL JOURNAL SYNC - ${modeLabel}`);
       addLog('step', '═══════════════════════════════════════════════════════════');
 
-      await syncGLJournals(
+      const result = await syncGLJournals(
         parameters,
         testMode,
         addLog,
-        (newProgress) => setProgress((prev) => ({ ...prev, ...newProgress })),
+        (newProgress) => {
+          setProgress((prev) => ({ ...prev, ...newProgress }));
+          if (newProgress.processedBatches !== undefined && newProgress.totalBatches) {
+            notifySyncProgress(`${newProgress.processedBatches}/${newProgress.totalBatches} batches`);
+          }
+        },
         abortControllerRef.current.signal,
         handleBatchPayload
       );
+      syncResult = { inserted: result.totalBatchesInserted + result.totalHeadersInserted + result.totalLinesInserted, errors: result.errors, type: 'records' };
+    }
+
+    // Notify Electron of sync completion
+    if (syncResult.errors > 0) {
+      notifySyncError(`Sync completed with ${syncResult.errors} errors. ${syncResult.inserted} ${syncResult.type} inserted.`);
+    } else {
+      notifySyncCompleted(`${syncResult.inserted} ${syncResult.type} synced successfully!`);
     }
 
     isSyncingRef.current = false;
