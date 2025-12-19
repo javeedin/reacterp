@@ -720,7 +720,7 @@ const Home: React.FC = () => {
                   fontSize: 24,
                   flexShrink: 0,
                 }}>
-                  {React.cloneElement(module.icon as React.ReactElement, { style: { fontSize: 24 } })}
+                  {React.isValidElement(module.icon) && React.cloneElement(module.icon as React.ReactElement<{ style?: React.CSSProperties }>, { style: { fontSize: 24 } })}
                 </div>
                 <div style={{ flex: 1 }}>
                   <Text strong style={{ display: 'block', color: REDWOOD.neutral900, fontSize: 15 }}>

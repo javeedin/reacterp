@@ -125,7 +125,7 @@ export const searchJournals = async (
 
     if (useProxy) {
       // Use proxy server
-      response = await fetch(`${PROXY_CONFIG.proxyUrl}/api/apex/gl/journals${queryString ? '?' + queryString : ''}`, {
+      response = await fetch(`${PROXY_CONFIG.baseUrl}/apex/gl/journals${queryString ? '?' + queryString : ''}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -173,7 +173,7 @@ export const getJournalLines = async (
     let response: Response;
 
     if (useProxy) {
-      response = await fetch(`${PROXY_CONFIG.proxyUrl}/api/apex/gl/journals/${jeHeaderId}/lines`, {
+      response = await fetch(`${PROXY_CONFIG.baseUrl}/apex/gl/journals/${jeHeaderId}/lines`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -218,7 +218,7 @@ export const getLookupValues = async (
     let response: Response;
 
     if (useProxy) {
-      response = await fetch(`${PROXY_CONFIG.proxyUrl}/api/apex/gl/lookups/${lookupType}`, {
+      response = await fetch(`${PROXY_CONFIG.baseUrl}/apex/gl/lookups/${lookupType}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',

@@ -59,7 +59,7 @@ import type { ColumnsType } from 'antd/es/table';
 import Autopilot from '../../components/Autopilot';
 
 const { Content } = Layout;
-const { Title, Text } = Typography;
+const { Text } = Typography;
 const { Option } = Select;
 const { Panel } = Collapse;
 
@@ -297,7 +297,7 @@ const ManageJournals: React.FC = () => {
     }
   };
 
-  const handleMenuItemClick = (key: string, path?: string) => {
+  const handleMenuItemClick = (_key: string, path?: string) => {
     closePanel();
     if (path) {
       navigate(path);

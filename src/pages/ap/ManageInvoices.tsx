@@ -27,7 +27,6 @@ import {
   SearchOutlined,
   ReloadOutlined,
   SaveOutlined,
-  PlusOutlined,
   EditOutlined,
   DeleteOutlined,
   DownOutlined,
@@ -706,7 +705,7 @@ const ManageInvoices: React.FC = () => {
               }}
               scroll={{ x: 1800 }}
               size="small"
-              rowClassName={(record, index) => index % 2 === 0 ? '' : 'table-row-light'}
+              rowClassName={(_record, index) => index % 2 === 0 ? '' : 'table-row-light'}
               onRow={(record) => ({
                 onDoubleClick: () => openInvoiceTab(record),
                 style: { cursor: 'pointer' },

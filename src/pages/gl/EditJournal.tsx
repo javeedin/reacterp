@@ -4,7 +4,6 @@ import {
   Card,
   Form,
   Select,
-  Input,
   Button,
   Space,
   Typography,
@@ -228,17 +227,16 @@ const mapToJournalData = (journal: any): JournalData => ({
 });
 
 const EditJournal: React.FC = () => {
-  const { id, batchId } = useParams<{ id?: string; batchId?: string }>();
+  const { batchId } = useParams<{ id?: string; batchId?: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const [form] = Form.useForm();
+  const [, /* form */] = Form.useForm();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [selectedLineKeys, setSelectedLineKeys] = useState<React.Key[]>([]);
 
   // Get data passed from ManageJournals
   const passedJournal = (location.state as { journal?: any })?.journal;
-  const passedBatch = (location.state as { batch?: any })?.batch;
   const passedBatchJournals = (location.state as { batchJournals?: any[] })?.batchJournals;
 
   // Determine if this is batch mode (multiple journals)
@@ -517,7 +515,6 @@ const EditJournal: React.FC = () => {
 
     // Colors
     const primaryColor: [number, number, number] = [199, 70, 52]; // #C74634
-    const headerBg: [number, number, number] = [245, 245, 245];
     const textColor: [number, number, number] = [26, 26, 26];
 
     let yPos = 15;
@@ -715,7 +712,8 @@ const EditJournal: React.FC = () => {
     const isBalanced = Math.abs(totals.enteredDr - totals.enteredCr) < 0.01;
     doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(...(isBalanced ? [29, 123, 77] : primaryColor)); // Green if balanced, Red if not
+    const balanceColor: [number, number, number] = isBalanced ? [29, 123, 77] : primaryColor;
+    doc.setTextColor(...balanceColor); // Green if balanced, Red if not
     doc.text(
       isBalanced ? '✓ Journal is Balanced' : '✗ Journal is NOT Balanced',
       14,

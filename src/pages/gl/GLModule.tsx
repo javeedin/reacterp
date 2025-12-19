@@ -10,7 +10,6 @@ import {
   SwapOutlined,
   AuditOutlined,
   BookOutlined,
-  BankOutlined,
   CalendarOutlined,
   DollarOutlined,
   ReconciliationOutlined,

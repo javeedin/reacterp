@@ -38,8 +38,6 @@ import {
   SettingOutlined,
   ScissorOutlined,
   PlusOutlined,
-  BankOutlined,
-  CheckCircleOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
