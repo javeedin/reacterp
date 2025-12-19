@@ -96,7 +96,7 @@ export type PaymentPayloadCallback = (
 ) => void;
 
 // APEX endpoints for AP Payments
-const APEX_PAYMENTS_ENDPOINT = 'ap/payments';
+const APEX_PAYMENTS_ENDPOINT = 'ap/createpayment';
 const APEX_RELATED_INVOICES_ENDPOINT = 'ap/payments/related-invoices';
 
 // Fetch related invoices for a payment from Oracle Fusion via proxy
