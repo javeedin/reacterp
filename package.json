@@ -58,7 +58,8 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
-      "public/**/*"
+      "public/**/*",
+      "server/**/*"
     ],
     "win": {
       "target": ["portable"],

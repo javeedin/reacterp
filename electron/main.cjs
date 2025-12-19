@@ -1,11 +1,66 @@
 const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, Notification, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { spawn } = require('child_process');
 
 let mainWindow;
 let tray = null;
 let isQuitting = false;
 let isSyncing = false;
+let proxyServer = null;
+
+// Start the proxy server
+function startProxyServer() {
+  const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+
+  let serverPath;
+  if (isDev) {
+    serverPath = path.join(__dirname, '../server/proxy.cjs');
+  } else {
+    // In production, server is in the app resources
+    serverPath = path.join(app.getAppPath(), 'server', 'proxy.cjs');
+  }
+
+  console.log('Starting proxy server from:', serverPath);
+
+  if (fs.existsSync(serverPath)) {
+    proxyServer = spawn('node', [serverPath], {
+      cwd: isDev ? path.join(__dirname, '..') : app.getAppPath(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    proxyServer.stdout.on('data', (data) => {
+      console.log('Proxy:', data.toString().trim());
+    });
+
+    proxyServer.stderr.on('data', (data) => {
+      console.error('Proxy Error:', data.toString().trim());
+    });
+
+    proxyServer.on('close', (code) => {
+      console.log('Proxy server exited with code:', code);
+      proxyServer = null;
+    });
+
+    proxyServer.on('error', (err) => {
+      console.error('Failed to start proxy server:', err);
+      proxyServer = null;
+    });
+
+    console.log('Proxy server started');
+  } else {
+    console.error('Proxy server not found at:', serverPath);
+  }
+}
+
+// Stop the proxy server
+function stopProxyServer() {
+  if (proxyServer) {
+    console.log('Stopping proxy server...');
+    proxyServer.kill();
+    proxyServer = null;
+  }
+}
 
 // Get config file path
 function getConfigPath() {
@@ -513,8 +568,14 @@ ipcMain.on('show-notification', (event, title, body) => {
 
 // App lifecycle
 app.whenReady().then(() => {
-  createWindow();
-  createTray();
+  // Start proxy server first
+  startProxyServer();
+
+  // Give proxy server a moment to start, then create window
+  setTimeout(() => {
+    createWindow();
+    createTray();
+  }, 1000);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -533,6 +594,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   isQuitting = true;
+  stopProxyServer();
 });
 
 // Handle certificate errors in development
