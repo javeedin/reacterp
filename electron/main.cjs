@@ -1,10 +1,127 @@
 const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, Notification, nativeImage } = require('electron');
 const path = require('path');
+const fs = require('fs');
 
 let mainWindow;
 let tray = null;
 let isQuitting = false;
 let isSyncing = false;
+
+// Get config file path
+function getConfigPath() {
+  return path.join(app.getPath('userData'), 'config.json');
+}
+
+// Configure remote URL (prompt user)
+function configureRemoteUrl() {
+  const { BrowserWindow } = require('electron');
+
+  // Create a simple prompt dialog
+  const prompt = new BrowserWindow({
+    width: 500,
+    height: 200,
+    parent: mainWindow,
+    modal: true,
+    show: false,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+    },
+  });
+
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Configure Remote URL</title>
+      <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
+        h3 { margin-top: 0; color: #333; }
+        input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        .buttons { text-align: right; margin-top: 15px; }
+        button { padding: 8px 20px; margin-left: 10px; cursor: pointer; border-radius: 4px; }
+        .save { background: #C74634; color: white; border: none; }
+        .cancel { background: #ddd; border: none; }
+        .hint { font-size: 12px; color: #666; }
+      </style>
+    </head>
+    <body>
+      <h3>Configure Remote URL</h3>
+      <p class="hint">Enter the URL where ReactERP is hosted (e.g., GitHub Pages, Vercel, or your server)</p>
+      <input type="text" id="url" placeholder="https://your-domain.com/reacterp" />
+      <div class="buttons">
+        <button class="cancel" onclick="window.close()">Cancel</button>
+        <button class="save" onclick="save()">Save & Restart</button>
+      </div>
+      <script>
+        const { ipcRenderer } = require('electron');
+        function save() {
+          const url = document.getElementById('url').value;
+          if (url) {
+            ipcRenderer.send('save-remote-url', url);
+          }
+        }
+        // Load existing URL
+        ipcRenderer.on('load-url', (e, url) => {
+          if (url) document.getElementById('url').value = url;
+        });
+      </script>
+    </body>
+    </html>
+  `;
+
+  prompt.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(htmlContent));
+  prompt.once('ready-to-show', () => {
+    prompt.show();
+    // Send existing URL to the prompt
+    try {
+      const config = JSON.parse(fs.readFileSync(getConfigPath(), 'utf8'));
+      prompt.webContents.send('load-url', config.remoteUrl || '');
+    } catch (e) {
+      // No config
+    }
+  });
+}
+
+// Save remote URL and restart
+ipcMain.on('save-remote-url', (event, url) => {
+  const configPath = getConfigPath();
+  fs.writeFileSync(configPath, JSON.stringify({ remoteUrl: url }, null, 2));
+  dialog.showMessageBox({
+    type: 'info',
+    title: 'Configuration Saved',
+    message: 'Remote URL saved. The app will now restart.',
+  }).then(() => {
+    app.relaunch();
+    app.exit(0);
+  });
+});
+
+// Clear remote URL (use local files)
+function clearRemoteUrl() {
+  const configPath = getConfigPath();
+  try {
+    if (fs.existsSync(configPath)) {
+      fs.unlinkSync(configPath);
+      dialog.showMessageBox({
+        type: 'info',
+        title: 'Configuration Cleared',
+        message: 'Remote URL cleared. The app will restart and use local files.',
+      }).then(() => {
+        app.relaunch();
+        app.exit(0);
+      });
+    } else {
+      dialog.showMessageBox({
+        type: 'info',
+        title: 'Already Using Local Files',
+        message: 'The app is already configured to use local files.',
+      });
+    }
+  } catch (e) {
+    console.error('Error clearing config:', e);
+  }
+}
 
 // Create the main application window
 function createWindow() {
@@ -24,15 +141,48 @@ function createWindow() {
 
   // Load the app
   const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
-  if (isDev) {
+
+  // Check for remote config (Git-based loading)
+  const configPath = getConfigPath();
+  let remoteUrl = null;
+
+  try {
+    if (fs.existsSync(configPath)) {
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      remoteUrl = config.remoteUrl;
+      console.log('Loaded remote URL from config:', remoteUrl);
+    }
+  } catch (e) {
+    console.log('No remote config found, using local files');
+  }
+
+  if (remoteUrl) {
+    // Load from remote URL (Git Pages, Vercel, etc.)
+    console.log('Loading from remote URL:', remoteUrl);
+    mainWindow.loadURL(remoteUrl);
+  } else if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
-    mainWindow.webContents.openDevTools();
   } else {
     // In production, load from the dist folder relative to app root
     const indexPath = path.join(app.getAppPath(), 'dist', 'index.html');
-    console.log('Loading:', indexPath);
+    console.log('App path:', app.getAppPath());
+    console.log('Loading local file:', indexPath);
+    console.log('File exists:', fs.existsSync(indexPath));
     mainWindow.loadFile(indexPath);
   }
+
+  // Always open DevTools for debugging (remove this line later)
+  mainWindow.webContents.openDevTools();
+
+  // Log any load errors
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+    console.error('Failed to load:', validatedURL);
+    console.error('Error:', errorCode, errorDescription);
+  });
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    console.log('Page loaded successfully');
+  });
 
   // Show window when ready
   mainWindow.once('ready-to-show', () => {
@@ -143,6 +293,19 @@ function createTray() {
       label: 'Stop Sync',
       click: () => {
         mainWindow.webContents.send('stop-sync');
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'Configure Remote URL...',
+      click: () => {
+        configureRemoteUrl();
+      },
+    },
+    {
+      label: 'Use Local Files',
+      click: () => {
+        clearRemoteUrl();
       },
     },
     { type: 'separator' },
