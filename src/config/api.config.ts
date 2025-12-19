@@ -144,6 +144,59 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
     apexEndpoint: 'ar/customers',
     parameters: [],
   },
+  {
+    id: 'ap-payments',
+    name: 'AP Payments',
+    description: 'Sync AP Payments with Related Invoices from Oracle Fusion',
+    oracleEndpoint: 'payablesPayments',
+    apexEndpoint: 'ap/payments',
+    hasChildren: true,
+    childConfig: {
+      lines: {
+        linkName: 'relatedInvoices',
+        apexEndpoint: 'ap/payments/related-invoices',
+      },
+    },
+    parameters: [
+      {
+        key: 'BusinessUnit',
+        label: 'Business Unit',
+        type: 'text',
+        required: false,
+      },
+      {
+        key: 'PayeeNumber',
+        label: 'Payee Number',
+        type: 'text',
+        required: false,
+      },
+      {
+        key: 'PaymentStatus',
+        label: 'Payment Status',
+        type: 'select',
+        required: false,
+        options: [
+          { label: 'All', value: '' },
+          { label: 'Negotiable', value: 'NEGOTIABLE' },
+          { label: 'Voided', value: 'VOIDED' },
+          { label: 'Cleared', value: 'CLEARED' },
+          { label: 'Reconciled', value: 'RECONCILED' },
+        ],
+      },
+      {
+        key: 'PaymentDateFrom',
+        label: 'Payment Date From',
+        type: 'date',
+        required: false,
+      },
+      {
+        key: 'PaymentDateTo',
+        label: 'Payment Date To',
+        type: 'date',
+        required: false,
+      },
+    ],
+  },
 ];
 
 export type ApiType = 'REST' | 'SOAP';

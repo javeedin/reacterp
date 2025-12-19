@@ -39,9 +39,10 @@ import {
   BugOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import { SYNC_OBJECTS, ORACLE_FUSION_CONFIG, PROXY_CONFIG, APEX_DB_CONFIG, type SyncObjectConfig, type ApiType } from '../../config/api.config';
+import { SYNC_OBJECTS, PROXY_CONFIG, APEX_DB_CONFIG, type SyncObjectConfig, type ApiType } from '../../config/api.config';
 import { syncGLJournals, testGLConnection, type SyncProgress, type LogCallback, type BatchPayloadCallback } from '../../services/gl-sync.service';
 import { syncAPInvoices, testAPConnection, type APSyncProgress, type InvoicePayloadCallback } from '../../services/ap-sync.service';
+import { syncAPPayments, testAPPaymentsConnection, type APPaymentsSyncProgress, type PaymentPayloadCallback } from '../../services/ap-payments-sync.service';
 import Autopilot from '../../components/Autopilot';
 
 // Icon imports for AP
@@ -100,6 +101,20 @@ interface InvoicePayloadLog {
   linesError?: string;
 }
 
+// Interface for payment payload debugging
+interface PaymentPayloadLog {
+  checkId: number;
+  paymentNumber: string;
+  payload: any;
+  postResult?: any;
+  status: 'pending' | 'success' | 'error';
+  errorMessage?: string;
+  // Related invoices info
+  relatedInvoicesFetched: number;
+  relatedInvoicesInserted: number;
+  relatedInvoicesError?: string;
+}
+
 // Proxy status type
 type ProxyStatus = 'unknown' | 'checking' | 'online' | 'offline';
 
@@ -124,6 +139,9 @@ const SyncData: React.FC = () => {
   const [invoiceDebugVisible, setInvoiceDebugVisible] = useState(false);
   const [selectedInvoicePayload, setSelectedInvoicePayload] = useState<InvoicePayloadLog | null>(null);
   const [isPostingInvoice, setIsPostingInvoice] = useState(false);
+
+  // Payment payload state (for AP Payments debug - reserved for future use)
+  const [, setPaymentPayloads] = useState<PaymentPayloadLog[]>([]);
 
   // GL Progress State
   const [progress, setProgress] = useState<SyncProgress>({
@@ -168,8 +186,26 @@ const SyncData: React.FC = () => {
     endTime: null,
   });
 
-  // Determine if AP Invoices is selected
+  // AP Payments Progress State
+  const [apPaymentsProgress, setApPaymentsProgress] = useState<APPaymentsSyncProgress>({
+    status: 'idle',
+    totalPayments: 0,
+    processedPayments: 0,
+    insertedPayments: 0,
+    currentPaymentNumber: '',
+    totalRelatedInvoices: 0,
+    processedRelatedInvoices: 0,
+    currentPage: 0,
+    totalPages: 0,
+    errors: 0,
+    lastError: '',
+    startTime: null,
+    endTime: null,
+  });
+
+  // Determine if AP Invoices or AP Payments is selected
   const isAPInvoices = selectedObject?.id === 'ap-invoices';
+  const isAPPayments = selectedObject?.id === 'ap-payments';
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const isSyncingRef = useRef(false);
@@ -402,6 +438,42 @@ const SyncData: React.FC = () => {
     });
   }, []);
 
+  // Payment payload callback handler (for AP Payments debug)
+  const handlePaymentPayload: PaymentPayloadCallback = useCallback((checkId, paymentNumber, payload, result, error, relatedInvoicesInfo) => {
+    setPaymentPayloads((prev) => {
+      const existing = prev.find((pp) => pp.checkId === checkId);
+      if (existing) {
+        // Update existing entry
+        return prev.map((pp) =>
+          pp.checkId === checkId
+            ? {
+                ...pp,
+                postResult: result,
+                status: error ? 'error' : (result ? 'success' : 'pending'),
+                errorMessage: error,
+                relatedInvoicesFetched: relatedInvoicesInfo?.fetched ?? pp.relatedInvoicesFetched,
+                relatedInvoicesInserted: relatedInvoicesInfo?.inserted ?? pp.relatedInvoicesInserted,
+                relatedInvoicesError: relatedInvoicesInfo?.error ?? pp.relatedInvoicesError,
+              }
+            : pp
+        );
+      } else {
+        // Add new entry
+        return [...prev, {
+          checkId,
+          paymentNumber,
+          payload,
+          postResult: result,
+          status: error ? 'error' : (result ? 'success' : 'pending'),
+          errorMessage: error,
+          relatedInvoicesFetched: relatedInvoicesInfo?.fetched ?? 0,
+          relatedInvoicesInserted: relatedInvoicesInfo?.inserted ?? 0,
+          relatedInvoicesError: relatedInvoicesInfo?.error,
+        }];
+      }
+    });
+  }, []);
+
   // Check proxy server status
   const checkProxyStatus = useCallback(async () => {
     setProxyStatus('checking');
@@ -503,7 +575,10 @@ const SyncData: React.FC = () => {
 
     // Test based on selected object type
     let success = false;
-    if (isAPInvoices) {
+    if (isAPPayments) {
+      addLog('info', 'Testing AP Payments endpoint...');
+      success = await testAPPaymentsConnection(addLog);
+    } else if (isAPInvoices) {
       addLog('info', 'Testing AP Invoices endpoint...');
       success = await testAPConnection(addLog);
     } else {
@@ -570,9 +645,36 @@ const SyncData: React.FC = () => {
     setLogs([]);
     setBatchPayloads([]);
     setInvoicePayloads([]);
+    setPaymentPayloads([]);
     logCounterRef.current = 0;
 
-    if (isAPInvoices) {
+    if (isAPPayments) {
+      // AP Payments Sync
+      setApPaymentsProgress({
+        status: 'fetching',
+        totalPayments: 0,
+        processedPayments: 0,
+        insertedPayments: 0,
+        currentPaymentNumber: '',
+        totalRelatedInvoices: 0,
+        processedRelatedInvoices: 0,
+        currentPage: 0,
+        totalPages: 0,
+        errors: 0,
+        lastError: '',
+        startTime: new Date(),
+        endTime: null,
+      });
+
+      await syncAPPayments(
+        parameters,
+        testMode,
+        addLog,
+        (newProgress) => setApPaymentsProgress((prev) => ({ ...prev, ...newProgress })),
+        abortControllerRef.current.signal,
+        handlePaymentPayload
+      );
+    } else if (isAPInvoices) {
       // AP Invoices Sync
       setApProgress({
         status: 'fetching',
@@ -792,7 +894,7 @@ const SyncData: React.FC = () => {
   ];
 
   // Check if syncing based on current object type
-  const currentStatus = isAPInvoices ? apProgress.status : progress.status;
+  const currentStatus = isAPPayments ? apPaymentsProgress.status : (isAPInvoices ? apProgress.status : progress.status);
   const isSyncing = !['idle', 'completed', 'error', 'stopped'].includes(currentStatus);
 
   // Calculate progress percentages for GL
@@ -931,17 +1033,19 @@ const SyncData: React.FC = () => {
                         <span style={{ color: REDWOOD.warning }}>●</span> Single Record (Debug)
                       </Option>
                       <Option value={true}>
-                        <span style={{ color: REDWOOD.info }}>●</span> Test Mode (25 {isAPInvoices ? 'invoices' : 'batches'})
+                        <span style={{ color: REDWOOD.info }}>●</span> Test Mode (25 {isAPPayments ? 'payments' : isAPInvoices ? 'invoices' : 'batches'})
                       </Option>
                       <Option value={false}>
-                        <span style={{ color: REDWOOD.success }}>●</span> Full Sync ({isAPInvoices ? '500 invoices' : 'All records'})
+                        <span style={{ color: REDWOOD.success }}>●</span> Full Sync ({isAPPayments ? '500 payments' : isAPInvoices ? '500 invoices' : 'All records'})
                       </Option>
                     </Select>
                     <Text type="secondary" style={{ fontSize: 11, marginTop: 4, display: 'block' }}>
                       {testMode === 'single'
-                        ? `Debug mode: Sync only 1 ${isAPInvoices ? 'invoice' : 'batch'} with full logging`
+                        ? `Debug mode: Sync only 1 ${isAPPayments ? 'payment' : isAPInvoices ? 'invoice' : 'batch'} with full logging`
                         : testMode
-                        ? `Limited to 25 ${isAPInvoices ? 'invoices' : 'batches'} for testing`
+                        ? `Limited to 25 ${isAPPayments ? 'payments' : isAPInvoices ? 'invoices' : 'batches'} for testing`
+                        : isAPPayments
+                        ? 'Full sync - 500 payments (paginated 25 per page)'
                         : isAPInvoices
                         ? 'Full sync - 500 invoices (paginated 25 per page)'
                         : 'Full sync - all matching records'}
@@ -1068,7 +1172,108 @@ const SyncData: React.FC = () => {
             {/* Right Panel - Progress & Logs */}
             <Col xs={24} lg={17}>
               {/* Progress Cards - Conditional based on sync type */}
-              {isAPInvoices ? (
+              {isAPPayments ? (
+                /* AP Payments KPI Cards */
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  {/* Payments Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <DatabaseOutlined style={{ fontSize: 20, color: REDWOOD.primary, marginRight: 8 }} />
+                        <Text strong>Payments</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {apPaymentsProgress.insertedPayments} / {apPaymentsProgress.totalPayments}
+                      </div>
+                      <Progress
+                        percent={apPaymentsProgress.totalPayments > 0 ? Math.round((apPaymentsProgress.insertedPayments / apPaymentsProgress.totalPayments) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.primary}
+                        style={{ marginTop: 8 }}
+                      />
+                      {apPaymentsProgress.currentPaymentNumber && (
+                        <Tooltip title={apPaymentsProgress.currentPaymentNumber}>
+                          <Text
+                            type="secondary"
+                            style={{ fontSize: 11, display: 'block', marginTop: 4 }}
+                            ellipsis
+                          >
+                            {apPaymentsProgress.currentPaymentNumber}
+                          </Text>
+                        </Tooltip>
+                      )}
+                      {apPaymentsProgress.currentPage > 0 && (
+                        <Text type="secondary" style={{ fontSize: 10, display: 'block' }}>
+                          Page {apPaymentsProgress.currentPage}/{apPaymentsProgress.totalPages}
+                        </Text>
+                      )}
+                    </Card>
+                  </Col>
+
+                  {/* Related Invoices Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <FileTextOutlined style={{ fontSize: 20, color: REDWOOD.success, marginRight: 8 }} />
+                        <Text strong>Related Invoices</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {apPaymentsProgress.processedRelatedInvoices}
+                        <Text type="secondary" style={{ fontSize: 14, marginLeft: 8 }}>
+                          / {apPaymentsProgress.totalRelatedInvoices}
+                        </Text>
+                      </div>
+                      <Progress
+                        percent={apPaymentsProgress.totalRelatedInvoices > 0 ? Math.round((apPaymentsProgress.processedRelatedInvoices / apPaymentsProgress.totalRelatedInvoices) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.success}
+                        style={{ marginTop: 8 }}
+                      />
+                    </Card>
+                  </Col>
+
+                  {/* Errors Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <WarningOutlined style={{ fontSize: 20, color: apPaymentsProgress.errors > 0 ? REDWOOD.error : REDWOOD.textSecondary, marginRight: 8 }} />
+                        <Text strong>Errors</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: apPaymentsProgress.errors > 0 ? REDWOOD.error : REDWOOD.textPrimary }}>
+                        {apPaymentsProgress.errors}
+                      </div>
+                      {apPaymentsProgress.lastError && (
+                        <Tooltip title={apPaymentsProgress.lastError}>
+                          <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 8 }} ellipsis>
+                            {apPaymentsProgress.lastError}
+                          </Text>
+                        </Tooltip>
+                      )}
+                    </Card>
+                  </Col>
+                </Row>
+              ) : isAPInvoices ? (
                 /* AP Invoices KPI Cards */
                 <Row gutter={16} style={{ marginBottom: 16 }}>
                   {/* Invoices Card */}
@@ -1346,14 +1551,14 @@ const SyncData: React.FC = () => {
                           {getStatusText(currentStatus)}
                         </Tag>
                       </div>
-                      {(isAPInvoices ? apProgress.startTime : progress.startTime) && (
+                      {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : progress.startTime) && (
                         <Text type="secondary" style={{ fontSize: 12 }}>
-                          Started: {(isAPInvoices ? apProgress.startTime : progress.startTime)?.toLocaleTimeString()}
+                          Started: {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : progress.startTime)?.toLocaleTimeString()}
                         </Text>
                       )}
-                      {(isAPInvoices ? apProgress.endTime : progress.endTime) && (
+                      {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : progress.endTime) && (
                         <Text type="secondary" style={{ fontSize: 12 }}>
-                          Ended: {(isAPInvoices ? apProgress.endTime : progress.endTime)?.toLocaleTimeString()}
+                          Ended: {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : progress.endTime)?.toLocaleTimeString()}
                         </Text>
                       )}
                     </Space>
@@ -1362,15 +1567,17 @@ const SyncData: React.FC = () => {
                     <Space>
                       <Text type="secondary">
                         <CheckCircleOutlined style={{ color: REDWOOD.success, marginRight: 4 }} />
-                        {isAPInvoices
+                        {isAPPayments
+                          ? `${apPaymentsProgress.insertedPayments} payments, ${apPaymentsProgress.processedRelatedInvoices} related invoices inserted`
+                          : isAPInvoices
                           ? `${apProgress.insertedInvoices} invoices inserted`
                           : `${progress.totalBatchesInserted + progress.totalHeadersInserted + progress.totalLinesInserted} inserted`
                         }
                       </Text>
-                      {(isAPInvoices ? apProgress.errors : progress.errors) > 0 && (
+                      {(isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : progress.errors) > 0 && (
                         <Text type="danger">
                           <CloseCircleOutlined style={{ marginRight: 4 }} />
-                          {isAPInvoices ? apProgress.errors : progress.errors} errors
+                          {isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : progress.errors} errors
                         </Text>
                       )}
                     </Space>
