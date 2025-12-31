@@ -35,6 +35,8 @@ import {
   CloseOutlined,
   CloudOutlined,
   HddOutlined,
+  CodeOutlined,
+  ClearOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import { ORACLE_FUSION_CONFIG, PROXY_CONFIG } from '../../config/api.config';
@@ -99,6 +101,8 @@ interface TabItem {
   syncing: boolean;
   syncStatus: 'idle' | 'syncing' | 'success' | 'error';
   syncMessage: string;
+  syncLogs: string[];
+  showLogs: boolean;
 }
 
 // Menu item interface for flyout
@@ -305,6 +309,8 @@ const COASegments: React.FC = () => {
       syncing: false,
       syncStatus: 'idle',
       syncMessage: '',
+      syncLogs: [],
+      showLogs: false,
     };
 
     setTabs(prev => [...prev, newTab]);
@@ -331,6 +337,28 @@ const COASegments: React.FC = () => {
     }
   };
 
+  // Add log to tab
+  const addSyncLog = (tabKey: string, log: string) => {
+    const timestamp = new Date().toLocaleTimeString();
+    setTabs(prev => prev.map(t =>
+      t.key === tabKey ? { ...t, syncLogs: [...t.syncLogs, `[${timestamp}] ${log}`] } : t
+    ));
+  };
+
+  // Toggle log panel
+  const toggleLogPanel = (tabKey: string) => {
+    setTabs(prev => prev.map(t =>
+      t.key === tabKey ? { ...t, showLogs: !t.showLogs } : t
+    ));
+  };
+
+  // Clear logs
+  const clearLogs = (tabKey: string) => {
+    setTabs(prev => prev.map(t =>
+      t.key === tabKey ? { ...t, syncLogs: [] } : t
+    ));
+  };
+
   // Sync values to APEX database
   const handleSyncToDb = async (tab: TabItem) => {
     if (tab.values.length === 0) {
@@ -338,35 +366,65 @@ const COASegments: React.FC = () => {
       return;
     }
 
+    // Clear previous logs and start fresh
     setTabs(prev => prev.map(t =>
-      t.key === tab.key ? { ...t, syncing: true, syncStatus: 'syncing', syncMessage: 'Preparing data...' } : t
+      t.key === tab.key ? { ...t, syncing: true, syncStatus: 'syncing', syncMessage: 'Preparing data...', syncLogs: [], showLogs: true } : t
+    ));
+
+    const postBody = { valueSetCode: tab.key, items: tab.values };
+    const bodyJson = JSON.stringify(postBody);
+
+    // Log request details
+    addSyncLog(tab.key, '========== SYNC REQUEST ==========');
+    addSyncLog(tab.key, `POST URL: ${APEX_SYNC_URL}`);
+    addSyncLog(tab.key, `Value Set Code: ${tab.key}`);
+    addSyncLog(tab.key, `Items Count: ${tab.values.length}`);
+    addSyncLog(tab.key, `Payload Size: ${(bodyJson.length / 1024).toFixed(2)} KB`);
+    addSyncLog(tab.key, `Request Body (first 500 chars):`);
+    addSyncLog(tab.key, bodyJson.substring(0, 500) + (bodyJson.length > 500 ? '...' : ''));
+
+    setTabs(prev => prev.map(t =>
+      t.key === tab.key ? { ...t, syncMessage: `Syncing ${tab.values.length} values...` } : t
     ));
 
     try {
-      const postBody = { valueSetCode: tab.key, items: tab.values };
-      setTabs(prev => prev.map(t =>
-        t.key === tab.key ? { ...t, syncMessage: `Syncing ${tab.values.length} values...` } : t
-      ));
+      addSyncLog(tab.key, '---------- SENDING REQUEST ----------');
 
       const response = await fetch(APEX_SYNC_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(postBody),
+        body: bodyJson,
       });
 
+      addSyncLog(tab.key, '---------- RESPONSE ----------');
+      addSyncLog(tab.key, `Status: ${response.status} ${response.statusText}`);
+      addSyncLog(tab.key, `OK: ${response.ok}`);
+
       const responseText = await response.text();
+      addSyncLog(tab.key, `Response Body:`);
+      addSyncLog(tab.key, responseText.substring(0, 1000) + (responseText.length > 1000 ? '...' : ''));
+
       let result;
-      try { result = JSON.parse(responseText); } catch { result = { success: false, error: responseText }; }
+      try {
+        result = JSON.parse(responseText);
+        addSyncLog(tab.key, `Parsed Result: success=${result.success}, insertedCount=${result.insertedCount || 'N/A'}`);
+      } catch {
+        result = { success: false, error: responseText };
+        addSyncLog(tab.key, `❌ Failed to parse JSON response`);
+      }
 
       if (result.success) {
+        addSyncLog(tab.key, `✅ SUCCESS: Synced ${result.insertedCount || tab.values.length} values`);
         setTabs(prev => prev.map(t =>
           t.key === tab.key ? { ...t, syncing: false, syncStatus: 'success', syncMessage: `✓ Synced ${result.insertedCount || tab.values.length} values` } : t
         ));
         message.success(`Successfully synced ${result.insertedCount || tab.values.length} values`);
       } else {
+        addSyncLog(tab.key, `❌ ERROR: ${result.error || 'Unknown error'}`);
         throw new Error(result.error || 'Unknown error');
       }
     } catch (error: any) {
+      addSyncLog(tab.key, `❌ EXCEPTION: ${error.message}`);
       setTabs(prev => prev.map(t =>
         t.key === tab.key ? { ...t, syncing: false, syncStatus: 'error', syncMessage: `✗ Error: ${error.message}` } : t
       ));
@@ -565,15 +623,44 @@ const COASegments: React.FC = () => {
                                   {tab.syncStatus === 'success' && <Text style={{ fontSize: 11, color: REDWOOD.success }}>{tab.syncMessage}</Text>}
                                   {tab.syncStatus === 'error' && <Text style={{ fontSize: 11, color: REDWOOD.primary }}>{tab.syncMessage}</Text>}
                                 </Space>
-                                <Button type="primary" size="small" icon={tab.syncing ? <SyncOutlined spin /> : <CloudUploadOutlined />} onClick={() => handleSyncToDb(tab)} disabled={tab.syncing || tab.values.length === 0 || dataSource === 'apex'} style={{ background: tab.syncStatus === 'success' ? REDWOOD.success : REDWOOD.info }}>
-                                  {tab.syncing ? 'Syncing...' : 'Sync to DB'}
-                                </Button>
+                                <Space>
+                                  <Tooltip title={tab.showLogs ? 'Hide Logs' : 'Show Logs'}>
+                                    <Button size="small" icon={<CodeOutlined />} onClick={() => toggleLogPanel(tab.key)} type={tab.showLogs ? 'primary' : 'default'} style={tab.showLogs ? { background: REDWOOD.warning } : {}}>
+                                      {tab.syncLogs.length > 0 ? `Logs (${tab.syncLogs.length})` : 'Logs'}
+                                    </Button>
+                                  </Tooltip>
+                                  <Button type="primary" size="small" icon={tab.syncing ? <SyncOutlined spin /> : <CloudUploadOutlined />} onClick={() => handleSyncToDb(tab)} disabled={tab.syncing || tab.values.length === 0 || dataSource === 'apex'} style={{ background: tab.syncStatus === 'success' ? REDWOOD.success : REDWOOD.info }}>
+                                    {tab.syncing ? 'Syncing...' : 'Sync to DB'}
+                                  </Button>
+                                </Space>
                               </div>
+                              {/* Sync Progress */}
                               {tab.syncing && (
                                 <div style={{ padding: '8px 12px', background: '#E6F7FF', borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                                     <Progress percent={100} status="active" showInfo={false} size="small" style={{ flex: 1 }} />
                                     <Text style={{ fontSize: 11, color: REDWOOD.info }}>{tab.syncMessage}</Text>
+                                  </div>
+                                </div>
+                              )}
+                              {/* Log Panel */}
+                              {tab.showLogs && (
+                                <div style={{ borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
+                                  <div style={{ padding: '6px 12px', background: '#1A1A1A', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <Text style={{ color: '#00FF00', fontSize: 11 }}>Sync Log</Text>
+                                    <Space size="small">
+                                      <Button size="small" type="text" icon={<ClearOutlined />} onClick={() => clearLogs(tab.key)} style={{ color: '#888', fontSize: 10 }}>Clear</Button>
+                                      <Button size="small" type="text" icon={<CloseOutlined />} onClick={() => toggleLogPanel(tab.key)} style={{ color: '#888' }} />
+                                    </Space>
+                                  </div>
+                                  <div style={{ background: '#1A1A1A', color: '#00FF00', padding: 12, fontFamily: 'monospace', fontSize: 11, maxHeight: 200, overflowY: 'auto' }}>
+                                    {tab.syncLogs.length === 0 ? (
+                                      <div style={{ color: '#888' }}>Click "Sync to DB" to see request logs...</div>
+                                    ) : (
+                                      tab.syncLogs.map((log, i) => (
+                                        <div key={i} style={{ marginBottom: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{log}</div>
+                                      ))
+                                    )}
                                   </div>
                                 </div>
                               )}
