@@ -296,19 +296,19 @@ const ChartOfAccountsEdit: React.FC = () => {
                   shorthandAliasEnabled: headerData.shorthandAliasEnabled,
                 }}
               >
-                <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 16 }}>
                   <Form.Item
                     name="apiName"
                     label={<><span style={{ color: REDWOOD.primary }}>*</span> API name</>}
-                    style={{ marginBottom: 16, minWidth: 250 }}
+                    style={{ marginBottom: 16, width: 200 }}
                   >
-                    <Input style={{ width: 250 }} />
+                    <Input />
                   </Form.Item>
 
                   <Form.Item
                     name="name"
                     label={<><span style={{ color: REDWOOD.primary }}>*</span> Name</>}
-                    style={{ marginBottom: 16, flex: 1, minWidth: 350 }}
+                    style={{ marginBottom: 16, width: 350 }}
                   >
                     <Input />
                   </Form.Item>
@@ -317,9 +317,9 @@ const ChartOfAccountsEdit: React.FC = () => {
                 <Form.Item
                   name="description"
                   label="Description"
-                  style={{ marginBottom: 16 }}
+                  style={{ marginBottom: 16, width: 400 }}
                 >
-                  <Input style={{ maxWidth: 500 }} />
+                  <Input />
                 </Form.Item>
 
                 <Space direction="vertical" size={8}>
