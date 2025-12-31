@@ -88,7 +88,7 @@ const EditStructure: React.FC = () => {
     setLoading(true);
     try {
       const response = await fetch(
-        `${APEX_DB_CONFIG.baseUrl}/chartofaccounts/getstructuresegments`
+        `${APEX_DB_CONFIG.baseUrl}/chartofaccounts/structuresegments`
       );
 
       if (!response.ok) {
