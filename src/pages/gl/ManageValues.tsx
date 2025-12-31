@@ -22,7 +22,7 @@ import {
   DeleteOutlined,
 } from '@ant-design/icons';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { PROXY_CONFIG, ORACLE_FUSION_CONFIG } from '../../config/api.config';
+import { PROXY_CONFIG } from '../../config/api.config';
 import Autopilot from '../../components/Autopilot';
 
 const { Content } = Layout;
@@ -82,25 +82,22 @@ const ManageValues: React.FC = () => {
     setLoading(true);
     try {
       const offset = (currentPage - 1) * pageSize;
-      const baseUrl = PROXY_CONFIG.enabled ? PROXY_CONFIG.baseUrl : ORACLE_FUSION_CONFIG.baseUrl;
 
-      // Build the API URL
-      const apiUrl = `${baseUrl}/valueSets/${segmentCode}/child/values?limit=${pageSize}&offset=${offset}`;
+      // Use the proxy server's /api/fusion/* endpoint which handles Oracle Fusion REST API
+      // The proxy constructs: https://iaaobn.fa.ocs.oraclecloud.com:443/{path}
+      const apiUrl = `${PROXY_CONFIG.baseUrl}/fusion/fscmRestApi/resources/11.13.18.05/valueSets/${segmentCode}/child/values?limit=${pageSize}&offset=${offset}`;
 
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-      };
+      console.log('Fetching values from:', apiUrl);
 
-      // Add auth header if using proxy
-      if (PROXY_CONFIG.enabled) {
-        const credentials = btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
-        headers['Authorization'] = `Basic ${credentials}`;
-      }
-
-      const response = await fetch(apiUrl, { headers });
+      const response = await fetch(apiUrl, {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
 
       const result = await response.json();
@@ -109,10 +106,13 @@ const ManageValues: React.FC = () => {
 
       if (result.items?.length > 0) {
         message.success(`Loaded ${result.items.length} values`);
+      } else {
+        message.info('No values found for this segment');
       }
     } catch (error) {
       console.error('Error fetching values:', error);
-      message.error('Failed to fetch values. Make sure proxy server is running.');
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      message.error(`Failed to fetch values: ${errorMessage}. Make sure proxy server is running (npm run server).`);
     } finally {
       setLoading(false);
     }
