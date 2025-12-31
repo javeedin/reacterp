@@ -27,7 +27,7 @@ import {
   AppstoreOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import { ORACLE_FUSION_CONFIG, PROXY_CONFIG } from '../../config/api.config';
+import { ORACLE_FUSION_CONFIG } from '../../config/api.config';
 import Autopilot from '../../components/Autopilot';
 
 // Detect if running in Electron
@@ -126,55 +126,54 @@ const COASegments: React.FC = () => {
     }
   };
 
-  // Fetch values for a segment
+  // Fetch values for a segment - Direct Oracle Fusion API call
   const fetchValues = async (segmentCode: string): Promise<ValueSetValue[]> => {
     // Check cache first
     if (valuesCache.current.has(segmentCode)) {
+      console.log('[COASegments] Cache hit for:', segmentCode);
       return valuesCache.current.get(segmentCode)!;
     }
 
+    console.log('[COASegments] ========== FETCH VALUES ==========');
+    console.log('[COASegments] Segment Code:', segmentCode);
+    console.log('[COASegments] Is Electron:', isElectron());
+
     try {
-      let response: Response;
+      const apiUrl = `https://iaaobn.fa.ocs.oraclecloud.com:443/fscmRestApi/resources/11.13.18.05/valueSets/${segmentCode}/child/values?limit=100&offset=0`;
+      const credentials = btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
 
-      if (isElectron()) {
-        // Direct Oracle Fusion API call (works in Electron with webSecurity: false)
-        const apiUrl = `https://iaaobn.fa.ocs.oraclecloud.com:443/fscmRestApi/resources/11.13.18.05/valueSets/${segmentCode}/child/values?limit=100&offset=0`;
-        const credentials = btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
+      console.log('[COASegments] API URL:', apiUrl);
+      console.log('[COASegments] Username:', ORACLE_FUSION_CONFIG.username);
 
-        response = await fetch(apiUrl, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Basic ${credentials}`,
-            'Content-Type': 'application/json',
-          },
-        });
-      } else {
-        // Use proxy server in browser mode (bypasses CORS)
-        const proxyUrl = `${PROXY_CONFIG.baseUrl}/fusion/fscmRestApi/resources/11.13.18.05/valueSets/${segmentCode}/child/values?limit=100&offset=0`;
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Basic ${credentials}`,
+          'Content-Type': 'application/json',
+        },
+      });
 
-        response = await fetch(proxyUrl, {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        });
-      }
+      console.log('[COASegments] Response Status:', response.status, response.statusText);
+      console.log('[COASegments] Response OK:', response.ok);
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorText = await response.text();
+        console.error('[COASegments] Error Response Body:', errorText.substring(0, 500));
+        throw new Error(`HTTP error! status: ${response.status} - ${errorText.substring(0, 200)}`);
       }
 
       const result = await response.json();
       const valueData = result.items || [];
+      console.log('[COASegments] Success! Values count:', valueData.length);
       valuesCache.current.set(segmentCode, valueData);
       return valueData;
-    } catch (error) {
-      console.error('Error fetching values:', error);
-      if (isElectron()) {
-        message.error('Failed to fetch values from Oracle Fusion.');
-      } else {
-        message.error('Failed to fetch values. Make sure the proxy server is running (node server/proxy.cjs).');
-      }
+    } catch (error: any) {
+      console.error('[COASegments] ========== ERROR ==========');
+      console.error('[COASegments] Error Type:', error.name);
+      console.error('[COASegments] Error Message:', error.message);
+      console.error('[COASegments] Full Error:', error);
+
+      message.error(`Failed to fetch values: ${error.message}`);
       return [];
     }
   };
