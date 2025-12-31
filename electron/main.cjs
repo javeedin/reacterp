@@ -190,6 +190,7 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.cjs'),
+      webSecurity: false, // Allow cross-origin requests to Oracle Fusion API
     },
     show: false, // Don't show until ready
   });
