@@ -22,8 +22,13 @@ import {
   DeleteOutlined,
 } from '@ant-design/icons';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { ORACLE_FUSION_CONFIG } from '../../config/api.config';
+import { ORACLE_FUSION_CONFIG, PROXY_CONFIG } from '../../config/api.config';
 import Autopilot from '../../components/Autopilot';
+
+// Detect if running in Electron
+const isElectron = () => {
+  return !!(window as any).electron || navigator.userAgent.toLowerCase().includes('electron');
+};
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -80,34 +85,45 @@ const ManageValues: React.FC = () => {
     console.log(`[ManageValues] ${msg}`);
   };
 
-  // Fetch values directly from Oracle Fusion
+  // Fetch values from Oracle Fusion (direct in Electron, proxy in browser)
   const fetchValues = async () => {
     setLoading(true);
     setApiLog([]); // Clear previous logs
 
+    const runningInElectron = isElectron();
     addLog('Starting fetchValues...');
     addLog(`Segment Code: ${segmentCode}`);
+    addLog(`Mode: ${runningInElectron ? 'Electron (Direct API)' : 'Browser (Proxy)'}`);
 
     try {
       const offset = (currentPage - 1) * pageSize;
+      let apiUrl: string;
+      let headers: HeadersInit;
 
-      // Build the Oracle Fusion API URL directly
-      const apiUrl = `https://iaaobn.fa.ocs.oraclecloud.com:443/fscmRestApi/resources/11.13.18.05/valueSets/${segmentCode}/child/values?limit=${pageSize}&offset=${offset}`;
+      if (runningInElectron) {
+        // Direct Oracle Fusion API call (works in Electron)
+        apiUrl = `https://iaaobn.fa.ocs.oraclecloud.com:443/fscmRestApi/resources/11.13.18.05/valueSets/${segmentCode}/child/values?limit=${pageSize}&offset=${offset}`;
+        const credentials = btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
+        headers = {
+          'Authorization': `Basic ${credentials}`,
+          'Content-Type': 'application/json',
+        };
+        addLog(`Oracle Fusion API URL: ${apiUrl}`);
+      } else {
+        // Use proxy server in browser mode (bypasses CORS)
+        apiUrl = `${PROXY_CONFIG.baseUrl}/fusion/fscmRestApi/resources/11.13.18.05/valueSets/${segmentCode}/child/values?limit=${pageSize}&offset=${offset}`;
+        headers = {
+          'Content-Type': 'application/json',
+        };
+        addLog(`Proxy URL: ${apiUrl}`);
+      }
+
       setLastApiUrl(apiUrl);
-
-      addLog(`Oracle Fusion API URL: ${apiUrl}`);
-      addLog(`Username: ${ORACLE_FUSION_CONFIG.username}`);
-      addLog('Sending GET request with Basic Auth...');
-
-      // Create Basic Auth header
-      const credentials = btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
+      addLog('Sending GET request...');
 
       const response = await fetch(apiUrl, {
         method: 'GET',
-        headers: {
-          'Authorization': `Basic ${credentials}`,
-          'Content-Type': 'application/json',
-        },
+        headers,
       });
 
       addLog(`Response Status: ${response.status} ${response.statusText}`);
@@ -134,7 +150,12 @@ const ManageValues: React.FC = () => {
       console.error('Error fetching values:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       addLog(`❌ Fetch Error: ${errorMessage}`);
-      message.error(`Failed to fetch values: ${errorMessage}`);
+
+      if (!runningInElectron) {
+        message.error('Failed to fetch. Start proxy: node server/proxy.cjs');
+      } else {
+        message.error(`Failed to fetch values: ${errorMessage}`);
+      }
     } finally {
       setLoading(false);
     }
