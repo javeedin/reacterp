@@ -396,7 +396,8 @@ const COASegments: React.FC = () => {
   };
 
   // Sync values to APEX database
-  const handleSyncToDb = async (tab: TabItem, testMode: boolean = false) => {
+  // testLimit: 0 = all, 1 = first 1, 5 = first 5, 25 = first 25
+  const handleSyncToDb = async (tab: TabItem, testLimit: number = 0) => {
     if (tab.values.length === 0) {
       message.warning('No values to sync');
       return;
@@ -407,8 +408,9 @@ const COASegments: React.FC = () => {
       t.key === tab.key ? { ...t, syncing: true, syncStatus: 'syncing', syncMessage: 'Preparing data...', syncLogs: [], showLogs: true } : t
     ));
 
-    // Use first 25 items if test mode, otherwise all
-    const itemsToSync = testMode ? tab.values.slice(0, 25) : tab.values;
+    // Use limited items if testLimit > 0, otherwise all
+    const itemsToSync = testLimit > 0 ? tab.values.slice(0, testLimit) : tab.values;
+    const testMode = testLimit > 0;
     const postBody = { valueSetCode: tab.key, items: itemsToSync };
     const bodyJson = JSON.stringify(postBody);
 
@@ -679,12 +681,17 @@ const COASegments: React.FC = () => {
                                       {tab.syncLogs.length > 0 ? `Logs (${tab.syncLogs.length})` : 'Logs'}
                                     </Button>
                                   </Tooltip>
-                                  <Tooltip title="Test sync with first 25 items only">
-                                    <Button size="small" icon={tab.syncing ? <SyncOutlined spin /> : <SyncOutlined />} onClick={() => handleSyncToDb(tab, true)} disabled={tab.syncing || tab.values.length === 0 || dataSource === 'apex'} style={{ borderColor: REDWOOD.warning, color: REDWOOD.warning }}>
-                                      Test (25)
+                                  <Tooltip title="Test sync with 1 item only">
+                                    <Button size="small" onClick={() => handleSyncToDb(tab, 1)} disabled={tab.syncing || tab.values.length === 0 || dataSource === 'apex'} style={{ borderColor: REDWOOD.success, color: REDWOOD.success }}>
+                                      Test (1)
                                     </Button>
                                   </Tooltip>
-                                  <Button type="primary" size="small" icon={tab.syncing ? <SyncOutlined spin /> : <CloudUploadOutlined />} onClick={() => handleSyncToDb(tab, false)} disabled={tab.syncing || tab.values.length === 0 || dataSource === 'apex'} style={{ background: tab.syncStatus === 'success' ? REDWOOD.success : REDWOOD.info }}>
+                                  <Tooltip title="Test sync with first 5 items">
+                                    <Button size="small" onClick={() => handleSyncToDb(tab, 5)} disabled={tab.syncing || tab.values.length === 0 || dataSource === 'apex'} style={{ borderColor: REDWOOD.warning, color: REDWOOD.warning }}>
+                                      Test (5)
+                                    </Button>
+                                  </Tooltip>
+                                  <Button type="primary" size="small" icon={tab.syncing ? <SyncOutlined spin /> : <CloudUploadOutlined />} onClick={() => handleSyncToDb(tab, 0)} disabled={tab.syncing || tab.values.length === 0 || dataSource === 'apex'} style={{ background: tab.syncStatus === 'success' ? REDWOOD.success : REDWOOD.info }}>
                                     {tab.syncing ? 'Syncing...' : 'Sync to DB'}
                                   </Button>
                                 </Space>
