@@ -19,8 +19,10 @@ import {
   CheckOutlined,
   PlusOutlined,
   EditOutlined,
+  UnorderedListOutlined,
 } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
+import { APEX_DB_CONFIG } from '../../config/api.config';
 import Autopilot from '../../components/Autopilot';
 
 const { Content } = Layout;
@@ -42,14 +44,16 @@ const REDWOOD = {
   surface: '#FFFFFF',
 };
 
-// Interface for Segment data
+// Interface for Segment data from API
 interface SegmentItem {
-  sequenceNumber: number;
-  name: string;
-  segmentCode: string;
-  columnName: string;
+  key_flex_filed_name_code: string;
+  structure_code: string;
+  sequence_no: number;
+  segment_name: string;
+  segment_code: string;
+  column_name: string;
   prompt: string;
-  enabled: boolean;
+  enabled: string;
 }
 
 // Interface for Structure header
@@ -83,20 +87,16 @@ const EditStructure: React.FC = () => {
   const fetchStructureData = async () => {
     setLoading(true);
     try {
-      // Mock data for segments - will be replaced with API call later
-      const mockSegments: SegmentItem[] = [
-        { sequenceNumber: 1, name: 'Company', segmentCode: 'BUIMERC_FIN_GLB_COA_CO', columnName: 'SEGMENT1', prompt: 'Company', enabled: true },
-        { sequenceNumber: 2, name: 'LOB', segmentCode: 'BUIMERC_FIN_GLB_COA_LOB', columnName: 'SEGMENT2', prompt: 'LOB', enabled: true },
-        { sequenceNumber: 3, name: 'Department', segmentCode: 'BUIMERC_FIN_GLB_COA_DEPARTMENT', columnName: 'SEGMENT3', prompt: 'Department', enabled: true },
-        { sequenceNumber: 4, name: 'Account', segmentCode: 'BUIMERC_FIN_GLB_COA_ACCOUNT', columnName: 'SEGMENT4', prompt: 'Account', enabled: true },
-        { sequenceNumber: 5, name: 'Sub Account', segmentCode: 'BUIMERC_FIN_GLB_COA_SUB_ACC', columnName: 'SEGMENT5', prompt: 'Sub Account', enabled: true },
-        { sequenceNumber: 6, name: 'Analysis', segmentCode: 'BUIMERC_FIN_GLB_COA_ALYS', columnName: 'SEGMENT6', prompt: 'Analysis', enabled: true },
-        { sequenceNumber: 7, name: 'Intercompany', segmentCode: 'BUIMERC_FIN_GLB_COA_IC', columnName: 'SEGMENT7', prompt: 'Intercompany', enabled: true },
-        { sequenceNumber: 8, name: 'Future1', segmentCode: 'BUIMERC_FIN_GLB_COA_FUT1', columnName: 'SEGMENT8', prompt: 'Future1', enabled: true },
-        { sequenceNumber: 9, name: 'Future2', segmentCode: 'BUIMERC_FIN_GLB_COA_FUT2', columnName: 'SEGMENT9', prompt: 'Future2', enabled: true },
-      ];
+      const response = await fetch(
+        `${APEX_DB_CONFIG.baseUrl}/chartofaccounts/getstructuresegments`
+      );
 
-      setSegments(mockSegments);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      setSegments(result.items || []);
 
       // Set form values
       form.setFieldsValue({
@@ -133,27 +133,27 @@ const EditStructure: React.FC = () => {
   const columns = [
     {
       title: 'Sequence Number',
-      dataIndex: 'sequenceNumber',
-      key: 'sequenceNumber',
+      dataIndex: 'sequence_no',
+      key: 'sequence_no',
       width: 120,
       align: 'center' as const,
     },
     {
       title: 'Name',
-      dataIndex: 'name',
-      key: 'name',
+      dataIndex: 'segment_name',
+      key: 'segment_name',
       width: 150,
     },
     {
       title: 'Segment Code',
-      dataIndex: 'segmentCode',
-      key: 'segmentCode',
+      dataIndex: 'segment_code',
+      key: 'segment_code',
       width: 280,
     },
     {
       title: 'Column Name',
-      dataIndex: 'columnName',
-      key: 'columnName',
+      dataIndex: 'column_name',
+      key: 'column_name',
       width: 150,
     },
     {
@@ -168,8 +168,8 @@ const EditStructure: React.FC = () => {
       key: 'enabled',
       width: 80,
       align: 'center' as const,
-      render: (enabled: boolean) =>
-        enabled ? <CheckOutlined style={{ color: REDWOOD.success }} /> : null,
+      render: (enabled: string) =>
+        enabled === 'YES' ? <CheckOutlined style={{ color: REDWOOD.success }} /> : null,
     },
   ];
 
@@ -317,13 +317,20 @@ const EditStructure: React.FC = () => {
                   <Button size="small" type="text">Detach</Button>
                   <Button size="small" type="text">Wrap</Button>
                 </Space>
+                <div style={{ flex: 1 }} />
+                <Button
+                  icon={<UnorderedListOutlined />}
+                  size="small"
+                >
+                  Manage Values
+                </Button>
               </div>
 
               {/* Table */}
               <Table
                 columns={columns}
                 dataSource={segments}
-                rowKey="sequenceNumber"
+                rowKey="segment_code"
                 loading={loading}
                 pagination={false}
                 size="small"
