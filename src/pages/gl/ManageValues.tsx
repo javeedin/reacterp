@@ -22,7 +22,7 @@ import {
   DeleteOutlined,
 } from '@ant-design/icons';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { PROXY_CONFIG } from '../../config/api.config';
+import { ORACLE_FUSION_CONFIG } from '../../config/api.config';
 import Autopilot from '../../components/Autopilot';
 
 const { Content } = Layout;
@@ -80,58 +80,32 @@ const ManageValues: React.FC = () => {
     console.log(`[ManageValues] ${msg}`);
   };
 
-  // Check proxy health
-  const checkProxyHealth = async () => {
-    addLog('Checking proxy server health...');
-    try {
-      const healthUrl = `${PROXY_CONFIG.baseUrl}/health`;
-      addLog(`Health check URL: ${healthUrl}`);
-
-      const response = await fetch(healthUrl);
-      const data = await response.json();
-
-      if (response.ok) {
-        addLog(`✅ Proxy server is running: ${JSON.stringify(data)}`);
-        return true;
-      } else {
-        addLog(`❌ Proxy server returned error: ${response.status}`);
-        return false;
-      }
-    } catch (error) {
-      addLog(`❌ Proxy server not reachable: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      return false;
-    }
-  };
-
-  // Fetch values
+  // Fetch values directly from Oracle Fusion
   const fetchValues = async () => {
     setLoading(true);
     setApiLog([]); // Clear previous logs
 
     addLog('Starting fetchValues...');
     addLog(`Segment Code: ${segmentCode}`);
-    addLog(`Proxy Config: ${JSON.stringify(PROXY_CONFIG)}`);
-
-    // First check proxy health
-    const proxyOk = await checkProxyHealth();
-    if (!proxyOk) {
-      message.error('Proxy server is not running. Start it with: npm run server');
-      setLoading(false);
-      return;
-    }
 
     try {
       const offset = (currentPage - 1) * pageSize;
 
-      // Build the API URL
-      const apiUrl = `${PROXY_CONFIG.baseUrl}/fusion/fscmRestApi/resources/11.13.18.05/valueSets/${segmentCode}/child/values?limit=${pageSize}&offset=${offset}`;
+      // Build the Oracle Fusion API URL directly
+      const apiUrl = `https://iaaobn.fa.ocs.oraclecloud.com:443/fscmRestApi/resources/11.13.18.05/valueSets/${segmentCode}/child/values?limit=${pageSize}&offset=${offset}`;
       setLastApiUrl(apiUrl);
 
-      addLog(`API URL: ${apiUrl}`);
-      addLog('Sending GET request...');
+      addLog(`Oracle Fusion API URL: ${apiUrl}`);
+      addLog(`Username: ${ORACLE_FUSION_CONFIG.username}`);
+      addLog('Sending GET request with Basic Auth...');
+
+      // Create Basic Auth header
+      const credentials = btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
 
       const response = await fetch(apiUrl, {
+        method: 'GET',
         headers: {
+          'Authorization': `Basic ${credentials}`,
           'Content-Type': 'application/json',
         },
       });
@@ -377,9 +351,9 @@ const ManageValues: React.FC = () => {
               <Text code>{segmentCode}</Text>
             </div>
             <div style={{ marginBottom: 12 }}>
-              <Text type="secondary">API URL: </Text>
+              <Text type="secondary">Oracle Fusion API URL: </Text>
               <Text code style={{ fontSize: 11, wordBreak: 'break-all' }}>
-                {lastApiUrl || `${PROXY_CONFIG.baseUrl}/fusion/fscmRestApi/resources/11.13.18.05/valueSets/${segmentCode}/child/values`}
+                {lastApiUrl || `https://iaaobn.fa.ocs.oraclecloud.com:443/fscmRestApi/resources/11.13.18.05/valueSets/${segmentCode}/child/values`}
               </Text>
             </div>
             <div
