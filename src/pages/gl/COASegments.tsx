@@ -396,7 +396,7 @@ const COASegments: React.FC = () => {
   };
 
   // Batch size for sync (APEX has CLOB length limits)
-  const BATCH_SIZE = 10;
+  const BATCH_SIZE = 5;
 
   // Sync values to APEX database with batching
   // testLimit: 0 = all, 1 = first 1, 5 = first 5, etc.
