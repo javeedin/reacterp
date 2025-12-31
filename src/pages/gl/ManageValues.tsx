@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   Layout,
   Typography,
@@ -72,28 +72,14 @@ const ManageValues: React.FC = () => {
   const [totalCount, setTotalCount] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
-  const [apiLog, setApiLog] = useState<string[]>([]);
-  const [lastApiUrl, setLastApiUrl] = useState<string>('');
 
   // Get segment name from location state
   const segmentName = location.state?.segmentName || segmentCode;
 
-  // Add log entry
-  const addLog = (msg: string) => {
-    const timestamp = new Date().toLocaleTimeString();
-    setApiLog(prev => [...prev, `[${timestamp}] ${msg}`]);
-    console.log(`[ManageValues] ${msg}`);
-  };
-
   // Fetch values from Oracle Fusion (direct in Electron, proxy in browser)
   const fetchValues = async () => {
     setLoading(true);
-    setApiLog([]); // Clear previous logs
-
     const runningInElectron = isElectron();
-    addLog('Starting fetchValues...');
-    addLog(`Segment Code: ${segmentCode}`);
-    addLog(`Mode: ${runningInElectron ? 'Electron (Direct API)' : 'Browser (Proxy)'}`);
 
     try {
       const offset = (currentPage - 1) * pageSize;
@@ -101,43 +87,29 @@ const ManageValues: React.FC = () => {
       let headers: HeadersInit;
 
       if (runningInElectron) {
-        // Direct Oracle Fusion API call (works in Electron)
         apiUrl = `https://iaaobn.fa.ocs.oraclecloud.com:443/fscmRestApi/resources/11.13.18.05/valueSets/${segmentCode}/child/values?limit=${pageSize}&offset=${offset}`;
         const credentials = btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
         headers = {
           'Authorization': `Basic ${credentials}`,
           'Content-Type': 'application/json',
         };
-        addLog(`Oracle Fusion API URL: ${apiUrl}`);
       } else {
-        // Use proxy server in browser mode (bypasses CORS)
         apiUrl = `${PROXY_CONFIG.baseUrl}/fusion/fscmRestApi/resources/11.13.18.05/valueSets/${segmentCode}/child/values?limit=${pageSize}&offset=${offset}`;
         headers = {
           'Content-Type': 'application/json',
         };
-        addLog(`Proxy URL: ${apiUrl}`);
       }
-
-      setLastApiUrl(apiUrl);
-      addLog('Sending GET request...');
 
       const response = await fetch(apiUrl, {
         method: 'GET',
         headers,
       });
 
-      addLog(`Response Status: ${response.status} ${response.statusText}`);
-
       if (!response.ok) {
-        const errorText = await response.text();
-        addLog(`❌ Error Response: ${errorText.substring(0, 500)}`);
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       const result = await response.json();
-      addLog(`✅ Response received: ${JSON.stringify(result).substring(0, 300)}...`);
-      addLog(`Items count: ${result.items?.length || 0}`);
-
       setValues(result.items || []);
       setTotalCount(result.totalResults || result.count || result.items?.length || 0);
 
@@ -149,8 +121,6 @@ const ManageValues: React.FC = () => {
     } catch (error) {
       console.error('Error fetching values:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      addLog(`❌ Fetch Error: ${errorMessage}`);
-
       if (!runningInElectron) {
         message.error('Failed to fetch. Start proxy: node server/proxy.cjs');
       } else {
@@ -160,11 +130,6 @@ const ManageValues: React.FC = () => {
       setLoading(false);
     }
   };
-
-  // Don't auto-fetch on load - let user manually trigger
-  useEffect(() => {
-    addLog(`Page loaded with segmentCode: ${segmentCode}`);
-  }, [segmentCode]);
 
   // Handle search
   const handleSearch = () => {
@@ -341,64 +306,6 @@ const ManageValues: React.FC = () => {
 
         {/* Main Content */}
         <div style={{ padding: 24 }}>
-          {/* Debug/Log Panel */}
-          <Card
-            style={{
-              borderRadius: 8,
-              border: `1px solid ${REDWOOD.warning}`,
-              marginBottom: 24,
-              background: '#FFFBE6',
-            }}
-            bodyStyle={{ padding: 16 }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <Text strong style={{ color: REDWOOD.warning }}>🔧 Debug Panel</Text>
-              <Space>
-                <Button
-                  type="primary"
-                  onClick={fetchValues}
-                  loading={loading}
-                  style={{ background: REDWOOD.info }}
-                >
-                  Fetch Values (Test API)
-                </Button>
-                <Button onClick={() => setApiLog([])}>
-                  Clear Log
-                </Button>
-              </Space>
-            </div>
-            <div style={{ marginBottom: 12 }}>
-              <Text type="secondary">Segment Code: </Text>
-              <Text code>{segmentCode}</Text>
-            </div>
-            <div style={{ marginBottom: 12 }}>
-              <Text type="secondary">Oracle Fusion API URL: </Text>
-              <Text code style={{ fontSize: 11, wordBreak: 'break-all' }}>
-                {lastApiUrl || `https://iaaobn.fa.ocs.oraclecloud.com:443/fscmRestApi/resources/11.13.18.05/valueSets/${segmentCode}/child/values`}
-              </Text>
-            </div>
-            <div
-              style={{
-                background: '#1A1A1A',
-                color: '#00FF00',
-                padding: 12,
-                borderRadius: 4,
-                fontFamily: 'monospace',
-                fontSize: 11,
-                maxHeight: 200,
-                overflowY: 'auto',
-              }}
-            >
-              {apiLog.length === 0 ? (
-                <div style={{ color: '#888' }}>Click "Fetch Values" to test the API call...</div>
-              ) : (
-                apiLog.map((log, i) => (
-                  <div key={i} style={{ marginBottom: 4 }}>{log}</div>
-                ))
-              )}
-            </div>
-          </Card>
-
           <Spin spinning={loading}>
             {/* Search Card */}
             <Card
