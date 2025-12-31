@@ -9,13 +9,12 @@ import {
   message,
   Spin,
   Input,
-  Tag,
   Empty,
   Breadcrumb,
   Row,
   Col,
-  Tooltip,
   Badge,
+  Tabs,
 } from 'antd';
 import {
   SearchOutlined,
@@ -23,11 +22,9 @@ import {
   PlusOutlined,
   DatabaseOutlined,
   HomeOutlined,
-  UnorderedListOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
   AppstoreOutlined,
-  ExportOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { ORACLE_FUSION_CONFIG } from '../../config/api.config';
@@ -74,13 +71,21 @@ interface ValueSetValue {
   SortOrder: number;
 }
 
+// Interface for Tab
+interface TabItem {
+  key: string;
+  label: string;
+  segment: Segment;
+  values: ValueSetValue[];
+  loading: boolean;
+}
+
 const COASegments: React.FC = () => {
   const [loading, setLoading] = useState(false);
-  const [valuesLoading, setValuesLoading] = useState(false);
   const [segments, setSegments] = useState<Segment[]>([]);
-  const [selectedSegment, setSelectedSegment] = useState<Segment | null>(null);
-  const [values, setValues] = useState<ValueSetValue[]>([]);
   const [searchText, setSearchText] = useState('');
+  const [tabs, setTabs] = useState<TabItem[]>([]);
+  const [activeTabKey, setActiveTabKey] = useState<string>('');
 
   // Use ref to persist data across renders (until page refresh)
   const segmentsCache = useRef<Segment[]>([]);
@@ -117,14 +122,12 @@ const COASegments: React.FC = () => {
   };
 
   // Fetch values for a segment
-  const fetchValues = async (segmentCode: string) => {
+  const fetchValues = async (segmentCode: string): Promise<ValueSetValue[]> => {
     // Check cache first
     if (valuesCache.current.has(segmentCode)) {
-      setValues(valuesCache.current.get(segmentCode)!);
-      return;
+      return valuesCache.current.get(segmentCode)!;
     }
 
-    setValuesLoading(true);
     try {
       const apiUrl = `https://iaaobn.fa.ocs.oraclecloud.com:443/fscmRestApi/resources/11.13.18.05/valueSets/${segmentCode}/child/values?limit=100&offset=0`;
       const credentials = btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
@@ -143,27 +146,62 @@ const COASegments: React.FC = () => {
 
       const result = await response.json();
       const valueData = result.items || [];
-      setValues(valueData);
       valuesCache.current.set(segmentCode, valueData);
-      message.success(`Loaded ${valueData.length} values`);
+      return valueData;
     } catch (error) {
       console.error('Error fetching values:', error);
       message.error('Failed to fetch values. Make sure you are running in Electron mode.');
-      setValues([]);
-    } finally {
-      setValuesLoading(false);
+      return [];
     }
   };
 
-  // Handle segment selection - show in right panel
-  const handleSegmentSelect = (segment: Segment) => {
-    setSelectedSegment(segment);
-    fetchValues(segment.segment_code);
+  // Handle segment click - open new tab
+  const handleSegmentClick = async (segment: Segment) => {
+    // Check if tab already exists
+    const existingTab = tabs.find(t => t.key === segment.segment_code);
+    if (existingTab) {
+      setActiveTabKey(segment.segment_code);
+      return;
+    }
+
+    // Add new tab with loading state
+    const newTab: TabItem = {
+      key: segment.segment_code,
+      label: segment.segment_name,
+      segment,
+      values: [],
+      loading: true,
+    };
+
+    setTabs(prev => [...prev, newTab]);
+    setActiveTabKey(segment.segment_code);
+
+    // Fetch values
+    const values = await fetchValues(segment.segment_code);
+
+    // Update tab with values
+    setTabs(prev => prev.map(t =>
+      t.key === segment.segment_code
+        ? { ...t, values, loading: false }
+        : t
+    ));
+
+    if (values.length > 0) {
+      message.success(`Loaded ${values.length} values`);
+    }
   };
 
-  // Handle open in new tab
-  const handleOpenInNewTab = (segment: Segment) => {
-    window.open(`#/gl/values/${segment.segment_code}`, '_blank');
+  // Handle tab close
+  const handleTabClose = (targetKey: string) => {
+    const newTabs = tabs.filter(t => t.key !== targetKey);
+    setTabs(newTabs);
+
+    // If closing active tab, switch to last tab
+    if (activeTabKey === targetKey && newTabs.length > 0) {
+      setActiveTabKey(newTabs[newTabs.length - 1].key);
+    } else if (newTabs.length === 0) {
+      setActiveTabKey('');
+    }
   };
 
   // Handle refresh - clear cache and reload
@@ -171,8 +209,8 @@ const COASegments: React.FC = () => {
     segmentsCache.current = [];
     valuesCache.current.clear();
     setSegments([]);
-    setValues([]);
-    setSelectedSegment(null);
+    setTabs([]);
+    setActiveTabKey('');
     fetchSegments();
   };
 
@@ -182,73 +220,80 @@ const COASegments: React.FC = () => {
     seg.column_name?.toLowerCase().includes(searchText.toLowerCase())
   );
 
+  // Check if segment is open in a tab
+  const isSegmentOpen = (segmentCode: string) => tabs.some(t => t.key === segmentCode);
+
   // Compact segment item component
-  const SegmentItem = ({ segment, isSelected }: { segment: Segment; isSelected: boolean }) => (
-    <div
-      onClick={() => handleSegmentSelect(segment)}
-      style={{
-        padding: '8px 12px',
-        borderRadius: 6,
-        border: isSelected ? `2px solid ${REDWOOD.info}` : `1px solid ${REDWOOD.neutral200}`,
-        background: isSelected ? `${REDWOOD.info}08` : REDWOOD.surface,
-        cursor: 'pointer',
-        transition: 'all 0.2s ease',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-      }}
-      onMouseEnter={(e) => {
-        if (!isSelected) {
-          e.currentTarget.style.background = `${REDWOOD.info}05`;
-          e.currentTarget.style.borderColor = REDWOOD.info;
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (!isSelected) {
-          e.currentTarget.style.background = REDWOOD.surface;
-          e.currentTarget.style.borderColor = REDWOOD.neutral200;
-        }
-      }}
-    >
-      {/* Sequence Badge */}
-      <div style={{
-        width: 24,
-        height: 24,
-        borderRadius: 4,
-        background: isSelected ? REDWOOD.info : REDWOOD.neutral200,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        color: isSelected ? '#fff' : REDWOOD.neutral600,
-        fontSize: 11,
-        fontWeight: 600,
-        flexShrink: 0,
-      }}>
-        {segment.sequence_no}
-      </div>
+  const SegmentItem = ({ segment }: { segment: Segment }) => {
+    const isOpen = isSegmentOpen(segment.segment_code);
+    const isActive = activeTabKey === segment.segment_code;
 
-      {/* Segment Name and Column */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <Text strong style={{ color: REDWOOD.neutral900, fontSize: 12 }}>
-          {segment.segment_name}
-        </Text>
-        <Text type="secondary" style={{ fontSize: 10, marginLeft: 4 }}>
-          ({segment.column_name})
-        </Text>
-      </div>
+    return (
+      <div
+        onClick={() => handleSegmentClick(segment)}
+        style={{
+          padding: '8px 12px',
+          borderRadius: 6,
+          border: isActive ? `2px solid ${REDWOOD.info}` : isOpen ? `1px solid ${REDWOOD.info}` : `1px solid ${REDWOOD.neutral200}`,
+          background: isActive ? `${REDWOOD.info}10` : isOpen ? `${REDWOOD.info}05` : REDWOOD.surface,
+          cursor: 'pointer',
+          transition: 'all 0.2s ease',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+        }}
+        onMouseEnter={(e) => {
+          if (!isActive) {
+            e.currentTarget.style.background = `${REDWOOD.info}08`;
+            e.currentTarget.style.borderColor = REDWOOD.info;
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (!isActive) {
+            e.currentTarget.style.background = isOpen ? `${REDWOOD.info}05` : REDWOOD.surface;
+            e.currentTarget.style.borderColor = isOpen ? REDWOOD.info : REDWOOD.neutral200;
+          }
+        }}
+      >
+        {/* Sequence Badge */}
+        <div style={{
+          width: 24,
+          height: 24,
+          borderRadius: 4,
+          background: isActive ? REDWOOD.info : REDWOOD.neutral200,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: isActive ? '#fff' : REDWOOD.neutral600,
+          fontSize: 11,
+          fontWeight: 600,
+          flexShrink: 0,
+        }}>
+          {segment.sequence_no}
+        </div>
 
-      {/* Open in new tab button */}
-      <Tooltip title="Open in new tab">
-        <ExportOutlined
-          onClick={(e) => {
-            e.stopPropagation();
-            handleOpenInNewTab(segment);
-          }}
-          style={{ color: REDWOOD.neutral300, fontSize: 12 }}
-        />
-      </Tooltip>
-    </div>
-  );
+        {/* Segment Name and Column */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <Text strong style={{ color: REDWOOD.neutral900, fontSize: 12 }}>
+            {segment.segment_name}
+          </Text>
+          <Text type="secondary" style={{ fontSize: 10, marginLeft: 4 }}>
+            ({segment.column_name})
+          </Text>
+        </div>
+
+        {/* Open indicator */}
+        {isOpen && (
+          <div style={{
+            width: 6,
+            height: 6,
+            borderRadius: '50%',
+            background: REDWOOD.info,
+          }} />
+        )}
+      </div>
+    );
+  };
 
   // Values table columns
   const valueColumns = [
@@ -345,7 +390,7 @@ const COASegments: React.FC = () => {
         <div style={{ padding: 16, height: 'calc(100vh - 120px)' }}>
           <Row gutter={16} style={{ height: '100%' }}>
             {/* Left Panel - Segments List */}
-            <Col xs={24} lg={8} xl={6} style={{ height: '100%' }}>
+            <Col xs={24} lg={7} xl={5} style={{ height: '100%' }}>
               <Card
                 size="small"
                 style={{
@@ -411,11 +456,7 @@ const COASegments: React.FC = () => {
                         {filteredSegments
                           .sort((a, b) => a.sequence_no - b.sequence_no)
                           .map((segment) => (
-                            <SegmentItem
-                              key={segment.segment_code}
-                              segment={segment}
-                              isSelected={selectedSegment?.segment_code === segment.segment_code}
-                            />
+                            <SegmentItem key={segment.segment_code} segment={segment} />
                           ))}
                       </div>
                     </Spin>
@@ -424,8 +465,8 @@ const COASegments: React.FC = () => {
               </Card>
             </Col>
 
-            {/* Right Panel - Values */}
-            <Col xs={24} lg={16} xl={18} style={{ height: '100%' }}>
+            {/* Right Panel - Tabs with Values */}
+            <Col xs={24} lg={17} xl={19} style={{ height: '100%' }}>
               <Card
                 size="small"
                 style={{
@@ -435,92 +476,88 @@ const COASegments: React.FC = () => {
                 }}
                 bodyStyle={{ padding: 0, height: '100%', display: 'flex', flexDirection: 'column' }}
               >
-                {/* Values Header */}
-                <div style={{
-                  padding: '10px 12px',
-                  borderBottom: `1px solid ${REDWOOD.neutral200}`,
-                  background: selectedSegment ? `${REDWOOD.info}05` : REDWOOD.surface,
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}>
-                  {selectedSegment ? (
-                    <>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <UnorderedListOutlined style={{ color: REDWOOD.info, fontSize: 14 }} />
-                        <Text strong style={{ fontSize: 13, color: REDWOOD.neutral900 }}>
-                          {selectedSegment.segment_name}
-                        </Text>
-                        <Tooltip title={selectedSegment.segment_code}>
-                          <Tag style={{ fontSize: 10, margin: 0 }}>{selectedSegment.column_name}</Tag>
-                        </Tooltip>
-                      </div>
-                      <Space size="small">
-                        <Badge count={values.length} style={{ backgroundColor: REDWOOD.success }} />
-                        <Tooltip title="Open in new tab">
-                          <Button
-                            size="small"
-                            icon={<ExportOutlined />}
-                            onClick={() => handleOpenInNewTab(selectedSegment)}
-                          />
-                        </Tooltip>
-                        <Button
-                          size="small"
-                          type="primary"
-                          icon={<PlusOutlined />}
-                          style={{ background: REDWOOD.success }}
-                        >
-                          Add
-                        </Button>
-                      </Space>
-                    </>
-                  ) : (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <UnorderedListOutlined style={{ color: REDWOOD.neutral300, fontSize: 14 }} />
-                      <Text type="secondary" style={{ fontSize: 12 }}>Select a segment to view values</Text>
-                    </div>
-                  )}
-                </div>
-
-                {/* Values Table */}
-                <div style={{ flex: 1, overflow: 'auto' }}>
-                  {!selectedSegment ? (
-                    <div style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      height: '100%',
-                      background: REDWOOD.neutral100,
-                    }}>
-                      <Empty
-                        image={Empty.PRESENTED_IMAGE_SIMPLE}
-                        imageStyle={{ height: 50 }}
-                        description={
-                          <Text type="secondary" style={{ fontSize: 12 }}>
-                            Select a segment from the left
+                {tabs.length === 0 ? (
+                  <div style={{
+                    flex: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: REDWOOD.neutral100,
+                  }}>
+                    <Empty
+                      image={Empty.PRESENTED_IMAGE_SIMPLE}
+                      imageStyle={{ height: 60 }}
+                      description={
+                        <div style={{ textAlign: 'center' }}>
+                          <Text type="secondary" style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>
+                            Click on a segment to open its values
                           </Text>
-                        }
-                      />
-                    </div>
-                  ) : (
-                    <Spin spinning={valuesLoading}>
-                      <Table
-                        columns={valueColumns}
-                        dataSource={values}
-                        rowKey="Value"
-                        size="small"
-                        pagination={{
-                          size: 'small',
-                          pageSize: 20,
-                          showSizeChanger: false,
-                          showTotal: (total) => <Text style={{ fontSize: 11 }}>{total} values</Text>,
-                        }}
-                        scroll={{ y: 'calc(100vh - 300px)' }}
-                        className="compact-table"
-                      />
-                    </Spin>
-                  )}
-                </div>
+                          <Text type="secondary" style={{ fontSize: 11 }}>
+                            Each segment opens in a <Text strong>new tab</Text>
+                          </Text>
+                        </div>
+                      }
+                    />
+                  </div>
+                ) : (
+                  <Tabs
+                    type="editable-card"
+                    activeKey={activeTabKey}
+                    onChange={setActiveTabKey}
+                    onEdit={(targetKey, action) => {
+                      if (action === 'remove') {
+                        handleTabClose(targetKey as string);
+                      }
+                    }}
+                    hideAdd
+                    style={{ height: '100%' }}
+                    tabBarStyle={{
+                      margin: 0,
+                      padding: '0 8px',
+                      background: REDWOOD.neutral100,
+                    }}
+                    items={tabs.map(tab => ({
+                      key: tab.key,
+                      label: (
+                        <span style={{ fontSize: 12 }}>
+                          <Badge
+                            count={tab.segment.sequence_no}
+                            style={{
+                              backgroundColor: activeTabKey === tab.key ? REDWOOD.info : REDWOOD.neutral300,
+                              fontSize: 10,
+                              marginRight: 6,
+                            }}
+                          />
+                          {tab.label}
+                        </span>
+                      ),
+                      closable: true,
+                      children: (
+                        <div style={{ height: 'calc(100vh - 220px)', overflow: 'auto' }}>
+                          {tab.loading ? (
+                            <div style={{ padding: 40, textAlign: 'center' }}>
+                              <Spin tip="Loading values..." />
+                            </div>
+                          ) : (
+                            <Table
+                              columns={valueColumns}
+                              dataSource={tab.values}
+                              rowKey="Value"
+                              size="small"
+                              pagination={{
+                                size: 'small',
+                                pageSize: 20,
+                                showSizeChanger: false,
+                                showTotal: (total) => <Text style={{ fontSize: 11 }}>{total} values</Text>,
+                              }}
+                              className="compact-table"
+                            />
+                          )}
+                        </div>
+                      ),
+                    }))}
+                  />
+                )}
               </Card>
             </Col>
           </Row>
@@ -539,6 +576,12 @@ const COASegments: React.FC = () => {
           padding: 8px !important;
           background: ${REDWOOD.neutral100} !important;
           font-size: 11px !important;
+        }
+        .ant-tabs-content {
+          height: 100%;
+        }
+        .ant-tabs-tabpane {
+          height: 100%;
         }
       `}</style>
     </Layout>
