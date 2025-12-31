@@ -395,8 +395,11 @@ const COASegments: React.FC = () => {
     ));
   };
 
-  // Sync values to APEX database
-  // testLimit: 0 = all, 1 = first 1, 5 = first 5, 25 = first 25
+  // Batch size for sync (APEX has CLOB length limits)
+  const BATCH_SIZE = 10;
+
+  // Sync values to APEX database with batching
+  // testLimit: 0 = all, 1 = first 1, 5 = first 5, etc.
   const handleSyncToDb = async (tab: TabItem, testLimit: number = 0) => {
     if (tab.values.length === 0) {
       message.warning('No values to sync');
@@ -411,74 +414,80 @@ const COASegments: React.FC = () => {
     // Use limited items if testLimit > 0, otherwise all
     const itemsToSync = testLimit > 0 ? tab.values.slice(0, testLimit) : tab.values;
     const testMode = testLimit > 0;
-    const postBody = { valueSetCode: tab.key, items: itemsToSync };
-    const bodyJson = JSON.stringify(postBody);
 
-    // Log request details
-    addSyncLog(tab.key, '========== SYNC REQUEST ==========');
-    addSyncLog(tab.key, testMode ? '🧪 TEST MODE: First 25 items only' : '📦 FULL SYNC');
-    addSyncLog(tab.key, `POST URL: ${APEX_SYNC_URL}`);
+    // Calculate batches
+    const totalBatches = Math.ceil(itemsToSync.length / BATCH_SIZE);
+    let totalInserted = 0;
+    let hasError = false;
+
+    addSyncLog(tab.key, '========== BATCH SYNC REQUEST ==========');
+    addSyncLog(tab.key, testMode ? `🧪 TEST MODE: First ${testLimit} items` : '📦 FULL SYNC');
     addSyncLog(tab.key, `Value Set Code: ${tab.key}`);
-    addSyncLog(tab.key, `Items Count: ${itemsToSync.length}`);
-    addSyncLog(tab.key, `Payload Size: ${(bodyJson.length / 1024).toFixed(2)} KB`);
-
-    // Log first item structure for debugging
-    if (itemsToSync.length > 0) {
-      addSyncLog(tab.key, '---------- FIRST ITEM STRUCTURE ----------');
-      const firstItem = itemsToSync[0];
-      addSyncLog(tab.key, `Field Names: ${Object.keys(firstItem).join(', ')}`);
-      addSyncLog(tab.key, `First Item JSON:`);
-      addSyncLog(tab.key, JSON.stringify(firstItem, null, 2));
-    }
-
-    addSyncLog(tab.key, '---------- FULL PAYLOAD ----------');
-    addSyncLog(tab.key, bodyJson);
-
-    setTabs(prev => prev.map(t =>
-      t.key === tab.key ? { ...t, syncMessage: `Syncing ${itemsToSync.length} values...` } : t
-    ));
+    addSyncLog(tab.key, `Total Items: ${itemsToSync.length}`);
+    addSyncLog(tab.key, `Batch Size: ${BATCH_SIZE}`);
+    addSyncLog(tab.key, `Total Batches: ${totalBatches}`);
 
     try {
-      addSyncLog(tab.key, '---------- SENDING REQUEST ----------');
+      for (let batchNum = 0; batchNum < totalBatches && !hasError; batchNum++) {
+        const startIdx = batchNum * BATCH_SIZE;
+        const endIdx = Math.min(startIdx + BATCH_SIZE, itemsToSync.length);
+        const batchItems = itemsToSync.slice(startIdx, endIdx);
 
-      const response = await fetch(APEX_SYNC_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: bodyJson,
-      });
+        addSyncLog(tab.key, `---------- BATCH ${batchNum + 1}/${totalBatches} ----------`);
+        addSyncLog(tab.key, `Items ${startIdx + 1} to ${endIdx} (${batchItems.length} items)`);
 
-      addSyncLog(tab.key, '---------- RESPONSE ----------');
-      addSyncLog(tab.key, `Status: ${response.status} ${response.statusText}`);
-      addSyncLog(tab.key, `OK: ${response.ok}`);
-
-      const responseText = await response.text();
-      addSyncLog(tab.key, `Response Body:`);
-      addSyncLog(tab.key, responseText);
-
-      let result;
-      try {
-        result = JSON.parse(responseText);
-        addSyncLog(tab.key, `Parsed Result: success=${result.success}, insertedCount=${result.insertedCount || 'N/A'}`);
-      } catch {
-        result = { success: false, error: responseText };
-        addSyncLog(tab.key, `❌ Failed to parse JSON response`);
-      }
-
-      if (result.success) {
-        const countMsg = testMode ? `${result.insertedCount}/${itemsToSync.length}` : (result.insertedCount || itemsToSync.length);
-        addSyncLog(tab.key, `✅ SUCCESS: Synced ${countMsg} values`);
         setTabs(prev => prev.map(t =>
-          t.key === tab.key ? { ...t, syncing: false, syncStatus: 'success', syncMessage: `✓ Synced ${countMsg} values` } : t
+          t.key === tab.key ? { ...t, syncMessage: `Batch ${batchNum + 1}/${totalBatches}: Syncing ${batchItems.length} items...` } : t
         ));
-        message.success(`Successfully synced ${countMsg} values`);
-      } else {
-        addSyncLog(tab.key, `❌ ERROR: ${result.error || 'Unknown error'}`);
-        throw new Error(result.error || 'Unknown error');
+
+        const postBody = { valueSetCode: tab.key, items: batchItems };
+        const bodyJson = JSON.stringify(postBody);
+
+        const response = await fetch(APEX_SYNC_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: bodyJson,
+        });
+
+        const responseText = await response.text();
+        addSyncLog(tab.key, `Response: ${responseText}`);
+
+        let result;
+        try {
+          result = JSON.parse(responseText);
+        } catch {
+          result = { success: false, error: responseText };
+        }
+
+        if (result.success) {
+          const inserted = result.insertedCount || batchItems.length;
+          totalInserted += inserted;
+          addSyncLog(tab.key, `✅ Batch ${batchNum + 1}: Inserted ${inserted} records`);
+        } else {
+          hasError = true;
+          addSyncLog(tab.key, `❌ Batch ${batchNum + 1} FAILED: ${result.error || 'Unknown error'}`);
+          throw new Error(result.error || `Batch ${batchNum + 1} failed`);
+        }
+
+        // Small delay between batches to avoid overwhelming the server
+        if (batchNum < totalBatches - 1) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
       }
+
+      addSyncLog(tab.key, '========== SYNC COMPLETE ==========');
+      addSyncLog(tab.key, `✅ Total Inserted: ${totalInserted}/${itemsToSync.length}`);
+
+      setTabs(prev => prev.map(t =>
+        t.key === tab.key ? { ...t, syncing: false, syncStatus: 'success', syncMessage: `✓ Synced ${totalInserted}/${itemsToSync.length} values` } : t
+      ));
+      message.success(`Successfully synced ${totalInserted} values in ${totalBatches} batches`);
+
     } catch (error: any) {
       addSyncLog(tab.key, `❌ EXCEPTION: ${error.message}`);
+      addSyncLog(tab.key, `Partial sync: ${totalInserted} records synced before error`);
       setTabs(prev => prev.map(t =>
-        t.key === tab.key ? { ...t, syncing: false, syncStatus: 'error', syncMessage: `✗ Error: ${error.message}` } : t
+        t.key === tab.key ? { ...t, syncing: false, syncStatus: 'error', syncMessage: `✗ Error: ${error.message} (${totalInserted} synced)` } : t
       ));
       message.error(`Sync failed: ${error.message}`);
     }
