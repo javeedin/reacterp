@@ -27,8 +27,13 @@ import {
   AppstoreOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import { ORACLE_FUSION_CONFIG } from '../../config/api.config';
+import { ORACLE_FUSION_CONFIG, PROXY_CONFIG } from '../../config/api.config';
 import Autopilot from '../../components/Autopilot';
+
+// Detect if running in Electron
+const isElectron = () => {
+  return !!(window as any).electron || navigator.userAgent.toLowerCase().includes('electron');
+};
 
 const { Content } = Layout;
 const { Text } = Typography;
@@ -129,16 +134,31 @@ const COASegments: React.FC = () => {
     }
 
     try {
-      const apiUrl = `https://iaaobn.fa.ocs.oraclecloud.com:443/fscmRestApi/resources/11.13.18.05/valueSets/${segmentCode}/child/values?limit=100&offset=0`;
-      const credentials = btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
+      let response: Response;
 
-      const response = await fetch(apiUrl, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Basic ${credentials}`,
-          'Content-Type': 'application/json',
-        },
-      });
+      if (isElectron()) {
+        // Direct Oracle Fusion API call (works in Electron with webSecurity: false)
+        const apiUrl = `https://iaaobn.fa.ocs.oraclecloud.com:443/fscmRestApi/resources/11.13.18.05/valueSets/${segmentCode}/child/values?limit=100&offset=0`;
+        const credentials = btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
+
+        response = await fetch(apiUrl, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Basic ${credentials}`,
+            'Content-Type': 'application/json',
+          },
+        });
+      } else {
+        // Use proxy server in browser mode (bypasses CORS)
+        const proxyUrl = `${PROXY_CONFIG.baseUrl}/fusion/fscmRestApi/resources/11.13.18.05/valueSets/${segmentCode}/child/values?limit=100&offset=0`;
+
+        response = await fetch(proxyUrl, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+      }
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -150,7 +170,11 @@ const COASegments: React.FC = () => {
       return valueData;
     } catch (error) {
       console.error('Error fetching values:', error);
-      message.error('Failed to fetch values. Make sure you are running in Electron mode.');
+      if (isElectron()) {
+        message.error('Failed to fetch values from Oracle Fusion.');
+      } else {
+        message.error('Failed to fetch values. Make sure the proxy server is running (node server/proxy.cjs).');
+      }
       return [];
     }
   };
