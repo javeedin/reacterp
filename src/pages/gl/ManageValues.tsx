@@ -62,32 +62,73 @@ const ManageValues: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [form] = Form.useForm();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [values, setValues] = useState<ValueSetValue[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  const [apiLog, setApiLog] = useState<string[]>([]);
+  const [lastApiUrl, setLastApiUrl] = useState<string>('');
 
   // Get segment name from location state
   const segmentName = location.state?.segmentName || segmentCode;
 
-  // Fetch values on load
-  useEffect(() => {
-    if (segmentCode) {
-      fetchValues();
-    }
-  }, [segmentCode, currentPage, pageSize]);
+  // Add log entry
+  const addLog = (msg: string) => {
+    const timestamp = new Date().toLocaleTimeString();
+    setApiLog(prev => [...prev, `[${timestamp}] ${msg}`]);
+    console.log(`[ManageValues] ${msg}`);
+  };
 
+  // Check proxy health
+  const checkProxyHealth = async () => {
+    addLog('Checking proxy server health...');
+    try {
+      const healthUrl = `${PROXY_CONFIG.baseUrl}/health`;
+      addLog(`Health check URL: ${healthUrl}`);
+
+      const response = await fetch(healthUrl);
+      const data = await response.json();
+
+      if (response.ok) {
+        addLog(`✅ Proxy server is running: ${JSON.stringify(data)}`);
+        return true;
+      } else {
+        addLog(`❌ Proxy server returned error: ${response.status}`);
+        return false;
+      }
+    } catch (error) {
+      addLog(`❌ Proxy server not reachable: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return false;
+    }
+  };
+
+  // Fetch values
   const fetchValues = async () => {
     setLoading(true);
+    setApiLog([]); // Clear previous logs
+
+    addLog('Starting fetchValues...');
+    addLog(`Segment Code: ${segmentCode}`);
+    addLog(`Proxy Config: ${JSON.stringify(PROXY_CONFIG)}`);
+
+    // First check proxy health
+    const proxyOk = await checkProxyHealth();
+    if (!proxyOk) {
+      message.error('Proxy server is not running. Start it with: npm run server');
+      setLoading(false);
+      return;
+    }
+
     try {
       const offset = (currentPage - 1) * pageSize;
 
-      // Use the proxy server's /api/fusion/* endpoint which handles Oracle Fusion REST API
-      // The proxy constructs: https://iaaobn.fa.ocs.oraclecloud.com:443/{path}
+      // Build the API URL
       const apiUrl = `${PROXY_CONFIG.baseUrl}/fusion/fscmRestApi/resources/11.13.18.05/valueSets/${segmentCode}/child/values?limit=${pageSize}&offset=${offset}`;
+      setLastApiUrl(apiUrl);
 
-      console.log('Fetching values from:', apiUrl);
+      addLog(`API URL: ${apiUrl}`);
+      addLog('Sending GET request...');
 
       const response = await fetch(apiUrl, {
         headers: {
@@ -95,12 +136,18 @@ const ManageValues: React.FC = () => {
         },
       });
 
+      addLog(`Response Status: ${response.status} ${response.statusText}`);
+
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        const errorText = await response.text();
+        addLog(`❌ Error Response: ${errorText.substring(0, 500)}`);
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       const result = await response.json();
+      addLog(`✅ Response received: ${JSON.stringify(result).substring(0, 300)}...`);
+      addLog(`Items count: ${result.items?.length || 0}`);
+
       setValues(result.items || []);
       setTotalCount(result.totalResults || result.count || result.items?.length || 0);
 
@@ -112,11 +159,17 @@ const ManageValues: React.FC = () => {
     } catch (error) {
       console.error('Error fetching values:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      message.error(`Failed to fetch values: ${errorMessage}. Make sure proxy server is running (npm run server).`);
+      addLog(`❌ Fetch Error: ${errorMessage}`);
+      message.error(`Failed to fetch values: ${errorMessage}`);
     } finally {
       setLoading(false);
     }
   };
+
+  // Don't auto-fetch on load - let user manually trigger
+  useEffect(() => {
+    addLog(`Page loaded with segmentCode: ${segmentCode}`);
+  }, [segmentCode]);
 
   // Handle search
   const handleSearch = () => {
@@ -293,6 +346,64 @@ const ManageValues: React.FC = () => {
 
         {/* Main Content */}
         <div style={{ padding: 24 }}>
+          {/* Debug/Log Panel */}
+          <Card
+            style={{
+              borderRadius: 8,
+              border: `1px solid ${REDWOOD.warning}`,
+              marginBottom: 24,
+              background: '#FFFBE6',
+            }}
+            bodyStyle={{ padding: 16 }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <Text strong style={{ color: REDWOOD.warning }}>🔧 Debug Panel</Text>
+              <Space>
+                <Button
+                  type="primary"
+                  onClick={fetchValues}
+                  loading={loading}
+                  style={{ background: REDWOOD.info }}
+                >
+                  Fetch Values (Test API)
+                </Button>
+                <Button onClick={() => setApiLog([])}>
+                  Clear Log
+                </Button>
+              </Space>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <Text type="secondary">Segment Code: </Text>
+              <Text code>{segmentCode}</Text>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <Text type="secondary">API URL: </Text>
+              <Text code style={{ fontSize: 11, wordBreak: 'break-all' }}>
+                {lastApiUrl || `${PROXY_CONFIG.baseUrl}/fusion/fscmRestApi/resources/11.13.18.05/valueSets/${segmentCode}/child/values`}
+              </Text>
+            </div>
+            <div
+              style={{
+                background: '#1A1A1A',
+                color: '#00FF00',
+                padding: 12,
+                borderRadius: 4,
+                fontFamily: 'monospace',
+                fontSize: 11,
+                maxHeight: 200,
+                overflowY: 'auto',
+              }}
+            >
+              {apiLog.length === 0 ? (
+                <div style={{ color: '#888' }}>Click "Fetch Values" to test the API call...</div>
+              ) : (
+                apiLog.map((log, i) => (
+                  <div key={i} style={{ marginBottom: 4 }}>{log}</div>
+                ))
+              )}
+            </div>
+          </Card>
+
           <Spin spinning={loading}>
             {/* Search Card */}
             <Card
