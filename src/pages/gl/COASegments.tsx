@@ -89,7 +89,18 @@ interface ValueSetValue {
   StartDateActive: string;
   EndDateActive: string;
   SortOrder: number;
+  SummaryFlag: string | null;
+  DetailPostingAllowed: string | null;
+  DetailBudgetingAllowed: string | null;
   AccountType: string | null;
+  ControlAccount: string | null;
+  ReconciliationFlag: string | null;
+  FinancialCategory: string | null;
+  ExternalDataSource: string | null;
+  CreationDate: string | null;
+  CreatedBy: string | null;
+  LastUpdateDate: string | null;
+  LastUpdatedBy: string | null;
 }
 
 // Interface for Tab
@@ -237,7 +248,7 @@ const COASegments: React.FC = () => {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const result = await response.json();
 
-    // Map Fusion response to our format
+    // Map Fusion response to our format (include all fields for APEX sync)
     return (result.items || []).map((item: any) => ({
       ValueId: item.ValueId,
       Value: item.Value,
@@ -246,7 +257,18 @@ const COASegments: React.FC = () => {
       StartDateActive: item.StartDateActive,
       EndDateActive: item.EndDateActive,
       SortOrder: item.SortOrder,
+      SummaryFlag: item.SummaryFlag || null,
+      DetailPostingAllowed: item.DetailPostingAllowed || null,
+      DetailBudgetingAllowed: item.DetailBudgetingAllowed || null,
       AccountType: item.AccountType || null,
+      ControlAccount: item.ControlAccount || null,
+      ReconciliationFlag: item.ReconciliationFlag || null,
+      FinancialCategory: item.FinancialCategory || null,
+      ExternalDataSource: item.ExternalDataSource || null,
+      CreationDate: item.CreationDate || null,
+      CreatedBy: item.CreatedBy || null,
+      LastUpdateDate: item.LastUpdateDate || null,
+      LastUpdatedBy: item.LastUpdatedBy || null,
     }));
   };
 
@@ -266,7 +288,18 @@ const COASegments: React.FC = () => {
       StartDateActive: item.start_date_active ? item.start_date_active.substring(0, 10) : '',
       EndDateActive: item.end_date_active ? item.end_date_active.substring(0, 10) : '',
       SortOrder: item.sort_order,
+      SummaryFlag: item.summary_flag || null,
+      DetailPostingAllowed: item.detail_posting_allowed || null,
+      DetailBudgetingAllowed: item.detail_budgeting_allowed || null,
       AccountType: item.account_type || null,
+      ControlAccount: item.control_account || null,
+      ReconciliationFlag: item.reconciliation_flag || null,
+      FinancialCategory: item.financial_category || null,
+      ExternalDataSource: item.external_data_source || null,
+      CreationDate: item.fusion_creation_date || null,
+      CreatedBy: item.fusion_created_by || null,
+      LastUpdateDate: item.fusion_last_update_date || null,
+      LastUpdatedBy: item.fusion_last_updated_by || null,
     }));
   };
 
