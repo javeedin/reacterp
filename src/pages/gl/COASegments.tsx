@@ -15,6 +15,7 @@ import {
   Col,
   Badge,
   Tabs,
+  Progress,
 } from 'antd';
 import {
   SearchOutlined,
@@ -25,6 +26,8 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   AppstoreOutlined,
+  SyncOutlined,
+  CloudUploadOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { ORACLE_FUSION_CONFIG, PROXY_CONFIG } from '../../config/api.config';
@@ -83,7 +86,13 @@ interface TabItem {
   segment: Segment;
   values: ValueSetValue[];
   loading: boolean;
+  syncing: boolean;
+  syncStatus: 'idle' | 'syncing' | 'success' | 'error';
+  syncMessage: string;
 }
+
+// APEX endpoint for syncing values
+const APEX_SYNC_URL = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/valuesets/addvalues';
 
 const COASegments: React.FC = () => {
   const [loading, setLoading] = useState(false);
@@ -210,6 +219,9 @@ const COASegments: React.FC = () => {
       segment,
       values: [],
       loading: true,
+      syncing: false,
+      syncStatus: 'idle',
+      syncMessage: '',
     };
 
     setTabs(prev => [...prev, newTab]);
@@ -240,6 +252,94 @@ const COASegments: React.FC = () => {
       setActiveTabKey(newTabs[newTabs.length - 1].key);
     } else if (newTabs.length === 0) {
       setActiveTabKey('');
+    }
+  };
+
+  // Sync values to APEX database
+  const handleSyncToDb = async (tab: TabItem) => {
+    if (tab.values.length === 0) {
+      message.warning('No values to sync');
+      return;
+    }
+
+    console.log('[COASegments] ========== SYNC TO DB ==========');
+    console.log('[COASegments] Value Set Code:', tab.key);
+    console.log('[COASegments] Values count:', tab.values.length);
+
+    // Update tab to syncing state
+    setTabs(prev => prev.map(t =>
+      t.key === tab.key
+        ? { ...t, syncing: true, syncStatus: 'syncing', syncMessage: 'Preparing data...' }
+        : t
+    ));
+
+    try {
+      // Prepare the POST body
+      const postBody = {
+        valueSetCode: tab.key,
+        items: tab.values,
+      };
+
+      console.log('[COASegments] POST URL:', APEX_SYNC_URL);
+      console.log('[COASegments] POST Body:', JSON.stringify(postBody).substring(0, 500));
+
+      // Update message
+      setTabs(prev => prev.map(t =>
+        t.key === tab.key
+          ? { ...t, syncMessage: `Syncing ${tab.values.length} values...` }
+          : t
+      ));
+
+      const response = await fetch(APEX_SYNC_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(postBody),
+      });
+
+      console.log('[COASegments] Response Status:', response.status);
+
+      const responseText = await response.text();
+      console.log('[COASegments] Response Body:', responseText);
+
+      let result;
+      try {
+        result = JSON.parse(responseText);
+      } catch {
+        result = { success: false, error: responseText };
+      }
+
+      if (result.success) {
+        // Success
+        setTabs(prev => prev.map(t =>
+          t.key === tab.key
+            ? {
+                ...t,
+                syncing: false,
+                syncStatus: 'success',
+                syncMessage: `✓ Synced ${result.insertedCount || tab.values.length} values`,
+              }
+            : t
+        ));
+        message.success(`Successfully synced ${result.insertedCount || tab.values.length} values to database`);
+      } else {
+        // Error from APEX
+        throw new Error(result.error || 'Unknown error from APEX');
+      }
+    } catch (error: any) {
+      console.error('[COASegments] Sync Error:', error);
+      setTabs(prev => prev.map(t =>
+        t.key === tab.key
+          ? {
+              ...t,
+              syncing: false,
+              syncStatus: 'error',
+              syncMessage: `✗ Error: ${error.message}`,
+            }
+          : t
+      ));
+      message.error(`Sync failed: ${error.message}`);
     }
   };
 
@@ -578,19 +678,75 @@ const COASegments: React.FC = () => {
                               <Spin tip="Loading values..." />
                             </div>
                           ) : (
-                            <Table
-                              columns={valueColumns}
-                              dataSource={tab.values}
-                              rowKey="Value"
-                              size="small"
-                              pagination={{
-                                size: 'small',
-                                pageSize: 20,
-                                showSizeChanger: false,
-                                showTotal: (total) => <Text style={{ fontSize: 11 }}>{total} values</Text>,
-                              }}
-                              className="compact-table"
-                            />
+                            <>
+                              {/* Sync Toolbar */}
+                              <div style={{
+                                padding: '8px 12px',
+                                borderBottom: `1px solid ${REDWOOD.neutral200}`,
+                                background: REDWOOD.neutral100,
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                              }}>
+                                <Space>
+                                  <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>
+                                    {tab.values.length} values loaded
+                                  </Text>
+                                  {tab.syncStatus === 'success' && (
+                                    <Text style={{ fontSize: 11, color: REDWOOD.success }}>
+                                      {tab.syncMessage}
+                                    </Text>
+                                  )}
+                                  {tab.syncStatus === 'error' && (
+                                    <Text style={{ fontSize: 11, color: REDWOOD.primary }}>
+                                      {tab.syncMessage}
+                                    </Text>
+                                  )}
+                                </Space>
+                                <Button
+                                  type="primary"
+                                  size="small"
+                                  icon={tab.syncing ? <SyncOutlined spin /> : <CloudUploadOutlined />}
+                                  onClick={() => handleSyncToDb(tab)}
+                                  disabled={tab.syncing || tab.values.length === 0}
+                                  style={{ background: tab.syncStatus === 'success' ? REDWOOD.success : REDWOOD.info }}
+                                >
+                                  {tab.syncing ? 'Syncing...' : 'Sync to DB'}
+                                </Button>
+                              </div>
+
+                              {/* Sync Progress */}
+                              {tab.syncing && (
+                                <div style={{ padding: '8px 12px', background: '#E6F7FF', borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                    <Progress
+                                      percent={100}
+                                      status="active"
+                                      showInfo={false}
+                                      size="small"
+                                      style={{ flex: 1 }}
+                                    />
+                                    <Text style={{ fontSize: 11, color: REDWOOD.info }}>
+                                      {tab.syncMessage}
+                                    </Text>
+                                  </div>
+                                </div>
+                              )}
+
+                              <Table
+                                columns={valueColumns}
+                                dataSource={tab.values}
+                                rowKey="Value"
+                                size="small"
+                                pagination={{
+                                  size: 'small',
+                                  pageSize: 20,
+                                  showSizeChanger: false,
+                                  showTotal: (total) => <Text style={{ fontSize: 11 }}>{total} values</Text>,
+                                }}
+                                className="compact-table"
+                              />
+                            </>
                           )}
                         </div>
                       ),
