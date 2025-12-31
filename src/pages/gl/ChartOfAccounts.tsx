@@ -62,6 +62,7 @@ const ChartOfAccounts: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<ChartOfAccountsItem[]>([]);
   const [searched, setSearched] = useState(false);
+  const [selectedRecord, setSelectedRecord] = useState<ChartOfAccountsItem | null>(null);
 
   // Fetch chart of accounts data
   const fetchChartOfAccounts = async () => {
@@ -212,7 +213,7 @@ const ChartOfAccounts: React.FC = () => {
           {/* Page Title */}
           <div style={{ marginBottom: 24 }}>
             <Title level={3} style={{ margin: 0, color: REDWOOD.neutral900 }}>
-              Manage Chart of Accounts Structure Instances
+              Manage Chart of Accounts Structure
             </Title>
           </div>
 
@@ -331,10 +332,24 @@ const ChartOfAccounts: React.FC = () => {
               </Space>
               <div style={{ flex: 1 }} />
               <Space>
-                <Button icon={<SettingOutlined />} size="small">
+                <Button
+                  icon={<SettingOutlined />}
+                  size="small"
+                  onClick={() => navigate('/gl/manage-structures')}
+                >
                   Manage Structures
                 </Button>
-                <Button icon={<FileTextOutlined />} size="small">
+                <Button
+                  icon={<FileTextOutlined />}
+                  size="small"
+                  onClick={() => {
+                    if (selectedRecord) {
+                      navigate(`/gl/chart-of-accounts/${selectedRecord.structureinstanceid}/edit`);
+                    } else {
+                      message.warning('Please select a record first');
+                    }
+                  }}
+                >
                   Manage Structure Instances
                 </Button>
                 <Button
@@ -369,10 +384,13 @@ const ChartOfAccounts: React.FC = () => {
               rowSelection={{
                 type: 'radio',
                 columnWidth: 40,
+                onChange: (_: React.Key[], selectedRows: ChartOfAccountsItem[]) => {
+                  setSelectedRecord(selectedRows[0] || null);
+                },
               }}
               onRow={(record) => ({
                 style: { cursor: 'pointer' },
-                onDoubleClick: () => navigate(`/gl/chart-of-accounts/${record.structureinstanceid}/edit`),
+                onClick: () => setSelectedRecord(record),
               })}
               style={{
                 borderRadius: 0,
