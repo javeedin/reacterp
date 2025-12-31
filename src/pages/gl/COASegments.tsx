@@ -82,6 +82,7 @@ interface Segment {
 
 // Interface for Value (supports both Fusion and APEX formats)
 interface ValueSetValue {
+  ValueId: number;
   Value: string;
   Description: string;
   EnabledFlag: string;
@@ -238,6 +239,7 @@ const COASegments: React.FC = () => {
 
     // Map Fusion response to our format
     return (result.items || []).map((item: any) => ({
+      ValueId: item.ValueId,
       Value: item.Value,
       Description: item.Description,
       EnabledFlag: item.EnabledFlag,
@@ -257,6 +259,7 @@ const COASegments: React.FC = () => {
 
     // Map APEX response (lowercase) to our format
     return (result.items || []).map((item: any) => ({
+      ValueId: item.value_id,
       Value: item.value,
       Description: item.description,
       EnabledFlag: item.enabled_flag,
