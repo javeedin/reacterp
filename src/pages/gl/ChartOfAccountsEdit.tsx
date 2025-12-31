@@ -406,11 +406,13 @@ const ChartOfAccountsEdit: React.FC = () => {
                 loading={loading}
                 pagination={false}
                 scroll={{ x: 900 }}
+                size="small"
                 rowSelection={{
                   type: 'checkbox',
                   columnWidth: 40,
                 }}
                 style={{ borderRadius: 0 }}
+                className="compact-table"
               />
             </Card>
           </Spin>
@@ -419,6 +421,16 @@ const ChartOfAccountsEdit: React.FC = () => {
 
       {/* Autopilot Assistant */}
       <Autopilot />
+
+      {/* Compact table styles */}
+      <style>{`
+        .compact-table .ant-table-tbody > tr > td {
+          padding: 8px 12px !important;
+        }
+        .compact-table .ant-table-thead > tr > th {
+          padding: 10px 12px !important;
+        }
+      `}</style>
     </Layout>
   );
 };
