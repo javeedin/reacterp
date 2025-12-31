@@ -62,6 +62,7 @@ interface MenuItemType {
 
 // Task menu items
 const taskMenuItems: MenuItemType[] = [
+  { key: 'coa-segments', icon: <BookOutlined />, label: 'COA Segments', description: 'Browse segment values', color: REDWOOD.info, path: '/gl/coa-segments' },
   { key: 'account-analysis', icon: <FundOutlined />, label: 'Account Analysis', description: 'Account detail analysis', color: REDWOOD.warning, path: '/gl/account-analysis' },
   { key: 'manage-journals', icon: <AccountBookOutlined />, label: 'Manage Journals', description: 'Search and manage journal entries', color: REDWOOD.primary, path: '/gl/manage-journals' },
   { key: 'journal-entry', icon: <FileTextOutlined />, label: 'Create Journal', description: 'Create manual journal entry', color: REDWOOD.taskBlue },

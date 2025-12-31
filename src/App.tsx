@@ -14,6 +14,7 @@ import ChartOfAccountsEdit from './pages/gl/ChartOfAccountsEdit';
 import ManageStructures from './pages/gl/ManageStructures';
 import EditStructure from './pages/gl/EditStructure';
 import ManageValues from './pages/gl/ManageValues';
+import COASegments from './pages/gl/COASegments';
 import { APModule } from './pages/ap';
 import ManageInvoices from './pages/ap/ManageInvoices';
 import ManagePayments from './pages/ap/ManagePayments';
@@ -69,6 +70,7 @@ function App() {
               <Route path="gl/manage-structures" element={<ManageStructures />} />
               <Route path="gl/structures/:id/edit" element={<EditStructure />} />
               <Route path="gl/values/:segmentCode" element={<ManageValues />} />
+              <Route path="gl/coa-segments" element={<COASegments />} />
               <Route path="gl/journals/:id/edit" element={<EditJournal />} />
               <Route path="gl/batch/:batchId/edit" element={<EditJournal />} />
               <Route path="ap" element={<APModule />} />
