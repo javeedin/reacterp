@@ -84,7 +84,7 @@ const reportMenuItems: MenuItemType[] = [
 
 // Setup menu items
 const setupMenuItems: MenuItemType[] = [
-  { key: 'chart-of-accounts', icon: <BookOutlined />, label: 'Chart of Accounts', description: 'Manage account structure', color: REDWOOD.primary },
+  { key: 'chart-of-accounts', icon: <BookOutlined />, label: 'Chart of Accounts', description: 'Manage account structure', color: REDWOOD.primary, path: '/gl/chart-of-accounts' },
   { key: 'ledgers', icon: <AccountBookOutlined />, label: 'Ledgers', description: 'Configure ledger settings', color: REDWOOD.info },
   { key: 'fiscal-calendar', icon: <CalendarOutlined />, label: 'Fiscal Calendar', description: 'Define accounting periods', color: REDWOOD.success },
   { key: 'currencies', icon: <DollarOutlined />, label: 'Currencies', description: 'Currency configurations', color: REDWOOD.warning },

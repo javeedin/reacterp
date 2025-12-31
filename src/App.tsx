@@ -9,6 +9,7 @@ import GLModule from './pages/gl/GLModule';
 import ManageJournals from './pages/gl/ManageJournals';
 import EditJournal from './pages/gl/EditJournal';
 import AccountAnalysis from './pages/gl/AccountAnalysis';
+import ChartOfAccounts from './pages/gl/ChartOfAccounts';
 import { APModule } from './pages/ap';
 import ManageInvoices from './pages/ap/ManageInvoices';
 import ManagePayments from './pages/ap/ManagePayments';
@@ -59,6 +60,7 @@ function App() {
               <Route path="gl" element={<GLModule />} />
               <Route path="gl/manage-journals" element={<ManageJournals />} />
               <Route path="gl/account-analysis" element={<AccountAnalysis />} />
+              <Route path="gl/chart-of-accounts" element={<ChartOfAccounts />} />
               <Route path="gl/journals/:id/edit" element={<EditJournal />} />
               <Route path="gl/batch/:batchId/edit" element={<EditJournal />} />
               <Route path="ap" element={<APModule />} />
