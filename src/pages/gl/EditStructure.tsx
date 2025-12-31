@@ -71,6 +71,7 @@ const EditStructure: React.FC = () => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(true);
   const [segments, setSegments] = useState<SegmentItem[]>([]);
+  const [selectedSegment, setSelectedSegment] = useState<SegmentItem | null>(null);
   const [headerData] = useState<StructureHeader>({
     structureCode: 'BUIMERC_FIN_GLB_COA',
     name: 'BUIMERC Global Chart of Accounts',
@@ -321,6 +322,15 @@ const EditStructure: React.FC = () => {
                 <Button
                   icon={<UnorderedListOutlined />}
                   size="small"
+                  onClick={() => {
+                    if (selectedSegment) {
+                      navigate(`/gl/values/${selectedSegment.segment_code}`, {
+                        state: { segmentName: selectedSegment.segment_name }
+                      });
+                    } else {
+                      message.warning('Please select a segment first');
+                    }
+                  }}
                 >
                   Manage Values
                 </Button>
@@ -337,8 +347,11 @@ const EditStructure: React.FC = () => {
                 scroll={{ x: 1000 }}
                 className="compact-table"
                 rowSelection={{
-                  type: 'checkbox',
+                  type: 'radio',
                   columnWidth: 40,
+                  onChange: (_: React.Key[], selectedRows: SegmentItem[]) => {
+                    setSelectedSegment(selectedRows[0] || null);
+                  },
                 }}
               />
             </Card>
