@@ -27,7 +27,7 @@ import {
   AppstoreOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import { ORACLE_FUSION_CONFIG } from '../../config/api.config';
+import { ORACLE_FUSION_CONFIG, PROXY_CONFIG } from '../../config/api.config';
 import Autopilot from '../../components/Autopilot';
 
 // Detect if running in Electron
@@ -126,7 +126,7 @@ const COASegments: React.FC = () => {
     }
   };
 
-  // Fetch values for a segment - Direct Oracle Fusion API call
+  // Fetch values for a segment
   const fetchValues = async (segmentCode: string): Promise<ValueSetValue[]> => {
     // Check cache first
     if (valuesCache.current.has(segmentCode)) {
@@ -134,32 +134,46 @@ const COASegments: React.FC = () => {
       return valuesCache.current.get(segmentCode)!;
     }
 
+    const runningInElectron = isElectron();
     console.log('[COASegments] ========== FETCH VALUES ==========');
     console.log('[COASegments] Segment Code:', segmentCode);
-    console.log('[COASegments] Is Electron:', isElectron());
+    console.log('[COASegments] Is Electron:', runningInElectron);
 
     try {
-      const apiUrl = `https://iaaobn.fa.ocs.oraclecloud.com:443/fscmRestApi/resources/11.13.18.05/valueSets/${segmentCode}/child/values?limit=100&offset=0`;
-      const credentials = btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
+      let apiUrl: string;
+      let headers: HeadersInit;
+
+      if (runningInElectron) {
+        // Direct Oracle Fusion API call (works in Electron with webSecurity: false)
+        apiUrl = `https://iaaobn.fa.ocs.oraclecloud.com:443/fscmRestApi/resources/11.13.18.05/valueSets/${segmentCode}/child/values?limit=100&offset=0`;
+        const credentials = btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
+        headers = {
+          'Authorization': `Basic ${credentials}`,
+          'Content-Type': 'application/json',
+        };
+        console.log('[COASegments] Mode: Direct Oracle API');
+      } else {
+        // Use proxy server in browser mode (bypasses CORS)
+        apiUrl = `${PROXY_CONFIG.baseUrl}/fusion/fscmRestApi/resources/11.13.18.05/valueSets/${segmentCode}/child/values?limit=100&offset=0`;
+        headers = {
+          'Content-Type': 'application/json',
+        };
+        console.log('[COASegments] Mode: Proxy Server');
+      }
 
       console.log('[COASegments] API URL:', apiUrl);
-      console.log('[COASegments] Username:', ORACLE_FUSION_CONFIG.username);
 
       const response = await fetch(apiUrl, {
         method: 'GET',
-        headers: {
-          'Authorization': `Basic ${credentials}`,
-          'Content-Type': 'application/json',
-        },
+        headers,
       });
 
       console.log('[COASegments] Response Status:', response.status, response.statusText);
-      console.log('[COASegments] Response OK:', response.ok);
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('[COASegments] Error Response Body:', errorText.substring(0, 500));
-        throw new Error(`HTTP error! status: ${response.status} - ${errorText.substring(0, 200)}`);
+        console.error('[COASegments] Error Response:', errorText.substring(0, 500));
+        throw new Error(`HTTP ${response.status}: ${errorText.substring(0, 100)}`);
       }
 
       const result = await response.json();
@@ -169,11 +183,13 @@ const COASegments: React.FC = () => {
       return valueData;
     } catch (error: any) {
       console.error('[COASegments] ========== ERROR ==========');
-      console.error('[COASegments] Error Type:', error.name);
-      console.error('[COASegments] Error Message:', error.message);
-      console.error('[COASegments] Full Error:', error);
+      console.error('[COASegments] Error:', error.message);
 
-      message.error(`Failed to fetch values: ${error.message}`);
+      if (!runningInElectron) {
+        message.error('Failed to fetch. Start proxy: node server/proxy.cjs');
+      } else {
+        message.error(`Failed: ${error.message}`);
+      }
       return [];
     }
   };
