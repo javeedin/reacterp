@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Layout,
   Typography,
@@ -63,6 +63,11 @@ const ChartOfAccounts: React.FC = () => {
   const [data, setData] = useState<ChartOfAccountsItem[]>([]);
   const [searched, setSearched] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<ChartOfAccountsItem | null>(null);
+
+  // Auto-fetch data on component mount
+  useEffect(() => {
+    fetchChartOfAccounts();
+  }, []);
 
   // Fetch chart of accounts data
   const fetchChartOfAccounts = async () => {
