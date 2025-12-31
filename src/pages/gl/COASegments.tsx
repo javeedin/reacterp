@@ -360,7 +360,7 @@ const COASegments: React.FC = () => {
   };
 
   // Sync values to APEX database
-  const handleSyncToDb = async (tab: TabItem) => {
+  const handleSyncToDb = async (tab: TabItem, testMode: boolean = false) => {
     if (tab.values.length === 0) {
       message.warning('No values to sync');
       return;
@@ -371,20 +371,33 @@ const COASegments: React.FC = () => {
       t.key === tab.key ? { ...t, syncing: true, syncStatus: 'syncing', syncMessage: 'Preparing data...', syncLogs: [], showLogs: true } : t
     ));
 
-    const postBody = { valueSetCode: tab.key, items: tab.values };
+    // Use first 25 items if test mode, otherwise all
+    const itemsToSync = testMode ? tab.values.slice(0, 25) : tab.values;
+    const postBody = { valueSetCode: tab.key, items: itemsToSync };
     const bodyJson = JSON.stringify(postBody);
 
     // Log request details
     addSyncLog(tab.key, '========== SYNC REQUEST ==========');
+    addSyncLog(tab.key, testMode ? '🧪 TEST MODE: First 25 items only' : '📦 FULL SYNC');
     addSyncLog(tab.key, `POST URL: ${APEX_SYNC_URL}`);
     addSyncLog(tab.key, `Value Set Code: ${tab.key}`);
-    addSyncLog(tab.key, `Items Count: ${tab.values.length}`);
+    addSyncLog(tab.key, `Items Count: ${itemsToSync.length}`);
     addSyncLog(tab.key, `Payload Size: ${(bodyJson.length / 1024).toFixed(2)} KB`);
-    addSyncLog(tab.key, `Request Body (first 500 chars):`);
-    addSyncLog(tab.key, bodyJson.substring(0, 500) + (bodyJson.length > 500 ? '...' : ''));
+
+    // Log first item structure for debugging
+    if (itemsToSync.length > 0) {
+      addSyncLog(tab.key, '---------- FIRST ITEM STRUCTURE ----------');
+      const firstItem = itemsToSync[0];
+      addSyncLog(tab.key, `Field Names: ${Object.keys(firstItem).join(', ')}`);
+      addSyncLog(tab.key, `First Item JSON:`);
+      addSyncLog(tab.key, JSON.stringify(firstItem, null, 2));
+    }
+
+    addSyncLog(tab.key, '---------- FULL PAYLOAD ----------');
+    addSyncLog(tab.key, bodyJson);
 
     setTabs(prev => prev.map(t =>
-      t.key === tab.key ? { ...t, syncMessage: `Syncing ${tab.values.length} values...` } : t
+      t.key === tab.key ? { ...t, syncMessage: `Syncing ${itemsToSync.length} values...` } : t
     ));
 
     try {
@@ -402,7 +415,7 @@ const COASegments: React.FC = () => {
 
       const responseText = await response.text();
       addSyncLog(tab.key, `Response Body:`);
-      addSyncLog(tab.key, responseText.substring(0, 1000) + (responseText.length > 1000 ? '...' : ''));
+      addSyncLog(tab.key, responseText);
 
       let result;
       try {
@@ -414,11 +427,12 @@ const COASegments: React.FC = () => {
       }
 
       if (result.success) {
-        addSyncLog(tab.key, `✅ SUCCESS: Synced ${result.insertedCount || tab.values.length} values`);
+        const countMsg = testMode ? `${result.insertedCount}/${itemsToSync.length}` : (result.insertedCount || itemsToSync.length);
+        addSyncLog(tab.key, `✅ SUCCESS: Synced ${countMsg} values`);
         setTabs(prev => prev.map(t =>
-          t.key === tab.key ? { ...t, syncing: false, syncStatus: 'success', syncMessage: `✓ Synced ${result.insertedCount || tab.values.length} values` } : t
+          t.key === tab.key ? { ...t, syncing: false, syncStatus: 'success', syncMessage: `✓ Synced ${countMsg} values` } : t
         ));
-        message.success(`Successfully synced ${result.insertedCount || tab.values.length} values`);
+        message.success(`Successfully synced ${countMsg} values`);
       } else {
         addSyncLog(tab.key, `❌ ERROR: ${result.error || 'Unknown error'}`);
         throw new Error(result.error || 'Unknown error');
@@ -629,7 +643,12 @@ const COASegments: React.FC = () => {
                                       {tab.syncLogs.length > 0 ? `Logs (${tab.syncLogs.length})` : 'Logs'}
                                     </Button>
                                   </Tooltip>
-                                  <Button type="primary" size="small" icon={tab.syncing ? <SyncOutlined spin /> : <CloudUploadOutlined />} onClick={() => handleSyncToDb(tab)} disabled={tab.syncing || tab.values.length === 0 || dataSource === 'apex'} style={{ background: tab.syncStatus === 'success' ? REDWOOD.success : REDWOOD.info }}>
+                                  <Tooltip title="Test sync with first 25 items only">
+                                    <Button size="small" icon={tab.syncing ? <SyncOutlined spin /> : <SyncOutlined />} onClick={() => handleSyncToDb(tab, true)} disabled={tab.syncing || tab.values.length === 0 || dataSource === 'apex'} style={{ borderColor: REDWOOD.warning, color: REDWOOD.warning }}>
+                                      Test (25)
+                                    </Button>
+                                  </Tooltip>
+                                  <Button type="primary" size="small" icon={tab.syncing ? <SyncOutlined spin /> : <CloudUploadOutlined />} onClick={() => handleSyncToDb(tab, false)} disabled={tab.syncing || tab.values.length === 0 || dataSource === 'apex'} style={{ background: tab.syncStatus === 'success' ? REDWOOD.success : REDWOOD.info }}>
                                     {tab.syncing ? 'Syncing...' : 'Sync to DB'}
                                   </Button>
                                 </Space>
