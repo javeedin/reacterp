@@ -23,7 +23,7 @@ import {
   SettingOutlined,
   DeploymentUnitOutlined,
 } from '@ant-design/icons';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import Autopilot from '../../components/Autopilot';
 
@@ -57,6 +57,7 @@ interface ChartOfAccountsItem {
 }
 
 const ChartOfAccounts: React.FC = () => {
+  const navigate = useNavigate();
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<ChartOfAccountsItem[]>([]);
@@ -371,7 +372,7 @@ const ChartOfAccounts: React.FC = () => {
               }}
               onRow={(record) => ({
                 style: { cursor: 'pointer' },
-                onClick: () => console.log('Selected:', record),
+                onDoubleClick: () => navigate(`/gl/chart-of-accounts/${record.structureinstanceid}/edit`),
               })}
               style={{
                 borderRadius: 0,
