@@ -1707,6 +1707,16 @@ const CreateJournal: React.FC = () => {
                     Journal Actions <DownOutlined />
                   </Button>
                 </Dropdown>
+                <Tooltip title="Export Journal to PDF">
+                  <Button
+                    size="small"
+                    icon={<FilePdfOutlined />}
+                    onClick={handlePrintPDF}
+                    style={{ background: REDWOOD.primary, color: '#fff', borderColor: REDWOOD.primary }}
+                  >
+                    Print PDF
+                  </Button>
+                </Tooltip>
               </Space>
             </div>
 
@@ -1772,18 +1782,6 @@ const CreateJournal: React.FC = () => {
                   </Button>
                 </Tooltip>
                 <Button size="small" style={{ fontSize: 11 }}>Wrap</Button>
-              </Space>
-              <Space size="small">
-                <Tooltip title="Export to PDF">
-                  <Button
-                    size="small"
-                    icon={<FilePdfOutlined />}
-                    onClick={handlePrintPDF}
-                    style={{ background: REDWOOD.primary, color: '#fff', borderColor: REDWOOD.primary }}
-                  >
-                    Print PDF
-                  </Button>
-                </Tooltip>
               </Space>
             </div>
 
