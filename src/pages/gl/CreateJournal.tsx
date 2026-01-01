@@ -33,10 +33,12 @@ import {
   TableOutlined,
   ColumnWidthOutlined,
   SplitCellsOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
+import AccountSelector from '../../components/AccountSelector';
 
 const { Content } = Layout;
 const { Title, Text, TextArea } = Typography;
@@ -129,6 +131,25 @@ const CreateJournal: React.FC = () => {
 
   // Selected line keys
   const [selectedLineKeys, setSelectedLineKeys] = useState<React.Key[]>([]);
+
+  // Account selector state
+  const [accountSelectorVisible, setAccountSelectorVisible] = useState(false);
+  const [editingLineKey, setEditingLineKey] = useState<string | null>(null);
+
+  // Open account selector for a line
+  const openAccountSelector = (lineKey: string) => {
+    setEditingLineKey(lineKey);
+    setAccountSelectorVisible(true);
+  };
+
+  // Handle account selection
+  const handleAccountSelect = (accountCode: string, _segments: Record<string, { value: string; description: string }>) => {
+    if (editingLineKey) {
+      updateLine(editingLineKey, 'account', accountCode);
+    }
+    setAccountSelectorVisible(false);
+    setEditingLineKey(null);
+  };
 
   // Batch data
   const [batchData, setBatchData] = useState<BatchData>({
@@ -342,15 +363,25 @@ const CreateJournal: React.FC = () => {
       title: <span><span style={{ color: REDWOOD.primary }}>*</span> Account</span>,
       dataIndex: 'account',
       key: 'account',
-      width: 280,
+      width: 300,
       render: (value, record) => (
-        <Input
-          value={value}
-          onChange={(e) => updateLine(record.key, 'account', e.target.value)}
-          placeholder="Enter account combination"
-          size="small"
-          style={{ width: '100%' }}
-        />
+        <Space.Compact style={{ width: '100%' }}>
+          <Input
+            value={value}
+            onChange={(e) => updateLine(record.key, 'account', e.target.value)}
+            placeholder="Select account"
+            size="small"
+            style={{ width: 'calc(100% - 32px)' }}
+          />
+          <Tooltip title="Search Account">
+            <Button
+              size="small"
+              icon={<SearchOutlined />}
+              onClick={() => openAccountSelector(record.key)}
+              style={{ borderColor: REDWOOD.neutral300 }}
+            />
+          </Tooltip>
+        </Space.Compact>
       ),
     },
     {
@@ -1139,6 +1170,17 @@ const CreateJournal: React.FC = () => {
           .ant-dropdown-button > .ant-btn:first-child { background: ${REDWOOD.warning}; border-color: ${REDWOOD.warning}; }
           .ant-dropdown-button > .ant-btn:last-child { background: ${REDWOOD.warning}; border-color: ${REDWOOD.warning}; border-left-color: rgba(255,255,255,0.3); }
         `}</style>
+
+        {/* Account Selector Modal */}
+        <AccountSelector
+          visible={accountSelectorVisible}
+          onCancel={() => {
+            setAccountSelectorVisible(false);
+            setEditingLineKey(null);
+          }}
+          onSelect={handleAccountSelect}
+          initialValue={editingLineKey ? lines.find(l => l.key === editingLineKey)?.account : undefined}
+        />
       </Content>
     </Layout>
   );
