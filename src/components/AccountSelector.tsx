@@ -215,14 +215,29 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
             style={{ width: '100%' }}
             loading={isLoading}
             showSearch
-            optionFilterProp="children"
-            filterOption={(input, option) =>
-              (option?.children as unknown as string)?.toLowerCase().includes(input.toLowerCase())
-            }
+            optionFilterProp="label"
+            filterOption={(input, option) => {
+              const searchTerm = input.toLowerCase();
+              const value = (option?.value as string)?.toLowerCase() || '';
+              const desc = (option?.['data-description'] as string)?.toLowerCase() || '';
+              return value.includes(searchTerm) || desc.includes(searchTerm);
+            }}
+            optionLabelProp="value"
+            dropdownStyle={{ minWidth: 350 }}
           >
             {values.map(v => (
-              <Option key={v.Value} value={v.Value}>
-                {v.Value}
+              <Option
+                key={v.Value}
+                value={v.Value}
+                label={`${v.Value} - ${v.Description}`}
+                data-description={v.Description}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                  <span style={{ fontWeight: 500, minWidth: 60 }}>{v.Value}</span>
+                  <span style={{ color: '#666', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {v.Description}
+                  </span>
+                </div>
               </Option>
             ))}
           </Select>
