@@ -262,6 +262,11 @@ const CreateJournal: React.FC = () => {
   // Detached mode for journal lines (full page)
   const [isDetached, setIsDetached] = useState(false);
 
+  // PDF Preview state
+  const [pdfPreviewVisible, setPdfPreviewVisible] = useState(false);
+  const [pdfDataUrl, setPdfDataUrl] = useState<string>('');
+  const [pdfFileName, setPdfFileName] = useState<string>('');
+
   // Search filter for journal lines
   const [lineSearchText, setLineSearchText] = useState('');
 
@@ -740,10 +745,36 @@ const CreateJournal: React.FC = () => {
     doc.text(`Data Access Set: BUIMERC LEDGER`, 15, finalY);
     doc.text(`Journal Count: ${journals.length}`, pageWidth - 15, finalY, { align: 'right' });
 
-    // Save the PDF
+    // Generate PDF as blob URL for preview
     const fileName = `Journal_${batchData.batchName}_${dayjs().format('YYYYMMDD_HHmmss')}.pdf`;
-    doc.save(fileName);
-    message.success(`PDF report generated: ${fileName}`);
+    const pdfBlob = doc.output('blob');
+    const blobUrl = URL.createObjectURL(pdfBlob);
+
+    // Set state to show preview modal
+    setPdfDataUrl(blobUrl);
+    setPdfFileName(fileName);
+    setPdfPreviewVisible(true);
+  };
+
+  // Download PDF from preview
+  const handleDownloadPDF = () => {
+    if (pdfDataUrl) {
+      const link = document.createElement('a');
+      link.href = pdfDataUrl;
+      link.download = pdfFileName;
+      link.click();
+      message.success(`PDF downloaded: ${pdfFileName}`);
+    }
+  };
+
+  // Close PDF preview and cleanup
+  const handleClosePdfPreview = () => {
+    if (pdfDataUrl) {
+      URL.revokeObjectURL(pdfDataUrl); // Clean up blob URL
+    }
+    setPdfPreviewVisible(false);
+    setPdfDataUrl('');
+    setPdfFileName('');
   };
 
   // Validate mandatory fields
@@ -1983,6 +2014,58 @@ const CreateJournal: React.FC = () => {
               </Table.Summary>
             )}
           />
+        </Modal>
+
+        {/* PDF Preview Modal */}
+        <Modal
+          title={
+            <Space>
+              <FilePdfOutlined style={{ color: REDWOOD.primary }} />
+              <span>Journal Report Preview</span>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {pdfFileName}
+              </Text>
+            </Space>
+          }
+          open={pdfPreviewVisible}
+          onCancel={handleClosePdfPreview}
+          width="90vw"
+          style={{ top: 20 }}
+          footer={
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                Preview generated on {dayjs().format('DD-MMM-YYYY HH:mm:ss')}
+              </Text>
+              <Space>
+                <Button onClick={handleClosePdfPreview}>
+                  Close
+                </Button>
+                <Button
+                  type="primary"
+                  icon={<FilePdfOutlined />}
+                  onClick={handleDownloadPDF}
+                  style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+                >
+                  Download PDF
+                </Button>
+              </Space>
+            </div>
+          }
+          styles={{
+            body: { padding: 0, height: 'calc(100vh - 200px)', overflow: 'hidden' }
+          }}
+        >
+          {pdfDataUrl && (
+            <iframe
+              src={pdfDataUrl}
+              style={{
+                width: '100%',
+                height: '100%',
+                border: 'none',
+              }}
+              title="PDF Preview"
+            />
+          )}
         </Modal>
       </Content>
     </Layout>
