@@ -22,7 +22,7 @@ CREATE TABLE reerp_gl_code_combinations (
     segment9_future2          VARCHAR2(30),    -- buimercFinGlbCoaFut2
 
     -- Concatenated Segments (for display/search)
-    concatenated_segments     VARCHAR2(250)   GENERATED ALWAYS AS (
+    concatenated_segments     VARCHAR2(500)   GENERATED ALWAYS AS (
         segment1_company || '-' ||
         segment2_lob || '-' ||
         segment3_department || '-' ||
