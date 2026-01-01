@@ -8,6 +8,7 @@ import Home from './pages/Home';
 import GLModule from './pages/gl/GLModule';
 import ManageJournals from './pages/gl/ManageJournals';
 import EditJournal from './pages/gl/EditJournal';
+import CreateJournal from './pages/gl/CreateJournal';
 import AccountAnalysis from './pages/gl/AccountAnalysis';
 import ChartOfAccounts from './pages/gl/ChartOfAccounts';
 import ChartOfAccountsEdit from './pages/gl/ChartOfAccountsEdit';
@@ -73,6 +74,7 @@ function App() {
               <Route path="gl/coa-segments" element={<COASegments />} />
               <Route path="gl/journals/:id/edit" element={<EditJournal />} />
               <Route path="gl/batch/:batchId/edit" element={<EditJournal />} />
+              <Route path="gl/create-journal" element={<CreateJournal />} />
               <Route path="ap" element={<APModule />} />
               <Route path="ap/manage-invoices" element={<ManageInvoices />} />
               <Route path="ap/manage-payments" element={<ManagePayments />} />
