@@ -37,10 +37,13 @@ import {
   SplitCellsOutlined,
   SearchOutlined,
   InfoCircleOutlined,
+  FilePdfOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
 
 const { Content } = Layout;
@@ -555,6 +558,193 @@ const CreateJournal: React.FC = () => {
   // Save handler
   // Check if debit and credit are balanced
   const isBalanced = lineTotals.enteredDr === lineTotals.enteredCr;
+
+  // Generate PDF Report
+  const handlePrintPDF = () => {
+    const doc = new jsPDF('landscape', 'mm', 'a4');
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+
+    // Colors matching Redwood palette
+    const primaryColor: [number, number, number] = [199, 70, 52]; // REDWOOD.primary
+    const headerBg: [number, number, number] = [247, 247, 247]; // REDWOOD.neutral100
+    const textColor: [number, number, number] = [26, 26, 26]; // REDWOOD.neutral900
+
+    let yPos = 15;
+
+    // Title
+    doc.setFontSize(18);
+    doc.setTextColor(...primaryColor);
+    doc.text('Journal Report', pageWidth / 2, yPos, { align: 'center' });
+    yPos += 8;
+
+    // Subtitle with date
+    doc.setFontSize(10);
+    doc.setTextColor(107, 107, 107); // neutral600
+    doc.text(`Generated on: ${dayjs().format('DD-MMM-YYYY HH:mm:ss')}`, pageWidth / 2, yPos, { align: 'center' });
+    yPos += 10;
+
+    // Horizontal line
+    doc.setDrawColor(...primaryColor);
+    doc.setLineWidth(0.5);
+    doc.line(15, yPos, pageWidth - 15, yPos);
+    yPos += 8;
+
+    // Journal Batch Section
+    doc.setFontSize(12);
+    doc.setTextColor(...textColor);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Journal Batch Information', 15, yPos);
+    yPos += 6;
+
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    const batchInfo = [
+      ['Batch Name:', batchData.batchName, 'Balance Type:', batchData.balanceType],
+      ['Accounting Period:', batchData.accountingPeriod, 'Status:', 'Unposted'],
+      ['Description:', batchData.description || '-', '', ''],
+    ];
+
+    batchInfo.forEach(row => {
+      doc.setFont('helvetica', 'bold');
+      doc.text(row[0], 15, yPos);
+      doc.setFont('helvetica', 'normal');
+      doc.text(row[1], 50, yPos);
+      if (row[2]) {
+        doc.setFont('helvetica', 'bold');
+        doc.text(row[2], 140, yPos);
+        doc.setFont('helvetica', 'normal');
+        doc.text(row[3], 175, yPos);
+      }
+      yPos += 5;
+    });
+    yPos += 5;
+
+    // Journal Section
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Journal: ${journalData.journalName || 'Untitled'}`, 15, yPos);
+    yPos += 6;
+
+    doc.setFontSize(9);
+    const journalInfo = [
+      ['Ledger:', journalData.ledger, 'Legal Entity:', journalData.legalEntity || '-'],
+      ['Accounting Date:', journalData.accountingDate, 'Category:', journalData.category || '-'],
+      ['Currency:', journalData.currency, 'Conversion Rate:', String(journalData.conversionRate)],
+      ['Conversion Type:', journalData.conversionRateType, 'Conversion Date:', journalData.conversionDate],
+    ];
+
+    journalInfo.forEach(row => {
+      doc.setFont('helvetica', 'bold');
+      doc.text(row[0], 15, yPos);
+      doc.setFont('helvetica', 'normal');
+      doc.text(row[1], 50, yPos);
+      doc.setFont('helvetica', 'bold');
+      doc.text(row[2], 140, yPos);
+      doc.setFont('helvetica', 'normal');
+      doc.text(row[3], 175, yPos);
+      yPos += 5;
+    });
+    yPos += 8;
+
+    // Journal Lines Table
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Journal Lines', 15, yPos);
+    yPos += 4;
+
+    // Prepare table data
+    const tableData = lines.map(line => [
+      String(line.lineNum),
+      line.account || '-',
+      line.accountDescription || '-',
+      line.currency.split(' ')[0], // Just currency code
+      line.enteredDr !== null ? formatNumber(line.enteredDr) : '-',
+      line.enteredCr !== null ? formatNumber(line.enteredCr) : '-',
+      line.accountedDr !== null ? formatNumber(line.accountedDr) : '-',
+      line.accountedCr !== null ? formatNumber(line.accountedCr) : '-',
+      line.description || '-',
+    ]);
+
+    // Add totals row
+    tableData.push([
+      '',
+      'TOTAL',
+      '',
+      '',
+      formatNumber(lineTotals.enteredDr),
+      formatNumber(lineTotals.enteredCr),
+      formatNumber(lineTotals.accountedDr),
+      formatNumber(lineTotals.accountedCr),
+      isBalanced ? 'Balanced' : 'UNBALANCED',
+    ]);
+
+    autoTable(doc, {
+      startY: yPos,
+      head: [[
+        'Line',
+        'Account Code',
+        'Account Description',
+        'Cur',
+        'Entered Dr',
+        'Entered Cr',
+        'Accounted Dr',
+        'Accounted Cr',
+        'Description',
+      ]],
+      body: tableData,
+      theme: 'grid',
+      headStyles: {
+        fillColor: primaryColor,
+        textColor: [255, 255, 255],
+        fontSize: 8,
+        fontStyle: 'bold',
+        halign: 'center',
+      },
+      bodyStyles: {
+        fontSize: 8,
+        textColor: textColor,
+      },
+      columnStyles: {
+        0: { cellWidth: 12, halign: 'center' },
+        1: { cellWidth: 45 },
+        2: { cellWidth: 40 },
+        3: { cellWidth: 12, halign: 'center' },
+        4: { cellWidth: 25, halign: 'right' },
+        5: { cellWidth: 25, halign: 'right' },
+        6: { cellWidth: 25, halign: 'right' },
+        7: { cellWidth: 25, halign: 'right' },
+        8: { cellWidth: 45 },
+      },
+      alternateRowStyles: {
+        fillColor: headerBg,
+      },
+      // Style the last row (totals) differently
+      didParseCell: (data) => {
+        if (data.row.index === tableData.length - 1) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [230, 230, 230];
+          if (data.column.index === 8 && !isBalanced) {
+            data.cell.styles.textColor = primaryColor;
+          }
+        }
+      },
+      margin: { left: 15, right: 15 },
+    });
+
+    // Footer
+    const finalY = (doc as any).lastAutoTable.finalY + 10;
+    doc.setFontSize(8);
+    doc.setTextColor(107, 107, 107);
+    doc.text(`Page 1 of 1`, pageWidth / 2, finalY, { align: 'center' });
+    doc.text(`Data Access Set: BUIMERC LEDGER`, 15, finalY);
+    doc.text(`Journal Count: ${journals.length}`, pageWidth - 15, finalY, { align: 'right' });
+
+    // Save the PDF
+    const fileName = `Journal_${batchData.batchName}_${dayjs().format('YYYYMMDD_HHmmss')}.pdf`;
+    doc.save(fileName);
+    message.success(`PDF report generated: ${fileName}`);
+  };
 
   // Validate mandatory fields
   const validateMandatoryFields = (): { valid: boolean; message: string } => {
@@ -1582,6 +1772,18 @@ const CreateJournal: React.FC = () => {
                   </Button>
                 </Tooltip>
                 <Button size="small" style={{ fontSize: 11 }}>Wrap</Button>
+              </Space>
+              <Space size="small">
+                <Tooltip title="Export to PDF">
+                  <Button
+                    size="small"
+                    icon={<FilePdfOutlined />}
+                    onClick={handlePrintPDF}
+                    style={{ background: REDWOOD.primary, color: '#fff', borderColor: REDWOOD.primary }}
+                  >
+                    Print PDF
+                  </Button>
+                </Tooltip>
               </Space>
             </div>
 
