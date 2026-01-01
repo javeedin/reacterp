@@ -41,7 +41,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
-import AccountSelector from '../../components/AccountSelector';
+import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
 
 const { Content } = Layout;
 const { Title, Text, TextArea } = Typography;
@@ -253,6 +253,8 @@ const CreateJournal: React.FC = () => {
   // Account selector state
   const [accountSelectorVisible, setAccountSelectorVisible] = useState(false);
   const [editingLineKey, setEditingLineKey] = useState<string | null>(null);
+  const [accountSelectorInitialValue, setAccountSelectorInitialValue] = useState<string | undefined>(undefined);
+  const [validatingAccount, setValidatingAccount] = useState<string | null>(null); // Line key being validated
 
   // Detached mode for journal lines (full page)
   const [isDetached, setIsDetached] = useState(false);
@@ -374,9 +376,43 @@ const CreateJournal: React.FC = () => {
   };
 
   // Open account selector for a line
-  const openAccountSelector = (lineKey: string) => {
+  const openAccountSelector = (lineKey: string, initialValue?: string) => {
     setEditingLineKey(lineKey);
+    setAccountSelectorInitialValue(initialValue);
     setAccountSelectorVisible(true);
+  };
+
+  // Validate account code on blur
+  const handleAccountBlur = async (lineKey: string, accountCode: string) => {
+    // Skip validation if empty or already validating
+    if (!accountCode || accountCode.trim() === '' || validatingAccount) {
+      return;
+    }
+
+    setValidatingAccount(lineKey);
+
+    try {
+      const result = await validateAccountCode(accountCode);
+
+      if (!result.isValid && result.segmentsLoaded) {
+        // Show message about invalid segments
+        message.warning(`Invalid segment value(s): ${result.invalidSegments.join(', ')}. Please correct using the account selector.`);
+
+        // Update line with validated code (valid parts kept, invalid parts blanked)
+        setLines(prevLines => prevLines.map(line =>
+          line.key === lineKey
+            ? { ...line, account: result.validatedCode, accountDescription: '', segmentDetails: {} }
+            : line
+        ));
+
+        // Open account selector with the validated code as initial value
+        openAccountSelector(lineKey, result.validatedCode);
+      }
+    } catch (error) {
+      console.error('Error validating account code:', error);
+    } finally {
+      setValidatingAccount(null);
+    }
   };
 
   // Handle account selection
@@ -637,9 +673,11 @@ const CreateJournal: React.FC = () => {
             <Input
               value={value}
               onChange={(e) => updateLine(record.key, 'account', e.target.value)}
-              placeholder="Select account"
+              onBlur={(e) => handleAccountBlur(record.key, e.target.value)}
+              placeholder="Select or type account"
               size="small"
               style={{ width: 'calc(100% - 64px)' }}
+              suffix={validatingAccount === record.key ? <span style={{ color: REDWOOD.info }}>...</span> : null}
             />
             <Tooltip title="Search Account">
               <Button
@@ -647,6 +685,7 @@ const CreateJournal: React.FC = () => {
                 icon={<SearchOutlined />}
                 onClick={() => openAccountSelector(record.key)}
                 style={{ borderColor: REDWOOD.neutral300 }}
+                loading={validatingAccount === record.key}
               />
             </Tooltip>
             {record.account && Object.keys(record.segmentDetails || {}).length > 0 && (
@@ -1596,9 +1635,13 @@ const CreateJournal: React.FC = () => {
           onCancel={() => {
             setAccountSelectorVisible(false);
             setEditingLineKey(null);
+            setAccountSelectorInitialValue(undefined);
           }}
-          onSelect={handleAccountSelect}
-          initialValue={editingLineKey ? lines.find(l => l.key === editingLineKey)?.account : undefined}
+          onSelect={(accountCode, segments) => {
+            handleAccountSelect(accountCode, segments);
+            setAccountSelectorInitialValue(undefined);
+          }}
+          initialValue={accountSelectorInitialValue ?? (editingLineKey ? lines.find(l => l.key === editingLineKey)?.account : undefined)}
         />
 
         {/* Detached Journal Lines Modal */}

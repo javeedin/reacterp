@@ -47,6 +47,98 @@ const clearCache = () => {
   valuesCache = new Map();
 };
 
+// Validation result interface
+export interface ValidationResult {
+  isValid: boolean;
+  validatedCode: string; // Code with invalid segments replaced with empty string
+  invalidSegments: string[]; // Names of invalid segments
+  segmentsLoaded: boolean; // Whether segment data is loaded
+}
+
+// Validate a code combination against cached values
+export const validateAccountCode = async (code: string): Promise<ValidationResult> => {
+  // If cache is empty, we need to fetch segments first
+  if (segmentsCache.length === 0) {
+    try {
+      const response = await fetch(SEGMENTS_API);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      const result = await response.json();
+      const segmentData: Segment[] = (result.items || []).sort(
+        (a: Segment, b: Segment) => a.sequence_no - b.sequence_no
+      );
+      segmentsCache = segmentData;
+    } catch (error) {
+      console.error('Error fetching segments for validation:', error);
+      return { isValid: true, validatedCode: code, invalidSegments: [], segmentsLoaded: false };
+    }
+  }
+
+  const parts = code.split('-');
+  const validatedParts: string[] = [];
+  const invalidSegments: string[] = [];
+  let allValid = true;
+
+  for (let i = 0; i < segmentsCache.length; i++) {
+    const segment = segmentsCache[i];
+    const inputValue = parts[i] || '';
+
+    // If empty, keep it (it will be handled by required field validation)
+    if (!inputValue) {
+      validatedParts.push('');
+      continue;
+    }
+
+    // Check if values are cached for this segment
+    let values = valuesCache.get(segment.segment_code);
+
+    // If not cached, try to fetch
+    if (!values) {
+      try {
+        const response = await fetch(`${VALUES_API}/${segment.segment_code}`);
+        if (response.ok) {
+          const result = await response.json();
+          values = (result.items || []).map((item: any) => ({
+            ValueId: item.value_id,
+            Value: item.value,
+            Description: item.description,
+            EnabledFlag: item.enabled_flag,
+          }));
+          valuesCache.set(segment.segment_code, values);
+        }
+      } catch (error) {
+        console.error(`Error fetching values for ${segment.segment_code}:`, error);
+      }
+    }
+
+    // Validate the value
+    if (values) {
+      const isValidValue = values.some(v => v.Value === inputValue);
+      if (isValidValue) {
+        validatedParts.push(inputValue);
+      } else {
+        validatedParts.push(''); // Leave blank for invalid
+        invalidSegments.push(segment.prompt || segment.segment_name);
+        allValid = false;
+      }
+    } else {
+      // If we couldn't fetch values, assume valid (fail open)
+      validatedParts.push(inputValue);
+    }
+  }
+
+  return {
+    isValid: allValid,
+    validatedCode: validatedParts.join('-'),
+    invalidSegments,
+    segmentsLoaded: true,
+  };
+};
+
+// Check if cache is populated
+export const isCacheLoaded = (): boolean => {
+  return segmentsCache.length > 0 && valuesCache.size > 0;
+};
+
 const AccountSelector: React.FC<AccountSelectorProps> = ({
   visible,
   onCancel,
