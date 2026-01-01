@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Layout,
   Card,
@@ -18,6 +18,7 @@ import {
   InputNumber,
   message,
   Popover,
+  Modal,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -135,6 +136,40 @@ const formatNumber = (value: number | null | undefined) => {
   return value.toLocaleString('en-US', { minimumFractionDigits: 2 });
 };
 
+// Generate batch name with timestamp
+const generateBatchName = (): string => {
+  const now = dayjs();
+  return `JB-${now.format('YYYYMMDD-HHmmss')}`;
+};
+
+// Period to last date mapping
+const periodEndDates: Record<string, string> = {
+  'Jan-26': '31-Jan-2026',
+  'Feb-26': '28-Feb-2026',
+  'Mar-26': '31-Mar-2026',
+  'Apr-26': '30-Apr-2026',
+  'May-26': '31-May-2026',
+  'Jun-26': '30-Jun-2026',
+  'Jul-26': '31-Jul-2026',
+  'Aug-26': '31-Aug-2026',
+  'Sep-26': '30-Sep-2026',
+  'Oct-26': '31-Oct-2026',
+  'Nov-26': '30-Nov-2026',
+  'Dec-26': '31-Dec-2026',
+};
+
+// Get last date of period
+const getPeriodEndDate = (period: string): string => {
+  return periodEndDates[period] || dayjs().endOf('month').format('D-MMM-YYYY');
+};
+
+// Conversion rates (mock data - in real app, fetch from API)
+const conversionRates: Record<string, Record<string, number>> = {
+  'User': { 'AED': 1, 'USD': 3.67, 'INR': 0.044 },
+  'Spot': { 'AED': 1, 'USD': 3.68, 'INR': 0.0438 },
+  'Corporate': { 'AED': 1, 'USD': 3.65, 'INR': 0.045 },
+};
+
 // Create default journal data
 const createDefaultJournalData = (): JournalData => ({
   journalName: '',
@@ -219,12 +254,21 @@ const CreateJournal: React.FC = () => {
   const [accountSelectorVisible, setAccountSelectorVisible] = useState(false);
   const [editingLineKey, setEditingLineKey] = useState<string | null>(null);
 
-  // Batch data
-  const [batchData, setBatchData] = useState<BatchData>({
-    batchName: '',
-    description: '',
-    balanceType: 'Actual',
-    accountingPeriod: 'Mar-26',
+  // Detached mode for journal lines (full page)
+  const [isDetached, setIsDetached] = useState(false);
+
+  // Search filter for journal lines
+  const [lineSearchText, setLineSearchText] = useState('');
+
+  // Initialize batch name with timestamp
+  const [batchData, setBatchData] = useState<BatchData>(() => {
+    const batchName = generateBatchName();
+    return {
+      batchName,
+      description: '',
+      balanceType: 'Actual',
+      accountingPeriod: 'Mar-26',
+    };
   });
 
   // Multiple journals state
@@ -255,6 +299,39 @@ const CreateJournal: React.FC = () => {
       return updated;
     });
   };
+
+  // Set journal name from batch name on initial load
+  useEffect(() => {
+    if (batchData.batchName && !journalData.journalName) {
+      setJournalData(prev => ({ ...prev, journalName: batchData.batchName }));
+    }
+  }, []);
+
+  // Update accounting date when period changes
+  useEffect(() => {
+    const periodEndDate = getPeriodEndDate(batchData.accountingPeriod);
+    setJournalData(prev => ({
+      ...prev,
+      accountingDate: periodEndDate,
+      conversionDate: periodEndDate,
+    }));
+  }, [batchData.accountingPeriod]);
+
+  // Calculate accounted amounts based on conversion rate
+  const calculateAccountedAmounts = (enteredAmount: number | null, rateType: string, currency: string): number | null => {
+    if (enteredAmount === null) return null;
+    const rate = conversionRates[rateType]?.[currency] || 1;
+    return Math.round(enteredAmount * rate * 100) / 100;
+  };
+
+  // Filter lines based on search
+  const filteredLines = lineSearchText
+    ? lines.filter(line =>
+        line.account.toLowerCase().includes(lineSearchText.toLowerCase()) ||
+        line.accountDescription.toLowerCase().includes(lineSearchText.toLowerCase()) ||
+        line.description.toLowerCase().includes(lineSearchText.toLowerCase())
+      )
+    : lines;
 
   // Add new journal
   const handleAddJournal = () => {
@@ -381,23 +458,72 @@ const CreateJournal: React.FC = () => {
   };
 
   // Save handler
-  const handleSave = async () => {
+  // Check if debit and credit are balanced
+  const isBalanced = lineTotals.enteredDr === lineTotals.enteredCr;
+
+  // Validate mandatory fields
+  const validateMandatoryFields = (): { valid: boolean; message: string } => {
     if (!batchData.batchName) {
-      message.warning('Please enter a Journal Batch name');
-      return;
+      return { valid: false, message: 'Please enter a Journal Batch name' };
+    }
+    if (!journalData.ledger) {
+      return { valid: false, message: 'Please select a Ledger' };
+    }
+    if (!journalData.legalEntity) {
+      return { valid: false, message: 'Please select a Legal Entity' };
+    }
+    if (!journalData.accountingDate) {
+      return { valid: false, message: 'Please enter an Accounting Date' };
     }
     if (!journalData.category) {
-      message.warning('Please select a Category');
+      return { valid: false, message: 'Please select a Category' };
+    }
+    return { valid: true, message: '' };
+  };
+
+  const handleSave = async () => {
+    const validation = validateMandatoryFields();
+    if (!validation.valid) {
+      message.warning(validation.message);
+      return;
+    }
+
+    // Check balance and show warning if not balanced
+    if (!isBalanced) {
+      message.warning(`Total Debit (${formatNumber(lineTotals.enteredDr)}) and Total Credit (${formatNumber(lineTotals.enteredCr)}) are not equal. Journal saved as unbalanced.`);
+    }
+
+    setSaving(true);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      message.success('Journal saved successfully');
+    } catch (error) {
+      message.error('Failed to save journal');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Handle Post - requires balanced journal
+  const handlePost = async () => {
+    const validation = validateMandatoryFields();
+    if (!validation.valid) {
+      message.warning(validation.message);
+      return;
+    }
+
+    if (!isBalanced) {
+      message.error(`Cannot post: Total Debit (${formatNumber(lineTotals.enteredDr)}) must equal Total Credit (${formatNumber(lineTotals.enteredCr)})`);
       return;
     }
 
     setSaving(true);
     try {
       await new Promise(resolve => setTimeout(resolve, 1000));
-      message.success('Journal created successfully');
+      message.success('Journal posted successfully');
       navigate('/gl/manage-journals');
     } catch (error) {
-      message.error('Failed to create journal');
+      message.error('Failed to post journal');
     } finally {
       setSaving(false);
     }
@@ -738,7 +864,37 @@ const CreateJournal: React.FC = () => {
           label: 'Control Total',
           children: (
             <div style={{ padding: '12px 0' }}>
-              <Text type="secondary" style={{ fontSize: 13 }}>Batch control totals will be calculated after lines are entered.</Text>
+              <Row gutter={[32, 12]}>
+                <Col span={12}>
+                  <Row gutter={[8, 12]} align="middle">
+                    <Col span={14}><Text style={{ fontSize: 13 }}>Total Entered Debit</Text></Col>
+                    <Col span={10}><Text strong style={{ fontSize: 13 }}>{formatNumber(lineTotals.enteredDr) || '0.00'}</Text></Col>
+
+                    <Col span={14}><Text style={{ fontSize: 13 }}>Total Entered Credit</Text></Col>
+                    <Col span={10}><Text strong style={{ fontSize: 13 }}>{formatNumber(lineTotals.enteredCr) || '0.00'}</Text></Col>
+
+                    <Col span={14}><Text style={{ fontSize: 13 }}>Difference</Text></Col>
+                    <Col span={10}>
+                      <Text strong style={{ fontSize: 13, color: isBalanced ? REDWOOD.success : REDWOOD.primary }}>
+                        {formatNumber(Math.abs(lineTotals.enteredDr - lineTotals.enteredCr)) || '0.00'}
+                        {!isBalanced && lineTotals.enteredDr !== lineTotals.enteredCr && ' (Unbalanced)'}
+                      </Text>
+                    </Col>
+                  </Row>
+                </Col>
+                <Col span={12}>
+                  <Row gutter={[8, 12]} align="middle">
+                    <Col span={14}><Text style={{ fontSize: 13 }}>Total Accounted Debit</Text></Col>
+                    <Col span={10}><Text strong style={{ fontSize: 13 }}>{formatNumber(lineTotals.accountedDr) || '0.00'}</Text></Col>
+
+                    <Col span={14}><Text style={{ fontSize: 13 }}>Total Accounted Credit</Text></Col>
+                    <Col span={10}><Text strong style={{ fontSize: 13 }}>{formatNumber(lineTotals.accountedCr) || '0.00'}</Text></Col>
+
+                    <Col span={14}><Text style={{ fontSize: 13 }}>Journal Count</Text></Col>
+                    <Col span={10}><Text strong style={{ fontSize: 13 }}>{journals.length}</Text></Col>
+                  </Row>
+                </Col>
+              </Row>
             </div>
           ),
         },
@@ -891,10 +1047,34 @@ const CreateJournal: React.FC = () => {
                     </Col>
 
                     <Col span={12}><Text style={{ fontSize: 13 }}>Conversion Rate Type</Text></Col>
-                    <Col span={12}><Text style={{ fontSize: 13 }}>{journalData.conversionRateType}</Text></Col>
+                    <Col span={12}>
+                      <Select
+                        value={journalData.conversionRateType}
+                        onChange={(val) => {
+                          const rate = conversionRates[val]?.[journalData.currency] || 1;
+                          setJournalData({ ...journalData, conversionRateType: val, conversionRate: rate, inverseRate: Math.round((1 / rate) * 10000) / 10000 });
+                        }}
+                        size="small"
+                        style={{ width: '100%' }}
+                      >
+                        <Option value="User">User</Option>
+                        <Option value="Spot">Spot</Option>
+                        <Option value="Corporate">Corporate</Option>
+                      </Select>
+                    </Col>
 
                     <Col span={12}><Text style={{ fontSize: 13 }}>Conversion Rate</Text></Col>
-                    <Col span={12}><Text style={{ fontSize: 13 }}>{journalData.conversionRate}</Text></Col>
+                    <Col span={12}>
+                      <InputNumber
+                        value={journalData.conversionRate}
+                        onChange={(val) => setJournalData({ ...journalData, conversionRate: val || 1, inverseRate: val ? Math.round((1 / val) * 10000) / 10000 : 1 })}
+                        size="small"
+                        style={{ width: '100%' }}
+                        precision={4}
+                        min={0.0001}
+                        disabled={journalData.conversionRateType !== 'User'}
+                      />
+                    </Col>
                   </Row>
                 </Col>
                 <Col span={8}>
@@ -1117,6 +1297,7 @@ const CreateJournal: React.FC = () => {
               menu={{ items: postMenu }}
               type="primary"
               style={{ background: REDWOOD.warning }}
+              onClick={handlePost}
             >
               Post
             </Dropdown.Button>
@@ -1292,36 +1473,46 @@ const CreateJournal: React.FC = () => {
                 <Tooltip title="Freeze Columns">
                   <Button size="small" icon={<ColumnWidthOutlined />} type="primary" style={{ background: REDWOOD.info }} />
                 </Tooltip>
-                <Tooltip title="Detach">
-                  <Button size="small" icon={<SplitCellsOutlined />}>Detach</Button>
+                <Tooltip title={isDetached ? "Close Detached View" : "Detach to Full Page"}>
+                  <Button
+                    size="small"
+                    icon={<SplitCellsOutlined />}
+                    onClick={() => setIsDetached(true)}
+                    type={isDetached ? "primary" : "default"}
+                  >
+                    Detach
+                  </Button>
                 </Tooltip>
                 <Button size="small" style={{ fontSize: 11 }}>Wrap</Button>
               </Space>
             </div>
 
-            {/* Filter Row */}
+            {/* Search Row */}
             <div style={{
-              padding: '4px 12px',
+              padding: '8px 12px',
               borderBottom: `1px solid ${REDWOOD.neutral200}`,
-              display: 'flex',
-              gap: 8,
               background: '#fafafa',
             }}>
-              <div style={{ width: 60 }} />
-              <Input size="small" style={{ width: 280 }} placeholder="" />
-              <Input size="small" style={{ width: 100 }} placeholder="" />
-              <Input size="small" style={{ width: 100 }} placeholder="" />
-              <Input size="small" style={{ width: 100 }} placeholder="" />
-              <DatePicker size="small" style={{ width: 110 }} placeholder="dd-mmm" format="DD-MMM" />
-              <Input size="small" style={{ width: 100 }} placeholder="" />
-              <Input size="small" style={{ width: 100 }} placeholder="" />
-              <Input size="small" style={{ width: 200 }} placeholder="" />
+              <Input
+                size="small"
+                placeholder="Search by account, description..."
+                prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
+                value={lineSearchText}
+                onChange={(e) => setLineSearchText(e.target.value)}
+                allowClear
+                style={{ width: 300 }}
+              />
+              {lineSearchText && (
+                <Text style={{ marginLeft: 12, fontSize: 12, color: REDWOOD.neutral600 }}>
+                  Showing {filteredLines.length} of {lines.length} lines
+                </Text>
+              )}
             </div>
 
             {/* Lines Table */}
             <Table
               columns={lineColumns}
-              dataSource={lines}
+              dataSource={filteredLines}
               rowSelection={{
                 selectedRowKeys: selectedLineKeys,
                 onChange: setSelectedLineKeys,
@@ -1357,6 +1548,85 @@ const CreateJournal: React.FC = () => {
           onSelect={handleAccountSelect}
           initialValue={editingLineKey ? lines.find(l => l.key === editingLineKey)?.account : undefined}
         />
+
+        {/* Detached Journal Lines Modal */}
+        <Modal
+          title={
+            <Space>
+              <span>Journal Lines - {batchData.batchName}</span>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                ({lines.length} lines | Dr: {formatNumber(lineTotals.enteredDr)} | Cr: {formatNumber(lineTotals.enteredCr)})
+              </Text>
+            </Space>
+          }
+          open={isDetached}
+          onCancel={() => setIsDetached(false)}
+          width="95vw"
+          style={{ top: 20 }}
+          footer={
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Space>
+                <Button icon={<PlusOutlined />} onClick={handleAddLine}>Add Line</Button>
+                <Button
+                  icon={<DeleteOutlined />}
+                  onClick={handleDeleteLines}
+                  disabled={selectedLineKeys.length === 0}
+                  danger
+                >
+                  Delete Selected
+                </Button>
+              </Space>
+              <Space>
+                <Text style={{ marginRight: 16 }}>
+                  Total: Dr <Text strong>{formatNumber(lineTotals.enteredDr)}</Text> | Cr <Text strong>{formatNumber(lineTotals.enteredCr)}</Text>
+                  {!isBalanced && <Text type="danger" style={{ marginLeft: 8 }}>(Unbalanced)</Text>}
+                </Text>
+                <Button onClick={() => setIsDetached(false)}>Close</Button>
+              </Space>
+            </div>
+          }
+          styles={{
+            body: { padding: 0, maxHeight: 'calc(100vh - 200px)', overflow: 'auto' }
+          }}
+        >
+          {/* Search in detached view */}
+          <div style={{
+            padding: '8px 16px',
+            borderBottom: `1px solid ${REDWOOD.neutral200}`,
+            background: '#fafafa',
+          }}>
+            <Input
+              size="small"
+              placeholder="Search by account, description..."
+              prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
+              value={lineSearchText}
+              onChange={(e) => setLineSearchText(e.target.value)}
+              allowClear
+              style={{ width: 300 }}
+            />
+            {lineSearchText && (
+              <Text style={{ marginLeft: 12, fontSize: 12, color: REDWOOD.neutral600 }}>
+                Showing {filteredLines.length} of {lines.length} lines
+              </Text>
+            )}
+          </div>
+
+          {/* Table in detached view */}
+          <Table
+            columns={lineColumns}
+            dataSource={filteredLines}
+            rowSelection={{
+              selectedRowKeys: selectedLineKeys,
+              onChange: setSelectedLineKeys,
+            }}
+            pagination={false}
+            scroll={{ x: 1400, y: 'calc(100vh - 350px)' }}
+            size="small"
+            bordered
+            className="compact-table"
+            rowClassName={(record) => selectedLineKeys.includes(record.key) ? 'selected-row' : ''}
+          />
+        </Modal>
       </Content>
     </Layout>
   );
