@@ -322,6 +322,7 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
       open={visible}
       onCancel={onCancel}
       width={650}
+      zIndex={2000}
       footer={
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <Button icon={<ReloadOutlined />} onClick={handleRefresh} loading={loading}>

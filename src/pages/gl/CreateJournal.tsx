@@ -450,12 +450,37 @@ const CreateJournal: React.FC = () => {
     setSelectedLineKeys([]);
   };
 
-  // Update line
+  // Update line with auto-calculation of accounted amounts
   const updateLine = (key: string, field: keyof JournalLine, value: any) => {
-    setLines(lines.map(line =>
-      line.key === key ? { ...line, [field]: value } : line
-    ));
+    setLines(prevLines => prevLines.map(line => {
+      if (line.key !== key) return line;
+
+      const updatedLine = { ...line, [field]: value };
+
+      // Auto-calculate accounted amounts when entered amounts change
+      if (field === 'enteredDr' || field === 'enteredCr') {
+        const rate = journalData.conversionRate || 1;
+        if (field === 'enteredDr') {
+          updatedLine.accountedDr = value !== null ? Math.round(value * rate * 100) / 100 : null;
+        } else {
+          updatedLine.accountedCr = value !== null ? Math.round(value * rate * 100) / 100 : null;
+        }
+      }
+
+      return updatedLine;
+    }));
   };
+
+  // Recalculate all accounted amounts when conversion rate changes
+  useEffect(() => {
+    const rate = journalData.conversionRate || 1;
+    setLines(prevLines => prevLines.map(line => ({
+      ...line,
+      accountedDr: line.enteredDr !== null ? Math.round(line.enteredDr * rate * 100) / 100 : null,
+      accountedCr: line.enteredCr !== null ? Math.round(line.enteredCr * rate * 100) / 100 : null,
+      conversionDate: journalData.conversionDate, // Sync conversion date from journal
+    })));
+  }, [journalData.conversionRate, journalData.conversionDate]);
 
   // Save handler
   // Check if debit and credit are balanced
@@ -1523,6 +1548,33 @@ const CreateJournal: React.FC = () => {
               bordered
               className="compact-table"
               rowClassName={(record) => selectedLineKeys.includes(record.key) ? 'selected-row' : ''}
+              summary={() => (
+                <Table.Summary fixed>
+                  <Table.Summary.Row style={{ background: REDWOOD.neutral100, fontWeight: 'bold' }}>
+                    <Table.Summary.Cell index={0} colSpan={2}>
+                      <Text strong>Total ({lines.length} lines)</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={2} />
+                    <Table.Summary.Cell index={3} />
+                    <Table.Summary.Cell index={4} align="right">
+                      <Text strong style={{ color: REDWOOD.info }}>{formatNumber(lineTotals.enteredDr)}</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={5} align="right">
+                      <Text strong style={{ color: REDWOOD.info }}>{formatNumber(lineTotals.enteredCr)}</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={6} />
+                    <Table.Summary.Cell index={7} align="right">
+                      <Text strong style={{ color: REDWOOD.info }}>{formatNumber(lineTotals.accountedDr)}</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={8} align="right">
+                      <Text strong style={{ color: REDWOOD.info }}>{formatNumber(lineTotals.accountedCr)}</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={9}>
+                      {!isBalanced && <Text type="danger" style={{ fontSize: 11 }}>Unbalanced</Text>}
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                </Table.Summary>
+              )}
             />
           </Card>
         </div>
@@ -1560,6 +1612,7 @@ const CreateJournal: React.FC = () => {
             </Space>
           }
           open={isDetached}
+          zIndex={1500}
           onCancel={() => setIsDetached(false)}
           width="95vw"
           style={{ top: 20 }}
@@ -1625,6 +1678,33 @@ const CreateJournal: React.FC = () => {
             bordered
             className="compact-table"
             rowClassName={(record) => selectedLineKeys.includes(record.key) ? 'selected-row' : ''}
+            summary={() => (
+              <Table.Summary fixed>
+                <Table.Summary.Row style={{ background: REDWOOD.neutral100, fontWeight: 'bold' }}>
+                  <Table.Summary.Cell index={0} colSpan={2}>
+                    <Text strong>Total ({lines.length} lines)</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={2} />
+                  <Table.Summary.Cell index={3} />
+                  <Table.Summary.Cell index={4} align="right">
+                    <Text strong style={{ color: REDWOOD.info }}>{formatNumber(lineTotals.enteredDr)}</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={5} align="right">
+                    <Text strong style={{ color: REDWOOD.info }}>{formatNumber(lineTotals.enteredCr)}</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={6} />
+                  <Table.Summary.Cell index={7} align="right">
+                    <Text strong style={{ color: REDWOOD.info }}>{formatNumber(lineTotals.accountedDr)}</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={8} align="right">
+                    <Text strong style={{ color: REDWOOD.info }}>{formatNumber(lineTotals.accountedCr)}</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={9}>
+                    {!isBalanced && <Text type="danger" style={{ fontSize: 11 }}>Unbalanced</Text>}
+                  </Table.Summary.Cell>
+                </Table.Summary.Row>
+              </Table.Summary>
+            )}
           />
         </Modal>
       </Content>
