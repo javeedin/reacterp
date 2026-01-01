@@ -389,12 +389,24 @@ const CreateJournal: React.FC = () => {
       return;
     }
 
+    // Skip if no dashes (not a combination code)
+    if (!accountCode.includes('-')) {
+      return;
+    }
+
     setValidatingAccount(lineKey);
+    console.log('Validating account code:', accountCode);
 
     try {
       const result = await validateAccountCode(accountCode);
+      console.log('Validation result:', result);
 
-      if (!result.isValid && result.segmentsLoaded) {
+      if (!result.segmentsLoaded) {
+        message.info('Could not load segment data for validation. Please verify the account code.');
+        return;
+      }
+
+      if (!result.isValid) {
         // Show message about invalid segments
         message.warning(`Invalid segment value(s): ${result.invalidSegments.join(', ')}. Please correct using the account selector.`);
 
@@ -407,9 +419,13 @@ const CreateJournal: React.FC = () => {
 
         // Open account selector with the validated code as initial value
         openAccountSelector(lineKey, result.validatedCode);
+      } else {
+        // All segments are valid - show success feedback
+        message.success('Account code validated successfully');
       }
     } catch (error) {
       console.error('Error validating account code:', error);
+      message.error('Failed to validate account code');
     } finally {
       setValidatingAccount(null);
     }

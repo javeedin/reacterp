@@ -57,16 +57,22 @@ export interface ValidationResult {
 
 // Validate a code combination against cached values
 export const validateAccountCode = async (code: string): Promise<ValidationResult> => {
+  console.log('validateAccountCode called with:', code);
+  console.log('Current segmentsCache length:', segmentsCache.length);
+
   // If cache is empty, we need to fetch segments first
   if (segmentsCache.length === 0) {
     try {
+      console.log('Fetching segments from API...');
       const response = await fetch(SEGMENTS_API);
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
       const result = await response.json();
+      console.log('Segments API response:', result);
       const segmentData: Segment[] = (result.items || []).sort(
         (a: Segment, b: Segment) => a.sequence_no - b.sequence_no
       );
       segmentsCache = segmentData;
+      console.log('Loaded segments:', segmentData.length);
     } catch (error) {
       console.error('Error fetching segments for validation:', error);
       return { isValid: true, validatedCode: code, invalidSegments: [], segmentsLoaded: false };
@@ -74,6 +80,8 @@ export const validateAccountCode = async (code: string): Promise<ValidationResul
   }
 
   const parts = code.split('-');
+  console.log('Code parts:', parts, 'Segments count:', segmentsCache.length);
+
   const validatedParts: string[] = [];
   const invalidSegments: string[] = [];
   let allValid = true;
@@ -81,6 +89,8 @@ export const validateAccountCode = async (code: string): Promise<ValidationResul
   for (let i = 0; i < segmentsCache.length; i++) {
     const segment = segmentsCache[i];
     const inputValue = parts[i] || '';
+
+    console.log(`Validating segment ${i}: ${segment.prompt || segment.segment_name}, input: "${inputValue}"`);
 
     // If empty, keep it (it will be handled by required field validation)
     if (!inputValue) {
@@ -90,10 +100,12 @@ export const validateAccountCode = async (code: string): Promise<ValidationResul
 
     // Check if values are cached for this segment
     let values = valuesCache.get(segment.segment_code);
+    console.log(`Values cache for ${segment.segment_code}:`, values ? `${values.length} values` : 'not cached');
 
     // If not cached, try to fetch
     if (!values) {
       try {
+        console.log(`Fetching values for ${segment.segment_code}...`);
         const response = await fetch(`${VALUES_API}/${segment.segment_code}`);
         if (response.ok) {
           const result = await response.json();
@@ -104,6 +116,9 @@ export const validateAccountCode = async (code: string): Promise<ValidationResul
             EnabledFlag: item.enabled_flag,
           }));
           valuesCache.set(segment.segment_code, values);
+          console.log(`Loaded ${values.length} values for ${segment.segment_code}`);
+        } else {
+          console.error(`Failed to fetch values for ${segment.segment_code}: ${response.status}`);
         }
       } catch (error) {
         console.error(`Error fetching values for ${segment.segment_code}:`, error);
@@ -111,8 +126,9 @@ export const validateAccountCode = async (code: string): Promise<ValidationResul
     }
 
     // Validate the value
-    if (values) {
+    if (values && values.length > 0) {
       const isValidValue = values.some(v => v.Value === inputValue);
+      console.log(`Segment ${segment.prompt}: "${inputValue}" is ${isValidValue ? 'VALID' : 'INVALID'}`);
       if (isValidValue) {
         validatedParts.push(inputValue);
       } else {
@@ -122,16 +138,19 @@ export const validateAccountCode = async (code: string): Promise<ValidationResul
       }
     } else {
       // If we couldn't fetch values, assume valid (fail open)
+      console.log(`No values for segment ${segment.prompt}, assuming valid`);
       validatedParts.push(inputValue);
     }
   }
 
-  return {
+  const result = {
     isValid: allValid,
     validatedCode: validatedParts.join('-'),
     invalidSegments,
     segmentsLoaded: true,
   };
+  console.log('Validation result:', result);
+  return result;
 };
 
 // Check if cache is populated
