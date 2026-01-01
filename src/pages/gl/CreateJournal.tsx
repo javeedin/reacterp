@@ -111,11 +111,79 @@ interface JournalData {
   reversalMethod: string;
 }
 
+// Journal Entry - combines journal data with its lines
+interface JournalEntry {
+  id: string;
+  data: JournalData;
+  lines: JournalLine[];
+}
+
 // Format number
 const formatNumber = (value: number | null | undefined) => {
   if (value === null || value === undefined) return '';
   return value.toLocaleString('en-US', { minimumFractionDigits: 2 });
 };
+
+// Create default journal data
+const createDefaultJournalData = (): JournalData => ({
+  journalName: '',
+  description: '',
+  ledger: 'BUIMERC LEDGER',
+  legalEntity: '',
+  accountingDate: dayjs().format('D-MMM-YYYY'),
+  category: '',
+  currency: 'AED',
+  conversionDate: dayjs().format('D-MMM-YYYY'),
+  conversionRateType: 'User',
+  conversionRate: 1,
+  inverseRate: 1,
+  reference: '',
+  referenceDate: '',
+  company: '',
+  regionalInfo: '',
+  controlTotal: null,
+  accountingSeqName: '',
+  accountingSeqNumber: '',
+  reportingSeqName: '',
+  reportingSeqNumber: '',
+  reversalPeriod: '',
+  reversalMethod: 'Switch DR or CR',
+});
+
+// Create default journal lines
+const createDefaultLines = (currency: string = 'AED'): JournalLine[] => [
+  {
+    key: '1',
+    lineNum: 1,
+    account: '',
+    currency: `${currency} UAE Dirham`,
+    enteredDr: null,
+    enteredCr: null,
+    conversionDate: dayjs().format('D-MMM-YYYY'),
+    accountedDr: null,
+    accountedCr: null,
+    description: '',
+  },
+  {
+    key: '2',
+    lineNum: 2,
+    account: '',
+    currency: `${currency} UAE Dirham`,
+    enteredDr: null,
+    enteredCr: null,
+    conversionDate: dayjs().format('D-MMM-YYYY'),
+    accountedDr: null,
+    accountedCr: null,
+    description: '',
+  },
+];
+
+// Create a new journal entry
+const createNewJournal = (id: string): JournalEntry => ({
+  id,
+  data: createDefaultJournalData(),
+  lines: createDefaultLines(),
+});
 
 const CreateJournal: React.FC = () => {
   const navigate = useNavigate();
@@ -136,6 +204,83 @@ const CreateJournal: React.FC = () => {
   const [accountSelectorVisible, setAccountSelectorVisible] = useState(false);
   const [editingLineKey, setEditingLineKey] = useState<string | null>(null);
 
+  // Batch data
+  const [batchData, setBatchData] = useState<BatchData>({
+    batchName: '',
+    description: '',
+    balanceType: 'Actual',
+    accountingPeriod: 'Mar-26',
+  });
+
+  // Multiple journals state
+  const [journals, setJournals] = useState<JournalEntry[]>([createNewJournal('1')]);
+  const [currentJournalIndex, setCurrentJournalIndex] = useState(0);
+
+  // Current journal data (derived from journals array)
+  const currentJournal = journals[currentJournalIndex];
+  const journalData = currentJournal.data;
+  const lines = currentJournal.lines;
+
+  // Update journal data for current journal
+  const setJournalData = (newData: JournalData | ((prev: JournalData) => JournalData)) => {
+    setJournals(prevJournals => {
+      const updated = [...prevJournals];
+      const data = typeof newData === 'function' ? newData(updated[currentJournalIndex].data) : newData;
+      updated[currentJournalIndex] = { ...updated[currentJournalIndex], data };
+      return updated;
+    });
+  };
+
+  // Update lines for current journal
+  const setLines = (newLines: JournalLine[] | ((prev: JournalLine[]) => JournalLine[])) => {
+    setJournals(prevJournals => {
+      const updated = [...prevJournals];
+      const lines = typeof newLines === 'function' ? newLines(updated[currentJournalIndex].lines) : newLines;
+      updated[currentJournalIndex] = { ...updated[currentJournalIndex], lines };
+      return updated;
+    });
+  };
+
+  // Add new journal
+  const handleAddJournal = () => {
+    const newId = String(journals.length + 1);
+    const newJournal = createNewJournal(newId);
+    setJournals([...journals, newJournal]);
+    setCurrentJournalIndex(journals.length); // Navigate to the new journal
+    message.success(`Journal ${journals.length + 1} created`);
+  };
+
+  // Delete current journal
+  const handleDeleteJournal = () => {
+    if (journals.length === 1) {
+      message.warning('Cannot delete the only journal in the batch');
+      return;
+    }
+    const newJournals = journals.filter((_, idx) => idx !== currentJournalIndex);
+    setJournals(newJournals);
+    // Adjust current index if needed
+    if (currentJournalIndex >= newJournals.length) {
+      setCurrentJournalIndex(newJournals.length - 1);
+    }
+    message.success('Journal deleted');
+  };
+
+  // Navigate to previous journal
+  const handlePrevJournal = () => {
+    if (currentJournalIndex > 0) {
+      setCurrentJournalIndex(currentJournalIndex - 1);
+      setSelectedLineKeys([]); // Reset selected lines
+    }
+  };
+
+  // Navigate to next journal
+  const handleNextJournal = () => {
+    if (currentJournalIndex < journals.length - 1) {
+      setCurrentJournalIndex(currentJournalIndex + 1);
+      setSelectedLineKeys([]); // Reset selected lines
+    }
+  };
+
   // Open account selector for a line
   const openAccountSelector = (lineKey: string) => {
     setEditingLineKey(lineKey);
@@ -150,68 +295,6 @@ const CreateJournal: React.FC = () => {
     setAccountSelectorVisible(false);
     setEditingLineKey(null);
   };
-
-  // Batch data
-  const [batchData, setBatchData] = useState<BatchData>({
-    batchName: '',
-    description: '',
-    balanceType: 'Actual',
-    accountingPeriod: 'Mar-26',
-  });
-
-  // Journal data
-  const [journalData, setJournalData] = useState<JournalData>({
-    journalName: '',
-    description: '',
-    ledger: 'BUIMERC LEDGER',
-    legalEntity: '',
-    accountingDate: dayjs().format('D-MMM-YYYY'),
-    category: '',
-    currency: 'AED',
-    conversionDate: dayjs().format('D-MMM-YYYY'),
-    conversionRateType: 'User',
-    conversionRate: 1,
-    inverseRate: 1,
-    reference: '',
-    referenceDate: '',
-    company: '',
-    regionalInfo: '',
-    controlTotal: null,
-    accountingSeqName: '',
-    accountingSeqNumber: '',
-    reportingSeqName: '',
-    reportingSeqNumber: '',
-    reversalPeriod: '',
-    reversalMethod: 'Switch DR or CR',
-  });
-
-  // Journal lines
-  const [lines, setLines] = useState<JournalLine[]>([
-    {
-      key: '1',
-      lineNum: 1,
-      account: '',
-      currency: 'AED UAE Dirham',
-      enteredDr: null,
-      enteredCr: null,
-      conversionDate: dayjs().format('D-MMM-YYYY'),
-      accountedDr: null,
-      accountedCr: null,
-      description: '',
-    },
-    {
-      key: '2',
-      lineNum: 2,
-      account: '',
-      currency: 'AED UAE Dirham',
-      enteredDr: null,
-      enteredCr: null,
-      conversionDate: dayjs().format('D-MMM-YYYY'),
-      accountedDr: null,
-      accountedCr: null,
-      description: '',
-    },
-  ]);
 
   // Calculate totals
   const lineTotals = lines.reduce(
@@ -1043,19 +1126,42 @@ const CreateJournal: React.FC = () => {
                 </a>
               </Space>
               <Space size="small">
-                <Button size="small" icon={<LeftOutlined />} disabled />
+                <Tooltip title="Previous Journal">
+                  <Button
+                    size="small"
+                    icon={<LeftOutlined />}
+                    disabled={currentJournalIndex === 0}
+                    onClick={handlePrevJournal}
+                  />
+                </Tooltip>
                 <Select
-                  value=""
+                  value={currentJournal.id}
                   style={{ width: 150, fontSize: 11 }}
                   size="small"
-                  placeholder=""
-                />
-                <Button size="small" icon={<RightOutlined />} disabled />
+                  onChange={(value) => {
+                    const idx = journals.findIndex(j => j.id === value);
+                    if (idx !== -1) setCurrentJournalIndex(idx);
+                  }}
+                >
+                  {journals.map((journal, idx) => (
+                    <Option key={journal.id} value={journal.id}>
+                      Journal {idx + 1}{journal.data.journalName ? `: ${journal.data.journalName}` : ''}
+                    </Option>
+                  ))}
+                </Select>
+                <Tooltip title="Next Journal">
+                  <Button
+                    size="small"
+                    icon={<RightOutlined />}
+                    disabled={currentJournalIndex === journals.length - 1}
+                    onClick={handleNextJournal}
+                  />
+                </Tooltip>
                 <Tooltip title="Add Journal">
-                  <Button size="small" icon={<PlusOutlined />} />
+                  <Button size="small" icon={<PlusOutlined />} onClick={handleAddJournal} />
                 </Tooltip>
                 <Tooltip title="Delete Journal">
-                  <Button size="small" icon={<DeleteOutlined />} />
+                  <Button size="small" icon={<DeleteOutlined />} onClick={handleDeleteJournal} />
                 </Tooltip>
                 <Dropdown menu={{ items: journalActionsMenu }}>
                   <Button size="small" style={{ fontSize: 11 }}>
