@@ -303,16 +303,23 @@ const CreateJournal: React.FC = () => {
   };
 
   // Handle account selection
-  const handleAccountSelect = (accountCode: string, segments: Record<string, { value: string; description: string }>) => {
+  const handleAccountSelect = (accountCode: string, segments: Record<string, { value: string; description: string; name?: string }>) => {
     if (editingLineKey) {
-      // Build account description from segment descriptions
-      const descriptions = Object.values(segments).map(s => s.description).filter(d => d);
-      const accountDescription = descriptions.join(' - ');
+      // Find the Account segment (contains "ACCOUNT" in the key or name)
+      const accountSegment = Object.entries(segments).find(([key, detail]) =>
+        key.toUpperCase().includes('ACCOUNT') ||
+        (detail.name && detail.name.toUpperCase().includes('ACCOUNT'))
+      );
+
+      // Build account description from Account segment only (e.g., "1000000 - Assets")
+      const accountDescription = accountSegment
+        ? `${accountSegment[1].value} - ${accountSegment[1].description}`
+        : '';
 
       // Update the line with account code, description, and segment details
       setLines(prevLines => prevLines.map(line =>
         line.key === editingLineKey
-          ? { ...line, account: accountCode, accountDescription, segmentDetails: segments }
+          ? { ...line, account: accountCode, accountDescription, segmentDetails: segments as Record<string, SegmentDetail> }
           : line
       ));
     }
