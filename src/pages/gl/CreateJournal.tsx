@@ -17,6 +17,7 @@ import {
   DatePicker,
   InputNumber,
   message,
+  Popover,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -34,6 +35,7 @@ import {
   ColumnWidthOutlined,
   SplitCellsOutlined,
   SearchOutlined,
+  InfoCircleOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -60,11 +62,19 @@ const REDWOOD = {
   surface: '#FFFFFF',
 };
 
+// Segment detail for account
+interface SegmentDetail {
+  value: string;
+  description: string;
+}
+
 // Journal Line interface
 interface JournalLine {
   key: string;
   lineNum: number;
   account: string;
+  accountDescription: string;
+  segmentDetails: Record<string, SegmentDetail>;
   currency: string;
   enteredDr: number | null;
   enteredCr: number | null;
@@ -156,6 +166,8 @@ const createDefaultLines = (currency: string = 'AED'): JournalLine[] => [
     key: '1',
     lineNum: 1,
     account: '',
+    accountDescription: '',
+    segmentDetails: {},
     currency: `${currency} UAE Dirham`,
     enteredDr: null,
     enteredCr: null,
@@ -168,6 +180,8 @@ const createDefaultLines = (currency: string = 'AED'): JournalLine[] => [
     key: '2',
     lineNum: 2,
     account: '',
+    accountDescription: '',
+    segmentDetails: {},
     currency: `${currency} UAE Dirham`,
     enteredDr: null,
     enteredCr: null,
@@ -288,9 +302,18 @@ const CreateJournal: React.FC = () => {
   };
 
   // Handle account selection
-  const handleAccountSelect = (accountCode: string, _segments: Record<string, { value: string; description: string }>) => {
+  const handleAccountSelect = (accountCode: string, segments: Record<string, { value: string; description: string }>) => {
     if (editingLineKey) {
-      updateLine(editingLineKey, 'account', accountCode);
+      // Build account description from segment descriptions
+      const descriptions = Object.values(segments).map(s => s.description).filter(d => d);
+      const accountDescription = descriptions.join(' - ');
+
+      // Update the line with account code, description, and segment details
+      setLines(prevLines => prevLines.map(line =>
+        line.key === editingLineKey
+          ? { ...line, account: accountCode, accountDescription, segmentDetails: segments }
+          : line
+      ));
     }
     setAccountSelectorVisible(false);
     setEditingLineKey(null);
@@ -316,6 +339,8 @@ const CreateJournal: React.FC = () => {
         key: String(newLineNum),
         lineNum: newLineNum,
         account: '',
+        accountDescription: '',
+        segmentDetails: {},
         currency: `${journalData.currency} UAE Dirham`,
         enteredDr: null,
         enteredCr: null,
@@ -446,25 +471,62 @@ const CreateJournal: React.FC = () => {
       title: <span><span style={{ color: REDWOOD.primary }}>*</span> Account</span>,
       dataIndex: 'account',
       key: 'account',
-      width: 300,
+      width: 350,
       render: (value, record) => (
-        <Space.Compact style={{ width: '100%' }}>
-          <Input
-            value={value}
-            onChange={(e) => updateLine(record.key, 'account', e.target.value)}
-            placeholder="Select account"
-            size="small"
-            style={{ width: 'calc(100% - 32px)' }}
-          />
-          <Tooltip title="Search Account">
-            <Button
+        <div>
+          <Space.Compact style={{ width: '100%' }}>
+            <Input
+              value={value}
+              onChange={(e) => updateLine(record.key, 'account', e.target.value)}
+              placeholder="Select account"
               size="small"
-              icon={<SearchOutlined />}
-              onClick={() => openAccountSelector(record.key)}
-              style={{ borderColor: REDWOOD.neutral300 }}
+              style={{ width: 'calc(100% - 64px)' }}
             />
-          </Tooltip>
-        </Space.Compact>
+            <Tooltip title="Search Account">
+              <Button
+                size="small"
+                icon={<SearchOutlined />}
+                onClick={() => openAccountSelector(record.key)}
+                style={{ borderColor: REDWOOD.neutral300 }}
+              />
+            </Tooltip>
+            {record.account && Object.keys(record.segmentDetails || {}).length > 0 && (
+              <Popover
+                title="Account Segments"
+                trigger="click"
+                content={
+                  <div style={{ minWidth: 280 }}>
+                    {Object.entries(record.segmentDetails || {}).map(([segmentCode, detail]) => (
+                      <div key={segmentCode} style={{ marginBottom: 8, display: 'flex', gap: 8 }}>
+                        <Text strong style={{ minWidth: 80, fontSize: 12 }}>{segmentCode}:</Text>
+                        <Text style={{ fontSize: 12 }}>{detail.value} - {detail.description}</Text>
+                      </div>
+                    ))}
+                  </div>
+                }
+              >
+                <Button
+                  size="small"
+                  icon={<InfoCircleOutlined />}
+                  style={{ borderColor: REDWOOD.neutral300, color: REDWOOD.info }}
+                />
+              </Popover>
+            )}
+          </Space.Compact>
+          {record.accountDescription && (
+            <div style={{
+              fontSize: 11,
+              color: REDWOOD.neutral600,
+              marginTop: 2,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              maxWidth: 320,
+            }}>
+              {record.accountDescription}
+            </div>
+          )}
+        </div>
       ),
     },
     {
