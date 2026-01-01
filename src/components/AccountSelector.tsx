@@ -38,8 +38,14 @@ const SEGMENTS_API = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloud
 const VALUES_API = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/valuesets/getvalues';
 
 // Cache for segments and values
-const segmentsCache: Segment[] = [];
-const valuesCache: Map<string, SegmentValue[]> = new Map();
+let segmentsCache: Segment[] = [];
+let valuesCache: Map<string, SegmentValue[]> = new Map();
+
+// Clear all caches
+const clearCache = () => {
+  segmentsCache = [];
+  valuesCache = new Map();
+};
 
 const AccountSelector: React.FC<AccountSelectorProps> = ({
   visible,
@@ -189,6 +195,66 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
     setSelectedValues(defaults);
   };
 
+  // Handle Refresh - clear cache and re-fetch data
+  const handleRefresh = async () => {
+    clearCache();
+    setSegments([]);
+    setSegmentValues({});
+    setSelectedValues({});
+    setLoading(true);
+
+    try {
+      // Fetch segments
+      const response = await fetch(SEGMENTS_API);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      const result = await response.json();
+      const segmentData: Segment[] = (result.items || []).sort(
+        (a: Segment, b: Segment) => a.sequence_no - b.sequence_no
+      );
+      segmentsCache.push(...segmentData);
+      setSegments(segmentData);
+
+      // Fetch all segment values
+      const valuesPromises = segmentData.map(async (seg) => {
+        setValuesLoading(prev => ({ ...prev, [seg.segment_code]: true }));
+        try {
+          const valResponse = await fetch(`${VALUES_API}/${seg.segment_code}`);
+          if (!valResponse.ok) throw new Error(`HTTP error! status: ${valResponse.status}`);
+          const valResult = await valResponse.json();
+          const values: SegmentValue[] = (valResult.items || []).map((item: any) => ({
+            ValueId: item.value_id,
+            Value: item.value,
+            Description: item.description,
+            EnabledFlag: item.enabled_flag,
+          }));
+          valuesCache.set(seg.segment_code, values);
+          setSegmentValues(prev => ({ ...prev, [seg.segment_code]: values }));
+          return { segmentCode: seg.segment_code, values };
+        } finally {
+          setValuesLoading(prev => ({ ...prev, [seg.segment_code]: false }));
+        }
+      });
+
+      const allValues = await Promise.all(valuesPromises);
+
+      // Set default values
+      const defaults: Record<string, string> = {};
+      allValues.forEach(({ segmentCode, values }) => {
+        if (values.length > 0) {
+          defaults[segmentCode] = values[0].Value;
+        }
+      });
+      setSelectedValues(defaults);
+
+      message.success('Data refreshed successfully');
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+      message.error('Failed to refresh data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Render segment row
   const renderSegmentRow = (segment: Segment) => {
     const values = segmentValues[segment.segment_code] || valuesCache.get(segment.segment_code) || [];
@@ -257,10 +323,10 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
       width={650}
       footer={
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <Button icon={<SearchOutlined />} onClick={() => {}}>
-            Search
+          <Button icon={<ReloadOutlined />} onClick={handleRefresh} loading={loading}>
+            Refresh
           </Button>
-          <Button icon={<ReloadOutlined />} onClick={handleReset}>
+          <Button icon={<SearchOutlined />} onClick={handleReset}>
             Reset
           </Button>
           <div style={{ width: 16 }} />
