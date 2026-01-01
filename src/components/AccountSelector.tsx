@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Modal, Select, Button, Space, Typography, Spin, Collapse, Row, Col, message } from 'antd';
+import { Modal, Select, Button, Space, Typography, Spin, Row, Col, message } from 'antd';
 import { SearchOutlined, ReloadOutlined } from '@ant-design/icons';
 
 const { Text } = Typography;
-const { Panel } = Collapse;
 const { Option } = Select;
 
 // Segment interface from API
@@ -53,7 +52,6 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
   const [selectedValues, setSelectedValues] = useState<Record<string, string>>({});
   const [valuesLoading, setValuesLoading] = useState<Record<string, boolean>>({});
   const [segmentValues, setSegmentValues] = useState<Record<string, SegmentValue[]>>({});
-  const [showSegments, setShowSegments] = useState(true);
   const initialized = useRef(false);
 
   // Fetch segments from API
@@ -202,7 +200,7 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
       <Row
         key={segment.segment_code}
         align="middle"
-        style={{ marginBottom: 12 }}
+        style={{ marginBottom: 8 }}
         gutter={8}
       >
         <Col span={6} style={{ textAlign: 'right', paddingRight: 8 }}>
@@ -275,7 +273,7 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
         </div>
       }
       styles={{
-        body: { maxHeight: '60vh', overflowY: 'auto' }
+        body: { padding: '16px 24px' }
       }}
     >
       {loading ? (
@@ -285,42 +283,23 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
         </div>
       ) : (
         <>
-          <Collapse
-            activeKey={showSegments ? ['segments'] : []}
-            onChange={(keys) => setShowSegments(keys.includes('segments'))}
-            ghost
-            style={{ marginBottom: 16 }}
-          >
-            <Panel
-              header={
-                <Space>
-                  <Text strong>{showSegments ? 'Hide Segments' : 'Show Segments'}</Text>
-                  <span style={{ color: '#C74634' }}>•</span>
-                </Space>
-              }
-              key="segments"
-              showArrow={true}
-            />
-          </Collapse>
-
-          {showSegments && (
-            <div style={{ padding: '0 16px' }}>
-              {segments.map(segment => renderSegmentRow(segment))}
-            </div>
-          )}
+          {/* All segments displayed directly */}
+          <div>
+            {segments.map(segment => renderSegmentRow(segment))}
+          </div>
 
           {/* Preview of combined account code */}
           <div
             style={{
-              marginTop: 16,
-              padding: 12,
+              marginTop: 12,
+              padding: 10,
               background: '#f5f5f5',
               borderRadius: 4,
               textAlign: 'center',
             }}
           >
             <Text strong>Account Code: </Text>
-            <Text code style={{ fontSize: 14 }}>{buildAccountCode()}</Text>
+            <Text code style={{ fontSize: 13 }}>{buildAccountCode()}</Text>
           </div>
         </>
       )}
