@@ -66,6 +66,7 @@ const REDWOOD = {
 interface SegmentDetail {
   value: string;
   description: string;
+  name: string; // User-friendly name like "Company", "Cost Center"
 }
 
 // Journal Line interface
@@ -498,7 +499,7 @@ const CreateJournal: React.FC = () => {
                   <div style={{ minWidth: 280 }}>
                     {Object.entries(record.segmentDetails || {}).map(([segmentCode, detail]) => (
                       <div key={segmentCode} style={{ marginBottom: 8, display: 'flex', gap: 8 }}>
-                        <Text strong style={{ minWidth: 80, fontSize: 12 }}>{segmentCode}:</Text>
+                        <Text strong style={{ minWidth: 100, fontSize: 12 }}>{detail.name || segmentCode}:</Text>
                         <Text style={{ fontSize: 12 }}>{detail.value} - {detail.description}</Text>
                       </div>
                     ))}

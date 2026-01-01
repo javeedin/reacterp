@@ -172,12 +172,13 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
   // Handle OK
   const handleOk = () => {
     const accountCode = buildAccountCode();
-    const segmentDetails: Record<string, { value: string; description: string }> = {};
+    const segmentDetails: Record<string, { value: string; description: string; name: string }> = {};
     segments.forEach(seg => {
       const value = selectedValues[seg.segment_code] || '';
       segmentDetails[seg.segment_code] = {
         value,
         description: getDescription(seg.segment_code, value),
+        name: seg.prompt || seg.segment_name, // User-friendly name like "Company", "Cost Center"
       };
     });
     onSelect(accountCode, segmentDetails);
