@@ -420,7 +420,25 @@ const CreateJournal: React.FC = () => {
         // Open account selector with the validated code as initial value
         openAccountSelector(lineKey, result.validatedCode);
       } else {
-        // All segments are valid - show success feedback
+        // All segments are valid - populate the line with segment details
+        // Find the Account segment (contains "ACCOUNT" in the key or name)
+        const accountSegment = Object.entries(result.segmentDetails).find(([key, detail]) =>
+          key.toUpperCase().includes('ACCOUNT') ||
+          (detail.name && detail.name.toUpperCase().includes('ACCOUNT'))
+        );
+
+        // Build account description from Account segment only (e.g., "1000000 - Assets")
+        const accountDescription = accountSegment
+          ? `${accountSegment[1].value} - ${accountSegment[1].description}`
+          : '';
+
+        // Update the line with segment details and description
+        setLines(prevLines => prevLines.map(line =>
+          line.key === lineKey
+            ? { ...line, accountDescription, segmentDetails: result.segmentDetails }
+            : line
+        ));
+
         message.success('Account code validated successfully');
       }
     } catch (error) {

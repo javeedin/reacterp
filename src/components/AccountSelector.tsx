@@ -53,6 +53,7 @@ export interface ValidationResult {
   validatedCode: string; // Code with invalid segments replaced with empty string
   invalidSegments: string[]; // Names of invalid segments
   segmentsLoaded: boolean; // Whether segment data is loaded
+  segmentDetails: Record<string, { value: string; description: string; name: string }>; // Details for valid segments
 }
 
 // Validate a code combination against cached values
@@ -75,7 +76,7 @@ export const validateAccountCode = async (code: string): Promise<ValidationResul
       console.log('Loaded segments:', segmentData.length);
     } catch (error) {
       console.error('Error fetching segments for validation:', error);
-      return { isValid: true, validatedCode: code, invalidSegments: [], segmentsLoaded: false };
+      return { isValid: true, validatedCode: code, invalidSegments: [], segmentsLoaded: false, segmentDetails: {} };
     }
   }
 
@@ -84,6 +85,7 @@ export const validateAccountCode = async (code: string): Promise<ValidationResul
 
   const validatedParts: string[] = [];
   const invalidSegments: string[] = [];
+  const segmentDetails: Record<string, { value: string; description: string; name: string }> = {};
   let allValid = true;
 
   for (let i = 0; i < segmentsCache.length; i++) {
@@ -127,10 +129,17 @@ export const validateAccountCode = async (code: string): Promise<ValidationResul
 
     // Validate the value
     if (values && values.length > 0) {
-      const isValidValue = values.some(v => v.Value === inputValue);
+      const foundValue = values.find(v => v.Value === inputValue);
+      const isValidValue = !!foundValue;
       console.log(`Segment ${segment.prompt}: "${inputValue}" is ${isValidValue ? 'VALID' : 'INVALID'}`);
       if (isValidValue) {
         validatedParts.push(inputValue);
+        // Store segment details for valid values
+        segmentDetails[segment.segment_code] = {
+          value: inputValue,
+          description: foundValue.Description || '',
+          name: segment.prompt || segment.segment_name,
+        };
       } else {
         validatedParts.push(''); // Leave blank for invalid
         invalidSegments.push(segment.prompt || segment.segment_name);
@@ -140,6 +149,12 @@ export const validateAccountCode = async (code: string): Promise<ValidationResul
       // If we couldn't fetch values, assume valid (fail open)
       console.log(`No values for segment ${segment.prompt}, assuming valid`);
       validatedParts.push(inputValue);
+      // Still add to segment details with empty description
+      segmentDetails[segment.segment_code] = {
+        value: inputValue,
+        description: '',
+        name: segment.prompt || segment.segment_name,
+      };
     }
   }
 
@@ -148,6 +163,7 @@ export const validateAccountCode = async (code: string): Promise<ValidationResul
     validatedCode: validatedParts.join('-'),
     invalidSegments,
     segmentsLoaded: true,
+    segmentDetails,
   };
   console.log('Validation result:', result);
   return result;
