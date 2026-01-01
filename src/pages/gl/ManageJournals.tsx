@@ -1559,7 +1559,7 @@ const ManageJournals: React.FC = () => {
                   </Button>
                 </Dropdown>
                 <Tooltip title="Create Journal">
-                  <Button size="small" icon={<PlusOutlined />} />
+                  <Button size="small" icon={<PlusOutlined />} onClick={() => navigate('/gl/create-journal')} />
                 </Tooltip>
                 <Tooltip title="Edit">
                   <Button

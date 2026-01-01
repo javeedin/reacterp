@@ -289,7 +289,7 @@ const CreateJournal: React.FC = () => {
 
   // Cancel handler
   const handleCancel = () => {
-    navigate('/gl/manage-journals');
+    navigate(-1);  // Go back to previous page
   };
 
   // Batch Actions menu
