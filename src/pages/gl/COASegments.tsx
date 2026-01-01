@@ -115,6 +115,7 @@ interface TabItem {
   syncMessage: string;
   syncLogs: string[];
   showLogs: boolean;
+  valueSearch: string;
 }
 
 // Menu item interface for flyout
@@ -347,6 +348,7 @@ const COASegments: React.FC = () => {
       syncMessage: '',
       syncLogs: [],
       showLogs: false,
+      valueSearch: '',
     };
 
     setTabs(prev => [...prev, newTab]);
@@ -393,6 +395,24 @@ const COASegments: React.FC = () => {
     setTabs(prev => prev.map(t =>
       t.key === tabKey ? { ...t, syncLogs: [] } : t
     ));
+  };
+
+  // Set value search for a tab
+  const setValueSearch = (tabKey: string, search: string) => {
+    setTabs(prev => prev.map(t =>
+      t.key === tabKey ? { ...t, valueSearch: search } : t
+    ));
+  };
+
+  // Filter values based on search
+  const getFilteredValues = (tab: TabItem) => {
+    if (!tab.valueSearch) return tab.values;
+    const search = tab.valueSearch.toLowerCase();
+    return tab.values.filter(v =>
+      v.Value?.toLowerCase().includes(search) ||
+      v.Description?.toLowerCase().includes(search) ||
+      v.AccountType?.toLowerCase().includes(search)
+    );
   };
 
   // Batch size for sync (APEX has CLOB length limits)
@@ -679,8 +699,17 @@ const COASegments: React.FC = () => {
                               {/* Toolbar with segment code */}
                               <div style={{ padding: '8px 12px', borderBottom: `1px solid ${REDWOOD.neutral200}`, background: REDWOOD.neutral100, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                 <Space>
-                                  <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{tab.values.length} values</Text>
+                                  <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{getFilteredValues(tab).length}/{tab.values.length} values</Text>
                                   <Text code style={{ fontSize: 10 }}>{tab.key}</Text>
+                                  <Input
+                                    size="small"
+                                    placeholder="Search values..."
+                                    prefix={<SearchOutlined style={{ color: REDWOOD.neutral300, fontSize: 11 }} />}
+                                    value={tab.valueSearch}
+                                    onChange={(e) => setValueSearch(tab.key, e.target.value)}
+                                    style={{ width: 180, fontSize: 11 }}
+                                    allowClear
+                                  />
                                   {tab.syncStatus === 'success' && <Text style={{ fontSize: 11, color: REDWOOD.success }}>{tab.syncMessage}</Text>}
                                   {tab.syncStatus === 'error' && <Text style={{ fontSize: 11, color: REDWOOD.primary }}>{tab.syncMessage}</Text>}
                                 </Space>
@@ -735,7 +764,7 @@ const COASegments: React.FC = () => {
                                   </div>
                                 </div>
                               )}
-                              <Table columns={valueColumns} dataSource={tab.values} rowKey="Value" size="small" pagination={{ size: 'small', pageSize: 20, showSizeChanger: false, showTotal: (total) => <Text style={{ fontSize: 11 }}>{total} values</Text> }} className="compact-table" />
+                              <Table columns={valueColumns} dataSource={getFilteredValues(tab)} rowKey="Value" size="small" pagination={{ size: 'small', pageSize: 20, showSizeChanger: false, showTotal: (total) => <Text style={{ fontSize: 11 }}>{total} values</Text> }} className="compact-table" />
                             </>
                           )}
                         </div>
