@@ -46,22 +46,23 @@ const REDWOOD = {
   textSecondary: '#6B6B6B',
 };
 
-// Types
+// Types - using camelCase to match API response
 interface InvoiceHold {
-  HoldLookupCode: string;
-  HoldName: string;
-  HoldType: string;
-  Description: string;
-  HoldClass: string;
-  PostableFlag: boolean;
-  ReleasableFlag: boolean;
-  WaitingInvoiceApprovalFlag: boolean;
-  UserUpdateableFlag: boolean;
-  UserReleasableFlag: boolean;
-  AccountingEventFlag: boolean;
-  ActiveFlag: boolean;
-  CreationDate: string;
-  LastUpdateDate: string;
+  holdName: string;
+  holdType: string;
+  description: string | null;
+  holdInstruction: string | null;
+  postableFlag: boolean;
+  userReleaseableFlag: boolean;
+  userUpdateableFlag: boolean;
+  holdsResolutionRoutingFlag: boolean | null;
+  daysBeforeNotifying: number | null;
+  daysBeforeReminding: number | null;
+  inactiveDate: string | null;
+  createdBy: string;
+  creationDate: string;
+  lastUpdateDate: string;
+  lastUpdatedBy: string;
 }
 
 const InvoiceHolds: React.FC = () => {
@@ -106,6 +107,7 @@ const InvoiceHolds: React.FC = () => {
         const items = result.items || [];
 
         console.log('Items fetched:', items.length);
+        console.log('Sample item:', items[0]);
         console.log('HasMore:', result.hasMore);
 
         allHolds.push(...items);
@@ -149,118 +151,110 @@ const InvoiceHolds: React.FC = () => {
   }, [fetchAllHolds]);
 
   // Get unique hold types for filtering
-  const holdTypes = [...new Set(holds.map(h => h.HoldType).filter(Boolean))];
-  const holdClasses = [...new Set(holds.map(h => h.HoldClass).filter(Boolean))];
+  const holdTypes = [...new Set(holds.map(h => h.holdType).filter(Boolean))];
 
   // Get statistics
-  const activeHolds = holds.filter(h => h.ActiveFlag).length;
-  const releasableHolds = holds.filter(h => h.ReleasableFlag).length;
-  const postableHolds = holds.filter(h => h.PostableFlag).length;
+  const activeHolds = holds.filter(h => !h.inactiveDate).length;
+  const postableHolds = holds.filter(h => h.postableFlag).length;
+  const userReleaseableHolds = holds.filter(h => h.userReleaseableFlag).length;
 
-  // Table columns
+  // Table columns - using camelCase field names
   const columns = [
     {
-      title: 'Hold Code',
-      dataIndex: 'HoldLookupCode',
-      key: 'HoldLookupCode',
-      width: 150,
-      sorter: (a: InvoiceHold, b: InvoiceHold) => (a.HoldLookupCode || '').localeCompare(b.HoldLookupCode || ''),
-      render: (code: string, record: InvoiceHold) => (
+      title: 'Hold Name',
+      dataIndex: 'holdName',
+      key: 'holdName',
+      width: 180,
+      sorter: (a: InvoiceHold, b: InvoiceHold) => (a.holdName || '').localeCompare(b.holdName || ''),
+      render: (name: string, record: InvoiceHold) => (
         <Space size={4}>
-          <Text strong style={{ fontSize: 11 }}>{code}</Text>
-          {record.ActiveFlag && <CheckCircleOutlined style={{ color: REDWOOD.success, fontSize: 10 }} />}
+          <Text strong style={{ fontSize: 11 }}>{name}</Text>
+          {!record.inactiveDate && <CheckCircleOutlined style={{ color: REDWOOD.success, fontSize: 10 }} />}
         </Space>
       ),
     },
     {
-      title: 'Hold Name',
-      dataIndex: 'HoldName',
-      key: 'HoldName',
-      width: 200,
-      ellipsis: true,
-      sorter: (a: InvoiceHold, b: InvoiceHold) => (a.HoldName || '').localeCompare(b.HoldName || ''),
-      render: (name: string) => <Text style={{ fontSize: 11 }}>{name}</Text>,
-    },
-    {
       title: 'Hold Type',
-      dataIndex: 'HoldType',
-      key: 'HoldType',
-      width: 120,
+      dataIndex: 'holdType',
+      key: 'holdType',
+      width: 180,
       filters: holdTypes.map(t => ({ text: t, value: t })),
-      onFilter: (value: React.Key | boolean, record: InvoiceHold) => record.HoldType === value,
+      onFilter: (value: React.Key | boolean, record: InvoiceHold) => record.holdType === value,
       render: (type: string) => type ? <Tag style={{ fontSize: 9 }}>{type}</Tag> : '-',
     },
     {
-      title: 'Hold Class',
-      dataIndex: 'HoldClass',
-      key: 'HoldClass',
-      width: 120,
-      filters: holdClasses.map(c => ({ text: c, value: c })),
-      onFilter: (value: React.Key | boolean, record: InvoiceHold) => record.HoldClass === value,
-      render: (cls: string) => cls ? <Tag color="blue" style={{ fontSize: 9 }}>{cls}</Tag> : '-',
-    },
-    {
       title: 'Description',
-      dataIndex: 'Description',
-      key: 'Description',
-      width: 250,
+      dataIndex: 'description',
+      key: 'description',
+      width: 300,
       ellipsis: true,
       render: (desc: string) => <Text style={{ fontSize: 10 }}>{desc || '-'}</Text>,
     },
     {
       title: 'Postable',
-      dataIndex: 'PostableFlag',
-      key: 'PostableFlag',
+      dataIndex: 'postableFlag',
+      key: 'postableFlag',
       width: 80,
       filters: [
         { text: 'Yes', value: true },
         { text: 'No', value: false },
       ],
-      onFilter: (value: React.Key | boolean, record: InvoiceHold) => record.PostableFlag === value,
+      onFilter: (value: React.Key | boolean, record: InvoiceHold) => record.postableFlag === value,
       render: (flag: boolean) => (
         flag ? <CheckCircleOutlined style={{ color: REDWOOD.success }} /> : <CloseCircleOutlined style={{ color: REDWOOD.textSecondary }} />
       ),
     },
     {
-      title: 'Releasable',
-      dataIndex: 'ReleasableFlag',
-      key: 'ReleasableFlag',
-      width: 90,
+      title: 'User Releaseable',
+      dataIndex: 'userReleaseableFlag',
+      key: 'userReleaseableFlag',
+      width: 120,
       filters: [
         { text: 'Yes', value: true },
         { text: 'No', value: false },
       ],
-      onFilter: (value: React.Key | boolean, record: InvoiceHold) => record.ReleasableFlag === value,
+      onFilter: (value: React.Key | boolean, record: InvoiceHold) => record.userReleaseableFlag === value,
       render: (flag: boolean) => (
         flag ? <CheckCircleOutlined style={{ color: REDWOOD.success }} /> : <CloseCircleOutlined style={{ color: REDWOOD.textSecondary }} />
       ),
     },
     {
-      title: 'User Releasable',
-      dataIndex: 'UserReleasableFlag',
-      key: 'UserReleasableFlag',
-      width: 110,
+      title: 'User Updateable',
+      dataIndex: 'userUpdateableFlag',
+      key: 'userUpdateableFlag',
+      width: 120,
       render: (flag: boolean) => (
         flag ? <CheckCircleOutlined style={{ color: REDWOOD.success }} /> : <CloseCircleOutlined style={{ color: REDWOOD.textSecondary }} />
       ),
     },
     {
       title: 'Active',
-      dataIndex: 'ActiveFlag',
-      key: 'ActiveFlag',
+      dataIndex: 'inactiveDate',
+      key: 'active',
       width: 70,
       filters: [
-        { text: 'Yes', value: true },
-        { text: 'No', value: false },
+        { text: 'Yes', value: 'active' },
+        { text: 'No', value: 'inactive' },
       ],
-      onFilter: (value: React.Key | boolean, record: InvoiceHold) => record.ActiveFlag === value,
-      render: (flag: boolean) => (
-        flag ? (
+      onFilter: (value: React.Key | boolean, record: InvoiceHold) => {
+        if (value === 'active') return !record.inactiveDate;
+        return !!record.inactiveDate;
+      },
+      render: (inactiveDate: string | null) => (
+        !inactiveDate ? (
           <Tag color="green" style={{ fontSize: 10 }}>Yes</Tag>
         ) : (
           <Tag color="default" style={{ fontSize: 10 }}>No</Tag>
         )
       ),
+    },
+    {
+      title: 'Hold Instruction',
+      dataIndex: 'holdInstruction',
+      key: 'holdInstruction',
+      width: 200,
+      ellipsis: true,
+      render: (instruction: string) => <Text style={{ fontSize: 10 }}>{instruction || '-'}</Text>,
     },
   ];
 
@@ -344,8 +338,8 @@ const InvoiceHolds: React.FC = () => {
             <Col span={6}>
               <Card size="small" style={{ borderRadius: 6 }} bodyStyle={{ padding: '12px 16px' }}>
                 <Statistic
-                  title={<Text style={{ fontSize: 11 }}>Releasable</Text>}
-                  value={releasableHolds}
+                  title={<Text style={{ fontSize: 11 }}>User Releaseable</Text>}
+                  value={userReleaseableHolds}
                   prefix={<ExclamationCircleOutlined style={{ color: REDWOOD.warning }} />}
                   valueStyle={{ fontSize: 20, color: REDWOOD.warning }}
                 />
@@ -411,7 +405,7 @@ const InvoiceHolds: React.FC = () => {
               <Table
                 dataSource={holds}
                 columns={columns}
-                rowKey="HoldLookupCode"
+                rowKey="holdName"
                 size="small"
                 pagination={{
                   pageSize: 20,
