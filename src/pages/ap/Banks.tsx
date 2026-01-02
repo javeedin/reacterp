@@ -527,9 +527,16 @@ const Banks: React.FC = () => {
     },
     {
       title: 'Account Number',
+      dataIndex: 'BankAccountNumber',
+      key: 'BankAccountNumber',
+      width: 150,
+      render: (num: string) => <Text code style={{ fontSize: 11 }}>{num}</Text>,
+    },
+    {
+      title: 'Masked Number',
       dataIndex: 'MaskedAccountNumber',
       key: 'MaskedAccountNumber',
-      width: 150,
+      width: 130,
       render: (num: string) => <Text code style={{ fontSize: 11 }}>{num}</Text>,
     },
     {
@@ -1078,8 +1085,12 @@ const Banks: React.FC = () => {
                       <Col span={8}><Form.Item name="AccountType" label="Account Type" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
                     </Row>
                     <Row gutter={12}>
-                      <Col span={16}><Form.Item name="BankAccountName" label="Account Name" rules={[{ required: true }]} style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
-                      <Col span={8}><Form.Item name="MaskedAccountNumber" label="Masked Account #" style={{ marginBottom: 0 }}><Input disabled size="small" /></Form.Item></Col>
+                      <Col span={12}><Form.Item name="BankAccountName" label="Account Name" rules={[{ required: true }]} style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
+                      <Col span={12}><Form.Item name="BankAccountNumber" label="Account Number" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
+                    </Row>
+                    <Row gutter={12}>
+                      <Col span={12}><Form.Item name="MaskedAccountNumber" label="Masked Account #" style={{ marginBottom: 0 }}><Input disabled size="small" /></Form.Item></Col>
+                      <Col span={12}><Form.Item name="BankAccountNumberElectronic" label="Electronic Account #" style={{ marginBottom: 0 }}><Input size="small" /></Form.Item></Col>
                     </Row>
                   </div>
                 ),
@@ -1148,8 +1159,8 @@ const Banks: React.FC = () => {
                 children: (
                   <div style={{ paddingTop: 8 }}>
                     <Row gutter={12}>
-                      <Col span={12}><Form.Item name="BankAccountNumberElectronic" label="Electronic Account Number" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
                       <Col span={12}><Form.Item name="ReconStartDate" label="Reconciliation Start Date" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
+                      <Col span={12}><Form.Item name="Description" label="Description" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
                     </Row>
                     <Divider style={{ margin: '8px 0' }} orientation="left" orientationMargin={0}><Text type="secondary" style={{ fontSize: 11 }}>Audit Information</Text></Divider>
                     <Row gutter={12}>
