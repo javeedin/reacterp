@@ -268,12 +268,13 @@ const Banks: React.FC = () => {
     setCheckbooks([]);
     setApiLogs([]); // Clear previous logs
 
-    // Use proxy same as banks/branches to avoid CORS
-    const url = `${PROXY_CONFIG.baseUrl}/oracle/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments`;
-    const displayUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments`;
+    // Use fusion proxy endpoint for nested paths
+    const fusionPath = `fscmRestApi/resources/11.13.18.05/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments`;
+    const url = `${PROXY_CONFIG.baseUrl}/fusion/${fusionPath}`;
+    const displayUrl = `https://iaaobn.fa.ocs.oraclecloud.com/${fusionPath}`;
 
     console.log('=== PAYMENT DOCUMENTS API CALL ===');
-    console.log('Proxy URL:', url);
+    console.log('URL:', url);
     console.log('Oracle URL:', displayUrl);
     console.log('BankAccountId:', bankAccountId);
 
@@ -286,20 +287,19 @@ const Banks: React.FC = () => {
       const result = await response.json();
       console.log('Response Data:', JSON.stringify(result, null, 2));
 
-      // Proxy returns { success, items } format
       const items = result.items || [];
       console.log('Items Count:', items.length);
 
       const logEntry = {
         type: 'Payment Documents',
         url: displayUrl,
-        status: result.success ? 'Success' : `Failed (${response.status})`,
+        status: response.ok ? 'Success' : `Failed (${response.status})`,
         count: items.length,
         time: new Date().toLocaleTimeString(),
       };
       setApiLogs(prev => [...prev, logEntry]);
 
-      if (result.success && items.length > 0) {
+      if (items.length > 0) {
         setPaymentDocuments(items);
       }
     } catch (err) {
@@ -326,12 +326,13 @@ const Banks: React.FC = () => {
     setCheckbooksLoading(true);
     setCheckbooks([]);
 
-    // Use proxy same as other Oracle calls to avoid CORS
-    const url = `${PROXY_CONFIG.baseUrl}/oracle/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments/${paymentDocumentId}/child/bankAccountCheckbooks`;
-    const displayUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments/${paymentDocumentId}/child/bankAccountCheckbooks`;
+    // Use fusion proxy endpoint for nested paths
+    const fusionPath = `fscmRestApi/resources/11.13.18.05/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments/${paymentDocumentId}/child/bankAccountCheckbooks`;
+    const url = `${PROXY_CONFIG.baseUrl}/fusion/${fusionPath}`;
+    const displayUrl = `https://iaaobn.fa.ocs.oraclecloud.com/${fusionPath}`;
 
     console.log('=== CHECKBOOKS API CALL ===');
-    console.log('Proxy URL:', url);
+    console.log('URL:', url);
     console.log('Oracle URL:', displayUrl);
     console.log('BankAccountId:', bankAccountId);
     console.log('PaymentDocumentId:', paymentDocumentId);
@@ -345,20 +346,19 @@ const Banks: React.FC = () => {
       const result = await response.json();
       console.log('Response Data:', JSON.stringify(result, null, 2));
 
-      // Proxy returns { success, items } format
       const items = result.items || [];
       console.log('Items Count:', items.length);
 
       const logEntry = {
         type: 'Checkbooks',
         url: displayUrl,
-        status: result.success ? 'Success' : `Failed (${response.status})`,
+        status: response.ok ? 'Success' : `Failed (${response.status})`,
         count: items.length,
         time: new Date().toLocaleTimeString(),
       };
       setApiLogs(prev => [...prev, logEntry]);
 
-      if (result.success && items.length > 0) {
+      if (items.length > 0) {
         setCheckbooks(items);
       }
     } catch (err) {
