@@ -17,6 +17,11 @@ import {
   List,
   Empty,
   Tooltip,
+  Modal,
+  Form,
+  Input,
+  Divider,
+  message,
 } from 'antd';
 import {
   HomeOutlined,
@@ -30,6 +35,7 @@ import {
   GlobalOutlined,
   CheckCircleOutlined,
   DollarOutlined,
+  EditOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { PROXY_CONFIG } from '../../config/api.config';
@@ -131,6 +137,19 @@ const Banks: React.FC = () => {
   const [error, setError] = useState<string>('');
   const [activeMainTab, setActiveMainTab] = useState('all-banks');
   const [bankTabs, setBankTabs] = useState<BankTab[]>([]);
+
+  // Edit modal state
+  const [editBankModalOpen, setEditBankModalOpen] = useState(false);
+  const [editingBank, setEditingBank] = useState<Bank | null>(null);
+  const [editBranchModalOpen, setEditBranchModalOpen] = useState(false);
+  const [editingBranch, setEditingBranch] = useState<BankBranch | null>(null);
+  const [editAccountModalOpen, setEditAccountModalOpen] = useState(false);
+  const [editingAccount, setEditingAccount] = useState<BankAccount | null>(null);
+
+  // Forms for editing
+  const [bankForm] = Form.useForm();
+  const [branchForm] = Form.useForm();
+  const [accountForm] = Form.useForm();
 
   // Fetch banks from selected source
   const fetchBanks = useCallback(async () => {
@@ -301,6 +320,111 @@ const Banks: React.FC = () => {
     }));
   };
 
+  // Edit Bank handlers
+  const handleEditBank = (bank: Bank) => {
+    setEditingBank(bank);
+    bankForm.setFieldsValue({
+      BankPartyId: bank.BankPartyId,
+      BankName: bank.BankName,
+      BankNameAlt: bank.BankNameAlt,
+      BankNumber: bank.BankNumber,
+      Description: bank.Description,
+      CountryName: bank.CountryName,
+      BankPartyNumber: bank.BankPartyNumber,
+      CreatedBy: bank.CreatedBy,
+      CreationDate: bank.CreationDate,
+      LastUpdateDate: bank.LastUpdateDate,
+      LastUpdatedBy: bank.LastUpdatedBy,
+    });
+    setEditBankModalOpen(true);
+  };
+
+  const handleSaveBank = async () => {
+    try {
+      const values = await bankForm.validateFields();
+      // TODO: Implement API call to save bank
+      message.success('Bank updated successfully');
+      setEditBankModalOpen(false);
+      setEditingBank(null);
+      fetchBanks();
+    } catch (err) {
+      console.error('Validation failed:', err);
+    }
+  };
+
+  // Edit Branch handlers
+  const handleEditBranch = (branch: BankBranch) => {
+    setEditingBranch(branch);
+    branchForm.setFieldsValue({
+      BranchPartyId: branch.BranchPartyId,
+      BankName: branch.BankName,
+      BankBranchName: branch.BankBranchName,
+      BankBranchNameAlt: branch.BankBranchNameAlt,
+      BranchNumber: branch.BranchNumber,
+      BankNumber: branch.BankNumber,
+      Description: branch.Description,
+      EFTSWIFTCode: branch.EFTSWIFTCode,
+      CountryName: branch.CountryName,
+      BranchPartyNumber: branch.BranchPartyNumber,
+      BankPartyNumber: branch.BankPartyNumber,
+      CreatedBy: branch.CreatedBy,
+      CreationDate: branch.CreationDate,
+      LastUpdateDate: branch.LastUpdateDate,
+    });
+    setEditBranchModalOpen(true);
+  };
+
+  const handleSaveBranch = async () => {
+    try {
+      const values = await branchForm.validateFields();
+      // TODO: Implement API call to save branch
+      message.success('Branch updated successfully');
+      setEditBranchModalOpen(false);
+      setEditingBranch(null);
+    } catch (err) {
+      console.error('Validation failed:', err);
+    }
+  };
+
+  // Edit Account handlers
+  const handleEditAccount = (account: BankAccount) => {
+    setEditingAccount(account);
+    accountForm.setFieldsValue({
+      BankAccountId: account.BankAccountId,
+      BankAccountName: account.BankAccountName,
+      BankAccountNumber: account.BankAccountNumber,
+      BankAccountNumberElectronic: account.BankAccountNumberElectronic,
+      MaskedAccountNumber: account.MaskedAccountNumber,
+      CurrencyCode: account.CurrencyCode,
+      BankName: account.BankName,
+      BankBranchName: account.BankBranchName,
+      BranchNumber: account.BranchNumber,
+      LegalEntityName: account.LegalEntityName,
+      Description: account.Description,
+      AccountType: account.AccountType,
+      ApUseAllowedFlag: account.ApUseAllowedFlag,
+      ArUseAllowedFlag: account.ArUseAllowedFlag,
+      CashAccountCombination: account.CashAccountCombination,
+      ReconStartDate: account.ReconStartDate,
+      CreatedBy: account.CreatedBy,
+      CreationDate: account.CreationDate,
+      LastUpdateDate: account.LastUpdateDate,
+    });
+    setEditAccountModalOpen(true);
+  };
+
+  const handleSaveAccount = async () => {
+    try {
+      const values = await accountForm.validateFields();
+      // TODO: Implement API call to save account
+      message.success('Bank Account updated successfully');
+      setEditAccountModalOpen(false);
+      setEditingAccount(null);
+    } catch (err) {
+      console.error('Validation failed:', err);
+    }
+  };
+
   // Banks table columns
   const bankColumns = [
     {
@@ -346,6 +470,24 @@ const Banks: React.FC = () => {
       key: 'LastUpdateDate',
       width: 180,
       render: (date: string) => date ? new Date(date).toLocaleString() : '-',
+    },
+    {
+      title: 'Actions',
+      key: 'actions',
+      width: 80,
+      render: (_: unknown, record: Bank) => (
+        <Tooltip title="Edit Bank">
+          <Button
+            type="text"
+            icon={<EditOutlined />}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleEditBank(record);
+            }}
+            style={{ color: REDWOOD.info }}
+          />
+        </Tooltip>
+      ),
     },
   ];
 
@@ -406,6 +548,25 @@ const Banks: React.FC = () => {
       render: (combo: string) => (
         <Tooltip title={combo}>
           <Text code style={{ fontSize: 10 }}>{combo}</Text>
+        </Tooltip>
+      ),
+    },
+    {
+      title: 'Actions',
+      key: 'actions',
+      width: 70,
+      render: (_: unknown, record: BankAccount) => (
+        <Tooltip title="Edit Account">
+          <Button
+            type="text"
+            icon={<EditOutlined />}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleEditAccount(record);
+            }}
+            size="small"
+            style={{ color: REDWOOD.info }}
+          />
         </Tooltip>
       ),
     },
@@ -485,16 +646,30 @@ const Banks: React.FC = () => {
                         if (!isSelected) e.currentTarget.style.background = 'transparent';
                       }}
                     >
-                      <div style={{ width: '100%' }}>
-                        <Text strong style={{ display: 'block', fontSize: 13, color: isSelected ? REDWOOD.info : REDWOOD.textPrimary }}>
-                          {branch.BankBranchName}
-                        </Text>
-                        <Space size="small" style={{ marginTop: 4 }}>
-                          <Text type="secondary" style={{ fontSize: 11 }}>{branch.BranchNumber}</Text>
-                          {branch.EFTSWIFTCode && (
-                            <Tag style={{ fontSize: 10, margin: 0 }}>{branch.EFTSWIFTCode}</Tag>
-                          )}
-                        </Space>
+                      <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div style={{ flex: 1 }}>
+                          <Text strong style={{ display: 'block', fontSize: 13, color: isSelected ? REDWOOD.info : REDWOOD.textPrimary }}>
+                            {branch.BankBranchName}
+                          </Text>
+                          <Space size="small" style={{ marginTop: 4 }}>
+                            <Text type="secondary" style={{ fontSize: 11 }}>{branch.BranchNumber}</Text>
+                            {branch.EFTSWIFTCode && (
+                              <Tag style={{ fontSize: 10, margin: 0 }}>{branch.EFTSWIFTCode}</Tag>
+                            )}
+                          </Space>
+                        </div>
+                        <Tooltip title="Edit Branch">
+                          <Button
+                            type="text"
+                            icon={<EditOutlined />}
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEditBranch(branch);
+                            }}
+                            style={{ color: REDWOOD.info, marginLeft: 8 }}
+                          />
+                        </Tooltip>
                       </div>
                     </List.Item>
                   );
@@ -764,6 +939,350 @@ const Banks: React.FC = () => {
           />
         </div>
       </Content>
+
+      {/* Edit Bank Modal */}
+      <Modal
+        title={
+          <Space>
+            <BankOutlined style={{ color: REDWOOD.info }} />
+            <span>Edit Bank</span>
+          </Space>
+        }
+        open={editBankModalOpen}
+        onCancel={() => {
+          setEditBankModalOpen(false);
+          setEditingBank(null);
+          bankForm.resetFields();
+        }}
+        footer={[
+          <Button key="cancel" onClick={() => {
+            setEditBankModalOpen(false);
+            setEditingBank(null);
+            bankForm.resetFields();
+          }}>
+            Cancel
+          </Button>,
+          <Button key="save" type="primary" onClick={handleSaveBank} style={{ background: REDWOOD.primary }}>
+            Save
+          </Button>,
+        ]}
+        width={700}
+      >
+        <Form form={bankForm} layout="vertical" style={{ marginTop: 16 }}>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="BankPartyId" label="Bank Party ID">
+                <Input disabled />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="BankPartyNumber" label="Bank Party Number">
+                <Input disabled />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Divider style={{ margin: '12px 0' }} />
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="BankName" label="Bank Name" rules={[{ required: true }]}>
+                <Input />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="BankNameAlt" label="Alternate Bank Name">
+                <Input />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="BankNumber" label="Bank Number">
+                <Input />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="CountryName" label="Country">
+                <Input />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item name="Description" label="Description">
+            <Input.TextArea rows={2} />
+          </Form.Item>
+          <Divider style={{ margin: '12px 0' }} />
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="CreatedBy" label="Created By">
+                <Input disabled />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="CreationDate" label="Creation Date">
+                <Input disabled />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="LastUpdatedBy" label="Last Updated By">
+                <Input disabled />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="LastUpdateDate" label="Last Update Date">
+                <Input disabled />
+              </Form.Item>
+            </Col>
+          </Row>
+        </Form>
+      </Modal>
+
+      {/* Edit Branch Modal */}
+      <Modal
+        title={
+          <Space>
+            <BranchesOutlined style={{ color: REDWOOD.primary }} />
+            <span>Edit Branch</span>
+          </Space>
+        }
+        open={editBranchModalOpen}
+        onCancel={() => {
+          setEditBranchModalOpen(false);
+          setEditingBranch(null);
+          branchForm.resetFields();
+        }}
+        footer={[
+          <Button key="cancel" onClick={() => {
+            setEditBranchModalOpen(false);
+            setEditingBranch(null);
+            branchForm.resetFields();
+          }}>
+            Cancel
+          </Button>,
+          <Button key="save" type="primary" onClick={handleSaveBranch} style={{ background: REDWOOD.primary }}>
+            Save
+          </Button>,
+        ]}
+        width={700}
+      >
+        <Form form={branchForm} layout="vertical" style={{ marginTop: 16 }}>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="BranchPartyId" label="Branch Party ID">
+                <Input disabled />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="BranchPartyNumber" label="Branch Party Number">
+                <Input disabled />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Divider style={{ margin: '12px 0' }} />
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="BankName" label="Bank Name">
+                <Input disabled />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="BankNumber" label="Bank Number">
+                <Input disabled />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="BankBranchName" label="Branch Name" rules={[{ required: true }]}>
+                <Input />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="BankBranchNameAlt" label="Alternate Branch Name">
+                <Input />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="BranchNumber" label="Branch Number">
+                <Input />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="EFTSWIFTCode" label="SWIFT Code">
+                <Input />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="CountryName" label="Country">
+                <Input />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="BankPartyNumber" label="Bank Party Number">
+                <Input disabled />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item name="Description" label="Description">
+            <Input.TextArea rows={2} />
+          </Form.Item>
+          <Divider style={{ margin: '12px 0' }} />
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="CreatedBy" label="Created By">
+                <Input disabled />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="CreationDate" label="Creation Date">
+                <Input disabled />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item name="LastUpdateDate" label="Last Update Date">
+            <Input disabled />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* Edit Account Modal */}
+      <Modal
+        title={
+          <Space>
+            <CreditCardOutlined style={{ color: REDWOOD.success }} />
+            <span>Edit Bank Account</span>
+          </Space>
+        }
+        open={editAccountModalOpen}
+        onCancel={() => {
+          setEditAccountModalOpen(false);
+          setEditingAccount(null);
+          accountForm.resetFields();
+        }}
+        footer={[
+          <Button key="cancel" onClick={() => {
+            setEditAccountModalOpen(false);
+            setEditingAccount(null);
+            accountForm.resetFields();
+          }}>
+            Cancel
+          </Button>,
+          <Button key="save" type="primary" onClick={handleSaveAccount} style={{ background: REDWOOD.primary }}>
+            Save
+          </Button>,
+        ]}
+        width={800}
+      >
+        <Form form={accountForm} layout="vertical" style={{ marginTop: 16 }}>
+          <Row gutter={16}>
+            <Col span={8}>
+              <Form.Item name="BankAccountId" label="Account ID">
+                <Input disabled />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="BankName" label="Bank Name">
+                <Input disabled />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="BankBranchName" label="Branch Name">
+                <Input disabled />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Divider style={{ margin: '12px 0' }} />
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="BankAccountName" label="Account Name" rules={[{ required: true }]}>
+                <Input />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="BankAccountNumber" label="Account Number">
+                <Input />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={16}>
+            <Col span={8}>
+              <Form.Item name="MaskedAccountNumber" label="Masked Account Number">
+                <Input disabled />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="BankAccountNumberElectronic" label="Electronic Account Number">
+                <Input />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="CurrencyCode" label="Currency">
+                <Input />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="LegalEntityName" label="Legal Entity">
+                <Input />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="AccountType" label="Account Type">
+                <Input />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={16}>
+            <Col span={8}>
+              <Form.Item name="BranchNumber" label="Branch Number">
+                <Input disabled />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="ApUseAllowedFlag" label="AP Use Allowed">
+                <Input />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="ArUseAllowedFlag" label="AR Use Allowed">
+                <Input />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item name="CashAccountCombination" label="Cash Account Combination">
+            <Input />
+          </Form.Item>
+          <Form.Item name="Description" label="Description">
+            <Input.TextArea rows={2} />
+          </Form.Item>
+          <Divider style={{ margin: '12px 0' }} />
+          <Row gutter={16}>
+            <Col span={8}>
+              <Form.Item name="ReconStartDate" label="Reconciliation Start Date">
+                <Input disabled />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="CreatedBy" label="Created By">
+                <Input disabled />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="CreationDate" label="Creation Date">
+                <Input disabled />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item name="LastUpdateDate" label="Last Update Date">
+            <Input disabled />
+          </Form.Item>
+        </Form>
+      </Modal>
 
       {/* Autopilot Assistant */}
       <Autopilot />
