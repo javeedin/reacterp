@@ -268,25 +268,22 @@ const Banks: React.FC = () => {
     setCheckbooks([]);
     setApiLogs([]); // Clear previous logs
 
-    const url = `${ORACLE_FUSION_CONFIG.baseUrl}/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments`;
-    const authHeader = 'Basic ' + btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
+    // Use proxy to avoid CORS (same as banks/branches)
+    const url = `${PROXY_CONFIG.baseUrl}/oracle/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments`;
+    const oracleUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments`;
 
     console.log('[API] Payment Documents URL:', url);
+    console.log('[API] Oracle URL:', oracleUrl);
 
     try {
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Authorization': authHeader,
-        },
-      });
+      const response = await fetch(url);
       const result = await response.json();
       console.log('[API] Payment Documents Response:', result);
 
       const items = result.items || [];
       const logEntry = {
         type: 'Payment Documents',
-        url,
+        url: oracleUrl,
         status: response.ok ? 'Success' : `Failed (${response.status})`,
         count: items.length,
         time: new Date().toLocaleTimeString(),
@@ -300,7 +297,7 @@ const Banks: React.FC = () => {
       console.error('Error fetching payment documents:', err);
       setApiLogs(prev => [...prev, {
         type: 'Payment Documents',
-        url,
+        url: oracleUrl,
         status: `Error: ${err instanceof Error ? err.message : 'Unknown'}`,
         count: 0,
         time: new Date().toLocaleTimeString(),
@@ -315,25 +312,22 @@ const Banks: React.FC = () => {
     setCheckbooksLoading(true);
     setCheckbooks([]);
 
-    const url = `${ORACLE_FUSION_CONFIG.baseUrl}/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments/${paymentDocumentId}/child/bankAccountCheckbooks`;
-    const authHeader = 'Basic ' + btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
+    // Use proxy to avoid CORS (same as banks/branches)
+    const url = `${PROXY_CONFIG.baseUrl}/oracle/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments/${paymentDocumentId}/child/bankAccountCheckbooks`;
+    const oracleUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments/${paymentDocumentId}/child/bankAccountCheckbooks`;
 
     console.log('[API] Checkbooks URL:', url);
+    console.log('[API] Oracle URL:', oracleUrl);
 
     try {
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Authorization': authHeader,
-        },
-      });
+      const response = await fetch(url);
       const result = await response.json();
       console.log('[API] Checkbooks Response:', result);
 
       const items = result.items || [];
       const logEntry = {
         type: 'Checkbooks',
-        url,
+        url: oracleUrl,
         status: response.ok ? 'Success' : `Failed (${response.status})`,
         count: items.length,
         time: new Date().toLocaleTimeString(),
@@ -347,7 +341,7 @@ const Banks: React.FC = () => {
       console.error('Error fetching checkbooks:', err);
       setApiLogs(prev => [...prev, {
         type: 'Checkbooks',
-        url,
+        url: oracleUrl,
         status: `Error: ${err instanceof Error ? err.message : 'Unknown'}`,
         count: 0,
         time: new Date().toLocaleTimeString(),
