@@ -16,6 +16,7 @@ import ManageStructures from './pages/gl/ManageStructures';
 import EditStructure from './pages/gl/EditStructure';
 import ManageValues from './pages/gl/ManageValues';
 import COASegments from './pages/gl/COASegments';
+import AccountCombinations from './pages/gl/AccountCombinations';
 import { APModule } from './pages/ap';
 import ManageInvoices from './pages/ap/ManageInvoices';
 import ManagePayments from './pages/ap/ManagePayments';
@@ -75,6 +76,7 @@ function App() {
               <Route path="gl/journals/:id/edit" element={<EditJournal />} />
               <Route path="gl/batch/:batchId/edit" element={<EditJournal />} />
               <Route path="gl/create-journal" element={<CreateJournal />} />
+              <Route path="gl/account-combinations" element={<AccountCombinations />} />
               <Route path="ap" element={<APModule />} />
               <Route path="ap/manage-invoices" element={<ManageInvoices />} />
               <Route path="ap/manage-payments" element={<ManagePayments />} />

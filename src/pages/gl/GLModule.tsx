@@ -89,7 +89,7 @@ const setupMenuItems: MenuItemType[] = [
   { key: 'ledgers', icon: <AccountBookOutlined />, label: 'Ledgers', description: 'Configure ledger settings', color: REDWOOD.info },
   { key: 'fiscal-calendar', icon: <CalendarOutlined />, label: 'Fiscal Calendar', description: 'Define accounting periods', color: REDWOOD.success },
   { key: 'currencies', icon: <DollarOutlined />, label: 'Currencies', description: 'Currency configurations', color: REDWOOD.warning },
-  { key: 'account-combinations', icon: <SettingOutlined />, label: 'Account Combinations', description: 'Valid account combinations', color: REDWOOD.primaryDark },
+  { key: 'account-combinations', icon: <SettingOutlined />, label: 'Account Combinations', description: 'Valid account combinations', color: REDWOOD.primaryDark, path: '/gl/account-combinations' },
   { key: 'cross-validation', icon: <SolutionOutlined />, label: 'Cross Validation', description: 'Validation rules setup', color: REDWOOD.reportGreen },
 ];
 
