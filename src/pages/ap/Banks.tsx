@@ -1034,38 +1034,75 @@ const Banks: React.FC = () => {
           <Button key="cancel" size="small" onClick={() => { setEditAccountModalOpen(false); setEditingAccount(null); accountForm.resetFields(); }}>Cancel</Button>,
           <Button key="save" size="small" type="primary" onClick={handleSaveAccount} style={{ background: REDWOOD.primary }}>Save</Button>,
         ]}
-        width={700}
-        styles={{ body: { padding: '12px 24px' } }}
+        width={650}
+        styles={{ body: { padding: '8px 16px 16px' } }}
       >
-        <Form form={accountForm} layout="vertical" size="small" style={{ marginTop: 8 }}>
-          <Row gutter={12}>
-            <Col span={4}><Form.Item name="BankAccountId" label="ID" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
-            <Col span={5}><Form.Item name="BankName" label="Bank" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
-            <Col span={5}><Form.Item name="BankBranchName" label="Branch" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
-            <Col span={5}><Form.Item name="BranchNumber" label="Branch #" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
-            <Col span={5}><Form.Item name="CurrencyCode" label="Currency" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
-          </Row>
-          <Row gutter={12}>
-            <Col span={12}><Form.Item name="BankAccountName" label="Account Name" rules={[{ required: true }]} style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
-            <Col span={6}><Form.Item name="BankAccountNumber" label="Account Number" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
-            <Col span={6}><Form.Item name="MaskedAccountNumber" label="Masked #" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
-          </Row>
-          <Row gutter={12}>
-            <Col span={8}><Form.Item name="LegalEntityName" label="Legal Entity" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
-            <Col span={8}><Form.Item name="AccountType" label="Account Type" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
-            <Col span={4}><Form.Item name="ApUseAllowedFlag" label="AP" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
-            <Col span={4}><Form.Item name="ArUseAllowedFlag" label="AR" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
-          </Row>
-          <Row gutter={12}>
-            <Col span={16}><Form.Item name="CashAccountCombination" label="Cash Account Combination" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
-            <Col span={8}><Form.Item name="Description" label="Description" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
-          </Row>
-          <Row gutter={12}>
-            <Col span={6}><Form.Item name="ReconStartDate" label="Recon Start" style={{ marginBottom: 0 }}><Input disabled size="small" /></Form.Item></Col>
-            <Col span={6}><Form.Item name="CreatedBy" label="Created By" style={{ marginBottom: 0 }}><Input disabled size="small" /></Form.Item></Col>
-            <Col span={6}><Form.Item name="CreationDate" label="Created" style={{ marginBottom: 0 }}><Input disabled size="small" /></Form.Item></Col>
-            <Col span={6}><Form.Item name="LastUpdateDate" label="Updated" style={{ marginBottom: 0 }}><Input disabled size="small" /></Form.Item></Col>
-          </Row>
+        <Form form={accountForm} layout="vertical" size="small">
+          <Tabs
+            size="small"
+            items={[
+              {
+                key: 'general',
+                label: 'General',
+                children: (
+                  <div style={{ paddingTop: 8 }}>
+                    <Row gutter={12}>
+                      <Col span={8}><Form.Item name="BankAccountId" label="Account ID" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
+                      <Col span={8}><Form.Item name="BankName" label="Bank" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
+                      <Col span={8}><Form.Item name="BankBranchName" label="Branch" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
+                    </Row>
+                    <Row gutter={12}>
+                      <Col span={8}><Form.Item name="BranchNumber" label="Branch Number" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
+                      <Col span={8}><Form.Item name="CurrencyCode" label="Currency" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
+                      <Col span={8}><Form.Item name="AccountType" label="Account Type" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
+                    </Row>
+                    <Row gutter={12}>
+                      <Col span={16}><Form.Item name="BankAccountName" label="Account Name" rules={[{ required: true }]} style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
+                      <Col span={8}><Form.Item name="MaskedAccountNumber" label="Masked Account #" style={{ marginBottom: 0 }}><Input disabled size="small" /></Form.Item></Col>
+                    </Row>
+                  </div>
+                ),
+              },
+              {
+                key: 'accounts',
+                label: 'Accounts',
+                children: (
+                  <div style={{ paddingTop: 8 }}>
+                    <Row gutter={12}>
+                      <Col span={12}><Form.Item name="LegalEntityName" label="Legal Entity" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
+                      <Col span={12}><Form.Item name="BankAccountNumber" label="Account Number" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
+                    </Row>
+                    <Form.Item name="CashAccountCombination" label="Cash Account Combination" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item>
+                    <Row gutter={12}>
+                      <Col span={12}><Form.Item name="ApUseAllowedFlag" label="AP Use Allowed" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
+                      <Col span={12}><Form.Item name="ArUseAllowedFlag" label="AR Use Allowed" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
+                    </Row>
+                    <Form.Item name="Description" label="Description" style={{ marginBottom: 0 }}><Input.TextArea rows={2} size="small" /></Form.Item>
+                  </div>
+                ),
+              },
+              {
+                key: 'others',
+                label: 'Others',
+                children: (
+                  <div style={{ paddingTop: 8 }}>
+                    <Row gutter={12}>
+                      <Col span={12}><Form.Item name="BankAccountNumberElectronic" label="Electronic Account Number" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
+                      <Col span={12}><Form.Item name="ReconStartDate" label="Reconciliation Start Date" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
+                    </Row>
+                    <Divider style={{ margin: '8px 0' }} orientation="left" orientationMargin={0}><Text type="secondary" style={{ fontSize: 11 }}>Audit Information</Text></Divider>
+                    <Row gutter={12}>
+                      <Col span={12}><Form.Item name="CreatedBy" label="Created By" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
+                      <Col span={12}><Form.Item name="CreationDate" label="Creation Date" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
+                    </Row>
+                    <Row gutter={12}>
+                      <Col span={12}><Form.Item name="LastUpdateDate" label="Last Update Date" style={{ marginBottom: 0 }}><Input disabled size="small" /></Form.Item></Col>
+                    </Row>
+                  </div>
+                ),
+              },
+            ]}
+          />
         </Form>
       </Modal>
 
