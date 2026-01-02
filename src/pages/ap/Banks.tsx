@@ -42,7 +42,7 @@ import {
   BugOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import { PROXY_CONFIG } from '../../config/api.config';
+import { PROXY_CONFIG, ORACLE_FUSION_CONFIG } from '../../config/api.config';
 import Autopilot from '../../components/Autopilot';
 import AccountSelector from '../../components/AccountSelector';
 
@@ -267,24 +267,31 @@ const Banks: React.FC = () => {
     setSelectedPaymentDoc(null);
     setCheckbooks([]);
     setApiLogs([]); // Clear previous logs
-    const url = `${PROXY_CONFIG.baseUrl}/oracle/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments`;
+    const url = `${ORACLE_FUSION_CONFIG.baseUrl}/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments`;
+    const authHeader = 'Basic ' + btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
     console.log('[API] Payment Documents URL:', url);
     try {
-      const response = await fetch(url);
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': authHeader,
+          'Content-Type': 'application/json',
+        },
+      });
       const result = await response.json();
       console.log('[API] Payment Documents Response:', result);
 
+      const items = result.items || [];
       const logEntry = {
         type: 'Payment Documents',
         url,
-        status: result.success ? 'Success' : 'Failed',
-        count: result.items?.length || 0,
+        status: response.ok ? 'Success' : 'Failed',
+        count: items.length,
         time: new Date().toLocaleTimeString(),
       };
       setApiLogs(prev => [...prev, logEntry]);
 
-      if (result.success && result.items) {
-        setPaymentDocuments(result.items);
+      if (items.length > 0) {
+        setPaymentDocuments(items);
       }
     } catch (err) {
       console.error('Error fetching payment documents:', err);
@@ -304,24 +311,31 @@ const Banks: React.FC = () => {
   const fetchCheckbooks = async (bankAccountId: number, paymentDocumentId: number) => {
     setCheckbooksLoading(true);
     setCheckbooks([]);
-    const url = `${PROXY_CONFIG.baseUrl}/oracle/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments/${paymentDocumentId}/child/bankAccountCheckbooks`;
+    const url = `${ORACLE_FUSION_CONFIG.baseUrl}/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments/${paymentDocumentId}/child/bankAccountCheckbooks`;
+    const authHeader = 'Basic ' + btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
     console.log('[API] Checkbooks URL:', url);
     try {
-      const response = await fetch(url);
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': authHeader,
+          'Content-Type': 'application/json',
+        },
+      });
       const result = await response.json();
       console.log('[API] Checkbooks Response:', result);
 
+      const items = result.items || [];
       const logEntry = {
         type: 'Checkbooks',
         url,
-        status: result.success ? 'Success' : 'Failed',
-        count: result.items?.length || 0,
+        status: response.ok ? 'Success' : 'Failed',
+        count: items.length,
         time: new Date().toLocaleTimeString(),
       };
       setApiLogs(prev => [...prev, logEntry]);
 
-      if (result.success && result.items) {
-        setCheckbooks(result.items);
+      if (items.length > 0) {
+        setCheckbooks(items);
       }
     } catch (err) {
       console.error('Error fetching checkbooks:', err);
