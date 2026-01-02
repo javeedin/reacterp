@@ -37,6 +37,8 @@ import {
   DollarOutlined,
   EditOutlined,
   SearchOutlined,
+  FileTextOutlined,
+  BookOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { PROXY_CONFIG } from '../../config/api.config';
@@ -134,6 +136,34 @@ interface AccountTab {
   loading: boolean;
 }
 
+interface PaymentDocument {
+  PaymentDocumentId: number;
+  PaymentDocumentName: string;
+  PaymentMethodCode: string;
+  PaymentMethodName: string;
+  FormatCode: string;
+  FormatName: string;
+  LastIssuedCheckNumber: number | null;
+  ActiveFlag: boolean;
+  CreatedBy: string;
+  CreationDate: string;
+  LastUpdateDate: string;
+}
+
+interface Checkbook {
+  CheckbookId: number;
+  CheckbookName: string;
+  CheckDigits: number | null;
+  FirstAvailableCheckNumber: number;
+  LastAvailableCheckNumber: number;
+  LastIssuedCheckNumber: number | null;
+  CheckbookStatus: string;
+  ActiveFlag: boolean;
+  CreatedBy: string;
+  CreationDate: string;
+  LastUpdateDate: string;
+}
+
 const Banks: React.FC = () => {
   const [dataSource, setDataSource] = useState<'fusion' | 'apex'>('fusion');
   const [banks, setBanks] = useState<Bank[]>([]);
@@ -157,6 +187,13 @@ const Banks: React.FC = () => {
 
   // Account selector state
   const [accountSelectorField, setAccountSelectorField] = useState<'cash' | 'clearing' | 'recon' | null>(null);
+
+  // Payment documents state
+  const [paymentDocuments, setPaymentDocuments] = useState<PaymentDocument[]>([]);
+  const [paymentDocsLoading, setPaymentDocsLoading] = useState(false);
+  const [selectedPaymentDoc, setSelectedPaymentDoc] = useState<PaymentDocument | null>(null);
+  const [checkbooks, setCheckbooks] = useState<Checkbook[]>([]);
+  const [checkbooksLoading, setCheckbooksLoading] = useState(false);
 
   // Fetch banks from selected source
   const fetchBanks = useCallback(async () => {
@@ -215,6 +252,54 @@ const Banks: React.FC = () => {
     } catch (err) {
       console.error('Error fetching accounts:', err);
       return [];
+    }
+  };
+
+  // Fetch payment documents for a bank account
+  const fetchPaymentDocuments = async (bankAccountId: number) => {
+    setPaymentDocsLoading(true);
+    setPaymentDocuments([]);
+    setSelectedPaymentDoc(null);
+    setCheckbooks([]);
+    try {
+      const url = `${PROXY_CONFIG.baseUrl}/oracle/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments`;
+      const response = await fetch(url);
+      const result = await response.json();
+
+      if (result.success && result.items) {
+        setPaymentDocuments(result.items);
+      }
+    } catch (err) {
+      console.error('Error fetching payment documents:', err);
+    } finally {
+      setPaymentDocsLoading(false);
+    }
+  };
+
+  // Fetch checkbooks for a payment document
+  const fetchCheckbooks = async (bankAccountId: number, paymentDocumentId: number) => {
+    setCheckbooksLoading(true);
+    setCheckbooks([]);
+    try {
+      const url = `${PROXY_CONFIG.baseUrl}/oracle/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments/${paymentDocumentId}/child/bankAccountCheckbooks`;
+      const response = await fetch(url);
+      const result = await response.json();
+
+      if (result.success && result.items) {
+        setCheckbooks(result.items);
+      }
+    } catch (err) {
+      console.error('Error fetching checkbooks:', err);
+    } finally {
+      setCheckbooksLoading(false);
+    }
+  };
+
+  // Handle payment document selection
+  const handlePaymentDocClick = (doc: PaymentDocument) => {
+    setSelectedPaymentDoc(doc);
+    if (editingAccount) {
+      fetchCheckbooks(editingAccount.BankAccountId, doc.PaymentDocumentId);
     }
   };
 
@@ -420,6 +505,8 @@ const Banks: React.FC = () => {
       LastUpdateDate: account.LastUpdateDate,
     });
     setEditAccountModalOpen(true);
+    // Fetch payment documents for this account
+    fetchPaymentDocuments(account.BankAccountId);
   };
 
   // Handle account selector selection
@@ -1057,12 +1144,26 @@ const Banks: React.FC = () => {
       <Modal
         title={<Space size={4}><CreditCardOutlined style={{ color: REDWOOD.success }} /><span>Edit Bank Account</span></Space>}
         open={editAccountModalOpen}
-        onCancel={() => { setEditAccountModalOpen(false); setEditingAccount(null); accountForm.resetFields(); }}
+        onCancel={() => {
+          setEditAccountModalOpen(false);
+          setEditingAccount(null);
+          accountForm.resetFields();
+          setPaymentDocuments([]);
+          setSelectedPaymentDoc(null);
+          setCheckbooks([]);
+        }}
         footer={[
-          <Button key="cancel" size="small" onClick={() => { setEditAccountModalOpen(false); setEditingAccount(null); accountForm.resetFields(); }}>Cancel</Button>,
+          <Button key="cancel" size="small" onClick={() => {
+            setEditAccountModalOpen(false);
+            setEditingAccount(null);
+            accountForm.resetFields();
+            setPaymentDocuments([]);
+            setSelectedPaymentDoc(null);
+            setCheckbooks([]);
+          }}>Cancel</Button>,
           <Button key="save" size="small" type="primary" onClick={handleSaveAccount} style={{ background: REDWOOD.primary }}>Save</Button>,
         ]}
-        width={650}
+        width={750}
         styles={{ body: { padding: '8px 16px 16px' } }}
       >
         <Form form={accountForm} layout="vertical" size="small">
@@ -1170,6 +1271,128 @@ const Banks: React.FC = () => {
                     <Row gutter={12}>
                       <Col span={12}><Form.Item name="LastUpdateDate" label="Last Update Date" style={{ marginBottom: 0 }}><Input disabled size="small" /></Form.Item></Col>
                     </Row>
+                  </div>
+                ),
+              },
+              {
+                key: 'paymentDocs',
+                label: <Space size={4}><FileTextOutlined />Payment Documents</Space>,
+                children: (
+                  <div style={{ paddingTop: 8 }}>
+                    <Spin spinning={paymentDocsLoading}>
+                      <div style={{ display: 'flex', gap: 12, height: 280 }}>
+                        {/* Payment Documents List */}
+                        <div style={{ width: 280, borderRight: `1px solid ${REDWOOD.border}`, paddingRight: 12 }}>
+                          <div style={{ marginBottom: 8 }}>
+                            <Space size={4}>
+                              <FileTextOutlined style={{ color: REDWOOD.primary }} />
+                              <Text strong style={{ fontSize: 12 }}>Payment Documents ({paymentDocuments.length})</Text>
+                            </Space>
+                          </div>
+                          {paymentDocuments.length === 0 ? (
+                            <Empty description="No payment documents" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                          ) : (
+                            <List
+                              size="small"
+                              dataSource={paymentDocuments}
+                              style={{ maxHeight: 240, overflow: 'auto' }}
+                              renderItem={(doc) => {
+                                const isSelected = selectedPaymentDoc?.PaymentDocumentId === doc.PaymentDocumentId;
+                                return (
+                                  <List.Item
+                                    onClick={() => handlePaymentDocClick(doc)}
+                                    style={{
+                                      padding: '6px 8px',
+                                      cursor: 'pointer',
+                                      background: isSelected ? `${REDWOOD.primary}15` : 'transparent',
+                                      borderLeft: isSelected ? `3px solid ${REDWOOD.primary}` : '3px solid transparent',
+                                      marginBottom: 2,
+                                      borderRadius: 4,
+                                    }}
+                                  >
+                                    <div style={{ width: '100%' }}>
+                                      <Text strong style={{ fontSize: 11, color: isSelected ? REDWOOD.primary : REDWOOD.textPrimary, display: 'block' }}>
+                                        {doc.PaymentDocumentName}
+                                      </Text>
+                                      <Space size={4} style={{ marginTop: 2 }}>
+                                        <Tag style={{ fontSize: 9, margin: 0, padding: '0 4px' }}>{doc.PaymentMethodCode}</Tag>
+                                        {doc.ActiveFlag && <CheckCircleOutlined style={{ color: REDWOOD.success, fontSize: 10 }} />}
+                                      </Space>
+                                    </div>
+                                  </List.Item>
+                                );
+                              }}
+                            />
+                          )}
+                        </div>
+
+                        {/* Checkbooks */}
+                        <div style={{ flex: 1 }}>
+                          <div style={{ marginBottom: 8 }}>
+                            <Space size={4}>
+                              <BookOutlined style={{ color: REDWOOD.info }} />
+                              <Text strong style={{ fontSize: 12 }}>
+                                Checkbooks {selectedPaymentDoc ? `(${checkbooks.length})` : ''}
+                              </Text>
+                            </Space>
+                          </div>
+                          <Spin spinning={checkbooksLoading}>
+                            {!selectedPaymentDoc ? (
+                              <Empty description="Select a payment document" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                            ) : checkbooks.length === 0 ? (
+                              <Empty description="No checkbooks" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                            ) : (
+                              <Table
+                                dataSource={checkbooks}
+                                rowKey="CheckbookId"
+                                size="small"
+                                pagination={false}
+                                scroll={{ y: 200 }}
+                                columns={[
+                                  {
+                                    title: 'Checkbook Name',
+                                    dataIndex: 'CheckbookName',
+                                    key: 'CheckbookName',
+                                    ellipsis: true,
+                                    render: (name: string) => <Text style={{ fontSize: 11 }}>{name}</Text>,
+                                  },
+                                  {
+                                    title: 'First #',
+                                    dataIndex: 'FirstAvailableCheckNumber',
+                                    key: 'FirstAvailableCheckNumber',
+                                    width: 70,
+                                    render: (num: number) => <Text code style={{ fontSize: 10 }}>{num}</Text>,
+                                  },
+                                  {
+                                    title: 'Last #',
+                                    dataIndex: 'LastAvailableCheckNumber',
+                                    key: 'LastAvailableCheckNumber',
+                                    width: 70,
+                                    render: (num: number) => <Text code style={{ fontSize: 10 }}>{num}</Text>,
+                                  },
+                                  {
+                                    title: 'Last Issued',
+                                    dataIndex: 'LastIssuedCheckNumber',
+                                    key: 'LastIssuedCheckNumber',
+                                    width: 80,
+                                    render: (num: number | null) => num ? <Text code style={{ fontSize: 10 }}>{num}</Text> : '-',
+                                  },
+                                  {
+                                    title: 'Status',
+                                    dataIndex: 'CheckbookStatus',
+                                    key: 'CheckbookStatus',
+                                    width: 70,
+                                    render: (status: string) => (
+                                      <Tag color={status === 'ACTIVE' ? 'green' : 'default'} style={{ fontSize: 9 }}>{status}</Tag>
+                                    ),
+                                  },
+                                ]}
+                              />
+                            )}
+                          </Spin>
+                        </div>
+                      </div>
+                    </Spin>
                   </div>
                 ),
               },
