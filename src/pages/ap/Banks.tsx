@@ -144,7 +144,11 @@ interface PaymentDocument {
   PaymentMethodName: string;
   FormatCode: string;
   FormatName: string;
+  FirstAvailableDocumentNumber: number | null;
+  LastAvailableDocumentNumber: number | null;
   LastIssuedCheckNumber: number | null;
+  PaperStockType: string | null;
+  PaymentDocumentCategory: string | null;
   ActiveFlag: boolean;
   CreatedBy: string;
   CreationDate: string;
@@ -1427,9 +1431,9 @@ const Banks: React.FC = () => {
                     )}
 
                     <Spin spinning={paymentDocsLoading}>
-                      <div style={{ display: 'flex', gap: 12, height: showApiLog ? 200 : 280 }}>
-                        {/* Payment Documents List */}
-                        <div style={{ width: 280, borderRight: `1px solid ${REDWOOD.border}`, paddingRight: 12 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        {/* Payment Documents Table - Top Section */}
+                        <div>
                           <div style={{ marginBottom: 8 }}>
                             <Space size={4}>
                               <FileTextOutlined style={{ color: REDWOOD.primary }} />
@@ -1439,62 +1443,101 @@ const Banks: React.FC = () => {
                           {paymentDocuments.length === 0 ? (
                             <Empty description="No payment documents" image={Empty.PRESENTED_IMAGE_SIMPLE} />
                           ) : (
-                            <List
-                              size="small"
+                            <Table
                               dataSource={paymentDocuments}
-                              style={{ maxHeight: 240, overflow: 'auto' }}
-                              renderItem={(doc) => {
-                                const isSelected = selectedPaymentDoc?.PaymentDocumentId === doc.PaymentDocumentId;
-                                return (
-                                  <List.Item
-                                    onClick={() => handlePaymentDocClick(doc)}
-                                    style={{
-                                      padding: '6px 8px',
-                                      cursor: 'pointer',
-                                      background: isSelected ? `${REDWOOD.primary}15` : 'transparent',
-                                      borderLeft: isSelected ? `3px solid ${REDWOOD.primary}` : '3px solid transparent',
-                                      marginBottom: 2,
-                                      borderRadius: 4,
-                                    }}
-                                  >
-                                    <div style={{ width: '100%' }}>
-                                      <Text strong style={{ fontSize: 11, color: isSelected ? REDWOOD.primary : REDWOOD.textPrimary, display: 'block' }}>
-                                        {doc.PaymentDocumentName}
-                                      </Text>
-                                      <Space size={4} style={{ marginTop: 2 }}>
-                                        <Tag style={{ fontSize: 9, margin: 0, padding: '0 4px' }}>{doc.PaymentMethodCode}</Tag>
-                                        {doc.ActiveFlag && <CheckCircleOutlined style={{ color: REDWOOD.success, fontSize: 10 }} />}
-                                      </Space>
-                                    </div>
-                                  </List.Item>
-                                );
-                              }}
+                              rowKey="PaymentDocumentId"
+                              size="small"
+                              pagination={false}
+                              scroll={{ y: 150 }}
+                              rowClassName={(record) =>
+                                selectedPaymentDoc?.PaymentDocumentId === record.PaymentDocumentId ? 'ant-table-row-selected' : ''
+                              }
+                              onRow={(record) => ({
+                                onClick: () => handlePaymentDocClick(record),
+                                style: {
+                                  cursor: 'pointer',
+                                  background: selectedPaymentDoc?.PaymentDocumentId === record.PaymentDocumentId ? `${REDWOOD.primary}15` : undefined,
+                                },
+                              })}
+                              columns={[
+                                {
+                                  title: 'Document Name',
+                                  dataIndex: 'PaymentDocumentName',
+                                  key: 'PaymentDocumentName',
+                                  width: 180,
+                                  ellipsis: true,
+                                  render: (name: string, record: PaymentDocument) => (
+                                    <Space size={4}>
+                                      <Text strong style={{ fontSize: 11 }}>{name}</Text>
+                                      {record.ActiveFlag && <CheckCircleOutlined style={{ color: REDWOOD.success, fontSize: 10 }} />}
+                                    </Space>
+                                  ),
+                                },
+                                {
+                                  title: 'Category',
+                                  dataIndex: 'PaymentDocumentCategory',
+                                  key: 'PaymentDocumentCategory',
+                                  width: 130,
+                                  ellipsis: true,
+                                  render: (cat: string) => cat ? <Tag style={{ fontSize: 9 }}>{cat}</Tag> : '-',
+                                },
+                                {
+                                  title: 'Format',
+                                  dataIndex: 'FormatName',
+                                  key: 'FormatName',
+                                  width: 180,
+                                  ellipsis: true,
+                                  render: (name: string) => <Text style={{ fontSize: 10 }}>{name || '-'}</Text>,
+                                },
+                                {
+                                  title: 'Paper Stock',
+                                  dataIndex: 'PaperStockType',
+                                  key: 'PaperStockType',
+                                  width: 120,
+                                  ellipsis: true,
+                                  render: (type: string) => <Text style={{ fontSize: 10 }}>{type || '-'}</Text>,
+                                },
+                                {
+                                  title: 'First Doc #',
+                                  dataIndex: 'FirstAvailableDocumentNumber',
+                                  key: 'FirstAvailableDocumentNumber',
+                                  width: 90,
+                                  render: (num: number | null) => num ? <Text code style={{ fontSize: 10 }}>{num}</Text> : '-',
+                                },
+                                {
+                                  title: 'Last Doc #',
+                                  dataIndex: 'LastAvailableDocumentNumber',
+                                  key: 'LastAvailableDocumentNumber',
+                                  width: 90,
+                                  render: (num: number | null) => num ? <Text code style={{ fontSize: 10 }}>{num}</Text> : '-',
+                                },
+                              ]}
                             />
                           )}
                         </div>
 
-                        {/* Checkbooks */}
-                        <div style={{ flex: 1 }}>
+                        {/* Checkbooks Table - Bottom Section */}
+                        <div style={{ borderTop: `1px solid ${REDWOOD.border}`, paddingTop: 12 }}>
                           <div style={{ marginBottom: 8 }}>
                             <Space size={4}>
                               <BookOutlined style={{ color: REDWOOD.info }} />
                               <Text strong style={{ fontSize: 12 }}>
-                                Checkbooks {selectedPaymentDoc ? `(${checkbooks.length})` : ''}
+                                Checkbooks {selectedPaymentDoc ? `- ${selectedPaymentDoc.PaymentDocumentName} (${checkbooks.length})` : ''}
                               </Text>
                             </Space>
                           </div>
                           <Spin spinning={checkbooksLoading}>
                             {!selectedPaymentDoc ? (
-                              <Empty description="Select a payment document" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                              <Empty description="Select a payment document above to view checkbooks" image={Empty.PRESENTED_IMAGE_SIMPLE} />
                             ) : checkbooks.length === 0 ? (
-                              <Empty description="No checkbooks" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                              <Empty description="No checkbooks for this payment document" image={Empty.PRESENTED_IMAGE_SIMPLE} />
                             ) : (
                               <Table
                                 dataSource={checkbooks}
                                 rowKey="CheckbookId"
                                 size="small"
                                 pagination={false}
-                                scroll={{ y: 200 }}
+                                scroll={{ y: 120 }}
                                 columns={[
                                   {
                                     title: 'Checkbook Name',
@@ -1504,31 +1547,31 @@ const Banks: React.FC = () => {
                                     render: (name: string) => <Text style={{ fontSize: 11 }}>{name}</Text>,
                                   },
                                   {
-                                    title: 'First #',
+                                    title: 'First Check #',
                                     dataIndex: 'FirstAvailableCheckNumber',
                                     key: 'FirstAvailableCheckNumber',
-                                    width: 70,
+                                    width: 100,
                                     render: (num: number) => <Text code style={{ fontSize: 10 }}>{num}</Text>,
                                   },
                                   {
-                                    title: 'Last #',
+                                    title: 'Last Check #',
                                     dataIndex: 'LastAvailableCheckNumber',
                                     key: 'LastAvailableCheckNumber',
-                                    width: 70,
+                                    width: 100,
                                     render: (num: number) => <Text code style={{ fontSize: 10 }}>{num}</Text>,
                                   },
                                   {
                                     title: 'Last Issued',
                                     dataIndex: 'LastIssuedCheckNumber',
                                     key: 'LastIssuedCheckNumber',
-                                    width: 80,
+                                    width: 90,
                                     render: (num: number | null) => num ? <Text code style={{ fontSize: 10 }}>{num}</Text> : '-',
                                   },
                                   {
                                     title: 'Status',
                                     dataIndex: 'CheckbookStatus',
                                     key: 'CheckbookStatus',
-                                    width: 70,
+                                    width: 80,
                                     render: (status: string) => (
                                       <Tag color={status === 'ACTIVE' ? 'green' : 'default'} style={{ fontSize: 9 }}>{status}</Tag>
                                     ),
