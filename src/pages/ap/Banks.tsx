@@ -579,14 +579,15 @@ const Banks: React.FC = () => {
       : undefined;
 
     return (
-      <div style={{ display: 'flex', height: 'calc(100vh - 280px)', gap: 16 }}>
+      <div style={{ display: 'flex', height: '100%', gap: 12 }}>
         {/* Left Panel - Branches */}
         <Card
           style={{
-            width: 320,
+            width: 280,
             flexShrink: 0,
-            borderRadius: 12,
+            borderRadius: '0 0 8px 8px',
             border: `1px solid ${REDWOOD.border}`,
+            borderTop: 'none',
             display: 'flex',
             flexDirection: 'column',
           }}
@@ -594,38 +595,39 @@ const Banks: React.FC = () => {
         >
           {/* Bank Header */}
           <div style={{
-            padding: '12px 16px',
+            padding: '8px 12px',
             background: REDWOOD.info,
             color: '#fff',
           }}>
-            <Space>
-              <BankOutlined />
-              <Text strong style={{ color: '#fff' }}>{bankTab.bank.BankName}</Text>
+            <Space size={4}>
+              <BankOutlined style={{ fontSize: 14 }} />
+              <Text strong style={{ color: '#fff', fontSize: 13 }}>{bankTab.bank.BankName}</Text>
             </Space>
           </div>
 
           {/* Branches Header */}
           <div style={{
-            padding: '8px 16px',
+            padding: '6px 12px',
             background: REDWOOD.surfaceSecondary,
             borderBottom: `1px solid ${REDWOOD.border}`,
           }}>
-            <Space>
-              <BranchesOutlined style={{ color: REDWOOD.primary }} />
-              <Text strong>Branches ({bankTab.branches.length})</Text>
+            <Space size={4}>
+              <BranchesOutlined style={{ color: REDWOOD.primary, fontSize: 12 }} />
+              <Text strong style={{ fontSize: 12 }}>Branches ({bankTab.branches.length})</Text>
             </Space>
           </div>
 
           {/* Branches List */}
           <div style={{ flex: 1, overflow: 'auto' }}>
             {bankTab.branchLoading ? (
-              <div style={{ padding: 40, textAlign: 'center' }}>
-                <Spin tip="Loading branches..." />
+              <div style={{ padding: 20, textAlign: 'center' }}>
+                <Spin size="small" tip="Loading..." />
               </div>
             ) : bankTab.branches.length === 0 ? (
-              <Empty description="No branches found" style={{ padding: 40 }} />
+              <Empty description="No branches" style={{ padding: 20 }} image={Empty.PRESENTED_IMAGE_SIMPLE} />
             ) : (
               <List
+                size="small"
                 dataSource={bankTab.branches}
                 renderItem={(branch) => {
                   const isSelected = bankTab.selectedBranch?.BranchPartyId === branch.BranchPartyId;
@@ -633,7 +635,7 @@ const Banks: React.FC = () => {
                     <List.Item
                       onClick={() => handleBranchClick(bankTab.key, branch)}
                       style={{
-                        padding: '10px 16px',
+                        padding: '6px 12px',
                         cursor: 'pointer',
                         background: isSelected ? `${REDWOOD.info}15` : 'transparent',
                         borderLeft: isSelected ? `3px solid ${REDWOOD.info}` : '3px solid transparent',
@@ -646,28 +648,28 @@ const Banks: React.FC = () => {
                         if (!isSelected) e.currentTarget.style.background = 'transparent';
                       }}
                     >
-                      <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <div style={{ flex: 1 }}>
-                          <Text strong style={{ display: 'block', fontSize: 13, color: isSelected ? REDWOOD.info : REDWOOD.textPrimary }}>
+                      <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <Text strong style={{ display: 'block', fontSize: 12, color: isSelected ? REDWOOD.info : REDWOOD.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                             {branch.BankBranchName}
                           </Text>
-                          <Space size="small" style={{ marginTop: 4 }}>
-                            <Text type="secondary" style={{ fontSize: 11 }}>{branch.BranchNumber}</Text>
+                          <Space size={4} style={{ marginTop: 2 }}>
+                            <Text type="secondary" style={{ fontSize: 10 }}>{branch.BranchNumber}</Text>
                             {branch.EFTSWIFTCode && (
-                              <Tag style={{ fontSize: 10, margin: 0 }}>{branch.EFTSWIFTCode}</Tag>
+                              <Tag style={{ fontSize: 9, margin: 0, padding: '0 4px', lineHeight: '16px' }}>{branch.EFTSWIFTCode}</Tag>
                             )}
                           </Space>
                         </div>
-                        <Tooltip title="Edit Branch">
+                        <Tooltip title="Edit">
                           <Button
                             type="text"
-                            icon={<EditOutlined />}
+                            icon={<EditOutlined style={{ fontSize: 12 }} />}
                             size="small"
                             onClick={(e) => {
                               e.stopPropagation();
                               handleEditBranch(branch);
                             }}
-                            style={{ color: REDWOOD.info, marginLeft: 8 }}
+                            style={{ color: REDWOOD.info, padding: '0 4px', height: 20 }}
                           />
                         </Tooltip>
                       </div>
@@ -683,8 +685,9 @@ const Banks: React.FC = () => {
         <Card
           style={{
             flex: 1,
-            borderRadius: 12,
+            borderRadius: '0 0 8px 8px',
             border: `1px solid ${REDWOOD.border}`,
+            borderTop: 'none',
             display: 'flex',
             flexDirection: 'column',
           }}
@@ -693,9 +696,9 @@ const Banks: React.FC = () => {
           {bankTab.accountTabs.length === 0 ? (
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <Empty
-                image={<CreditCardOutlined style={{ fontSize: 48, color: REDWOOD.textSecondary }} />}
+                image={<CreditCardOutlined style={{ fontSize: 36, color: REDWOOD.textSecondary }} />}
                 description={
-                  <Text type="secondary">Select a branch to view bank accounts</Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>Select a branch to view accounts</Text>
                 }
               />
             </div>
@@ -703,6 +706,7 @@ const Banks: React.FC = () => {
             <Tabs
               type="editable-card"
               hideAdd
+              size="small"
               activeKey={activeAccountTabKey}
               onChange={(key) => {
                 const accountTab = bankTab.accountTabs.find(at => at.key === key);
@@ -717,32 +721,32 @@ const Banks: React.FC = () => {
                   handleCloseAccountTab(bankTab.key, targetKey as string);
                 }
               }}
-              style={{ height: '100%' }}
-              tabBarStyle={{ margin: 0, padding: '0 16px', background: REDWOOD.surfaceSecondary }}
+              style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+              tabBarStyle={{ margin: 0, padding: '0 12px', background: REDWOOD.surfaceSecondary }}
               items={bankTab.accountTabs.map(accountTab => ({
                 key: accountTab.key,
                 label: (
-                  <Space size="small">
-                    <CreditCardOutlined />
-                    <span style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block' }}>
+                  <Space size={4}>
+                    <CreditCardOutlined style={{ fontSize: 12 }} />
+                    <span style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block', fontSize: 12 }}>
                       {accountTab.branch.BankBranchName}
                     </span>
                   </Space>
                 ),
                 children: (
-                  <div style={{ padding: 16, height: 'calc(100% - 46px)', overflow: 'auto' }}>
+                  <div style={{ padding: 12, height: '100%', overflow: 'auto' }}>
                     {accountTab.loading ? (
-                      <div style={{ padding: 40, textAlign: 'center' }}>
-                        <Spin tip="Loading accounts..." />
+                      <div style={{ padding: 20, textAlign: 'center' }}>
+                        <Spin size="small" tip="Loading..." />
                       </div>
                     ) : accountTab.accounts.length === 0 ? (
-                      <Empty description="No bank accounts found for this branch" />
+                      <Empty description="No accounts" image={Empty.PRESENTED_IMAGE_SIMPLE} />
                     ) : (
                       <>
-                        <div style={{ marginBottom: 12 }}>
-                          <Space>
-                            <DollarOutlined style={{ color: REDWOOD.success }} />
-                            <Text strong>Bank Accounts ({accountTab.accounts.length})</Text>
+                        <div style={{ marginBottom: 8 }}>
+                          <Space size={4}>
+                            <DollarOutlined style={{ color: REDWOOD.success, fontSize: 12 }} />
+                            <Text strong style={{ fontSize: 12 }}>Bank Accounts ({accountTab.accounts.length})</Text>
                           </Space>
                         </div>
                         <Table
@@ -750,8 +754,8 @@ const Banks: React.FC = () => {
                           columns={accountColumns}
                           rowKey="BankAccountId"
                           size="small"
-                          pagination={{ pageSize: 10, showSizeChanger: false }}
-                          scroll={{ x: 900 }}
+                          pagination={{ pageSize: 8, showSizeChanger: false, size: 'small' }}
+                          scroll={{ x: 850 }}
                         />
                       </>
                     )}
@@ -770,7 +774,7 @@ const Banks: React.FC = () => {
     {
       key: 'all-banks',
       label: (
-        <Space>
+        <Space size={4}>
           <BankOutlined />
           All Banks
         </Space>
@@ -779,11 +783,14 @@ const Banks: React.FC = () => {
       children: (
         <Card
           style={{
-            borderRadius: 12,
+            borderRadius: '0 0 8px 8px',
             border: `1px solid ${REDWOOD.border}`,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+            borderTop: 'none',
+            height: '100%',
+            display: 'flex',
+            flexDirection: 'column',
           }}
-          bodyStyle={{ padding: 0 }}
+          bodyStyle={{ padding: 0, flex: 1, overflow: 'auto' }}
         >
           {error && (
             <Alert
@@ -793,7 +800,7 @@ const Banks: React.FC = () => {
               showIcon
               closable
               onClose={() => setError('')}
-              style={{ margin: 16, borderRadius: 8 }}
+              style={{ margin: 8, borderRadius: 6 }}
             />
           )}
           <Spin spinning={loading} tip="Loading banks...">
@@ -801,17 +808,19 @@ const Banks: React.FC = () => {
               dataSource={banks}
               columns={bankColumns}
               rowKey="BankPartyId"
-              size="middle"
+              size="small"
               pagination={{
-                pageSize: 25,
+                pageSize: 15,
                 showSizeChanger: true,
-                pageSizeOptions: ['10', '25', '50', '100'],
-                showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} banks`,
+                pageSizeOptions: ['10', '15', '25', '50'],
+                showTotal: (total, range) => `${range[0]}-${range[1]} of ${total}`,
+                size: 'small',
               }}
               onRow={(record) => ({
                 style: { cursor: 'pointer' },
                 onDoubleClick: () => handleBankClick(record),
               })}
+              scroll={{ y: 'calc(100vh - 280px)' }}
             />
           </Spin>
         </Card>
@@ -833,13 +842,14 @@ const Banks: React.FC = () => {
   ];
 
   return (
-    <Layout style={{ minHeight: 'calc(100vh - 64px)', background: REDWOOD.surfaceSecondary }}>
-      <Content>
+    <Layout style={{ height: 'calc(100vh - 64px)', background: REDWOOD.surfaceSecondary, overflow: 'hidden' }}>
+      <Content style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         {/* Header */}
         <div style={{
-          padding: '16px 24px',
+          padding: '8px 16px',
           background: REDWOOD.surface,
-          borderBottom: `1px solid ${REDWOOD.border}`
+          borderBottom: `1px solid ${REDWOOD.border}`,
+          flexShrink: 0,
         }}>
           <Breadcrumb
             items={[
@@ -850,62 +860,64 @@ const Banks: React.FC = () => {
           />
         </div>
 
-        <div style={{ padding: 24 }}>
+        <div style={{ padding: '12px 16px', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {/* Title and Controls */}
-          <Row justify="space-between" align="middle" style={{ marginBottom: 24 }}>
+          <Row justify="space-between" align="middle" style={{ marginBottom: 12, flexShrink: 0 }}>
             <Col>
               <Space align="center">
                 <div style={{
-                  width: 48,
-                  height: 48,
-                  borderRadius: 8,
+                  width: 36,
+                  height: 36,
+                  borderRadius: 6,
                   background: REDWOOD.info,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}>
-                  <BankOutlined style={{ fontSize: 24, color: '#fff' }} />
+                  <BankOutlined style={{ fontSize: 18, color: '#fff' }} />
                 </div>
                 <div>
-                  <Title level={3} style={{ margin: 0, color: REDWOOD.textPrimary }}>
+                  <Title level={4} style={{ margin: 0, color: REDWOOD.textPrimary }}>
                     Banks
                   </Title>
-                  <Text type="secondary">Manage banks, branches, and bank accounts</Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>Manage banks, branches, and bank accounts</Text>
                 </div>
               </Space>
             </Col>
             <Col>
-              <Space size="large">
+              <Space size="middle">
                 {/* Data Source Toggle */}
                 <div style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 12,
-                  padding: '8px 16px',
+                  gap: 8,
+                  padding: '4px 12px',
                   background: REDWOOD.surface,
-                  borderRadius: 8,
+                  borderRadius: 6,
                   border: `1px solid ${REDWOOD.border}`,
                 }}>
-                  <Space>
-                    <DatabaseOutlined style={{ color: dataSource === 'apex' ? REDWOOD.primary : REDWOOD.textSecondary }} />
-                    <Text strong={dataSource === 'apex'} style={{ color: dataSource === 'apex' ? REDWOOD.textPrimary : REDWOOD.textSecondary }}>
-                      APEX DB
+                  <Space size={4}>
+                    <DatabaseOutlined style={{ color: dataSource === 'apex' ? REDWOOD.primary : REDWOOD.textSecondary, fontSize: 12 }} />
+                    <Text style={{ fontSize: 12, color: dataSource === 'apex' ? REDWOOD.textPrimary : REDWOOD.textSecondary }}>
+                      APEX
                     </Text>
                   </Space>
                   <Switch
+                    size="small"
                     checked={dataSource === 'fusion'}
                     onChange={handleSourceToggle}
                     style={{ background: dataSource === 'fusion' ? REDWOOD.info : REDWOOD.primary }}
                   />
-                  <Space>
-                    <CloudOutlined style={{ color: dataSource === 'fusion' ? REDWOOD.info : REDWOOD.textSecondary }} />
-                    <Text strong={dataSource === 'fusion'} style={{ color: dataSource === 'fusion' ? REDWOOD.textPrimary : REDWOOD.textSecondary }}>
+                  <Space size={4}>
+                    <CloudOutlined style={{ color: dataSource === 'fusion' ? REDWOOD.info : REDWOOD.textSecondary, fontSize: 12 }} />
+                    <Text style={{ fontSize: 12, color: dataSource === 'fusion' ? REDWOOD.textPrimary : REDWOOD.textSecondary }}>
                       Fusion
                     </Text>
                   </Space>
                 </div>
 
                 <Button
+                  size="small"
                   icon={<ReloadOutlined />}
                   onClick={fetchBanks}
                   loading={loading}
@@ -928,13 +940,15 @@ const Banks: React.FC = () => {
               }
             }}
             items={mainTabItems}
+            style={{ flex: 1, display: 'flex', flexDirection: 'column' }}
             tabBarStyle={{
-              marginBottom: 16,
+              marginBottom: 0,
               background: REDWOOD.surface,
-              padding: '8px 16px 0',
-              borderRadius: '12px 12px 0 0',
+              padding: '4px 12px 0',
+              borderRadius: '8px 8px 0 0',
               border: `1px solid ${REDWOOD.border}`,
               borderBottom: 'none',
+              flexShrink: 0,
             }}
           />
         </div>
