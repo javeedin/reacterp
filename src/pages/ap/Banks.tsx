@@ -271,7 +271,10 @@ const Banks: React.FC = () => {
     const url = `${ORACLE_FUSION_CONFIG.baseUrl}/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments`;
     const authHeader = 'Basic ' + btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
 
-    console.log('[API] Payment Documents URL:', url);
+    console.log('=== PAYMENT DOCUMENTS API CALL ===');
+    console.log('URL:', url);
+    console.log('BankAccountId:', bankAccountId);
+    console.log('Auth:', authHeader.substring(0, 20) + '...');
 
     try {
       const response = await fetch(url, {
@@ -281,10 +284,16 @@ const Banks: React.FC = () => {
           'Content-Type': 'application/json',
         },
       });
+
+      console.log('Response Status:', response.status);
+      console.log('Response OK:', response.ok);
+
       const result = await response.json();
-      console.log('[API] Payment Documents Response:', result);
+      console.log('Response Data:', JSON.stringify(result, null, 2));
 
       const items = result.items || [];
+      console.log('Items Count:', items.length);
+
       const logEntry = {
         type: 'Payment Documents',
         url,
@@ -298,7 +307,11 @@ const Banks: React.FC = () => {
         setPaymentDocuments(items);
       }
     } catch (err) {
-      console.error('Error fetching payment documents:', err);
+      console.error('=== PAYMENT DOCUMENTS ERROR ===');
+      console.error('Error Type:', err instanceof Error ? err.constructor.name : typeof err);
+      console.error('Error Message:', err instanceof Error ? err.message : String(err));
+      console.error('Full Error:', err);
+
       setApiLogs(prev => [...prev, {
         type: 'Payment Documents',
         url,
@@ -308,6 +321,7 @@ const Banks: React.FC = () => {
       }]);
     } finally {
       setPaymentDocsLoading(false);
+      console.log('=== END PAYMENT DOCUMENTS ===');
     }
   };
 
@@ -319,7 +333,10 @@ const Banks: React.FC = () => {
     const url = `${ORACLE_FUSION_CONFIG.baseUrl}/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments/${paymentDocumentId}/child/bankAccountCheckbooks`;
     const authHeader = 'Basic ' + btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
 
-    console.log('[API] Checkbooks URL:', url);
+    console.log('=== CHECKBOOKS API CALL ===');
+    console.log('URL:', url);
+    console.log('BankAccountId:', bankAccountId);
+    console.log('PaymentDocumentId:', paymentDocumentId);
 
     try {
       const response = await fetch(url, {
@@ -329,10 +346,16 @@ const Banks: React.FC = () => {
           'Content-Type': 'application/json',
         },
       });
+
+      console.log('Response Status:', response.status);
+      console.log('Response OK:', response.ok);
+
       const result = await response.json();
-      console.log('[API] Checkbooks Response:', result);
+      console.log('Response Data:', JSON.stringify(result, null, 2));
 
       const items = result.items || [];
+      console.log('Items Count:', items.length);
+
       const logEntry = {
         type: 'Checkbooks',
         url,
@@ -346,7 +369,11 @@ const Banks: React.FC = () => {
         setCheckbooks(items);
       }
     } catch (err) {
-      console.error('Error fetching checkbooks:', err);
+      console.error('=== CHECKBOOKS ERROR ===');
+      console.error('Error Type:', err instanceof Error ? err.constructor.name : typeof err);
+      console.error('Error Message:', err instanceof Error ? err.message : String(err));
+      console.error('Full Error:', err);
+
       setApiLogs(prev => [...prev, {
         type: 'Checkbooks',
         url,
@@ -356,6 +383,7 @@ const Banks: React.FC = () => {
       }]);
     } finally {
       setCheckbooksLoading(false);
+      console.log('=== END CHECKBOOKS ===');
     }
   };
 
