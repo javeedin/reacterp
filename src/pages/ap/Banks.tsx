@@ -267,24 +267,24 @@ const Banks: React.FC = () => {
     setSelectedPaymentDoc(null);
     setCheckbooks([]);
     setApiLogs([]); // Clear previous logs
-    const url = `${ORACLE_FUSION_CONFIG.baseUrl}/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments`;
-    const authHeader = 'Basic ' + btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
-    console.log('[API] Payment Documents URL:', url);
+
+    // Use proxy to avoid CORS, but log the actual Oracle Fusion URL
+    const proxyUrl = `${PROXY_CONFIG.baseUrl}/oracle/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments`;
+    const oracleUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments`;
+
+    console.log('[API] Payment Documents - Proxy URL:', proxyUrl);
+    console.log('[API] Payment Documents - Oracle URL:', oracleUrl);
+
     try {
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': authHeader,
-          'Content-Type': 'application/json',
-        },
-      });
+      const response = await fetch(proxyUrl);
       const result = await response.json();
       console.log('[API] Payment Documents Response:', result);
 
       const items = result.items || [];
       const logEntry = {
         type: 'Payment Documents',
-        url,
-        status: response.ok ? 'Success' : 'Failed',
+        url: oracleUrl, // Show Oracle URL in log
+        status: result.success !== false ? 'Success' : 'Failed',
         count: items.length,
         time: new Date().toLocaleTimeString(),
       };
@@ -297,7 +297,7 @@ const Banks: React.FC = () => {
       console.error('Error fetching payment documents:', err);
       setApiLogs(prev => [...prev, {
         type: 'Payment Documents',
-        url,
+        url: oracleUrl,
         status: `Error: ${err instanceof Error ? err.message : 'Unknown'}`,
         count: 0,
         time: new Date().toLocaleTimeString(),
@@ -311,24 +311,24 @@ const Banks: React.FC = () => {
   const fetchCheckbooks = async (bankAccountId: number, paymentDocumentId: number) => {
     setCheckbooksLoading(true);
     setCheckbooks([]);
-    const url = `${ORACLE_FUSION_CONFIG.baseUrl}/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments/${paymentDocumentId}/child/bankAccountCheckbooks`;
-    const authHeader = 'Basic ' + btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
-    console.log('[API] Checkbooks URL:', url);
+
+    // Use proxy to avoid CORS, but log the actual Oracle Fusion URL
+    const proxyUrl = `${PROXY_CONFIG.baseUrl}/oracle/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments/${paymentDocumentId}/child/bankAccountCheckbooks`;
+    const oracleUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments/${paymentDocumentId}/child/bankAccountCheckbooks`;
+
+    console.log('[API] Checkbooks - Proxy URL:', proxyUrl);
+    console.log('[API] Checkbooks - Oracle URL:', oracleUrl);
+
     try {
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': authHeader,
-          'Content-Type': 'application/json',
-        },
-      });
+      const response = await fetch(proxyUrl);
       const result = await response.json();
       console.log('[API] Checkbooks Response:', result);
 
       const items = result.items || [];
       const logEntry = {
         type: 'Checkbooks',
-        url,
-        status: response.ok ? 'Success' : 'Failed',
+        url: oracleUrl, // Show Oracle URL in log
+        status: result.success !== false ? 'Success' : 'Failed',
         count: items.length,
         time: new Date().toLocaleTimeString(),
       };
@@ -341,7 +341,7 @@ const Banks: React.FC = () => {
       console.error('Error fetching checkbooks:', err);
       setApiLogs(prev => [...prev, {
         type: 'Checkbooks',
-        url,
+        url: oracleUrl,
         status: `Error: ${err instanceof Error ? err.message : 'Unknown'}`,
         count: 0,
         time: new Date().toLocaleTimeString(),
