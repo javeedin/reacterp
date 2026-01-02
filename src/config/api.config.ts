@@ -88,6 +88,33 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
     ],
   },
   {
+    id: 'gl-code-combinations',
+    name: 'GL Code Combinations',
+    description: 'Sync GL Account Code Combinations (Chart of Accounts) from Oracle Fusion',
+    oracleEndpoint: 'accountCombinationsLOV',
+    apexEndpoint: 'glcodecombinations/create',
+    parameters: [
+      {
+        key: 'ChartOfAccountsId',
+        label: 'Chart of Accounts ID',
+        type: 'text',
+        required: false,
+        defaultValue: '',
+      },
+      {
+        key: 'EnabledFlag',
+        label: 'Enabled Only',
+        type: 'select',
+        required: false,
+        options: [
+          { label: 'All', value: '' },
+          { label: 'Enabled Only', value: 'Y' },
+          { label: 'Disabled Only', value: 'N' },
+        ],
+      },
+    ],
+  },
+  {
     id: 'ap-invoices',
     name: 'AP Invoices',
     description: 'Sync AP Invoices from Oracle Fusion',

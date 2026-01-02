@@ -43,6 +43,7 @@ import { SYNC_OBJECTS, PROXY_CONFIG, APEX_DB_CONFIG, type SyncObjectConfig, type
 import { syncGLJournals, testGLConnection, type SyncProgress, type LogCallback, type BatchPayloadCallback } from '../../services/gl-sync.service';
 import { syncAPInvoices, testAPConnection, type APSyncProgress, type InvoicePayloadCallback } from '../../services/ap-sync.service';
 import { syncAPPayments, testAPPaymentsConnection, type APPaymentsSyncProgress, type PaymentPayloadCallback } from '../../services/ap-payments-sync.service';
+import { syncGLCodeCombinations, testGLCodeCombConnection, type CodeCombSyncProgress, type CodeCombPayloadCallback } from '../../services/gl-codecomb-sync.service';
 import Autopilot from '../../components/Autopilot';
 import { useElectron } from '../../hooks/useElectron';
 
@@ -207,9 +208,34 @@ const SyncData: React.FC = () => {
     endTime: null,
   });
 
-  // Determine if AP Invoices or AP Payments is selected
+  // GL Code Combinations Progress State
+  const [codeCombProgress, setCodeCombProgress] = useState<CodeCombSyncProgress>({
+    status: 'idle',
+    totalRecords: 0,
+    processedRecords: 0,
+    insertedRecords: 0,
+    currentPage: 0,
+    totalPages: 0,
+    errors: 0,
+    lastError: '',
+    startTime: null,
+    endTime: null,
+  });
+
+  // Code Combination payload state (for debug)
+  const [codeCombPayloads, setCodeCombPayloads] = useState<Array<{
+    ccId: number;
+    concatenatedSegments: string;
+    payload: any;
+    postResult?: any;
+    status: 'pending' | 'success' | 'error';
+    errorMessage?: string;
+  }>>([]);
+
+  // Determine sync type based on selected object
   const isAPInvoices = selectedObject?.id === 'ap-invoices';
   const isAPPayments = selectedObject?.id === 'ap-payments';
+  const isGLCodeComb = selectedObject?.id === 'gl-code-combinations';
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const isSyncingRef = useRef(false);
@@ -478,6 +504,34 @@ const SyncData: React.FC = () => {
     });
   }, []);
 
+  // Code Combination payload callback handler
+  const handleCodeCombPayload: CodeCombPayloadCallback = useCallback((ccId, concatenatedSegments, payload, result, error) => {
+    setCodeCombPayloads((prev) => {
+      const existing = prev.find((cc) => cc.ccId === ccId);
+      if (existing) {
+        return prev.map((cc) =>
+          cc.ccId === ccId
+            ? {
+                ...cc,
+                postResult: result,
+                status: error ? 'error' : (result ? 'success' : 'pending'),
+                errorMessage: error,
+              }
+            : cc
+        );
+      } else {
+        return [...prev, {
+          ccId,
+          concatenatedSegments,
+          payload,
+          postResult: result,
+          status: error ? 'error' : (result ? 'success' : 'pending'),
+          errorMessage: error,
+        }];
+      }
+    });
+  }, []);
+
   // Check proxy server status
   const checkProxyStatus = useCallback(async () => {
     setProxyStatus('checking');
@@ -585,6 +639,9 @@ const SyncData: React.FC = () => {
     } else if (isAPInvoices) {
       addLog('info', 'Testing AP Invoices endpoint...');
       success = await testAPConnection(addLog);
+    } else if (isGLCodeComb) {
+      addLog('info', 'Testing GL Code Combinations endpoint...');
+      success = await testGLCodeCombConnection(addLog);
     } else {
       addLog('info', 'Testing GL Journals endpoint...');
       success = await testGLConnection(addLog);
@@ -650,6 +707,7 @@ const SyncData: React.FC = () => {
     setBatchPayloads([]);
     setInvoicePayloads([]);
     setPaymentPayloads([]);
+    setCodeCombPayloads([]);
     logCounterRef.current = 0;
 
     // Notify Electron that sync started
@@ -727,6 +785,35 @@ const SyncData: React.FC = () => {
         handleInvoicePayload
       );
       syncResult = { inserted: result.insertedInvoices, errors: result.errors, type: 'invoices' };
+    } else if (isGLCodeComb) {
+      // GL Code Combinations Sync
+      setCodeCombProgress({
+        status: 'fetching',
+        totalRecords: 0,
+        processedRecords: 0,
+        insertedRecords: 0,
+        currentPage: 0,
+        totalPages: 0,
+        errors: 0,
+        lastError: '',
+        startTime: new Date(),
+        endTime: null,
+      });
+
+      const result = await syncGLCodeCombinations(
+        parameters,
+        testMode,
+        addLog,
+        (newProgress) => {
+          setCodeCombProgress((prev) => ({ ...prev, ...newProgress }));
+          if (newProgress.processedRecords !== undefined && newProgress.totalRecords) {
+            notifySyncProgress(`${newProgress.processedRecords}/${newProgress.totalRecords} code combinations`);
+          }
+        },
+        abortControllerRef.current.signal,
+        handleCodeCombPayload
+      );
+      syncResult = { inserted: result.insertedRecords, errors: result.errors, type: 'code combinations' };
     } else {
       // GL Journals Sync
       setProgress({
@@ -930,7 +1017,13 @@ const SyncData: React.FC = () => {
   ];
 
   // Check if syncing based on current object type
-  const currentStatus = isAPPayments ? apPaymentsProgress.status : (isAPInvoices ? apProgress.status : progress.status);
+  const currentStatus = isAPPayments
+    ? apPaymentsProgress.status
+    : isAPInvoices
+    ? apProgress.status
+    : isGLCodeComb
+    ? codeCombProgress.status
+    : progress.status;
   const isSyncing = !['idle', 'completed', 'error', 'stopped'].includes(currentStatus);
 
   // Calculate progress percentages for GL
@@ -1069,21 +1162,23 @@ const SyncData: React.FC = () => {
                         <span style={{ color: REDWOOD.warning }}>●</span> Single Record (Debug)
                       </Option>
                       <Option value={true}>
-                        <span style={{ color: REDWOOD.info }}>●</span> Test Mode (25 {isAPPayments ? 'payments' : isAPInvoices ? 'invoices' : 'batches'})
+                        <span style={{ color: REDWOOD.info }}>●</span> Test Mode (25 {isAPPayments ? 'payments' : isAPInvoices ? 'invoices' : isGLCodeComb ? 'records' : 'batches'})
                       </Option>
                       <Option value={false}>
-                        <span style={{ color: REDWOOD.success }}>●</span> Full Sync ({isAPPayments ? '500 payments' : isAPInvoices ? '500 invoices' : 'All records'})
+                        <span style={{ color: REDWOOD.success }}>●</span> Full Sync ({isAPPayments ? '500 payments' : isAPInvoices ? '500 invoices' : isGLCodeComb ? '500 records' : 'All records'})
                       </Option>
                     </Select>
                     <Text type="secondary" style={{ fontSize: 11, marginTop: 4, display: 'block' }}>
                       {testMode === 'single'
-                        ? `Debug mode: Sync only 1 ${isAPPayments ? 'payment' : isAPInvoices ? 'invoice' : 'batch'} with full logging`
+                        ? `Debug mode: Sync only 1 ${isAPPayments ? 'payment' : isAPInvoices ? 'invoice' : isGLCodeComb ? 'code combination' : 'batch'} with full logging`
                         : testMode
-                        ? `Limited to 25 ${isAPPayments ? 'payments' : isAPInvoices ? 'invoices' : 'batches'} for testing`
+                        ? `Limited to 25 ${isAPPayments ? 'payments' : isAPInvoices ? 'invoices' : isGLCodeComb ? 'code combinations' : 'batches'} for testing`
                         : isAPPayments
                         ? 'Full sync - 500 payments (paginated 25 per page)'
                         : isAPInvoices
                         ? 'Full sync - 500 invoices (paginated 25 per page)'
+                        : isGLCodeComb
+                        ? 'Full sync - 500 code combinations (paginated 100 per page)'
                         : 'Full sync - all matching records'}
                     </Text>
                   </div>
@@ -1446,6 +1541,96 @@ const SyncData: React.FC = () => {
                     </Card>
                   </Col>
                 </Row>
+              ) : isGLCodeComb ? (
+                /* GL Code Combinations KPI Cards */
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  {/* Records Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <DatabaseOutlined style={{ fontSize: 20, color: REDWOOD.primary, marginRight: 8 }} />
+                        <Text strong>Code Combinations</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {codeCombProgress.insertedRecords} / {codeCombProgress.totalRecords}
+                      </div>
+                      <Progress
+                        percent={codeCombProgress.totalRecords > 0 ? Math.round((codeCombProgress.insertedRecords / codeCombProgress.totalRecords) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.primary}
+                        style={{ marginTop: 8 }}
+                      />
+                      {codeCombProgress.currentPage > 0 && (
+                        <Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 4 }}>
+                          Page {codeCombProgress.currentPage}/{codeCombProgress.totalPages}
+                        </Text>
+                      )}
+                    </Card>
+                  </Col>
+
+                  {/* Processed Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <FileTextOutlined style={{ fontSize: 20, color: REDWOOD.success, marginRight: 8 }} />
+                        <Text strong>Processed</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {codeCombProgress.processedRecords}
+                        <Text type="secondary" style={{ fontSize: 14, marginLeft: 8 }}>
+                          / {codeCombProgress.totalRecords}
+                        </Text>
+                      </div>
+                      <Progress
+                        percent={codeCombProgress.totalRecords > 0 ? Math.round((codeCombProgress.processedRecords / codeCombProgress.totalRecords) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.success}
+                        style={{ marginTop: 8 }}
+                      />
+                    </Card>
+                  </Col>
+
+                  {/* Errors Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <WarningOutlined style={{ fontSize: 20, color: codeCombProgress.errors > 0 ? REDWOOD.error : REDWOOD.textSecondary, marginRight: 8 }} />
+                        <Text strong>Errors</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: codeCombProgress.errors > 0 ? REDWOOD.error : REDWOOD.textPrimary }}>
+                        {codeCombProgress.errors}
+                      </div>
+                      {codeCombProgress.lastError && (
+                        <Tooltip title={codeCombProgress.lastError}>
+                          <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 8 }} ellipsis>
+                            {codeCombProgress.lastError}
+                          </Text>
+                        </Tooltip>
+                      )}
+                    </Card>
+                  </Col>
+                </Row>
               ) : (
                 /* GL Journals KPI Cards */
                 <Row gutter={16} style={{ marginBottom: 16 }}>
@@ -1587,14 +1772,14 @@ const SyncData: React.FC = () => {
                           {getStatusText(currentStatus)}
                         </Tag>
                       </div>
-                      {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : progress.startTime) && (
+                      {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : isGLCodeComb ? codeCombProgress.startTime : progress.startTime) && (
                         <Text type="secondary" style={{ fontSize: 12 }}>
-                          Started: {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : progress.startTime)?.toLocaleTimeString()}
+                          Started: {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : isGLCodeComb ? codeCombProgress.startTime : progress.startTime)?.toLocaleTimeString()}
                         </Text>
                       )}
-                      {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : progress.endTime) && (
+                      {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : isGLCodeComb ? codeCombProgress.endTime : progress.endTime) && (
                         <Text type="secondary" style={{ fontSize: 12 }}>
-                          Ended: {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : progress.endTime)?.toLocaleTimeString()}
+                          Ended: {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : isGLCodeComb ? codeCombProgress.endTime : progress.endTime)?.toLocaleTimeString()}
                         </Text>
                       )}
                     </Space>
@@ -1607,13 +1792,15 @@ const SyncData: React.FC = () => {
                           ? `${apPaymentsProgress.insertedPayments} payments, ${apPaymentsProgress.processedRelatedInvoices} related invoices inserted`
                           : isAPInvoices
                           ? `${apProgress.insertedInvoices} invoices inserted`
+                          : isGLCodeComb
+                          ? `${codeCombProgress.insertedRecords} code combinations inserted`
                           : `${progress.totalBatchesInserted + progress.totalHeadersInserted + progress.totalLinesInserted} inserted`
                         }
                       </Text>
-                      {(isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : progress.errors) > 0 && (
+                      {(isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLCodeComb ? codeCombProgress.errors : progress.errors) > 0 && (
                         <Text type="danger">
                           <CloseCircleOutlined style={{ marginRight: 4 }} />
-                          {isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : progress.errors} errors
+                          {isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLCodeComb ? codeCombProgress.errors : progress.errors} errors
                         </Text>
                       )}
                     </Space>
