@@ -956,345 +956,116 @@ const Banks: React.FC = () => {
 
       {/* Edit Bank Modal */}
       <Modal
-        title={
-          <Space>
-            <BankOutlined style={{ color: REDWOOD.info }} />
-            <span>Edit Bank</span>
-          </Space>
-        }
+        title={<Space size={4}><BankOutlined style={{ color: REDWOOD.info }} /><span>Edit Bank</span></Space>}
         open={editBankModalOpen}
-        onCancel={() => {
-          setEditBankModalOpen(false);
-          setEditingBank(null);
-          bankForm.resetFields();
-        }}
+        onCancel={() => { setEditBankModalOpen(false); setEditingBank(null); bankForm.resetFields(); }}
         footer={[
-          <Button key="cancel" onClick={() => {
-            setEditBankModalOpen(false);
-            setEditingBank(null);
-            bankForm.resetFields();
-          }}>
-            Cancel
-          </Button>,
-          <Button key="save" type="primary" onClick={handleSaveBank} style={{ background: REDWOOD.primary }}>
-            Save
-          </Button>,
+          <Button key="cancel" size="small" onClick={() => { setEditBankModalOpen(false); setEditingBank(null); bankForm.resetFields(); }}>Cancel</Button>,
+          <Button key="save" size="small" type="primary" onClick={handleSaveBank} style={{ background: REDWOOD.primary }}>Save</Button>,
         ]}
-        width={700}
+        width={600}
+        styles={{ body: { padding: '12px 24px' } }}
       >
-        <Form form={bankForm} layout="vertical" style={{ marginTop: 16 }}>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="BankPartyId" label="Bank Party ID">
-                <Input disabled />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="BankPartyNumber" label="Bank Party Number">
-                <Input disabled />
-              </Form.Item>
-            </Col>
+        <Form form={bankForm} layout="vertical" size="small" style={{ marginTop: 8 }}>
+          <Row gutter={12}>
+            <Col span={6}><Form.Item name="BankPartyId" label="Party ID" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
+            <Col span={6}><Form.Item name="BankPartyNumber" label="Party Number" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
+            <Col span={6}><Form.Item name="BankNumber" label="Bank Number" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
+            <Col span={6}><Form.Item name="CountryName" label="Country" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
           </Row>
-          <Divider style={{ margin: '12px 0' }} />
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="BankName" label="Bank Name" rules={[{ required: true }]}>
-                <Input />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="BankNameAlt" label="Alternate Bank Name">
-                <Input />
-              </Form.Item>
-            </Col>
+          <Row gutter={12}>
+            <Col span={12}><Form.Item name="BankName" label="Bank Name" rules={[{ required: true }]} style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
+            <Col span={12}><Form.Item name="BankNameAlt" label="Alternate Name" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
           </Row>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="BankNumber" label="Bank Number">
-                <Input />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="CountryName" label="Country">
-                <Input />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Form.Item name="Description" label="Description">
-            <Input.TextArea rows={2} />
-          </Form.Item>
-          <Divider style={{ margin: '12px 0' }} />
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="CreatedBy" label="Created By">
-                <Input disabled />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="CreationDate" label="Creation Date">
-                <Input disabled />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="LastUpdatedBy" label="Last Updated By">
-                <Input disabled />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="LastUpdateDate" label="Last Update Date">
-                <Input disabled />
-              </Form.Item>
-            </Col>
+          <Form.Item name="Description" label="Description" style={{ marginBottom: 8 }}><Input.TextArea rows={1} size="small" /></Form.Item>
+          <Row gutter={12}>
+            <Col span={6}><Form.Item name="CreatedBy" label="Created By" style={{ marginBottom: 0 }}><Input disabled size="small" /></Form.Item></Col>
+            <Col span={6}><Form.Item name="CreationDate" label="Created" style={{ marginBottom: 0 }}><Input disabled size="small" /></Form.Item></Col>
+            <Col span={6}><Form.Item name="LastUpdatedBy" label="Updated By" style={{ marginBottom: 0 }}><Input disabled size="small" /></Form.Item></Col>
+            <Col span={6}><Form.Item name="LastUpdateDate" label="Updated" style={{ marginBottom: 0 }}><Input disabled size="small" /></Form.Item></Col>
           </Row>
         </Form>
       </Modal>
 
       {/* Edit Branch Modal */}
       <Modal
-        title={
-          <Space>
-            <BranchesOutlined style={{ color: REDWOOD.primary }} />
-            <span>Edit Branch</span>
-          </Space>
-        }
+        title={<Space size={4}><BranchesOutlined style={{ color: REDWOOD.primary }} /><span>Edit Branch</span></Space>}
         open={editBranchModalOpen}
-        onCancel={() => {
-          setEditBranchModalOpen(false);
-          setEditingBranch(null);
-          branchForm.resetFields();
-        }}
+        onCancel={() => { setEditBranchModalOpen(false); setEditingBranch(null); branchForm.resetFields(); }}
         footer={[
-          <Button key="cancel" onClick={() => {
-            setEditBranchModalOpen(false);
-            setEditingBranch(null);
-            branchForm.resetFields();
-          }}>
-            Cancel
-          </Button>,
-          <Button key="save" type="primary" onClick={handleSaveBranch} style={{ background: REDWOOD.primary }}>
-            Save
-          </Button>,
+          <Button key="cancel" size="small" onClick={() => { setEditBranchModalOpen(false); setEditingBranch(null); branchForm.resetFields(); }}>Cancel</Button>,
+          <Button key="save" size="small" type="primary" onClick={handleSaveBranch} style={{ background: REDWOOD.primary }}>Save</Button>,
         ]}
-        width={700}
+        width={600}
+        styles={{ body: { padding: '12px 24px' } }}
       >
-        <Form form={branchForm} layout="vertical" style={{ marginTop: 16 }}>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="BranchPartyId" label="Branch Party ID">
-                <Input disabled />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="BranchPartyNumber" label="Branch Party Number">
-                <Input disabled />
-              </Form.Item>
-            </Col>
+        <Form form={branchForm} layout="vertical" size="small" style={{ marginTop: 8 }}>
+          <Row gutter={12}>
+            <Col span={6}><Form.Item name="BranchPartyId" label="Branch ID" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
+            <Col span={6}><Form.Item name="BranchPartyNumber" label="Party Number" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
+            <Col span={6}><Form.Item name="BankName" label="Bank" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
+            <Col span={6}><Form.Item name="BankNumber" label="Bank Number" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
           </Row>
-          <Divider style={{ margin: '12px 0' }} />
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="BankName" label="Bank Name">
-                <Input disabled />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="BankNumber" label="Bank Number">
-                <Input disabled />
-              </Form.Item>
-            </Col>
+          <Row gutter={12}>
+            <Col span={12}><Form.Item name="BankBranchName" label="Branch Name" rules={[{ required: true }]} style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
+            <Col span={12}><Form.Item name="BankBranchNameAlt" label="Alternate Name" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
           </Row>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="BankBranchName" label="Branch Name" rules={[{ required: true }]}>
-                <Input />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="BankBranchNameAlt" label="Alternate Branch Name">
-                <Input />
-              </Form.Item>
-            </Col>
+          <Row gutter={12}>
+            <Col span={6}><Form.Item name="BranchNumber" label="Branch Number" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
+            <Col span={6}><Form.Item name="EFTSWIFTCode" label="SWIFT Code" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
+            <Col span={6}><Form.Item name="CountryName" label="Country" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
+            <Col span={6}><Form.Item name="BankPartyNumber" label="Bank Party #" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
           </Row>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="BranchNumber" label="Branch Number">
-                <Input />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="EFTSWIFTCode" label="SWIFT Code">
-                <Input />
-              </Form.Item>
-            </Col>
+          <Form.Item name="Description" label="Description" style={{ marginBottom: 8 }}><Input.TextArea rows={1} size="small" /></Form.Item>
+          <Row gutter={12}>
+            <Col span={8}><Form.Item name="CreatedBy" label="Created By" style={{ marginBottom: 0 }}><Input disabled size="small" /></Form.Item></Col>
+            <Col span={8}><Form.Item name="CreationDate" label="Created" style={{ marginBottom: 0 }}><Input disabled size="small" /></Form.Item></Col>
+            <Col span={8}><Form.Item name="LastUpdateDate" label="Updated" style={{ marginBottom: 0 }}><Input disabled size="small" /></Form.Item></Col>
           </Row>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="CountryName" label="Country">
-                <Input />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="BankPartyNumber" label="Bank Party Number">
-                <Input disabled />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Form.Item name="Description" label="Description">
-            <Input.TextArea rows={2} />
-          </Form.Item>
-          <Divider style={{ margin: '12px 0' }} />
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="CreatedBy" label="Created By">
-                <Input disabled />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="CreationDate" label="Creation Date">
-                <Input disabled />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Form.Item name="LastUpdateDate" label="Last Update Date">
-            <Input disabled />
-          </Form.Item>
         </Form>
       </Modal>
 
       {/* Edit Account Modal */}
       <Modal
-        title={
-          <Space>
-            <CreditCardOutlined style={{ color: REDWOOD.success }} />
-            <span>Edit Bank Account</span>
-          </Space>
-        }
+        title={<Space size={4}><CreditCardOutlined style={{ color: REDWOOD.success }} /><span>Edit Bank Account</span></Space>}
         open={editAccountModalOpen}
-        onCancel={() => {
-          setEditAccountModalOpen(false);
-          setEditingAccount(null);
-          accountForm.resetFields();
-        }}
+        onCancel={() => { setEditAccountModalOpen(false); setEditingAccount(null); accountForm.resetFields(); }}
         footer={[
-          <Button key="cancel" onClick={() => {
-            setEditAccountModalOpen(false);
-            setEditingAccount(null);
-            accountForm.resetFields();
-          }}>
-            Cancel
-          </Button>,
-          <Button key="save" type="primary" onClick={handleSaveAccount} style={{ background: REDWOOD.primary }}>
-            Save
-          </Button>,
+          <Button key="cancel" size="small" onClick={() => { setEditAccountModalOpen(false); setEditingAccount(null); accountForm.resetFields(); }}>Cancel</Button>,
+          <Button key="save" size="small" type="primary" onClick={handleSaveAccount} style={{ background: REDWOOD.primary }}>Save</Button>,
         ]}
-        width={800}
+        width={700}
+        styles={{ body: { padding: '12px 24px' } }}
       >
-        <Form form={accountForm} layout="vertical" style={{ marginTop: 16 }}>
-          <Row gutter={16}>
-            <Col span={8}>
-              <Form.Item name="BankAccountId" label="Account ID">
-                <Input disabled />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="BankName" label="Bank Name">
-                <Input disabled />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="BankBranchName" label="Branch Name">
-                <Input disabled />
-              </Form.Item>
-            </Col>
+        <Form form={accountForm} layout="vertical" size="small" style={{ marginTop: 8 }}>
+          <Row gutter={12}>
+            <Col span={4}><Form.Item name="BankAccountId" label="ID" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
+            <Col span={5}><Form.Item name="BankName" label="Bank" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
+            <Col span={5}><Form.Item name="BankBranchName" label="Branch" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
+            <Col span={5}><Form.Item name="BranchNumber" label="Branch #" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
+            <Col span={5}><Form.Item name="CurrencyCode" label="Currency" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
           </Row>
-          <Divider style={{ margin: '12px 0' }} />
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="BankAccountName" label="Account Name" rules={[{ required: true }]}>
-                <Input />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="BankAccountNumber" label="Account Number">
-                <Input />
-              </Form.Item>
-            </Col>
+          <Row gutter={12}>
+            <Col span={12}><Form.Item name="BankAccountName" label="Account Name" rules={[{ required: true }]} style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
+            <Col span={6}><Form.Item name="BankAccountNumber" label="Account Number" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
+            <Col span={6}><Form.Item name="MaskedAccountNumber" label="Masked #" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
           </Row>
-          <Row gutter={16}>
-            <Col span={8}>
-              <Form.Item name="MaskedAccountNumber" label="Masked Account Number">
-                <Input disabled />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="BankAccountNumberElectronic" label="Electronic Account Number">
-                <Input />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="CurrencyCode" label="Currency">
-                <Input />
-              </Form.Item>
-            </Col>
+          <Row gutter={12}>
+            <Col span={8}><Form.Item name="LegalEntityName" label="Legal Entity" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
+            <Col span={8}><Form.Item name="AccountType" label="Account Type" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
+            <Col span={4}><Form.Item name="ApUseAllowedFlag" label="AP" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
+            <Col span={4}><Form.Item name="ArUseAllowedFlag" label="AR" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
           </Row>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="LegalEntityName" label="Legal Entity">
-                <Input />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="AccountType" label="Account Type">
-                <Input />
-              </Form.Item>
-            </Col>
+          <Row gutter={12}>
+            <Col span={16}><Form.Item name="CashAccountCombination" label="Cash Account Combination" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
+            <Col span={8}><Form.Item name="Description" label="Description" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
           </Row>
-          <Row gutter={16}>
-            <Col span={8}>
-              <Form.Item name="BranchNumber" label="Branch Number">
-                <Input disabled />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="ApUseAllowedFlag" label="AP Use Allowed">
-                <Input />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="ArUseAllowedFlag" label="AR Use Allowed">
-                <Input />
-              </Form.Item>
-            </Col>
+          <Row gutter={12}>
+            <Col span={6}><Form.Item name="ReconStartDate" label="Recon Start" style={{ marginBottom: 0 }}><Input disabled size="small" /></Form.Item></Col>
+            <Col span={6}><Form.Item name="CreatedBy" label="Created By" style={{ marginBottom: 0 }}><Input disabled size="small" /></Form.Item></Col>
+            <Col span={6}><Form.Item name="CreationDate" label="Created" style={{ marginBottom: 0 }}><Input disabled size="small" /></Form.Item></Col>
+            <Col span={6}><Form.Item name="LastUpdateDate" label="Updated" style={{ marginBottom: 0 }}><Input disabled size="small" /></Form.Item></Col>
           </Row>
-          <Form.Item name="CashAccountCombination" label="Cash Account Combination">
-            <Input />
-          </Form.Item>
-          <Form.Item name="Description" label="Description">
-            <Input.TextArea rows={2} />
-          </Form.Item>
-          <Divider style={{ margin: '12px 0' }} />
-          <Row gutter={16}>
-            <Col span={8}>
-              <Form.Item name="ReconStartDate" label="Reconciliation Start Date">
-                <Input disabled />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="CreatedBy" label="Created By">
-                <Input disabled />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="CreationDate" label="Creation Date">
-                <Input disabled />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Form.Item name="LastUpdateDate" label="Last Update Date">
-            <Input disabled />
-          </Form.Item>
         </Form>
       </Modal>
 
