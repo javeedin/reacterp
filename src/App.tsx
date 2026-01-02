@@ -20,6 +20,7 @@ import AccountCombinations from './pages/gl/AccountCombinations';
 import { APModule } from './pages/ap';
 import ManageInvoices from './pages/ap/ManageInvoices';
 import ManagePayments from './pages/ap/ManagePayments';
+import Banks from './pages/ap/Banks';
 import SyncData from './pages/sync/SyncData';
 
 // Placeholder component for modules under development
@@ -80,6 +81,7 @@ function App() {
               <Route path="ap" element={<APModule />} />
               <Route path="ap/manage-invoices" element={<ManageInvoices />} />
               <Route path="ap/manage-payments" element={<ManagePayments />} />
+              <Route path="ap/banks" element={<Banks />} />
               <Route path="ap/*" element={<APModule />} />
               <Route path="ar/*" element={<ComingSoon moduleName="Accounts Receivable" />} />
               <Route path="inventory/*" element={<ComingSoon moduleName="Inventory" />} />

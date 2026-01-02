@@ -103,6 +103,14 @@ const periodsTaskItems: MenuItemType[] = [
   { key: 'manage-periods', icon: <CalendarOutlined />, label: 'Manage Accounting Periods', description: 'Open/close periods', color: REDWOOD.info },
 ];
 
+// Setup & Maintenance items
+const setupItems: MenuItemType[] = [
+  { key: 'banks', icon: <BankOutlined />, label: 'Banks', description: 'Manage banks, branches & accounts', color: REDWOOD.info, path: '/ap/banks' },
+  { key: 'suppliers', icon: <FileTextOutlined />, label: 'Suppliers', description: 'Manage supplier master data', color: REDWOOD.success },
+  { key: 'payment-terms', icon: <CalendarOutlined />, label: 'Payment Terms', description: 'Configure payment terms', color: REDWOOD.warning },
+  { key: 'payment-methods', icon: <CreditCardOutlined />, label: 'Payment Methods', description: 'Setup payment methods', color: REDWOOD.primary },
+];
+
 // Payment task items
 const paymentTaskItems: MenuItemType[] = [
   { key: 'manage-payments', icon: <DollarOutlined />, label: 'Manage Payments', description: 'Search and manage payments', color: REDWOOD.taskBlue, path: '/ap/manage-payments' },
@@ -149,6 +157,7 @@ const APModule: React.FC = () => {
     { key: 'assets', label: 'Assets', items: assetsTaskItems },
     { key: 'periods', label: 'Payables Periods', items: periodsTaskItems },
     { key: 'payments', label: 'Payments', items: paymentTaskItems },
+    { key: 'setup', label: 'Setup & Maintenance', items: setupItems },
   ];
 
   // Get current section items
@@ -908,6 +917,18 @@ const APModule: React.FC = () => {
             <SectionTitle icon={<BookOutlined />} title="Accounting" color={REDWOOD.info} />
             <Row gutter={[16, 16]}>
               {accountingTaskItems.map((item) => (
+                <Col xs={24} sm={12} lg={8} xl={6} key={item.key}>
+                  <MenuCard item={item} />
+                </Col>
+              ))}
+            </Row>
+          </div>
+
+          {/* Setup & Maintenance Section */}
+          <div style={{ marginBottom: 32 }}>
+            <SectionTitle icon={<SettingOutlined />} title="Setup & Maintenance" color={REDWOOD.neutral600} />
+            <Row gutter={[16, 16]}>
+              {setupItems.map((item) => (
                 <Col xs={24} sm={12} lg={8} xl={6} key={item.key}>
                   <MenuCard item={item} />
                 </Col>
