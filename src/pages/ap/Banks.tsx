@@ -1345,8 +1345,20 @@ const Banks: React.FC = () => {
                 label: <Space size={4}><FileTextOutlined />Payment Documents</Space>,
                 children: (
                   <div style={{ paddingTop: 8 }}>
-                    {/* API Log Toggle */}
-                    <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'flex-end' }}>
+                    {/* API Log Toggle and Refresh */}
+                    <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                      <Tooltip title="Refresh Payment Documents">
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={<ReloadOutlined />}
+                          onClick={() => editingAccount && fetchPaymentDocuments(editingAccount.BankAccountId)}
+                          loading={paymentDocsLoading}
+                          style={{ fontSize: 11 }}
+                        >
+                          Refresh
+                        </Button>
+                      </Tooltip>
                       <Tooltip title="Toggle API Log">
                         <Button
                           type={showApiLog ? 'primary' : 'text'}
