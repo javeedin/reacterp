@@ -39,6 +39,7 @@ import {
   SearchOutlined,
   FileTextOutlined,
   BookOutlined,
+  BugOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { PROXY_CONFIG } from '../../config/api.config';
@@ -195,6 +196,10 @@ const Banks: React.FC = () => {
   const [checkbooks, setCheckbooks] = useState<Checkbook[]>([]);
   const [checkbooksLoading, setCheckbooksLoading] = useState(false);
 
+  // API Log state
+  const [apiLogs, setApiLogs] = useState<Array<{ type: string; url: string; status: string; count: number; time: string }>>([]);
+  const [showApiLog, setShowApiLog] = useState(false);
+
   // Fetch banks from selected source
   const fetchBanks = useCallback(async () => {
     setLoading(true);
@@ -261,16 +266,35 @@ const Banks: React.FC = () => {
     setPaymentDocuments([]);
     setSelectedPaymentDoc(null);
     setCheckbooks([]);
+    setApiLogs([]); // Clear previous logs
+    const url = `${PROXY_CONFIG.baseUrl}/oracle/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments`;
+    console.log('[API] Payment Documents URL:', url);
     try {
-      const url = `${PROXY_CONFIG.baseUrl}/oracle/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments`;
       const response = await fetch(url);
       const result = await response.json();
+      console.log('[API] Payment Documents Response:', result);
+
+      const logEntry = {
+        type: 'Payment Documents',
+        url,
+        status: result.success ? 'Success' : 'Failed',
+        count: result.items?.length || 0,
+        time: new Date().toLocaleTimeString(),
+      };
+      setApiLogs(prev => [...prev, logEntry]);
 
       if (result.success && result.items) {
         setPaymentDocuments(result.items);
       }
     } catch (err) {
       console.error('Error fetching payment documents:', err);
+      setApiLogs(prev => [...prev, {
+        type: 'Payment Documents',
+        url,
+        status: `Error: ${err instanceof Error ? err.message : 'Unknown'}`,
+        count: 0,
+        time: new Date().toLocaleTimeString(),
+      }]);
     } finally {
       setPaymentDocsLoading(false);
     }
@@ -280,16 +304,34 @@ const Banks: React.FC = () => {
   const fetchCheckbooks = async (bankAccountId: number, paymentDocumentId: number) => {
     setCheckbooksLoading(true);
     setCheckbooks([]);
+    const url = `${PROXY_CONFIG.baseUrl}/oracle/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments/${paymentDocumentId}/child/bankAccountCheckbooks`;
+    console.log('[API] Checkbooks URL:', url);
     try {
-      const url = `${PROXY_CONFIG.baseUrl}/oracle/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments/${paymentDocumentId}/child/bankAccountCheckbooks`;
       const response = await fetch(url);
       const result = await response.json();
+      console.log('[API] Checkbooks Response:', result);
+
+      const logEntry = {
+        type: 'Checkbooks',
+        url,
+        status: result.success ? 'Success' : 'Failed',
+        count: result.items?.length || 0,
+        time: new Date().toLocaleTimeString(),
+      };
+      setApiLogs(prev => [...prev, logEntry]);
 
       if (result.success && result.items) {
         setCheckbooks(result.items);
       }
     } catch (err) {
       console.error('Error fetching checkbooks:', err);
+      setApiLogs(prev => [...prev, {
+        type: 'Checkbooks',
+        url,
+        status: `Error: ${err instanceof Error ? err.message : 'Unknown'}`,
+        count: 0,
+        time: new Date().toLocaleTimeString(),
+      }]);
     } finally {
       setCheckbooksLoading(false);
     }
@@ -1151,6 +1193,8 @@ const Banks: React.FC = () => {
           setPaymentDocuments([]);
           setSelectedPaymentDoc(null);
           setCheckbooks([]);
+          setApiLogs([]);
+          setShowApiLog(false);
         }}
         footer={[
           <Button key="cancel" size="small" onClick={() => {
@@ -1160,6 +1204,8 @@ const Banks: React.FC = () => {
             setPaymentDocuments([]);
             setSelectedPaymentDoc(null);
             setCheckbooks([]);
+            setApiLogs([]);
+            setShowApiLog(false);
           }}>Cancel</Button>,
           <Button key="save" size="small" type="primary" onClick={handleSaveAccount} style={{ background: REDWOOD.primary }}>Save</Button>,
         ]}
@@ -1279,8 +1325,54 @@ const Banks: React.FC = () => {
                 label: <Space size={4}><FileTextOutlined />Payment Documents</Space>,
                 children: (
                   <div style={{ paddingTop: 8 }}>
+                    {/* API Log Toggle */}
+                    <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'flex-end' }}>
+                      <Tooltip title="Toggle API Log">
+                        <Button
+                          type={showApiLog ? 'primary' : 'text'}
+                          size="small"
+                          icon={<BugOutlined />}
+                          onClick={() => setShowApiLog(!showApiLog)}
+                          style={{ fontSize: 11 }}
+                        >
+                          API Log
+                        </Button>
+                      </Tooltip>
+                    </div>
+
+                    {/* API Log Panel */}
+                    {showApiLog && (
+                      <div style={{
+                        marginBottom: 8,
+                        padding: 8,
+                        background: '#f5f5f5',
+                        borderRadius: 4,
+                        border: `1px solid ${REDWOOD.border}`,
+                        maxHeight: 120,
+                        overflow: 'auto',
+                      }}>
+                        <Text strong style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>API Calls:</Text>
+                        {apiLogs.length === 0 ? (
+                          <Text type="secondary" style={{ fontSize: 10 }}>No API calls yet</Text>
+                        ) : (
+                          apiLogs.map((log, idx) => (
+                            <div key={idx} style={{ marginBottom: 6, fontSize: 10, fontFamily: 'monospace' }}>
+                              <div>
+                                <Tag color={log.status === 'Success' ? 'green' : 'red'} style={{ fontSize: 9 }}>{log.type}</Tag>
+                                <Text type="secondary">{log.time}</Text>
+                                <Text style={{ marginLeft: 8 }}>Items: {log.count}</Text>
+                              </div>
+                              <div style={{ wordBreak: 'break-all', color: '#666', marginTop: 2 }}>
+                                {log.url}
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+
                     <Spin spinning={paymentDocsLoading}>
-                      <div style={{ display: 'flex', gap: 12, height: 280 }}>
+                      <div style={{ display: 'flex', gap: 12, height: showApiLog ? 200 : 280 }}>
                         {/* Payment Documents List */}
                         <div style={{ width: 280, borderRight: `1px solid ${REDWOOD.border}`, paddingRight: 12 }}>
                           <div style={{ marginBottom: 8 }}>
