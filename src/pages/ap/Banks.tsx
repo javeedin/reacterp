@@ -36,10 +36,12 @@ import {
   CheckCircleOutlined,
   DollarOutlined,
   EditOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { PROXY_CONFIG } from '../../config/api.config';
 import Autopilot from '../../components/Autopilot';
+import AccountSelector from '../../components/AccountSelector';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -108,6 +110,8 @@ interface BankAccount {
   ApUseAllowedFlag: boolean;
   ArUseAllowedFlag: boolean;
   CashAccountCombination: string;
+  CashClearingAccountCombination: string;
+  ReconciliationDifferenceAccountCombination: string;
   ReconStartDate: string;
   CreatedBy: string;
   CreationDate: string;
@@ -150,6 +154,9 @@ const Banks: React.FC = () => {
   const [bankForm] = Form.useForm();
   const [branchForm] = Form.useForm();
   const [accountForm] = Form.useForm();
+
+  // Account selector state
+  const [accountSelectorField, setAccountSelectorField] = useState<'cash' | 'clearing' | 'recon' | null>(null);
 
   // Fetch banks from selected source
   const fetchBanks = useCallback(async () => {
@@ -405,12 +412,26 @@ const Banks: React.FC = () => {
       ApUseAllowedFlag: account.ApUseAllowedFlag,
       ArUseAllowedFlag: account.ArUseAllowedFlag,
       CashAccountCombination: account.CashAccountCombination,
+      CashClearingAccountCombination: account.CashClearingAccountCombination,
+      ReconciliationDifferenceAccountCombination: account.ReconciliationDifferenceAccountCombination,
       ReconStartDate: account.ReconStartDate,
       CreatedBy: account.CreatedBy,
       CreationDate: account.CreationDate,
       LastUpdateDate: account.LastUpdateDate,
     });
     setEditAccountModalOpen(true);
+  };
+
+  // Handle account selector selection
+  const handleAccountSelect = (accountCode: string) => {
+    if (accountSelectorField === 'cash') {
+      accountForm.setFieldsValue({ CashAccountCombination: accountCode });
+    } else if (accountSelectorField === 'clearing') {
+      accountForm.setFieldsValue({ CashClearingAccountCombination: accountCode });
+    } else if (accountSelectorField === 'recon') {
+      accountForm.setFieldsValue({ ReconciliationDifferenceAccountCombination: accountCode });
+    }
+    setAccountSelectorField(null);
   };
 
   const handleSaveAccount = async () => {
@@ -1072,12 +1093,52 @@ const Banks: React.FC = () => {
                       <Col span={12}><Form.Item name="LegalEntityName" label="Legal Entity" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
                       <Col span={12}><Form.Item name="BankAccountNumber" label="Account Number" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
                     </Row>
-                    <Form.Item name="CashAccountCombination" label="Cash Account Combination" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item>
+                    <Form.Item name="CashAccountCombination" label="Cash Account" style={{ marginBottom: 8 }}>
+                      <Input
+                        size="small"
+                        suffix={
+                          <SearchOutlined
+                            style={{ color: REDWOOD.info, cursor: 'pointer' }}
+                            onClick={() => setAccountSelectorField('cash')}
+                          />
+                        }
+                        onClick={() => setAccountSelectorField('cash')}
+                        readOnly
+                        style={{ cursor: 'pointer' }}
+                      />
+                    </Form.Item>
+                    <Form.Item name="CashClearingAccountCombination" label="Cash Clearing Account" style={{ marginBottom: 8 }}>
+                      <Input
+                        size="small"
+                        suffix={
+                          <SearchOutlined
+                            style={{ color: REDWOOD.info, cursor: 'pointer' }}
+                            onClick={() => setAccountSelectorField('clearing')}
+                          />
+                        }
+                        onClick={() => setAccountSelectorField('clearing')}
+                        readOnly
+                        style={{ cursor: 'pointer' }}
+                      />
+                    </Form.Item>
+                    <Form.Item name="ReconciliationDifferenceAccountCombination" label="Recon Difference Account" style={{ marginBottom: 8 }}>
+                      <Input
+                        size="small"
+                        suffix={
+                          <SearchOutlined
+                            style={{ color: REDWOOD.info, cursor: 'pointer' }}
+                            onClick={() => setAccountSelectorField('recon')}
+                          />
+                        }
+                        onClick={() => setAccountSelectorField('recon')}
+                        readOnly
+                        style={{ cursor: 'pointer' }}
+                      />
+                    </Form.Item>
                     <Row gutter={12}>
                       <Col span={12}><Form.Item name="ApUseAllowedFlag" label="AP Use Allowed" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
-                      <Col span={12}><Form.Item name="ArUseAllowedFlag" label="AR Use Allowed" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
+                      <Col span={12}><Form.Item name="ArUseAllowedFlag" label="AR Use Allowed" style={{ marginBottom: 0 }}><Input size="small" /></Form.Item></Col>
                     </Row>
-                    <Form.Item name="Description" label="Description" style={{ marginBottom: 0 }}><Input.TextArea rows={2} size="small" /></Form.Item>
                   </div>
                 ),
               },
@@ -1105,6 +1166,22 @@ const Banks: React.FC = () => {
           />
         </Form>
       </Modal>
+
+      {/* Account Selector Modal */}
+      <AccountSelector
+        visible={accountSelectorField !== null}
+        onCancel={() => setAccountSelectorField(null)}
+        onSelect={handleAccountSelect}
+        initialValue={
+          accountSelectorField === 'cash'
+            ? accountForm.getFieldValue('CashAccountCombination')
+            : accountSelectorField === 'clearing'
+            ? accountForm.getFieldValue('CashClearingAccountCombination')
+            : accountSelectorField === 'recon'
+            ? accountForm.getFieldValue('ReconciliationDifferenceAccountCombination')
+            : undefined
+        }
+      />
 
       {/* Autopilot Assistant */}
       <Autopilot />
