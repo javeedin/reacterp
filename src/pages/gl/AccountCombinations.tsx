@@ -221,7 +221,16 @@ const AccountCombinations: React.FC = () => {
     setDataSource(checked ? 'fusion' : 'apex');
   };
 
-  // Table columns with trimmed labels
+  // Generate unique filter values for a column
+  const getColumnFilters = (dataIndex: keyof CodeCombination) => {
+    const uniqueValues = [...new Set(data.map((item) => item[dataIndex]).filter(Boolean))];
+    return uniqueValues.sort().map((value) => ({
+      text: String(value),
+      value: String(value),
+    }));
+  };
+
+  // Table columns with trimmed labels and filters
   const columns = [
     {
       title: 'CC ID',
@@ -230,76 +239,135 @@ const AccountCombinations: React.FC = () => {
       width: 140,
       sorter: (a: CodeCombination, b: CodeCombination) => a._code_combination_id - b._code_combination_id,
       render: (id: number) => <Text code style={{ fontSize: 11 }}>{id}</Text>,
+      filterDropdown: ({ setSelectedKeys, selectedKeys, confirm, clearFilters }: any) => (
+        <div style={{ padding: 8 }}>
+          <Input
+            placeholder="Search CC ID"
+            value={selectedKeys[0]}
+            onChange={(e) => setSelectedKeys(e.target.value ? [e.target.value] : [])}
+            onPressEnter={() => confirm()}
+            style={{ marginBottom: 8, display: 'block' }}
+          />
+          <Space>
+            <Button type="primary" onClick={() => confirm()} size="small" style={{ width: 90 }}>
+              Filter
+            </Button>
+            <Button onClick={() => clearFilters?.()} size="small" style={{ width: 90 }}>
+              Reset
+            </Button>
+          </Space>
+        </div>
+      ),
+      onFilter: (value: React.Key | boolean, record: CodeCombination) =>
+        String(record._code_combination_id).includes(String(value)),
+      filterIcon: (filtered: boolean) => (
+        <SearchOutlined style={{ color: filtered ? REDWOOD.primary : undefined }} />
+      ),
     },
     {
       title: 'Co',
       dataIndex: 'buimercfinglbcoaco',
       key: 'co',
-      width: 60,
+      width: 70,
       sorter: (a: CodeCombination, b: CodeCombination) => (a.buimercfinglbcoaco || '').localeCompare(b.buimercfinglbcoaco || ''),
+      filters: getColumnFilters('buimercfinglbcoaco'),
+      onFilter: (value: React.Key | boolean, record: CodeCombination) => record.buimercfinglbcoaco === value,
+      filterSearch: true,
     },
     {
       title: 'LOB',
       dataIndex: 'buimercfinglbcoalob',
       key: 'lob',
-      width: 60,
+      width: 70,
       sorter: (a: CodeCombination, b: CodeCombination) => (a.buimercfinglbcoalob || '').localeCompare(b.buimercfinglbcoalob || ''),
+      filters: getColumnFilters('buimercfinglbcoalob'),
+      onFilter: (value: React.Key | boolean, record: CodeCombination) => record.buimercfinglbcoalob === value,
+      filterSearch: true,
     },
     {
       title: 'Dept',
       dataIndex: 'buimercfinglbcoadepartment',
       key: 'department',
-      width: 70,
+      width: 80,
       sorter: (a: CodeCombination, b: CodeCombination) => (a.buimercfinglbcoadepartment || '').localeCompare(b.buimercfinglbcoadepartment || ''),
+      filters: getColumnFilters('buimercfinglbcoadepartment'),
+      onFilter: (value: React.Key | boolean, record: CodeCombination) => record.buimercfinglbcoadepartment === value,
+      filterSearch: true,
     },
     {
       title: 'Account',
       dataIndex: 'buimercfinglbcoaaccount',
       key: 'account',
-      width: 100,
+      width: 110,
       sorter: (a: CodeCombination, b: CodeCombination) => (a.buimercfinglbcoaaccount || '').localeCompare(b.buimercfinglbcoaaccount || ''),
       render: (account: string) => <Text strong>{account}</Text>,
+      filters: getColumnFilters('buimercfinglbcoaaccount'),
+      onFilter: (value: React.Key | boolean, record: CodeCombination) => record.buimercfinglbcoaaccount === value,
+      filterSearch: true,
     },
     {
       title: 'SubAcc',
       dataIndex: 'buimercfinglbcoasubacc',
       key: 'subacc',
-      width: 80,
+      width: 90,
       sorter: (a: CodeCombination, b: CodeCombination) => (a.buimercfinglbcoasubacc || '').localeCompare(b.buimercfinglbcoasubacc || ''),
+      filters: getColumnFilters('buimercfinglbcoasubacc'),
+      onFilter: (value: React.Key | boolean, record: CodeCombination) => record.buimercfinglbcoasubacc === value,
+      filterSearch: true,
     },
     {
       title: 'Alys',
       dataIndex: 'buimercfinglbcoaalys',
       key: 'alys',
-      width: 60,
+      width: 70,
       sorter: (a: CodeCombination, b: CodeCombination) => (a.buimercfinglbcoaalys || '').localeCompare(b.buimercfinglbcoaalys || ''),
+      filters: getColumnFilters('buimercfinglbcoaalys'),
+      onFilter: (value: React.Key | boolean, record: CodeCombination) => record.buimercfinglbcoaalys === value,
+      filterSearch: true,
     },
     {
       title: 'IC',
       dataIndex: 'buimercfinglbcoaic',
       key: 'ic',
-      width: 50,
+      width: 60,
       sorter: (a: CodeCombination, b: CodeCombination) => (a.buimercfinglbcoaic || '').localeCompare(b.buimercfinglbcoaic || ''),
+      filters: getColumnFilters('buimercfinglbcoaic'),
+      onFilter: (value: React.Key | boolean, record: CodeCombination) => record.buimercfinglbcoaic === value,
+      filterSearch: true,
     },
     {
       title: 'Fut1',
       dataIndex: 'buimercfinglbcoafut1',
       key: 'fut1',
-      width: 60,
+      width: 70,
       sorter: (a: CodeCombination, b: CodeCombination) => (a.buimercfinglbcoafut1 || '').localeCompare(b.buimercfinglbcoafut1 || ''),
+      filters: getColumnFilters('buimercfinglbcoafut1'),
+      onFilter: (value: React.Key | boolean, record: CodeCombination) => record.buimercfinglbcoafut1 === value,
+      filterSearch: true,
     },
     {
       title: 'Fut2',
       dataIndex: 'buimercfinglbcoafut2',
       key: 'fut2',
-      width: 60,
+      width: 70,
       sorter: (a: CodeCombination, b: CodeCombination) => (a.buimercfinglbcoafut2 || '').localeCompare(b.buimercfinglbcoafut2 || ''),
+      filters: getColumnFilters('buimercfinglbcoafut2'),
+      onFilter: (value: React.Key | boolean, record: CodeCombination) => record.buimercfinglbcoafut2 === value,
+      filterSearch: true,
     },
     {
       title: 'Type',
       dataIndex: 'accounttype',
       key: 'accounttype',
-      width: 60,
+      width: 70,
+      filters: [
+        { text: 'A - Asset', value: 'A' },
+        { text: 'L - Liability', value: 'L' },
+        { text: 'O - Equity', value: 'O' },
+        { text: 'E - Expense', value: 'E' },
+        { text: 'R - Revenue', value: 'R' },
+      ],
+      onFilter: (value: React.Key | boolean, record: CodeCombination) => record.accounttype === value,
       render: (type: string) => {
         const typeMap: Record<string, { label: string; color: string }> = {
           'A': { label: 'Asset', color: REDWOOD.info },
@@ -320,7 +388,7 @@ const AccountCombinations: React.FC = () => {
       title: 'Enabled',
       dataIndex: 'enabledflag',
       key: 'enabledflag',
-      width: 80,
+      width: 90,
       render: (flag: string) => (
         flag === 'Y'
           ? <CheckCircleOutlined style={{ color: REDWOOD.success, fontSize: 16 }} />
@@ -336,30 +404,42 @@ const AccountCombinations: React.FC = () => {
       title: 'Posting',
       dataIndex: 'detailpostingallowedflag',
       key: 'detailpostingallowedflag',
-      width: 80,
-      render: (flag: string) => (
-        flag === 'Y'
-          ? <CheckCircleOutlined style={{ color: REDWOOD.success, fontSize: 16 }} />
-          : <CloseCircleOutlined style={{ color: REDWOOD.textSecondary, fontSize: 16 }} />
-      ),
-    },
-    {
-      title: 'Budgeting',
-      dataIndex: 'detailbudgetingallowedflag',
-      key: 'detailbudgetingallowedflag',
       width: 90,
       render: (flag: string) => (
         flag === 'Y'
           ? <CheckCircleOutlined style={{ color: REDWOOD.success, fontSize: 16 }} />
           : <CloseCircleOutlined style={{ color: REDWOOD.textSecondary, fontSize: 16 }} />
       ),
+      filters: [
+        { text: 'Allowed', value: 'Y' },
+        { text: 'Not Allowed', value: 'N' },
+      ],
+      onFilter: (value: React.Key | boolean, record: CodeCombination) => record.detailpostingallowedflag === value,
+    },
+    {
+      title: 'Budgeting',
+      dataIndex: 'detailbudgetingallowedflag',
+      key: 'detailbudgetingallowedflag',
+      width: 100,
+      render: (flag: string) => (
+        flag === 'Y'
+          ? <CheckCircleOutlined style={{ color: REDWOOD.success, fontSize: 16 }} />
+          : <CloseCircleOutlined style={{ color: REDWOOD.textSecondary, fontSize: 16 }} />
+      ),
+      filters: [
+        { text: 'Allowed', value: 'Y' },
+        { text: 'Not Allowed', value: 'N' },
+      ],
+      onFilter: (value: React.Key | boolean, record: CodeCombination) => record.detailbudgetingallowedflag === value,
     },
     {
       title: 'Start Date',
       dataIndex: 'startdateactive',
       key: 'startdateactive',
-      width: 100,
+      width: 110,
       render: (date: string) => date ? new Date(date).toLocaleDateString() : '-',
+      sorter: (a: CodeCombination, b: CodeCombination) =>
+        new Date(a.startdateactive || 0).getTime() - new Date(b.startdateactive || 0).getTime(),
     },
   ];
 
