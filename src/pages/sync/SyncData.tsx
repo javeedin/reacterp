@@ -1165,7 +1165,7 @@ const SyncData: React.FC = () => {
                         <span style={{ color: REDWOOD.info }}>●</span> Test Mode (25 {isAPPayments ? 'payments' : isAPInvoices ? 'invoices' : isGLCodeComb ? 'records' : 'batches'})
                       </Option>
                       <Option value={false}>
-                        <span style={{ color: REDWOOD.success }}>●</span> Full Sync ({isAPPayments ? '500 payments' : isAPInvoices ? '500 invoices' : isGLCodeComb ? '500 records' : 'All records'})
+                        <span style={{ color: REDWOOD.success }}>●</span> Full Sync ({isAPPayments ? '500 payments' : isAPInvoices ? '500 invoices' : 'All records'})
                       </Option>
                     </Select>
                     <Text type="secondary" style={{ fontSize: 11, marginTop: 4, display: 'block' }}>
@@ -1178,7 +1178,7 @@ const SyncData: React.FC = () => {
                         : isAPInvoices
                         ? 'Full sync - 500 invoices (paginated 25 per page)'
                         : isGLCodeComb
-                        ? 'Full sync - 500 code combinations (paginated 100 per page)'
+                        ? 'Full sync - all code combinations (paginated 500 per page)'
                         : 'Full sync - all matching records'}
                     </Text>
                   </div>

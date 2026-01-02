@@ -147,20 +147,20 @@ export const syncGLCodeCombinations = async (
   onProgress(progress);
 
   // Determine limit based on mode
-  let limit: number;
-  let totalLimit: number;
+  let pageLimit: number;
+  let maxRecords: number | null; // null means no limit (fetch all)
   if (testMode === 'single') {
-    limit = 1;
-    totalLimit = 1;
+    pageLimit = 1;
+    maxRecords = 1;
   } else if (testMode === true) {
-    limit = 25;
-    totalLimit = 25;
+    pageLimit = 25;
+    maxRecords = 25;
   } else {
-    limit = 100; // Fetch 100 at a time
-    totalLimit = 500; // Max 500 records for full sync
+    pageLimit = 500; // Fetch 500 per page for full sync
+    maxRecords = null; // No limit - fetch all pages
   }
 
-  const modeLabel = testMode === 'single' ? 'SINGLE RECORD DEBUG' : (testMode ? 'TEST MODE (25 records)' : 'FULL SYNC (500 records)');
+  const modeLabel = testMode === 'single' ? 'SINGLE RECORD DEBUG' : (testMode ? 'TEST MODE (25 records)' : 'FULL SYNC (all records)');
   log('step', '═══════════════════════════════════════════════════════════');
   log('step', `  GL CODE COMBINATIONS SYNC - ${modeLabel}`);
   log('step', '═══════════════════════════════════════════════════════════');
@@ -172,7 +172,7 @@ export const syncGLCodeCombinations = async (
     let pageNum = 0;
 
     // Fetch records with pagination
-    while (hasMore && allRecords.length < totalLimit) {
+    while (hasMore && (maxRecords === null || allRecords.length < maxRecords)) {
       if (signal?.aborted) {
         log('warning', '⚠ Sync aborted by user');
         progress.status = 'stopped';
@@ -182,7 +182,9 @@ export const syncGLCodeCombinations = async (
       }
 
       pageNum++;
-      const fetchLimit = Math.min(limit, totalLimit - allRecords.length);
+      const fetchLimit = maxRecords !== null
+        ? Math.min(pageLimit, maxRecords - allRecords.length)
+        : pageLimit;
 
       log('info', '');
       log('step', `──── Fetching Page ${pageNum} (offset: ${offset}, limit: ${fetchLimit}) ────`);
@@ -215,9 +217,14 @@ export const syncGLCodeCombinations = async (
 
       log('success', `Fetched ${items.length} records (Total: ${allRecords.length})`);
 
-      // Check if there are more records
-      hasMore = items.length === fetchLimit && allRecords.length < totalLimit;
+      // Check if there are more records - stop if we got less than requested
+      hasMore = items.length === fetchLimit;
       offset += items.length;
+
+      // Also check if we've reached maxRecords limit (for test modes)
+      if (maxRecords !== null && allRecords.length >= maxRecords) {
+        hasMore = false;
+      }
 
       progress.currentPage = pageNum;
       progress.totalRecords = allRecords.length;
