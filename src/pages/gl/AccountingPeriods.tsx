@@ -364,6 +364,14 @@ const AccountingPeriods: React.FC = () => {
 
   // Filter and group period statuses by ledger
   const getLedgerSummaries = useCallback((): LedgerPeriodSummary[] => {
+    // Wait for ledgers to be loaded before calculating summaries
+    if (ledgers.length === 0) {
+      console.log('getLedgerSummaries: Waiting for ledgers to load...');
+      return [];
+    }
+
+    console.log('getLedgerSummaries: Ledgers loaded:', ledgers.length, 'Period statuses:', periodStatuses.length);
+
     // If "All" is selected (null), show all applications; otherwise filter by selected application
     const filtered = selectedApplication === null
       ? periodStatuses
@@ -373,9 +381,10 @@ const AccountingPeriods: React.FC = () => {
     // Group by LedgerId
     const ledgerMap = new Map<number, PeriodStatus[]>();
     filtered.forEach(p => {
-      // Filter out reporting ledgers
-      if (isReportingLedger(p.LedgerId)) {
-        return;
+      // Filter out reporting ledgers - only if ledger exists in our ledger list
+      const ledger = ledgers.find(l => l.ledger_id === p.LedgerId);
+      if (ledger && (ledger.ledger_category_code === 'SECONDARY' || ledger.ledger_category_code === 'ALC')) {
+        return; // Skip reporting ledgers
       }
       const existing = ledgerMap.get(p.LedgerId) || [];
       existing.push(p);
@@ -421,7 +430,7 @@ const AccountingPeriods: React.FC = () => {
     });
 
     return summaries;
-  }, [periodStatuses, selectedApplication, effectiveDate, isReportingLedger, getLedgerName]);
+  }, [periodStatuses, selectedApplication, effectiveDate, ledgers, getLedgerName]);
 
   const ledgerSummaries = getLedgerSummaries();
 
