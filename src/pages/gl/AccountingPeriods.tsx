@@ -57,7 +57,7 @@ const REDWOOD = {
   textSecondary: '#6B6B6B',
 };
 
-// Types
+// Types - support both uppercase (Oracle APEX) and lowercase field names
 interface Application {
   application_id: number;
   application_name: string;
@@ -71,6 +71,21 @@ interface Ledger {
   ledger_category_code?: string; // PRIMARY, SECONDARY, ALC, etc.
   currency_code?: string;
 }
+
+// Normalize API response to handle both UPPERCASE and lowercase field names
+const normalizeApplication = (item: Record<string, unknown>): Application => ({
+  application_id: (item.application_id ?? item.APPLICATION_ID ?? 0) as number,
+  application_name: (item.application_name ?? item.APPLICATION_NAME ?? '') as string,
+  application_short_name: (item.application_short_name ?? item.APPLICATION_SHORT_NAME ?? '') as string,
+});
+
+const normalizeLedger = (item: Record<string, unknown>): Ledger => ({
+  ledger_id: (item.ledger_id ?? item.LEDGER_ID ?? 0) as number,
+  ledger_name: (item.ledger_name ?? item.LEDGER_NAME ?? '') as string,
+  ledger_short_name: (item.ledger_short_name ?? item.LEDGER_SHORT_NAME ?? '') as string,
+  ledger_category_code: (item.ledger_category_code ?? item.LEDGER_CATEGORY_CODE ?? '') as string,
+  currency_code: (item.currency_code ?? item.CURRENCY_CODE ?? '') as string,
+});
 
 interface AccountingPeriod {
   PeriodNameId: string;
@@ -180,15 +195,17 @@ const AccountingPeriods: React.FC = () => {
       }
 
       const result = await response.json();
-      const items = result.items || result || [];
-      console.log('Applications fetched:', items.length);
-      setApplications(items);
+      const rawItems = result.items || result || [];
+      console.log('Applications fetched (raw):', rawItems.length, rawItems[0]);
 
-      // Set default application if not set and we have data
-      if (items.length > 0 && selectedApplication === null) {
-        // Default to Payables (200) or first available
-        const defaultApp = items.find((a: Application) => a.application_id === 200) || items[0];
-        setSelectedApplication(defaultApp.application_id);
+      // Normalize field names (handle both UPPERCASE and lowercase)
+      const normalizedItems = rawItems.map((item: Record<string, unknown>) => normalizeApplication(item));
+      console.log('Applications normalized:', normalizedItems.length, normalizedItems[0]);
+      setApplications(normalizedItems);
+
+      // Set default application - default to "All" (null means all)
+      if (selectedApplication === null) {
+        setSelectedApplication(null); // Start with "All" selected
       }
     } catch (err) {
       console.error('Error fetching applications:', err);
@@ -208,9 +225,13 @@ const AccountingPeriods: React.FC = () => {
       }
 
       const result = await response.json();
-      const items = result.items || result || [];
-      console.log('Ledgers fetched:', items.length);
-      setLedgers(items);
+      const rawItems = result.items || result || [];
+      console.log('Ledgers fetched (raw):', rawItems.length, rawItems[0]);
+
+      // Normalize field names (handle both UPPERCASE and lowercase)
+      const normalizedItems = rawItems.map((item: Record<string, unknown>) => normalizeLedger(item));
+      console.log('Ledgers normalized:', normalizedItems.length, normalizedItems[0]);
+      setLedgers(normalizedItems);
     } catch (err) {
       console.error('Error fetching ledgers:', err);
     }
@@ -343,9 +364,10 @@ const AccountingPeriods: React.FC = () => {
 
   // Filter and group period statuses by ledger
   const getLedgerSummaries = useCallback((): LedgerPeriodSummary[] => {
-    if (selectedApplication === null) return [];
-
-    const filtered = periodStatuses.filter(p => p.ApplicationId === selectedApplication);
+    // If "All" is selected (null), show all applications; otherwise filter by selected application
+    const filtered = selectedApplication === null
+      ? periodStatuses
+      : periodStatuses.filter(p => p.ApplicationId === selectedApplication);
     const effectiveDateStr = effectiveDate.format('YYYY-MM-DD');
 
     // Group by LedgerId
@@ -671,12 +693,16 @@ const AccountingPeriods: React.FC = () => {
             <Text style={{ fontSize: 12 }}>Application:</Text>
             <Select
               value={selectedApplication}
-              onChange={setSelectedApplication}
+              onChange={(value) => setSelectedApplication(value)}
               style={{ width: 200 }}
               size="small"
               loading={mappingLoading}
               placeholder="Select Application"
+              allowClear
             >
+              <Select.Option key="all" value={null}>
+                All
+              </Select.Option>
               {applications
                 .filter(app => availableApplicationIds.includes(app.application_id))
                 .map(app => (
