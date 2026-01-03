@@ -57,15 +57,21 @@ const REDWOOD = {
   textSecondary: '#6B6B6B',
 };
 
-// Application mapping
-const APPLICATION_MAP: { [key: number]: string } = {
-  101: 'General Ledger',
-  200: 'Payables',
-  222: 'Receivables',
-  401: 'Inventory',
-};
-
 // Types
+interface Application {
+  application_id: number;
+  application_name: string;
+  application_short_name?: string;
+}
+
+interface Ledger {
+  ledger_id: number;
+  ledger_name: string;
+  ledger_short_name?: string;
+  ledger_category_code?: string; // PRIMARY, SECONDARY, ALC, etc.
+  currency_code?: string;
+}
+
 interface AccountingPeriod {
   PeriodNameId: string;
   PeriodSetNameId: string;
@@ -80,6 +86,7 @@ interface AccountingPeriod {
 
 interface PeriodStatus {
   PeriodNameId: string;
+  PeriodName?: string;
   ApplicationId: number;
   LedgerId: number;
   LedgerName?: string;
@@ -91,6 +98,18 @@ interface PeriodStatus {
   PeriodNumber: number;
   AdjustmentPeriodFlag: boolean;
 }
+
+// Helper to extract period name from PeriodNameId (format: "PERIODSET_PeriodName_AppId_LedgerId")
+const extractPeriodName = (periodNameId: string, periodName?: string): string => {
+  if (periodName) return periodName;
+  if (!periodNameId) return '-';
+  const parts = periodNameId.split('_');
+  // Format is typically: PERIODSET_Jan-26_101_300000000774004
+  if (parts.length >= 2) {
+    return parts[1];
+  }
+  return periodNameId;
+};
 
 interface LedgerPeriodSummary {
   LedgerId: number;
@@ -104,11 +123,16 @@ interface LedgerPeriodSummary {
 const AccountingPeriods: React.FC = () => {
   const [activeTab, setActiveTab] = useState('status');
 
+  // Applications and Ledgers mapping state
+  const [applications, setApplications] = useState<Application[]>([]);
+  const [ledgers, setLedgers] = useState<Ledger[]>([]);
+  const [mappingLoading, setMappingLoading] = useState(false);
+
   // Period Status tab state
   const [periodStatuses, setPeriodStatuses] = useState<PeriodStatus[]>([]);
   const [statusLoading, setStatusLoading] = useState(false);
   const [statusError, setStatusError] = useState<string>('');
-  const [selectedApplication, setSelectedApplication] = useState<number>(200); // Default to Payables
+  const [selectedApplication, setSelectedApplication] = useState<number | null>(null);
   const [effectiveDate, setEffectiveDate] = useState<dayjs.Dayjs>(dayjs());
   const [selectedLedger, setSelectedLedger] = useState<LedgerPeriodSummary | null>(null);
   const [selectedPeriod, setSelectedPeriod] = useState<PeriodStatus | null>(null);
@@ -123,6 +147,84 @@ const AccountingPeriods: React.FC = () => {
     total: 0,
     fetching: false,
   });
+
+  // Helper function to get application name by ID
+  const getApplicationName = useCallback((appId: number): string => {
+    const app = applications.find(a => a.application_id === appId);
+    return app?.application_name || `Application ${appId}`;
+  }, [applications]);
+
+  // Helper function to get ledger name by ID
+  const getLedgerName = useCallback((ledgerId: number): string => {
+    const ledger = ledgers.find(l => l.ledger_id === ledgerId);
+    return ledger?.ledger_name || `Ledger ${ledgerId}`;
+  }, [ledgers]);
+
+  // Helper function to check if ledger is a reporting ledger (to be filtered out)
+  const isReportingLedger = useCallback((ledgerId: number): boolean => {
+    const ledger = ledgers.find(l => l.ledger_id === ledgerId);
+    // Filter out SECONDARY and ALC (Average Ledger Currency) ledgers - these are reporting ledgers
+    return ledger?.ledger_category_code === 'SECONDARY' || ledger?.ledger_category_code === 'ALC';
+  }, [ledgers]);
+
+  // Fetch applications from APEX REST
+  const fetchApplications = useCallback(async () => {
+    try {
+      const url = `${PROXY_CONFIG.baseUrl}/apex/applications/getall`;
+      console.log('=== FETCHING APPLICATIONS ===');
+      console.log('URL:', url);
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`API Error: ${response.status} ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      const items = result.items || result || [];
+      console.log('Applications fetched:', items.length);
+      setApplications(items);
+
+      // Set default application if not set and we have data
+      if (items.length > 0 && selectedApplication === null) {
+        // Default to Payables (200) or first available
+        const defaultApp = items.find((a: Application) => a.application_id === 200) || items[0];
+        setSelectedApplication(defaultApp.application_id);
+      }
+    } catch (err) {
+      console.error('Error fetching applications:', err);
+    }
+  }, [selectedApplication]);
+
+  // Fetch ledgers from APEX REST
+  const fetchLedgers = useCallback(async () => {
+    try {
+      const url = `${PROXY_CONFIG.baseUrl}/apex/ledgers`;
+      console.log('=== FETCHING LEDGERS ===');
+      console.log('URL:', url);
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`API Error: ${response.status} ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      const items = result.items || result || [];
+      console.log('Ledgers fetched:', items.length);
+      setLedgers(items);
+    } catch (err) {
+      console.error('Error fetching ledgers:', err);
+    }
+  }, []);
+
+  // Fetch applications and ledgers on mount
+  useEffect(() => {
+    const fetchMappingData = async () => {
+      setMappingLoading(true);
+      await Promise.all([fetchApplications(), fetchLedgers()]);
+      setMappingLoading(false);
+    };
+    fetchMappingData();
+  }, [fetchApplications, fetchLedgers]);
 
   // Fetch period statuses with pagination
   const fetchPeriodStatuses = useCallback(async () => {
@@ -236,17 +338,23 @@ const AccountingPeriods: React.FC = () => {
     fetchAllPeriods();
   }, [fetchPeriodStatuses, fetchAllPeriods]);
 
-  // Get unique applications from data
-  const applications = [...new Set(periodStatuses.map(p => p.ApplicationId))].sort();
+  // Get unique applications from period status data (for dropdown options based on data availability)
+  const availableApplicationIds = [...new Set(periodStatuses.map(p => p.ApplicationId))].sort();
 
   // Filter and group period statuses by ledger
   const getLedgerSummaries = useCallback((): LedgerPeriodSummary[] => {
+    if (selectedApplication === null) return [];
+
     const filtered = periodStatuses.filter(p => p.ApplicationId === selectedApplication);
     const effectiveDateStr = effectiveDate.format('YYYY-MM-DD');
 
     // Group by LedgerId
     const ledgerMap = new Map<number, PeriodStatus[]>();
     filtered.forEach(p => {
+      // Filter out reporting ledgers
+      if (isReportingLedger(p.LedgerId)) {
+        return;
+      }
       const existing = ledgerMap.get(p.LedgerId) || [];
       existing.push(p);
       ledgerMap.set(p.LedgerId, existing);
@@ -277,8 +385,8 @@ const AccountingPeriods: React.FC = () => {
       const priorPeriod = currentIdx > 0 ? sorted[currentIdx - 1] : null;
       const nextPeriod = currentIdx < sorted.length - 1 ? sorted[currentIdx + 1] : null;
 
-      // Get ledger name from the first period (would need a separate lookup in real app)
-      const ledgerName = `Ledger ${ledgerId}`;
+      // Get ledger name from ledgers lookup
+      const ledgerName = getLedgerName(ledgerId);
 
       summaries.push({
         LedgerId: ledgerId,
@@ -291,7 +399,7 @@ const AccountingPeriods: React.FC = () => {
     });
 
     return summaries;
-  }, [periodStatuses, selectedApplication, effectiveDate]);
+  }, [periodStatuses, selectedApplication, effectiveDate, isReportingLedger, getLedgerName]);
 
   const ledgerSummaries = getLedgerSummaries();
 
@@ -349,7 +457,9 @@ const AccountingPeriods: React.FC = () => {
           key: 'currentName',
           width: 120,
           render: (_: unknown, record: LedgerPeriodSummary) => (
-            <Text style={{ fontSize: 11 }}>{record.currentPeriod?.PeriodNameId?.split('_')[1] || '-'}</Text>
+            <Text style={{ fontSize: 11 }}>
+              {record.currentPeriod ? extractPeriodName(record.currentPeriod.PeriodNameId, record.currentPeriod.PeriodName) : '-'}
+            </Text>
           ),
         },
         {
@@ -371,7 +481,9 @@ const AccountingPeriods: React.FC = () => {
           key: 'priorName',
           width: 120,
           render: (_: unknown, record: LedgerPeriodSummary) => (
-            <Text style={{ fontSize: 11 }}>{record.priorPeriod?.PeriodNameId?.split('_')[1] || '-'}</Text>
+            <Text style={{ fontSize: 11 }}>
+              {record.priorPeriod ? extractPeriodName(record.priorPeriod.PeriodNameId, record.priorPeriod.PeriodName) : '-'}
+            </Text>
           ),
         },
         {
@@ -393,7 +505,9 @@ const AccountingPeriods: React.FC = () => {
           key: 'nextName',
           width: 120,
           render: (_: unknown, record: LedgerPeriodSummary) => (
-            <Text style={{ fontSize: 11 }}>{record.nextPeriod?.PeriodNameId?.split('_')[1] || '-'}</Text>
+            <Text style={{ fontSize: 11 }}>
+              {record.nextPeriod ? extractPeriodName(record.nextPeriod.PeriodNameId, record.nextPeriod.PeriodName) : '-'}
+            </Text>
           ),
         },
         {
@@ -416,7 +530,9 @@ const AccountingPeriods: React.FC = () => {
       dataIndex: 'PeriodNameId',
       key: 'PeriodNameId',
       width: 180,
-      render: (name: string) => <Text style={{ fontSize: 11 }}>{name?.split('_')[1] || name}</Text>,
+      render: (periodNameId: string, record: PeriodStatus) => (
+        <Text style={{ fontSize: 11 }}>{extractPeriodName(periodNameId, record.PeriodName)}</Text>
+      ),
     },
     {
       title: 'Period Number',
@@ -556,14 +672,18 @@ const AccountingPeriods: React.FC = () => {
             <Select
               value={selectedApplication}
               onChange={setSelectedApplication}
-              style={{ width: 180 }}
+              style={{ width: 200 }}
               size="small"
+              loading={mappingLoading}
+              placeholder="Select Application"
             >
-              {applications.map(appId => (
-                <Select.Option key={appId} value={appId}>
-                  {APPLICATION_MAP[appId] || `Application ${appId}`}
-                </Select.Option>
-              ))}
+              {applications
+                .filter(app => availableApplicationIds.includes(app.application_id))
+                .map(app => (
+                  <Select.Option key={app.application_id} value={app.application_id}>
+                    {app.application_name}
+                  </Select.Option>
+                ))}
             </Select>
           </Space>
         </Col>
@@ -830,101 +950,120 @@ const AccountingPeriods: React.FC = () => {
           </Button>,
         ]}
       >
-        {selectedLedger && (
-          <div>
-            {/* Ledger Info */}
-            <Row gutter={24} style={{ marginBottom: 16 }}>
-              <Col span={8}>
-                <Text style={{ fontSize: 12 }}>
-                  <Text strong>Ledger: </Text>
-                  <Select
-                    value={selectedLedger.LedgerId}
-                    style={{ width: 180 }}
-                    size="small"
-                  >
-                    <Select.Option value={selectedLedger.LedgerId}>
-                      {selectedLedger.LedgerName}
-                    </Select.Option>
-                  </Select>
-                </Text>
-              </Col>
-              <Col span={8}>
-                <Text style={{ fontSize: 12 }}>
-                  <Text strong>Latest Open Period: </Text>
-                  {selectedLedger.allPeriods.find(p => p.ClosingStatus === 'O')?.PeriodNameId?.split('_')[1] || '-'}
-                </Text>
-              </Col>
-              <Col span={8}>
-                <Text style={{ fontSize: 12 }}>
-                  <Text strong>Application: </Text>
-                  {APPLICATION_MAP[selectedApplication] || `Application ${selectedApplication}`}
-                </Text>
-              </Col>
-            </Row>
+        {selectedLedger && (() => {
+          // Get current period and the next future period only
+          const sorted = [...selectedLedger.allPeriods].sort((a, b) => a.EffectivePeriodNumber - b.EffectivePeriodNumber);
+          const currentPeriod = selectedLedger.currentPeriod;
+          const currentIdx = currentPeriod ? sorted.findIndex(p => p.PeriodNameId === currentPeriod.PeriodNameId) : -1;
 
-            {/* Action Buttons */}
-            <Space style={{ marginBottom: 16 }}>
-              <Button
-                size="small"
-                icon={<UnlockOutlined />}
-                disabled={!canOpenPeriod}
-              >
-                Open Period
-              </Button>
-              <Button
-                size="small"
-                icon={<LockOutlined />}
-                disabled={!canClosePeriod}
-              >
-                Close Period
-              </Button>
-              <Select
-                placeholder="Status"
-                style={{ width: 120 }}
-                size="small"
-                allowClear
-              >
-                <Select.Option value="all">All</Select.Option>
-                <Select.Option value="O">Open</Select.Option>
-                <Select.Option value="C">Closed</Select.Option>
-                <Select.Option value="F">Future</Select.Option>
-                <Select.Option value="N">Never Opened</Select.Option>
-              </Select>
-            </Space>
+          // Show current period + 1 future period only
+          const periodsToShow: PeriodStatus[] = [];
+          if (currentIdx >= 0 && currentPeriod) {
+            periodsToShow.push(currentPeriod);
+            // Add the next period if available
+            if (currentIdx + 1 < sorted.length) {
+              periodsToShow.push(sorted[currentIdx + 1]);
+            }
+          }
 
-            {/* Periods Table */}
-            <Table
-              dataSource={selectedLedger.allPeriods.sort((a, b) => b.EffectivePeriodNumber - a.EffectivePeriodNumber)}
-              columns={detailColumns}
-              rowKey="PeriodNameId"
-              size="small"
-              pagination={false}
-              scroll={{ y: 400 }}
-              rowSelection={{
-                type: 'radio',
-                selectedRowKeys: selectedPeriod ? [selectedPeriod.PeriodNameId] : [],
-                onChange: (_, selectedRows) => {
-                  setSelectedPeriod(selectedRows[0] || null);
-                },
-              }}
-              onRow={(record) => ({
-                onClick: () => setSelectedPeriod(record),
-                style: { cursor: 'pointer' },
-              })}
-            />
+          const latestOpenPeriod = selectedLedger.allPeriods.find(p => p.ClosingStatus === 'O');
 
-            {/* Legend */}
-            <div style={{ marginTop: 12, display: 'flex', gap: 16, alignItems: 'center' }}>
-              <Space size={16}>
-                <Space size={4}><BookOutlined style={{ color: REDWOOD.info }} /><Text style={{ fontSize: 10 }}>Open</Text></Space>
-                <Space size={4}><CheckCircleOutlined style={{ color: REDWOOD.success }} /><Text style={{ fontSize: 10 }}>Closed</Text></Space>
-                <Space size={4}><LockOutlined style={{ color: REDWOOD.textSecondary }} /><Text style={{ fontSize: 10 }}>Permanently Closed</Text></Space>
-                <Space size={4}><EditOutlined style={{ color: REDWOOD.warning }} /><Text style={{ fontSize: 10 }}>Future Enterable</Text></Space>
-                <Space size={4}><StopOutlined style={{ color: REDWOOD.info }} /><Text style={{ fontSize: 10 }}>Never Opened</Text></Space>
+          return (
+            <div>
+              {/* Ledger Info */}
+              <Row gutter={24} style={{ marginBottom: 16 }}>
+                <Col span={8}>
+                  <Text style={{ fontSize: 12 }}>
+                    <Text strong>Ledger: </Text>
+                    <Select
+                      value={selectedLedger.LedgerId}
+                      style={{ width: 200 }}
+                      size="small"
+                    >
+                      <Select.Option value={selectedLedger.LedgerId}>
+                        {selectedLedger.LedgerName}
+                      </Select.Option>
+                    </Select>
+                  </Text>
+                </Col>
+                <Col span={8}>
+                  <Text style={{ fontSize: 12 }}>
+                    <Text strong>Latest Open Period: </Text>
+                    {latestOpenPeriod ? extractPeriodName(latestOpenPeriod.PeriodNameId, latestOpenPeriod.PeriodName) : '-'}
+                  </Text>
+                </Col>
+                <Col span={8}>
+                  <Text style={{ fontSize: 12 }}>
+                    <Text strong>Application: </Text>
+                    {selectedApplication !== null ? getApplicationName(selectedApplication) : '-'}
+                  </Text>
+                </Col>
+              </Row>
+
+              {/* Action Buttons */}
+              <Space style={{ marginBottom: 16 }}>
+                <Button
+                  size="small"
+                  icon={<UnlockOutlined />}
+                  disabled={!canOpenPeriod}
+                >
+                  Open Period
+                </Button>
+                <Button
+                  size="small"
+                  icon={<LockOutlined />}
+                  disabled={!canClosePeriod}
+                >
+                  Close Period
+                </Button>
+                <Select
+                  placeholder="Status"
+                  style={{ width: 120 }}
+                  size="small"
+                  allowClear
+                >
+                  <Select.Option value="all">All</Select.Option>
+                  <Select.Option value="O">Open</Select.Option>
+                  <Select.Option value="C">Closed</Select.Option>
+                  <Select.Option value="F">Future</Select.Option>
+                  <Select.Option value="N">Never Opened</Select.Option>
+                </Select>
               </Space>
+
+              {/* Periods Table - Shows current period + 1 future period only */}
+              <Table
+                dataSource={periodsToShow.sort((a, b) => a.EffectivePeriodNumber - b.EffectivePeriodNumber)}
+                columns={detailColumns}
+                rowKey="PeriodNameId"
+                size="small"
+                pagination={false}
+                scroll={{ y: 400 }}
+                rowSelection={{
+                  type: 'radio',
+                  selectedRowKeys: selectedPeriod ? [selectedPeriod.PeriodNameId] : [],
+                  onChange: (_, selectedRows) => {
+                    setSelectedPeriod(selectedRows[0] || null);
+                  },
+                }}
+                onRow={(record) => ({
+                  onClick: () => setSelectedPeriod(record),
+                  style: { cursor: 'pointer' },
+                })}
+              />
+
+              {/* Legend */}
+              <div style={{ marginTop: 12, display: 'flex', gap: 16, alignItems: 'center' }}>
+                <Space size={16}>
+                  <Space size={4}><BookOutlined style={{ color: REDWOOD.info }} /><Text style={{ fontSize: 10 }}>Open</Text></Space>
+                  <Space size={4}><CheckCircleOutlined style={{ color: REDWOOD.success }} /><Text style={{ fontSize: 10 }}>Closed</Text></Space>
+                  <Space size={4}><LockOutlined style={{ color: REDWOOD.textSecondary }} /><Text style={{ fontSize: 10 }}>Permanently Closed</Text></Space>
+                  <Space size={4}><EditOutlined style={{ color: REDWOOD.warning }} /><Text style={{ fontSize: 10 }}>Future Enterable</Text></Space>
+                  <Space size={4}><StopOutlined style={{ color: REDWOOD.info }} /><Text style={{ fontSize: 10 }}>Never Opened</Text></Space>
+                </Space>
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
       </Modal>
 
       {/* Autopilot Assistant */}
