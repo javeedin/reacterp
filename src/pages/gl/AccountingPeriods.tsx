@@ -18,7 +18,8 @@ import {
   Select,
   DatePicker,
   Tooltip,
-  Modal,
+  Popover,
+  Divider,
 } from 'antd';
 import {
   HomeOutlined,
@@ -32,6 +33,8 @@ import {
   LockOutlined,
   UnlockOutlined,
   StopOutlined,
+  ApiOutlined,
+  ArrowLeftOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -151,7 +154,7 @@ const AccountingPeriods: React.FC = () => {
   const [effectiveDate, setEffectiveDate] = useState<dayjs.Dayjs>(dayjs());
   const [selectedLedger, setSelectedLedger] = useState<LedgerPeriodSummary | null>(null);
   const [selectedPeriod, setSelectedPeriod] = useState<PeriodStatus | null>(null);
-  const [detailModalVisible, setDetailModalVisible] = useState(false);
+  const [showApiLog, setShowApiLog] = useState(false);
 
   // All Periods tab state
   const [periods, setPeriods] = useState<AccountingPeriod[]>([]);
@@ -452,12 +455,38 @@ const AccountingPeriods: React.FC = () => {
     }
   };
 
-  // Handle ledger click to show detail
+  // Handle ledger click to show detail in tab
   const handleLedgerClick = (ledger: LedgerPeriodSummary) => {
     setSelectedLedger(ledger);
     setSelectedPeriod(null);
-    setDetailModalVisible(true);
+    setActiveTab('details'); // Switch to details tab
   };
+
+  // Webservices used on this page
+  const webservices = [
+    { method: 'GET', url: '/api/apex/applications/getall', description: 'Fetch applications list' },
+    { method: 'GET', url: '/api/apex/ledgers', description: 'Fetch ledgers list' },
+    { method: 'GET', url: '/api/fusion/fscmRestApi/resources/11.13.18.05/accountingPeriodStatusLOV', description: 'Fetch period statuses' },
+    { method: 'GET', url: '/api/fusion/fscmRestApi/resources/11.13.18.05/accountingPeriodsLOV', description: 'Fetch all periods' },
+    { method: 'POST', url: '/api/apex/gl/periods/open', description: 'Open period (TBD)' },
+    { method: 'POST', url: '/api/apex/gl/periods/close', description: 'Close period (TBD)' },
+  ];
+
+  // API Log Popover Content
+  const apiLogContent = (
+    <div style={{ width: 500 }}>
+      <Text strong style={{ fontSize: 12 }}>Webservices Used:</Text>
+      <Divider style={{ margin: '8px 0' }} />
+      {webservices.map((ws, idx) => (
+        <div key={idx} style={{ marginBottom: 8, padding: '4px 8px', background: '#f5f5f5', borderRadius: 4 }}>
+          <Tag color={ws.method === 'GET' ? 'blue' : 'green'} style={{ fontSize: 10 }}>{ws.method}</Tag>
+          <Text code style={{ fontSize: 10 }}>{ws.url}</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: 10 }}>{ws.description}</Text>
+        </div>
+      ))}
+    </div>
+  );
 
   // Check if actions should be enabled
   const canOpenPeriod = selectedPeriod && (selectedPeriod.ClosingStatus === 'C' || selectedPeriod.ClosingStatus === 'F' || selectedPeriod.ClosingStatus === 'N');
@@ -809,6 +838,147 @@ const AccountingPeriods: React.FC = () => {
     </div>
   );
 
+  // Edit Period Statuses Tab Content (replaces modal)
+  const EditPeriodStatusesTab = () => {
+    if (!selectedLedger) {
+      return (
+        <div style={{ padding: 40, textAlign: 'center' }}>
+          <Text type="secondary">Select a ledger from Period Status tab to view details</Text>
+        </div>
+      );
+    }
+
+    // Get all periods sorted by EffectivePeriodNumber
+    const sorted = [...selectedLedger.allPeriods].sort((a, b) => a.EffectivePeriodNumber - b.EffectivePeriodNumber);
+    const currentPeriod = selectedLedger.currentPeriod;
+    const currentIdx = currentPeriod ? sorted.findIndex(p => p.PeriodNameId === currentPeriod.PeriodNameId) : -1;
+
+    // Show all historical periods + current period + 1 future period only
+    const periodsToShow: PeriodStatus[] = [];
+    if (currentIdx >= 0) {
+      // Add all historical periods (before current)
+      for (let i = 0; i <= currentIdx; i++) {
+        periodsToShow.push(sorted[i]);
+      }
+      // Add only 1 future period (after current)
+      if (currentIdx + 1 < sorted.length) {
+        periodsToShow.push(sorted[currentIdx + 1]);
+      }
+    } else {
+      // If no current period found, show all periods
+      periodsToShow.push(...sorted);
+    }
+
+    const latestOpenPeriod = selectedLedger.allPeriods.find(p => p.ClosingStatus === 'O');
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        {/* Back Button */}
+        <div style={{ marginBottom: 12 }}>
+          <Button
+            icon={<ArrowLeftOutlined />}
+            onClick={() => setActiveTab('status')}
+            size="small"
+          >
+            Back to Period Status
+          </Button>
+        </div>
+
+        {/* Ledger Info Card */}
+        <Card size="small" style={{ marginBottom: 12, borderRadius: 6 }}>
+          <Row gutter={24}>
+            <Col span={8}>
+              <Text style={{ fontSize: 12 }}>
+                <Text strong>Ledger: </Text>
+                {selectedLedger.LedgerName}
+              </Text>
+            </Col>
+            <Col span={8}>
+              <Text style={{ fontSize: 12 }}>
+                <Text strong>Latest Open Period: </Text>
+                {latestOpenPeriod ? extractPeriodName(latestOpenPeriod.PeriodNameId, latestOpenPeriod.PeriodName) : '-'}
+              </Text>
+            </Col>
+            <Col span={8}>
+              <Text style={{ fontSize: 12 }}>
+                <Text strong>Application: </Text>
+                {selectedApplication !== null ? getApplicationName(selectedApplication) : 'All'}
+              </Text>
+            </Col>
+          </Row>
+        </Card>
+
+        {/* Action Buttons */}
+        <Space style={{ marginBottom: 12 }}>
+          <Button
+            size="small"
+            icon={<UnlockOutlined />}
+            disabled={!canOpenPeriod}
+            type="primary"
+          >
+            Open Period
+          </Button>
+          <Button
+            size="small"
+            icon={<LockOutlined />}
+            disabled={!canClosePeriod}
+          >
+            Close Period
+          </Button>
+          <Select
+            placeholder="Filter by Status"
+            style={{ width: 150 }}
+            size="small"
+            allowClear
+          >
+            <Select.Option value="all">All</Select.Option>
+            <Select.Option value="O">Open</Select.Option>
+            <Select.Option value="C">Closed</Select.Option>
+            <Select.Option value="F">Future</Select.Option>
+            <Select.Option value="N">Never Opened</Select.Option>
+          </Select>
+        </Space>
+
+        {/* Periods Table */}
+        <Card
+          style={{ flex: 1, borderRadius: 6, border: `1px solid ${REDWOOD.border}` }}
+          bodyStyle={{ padding: 0 }}
+        >
+          <Table
+            dataSource={periodsToShow.sort((a, b) => b.EffectivePeriodNumber - a.EffectivePeriodNumber)}
+            columns={detailColumns}
+            rowKey="PeriodNameId"
+            size="small"
+            pagination={false}
+            scroll={{ y: 'calc(100vh - 420px)' }}
+            rowSelection={{
+              type: 'radio',
+              selectedRowKeys: selectedPeriod ? [selectedPeriod.PeriodNameId] : [],
+              onChange: (_, selectedRows) => {
+                setSelectedPeriod(selectedRows[0] || null);
+              },
+            }}
+            onRow={(record) => ({
+              onClick: () => setSelectedPeriod(record),
+              style: { cursor: 'pointer' },
+            })}
+          />
+        </Card>
+
+        {/* Legend */}
+        <div style={{ marginTop: 8, display: 'flex', gap: 16, alignItems: 'center' }}>
+          <Space size={16}>
+            <Space size={4}><BookOutlined style={{ color: REDWOOD.info }} /><Text style={{ fontSize: 10 }}>Open</Text></Space>
+            <Space size={4}><CheckCircleOutlined style={{ color: REDWOOD.success }} /><Text style={{ fontSize: 10 }}>Closed</Text></Space>
+            <Space size={4}><LockOutlined style={{ color: REDWOOD.textSecondary }} /><Text style={{ fontSize: 10 }}>Permanently Closed</Text></Space>
+            <Space size={4}><EditOutlined style={{ color: REDWOOD.warning }} /><Text style={{ fontSize: 10 }}>Future Enterable</Text></Space>
+            <Space size={4}><StopOutlined style={{ color: REDWOOD.info }} /><Text style={{ fontSize: 10 }}>Never Opened</Text></Space>
+          </Space>
+        </div>
+      </div>
+    );
+  };
+
   // All Periods Tab Content
   const AllPeriodsTab = () => (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -950,6 +1120,23 @@ const AccountingPeriods: React.FC = () => {
                 </div>
               </Space>
             </Col>
+            <Col>
+              <Popover
+                content={apiLogContent}
+                title="API Services"
+                trigger="click"
+                open={showApiLog}
+                onOpenChange={setShowApiLog}
+              >
+                <Button
+                  icon={<ApiOutlined />}
+                  size="small"
+                  type={showApiLog ? 'primary' : 'default'}
+                >
+                  API Log
+                </Button>
+              </Popover>
+            </Col>
           </Row>
 
           {/* Tabs */}
@@ -968,144 +1155,16 @@ const AccountingPeriods: React.FC = () => {
                 label: 'All Periods',
                 children: <AllPeriodsTab />,
               },
+              {
+                key: 'details',
+                label: selectedLedger ? `Edit: ${selectedLedger.LedgerName}` : 'Edit Period Statuses',
+                children: <EditPeriodStatusesTab />,
+                disabled: !selectedLedger,
+              },
             ]}
           />
         </div>
       </Content>
-
-      {/* Detail Modal - Edit Accounting Period Statuses */}
-      <Modal
-        title={`Edit Accounting Period Statuses: ${selectedLedger?.LedgerName || ''}`}
-        open={detailModalVisible}
-        onCancel={() => setDetailModalVisible(false)}
-        width={900}
-        footer={[
-          <Button key="done" type="primary" onClick={() => setDetailModalVisible(false)}>
-            Done
-          </Button>,
-        ]}
-      >
-        {selectedLedger && (() => {
-          // Get all periods sorted by EffectivePeriodNumber
-          const sorted = [...selectedLedger.allPeriods].sort((a, b) => a.EffectivePeriodNumber - b.EffectivePeriodNumber);
-          const currentPeriod = selectedLedger.currentPeriod;
-          const currentIdx = currentPeriod ? sorted.findIndex(p => p.PeriodNameId === currentPeriod.PeriodNameId) : -1;
-
-          // Show all historical periods + current period + 1 future period only
-          const periodsToShow: PeriodStatus[] = [];
-          if (currentIdx >= 0) {
-            // Add all historical periods (before current)
-            for (let i = 0; i <= currentIdx; i++) {
-              periodsToShow.push(sorted[i]);
-            }
-            // Add only 1 future period (after current)
-            if (currentIdx + 1 < sorted.length) {
-              periodsToShow.push(sorted[currentIdx + 1]);
-            }
-          } else {
-            // If no current period found, show all periods
-            periodsToShow.push(...sorted);
-          }
-
-          const latestOpenPeriod = selectedLedger.allPeriods.find(p => p.ClosingStatus === 'O');
-
-          return (
-            <div>
-              {/* Ledger Info */}
-              <Row gutter={24} style={{ marginBottom: 16 }}>
-                <Col span={8}>
-                  <Text style={{ fontSize: 12 }}>
-                    <Text strong>Ledger: </Text>
-                    <Select
-                      value={selectedLedger.LedgerId}
-                      style={{ width: 200 }}
-                      size="small"
-                    >
-                      <Select.Option value={selectedLedger.LedgerId}>
-                        {selectedLedger.LedgerName}
-                      </Select.Option>
-                    </Select>
-                  </Text>
-                </Col>
-                <Col span={8}>
-                  <Text style={{ fontSize: 12 }}>
-                    <Text strong>Latest Open Period: </Text>
-                    {latestOpenPeriod ? extractPeriodName(latestOpenPeriod.PeriodNameId, latestOpenPeriod.PeriodName) : '-'}
-                  </Text>
-                </Col>
-                <Col span={8}>
-                  <Text style={{ fontSize: 12 }}>
-                    <Text strong>Application: </Text>
-                    {selectedApplication !== null ? getApplicationName(selectedApplication) : '-'}
-                  </Text>
-                </Col>
-              </Row>
-
-              {/* Action Buttons */}
-              <Space style={{ marginBottom: 16 }}>
-                <Button
-                  size="small"
-                  icon={<UnlockOutlined />}
-                  disabled={!canOpenPeriod}
-                >
-                  Open Period
-                </Button>
-                <Button
-                  size="small"
-                  icon={<LockOutlined />}
-                  disabled={!canClosePeriod}
-                >
-                  Close Period
-                </Button>
-                <Select
-                  placeholder="Status"
-                  style={{ width: 120 }}
-                  size="small"
-                  allowClear
-                >
-                  <Select.Option value="all">All</Select.Option>
-                  <Select.Option value="O">Open</Select.Option>
-                  <Select.Option value="C">Closed</Select.Option>
-                  <Select.Option value="F">Future</Select.Option>
-                  <Select.Option value="N">Never Opened</Select.Option>
-                </Select>
-              </Space>
-
-              {/* Periods Table - Shows all historical + current + 1 future period */}
-              <Table
-                dataSource={periodsToShow.sort((a, b) => b.EffectivePeriodNumber - a.EffectivePeriodNumber)}
-                columns={detailColumns}
-                rowKey="PeriodNameId"
-                size="small"
-                pagination={false}
-                scroll={{ y: 400 }}
-                rowSelection={{
-                  type: 'radio',
-                  selectedRowKeys: selectedPeriod ? [selectedPeriod.PeriodNameId] : [],
-                  onChange: (_, selectedRows) => {
-                    setSelectedPeriod(selectedRows[0] || null);
-                  },
-                }}
-                onRow={(record) => ({
-                  onClick: () => setSelectedPeriod(record),
-                  style: { cursor: 'pointer' },
-                })}
-              />
-
-              {/* Legend */}
-              <div style={{ marginTop: 12, display: 'flex', gap: 16, alignItems: 'center' }}>
-                <Space size={16}>
-                  <Space size={4}><BookOutlined style={{ color: REDWOOD.info }} /><Text style={{ fontSize: 10 }}>Open</Text></Space>
-                  <Space size={4}><CheckCircleOutlined style={{ color: REDWOOD.success }} /><Text style={{ fontSize: 10 }}>Closed</Text></Space>
-                  <Space size={4}><LockOutlined style={{ color: REDWOOD.textSecondary }} /><Text style={{ fontSize: 10 }}>Permanently Closed</Text></Space>
-                  <Space size={4}><EditOutlined style={{ color: REDWOOD.warning }} /><Text style={{ fontSize: 10 }}>Future Enterable</Text></Space>
-                  <Space size={4}><StopOutlined style={{ color: REDWOOD.info }} /><Text style={{ fontSize: 10 }}>Never Opened</Text></Space>
-                </Space>
-              </div>
-            </div>
-          );
-        })()}
-      </Modal>
 
       {/* Autopilot Assistant */}
       <Autopilot />
