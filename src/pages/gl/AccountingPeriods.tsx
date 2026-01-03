@@ -986,19 +986,25 @@ const AccountingPeriods: React.FC = () => {
         ]}
       >
         {selectedLedger && (() => {
-          // Get current period and the next future period only
+          // Get all periods sorted by EffectivePeriodNumber
           const sorted = [...selectedLedger.allPeriods].sort((a, b) => a.EffectivePeriodNumber - b.EffectivePeriodNumber);
           const currentPeriod = selectedLedger.currentPeriod;
           const currentIdx = currentPeriod ? sorted.findIndex(p => p.PeriodNameId === currentPeriod.PeriodNameId) : -1;
 
-          // Show current period + 1 future period only
+          // Show all historical periods + current period + 1 future period only
           const periodsToShow: PeriodStatus[] = [];
-          if (currentIdx >= 0 && currentPeriod) {
-            periodsToShow.push(currentPeriod);
-            // Add the next period if available
+          if (currentIdx >= 0) {
+            // Add all historical periods (before current)
+            for (let i = 0; i <= currentIdx; i++) {
+              periodsToShow.push(sorted[i]);
+            }
+            // Add only 1 future period (after current)
             if (currentIdx + 1 < sorted.length) {
               periodsToShow.push(sorted[currentIdx + 1]);
             }
+          } else {
+            // If no current period found, show all periods
+            periodsToShow.push(...sorted);
           }
 
           const latestOpenPeriod = selectedLedger.allPeriods.find(p => p.ClosingStatus === 'O');
@@ -1065,9 +1071,9 @@ const AccountingPeriods: React.FC = () => {
                 </Select>
               </Space>
 
-              {/* Periods Table - Shows current period + 1 future period only */}
+              {/* Periods Table - Shows all historical + current + 1 future period */}
               <Table
-                dataSource={periodsToShow.sort((a, b) => a.EffectivePeriodNumber - b.EffectivePeriodNumber)}
+                dataSource={periodsToShow.sort((a, b) => b.EffectivePeriodNumber - a.EffectivePeriodNumber)}
                 columns={detailColumns}
                 rowKey="PeriodNameId"
                 size="small"
