@@ -35,6 +35,7 @@ import {
   StopOutlined,
   ApiOutlined,
   ArrowLeftOutlined,
+  CloseOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -178,11 +179,11 @@ const AccountingPeriods: React.FC = () => {
   const [currentStatusLoading, setCurrentStatusLoading] = useState(false);
   const [currentStatusError, setCurrentStatusError] = useState<string>('');
 
-  // NEW: Period Status Detail for drill-down
-  const [periodStatusDetails, setPeriodStatusDetails] = useState<PeriodStatusDetailItem[]>([]);
-  const [detailsLoading, setDetailsLoading] = useState(false);
-  const [detailsError, setDetailsError] = useState<string>('');
-  const [selectedStatusItem, setSelectedStatusItem] = useState<CurrentPeriodStatusItem | null>(null);
+  // NEW: Multiple open tabs for period status details
+  const [openTabs, setOpenTabs] = useState<CurrentPeriodStatusItem[]>([]);
+  const [tabDetailsMap, setTabDetailsMap] = useState<Record<string, PeriodStatusDetailItem[]>>({});
+  const [tabLoadingMap, setTabLoadingMap] = useState<Record<string, boolean>>({});
+  const [tabErrorMap, setTabErrorMap] = useState<Record<string, string>>({});
 
   // Period Status tab state (legacy - keep for now)
   const [periodStatuses, setPeriodStatuses] = useState<PeriodStatus[]>([]);
@@ -317,16 +318,21 @@ const AccountingPeriods: React.FC = () => {
     }
   }, []);
 
-  // NEW: Fetch period status details for a specific application and ledger
-  const fetchPeriodStatusDetails = useCallback(async (applicationName: string, ledgerName: string) => {
-    setDetailsLoading(true);
-    setDetailsError('');
-    setPeriodStatusDetails([]);
+  // Helper to generate unique tab key
+  const getTabKey = (item: CurrentPeriodStatusItem) => `${item.ledger_name}-${item.app}`;
+
+  // NEW: Fetch period status details for a specific application and ledger (stores in map)
+  const fetchPeriodStatusDetails = useCallback(async (item: CurrentPeriodStatusItem) => {
+    const tabKey = getTabKey(item);
+
+    // Set loading state for this tab
+    setTabLoadingMap(prev => ({ ...prev, [tabKey]: true }));
+    setTabErrorMap(prev => ({ ...prev, [tabKey]: '' }));
 
     try {
       const params = new URLSearchParams({
-        P_APPLICATION_NAME: applicationName,
-        P_LEDGER_NAME: ledgerName,
+        P_APPLICATION_NAME: item.application_name,
+        P_LEDGER_NAME: item.ledger_name,
       });
       const url = `${PROXY_CONFIG.baseUrl}/apex/periodsstatus/create?${params.toString()}`;
       console.log('=== FETCHING PERIOD STATUS DETAILS ===');
@@ -341,12 +347,13 @@ const AccountingPeriods: React.FC = () => {
       const items = result.items || [];
       console.log('Period status details fetched:', items.length);
 
-      setPeriodStatusDetails(items);
+      // Store in map
+      setTabDetailsMap(prev => ({ ...prev, [tabKey]: items }));
     } catch (err) {
       console.error('Error fetching period status details:', err);
-      setDetailsError(err instanceof Error ? err.message : 'Unknown error');
+      setTabErrorMap(prev => ({ ...prev, [tabKey]: err instanceof Error ? err.message : 'Unknown error' }));
     } finally {
-      setDetailsLoading(false);
+      setTabLoadingMap(prev => ({ ...prev, [tabKey]: false }));
     }
   }, []);
 
@@ -567,12 +574,49 @@ const AccountingPeriods: React.FC = () => {
     setActiveTab('details'); // Switch to details tab
   };
 
-  // NEW: Handle status item click to drill-down with APEX API
+  // NEW: Handle status item click to open a new tab for drill-down
   const handleStatusItemClick = (item: CurrentPeriodStatusItem) => {
-    setSelectedStatusItem(item);
-    setActiveTab('details');
-    // Fetch period details for the selected application and ledger
-    fetchPeriodStatusDetails(item.application_name, item.ledger_name);
+    const tabKey = getTabKey(item);
+
+    // Check if tab already exists
+    const existingTab = openTabs.find(t => getTabKey(t) === tabKey);
+    if (existingTab) {
+      // Just switch to existing tab
+      setActiveTab(tabKey);
+      return;
+    }
+
+    // Add new tab
+    setOpenTabs(prev => [...prev, item]);
+    setActiveTab(tabKey);
+
+    // Fetch period details for the new tab
+    fetchPeriodStatusDetails(item);
+  };
+
+  // Close a specific tab
+  const handleCloseTab = (tabKey: string) => {
+    setOpenTabs(prev => prev.filter(t => getTabKey(t) !== tabKey));
+    // Clean up data for closed tab
+    setTabDetailsMap(prev => {
+      const newMap = { ...prev };
+      delete newMap[tabKey];
+      return newMap;
+    });
+    setTabLoadingMap(prev => {
+      const newMap = { ...prev };
+      delete newMap[tabKey];
+      return newMap;
+    });
+    setTabErrorMap(prev => {
+      const newMap = { ...prev };
+      delete newMap[tabKey];
+      return newMap;
+    });
+    // Switch to status tab if closing active tab
+    if (activeTab === tabKey) {
+      setActiveTab('status');
+    }
   };
 
   // Webservices used on this page
@@ -1059,65 +1103,48 @@ const AccountingPeriods: React.FC = () => {
     },
   ];
 
-  // Edit Period Statuses Tab Content - NEW: Using APEX periodsstatus/create endpoint
-  const EditPeriodStatusesTab = () => {
-    if (!selectedStatusItem) {
-      return (
-        <div style={{ padding: 40, textAlign: 'center' }}>
-          <Text type="secondary">Select a ledger from Period Status tab to view details</Text>
-        </div>
-      );
-    }
+  // Tab Content for period status details - reusable for each open tab
+  const renderPeriodStatusTabContent = (item: CurrentPeriodStatusItem) => {
+    const tabKey = getTabKey(item);
+    const details = tabDetailsMap[tabKey] || [];
+    const isLoading = tabLoadingMap[tabKey] || false;
+    const error = tabErrorMap[tabKey] || '';
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        {/* Back Button */}
-        <div style={{ marginBottom: 12 }}>
-          <Button
-            icon={<ArrowLeftOutlined />}
-            onClick={() => {
-              setActiveTab('status');
-              setSelectedStatusItem(null);
-            }}
-            size="small"
-          >
-            Back to Period Status
-          </Button>
-        </div>
-
         {/* Ledger Info Card */}
         <Card size="small" style={{ marginBottom: 12, borderRadius: 6 }}>
           <Row gutter={24}>
             <Col span={8}>
               <Text style={{ fontSize: 12 }}>
                 <Text strong>Ledger: </Text>
-                {selectedStatusItem.ledger_name}
+                {item.ledger_name}
               </Text>
             </Col>
             <Col span={8}>
               <Text style={{ fontSize: 12 }}>
                 <Text strong>Application: </Text>
-                <Tag color="blue">{selectedStatusItem.app}</Tag> {selectedStatusItem.application_name}
+                <Tag color="blue">{item.app}</Tag> {item.application_name}
               </Text>
             </Col>
             <Col span={8}>
               <Text style={{ fontSize: 12 }}>
                 <Text strong>Current Period: </Text>
-                {selectedStatusItem.current_period || '-'}
+                {item.current_period || '-'}
               </Text>
             </Col>
           </Row>
         </Card>
 
         {/* Error */}
-        {detailsError && (
+        {error && (
           <Alert
             message="Error Loading Period Details"
-            description={detailsError}
+            description={error}
             type="error"
             showIcon
             closable
-            onClose={() => setDetailsError('')}
+            onClose={() => setTabErrorMap(prev => ({ ...prev, [tabKey]: '' }))}
             style={{ marginBottom: 12 }}
           />
         )}
@@ -1127,21 +1154,21 @@ const AccountingPeriods: React.FC = () => {
           style={{ flex: 1, borderRadius: 6, border: `1px solid ${REDWOOD.border}` }}
           bodyStyle={{ padding: 0 }}
         >
-          <Spin spinning={detailsLoading}>
+          <Spin spinning={isLoading}>
             <Table
-              dataSource={periodStatusDetails}
+              dataSource={details}
               columns={periodDetailColumns}
               rowKey="period_name_id"
               size="small"
               pagination={{ pageSize: 20, showSizeChanger: true, size: 'small' }}
-              scroll={{ y: 'calc(100vh - 420px)' }}
+              scroll={{ y: 'calc(100vh - 380px)' }}
             />
           </Spin>
         </Card>
 
         {/* Legend */}
         <div style={{ marginTop: 8, display: 'flex', gap: 16, alignItems: 'center' }}>
-          <Text style={{ fontSize: 11 }}>Rows: {periodStatusDetails.length}</Text>
+          <Text style={{ fontSize: 11 }}>Rows: {details.length}</Text>
           <Space size={16}>
             <Space size={4}><BookOutlined style={{ color: REDWOOD.info }} /><Text style={{ fontSize: 10 }}>Open</Text></Space>
             <Space size={4}><CheckCircleOutlined style={{ color: REDWOOD.success }} /><Text style={{ fontSize: 10 }}>Closed</Text></Space>
@@ -1318,24 +1345,39 @@ const AccountingPeriods: React.FC = () => {
           <Tabs
             activeKey={activeTab}
             onChange={setActiveTab}
+            type="editable-card"
+            hideAdd
+            onEdit={(targetKey, action) => {
+              if (action === 'remove' && typeof targetKey === 'string') {
+                handleCloseTab(targetKey);
+              }
+            }}
             style={{ flex: 1, display: 'flex', flexDirection: 'column' }}
             items={[
               {
                 key: 'status',
                 label: 'Period Status',
                 children: <PeriodStatusTab />,
+                closable: false,
               },
               {
                 key: 'all',
                 label: 'All Periods',
                 children: <AllPeriodsTab />,
+                closable: false,
               },
-              {
-                key: 'details',
-                label: selectedStatusItem ? `${selectedStatusItem.application_name} - Period Status` : 'Period Status Details',
-                children: <EditPeriodStatusesTab />,
-                disabled: !selectedStatusItem,
-              },
+              // Dynamically render open tabs for each module
+              ...openTabs.map(item => ({
+                key: getTabKey(item),
+                label: (
+                  <span>
+                    <Tag color="blue" style={{ fontSize: 9, marginRight: 4 }}>{item.app}</Tag>
+                    {item.application_name}
+                  </span>
+                ),
+                children: renderPeriodStatusTabContent(item),
+                closable: true,
+              })),
             ]}
           />
         </div>
