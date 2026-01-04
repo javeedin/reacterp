@@ -194,29 +194,14 @@ DECLARE
     l_module_id     NUMBER;
     l_template_id   NUMBER;
 BEGIN
-    -- Create or get module
-    BEGIN
-        SELECT id INTO l_module_id
-        FROM user_ords_modules
-        WHERE name = 'cash';
-    EXCEPTION
-        WHEN NO_DATA_FOUND THEN
-            ORDS.DEFINE_MODULE(
-                p_module_name    => 'cash',
-                p_base_path      => '/cash/',
-                p_items_per_page => 25,
-                p_status         => 'PUBLISHED',
-                p_comments       => 'Cash Management REST APIs'
-            );
-            SELECT id INTO l_module_id
-            FROM user_ords_modules
-            WHERE name = 'cash';
-    END;
+    -- Use existing reerp module (already created)
+    -- The endpoint will be: /ords/bcldifc/reerp/banks/createnewbank
+    NULL;
 
     -- Define template
     ORDS.DEFINE_TEMPLATE(
-        p_module_name    => 'cash',
-        p_pattern        => 'banks/create',
+        p_module_name    => 'reerp',
+        p_pattern        => 'banks/createnewbank',
         p_priority       => 0,
         p_etag_type      => 'HASH',
         p_etag_query     => NULL,
@@ -225,8 +210,8 @@ BEGIN
 
     -- Define POST handler
     ORDS.DEFINE_HANDLER(
-        p_module_name    => 'cash',
-        p_pattern        => 'banks/create',
+        p_module_name    => 'reerp',
+        p_pattern        => 'banks/createnewbank',
         p_method         => 'POST',
         p_source_type    => 'plsql/block',
         p_items_per_page => 0,

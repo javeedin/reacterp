@@ -94,13 +94,13 @@ const insertToApex = async (
   }
 };
 
-// Test connection to Oracle Fusion banks endpoint
+// Test connection to Oracle Fusion cashBanks endpoint
 export const testBanksConnection = async (log: LogCallback): Promise<boolean> => {
   try {
     log('info', 'Testing Banks endpoint...');
 
     const result = await fetchFromOracle(
-      'banks',
+      'cashBanks',
       { limit: '1' },
       log,
       true
@@ -192,7 +192,7 @@ export const syncBanks = async (
         offset: String(offset),
       };
 
-      const result = await fetchFromOracle('banks', queryParams, log, true);
+      const result = await fetchFromOracle('cashBanks', queryParams, log, true);
 
       if (!result.success || !result.items) {
         throw new Error(result.error || 'Failed to fetch banks');
@@ -276,7 +276,7 @@ export const syncBanks = async (
       };
 
       try {
-        const result = await insertToApex('cash/banks/create', payload, log, true);
+        const result = await insertToApex('banks/createnewbank', payload, log, true);
 
         if (result.status === 'success') {
           const inserted = result.count || batch.length;
