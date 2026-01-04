@@ -466,10 +466,10 @@ const AccountingPeriods: React.FC = () => {
   const webservices = [
     { method: 'GET', url: '/api/apex/applications/getall', description: 'Fetch applications list' },
     { method: 'GET', url: '/api/apex/ledgers', description: 'Fetch ledgers list' },
-    { method: 'GET', url: '/api/fusion/fscmRestApi/resources/11.13.18.05/accountingPeriodStatusLOV', description: 'Fetch period statuses' },
-    { method: 'GET', url: '/api/fusion/fscmRestApi/resources/11.13.18.05/accountingPeriodsLOV', description: 'Fetch all periods' },
-    { method: 'POST', url: '/api/apex/gl/periods/open', description: 'Open period (TBD)' },
-    { method: 'POST', url: '/api/apex/gl/periods/close', description: 'Close period (TBD)' },
+    { method: 'GET', url: '/api/fusion/fscmRestApi/resources/11.13.18.05/accountingPeriodStatusLOV', description: 'Fetch period statuses from Fusion' },
+    { method: 'GET', url: '/api/fusion/fscmRestApi/resources/11.13.18.05/accountingPeriodsLOV', description: 'Fetch all periods from Fusion' },
+    { method: 'POST', url: '/api/apex/gl/periodstatus', description: 'Sync period status to APEX DB' },
+    { method: 'GET', url: '/api/apex/gl/periodstatus', description: 'Get period status from APEX DB' },
   ];
 
   // API Log Popover Content
