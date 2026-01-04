@@ -232,7 +232,7 @@ BEGIN
         p_items_per_page => 0,
         p_mimes_allowed  => 'application/json',
         p_comments       => 'Sync banks from Oracle Fusion',
-        p_source         => '
+        p_source         => q'[
 DECLARE
     l_json   CLOB;
     l_count  NUMBER;
@@ -248,13 +248,13 @@ BEGIN
 
     IF l_error IS NOT NULL THEN
         :status_code := 500;
-        HTP.P(''{"status": "error", "message": "'' || l_error || ''"}'');
+        HTP.P('{"status": "error", "message": "' || l_error || '"}');
     ELSE
         :status_code := 200;
-        HTP.P(''{"status": "success", "count": '' || l_count || ''}'');
+        HTP.P('{"status": "success", "count": ' || l_count || '}');
     END IF;
 END;
-'
+]'
     );
 
     COMMIT;
