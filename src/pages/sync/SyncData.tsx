@@ -1110,6 +1110,8 @@ const SyncData: React.FC = () => {
     ? apProgress.status
     : isGLCodeComb
     ? codeCombProgress.status
+    : isGLPeriodStatus
+    ? periodStatusProgress.status
     : progress.status;
   const isSyncing = !['idle', 'completed', 'error', 'stopped'].includes(currentStatus);
 
@@ -1718,6 +1720,96 @@ const SyncData: React.FC = () => {
                     </Card>
                   </Col>
                 </Row>
+              ) : isGLPeriodStatus ? (
+                /* GL Period Status KPI Cards */
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  {/* Records Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <DatabaseOutlined style={{ fontSize: 20, color: REDWOOD.primary, marginRight: 8 }} />
+                        <Text strong>Period Statuses</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {periodStatusProgress.insertedRecords} / {periodStatusProgress.totalRecords}
+                      </div>
+                      <Progress
+                        percent={periodStatusProgress.totalRecords > 0 ? Math.round((periodStatusProgress.insertedRecords / periodStatusProgress.totalRecords) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.primary}
+                        style={{ marginTop: 8 }}
+                      />
+                      {periodStatusProgress.currentPage > 0 && (
+                        <Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 4 }}>
+                          Page {periodStatusProgress.currentPage}/{periodStatusProgress.totalPages}
+                        </Text>
+                      )}
+                    </Card>
+                  </Col>
+
+                  {/* Processed Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <FileTextOutlined style={{ fontSize: 20, color: REDWOOD.success, marginRight: 8 }} />
+                        <Text strong>Processed</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {periodStatusProgress.processedRecords}
+                        <Text type="secondary" style={{ fontSize: 14, marginLeft: 8 }}>
+                          / {periodStatusProgress.totalRecords}
+                        </Text>
+                      </div>
+                      <Progress
+                        percent={periodStatusProgress.totalRecords > 0 ? Math.round((periodStatusProgress.processedRecords / periodStatusProgress.totalRecords) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.success}
+                        style={{ marginTop: 8 }}
+                      />
+                    </Card>
+                  </Col>
+
+                  {/* Errors Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <WarningOutlined style={{ fontSize: 20, color: periodStatusProgress.errors > 0 ? REDWOOD.error : REDWOOD.textSecondary, marginRight: 8 }} />
+                        <Text strong>Errors</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: periodStatusProgress.errors > 0 ? REDWOOD.error : REDWOOD.textPrimary }}>
+                        {periodStatusProgress.errors}
+                      </div>
+                      {periodStatusProgress.lastError && (
+                        <Tooltip title={periodStatusProgress.lastError}>
+                          <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 8 }} ellipsis>
+                            {periodStatusProgress.lastError}
+                          </Text>
+                        </Tooltip>
+                      )}
+                    </Card>
+                  </Col>
+                </Row>
               ) : (
                 /* GL Journals KPI Cards */
                 <Row gutter={16} style={{ marginBottom: 16 }}>
@@ -1859,14 +1951,14 @@ const SyncData: React.FC = () => {
                           {getStatusText(currentStatus)}
                         </Tag>
                       </div>
-                      {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : isGLCodeComb ? codeCombProgress.startTime : progress.startTime) && (
+                      {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : isGLCodeComb ? codeCombProgress.startTime : isGLPeriodStatus ? periodStatusProgress.startTime : progress.startTime) && (
                         <Text type="secondary" style={{ fontSize: 12 }}>
-                          Started: {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : isGLCodeComb ? codeCombProgress.startTime : progress.startTime)?.toLocaleTimeString()}
+                          Started: {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : isGLCodeComb ? codeCombProgress.startTime : isGLPeriodStatus ? periodStatusProgress.startTime : progress.startTime)?.toLocaleTimeString()}
                         </Text>
                       )}
-                      {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : isGLCodeComb ? codeCombProgress.endTime : progress.endTime) && (
+                      {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : isGLCodeComb ? codeCombProgress.endTime : isGLPeriodStatus ? periodStatusProgress.endTime : progress.endTime) && (
                         <Text type="secondary" style={{ fontSize: 12 }}>
-                          Ended: {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : isGLCodeComb ? codeCombProgress.endTime : progress.endTime)?.toLocaleTimeString()}
+                          Ended: {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : isGLCodeComb ? codeCombProgress.endTime : isGLPeriodStatus ? periodStatusProgress.endTime : progress.endTime)?.toLocaleTimeString()}
                         </Text>
                       )}
                     </Space>
@@ -1881,13 +1973,15 @@ const SyncData: React.FC = () => {
                           ? `${apProgress.insertedInvoices} invoices inserted`
                           : isGLCodeComb
                           ? `${codeCombProgress.insertedRecords} code combinations inserted`
+                          : isGLPeriodStatus
+                          ? `${periodStatusProgress.insertedRecords} period statuses inserted`
                           : `${progress.totalBatchesInserted + progress.totalHeadersInserted + progress.totalLinesInserted} inserted`
                         }
                       </Text>
-                      {(isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLCodeComb ? codeCombProgress.errors : progress.errors) > 0 && (
+                      {(isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : progress.errors) > 0 && (
                         <Text type="danger">
                           <CloseCircleOutlined style={{ marginRight: 4 }} />
-                          {isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLCodeComb ? codeCombProgress.errors : progress.errors} errors
+                          {isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : progress.errors} errors
                         </Text>
                       )}
                     </Space>
