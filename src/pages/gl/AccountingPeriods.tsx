@@ -75,6 +75,33 @@ interface Ledger {
   currency_code?: string;
 }
 
+// NEW: Current Period Status from APEX (currentperiodstatus endpoint)
+interface CurrentPeriodStatusItem {
+  ledger_name: string;
+  app: string;
+  application_name: string;
+  prior_period: string | null;
+  prior_status: string | null;
+  current_period: string | null;
+  current_status: string | null;
+  next_period: string | null;
+  next_status: string | null;
+}
+
+// NEW: Period Status Detail from APEX (periodsstatus/create endpoint)
+interface PeriodStatusDetailItem {
+  period_name_id: string;
+  ledger_name: string;
+  app: string;
+  application_name: string;
+  status: string;
+  start_date: string;
+  end_date: string;
+  period_year: number;
+  period_number: number;
+  adj_flag: string;
+}
+
 // Normalize API response to handle both UPPERCASE and lowercase field names
 const normalizeApplication = (item: Record<string, unknown>): Application => ({
   application_id: (item.application_id ?? item.APPLICATION_ID ?? 0) as number,
@@ -146,7 +173,18 @@ const AccountingPeriods: React.FC = () => {
   const [ledgers, setLedgers] = useState<Ledger[]>([]);
   const [mappingLoading, setMappingLoading] = useState(false);
 
-  // Period Status tab state
+  // NEW: Current Period Status from APEX (replaces Fusion periodStatuses)
+  const [currentPeriodStatuses, setCurrentPeriodStatuses] = useState<CurrentPeriodStatusItem[]>([]);
+  const [currentStatusLoading, setCurrentStatusLoading] = useState(false);
+  const [currentStatusError, setCurrentStatusError] = useState<string>('');
+
+  // NEW: Period Status Detail for drill-down
+  const [periodStatusDetails, setPeriodStatusDetails] = useState<PeriodStatusDetailItem[]>([]);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [detailsError, setDetailsError] = useState<string>('');
+  const [selectedStatusItem, setSelectedStatusItem] = useState<CurrentPeriodStatusItem | null>(null);
+
+  // Period Status tab state (legacy - keep for now)
   const [periodStatuses, setPeriodStatuses] = useState<PeriodStatus[]>([]);
   const [statusLoading, setStatusLoading] = useState(false);
   const [statusError, setStatusError] = useState<string>('');
@@ -250,7 +288,74 @@ const AccountingPeriods: React.FC = () => {
     fetchMappingData();
   }, [fetchApplications, fetchLedgers]);
 
-  // Fetch period statuses with pagination
+  // NEW: Fetch current period statuses from APEX REST (currentperiodstatus endpoint)
+  const fetchCurrentPeriodStatuses = useCallback(async () => {
+    setCurrentStatusLoading(true);
+    setCurrentStatusError('');
+    setCurrentPeriodStatuses([]);
+
+    try {
+      const url = `${PROXY_CONFIG.baseUrl}/apex/currentperiodstatus`;
+      console.log('=== FETCHING CURRENT PERIOD STATUSES ===');
+      console.log('URL:', url);
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`API Error: ${response.status} ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      const items = result.items || [];
+      console.log('Current period statuses fetched:', items.length);
+
+      setCurrentPeriodStatuses(items);
+    } catch (err) {
+      console.error('Error fetching current period statuses:', err);
+      setCurrentStatusError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setCurrentStatusLoading(false);
+    }
+  }, []);
+
+  // NEW: Fetch period status details for a specific application and ledger
+  const fetchPeriodStatusDetails = useCallback(async (applicationName: string, ledgerName: string) => {
+    setDetailsLoading(true);
+    setDetailsError('');
+    setPeriodStatusDetails([]);
+
+    try {
+      const params = new URLSearchParams({
+        P_APPLICATION_NAME: applicationName,
+        P_LEDGER_NAME: ledgerName,
+      });
+      const url = `${PROXY_CONFIG.baseUrl}/apex/periodsstatus/create?${params.toString()}`;
+      console.log('=== FETCHING PERIOD STATUS DETAILS ===');
+      console.log('URL:', url);
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`API Error: ${response.status} ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      const items = result.items || [];
+      console.log('Period status details fetched:', items.length);
+
+      setPeriodStatusDetails(items);
+    } catch (err) {
+      console.error('Error fetching period status details:', err);
+      setDetailsError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setDetailsLoading(false);
+    }
+  }, []);
+
+  // Fetch current period statuses on mount
+  useEffect(() => {
+    fetchCurrentPeriodStatuses();
+  }, [fetchCurrentPeriodStatuses]);
+
+  // Fetch period statuses with pagination (legacy - keep for All Periods tab)
   const fetchPeriodStatuses = useCallback(async () => {
     setStatusLoading(true);
     setStatusError('');
@@ -455,21 +560,28 @@ const AccountingPeriods: React.FC = () => {
     }
   };
 
-  // Handle ledger click to show detail in tab
+  // Handle ledger click to show detail in tab (legacy)
   const handleLedgerClick = (ledger: LedgerPeriodSummary) => {
     setSelectedLedger(ledger);
     setSelectedPeriod(null);
     setActiveTab('details'); // Switch to details tab
   };
 
+  // NEW: Handle status item click to drill-down with APEX API
+  const handleStatusItemClick = (item: CurrentPeriodStatusItem) => {
+    setSelectedStatusItem(item);
+    setActiveTab('details');
+    // Fetch period details for the selected application and ledger
+    fetchPeriodStatusDetails(item.application_name, item.ledger_name);
+  };
+
   // Webservices used on this page
   const webservices = [
     { method: 'GET', url: '/api/apex/applications/getall', description: 'Fetch applications list' },
     { method: 'GET', url: '/api/apex/ledgers', description: 'Fetch ledgers list' },
-    { method: 'GET', url: '/api/fusion/fscmRestApi/resources/11.13.18.05/accountingPeriodStatusLOV', description: 'Fetch period statuses from Fusion' },
-    { method: 'GET', url: '/api/fusion/fscmRestApi/resources/11.13.18.05/accountingPeriodsLOV', description: 'Fetch all periods from Fusion' },
-    { method: 'POST', url: '/api/apex/gl/periodstatus', description: 'Sync period status to APEX DB' },
-    { method: 'GET', url: '/api/apex/gl/periodstatus', description: 'Get period status from APEX DB' },
+    { method: 'GET', url: '/api/apex/currentperiodstatus', description: 'Fetch current period statuses (prior/current/next)' },
+    { method: 'GET', url: '/api/apex/periodsstatus/create?P_APPLICATION_NAME=...&P_LEDGER_NAME=...', description: 'Fetch period status details for application/ledger' },
+    { method: 'GET', url: '/api/fusion/fscmRestApi/resources/11.13.18.05/accountingPeriodsLOV', description: 'Fetch all periods from Fusion (All Periods tab)' },
   ];
 
   // API Log Popover Content
@@ -492,7 +604,101 @@ const AccountingPeriods: React.FC = () => {
   const canOpenPeriod = selectedPeriod && (selectedPeriod.ClosingStatus === 'C' || selectedPeriod.ClosingStatus === 'F' || selectedPeriod.ClosingStatus === 'N');
   const canClosePeriod = selectedPeriod && selectedPeriod.ClosingStatus === 'O';
 
-  // Period Status columns
+  // NEW: Period Status columns for APEX currentperiodstatus data
+  const currentStatusColumns = [
+    {
+      title: 'Ledger',
+      dataIndex: 'ledger_name',
+      key: 'ledger_name',
+      width: 200,
+      render: (name: string, record: CurrentPeriodStatusItem) => (
+        <Text
+          strong
+          style={{ fontSize: 12, color: REDWOOD.info, cursor: 'pointer' }}
+          onClick={() => handleStatusItemClick(record)}
+        >
+          {name}
+        </Text>
+      ),
+    },
+    {
+      title: 'Application',
+      dataIndex: 'application_name',
+      key: 'application_name',
+      width: 120,
+      render: (name: string, record: CurrentPeriodStatusItem) => (
+        <Tag color="blue" style={{ fontSize: 10 }}>{record.app}</Tag>
+      ),
+    },
+    {
+      title: 'Prior Period',
+      children: [
+        {
+          title: 'Name',
+          key: 'priorName',
+          width: 100,
+          render: (_: unknown, record: CurrentPeriodStatusItem) => (
+            <Text style={{ fontSize: 11 }}>{record.prior_period || '-'}</Text>
+          ),
+        },
+        {
+          title: 'Status',
+          key: 'priorStatus',
+          width: 60,
+          align: 'center' as const,
+          render: (_: unknown, record: CurrentPeriodStatusItem) => (
+            record.prior_status ? getStatusIcon(record.prior_status) : '-'
+          ),
+        },
+      ],
+    },
+    {
+      title: 'Current Period',
+      children: [
+        {
+          title: 'Name',
+          key: 'currentName',
+          width: 100,
+          render: (_: unknown, record: CurrentPeriodStatusItem) => (
+            <Text style={{ fontSize: 11, fontWeight: 600 }}>{record.current_period || '-'}</Text>
+          ),
+        },
+        {
+          title: 'Status',
+          key: 'currentStatus',
+          width: 60,
+          align: 'center' as const,
+          render: (_: unknown, record: CurrentPeriodStatusItem) => (
+            record.current_status ? getStatusIcon(record.current_status) : '-'
+          ),
+        },
+      ],
+    },
+    {
+      title: 'Next Period',
+      children: [
+        {
+          title: 'Name',
+          key: 'nextName',
+          width: 100,
+          render: (_: unknown, record: CurrentPeriodStatusItem) => (
+            <Text style={{ fontSize: 11 }}>{record.next_period || '-'}</Text>
+          ),
+        },
+        {
+          title: 'Status',
+          key: 'nextStatus',
+          width: 60,
+          align: 'center' as const,
+          render: (_: unknown, record: CurrentPeriodStatusItem) => (
+            record.next_status ? getStatusIcon(record.next_status) : '-'
+          ),
+        },
+      ],
+    },
+  ];
+
+  // Legacy: Period Status columns (keep for reference)
   const statusColumns = [
     {
       title: 'Ledger',
@@ -721,101 +927,51 @@ const AccountingPeriods: React.FC = () => {
   const regularPeriods = periods.length - adjustmentPeriods;
   const uniquePeriodSets = [...new Set(periods.map(p => p.PeriodSetNameId))].length;
 
-  // Period Status Tab Content
+  // Period Status Tab Content - NEW: Using APEX currentperiodstatus endpoint
   const PeriodStatusTab = () => (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Controls */}
       <Row gutter={16} align="middle" style={{ marginBottom: 12 }}>
         <Col>
-          <Space>
-            <Text style={{ fontSize: 12 }}>Application:</Text>
-            <Select
-              value={selectedApplication}
-              onChange={(value) => setSelectedApplication(value)}
-              style={{ width: 200 }}
-              size="small"
-              loading={mappingLoading}
-              placeholder="Select Application"
-              allowClear
-            >
-              <Select.Option key="all" value={null}>
-                All
-              </Select.Option>
-              {applications
-                .filter(app => availableApplicationIds.includes(app.application_id))
-                .map(app => (
-                  <Select.Option key={app.application_id} value={app.application_id}>
-                    {app.application_name}
-                  </Select.Option>
-                ))}
-            </Select>
-          </Space>
-        </Col>
-        <Col>
-          <Space>
-            <Button
-              size="small"
-              disabled={!canOpenPeriod}
-              icon={<UnlockOutlined />}
-            >
-              Open Next Period
-            </Button>
-            <Button
-              size="small"
-              disabled={!canClosePeriod}
-              icon={<LockOutlined />}
-            >
-              Close Current Period
-            </Button>
-          </Space>
-        </Col>
-        <Col>
-          <Space>
-            <Text style={{ fontSize: 12 }}>Effective As-of Date:</Text>
-            <DatePicker
-              value={effectiveDate}
-              onChange={(date) => date && setEffectiveDate(date)}
-              format="D-MMM-YYYY"
-              size="small"
-              allowClear={false}
-            />
-          </Space>
-        </Col>
-        <Col>
           <Button
             icon={<ReloadOutlined />}
-            onClick={fetchPeriodStatuses}
-            loading={statusLoading}
+            onClick={fetchCurrentPeriodStatuses}
+            loading={currentStatusLoading}
             size="small"
           >
             Refresh
           </Button>
         </Col>
+        <Col>
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            Click on a ledger to view all period details
+          </Text>
+        </Col>
       </Row>
 
       {/* Status Error */}
-      {statusError && (
+      {currentStatusError && (
         <Alert
           message="Error Loading Period Status"
-          description={statusError}
+          description={currentStatusError}
           type="error"
           showIcon
           closable
-          onClose={() => setStatusError('')}
+          onClose={() => setCurrentStatusError('')}
           style={{ marginBottom: 12 }}
         />
       )}
 
-      {/* Ledger Period Status Table */}
+      {/* Current Period Status Table - NEW APEX data */}
       <Card
         style={{ flex: 1, borderRadius: 6, border: `1px solid ${REDWOOD.border}` }}
         bodyStyle={{ padding: 0 }}
       >
-        <Spin spinning={statusLoading}>
+        <Spin spinning={currentStatusLoading}>
           <Table
-            dataSource={ledgerSummaries}
-            columns={statusColumns}
-            rowKey="LedgerId"
+            dataSource={currentPeriodStatuses}
+            columns={currentStatusColumns}
+            rowKey={(record) => `${record.ledger_name}-${record.app}`}
             size="small"
             pagination={false}
             scroll={{ y: 'calc(100vh - 340px)' }}
@@ -826,7 +982,7 @@ const AccountingPeriods: React.FC = () => {
 
       {/* Legend */}
       <div style={{ marginTop: 8, display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-        <Text style={{ fontSize: 11 }}>Rows Selected: {ledgerSummaries.length}</Text>
+        <Text style={{ fontSize: 11 }}>Rows: {currentPeriodStatuses.length}</Text>
         <Space size={16}>
           <Space size={4}><BookOutlined style={{ color: REDWOOD.info }} /><Text style={{ fontSize: 10 }}>Open</Text></Space>
           <Space size={4}><CheckCircleOutlined style={{ color: REDWOOD.success }} /><Text style={{ fontSize: 10 }}>Closed</Text></Space>
@@ -838,9 +994,74 @@ const AccountingPeriods: React.FC = () => {
     </div>
   );
 
-  // Edit Period Statuses Tab Content (replaces modal)
+  // NEW: Detail columns for APEX periodsstatus/create data
+  const periodDetailColumns = [
+    {
+      title: 'Period',
+      dataIndex: 'period_name_id',
+      key: 'period_name_id',
+      width: 120,
+      render: (name: string) => <Text style={{ fontSize: 11 }}>{name}</Text>,
+    },
+    {
+      title: 'Year',
+      dataIndex: 'period_year',
+      key: 'period_year',
+      width: 80,
+      render: (year: number) => <Text code style={{ fontSize: 11 }}>{year}</Text>,
+    },
+    {
+      title: 'Period #',
+      dataIndex: 'period_number',
+      key: 'period_number',
+      width: 80,
+      render: (num: number) => <Text style={{ fontSize: 11 }}>{num}</Text>,
+    },
+    {
+      title: 'Start Date',
+      dataIndex: 'start_date',
+      key: 'start_date',
+      width: 120,
+      render: (date: string) => <Text style={{ fontSize: 11 }}>{date ? dayjs(date).format('D-MMM-YYYY') : '-'}</Text>,
+    },
+    {
+      title: 'End Date',
+      dataIndex: 'end_date',
+      key: 'end_date',
+      width: 120,
+      render: (date: string) => <Text style={{ fontSize: 11 }}>{date ? dayjs(date).format('D-MMM-YYYY') : '-'}</Text>,
+    },
+    {
+      title: 'Status',
+      dataIndex: 'status',
+      key: 'status',
+      width: 100,
+      render: (status: string) => {
+        // Map status text to status code for icon
+        const statusCode = status === 'Open' ? 'O' : status === 'Closed' ? 'C' : status === 'Future' ? 'F' : status === 'Never Opened' ? 'N' : status === 'Permanently Closed' ? 'P' : status;
+        return (
+          <Space>
+            {getStatusIcon(statusCode)}
+            <Text style={{ fontSize: 10 }}>{status}</Text>
+          </Space>
+        );
+      },
+    },
+    {
+      title: 'Adj',
+      dataIndex: 'adj_flag',
+      key: 'adj_flag',
+      width: 60,
+      align: 'center' as const,
+      render: (flag: string) => (
+        flag === 'Y' ? <Tag color="orange" style={{ fontSize: 9 }}>Y</Tag> : <Text style={{ fontSize: 10 }}>N</Text>
+      ),
+    },
+  ];
+
+  // Edit Period Statuses Tab Content - NEW: Using APEX periodsstatus/create endpoint
   const EditPeriodStatusesTab = () => {
-    if (!selectedLedger) {
+    if (!selectedStatusItem) {
       return (
         <div style={{ padding: 40, textAlign: 'center' }}>
           <Text type="secondary">Select a ledger from Period Status tab to view details</Text>
@@ -848,36 +1069,16 @@ const AccountingPeriods: React.FC = () => {
       );
     }
 
-    // Get all periods sorted by EffectivePeriodNumber
-    const sorted = [...selectedLedger.allPeriods].sort((a, b) => a.EffectivePeriodNumber - b.EffectivePeriodNumber);
-    const currentPeriod = selectedLedger.currentPeriod;
-    const currentIdx = currentPeriod ? sorted.findIndex(p => p.PeriodNameId === currentPeriod.PeriodNameId) : -1;
-
-    // Show all historical periods + current period + 1 future period only
-    const periodsToShow: PeriodStatus[] = [];
-    if (currentIdx >= 0) {
-      // Add all historical periods (before current)
-      for (let i = 0; i <= currentIdx; i++) {
-        periodsToShow.push(sorted[i]);
-      }
-      // Add only 1 future period (after current)
-      if (currentIdx + 1 < sorted.length) {
-        periodsToShow.push(sorted[currentIdx + 1]);
-      }
-    } else {
-      // If no current period found, show all periods
-      periodsToShow.push(...sorted);
-    }
-
-    const latestOpenPeriod = selectedLedger.allPeriods.find(p => p.ClosingStatus === 'O');
-
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         {/* Back Button */}
         <div style={{ marginBottom: 12 }}>
           <Button
             icon={<ArrowLeftOutlined />}
-            onClick={() => setActiveTab('status')}
+            onClick={() => {
+              setActiveTab('status');
+              setSelectedStatusItem(null);
+            }}
             size="small"
           >
             Back to Period Status
@@ -890,83 +1091,57 @@ const AccountingPeriods: React.FC = () => {
             <Col span={8}>
               <Text style={{ fontSize: 12 }}>
                 <Text strong>Ledger: </Text>
-                {selectedLedger.LedgerName}
-              </Text>
-            </Col>
-            <Col span={8}>
-              <Text style={{ fontSize: 12 }}>
-                <Text strong>Latest Open Period: </Text>
-                {latestOpenPeriod ? extractPeriodName(latestOpenPeriod.PeriodNameId, latestOpenPeriod.PeriodName) : '-'}
+                {selectedStatusItem.ledger_name}
               </Text>
             </Col>
             <Col span={8}>
               <Text style={{ fontSize: 12 }}>
                 <Text strong>Application: </Text>
-                {selectedApplication !== null ? getApplicationName(selectedApplication) : 'All'}
+                <Tag color="blue">{selectedStatusItem.app}</Tag> {selectedStatusItem.application_name}
+              </Text>
+            </Col>
+            <Col span={8}>
+              <Text style={{ fontSize: 12 }}>
+                <Text strong>Current Period: </Text>
+                {selectedStatusItem.current_period || '-'}
               </Text>
             </Col>
           </Row>
         </Card>
 
-        {/* Action Buttons */}
-        <Space style={{ marginBottom: 12 }}>
-          <Button
-            size="small"
-            icon={<UnlockOutlined />}
-            disabled={!canOpenPeriod}
-            type="primary"
-          >
-            Open Period
-          </Button>
-          <Button
-            size="small"
-            icon={<LockOutlined />}
-            disabled={!canClosePeriod}
-          >
-            Close Period
-          </Button>
-          <Select
-            placeholder="Filter by Status"
-            style={{ width: 150 }}
-            size="small"
-            allowClear
-          >
-            <Select.Option value="all">All</Select.Option>
-            <Select.Option value="O">Open</Select.Option>
-            <Select.Option value="C">Closed</Select.Option>
-            <Select.Option value="F">Future</Select.Option>
-            <Select.Option value="N">Never Opened</Select.Option>
-          </Select>
-        </Space>
+        {/* Error */}
+        {detailsError && (
+          <Alert
+            message="Error Loading Period Details"
+            description={detailsError}
+            type="error"
+            showIcon
+            closable
+            onClose={() => setDetailsError('')}
+            style={{ marginBottom: 12 }}
+          />
+        )}
 
-        {/* Periods Table */}
+        {/* Periods Table - APEX data */}
         <Card
           style={{ flex: 1, borderRadius: 6, border: `1px solid ${REDWOOD.border}` }}
           bodyStyle={{ padding: 0 }}
         >
-          <Table
-            dataSource={periodsToShow.sort((a, b) => b.EffectivePeriodNumber - a.EffectivePeriodNumber)}
-            columns={detailColumns}
-            rowKey="PeriodNameId"
-            size="small"
-            pagination={false}
-            scroll={{ y: 'calc(100vh - 420px)' }}
-            rowSelection={{
-              type: 'radio',
-              selectedRowKeys: selectedPeriod ? [selectedPeriod.PeriodNameId] : [],
-              onChange: (_, selectedRows) => {
-                setSelectedPeriod(selectedRows[0] || null);
-              },
-            }}
-            onRow={(record) => ({
-              onClick: () => setSelectedPeriod(record),
-              style: { cursor: 'pointer' },
-            })}
-          />
+          <Spin spinning={detailsLoading}>
+            <Table
+              dataSource={periodStatusDetails}
+              columns={periodDetailColumns}
+              rowKey="period_name_id"
+              size="small"
+              pagination={{ pageSize: 20, showSizeChanger: true, size: 'small' }}
+              scroll={{ y: 'calc(100vh - 420px)' }}
+            />
+          </Spin>
         </Card>
 
         {/* Legend */}
         <div style={{ marginTop: 8, display: 'flex', gap: 16, alignItems: 'center' }}>
+          <Text style={{ fontSize: 11 }}>Rows: {periodStatusDetails.length}</Text>
           <Space size={16}>
             <Space size={4}><BookOutlined style={{ color: REDWOOD.info }} /><Text style={{ fontSize: 10 }}>Open</Text></Space>
             <Space size={4}><CheckCircleOutlined style={{ color: REDWOOD.success }} /><Text style={{ fontSize: 10 }}>Closed</Text></Space>
@@ -1157,9 +1332,9 @@ const AccountingPeriods: React.FC = () => {
               },
               {
                 key: 'details',
-                label: selectedLedger ? `Edit: ${selectedLedger.LedgerName}` : 'Edit Period Statuses',
+                label: selectedStatusItem ? `${selectedStatusItem.application_name} - Period Status` : 'Period Status Details',
                 children: <EditPeriodStatusesTab />,
-                disabled: !selectedLedger,
+                disabled: !selectedStatusItem,
               },
             ]}
           />
