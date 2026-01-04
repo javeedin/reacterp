@@ -172,6 +172,35 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
     parameters: [],
   },
   {
+    id: 'gl-period-status',
+    name: 'GL Period Status',
+    description: 'Sync GL Accounting Period Status from Oracle Fusion',
+    oracleEndpoint: 'accountingPeriodStatusLOV',
+    apexEndpoint: 'gl/periodstatus',
+    parameters: [
+      {
+        key: 'LedgerId',
+        label: 'Ledger ID',
+        type: 'text',
+        required: false,
+        defaultValue: '',
+      },
+      {
+        key: 'ApplicationId',
+        label: 'Application ID',
+        type: 'select',
+        required: false,
+        options: [
+          { label: 'All', value: '' },
+          { label: 'GL (101)', value: '101' },
+          { label: 'AP (200)', value: '200' },
+          { label: 'AR (222)', value: '222' },
+          { label: 'INV (401)', value: '401' },
+        ],
+      },
+    ],
+  },
+  {
     id: 'ap-payments',
     name: 'AP Payments',
     description: 'Sync AP Payments with Related Invoices from Oracle Fusion',

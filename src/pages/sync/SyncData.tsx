@@ -44,6 +44,7 @@ import { syncGLJournals, testGLConnection, type SyncProgress, type LogCallback, 
 import { syncAPInvoices, testAPConnection, type APSyncProgress, type InvoicePayloadCallback } from '../../services/ap-sync.service';
 import { syncAPPayments, testAPPaymentsConnection, type APPaymentsSyncProgress, type PaymentPayloadCallback } from '../../services/ap-payments-sync.service';
 import { syncGLCodeCombinations, testGLCodeCombConnection, type CodeCombSyncProgress, type CodeCombPayloadCallback } from '../../services/gl-codecomb-sync.service';
+import { syncGLPeriodStatus, testGLPeriodStatusConnection, type PeriodStatusSyncProgress, type PeriodStatusPayloadCallback } from '../../services/gl-periodstatus-sync.service';
 import Autopilot from '../../components/Autopilot';
 import { useElectron } from '../../hooks/useElectron';
 
@@ -232,10 +233,35 @@ const SyncData: React.FC = () => {
     errorMessage?: string;
   }>>([]);
 
+  // GL Period Status Progress State
+  const [periodStatusProgress, setPeriodStatusProgress] = useState<PeriodStatusSyncProgress>({
+    status: 'idle',
+    totalRecords: 0,
+    processedRecords: 0,
+    insertedRecords: 0,
+    currentPage: 0,
+    totalPages: 0,
+    errors: 0,
+    lastError: '',
+    startTime: null,
+    endTime: null,
+  });
+
+  // Period Status payload state (for debug)
+  const [periodStatusPayloads, setPeriodStatusPayloads] = useState<Array<{
+    periodNameId: string;
+    ledgerId: number;
+    payload: any;
+    postResult?: any;
+    status: 'pending' | 'success' | 'error';
+    errorMessage?: string;
+  }>>([]);
+
   // Determine sync type based on selected object
   const isAPInvoices = selectedObject?.id === 'ap-invoices';
   const isAPPayments = selectedObject?.id === 'ap-payments';
   const isGLCodeComb = selectedObject?.id === 'gl-code-combinations';
+  const isGLPeriodStatus = selectedObject?.id === 'gl-period-status';
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const isSyncingRef = useRef(false);
@@ -532,6 +558,34 @@ const SyncData: React.FC = () => {
     });
   }, []);
 
+  // Period Status payload callback handler
+  const handlePeriodStatusPayload: PeriodStatusPayloadCallback = useCallback((periodNameId, ledgerId, payload, result, error) => {
+    setPeriodStatusPayloads((prev) => {
+      const existing = prev.find((ps) => ps.periodNameId === periodNameId && ps.ledgerId === ledgerId);
+      if (existing) {
+        return prev.map((ps) =>
+          ps.periodNameId === periodNameId && ps.ledgerId === ledgerId
+            ? {
+                ...ps,
+                postResult: result,
+                status: error ? 'error' : (result ? 'success' : 'pending'),
+                errorMessage: error,
+              }
+            : ps
+        );
+      } else {
+        return [...prev, {
+          periodNameId,
+          ledgerId,
+          payload,
+          postResult: result,
+          status: error ? 'error' : (result ? 'success' : 'pending'),
+          errorMessage: error,
+        }];
+      }
+    });
+  }, []);
+
   // Check proxy server status
   const checkProxyStatus = useCallback(async () => {
     setProxyStatus('checking');
@@ -642,6 +696,9 @@ const SyncData: React.FC = () => {
     } else if (isGLCodeComb) {
       addLog('info', 'Testing GL Code Combinations endpoint...');
       success = await testGLCodeCombConnection(addLog);
+    } else if (isGLPeriodStatus) {
+      addLog('info', 'Testing GL Period Status endpoint...');
+      success = await testGLPeriodStatusConnection(addLog);
     } else {
       addLog('info', 'Testing GL Journals endpoint...');
       success = await testGLConnection(addLog);
@@ -708,6 +765,7 @@ const SyncData: React.FC = () => {
     setInvoicePayloads([]);
     setPaymentPayloads([]);
     setCodeCombPayloads([]);
+    setPeriodStatusPayloads([]);
     logCounterRef.current = 0;
 
     // Notify Electron that sync started
@@ -814,6 +872,35 @@ const SyncData: React.FC = () => {
         handleCodeCombPayload
       );
       syncResult = { inserted: result.insertedRecords, errors: result.errors, type: 'code combinations' };
+    } else if (isGLPeriodStatus) {
+      // GL Period Status Sync
+      setPeriodStatusProgress({
+        status: 'fetching',
+        totalRecords: 0,
+        processedRecords: 0,
+        insertedRecords: 0,
+        currentPage: 0,
+        totalPages: 0,
+        errors: 0,
+        lastError: '',
+        startTime: new Date(),
+        endTime: null,
+      });
+
+      const result = await syncGLPeriodStatus(
+        parameters,
+        testMode,
+        addLog,
+        (newProgress) => {
+          setPeriodStatusProgress((prev) => ({ ...prev, ...newProgress }));
+          if (newProgress.processedRecords !== undefined && newProgress.totalRecords) {
+            notifySyncProgress(`${newProgress.processedRecords}/${newProgress.totalRecords} period statuses`);
+          }
+        },
+        abortControllerRef.current.signal,
+        handlePeriodStatusPayload
+      );
+      syncResult = { inserted: result.insertedRecords, errors: result.errors, type: 'period statuses' };
     } else {
       // GL Journals Sync
       setProgress({
