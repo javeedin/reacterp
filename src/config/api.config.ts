@@ -176,7 +176,7 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
     name: 'GL Period Status',
     description: 'Sync GL Accounting Period Status from Oracle Fusion',
     oracleEndpoint: 'accountingPeriodStatusLOV',
-    apexEndpoint: 'gl/periodstatus',
+    apexEndpoint: 'moduleperiodsstatus/create',
     parameters: [
       {
         key: 'LedgerId',

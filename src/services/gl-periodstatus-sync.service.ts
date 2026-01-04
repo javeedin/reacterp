@@ -286,7 +286,7 @@ export const syncGLPeriodStatus = async (
       };
 
       try {
-        const result = await insertToApex('gl/periodstatus', payload, log, true);
+        const result = await insertToApex('moduleperiodsstatus/create', payload, log, true);
 
         if (result.success) {
           const inserted = result.count || batch.length;
