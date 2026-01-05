@@ -248,6 +248,52 @@ app.get(/^\/api\/hcm\/(.+)$/, async (req, res) => {
   }
 });
 
+// Proxy: Fetch from Oracle HCM using FULL URL (for child resources like userAccountRoles)
+app.get('/api/hcm-url', async (req, res) => {
+  const fullUrl = req.query.url;
+
+  if (!fullUrl) {
+    return res.status(400).json({ success: false, error: 'URL parameter required' });
+  }
+
+  console.log('=== HCM URL PROXY REQUEST ===');
+  console.log('Full URL:', fullUrl);
+
+  try {
+    const response = await fetch(fullUrl, {
+      method: 'GET',
+      headers: {
+        'Authorization': getOracleHcmAuth(),
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+    });
+
+    console.log('HCM URL Response Status:', response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.log('HCM URL Error:', errorText.substring(0, 300));
+      return res.status(response.status).json({
+        success: false,
+        error: `HCM API Error: ${response.status} ${response.statusText}`,
+        details: errorText.substring(0, 500),
+      });
+    }
+
+    const data = await response.json();
+    console.log('HCM URL Response - Items:', data.items?.length || 0);
+
+    res.json(data);
+  } catch (error) {
+    console.error('HCM URL Proxy Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
 // Proxy: GET from APEX Database - supports nested paths like ap/createinvoice
 app.get(/^\/api\/apex\/(.+)$/, async (req, res) => {
   const path = req.params[0]; // Gets everything after /api/apex/

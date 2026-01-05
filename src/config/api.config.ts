@@ -241,6 +241,15 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
     parameters: [],
   },
   {
+    id: 'user-account-roles',
+    name: 'User Account Roles',
+    description: 'Sync User Account Roles from Oracle HCM (fetches roles for each user)',
+    oracleEndpoint: 'userAccounts',
+    apexEndpoint: 'useraccountroles',
+    hasChildren: true,
+    parameters: [],
+  },
+  {
     id: 'ap-payments',
     name: 'AP Payments',
     description: 'Sync AP Payments with Related Invoices from Oracle Fusion',
