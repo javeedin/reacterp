@@ -100,7 +100,7 @@ export const testLegalEntitiesConnection = async (log: LogCallback): Promise<boo
     log('info', 'Testing Legal Entities endpoint...');
 
     const result = await fetchFromOracle(
-      'legalEntities',
+      'legalEntitiesLOV',
       { limit: '1' },
       log,
       true
@@ -192,7 +192,7 @@ export const syncLegalEntities = async (
         offset: String(offset),
       };
 
-      const result = await fetchFromOracle('legalEntities', queryParams, log, true);
+      const result = await fetchFromOracle('legalEntitiesLOV', queryParams, log, true);
 
       if (!result.success || !result.items) {
         throw new Error(result.error || 'Failed to fetch legal entities');
