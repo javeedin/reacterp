@@ -52,6 +52,7 @@ import { syncBankAccounts, testBankAccountsConnection, type BankAccountsSyncProg
 import { syncLegalEntities, testLegalEntitiesConnection, type LegalEntitiesSyncProgress, type LegalEntitiesPayloadCallback } from '../../services/legal-entities-sync.service';
 import { syncUserAccounts, testUserAccountsConnection, type UserAccountsSyncProgress, type UserAccountsPayloadCallback } from '../../services/user-accounts-sync.service';
 import { syncUserAccountRoles, testUserAccountRolesConnection, type UserAccountRolesSyncProgress, type UserAccountRolesPayloadCallback } from '../../services/user-account-roles-sync.service';
+import { syncRoles, testRolesConnection, type RolesSyncProgress, type RolesPayloadCallback } from '../../services/roles-sync.service';
 import Autopilot from '../../components/Autopilot';
 import { useElectron } from '../../hooks/useElectron';
 
@@ -410,6 +411,30 @@ const SyncData: React.FC = () => {
     errorMessage?: string;
   }>>([]);
 
+  // Roles Progress State
+  const [rolesProgress, setRolesProgress] = useState<RolesSyncProgress>({
+    status: 'idle',
+    totalRecords: 0,
+    processedRecords: 0,
+    insertedRecords: 0,
+    currentPage: 0,
+    totalPages: 0,
+    errors: 0,
+    lastError: '',
+    startTime: null,
+    endTime: null,
+  });
+
+  // Roles payload state (for debug)
+  const [rolesPayloads, setRolesPayloads] = useState<Array<{
+    roleId: number;
+    roleName: string;
+    payload: any;
+    postResult?: any;
+    status: 'pending' | 'success' | 'error';
+    errorMessage?: string;
+  }>>([]);
+
   // Determine sync type based on selected object
   const isAPInvoices = selectedObject?.id === 'ap-invoices';
   const isAPPayments = selectedObject?.id === 'ap-payments';
@@ -421,6 +446,7 @@ const SyncData: React.FC = () => {
   const isLegalEntities = selectedObject?.id === 'legal-entities';
   const isUserAccounts = selectedObject?.id === 'user-accounts';
   const isUserAccountRoles = selectedObject?.id === 'user-account-roles';
+  const isRoles = selectedObject?.id === 'roles';
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const isSyncingRef = useRef(false);
@@ -915,6 +941,34 @@ const SyncData: React.FC = () => {
     });
   }, []);
 
+  // Roles payload callback handler
+  const handleRolesPayload: RolesPayloadCallback = useCallback((roleId, roleName, payload, result, error) => {
+    setRolesPayloads((prev) => {
+      const existing = prev.find((r) => r.roleId === roleId);
+      if (existing) {
+        return prev.map((r) =>
+          r.roleId === roleId
+            ? {
+                ...r,
+                postResult: result,
+                status: error ? 'error' : (result ? 'success' : 'pending'),
+                errorMessage: error,
+              }
+            : r
+        );
+      } else {
+        return [...prev, {
+          roleId,
+          roleName,
+          payload,
+          postResult: result,
+          status: error ? 'error' : (result ? 'success' : 'pending'),
+          errorMessage: error,
+        }];
+      }
+    });
+  }, []);
+
   // Check proxy server status
   const checkProxyStatus = useCallback(async () => {
     setProxyStatus('checking');
@@ -1047,6 +1101,10 @@ const SyncData: React.FC = () => {
       addLog('info', 'Testing User Account Roles endpoint...');
       const result = await testUserAccountRolesConnection(addLog);
       success = result.success;
+    } else if (isRoles) {
+      addLog('info', 'Testing Roles endpoint...');
+      const result = await testRolesConnection(addLog);
+      success = result.success;
     } else {
       addLog('info', 'Testing GL Journals endpoint...');
       success = await testGLConnection(addLog);
@@ -1120,6 +1178,7 @@ const SyncData: React.FC = () => {
     setLegalEntitiesPayloads([]);
     setUserAccountsPayloads([]);
     setUserAccountRolesPayloads([]);
+    setRolesPayloads([]);
     logCounterRef.current = 0;
 
     // Notify Electron that sync started
@@ -1430,6 +1489,35 @@ const SyncData: React.FC = () => {
         handleUserAccountRolesPayload
       );
       syncResult = { inserted: result.insertedRoles, errors: result.errors, type: 'user account roles' };
+    } else if (isRoles) {
+      // Roles Sync
+      setRolesProgress({
+        status: 'fetching',
+        totalRecords: 0,
+        processedRecords: 0,
+        insertedRecords: 0,
+        currentPage: 0,
+        totalPages: 0,
+        errors: 0,
+        lastError: '',
+        startTime: new Date(),
+        endTime: null,
+      });
+
+      const result = await syncRoles(
+        parameters,
+        testMode,
+        addLog,
+        (newProgress) => {
+          setRolesProgress((prev) => ({ ...prev, ...newProgress }));
+          if (newProgress.processedRecords !== undefined && newProgress.totalRecords) {
+            notifySyncProgress(`${newProgress.processedRecords}/${newProgress.totalRecords} roles`);
+          }
+        },
+        abortControllerRef.current.signal,
+        handleRolesPayload
+      );
+      syncResult = { inserted: result.insertedRecords, errors: result.errors, type: 'roles' };
     } else {
       // GL Journals Sync
       setProgress({
@@ -1653,6 +1741,8 @@ const SyncData: React.FC = () => {
     ? userAccountsProgress.status
     : isUserAccountRoles
     ? userAccountRolesProgress.status
+    : isRoles
+    ? rolesProgress.status
     : progress.status;
   const isSyncing = !['idle', 'completed', 'error', 'stopped'].includes(currentStatus);
 
@@ -2891,6 +2981,96 @@ const SyncData: React.FC = () => {
                     </Card>
                   </Col>
                 </Row>
+              ) : isRoles ? (
+                /* Roles KPI Cards */
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  {/* Records Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <DatabaseOutlined style={{ fontSize: 20, color: REDWOOD.primary, marginRight: 8 }} />
+                        <Text strong>Roles</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {rolesProgress.insertedRecords} / {rolesProgress.totalRecords}
+                      </div>
+                      <Progress
+                        percent={rolesProgress.totalRecords > 0 ? Math.round((rolesProgress.insertedRecords / rolesProgress.totalRecords) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.primary}
+                        style={{ marginTop: 8 }}
+                      />
+                      {rolesProgress.currentPage > 0 && (
+                        <Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 4 }}>
+                          Page {rolesProgress.currentPage}
+                        </Text>
+                      )}
+                    </Card>
+                  </Col>
+
+                  {/* Processed Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <FileTextOutlined style={{ fontSize: 20, color: REDWOOD.success, marginRight: 8 }} />
+                        <Text strong>Processed</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {rolesProgress.processedRecords}
+                        <Text type="secondary" style={{ fontSize: 14, marginLeft: 8 }}>
+                          / {rolesProgress.totalRecords}
+                        </Text>
+                      </div>
+                      <Progress
+                        percent={rolesProgress.totalRecords > 0 ? Math.round((rolesProgress.processedRecords / rolesProgress.totalRecords) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.success}
+                        style={{ marginTop: 8 }}
+                      />
+                    </Card>
+                  </Col>
+
+                  {/* Errors Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <WarningOutlined style={{ fontSize: 20, color: rolesProgress.errors > 0 ? REDWOOD.error : REDWOOD.textSecondary, marginRight: 8 }} />
+                        <Text strong>Errors</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: rolesProgress.errors > 0 ? REDWOOD.error : REDWOOD.textPrimary }}>
+                        {rolesProgress.errors}
+                      </div>
+                      {rolesProgress.lastError && (
+                        <Tooltip title={rolesProgress.lastError}>
+                          <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 8 }} ellipsis>
+                            {rolesProgress.lastError}
+                          </Text>
+                        </Tooltip>
+                      )}
+                    </Card>
+                  </Col>
+                </Row>
               ) : (
                 /* GL Journals KPI Cards */
                 <Row gutter={16} style={{ marginBottom: 16 }}>
@@ -3032,14 +3212,14 @@ const SyncData: React.FC = () => {
                           {getStatusText(currentStatus)}
                         </Tag>
                       </div>
-                      {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : isGLCodeComb ? codeCombProgress.startTime : isGLPeriodStatus ? periodStatusProgress.startTime : isBanks ? banksProgress.startTime : isBankBranches ? bankBranchesProgress.startTime : isBankAccounts ? bankAccountsProgress.startTime : isLegalEntities ? legalEntitiesProgress.startTime : isUserAccounts ? userAccountsProgress.startTime : isUserAccountRoles ? userAccountRolesProgress.startTime : progress.startTime) && (
+                      {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : isGLCodeComb ? codeCombProgress.startTime : isGLPeriodStatus ? periodStatusProgress.startTime : isBanks ? banksProgress.startTime : isBankBranches ? bankBranchesProgress.startTime : isBankAccounts ? bankAccountsProgress.startTime : isLegalEntities ? legalEntitiesProgress.startTime : isUserAccounts ? userAccountsProgress.startTime : isUserAccountRoles ? userAccountRolesProgress.startTime : isRoles ? rolesProgress.startTime : progress.startTime) && (
                         <Text type="secondary" style={{ fontSize: 12 }}>
-                          Started: {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : isGLCodeComb ? codeCombProgress.startTime : isGLPeriodStatus ? periodStatusProgress.startTime : isBanks ? banksProgress.startTime : isBankBranches ? bankBranchesProgress.startTime : isBankAccounts ? bankAccountsProgress.startTime : isLegalEntities ? legalEntitiesProgress.startTime : isUserAccounts ? userAccountsProgress.startTime : isUserAccountRoles ? userAccountRolesProgress.startTime : progress.startTime)?.toLocaleTimeString()}
+                          Started: {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : isGLCodeComb ? codeCombProgress.startTime : isGLPeriodStatus ? periodStatusProgress.startTime : isBanks ? banksProgress.startTime : isBankBranches ? bankBranchesProgress.startTime : isBankAccounts ? bankAccountsProgress.startTime : isLegalEntities ? legalEntitiesProgress.startTime : isUserAccounts ? userAccountsProgress.startTime : isUserAccountRoles ? userAccountRolesProgress.startTime : isRoles ? rolesProgress.startTime : progress.startTime)?.toLocaleTimeString()}
                         </Text>
                       )}
-                      {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : isGLCodeComb ? codeCombProgress.endTime : isGLPeriodStatus ? periodStatusProgress.endTime : isBanks ? banksProgress.endTime : isBankBranches ? bankBranchesProgress.endTime : isBankAccounts ? bankAccountsProgress.endTime : isLegalEntities ? legalEntitiesProgress.endTime : isUserAccounts ? userAccountsProgress.endTime : isUserAccountRoles ? userAccountRolesProgress.endTime : progress.endTime) && (
+                      {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : isGLCodeComb ? codeCombProgress.endTime : isGLPeriodStatus ? periodStatusProgress.endTime : isBanks ? banksProgress.endTime : isBankBranches ? bankBranchesProgress.endTime : isBankAccounts ? bankAccountsProgress.endTime : isLegalEntities ? legalEntitiesProgress.endTime : isUserAccounts ? userAccountsProgress.endTime : isUserAccountRoles ? userAccountRolesProgress.endTime : isRoles ? rolesProgress.endTime : progress.endTime) && (
                         <Text type="secondary" style={{ fontSize: 12 }}>
-                          Ended: {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : isGLCodeComb ? codeCombProgress.endTime : isGLPeriodStatus ? periodStatusProgress.endTime : isBanks ? banksProgress.endTime : isBankBranches ? bankBranchesProgress.endTime : isBankAccounts ? bankAccountsProgress.endTime : isLegalEntities ? legalEntitiesProgress.endTime : isUserAccounts ? userAccountsProgress.endTime : isUserAccountRoles ? userAccountRolesProgress.endTime : progress.endTime)?.toLocaleTimeString()}
+                          Ended: {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : isGLCodeComb ? codeCombProgress.endTime : isGLPeriodStatus ? periodStatusProgress.endTime : isBanks ? banksProgress.endTime : isBankBranches ? bankBranchesProgress.endTime : isBankAccounts ? bankAccountsProgress.endTime : isLegalEntities ? legalEntitiesProgress.endTime : isUserAccounts ? userAccountsProgress.endTime : isUserAccountRoles ? userAccountRolesProgress.endTime : isRoles ? rolesProgress.endTime : progress.endTime)?.toLocaleTimeString()}
                         </Text>
                       )}
                     </Space>
@@ -3068,13 +3248,15 @@ const SyncData: React.FC = () => {
                           ? `${userAccountsProgress.insertedRecords} user accounts inserted`
                           : isUserAccountRoles
                           ? `${userAccountRolesProgress.insertedRoles} roles inserted (${userAccountRolesProgress.processedUsers} users)`
+                          : isRoles
+                          ? `${rolesProgress.insertedRecords} roles inserted`
                           : `${progress.totalBatchesInserted + progress.totalHeadersInserted + progress.totalLinesInserted} inserted`
                         }
                       </Text>
-                      {(isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : progress.errors) > 0 && (
+                      {(isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : isRoles ? rolesProgress.errors : progress.errors) > 0 && (
                         <Text type="danger">
                           <CloseCircleOutlined style={{ marginRight: 4 }} />
-                          {isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : progress.errors} errors
+                          {isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : isRoles ? rolesProgress.errors : progress.errors} errors
                         </Text>
                       )}
                     </Space>
