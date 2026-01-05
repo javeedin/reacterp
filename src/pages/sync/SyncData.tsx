@@ -37,6 +37,7 @@ import {
   DownloadOutlined,
   SendOutlined,
   BugOutlined,
+  BankOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { SYNC_OBJECTS, PROXY_CONFIG, APEX_DB_CONFIG, type SyncObjectConfig, type ApiType } from '../../config/api.config';
