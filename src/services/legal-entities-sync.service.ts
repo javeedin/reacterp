@@ -273,7 +273,7 @@ export const syncLegalEntities = async (
       };
 
       try {
-        const result = await insertToApex('legal/legalentities', payload, log, true);
+        const result = await insertToApex('legalentities', payload, log, true);
 
         if (result.status === 'success') {
           const inserted = result.count || batch.length;

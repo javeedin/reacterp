@@ -229,7 +229,7 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
     name: 'Legal Entities',
     description: 'Sync Legal Entities from Oracle Fusion',
     oracleEndpoint: 'legalEntities',
-    apexEndpoint: 'legal/legalentities',
+    apexEndpoint: 'legalentities',
     parameters: [],
   },
   {

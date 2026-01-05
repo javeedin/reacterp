@@ -150,7 +150,7 @@ END RR_SYNC_LEGAL_ENTITIES;
 /
 
 -- ============================================
--- APEX REST Handler for POST /legal/legalentities
+-- APEX REST Handler for POST /legalentities
 -- ============================================
 
 DECLARE
@@ -158,13 +158,13 @@ DECLARE
     l_template_id   NUMBER;
 BEGIN
     -- Use existing reerp module (already created)
-    -- The endpoint will be: /ords/bcldifc/reerp/legal/legalentities
+    -- The endpoint will be: /ords/bcldifc/reerp/legalentities
     NULL;
 
     -- Define template
     ORDS.DEFINE_TEMPLATE(
         p_module_name    => 'reerp',
-        p_pattern        => 'legal/legalentities',
+        p_pattern        => 'legalentities',
         p_priority       => 0,
         p_etag_type      => 'HASH',
         p_etag_query     => NULL,
@@ -174,7 +174,7 @@ BEGIN
     -- Define POST handler
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'reerp',
-        p_pattern        => 'legal/legalentities',
+        p_pattern        => 'legalentities',
         p_method         => 'POST',
         p_source_type    => 'plsql/block',
         p_items_per_page => 0,
