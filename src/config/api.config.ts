@@ -245,7 +245,7 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
     name: 'User Account Roles',
     description: 'Sync User Account Roles from Oracle HCM (fetches roles for each user)',
     oracleEndpoint: 'userAccounts',
-    apexEndpoint: 'useraccountroles',
+    apexEndpoint: 'useraccounts/userroles',
     hasChildren: true,
     parameters: [],
   },

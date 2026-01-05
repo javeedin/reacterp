@@ -115,7 +115,7 @@ END RR_SYNC_USER_ACCOUNT_ROLES;
 BEGIN
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'reerp',
-        p_pattern        => 'useraccountroles',
+        p_pattern        => 'useraccounts/userroles',
         p_method         => 'POST',
         p_source_type    => 'plsql/block',
         p_items_per_page => 0,

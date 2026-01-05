@@ -294,7 +294,7 @@ export const syncUserAccountRoles = async (
           };
 
           // Insert to APEX
-          const insertResult = await insertToApex('useraccountroles', payload, log, false);
+          const insertResult = await insertToApex('useraccounts/userroles', payload, log, false);
 
           if (insertResult.success) {
             const count = insertResult.count || roles.length;
