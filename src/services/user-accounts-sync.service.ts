@@ -24,7 +24,7 @@ export type UserAccountsPayloadCallback = (
   error?: string
 ) => void;
 
-// Fetch from Oracle HCM REST API via proxy
+// Fetch from Oracle HCM REST API via proxy (Test environment)
 const fetchFromOracle = async (
   endpoint: string,
   params: Record<string, string> = {},
@@ -33,12 +33,11 @@ const fetchFromOracle = async (
 ): Promise<any> => {
   try {
     const queryParams = new URLSearchParams(params);
-    // User Accounts uses HCM REST API (not fscmRestApi)
-    const fusionPath = `hcmRestApi/resources/11.13.18.05/${endpoint}`;
-    const proxyUrl = `${PROXY_CONFIG.baseUrl}/fusion/${fusionPath}?${queryParams.toString()}`;
+    // User Accounts uses HCM REST API on test environment via /api/hcm/
+    const proxyUrl = `${PROXY_CONFIG.baseUrl}/hcm/${endpoint}?${queryParams.toString()}`;
 
     if (verbose) {
-      log?.('step', '──── [GET] Oracle HCM ────');
+      log?.('step', '──── [GET] Oracle HCM (Test) ────');
       log?.('info', `Proxy URL: ${proxyUrl}`);
     }
 

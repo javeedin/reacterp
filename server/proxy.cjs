@@ -11,6 +11,13 @@ const ORACLE_CONFIG = {
   password: 'BCL#261285',
 };
 
+// Oracle HCM Configuration (Test environment for User Accounts)
+const ORACLE_HCM_CONFIG = {
+  baseUrl: 'https://iaaobn-test.fa.ocs.oraclecloud.com/hcmRestApi/resources/11.13.18.05',
+  username: 'javeedindia@gmail.com',
+  password: 'Bumeric2026',
+};
+
 // APEX Database Configuration
 const APEX_CONFIG = {
   baseUrl: 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp',
@@ -34,6 +41,12 @@ app.get('/api/health', (req, res) => {
 // Get Oracle Auth header
 const getOracleAuth = () => {
   const credentials = Buffer.from(`${ORACLE_CONFIG.username}:${ORACLE_CONFIG.password}`).toString('base64');
+  return `Basic ${credentials}`;
+};
+
+// Get Oracle HCM Auth header
+const getOracleHcmAuth = () => {
+  const credentials = Buffer.from(`${ORACLE_HCM_CONFIG.username}:${ORACLE_HCM_CONFIG.password}`).toString('base64');
   return `Basic ${credentials}`;
 };
 
@@ -178,6 +191,56 @@ app.get(/^\/api\/fusion\/(.+)$/, async (req, res) => {
     res.json(data);
   } catch (error) {
     console.error('Fusion Proxy Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+// Proxy: Fetch from Oracle HCM (Test environment) - for User Accounts
+app.get(/^\/api\/hcm\/(.+)$/, async (req, res) => {
+  const path = req.params[0]; // Gets everything after /api/hcm/
+  const queryString = Object.keys(req.query).length > 0
+    ? '?' + new URLSearchParams(req.query).toString()
+    : '';
+
+  // Construct URL using HCM test environment
+  const url = `${ORACLE_HCM_CONFIG.baseUrl}/${path}${queryString}`;
+
+  console.log('=== HCM PROXY REQUEST ===');
+  console.log('Path:', path);
+  console.log('Query:', req.query);
+  console.log('Full URL:', url);
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': getOracleHcmAuth(),
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+    });
+
+    console.log('HCM Response Status:', response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.log('HCM Error:', errorText.substring(0, 300));
+      return res.status(response.status).json({
+        success: false,
+        error: `HCM API Error: ${response.status} ${response.statusText}`,
+        details: errorText.substring(0, 500),
+      });
+    }
+
+    const data = await response.json();
+    console.log('HCM Response - Items:', data.items?.length || 0, 'HasMore:', data.hasMore);
+
+    res.json(data);
+  } catch (error) {
+    console.error('HCM Proxy Error:', error.message);
     res.status(500).json({
       success: false,
       error: error.message,
