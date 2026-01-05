@@ -319,7 +319,7 @@ export const syncBankAccounts = async (
       };
 
       try {
-        const result = await insertToApex('banks/accounts', payload, log, true);
+        const result = await insertToApex('banks/bankaccounts', payload, log, true);
 
         if (result.status === 'success') {
           const inserted = result.count || batch.length;

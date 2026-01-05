@@ -346,7 +346,7 @@ END RR_SYNC_BANK_ACCOUNTS;
 /
 
 -- ============================================
--- APEX REST Handler for POST /banks/accounts
+-- APEX REST Handler for POST /banks/bankaccounts
 -- ============================================
 
 DECLARE
@@ -354,13 +354,13 @@ DECLARE
     l_template_id   NUMBER;
 BEGIN
     -- Use existing reerp module (already created)
-    -- The endpoint will be: /ords/bcldifc/reerp/banks/accounts
+    -- The endpoint will be: /ords/bcldifc/reerp/banks/bankaccounts
     NULL;
 
     -- Define template
     ORDS.DEFINE_TEMPLATE(
         p_module_name    => 'reerp',
-        p_pattern        => 'banks/accounts',
+        p_pattern        => 'banks/bankaccounts',
         p_priority       => 0,
         p_etag_type      => 'HASH',
         p_etag_query     => NULL,
@@ -370,7 +370,7 @@ BEGIN
     -- Define POST handler
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'reerp',
-        p_pattern        => 'banks/accounts',
+        p_pattern        => 'banks/bankaccounts',
         p_method         => 'POST',
         p_source_type    => 'plsql/block',
         p_items_per_page => 0,
