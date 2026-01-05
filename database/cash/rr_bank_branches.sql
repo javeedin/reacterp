@@ -260,7 +260,7 @@ END RR_SYNC_BANK_BRANCHES;
 /
 
 -- ============================================
--- APEX REST Handler for POST /bankbranches/createnewbranch
+-- APEX REST Handler for POST /banks/brankbranches
 -- ============================================
 
 DECLARE
@@ -268,13 +268,13 @@ DECLARE
     l_template_id   NUMBER;
 BEGIN
     -- Use existing reerp module (already created)
-    -- The endpoint will be: /ords/bcldifc/reerp/bankbranches/createnewbranch
+    -- The endpoint will be: /ords/bcldifc/reerp/banks/brankbranches
     NULL;
 
     -- Define template
     ORDS.DEFINE_TEMPLATE(
         p_module_name    => 'reerp',
-        p_pattern        => 'bankbranches/createnewbranch',
+        p_pattern        => 'banks/brankbranches',
         p_priority       => 0,
         p_etag_type      => 'HASH',
         p_etag_query     => NULL,
@@ -284,7 +284,7 @@ BEGIN
     -- Define POST handler
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'reerp',
-        p_pattern        => 'bankbranches/createnewbranch',
+        p_pattern        => 'banks/brankbranches',
         p_method         => 'POST',
         p_source_type    => 'plsql/block',
         p_items_per_page => 0,

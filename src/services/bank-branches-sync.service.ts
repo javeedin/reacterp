@@ -285,7 +285,7 @@ export const syncBankBranches = async (
       };
 
       try {
-        const result = await insertToApex('bankbranches/createnewbranch', payload, log, true);
+        const result = await insertToApex('banks/brankbranches', payload, log, true);
 
         if (result.status === 'success') {
           const inserted = result.count || batch.length;
