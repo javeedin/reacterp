@@ -24,7 +24,7 @@ export type UserAccountsPayloadCallback = (
   error?: string
 ) => void;
 
-// Fetch from Oracle endpoint via proxy
+// Fetch from Oracle HCM REST API via proxy
 const fetchFromOracle = async (
   endpoint: string,
   params: Record<string, string> = {},
@@ -33,24 +33,27 @@ const fetchFromOracle = async (
 ): Promise<any> => {
   try {
     const queryParams = new URLSearchParams(params);
-    const proxyUrl = `${PROXY_CONFIG.baseUrl}/oracle/${endpoint}?${queryParams.toString()}`;
+    // User Accounts uses HCM REST API (not fscmRestApi)
+    const fusionPath = `hcmRestApi/resources/11.13.18.05/${endpoint}`;
+    const proxyUrl = `${PROXY_CONFIG.baseUrl}/fusion/${fusionPath}?${queryParams.toString()}`;
 
     if (verbose) {
-      log?.('step', '──── [GET] Oracle Fusion ────');
+      log?.('step', '──── [GET] Oracle HCM ────');
       log?.('info', `Proxy URL: ${proxyUrl}`);
     }
 
     const response = await fetch(proxyUrl);
     const data = await response.json();
 
-    if (!data.success) {
-      throw new Error(data.error || 'Fetch failed');
+    if (!response.ok) {
+      throw new Error(data.error || `Fetch failed: ${response.status}`);
     }
 
     if (verbose) {
       log?.('success', `GET Response: ${data.items?.length || 0} records fetched`);
     }
-    return data;
+    // Wrap response to match expected format
+    return { success: true, items: data.items || [], hasMore: data.hasMore, count: data.count };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
     log?.('error', `GET Error: ${errorMsg}`);
