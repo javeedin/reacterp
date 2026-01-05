@@ -46,6 +46,7 @@ import { syncAPPayments, testAPPaymentsConnection, type APPaymentsSyncProgress, 
 import { syncGLCodeCombinations, testGLCodeCombConnection, type CodeCombSyncProgress, type CodeCombPayloadCallback } from '../../services/gl-codecomb-sync.service';
 import { syncGLPeriodStatus, testGLPeriodStatusConnection, type PeriodStatusSyncProgress, type PeriodStatusPayloadCallback } from '../../services/gl-periodstatus-sync.service';
 import { syncBanks, testBanksConnection, type BanksSyncProgress, type BanksPayloadCallback } from '../../services/banks-sync.service';
+import { syncBankBranches, testBankBranchesConnection, type BankBranchesSyncProgress, type BankBranchesPayloadCallback } from '../../services/bank-branches-sync.service';
 import Autopilot from '../../components/Autopilot';
 import { useElectron } from '../../hooks/useElectron';
 
@@ -282,12 +283,37 @@ const SyncData: React.FC = () => {
     errorMessage?: string;
   }>>([]);
 
+  // Bank Branches Progress State
+  const [bankBranchesProgress, setBankBranchesProgress] = useState<BankBranchesSyncProgress>({
+    status: 'idle',
+    totalRecords: 0,
+    processedRecords: 0,
+    insertedRecords: 0,
+    currentPage: 0,
+    totalPages: 0,
+    errors: 0,
+    lastError: '',
+    startTime: null,
+    endTime: null,
+  });
+
+  // Bank Branches payload state (for debug)
+  const [bankBranchesPayloads, setBankBranchesPayloads] = useState<Array<{
+    branchPartyId: number;
+    branchName: string;
+    payload: any;
+    postResult?: any;
+    status: 'pending' | 'success' | 'error';
+    errorMessage?: string;
+  }>>([]);
+
   // Determine sync type based on selected object
   const isAPInvoices = selectedObject?.id === 'ap-invoices';
   const isAPPayments = selectedObject?.id === 'ap-payments';
   const isGLCodeComb = selectedObject?.id === 'gl-code-combinations';
   const isGLPeriodStatus = selectedObject?.id === 'gl-period-status';
   const isBanks = selectedObject?.id === 'banks';
+  const isBankBranches = selectedObject?.id === 'bank-branches';
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const isSyncingRef = useRef(false);
@@ -640,6 +666,34 @@ const SyncData: React.FC = () => {
     });
   }, []);
 
+  // Bank Branches payload callback handler
+  const handleBankBranchesPayload: BankBranchesPayloadCallback = useCallback((branchPartyId, branchName, payload, result, error) => {
+    setBankBranchesPayloads((prev) => {
+      const existing = prev.find((b) => b.branchPartyId === branchPartyId);
+      if (existing) {
+        return prev.map((b) =>
+          b.branchPartyId === branchPartyId
+            ? {
+                ...b,
+                postResult: result,
+                status: error ? 'error' : (result ? 'success' : 'pending'),
+                errorMessage: error,
+              }
+            : b
+        );
+      } else {
+        return [...prev, {
+          branchPartyId,
+          branchName,
+          payload,
+          postResult: result,
+          status: error ? 'error' : (result ? 'success' : 'pending'),
+          errorMessage: error,
+        }];
+      }
+    });
+  }, []);
+
   // Check proxy server status
   const checkProxyStatus = useCallback(async () => {
     setProxyStatus('checking');
@@ -756,6 +810,9 @@ const SyncData: React.FC = () => {
     } else if (isBanks) {
       addLog('info', 'Testing Banks endpoint...');
       success = await testBanksConnection(addLog);
+    } else if (isBankBranches) {
+      addLog('info', 'Testing Bank Branches endpoint...');
+      success = await testBankBranchesConnection(addLog);
     } else {
       addLog('info', 'Testing GL Journals endpoint...');
       success = await testGLConnection(addLog);
@@ -824,6 +881,7 @@ const SyncData: React.FC = () => {
     setCodeCombPayloads([]);
     setPeriodStatusPayloads([]);
     setBanksPayloads([]);
+    setBankBranchesPayloads([]);
     logCounterRef.current = 0;
 
     // Notify Electron that sync started
@@ -988,6 +1046,35 @@ const SyncData: React.FC = () => {
         handleBanksPayload
       );
       syncResult = { inserted: result.insertedRecords, errors: result.errors, type: 'banks' };
+    } else if (isBankBranches) {
+      // Bank Branches Sync
+      setBankBranchesProgress({
+        status: 'fetching',
+        totalRecords: 0,
+        processedRecords: 0,
+        insertedRecords: 0,
+        currentPage: 0,
+        totalPages: 0,
+        errors: 0,
+        lastError: '',
+        startTime: new Date(),
+        endTime: null,
+      });
+
+      const result = await syncBankBranches(
+        parameters,
+        testMode,
+        addLog,
+        (newProgress) => {
+          setBankBranchesProgress((prev) => ({ ...prev, ...newProgress }));
+          if (newProgress.processedRecords !== undefined && newProgress.totalRecords) {
+            notifySyncProgress(`${newProgress.processedRecords}/${newProgress.totalRecords} bank branches`);
+          }
+        },
+        abortControllerRef.current.signal,
+        handleBankBranchesPayload
+      );
+      syncResult = { inserted: result.insertedRecords, errors: result.errors, type: 'bank branches' };
     } else {
       // GL Journals Sync
       setProgress({
@@ -1201,6 +1288,8 @@ const SyncData: React.FC = () => {
     ? periodStatusProgress.status
     : isBanks
     ? banksProgress.status
+    : isBankBranches
+    ? bankBranchesProgress.status
     : progress.status;
   const isSyncing = !['idle', 'completed', 'error', 'stopped'].includes(currentStatus);
 
@@ -1989,6 +2078,96 @@ const SyncData: React.FC = () => {
                     </Card>
                   </Col>
                 </Row>
+              ) : isBankBranches ? (
+                /* Bank Branches KPI Cards */
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  {/* Records Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <BranchesOutlined style={{ fontSize: 20, color: REDWOOD.primary, marginRight: 8 }} />
+                        <Text strong>Bank Branches</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {bankBranchesProgress.insertedRecords} / {bankBranchesProgress.totalRecords}
+                      </div>
+                      <Progress
+                        percent={bankBranchesProgress.totalRecords > 0 ? Math.round((bankBranchesProgress.insertedRecords / bankBranchesProgress.totalRecords) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.primary}
+                        style={{ marginTop: 8 }}
+                      />
+                      {bankBranchesProgress.currentPage > 0 && (
+                        <Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 4 }}>
+                          Page {bankBranchesProgress.currentPage}/{bankBranchesProgress.totalPages}
+                        </Text>
+                      )}
+                    </Card>
+                  </Col>
+
+                  {/* Processed Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <FileTextOutlined style={{ fontSize: 20, color: REDWOOD.success, marginRight: 8 }} />
+                        <Text strong>Processed</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {bankBranchesProgress.processedRecords}
+                        <Text type="secondary" style={{ fontSize: 14, marginLeft: 8 }}>
+                          / {bankBranchesProgress.totalRecords}
+                        </Text>
+                      </div>
+                      <Progress
+                        percent={bankBranchesProgress.totalRecords > 0 ? Math.round((bankBranchesProgress.processedRecords / bankBranchesProgress.totalRecords) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.success}
+                        style={{ marginTop: 8 }}
+                      />
+                    </Card>
+                  </Col>
+
+                  {/* Errors Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <WarningOutlined style={{ fontSize: 20, color: bankBranchesProgress.errors > 0 ? REDWOOD.error : REDWOOD.textSecondary, marginRight: 8 }} />
+                        <Text strong>Errors</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: bankBranchesProgress.errors > 0 ? REDWOOD.error : REDWOOD.textPrimary }}>
+                        {bankBranchesProgress.errors}
+                      </div>
+                      {bankBranchesProgress.lastError && (
+                        <Tooltip title={bankBranchesProgress.lastError}>
+                          <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 8 }} ellipsis>
+                            {bankBranchesProgress.lastError}
+                          </Text>
+                        </Tooltip>
+                      )}
+                    </Card>
+                  </Col>
+                </Row>
               ) : (
                 /* GL Journals KPI Cards */
                 <Row gutter={16} style={{ marginBottom: 16 }}>
@@ -2130,14 +2309,14 @@ const SyncData: React.FC = () => {
                           {getStatusText(currentStatus)}
                         </Tag>
                       </div>
-                      {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : isGLCodeComb ? codeCombProgress.startTime : isGLPeriodStatus ? periodStatusProgress.startTime : isBanks ? banksProgress.startTime : progress.startTime) && (
+                      {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : isGLCodeComb ? codeCombProgress.startTime : isGLPeriodStatus ? periodStatusProgress.startTime : isBanks ? banksProgress.startTime : isBankBranches ? bankBranchesProgress.startTime : progress.startTime) && (
                         <Text type="secondary" style={{ fontSize: 12 }}>
-                          Started: {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : isGLCodeComb ? codeCombProgress.startTime : isGLPeriodStatus ? periodStatusProgress.startTime : isBanks ? banksProgress.startTime : progress.startTime)?.toLocaleTimeString()}
+                          Started: {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : isGLCodeComb ? codeCombProgress.startTime : isGLPeriodStatus ? periodStatusProgress.startTime : isBanks ? banksProgress.startTime : isBankBranches ? bankBranchesProgress.startTime : progress.startTime)?.toLocaleTimeString()}
                         </Text>
                       )}
-                      {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : isGLCodeComb ? codeCombProgress.endTime : isGLPeriodStatus ? periodStatusProgress.endTime : isBanks ? banksProgress.endTime : progress.endTime) && (
+                      {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : isGLCodeComb ? codeCombProgress.endTime : isGLPeriodStatus ? periodStatusProgress.endTime : isBanks ? banksProgress.endTime : isBankBranches ? bankBranchesProgress.endTime : progress.endTime) && (
                         <Text type="secondary" style={{ fontSize: 12 }}>
-                          Ended: {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : isGLCodeComb ? codeCombProgress.endTime : isGLPeriodStatus ? periodStatusProgress.endTime : isBanks ? banksProgress.endTime : progress.endTime)?.toLocaleTimeString()}
+                          Ended: {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : isGLCodeComb ? codeCombProgress.endTime : isGLPeriodStatus ? periodStatusProgress.endTime : isBanks ? banksProgress.endTime : isBankBranches ? bankBranchesProgress.endTime : progress.endTime)?.toLocaleTimeString()}
                         </Text>
                       )}
                     </Space>
@@ -2156,13 +2335,15 @@ const SyncData: React.FC = () => {
                           ? `${periodStatusProgress.insertedRecords} period statuses inserted`
                           : isBanks
                           ? `${banksProgress.insertedRecords} banks inserted`
+                          : isBankBranches
+                          ? `${bankBranchesProgress.insertedRecords} bank branches inserted`
                           : `${progress.totalBatchesInserted + progress.totalHeadersInserted + progress.totalLinesInserted} inserted`
                         }
                       </Text>
-                      {(isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isBanks ? banksProgress.errors : progress.errors) > 0 && (
+                      {(isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : progress.errors) > 0 && (
                         <Text type="danger">
                           <CloseCircleOutlined style={{ marginRight: 4 }} />
-                          {isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isBanks ? banksProgress.errors : progress.errors} errors
+                          {isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : progress.errors} errors
                         </Text>
                       )}
                     </Space>

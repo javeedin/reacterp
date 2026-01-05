@@ -209,6 +209,14 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
     parameters: [],
   },
   {
+    id: 'bank-branches',
+    name: 'Bank Branches',
+    description: 'Sync Bank Branches from Oracle Fusion',
+    oracleEndpoint: 'cashBankBranches',
+    apexEndpoint: 'bankbranches/createnewbranch',
+    parameters: [],
+  },
+  {
     id: 'ap-payments',
     name: 'AP Payments',
     description: 'Sync AP Payments with Related Invoices from Oracle Fusion',
