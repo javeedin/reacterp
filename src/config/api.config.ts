@@ -156,14 +156,6 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
     parameters: [],
   },
   {
-    id: 'suppliers',
-    name: 'Suppliers',
-    description: 'Sync Suppliers/Vendors from Oracle Fusion',
-    oracleEndpoint: 'suppliers',
-    apexEndpoint: 'ap/suppliers',
-    parameters: [],
-  },
-  {
     id: 'customers',
     name: 'Customers',
     description: 'Sync Customers from Oracle Fusion',
@@ -255,6 +247,14 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
     description: 'Sync Roles from Oracle HCM',
     oracleEndpoint: 'rolesLOV',
     apexEndpoint: 'roles',
+    parameters: [],
+  },
+  {
+    id: 'suppliers',
+    name: 'Suppliers',
+    description: 'Sync Suppliers from Oracle Fusion',
+    oracleEndpoint: 'suppliers',
+    apexEndpoint: 'suppliers',
     parameters: [],
   },
   {
