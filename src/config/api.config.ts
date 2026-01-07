@@ -274,6 +274,14 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
     parameters: [],
   },
   {
+    id: 'supplier-site-assignments',
+    name: 'Supplier Site Assignments',
+    description: 'Sync Site Assignments from Fusion (requires Sites to be synced first)',
+    oracleEndpoint: 'suppliers/{id}/child/sites/{siteId}/child/siteAssignments',
+    apexEndpoint: 'suppliers/sites/assignments',
+    parameters: [],
+  },
+  {
     id: 'ap-payments',
     name: 'AP Payments',
     description: 'Sync AP Payments with Related Invoices from Oracle Fusion',

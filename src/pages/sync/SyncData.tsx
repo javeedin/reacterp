@@ -57,6 +57,7 @@ import { syncRoles, testRolesConnection, type RolesSyncProgress, type RolesPaylo
 import { syncSuppliers, testSuppliersConnection, type SuppliersSyncProgress, type SuppliersPayloadCallback } from '../../services/suppliers-sync.service';
 import { syncSupplierAddresses, testSupplierAddressConnection, type SupplierAddressSyncProgress, type SupplierAddressPayloadCallback } from '../../services/supplier-address-sync.service';
 import { syncSupplierSites, testSupplierSitesConnection, type SupplierSitesSyncProgress, type SupplierSitesPayloadCallback } from '../../services/supplier-sites-sync.service';
+import { syncSiteAssignments, testSiteAssignmentsConnection, type SiteAssignmentsSyncProgress, type SiteAssignmentsPayloadCallback } from '../../services/supplier-site-assignments-sync.service';
 import { useSyncWorker, type WorkerSyncProgress, type WorkerLog } from '../../hooks/useSyncWorker';
 import Autopilot from '../../components/Autopilot';
 import { useElectron, useElectronBackgroundSync } from '../../hooks/useElectron';
@@ -526,6 +527,32 @@ const SyncData: React.FC = () => {
     errorMessage?: string;
   }>>([]);
 
+  // Site Assignments Progress State
+  const [siteAssignmentsProgress, setSiteAssignmentsProgress] = useState<SiteAssignmentsSyncProgress>({
+    status: 'idle',
+    totalSites: 0,
+    processedSites: 0,
+    totalAssignments: 0,
+    insertedAssignments: 0,
+    currentSite: '',
+    currentSiteId: null,
+    errors: 0,
+    lastError: '',
+    startTime: null,
+    endTime: null,
+  });
+
+  // Site Assignments payload state (for debug)
+  const [siteAssignmentsPayloads, setSiteAssignmentsPayloads] = useState<Array<{
+    siteId: number;
+    siteName: string;
+    assignmentCount: number;
+    payload: any;
+    postResult?: any;
+    status: 'pending' | 'success' | 'error';
+    errorMessage?: string;
+  }>>([]);
+
   // Determine sync type based on selected object
   const isAPInvoices = selectedObject?.id === 'ap-invoices';
   const isAPPayments = selectedObject?.id === 'ap-payments';
@@ -541,6 +568,7 @@ const SyncData: React.FC = () => {
   const isSuppliers = selectedObject?.id === 'suppliers';
   const isSupplierAddresses = selectedObject?.id === 'supplier-addresses';
   const isSupplierSites = selectedObject?.id === 'supplier-sites';
+  const isSiteAssignments = selectedObject?.id === 'supplier-site-assignments';
 
   // Web Worker for background sync
   const handleWorkerProgress = useCallback((progress: WorkerSyncProgress) => {
@@ -1244,6 +1272,35 @@ const SyncData: React.FC = () => {
     });
   }, []);
 
+  // Site Assignments payload callback handler
+  const handleSiteAssignmentsPayload: SiteAssignmentsPayloadCallback = useCallback((siteId, siteName, assignmentCount, payload, result, error) => {
+    setSiteAssignmentsPayloads((prev) => {
+      const existing = prev.find((s) => s.siteId === siteId);
+      if (existing) {
+        return prev.map((s) =>
+          s.siteId === siteId
+            ? {
+                ...s,
+                postResult: result,
+                status: error ? 'error' : (result ? 'success' : 'pending'),
+                errorMessage: error,
+              }
+            : s
+        );
+      } else {
+        return [...prev, {
+          siteId,
+          siteName,
+          assignmentCount,
+          payload,
+          postResult: result,
+          status: error ? 'error' : (result ? 'success' : 'pending'),
+          errorMessage: error,
+        }];
+      }
+    });
+  }, []);
+
   // Check proxy server status
   const checkProxyStatus = useCallback(async () => {
     setProxyStatus('checking');
@@ -1392,6 +1449,10 @@ const SyncData: React.FC = () => {
       addLog('info', 'Testing Supplier Sites endpoint...');
       const result = await testSupplierSitesConnection(addLog);
       success = result.success;
+    } else if (isSiteAssignments) {
+      addLog('info', 'Testing Site Assignments endpoint...');
+      const result = await testSiteAssignmentsConnection(addLog);
+      success = result.success;
     } else {
       addLog('info', 'Testing GL Journals endpoint...');
       success = await testGLConnection(addLog);
@@ -1468,6 +1529,8 @@ const SyncData: React.FC = () => {
     setRolesPayloads([]);
     setSuppliersPayloads([]);
     setSupplierAddressPayloads([]);
+    setSupplierSitesPayloads([]);
+    setSiteAssignmentsPayloads([]);
     logCounterRef.current = 0;
 
     // Notify Electron that sync started
@@ -1929,6 +1992,36 @@ const SyncData: React.FC = () => {
         handleSupplierSitesPayload
       );
       syncResult = { inserted: result.insertedSites, errors: result.errors, type: 'supplier sites' };
+    } else if (isSiteAssignments) {
+      // Site Assignments Sync
+      setSiteAssignmentsProgress({
+        status: 'fetching_sites',
+        totalSites: 0,
+        processedSites: 0,
+        totalAssignments: 0,
+        insertedAssignments: 0,
+        currentSite: '',
+        currentSiteId: null,
+        errors: 0,
+        lastError: '',
+        startTime: new Date(),
+        endTime: null,
+      });
+
+      const result = await syncSiteAssignments(
+        parameters,
+        testMode,
+        addLog,
+        (newProgress) => {
+          setSiteAssignmentsProgress((prev) => ({ ...prev, ...newProgress }));
+          if (newProgress.processedSites !== undefined && newProgress.totalSites) {
+            notifySyncProgress(`${newProgress.processedSites}/${newProgress.totalSites} sites, ${newProgress.insertedAssignments || 0} assignments`);
+          }
+        },
+        abortControllerRef.current.signal,
+        handleSiteAssignmentsPayload
+      );
+      syncResult = { inserted: result.insertedAssignments, errors: result.errors, type: 'site assignments' };
     } else {
       // GL Journals Sync
       setProgress({
@@ -2173,6 +2266,8 @@ const SyncData: React.FC = () => {
     ? supplierAddressProgress.status
     : isSupplierSites
     ? supplierSitesProgress.status
+    : isSiteAssignments
+    ? siteAssignmentsProgress.status
     : progress.status;
   const isSyncing = !['idle', 'completed', 'error', 'stopped'].includes(currentStatus);
 
@@ -3848,6 +3943,98 @@ const SyncData: React.FC = () => {
                         <Tooltip title={supplierSitesProgress.lastError}>
                           <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 8 }} ellipsis>
                             {supplierSitesProgress.lastError}
+                          </Text>
+                        </Tooltip>
+                      )}
+                    </Card>
+                  </Col>
+                </Row>
+              ) : isSiteAssignments ? (
+                /* Site Assignments KPI Cards */
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  {/* Sites Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <BranchesOutlined style={{ fontSize: 20, color: REDWOOD.primary, marginRight: 8 }} />
+                        <Text strong>Sites</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {siteAssignmentsProgress.processedSites} / {siteAssignmentsProgress.totalSites}
+                      </div>
+                      <Progress
+                        percent={siteAssignmentsProgress.totalSites > 0 ? Math.round((siteAssignmentsProgress.processedSites / siteAssignmentsProgress.totalSites) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.primary}
+                        style={{ marginTop: 8 }}
+                      />
+                      {siteAssignmentsProgress.currentSite && (
+                        <Tooltip title={siteAssignmentsProgress.currentSite}>
+                          <Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 4 }} ellipsis>
+                            {siteAssignmentsProgress.currentSite}
+                          </Text>
+                        </Tooltip>
+                      )}
+                    </Card>
+                  </Col>
+
+                  {/* Assignments Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <FileSearchOutlined style={{ fontSize: 20, color: REDWOOD.success, marginRight: 8 }} />
+                        <Text strong>Assignments Inserted</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {siteAssignmentsProgress.insertedAssignments}
+                        <Text type="secondary" style={{ fontSize: 14, marginLeft: 8 }}>
+                          / {siteAssignmentsProgress.totalAssignments}
+                        </Text>
+                      </div>
+                      <Progress
+                        percent={siteAssignmentsProgress.totalAssignments > 0 ? Math.round((siteAssignmentsProgress.insertedAssignments / siteAssignmentsProgress.totalAssignments) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.success}
+                        style={{ marginTop: 8 }}
+                      />
+                    </Card>
+                  </Col>
+
+                  {/* Errors Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <WarningOutlined style={{ fontSize: 20, color: siteAssignmentsProgress.errors > 0 ? REDWOOD.error : REDWOOD.textSecondary, marginRight: 8 }} />
+                        <Text strong>Errors</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: siteAssignmentsProgress.errors > 0 ? REDWOOD.error : REDWOOD.textPrimary }}>
+                        {siteAssignmentsProgress.errors}
+                      </div>
+                      {siteAssignmentsProgress.lastError && (
+                        <Tooltip title={siteAssignmentsProgress.lastError}>
+                          <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 8 }} ellipsis>
+                            {siteAssignmentsProgress.lastError}
                           </Text>
                         </Tooltip>
                       )}
