@@ -58,7 +58,7 @@ import { syncSuppliers, testSuppliersConnection, type SuppliersSyncProgress, typ
 import { syncSupplierAddresses, testSupplierAddressConnection, type SupplierAddressSyncProgress, type SupplierAddressPayloadCallback } from '../../services/supplier-address-sync.service';
 import { useSyncWorker, type WorkerSyncProgress, type WorkerLog } from '../../hooks/useSyncWorker';
 import Autopilot from '../../components/Autopilot';
-import { useElectron } from '../../hooks/useElectron';
+import { useElectron, useElectronBackgroundSync } from '../../hooks/useElectron';
 
 // Icon imports for AP
 import { FileSearchOutlined, BranchesOutlined } from '@ant-design/icons';
@@ -141,6 +141,7 @@ const SyncData: React.FC = () => {
   const [isTesting, setIsTesting] = useState(false);
   const [testMode, setTestMode] = useState<boolean | 'single'>(true); // true=25, false=full, 'single'=1
   const [useBackgroundWorker, setUseBackgroundWorker] = useState(false); // Run sync in Web Worker
+  const [verboseConsole, setVerboseConsole] = useState(false); // Show logs in browser console
   const [proxyStatus, setProxyStatus] = useState<ProxyStatus>('unknown');
   const [proxyError, setProxyError] = useState<string>('');
   const [logDetailVisible, setLogDetailVisible] = useState(false);
@@ -159,8 +160,16 @@ const SyncData: React.FC = () => {
   // Payment payload state (for AP Payments debug - reserved for future use)
   const [, setPaymentPayloads] = useState<PaymentPayloadLog[]>([]);
 
-  // Electron notifications
-  const { notifySyncStarted, notifySyncCompleted, notifySyncError, notifySyncProgress } = useElectron();
+  // Electron notifications and background sync
+  const {
+    isElectron: isRunningInElectron,
+    isBackgroundSyncSupported: isElectronBgSyncSupported,
+    notifySyncStarted,
+    notifySyncCompleted,
+    notifySyncError,
+    notifySyncProgress
+  } = useElectron();
+  const [useElectronBackground, setUseElectronBackground] = useState(false);
 
   // GL Progress State
   const [progress, setProgress] = useState<SyncProgress>({
@@ -552,6 +561,55 @@ const SyncData: React.FC = () => {
     onError: handleWorkerError,
   });
 
+  // Electron background sync callbacks
+  const handleElectronProgress = useCallback((progress: any) => {
+    if (isSupplierAddresses) {
+      setSupplierAddressProgress((prev) => ({
+        ...prev,
+        status: progress.status as any,
+        totalSuppliers: progress.totalSuppliers ?? prev.totalSuppliers,
+        processedSuppliers: progress.processedSuppliers ?? prev.processedSuppliers,
+        totalAddresses: progress.totalAddresses ?? prev.totalAddresses,
+        insertedAddresses: progress.insertedAddresses ?? prev.insertedAddresses,
+        currentSupplier: progress.currentSupplier ?? prev.currentSupplier,
+        errors: progress.errors ?? prev.errors,
+      }));
+    }
+  }, [isSupplierAddresses]);
+
+  const handleElectronLog = useCallback((log: any) => {
+    const syncLog = {
+      id: `electron-${Date.now()}`,
+      timestamp: new Date(log.timestamp || Date.now()),
+      type: log.type as any,
+      message: log.message,
+    };
+    setLogs((prev) => [syncLog, ...prev].slice(0, 500));
+  }, []);
+
+  const handleElectronComplete = useCallback((result: any) => {
+    isSyncingRef.current = false;
+    addLog('success', `Electron background sync completed: ${result.insertedRecords} records in ${result.duration}s`);
+    notifySyncCompleted(`Sync completed: ${result.insertedRecords} records`);
+  }, [notifySyncCompleted]);
+
+  const handleElectronError = useCallback((error: string) => {
+    isSyncingRef.current = false;
+    addLog('error', `Electron background sync failed: ${error}`);
+    notifySyncError(error);
+  }, [notifySyncError]);
+
+  const {
+    isSupported: isElectronSyncSupported,
+    startSync: startElectronSync,
+    stopSync: stopElectronSync,
+  } = useElectronBackgroundSync(
+    handleElectronProgress,
+    handleElectronLog,
+    handleElectronComplete,
+    handleElectronError
+  );
+
   const abortControllerRef = useRef<AbortController | null>(null);
   const isSyncingRef = useRef(false);
   const logCounterRef = useRef(0); // Track total logs generated for debugging
@@ -567,14 +625,13 @@ const SyncData: React.FC = () => {
       message,
     };
 
-    // Only log to console in test modes (verbose), not full sync for performance
-    // Full sync will have minimal logs from the service anyway
-    if (testMode !== false) {
+    // Only log to console if verboseConsole is enabled
+    if (verboseConsole) {
       console.log(`[LOG #${logNumber}] [${type.toUpperCase()}] ${message}`);
     }
 
     setLogs((prev) => [log, ...prev].slice(0, 500));
-  }, [testMode]);
+  }, [verboseConsole]);
 
   // Update batch payload status after POST
   const updateBatchPayloadStatus = useCallback((batchId: number, status: 'success' | 'error', postResult?: any, errorMessage?: string) => {
@@ -1734,8 +1791,27 @@ const SyncData: React.FC = () => {
         endTime: null,
       });
 
+      // Use Electron background sync if enabled
+      if (useElectronBackground && isElectronSyncSupported) {
+        addLog('info', 'Starting sync in Electron main process...');
+        addLog('info', 'Sync will continue even if window is minimized.');
+        try {
+          await startElectronSync({
+            syncType: 'supplier-addresses',
+            parameters,
+            testMode,
+            proxyBaseUrl: PROXY_CONFIG.baseUrl,
+            apexBaseUrl: APEX_DB_CONFIG.baseUrl,
+          });
+          // Electron handles the rest asynchronously - return early
+          return;
+        } catch (error) {
+          addLog('error', `Failed to start Electron sync: ${error}`);
+          syncResult = { inserted: 0, errors: 1, type: 'supplier addresses' };
+        }
+      }
       // Use Web Worker for background sync if enabled
-      if (useBackgroundWorker && isWorkerSupported) {
+      else if (useBackgroundWorker && isWorkerSupported) {
         addLog('info', 'Starting sync in background thread (Web Worker)...');
         addLog('info', 'UI will remain responsive. You can switch tabs safely.');
         const started = startWorkerSync('supplier-addresses', parameters, testMode);
@@ -1819,6 +1895,19 @@ const SyncData: React.FC = () => {
   const handleStop = () => {
     isSyncingRef.current = false;
     abortControllerRef.current?.abort();
+
+    // Stop Web Worker if running
+    if (isWorkerRunning) {
+      stopWorkerSync();
+      addLog('warning', '⚠ Stopping Web Worker sync...');
+    }
+
+    // Stop Electron background sync if running
+    if (useElectronBackground) {
+      stopElectronSync();
+      addLog('warning', '⚠ Stopping Electron background sync...');
+    }
+
     addLog('warning', '⚠ Stopping sync...');
   };
 
@@ -2151,28 +2240,84 @@ const SyncData: React.FC = () => {
                     </Text>
                   </div>
 
-                  {/* Background Worker Option - Only for Supplier Addresses */}
-                  {isSupplierAddresses && isWorkerSupported && (
+                  {/* Background Options */}
+                  {isSupplierAddresses && (isWorkerSupported || isElectronSyncSupported) && (
                     <div style={{
                       marginBottom: 16,
                       padding: '12px 16px',
                       background: REDWOOD.surfaceSecondary,
                       borderRadius: 8,
                     }}>
-                      <Checkbox
-                        checked={useBackgroundWorker}
-                        onChange={(e) => setUseBackgroundWorker(e.target.checked)}
-                        disabled={isSyncing}
-                      >
-                        <Text strong>Run in Background (Web Worker)</Text>
-                      </Checkbox>
-                      <Text type="secondary" style={{ fontSize: 11, marginTop: 4, display: 'block', marginLeft: 24 }}>
-                        {useBackgroundWorker
-                          ? 'Sync runs in a background thread. UI remains responsive.'
-                          : 'Enable to prevent UI freezing during long sync operations.'}
+                      <Text strong style={{ display: 'block', marginBottom: 8 }}>Background Processing</Text>
+
+                      {/* Web Worker Option */}
+                      {isWorkerSupported && (
+                        <div style={{ marginBottom: 8 }}>
+                          <Checkbox
+                            checked={useBackgroundWorker && !useElectronBackground}
+                            onChange={(e) => {
+                              setUseBackgroundWorker(e.target.checked);
+                              if (e.target.checked) setUseElectronBackground(false);
+                            }}
+                            disabled={isSyncing}
+                          >
+                            Web Worker (Browser Thread)
+                          </Checkbox>
+                        </div>
+                      )}
+
+                      {/* Electron Option */}
+                      {isElectronSyncSupported && (
+                        <div style={{ marginBottom: 8 }}>
+                          <Checkbox
+                            checked={useElectronBackground}
+                            onChange={(e) => {
+                              setUseElectronBackground(e.target.checked);
+                              if (e.target.checked) setUseBackgroundWorker(false);
+                            }}
+                            disabled={isSyncing}
+                          >
+                            Electron (Main Process)
+                          </Checkbox>
+                        </div>
+                      )}
+
+                      <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>
+                        {useElectronBackground
+                          ? 'Runs in Electron main process. Can continue even if window is minimized.'
+                          : useBackgroundWorker
+                          ? 'Runs in browser Web Worker. UI remains responsive.'
+                          : 'Select an option for long-running sync to prevent UI freezing.'}
                       </Text>
+
+                      {!isRunningInElectron && (
+                        <Text type="warning" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
+                          ⚠️ Not running in Electron. Electron option requires desktop app.
+                        </Text>
+                      )}
                     </div>
                   )}
+
+                  {/* Verbose Console Option */}
+                  <div style={{
+                    marginBottom: 16,
+                    padding: '12px 16px',
+                    background: REDWOOD.surfaceSecondary,
+                    borderRadius: 8,
+                  }}>
+                    <Checkbox
+                      checked={verboseConsole}
+                      onChange={(e) => setVerboseConsole(e.target.checked)}
+                      disabled={isSyncing}
+                    >
+                      <Text strong>Show Console Logs</Text>
+                    </Checkbox>
+                    <Text type="secondary" style={{ fontSize: 11, marginTop: 4, display: 'block', marginLeft: 24 }}>
+                      {verboseConsole
+                        ? 'Logs are shown in browser console (may affect performance).'
+                        : 'Console logs disabled. Logs still appear in the panel below.'}
+                    </Text>
+                  </div>
 
                   <Space direction="vertical" style={{ width: '100%' }} size="middle">
                     <Button

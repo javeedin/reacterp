@@ -1,4 +1,5 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
+import type { BackgroundSyncConfig, BackgroundSyncProgress, BackgroundSyncLog, BackgroundSyncResult } from '../types/electron';
 
 // Check if running in Electron
 export const isElectron = (): boolean => {
@@ -14,7 +15,6 @@ export const useElectron = () => {
     if (electron) {
       electron.syncStarted(syncType);
     }
-    console.log(`[Electron] Sync started: ${syncType}`);
   }, [electron]);
 
   // Update sync progress
@@ -34,7 +34,6 @@ export const useElectron = () => {
         new Notification('Sync Completed', { body: summary });
       }
     }
-    console.log(`[Electron] Sync completed: ${summary}`);
   }, [electron]);
 
   // Notify sync error
@@ -47,7 +46,6 @@ export const useElectron = () => {
         new Notification('Sync Error', { body: error });
       }
     }
-    console.log(`[Electron] Sync error: ${error}`);
   }, [electron]);
 
   // Show a general notification
@@ -71,14 +69,98 @@ export const useElectron = () => {
     return true; // Electron handles permissions differently
   }, [electron]);
 
+  // Start background sync (Electron main process)
+  const startBackgroundSync = useCallback(async (config: BackgroundSyncConfig) => {
+    if (electron?.startBackgroundSync) {
+      await electron.startBackgroundSync(config);
+    } else {
+      throw new Error('Background sync not available - not running in Electron');
+    }
+  }, [electron]);
+
+  // Stop background sync
+  const stopBackgroundSync = useCallback(async () => {
+    if (electron?.stopBackgroundSync) {
+      await electron.stopBackgroundSync();
+    }
+  }, [electron]);
+
+  // Check if background sync is supported
+  const isBackgroundSyncSupported = !!electron?.startBackgroundSync;
+
   return {
     isElectron: !!electron,
+    isBackgroundSyncSupported,
     notifySyncStarted,
     notifySyncProgress,
     notifySyncCompleted,
     notifySyncError,
     showNotification,
     requestNotificationPermission,
+    startBackgroundSync,
+    stopBackgroundSync,
+  };
+};
+
+// Hook for Electron background sync with callbacks
+export const useElectronBackgroundSync = (
+  onProgress?: (progress: BackgroundSyncProgress) => void,
+  onLog?: (log: BackgroundSyncLog) => void,
+  onComplete?: (result: BackgroundSyncResult) => void,
+  onError?: (error: string) => void
+) => {
+  const electron = window.electronAPI;
+  const isRunningRef = useRef(false);
+
+  useEffect(() => {
+    if (!electron) return;
+
+    if (onProgress && electron.onBackgroundSyncProgress) {
+      electron.onBackgroundSyncProgress(onProgress);
+    }
+    if (onLog && electron.onBackgroundSyncLog) {
+      electron.onBackgroundSyncLog(onLog);
+    }
+    if (onComplete && electron.onBackgroundSyncComplete) {
+      electron.onBackgroundSyncComplete((result) => {
+        isRunningRef.current = false;
+        onComplete(result);
+      });
+    }
+    if (onError && electron.onBackgroundSyncError) {
+      electron.onBackgroundSyncError((error) => {
+        isRunningRef.current = false;
+        onError(error);
+      });
+    }
+
+    return () => {
+      if (electron.removeBackgroundSyncListeners) {
+        electron.removeBackgroundSyncListeners();
+      }
+    };
+  }, [electron, onProgress, onLog, onComplete, onError]);
+
+  const startSync = useCallback(async (config: BackgroundSyncConfig) => {
+    if (!electron?.startBackgroundSync) {
+      throw new Error('Background sync not available');
+    }
+    isRunningRef.current = true;
+    await electron.startBackgroundSync(config);
+  }, [electron]);
+
+  const stopSync = useCallback(async () => {
+    if (electron?.stopBackgroundSync) {
+      await electron.stopBackgroundSync();
+      isRunningRef.current = false;
+    }
+  }, [electron]);
+
+  return {
+    isSupported: !!electron?.startBackgroundSync,
+    isRunning: isRunningRef.current,
+    startSync,
+    stopSync,
   };
 };
 

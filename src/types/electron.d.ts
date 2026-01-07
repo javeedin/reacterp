@@ -17,11 +17,52 @@ export interface ElectronAPI {
   removeStartSyncListener: () => void;
   removeStopSyncListener: () => void;
 
+  // Background sync (runs in main process)
+  startBackgroundSync: (config: BackgroundSyncConfig) => Promise<void>;
+  stopBackgroundSync: () => Promise<void>;
+  onBackgroundSyncProgress: (callback: (progress: BackgroundSyncProgress) => void) => void;
+  onBackgroundSyncLog: (callback: (log: BackgroundSyncLog) => void) => void;
+  onBackgroundSyncComplete: (callback: (result: BackgroundSyncResult) => void) => void;
+  onBackgroundSyncError: (callback: (error: string) => void) => void;
+  removeBackgroundSyncListeners: () => void;
+
   // Check if running in Electron
   isElectron: boolean;
 
   // Platform info
   platform: string;
+}
+
+// Background sync types
+export interface BackgroundSyncConfig {
+  syncType: 'supplier-addresses' | 'suppliers' | 'gl-journals' | 'ap-invoices';
+  parameters: Record<string, string>;
+  testMode: boolean | 'single';
+  proxyBaseUrl: string;
+  apexBaseUrl: string;
+}
+
+export interface BackgroundSyncProgress {
+  status: string;
+  totalSuppliers?: number;
+  processedSuppliers?: number;
+  totalAddresses?: number;
+  insertedAddresses?: number;
+  currentSupplier?: string;
+  errors?: number;
+}
+
+export interface BackgroundSyncLog {
+  type: 'info' | 'success' | 'error' | 'warning' | 'step';
+  message: string;
+  timestamp: string;
+}
+
+export interface BackgroundSyncResult {
+  success: boolean;
+  insertedRecords: number;
+  errors: number;
+  duration: number;
 }
 
 declare global {
