@@ -477,16 +477,16 @@ const ManageSuppliers: React.FC = () => {
             }
             key="1"
           >
-            <Form form={form} layout="vertical">
-              <Row gutter={24}>
+            <Form form={form} layout="horizontal" labelCol={{ span: 10 }} wrapperCol={{ span: 14 }} size="small">
+              <Row gutter={16}>
                 <Col span={8}>
-                  <Form.Item label="Supplier" name="supplier">
-                    <Input placeholder="Enter supplier name" />
+                  <Form.Item label="Supplier" name="supplier" style={{ marginBottom: 8 }}>
+                    <Input placeholder="" size="small" />
                   </Form.Item>
                 </Col>
                 <Col span={8}>
-                  <Form.Item label="Supplier Type" name="supplierType">
-                    <Select placeholder="Select type" allowClear>
+                  <Form.Item label="Supplier Type" name="supplierType" style={{ marginBottom: 8 }}>
+                    <Select placeholder="" allowClear size="small">
                       <Option value="">All</Option>
                       <Option value="Vendor">Vendor</Option>
                       <Option value="Contractor">Contractor</Option>
@@ -494,8 +494,20 @@ const ManageSuppliers: React.FC = () => {
                   </Form.Item>
                 </Col>
                 <Col span={8}>
-                  <Form.Item label="Tax Organization Type" name="taxOrganizationType">
-                    <Select placeholder="Select type" allowClear>
+                  <div style={{ textAlign: 'right', paddingTop: 4 }}>
+                    <Text type="secondary" style={{ fontSize: 11 }}>** At least one is required</Text>
+                  </div>
+                </Col>
+              </Row>
+              <Row gutter={16}>
+                <Col span={8}>
+                  <Form.Item label="Taxpayer ID" name="taxpayerId" style={{ marginBottom: 8 }}>
+                    <Input placeholder="" size="small" />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item label="Tax Organization Type" name="taxOrganizationType" style={{ marginBottom: 8 }}>
+                    <Select placeholder="" allowClear size="small">
                       <Option value="">All</Option>
                       <Option value="Corporation">Corporation</Option>
                       <Option value="Individual">Individual</Option>
@@ -503,42 +515,35 @@ const ManageSuppliers: React.FC = () => {
                     </Select>
                   </Form.Item>
                 </Col>
+                <Col span={8} />
               </Row>
-              <Row gutter={24}>
+              <Row gutter={16}>
                 <Col span={8}>
-                  <Form.Item label="Taxpayer ID" name="taxpayerId">
-                    <Input placeholder="Enter taxpayer ID" />
+                  <Form.Item label="Tax Registration Number" name="taxRegistrationNumber" style={{ marginBottom: 8 }}>
+                    <Input placeholder="" size="small" />
                   </Form.Item>
                 </Col>
                 <Col span={8}>
-                  <Form.Item label="Business Classification" name="businessClassification">
-                    <Select placeholder="Select classification" allowClear>
+                  <Form.Item label="Business Classification" name="businessClassification" style={{ marginBottom: 8 }}>
+                    <Select placeholder="" allowClear size="small">
                       <Option value="">All</Option>
                     </Select>
                   </Form.Item>
                 </Col>
-                <Col span={8}>
-                  <Form.Item label="Tax Registration Number" name="taxRegistrationNumber">
-                    <Input placeholder="Enter tax registration number" />
-                  </Form.Item>
-                </Col>
+                <Col span={8} />
               </Row>
-              <Row gutter={24}>
+              <Row gutter={16}>
                 <Col span={8}>
-                  <Form.Item label="Creation Date" name="creationDate">
-                    <RangePicker style={{ width: '100%' }} />
+                  <Form.Item label="Creation Date" name="creationDate" style={{ marginBottom: 8 }}>
+                    <RangePicker size="small" style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
                 <Col span={8}>
-                  <Form.Item label="Products and Services" name="productsServices">
-                    <Input placeholder="Search products and services" suffix={<SearchOutlined />} />
+                  <Form.Item label="Products and Services" name="productsServices" style={{ marginBottom: 8 }}>
+                    <Input placeholder="" size="small" suffix={<SearchOutlined />} />
                   </Form.Item>
                 </Col>
-                <Col span={8}>
-                  <div style={{ display: 'flex', alignItems: 'center', height: '100%', paddingTop: 30 }}>
-                    <Text style={{ marginRight: 12 }}>** At least one is required</Text>
-                  </div>
-                </Col>
+                <Col span={8} />
               </Row>
             </Form>
           </Panel>
@@ -758,61 +763,61 @@ const ManageSuppliers: React.FC = () => {
       {/* General Section */}
       <Collapse defaultActiveKey={['general']} bordered={false}>
         <Panel header={<Text strong>General</Text>} key="general">
-          <Row gutter={48}>
+          <Row gutter={24}>
             <Col span={12}>
-              <Form layout="horizontal" labelCol={{ span: 10 }} wrapperCol={{ span: 14 }}>
-                <Form.Item label="Supplier" required>
-                  <Input value={detail.supplier} />
+              <Form layout="horizontal" labelCol={{ span: 10 }} wrapperCol={{ span: 14 }} size="small">
+                <Form.Item label="Supplier" required style={{ marginBottom: 6 }}>
+                  <Input value={detail.supplier} size="small" />
                 </Form.Item>
-                <Form.Item label="Supplier Number">
+                <Form.Item label="Supplier Number" style={{ marginBottom: 6 }}>
                   <Text>{detail.supplierNumber}</Text>
                 </Form.Item>
-                <Form.Item label="Alternate Name">
-                  <Input value={detail.alternateName} />
+                <Form.Item label="Alternate Name" style={{ marginBottom: 6 }}>
+                  <Input value={detail.alternateName} size="small" />
                 </Form.Item>
-                <Form.Item label="Tax Organization Type">
-                  <Select value={detail.taxOrganizationType || 'Corporation'} style={{ width: '100%' }}>
+                <Form.Item label="Tax Organization Type" style={{ marginBottom: 6 }}>
+                  <Select value={detail.taxOrganizationType || 'Corporation'} style={{ width: '100%' }} size="small">
                     <Option value="Corporation">Corporation</Option>
                     <Option value="Individual">Individual</Option>
                     <Option value="Partnership">Partnership</Option>
                   </Select>
                 </Form.Item>
-                <Form.Item label="Supplier Type">
-                  <Select value={detail.supplierType} style={{ width: '100%' }} allowClear>
+                <Form.Item label="Supplier Type" style={{ marginBottom: 6 }}>
+                  <Select value={detail.supplierType} style={{ width: '100%' }} allowClear size="small">
                     <Option value="Vendor">Vendor</Option>
                     <Option value="Contractor">Contractor</Option>
                   </Select>
                 </Form.Item>
-                <Form.Item label="Inactive Date">
-                  <DatePicker style={{ width: '100%' }} placeholder="dd-mmm-yyyy" />
+                <Form.Item label="Inactive Date" style={{ marginBottom: 6 }}>
+                  <DatePicker style={{ width: '100%' }} placeholder="dd-mmm-yyyy" size="small" />
                 </Form.Item>
-                <Form.Item label="Status">
+                <Form.Item label="Status" style={{ marginBottom: 6 }}>
                   <Text>{detail.status}</Text>
                 </Form.Item>
               </Form>
             </Col>
             <Col span={12}>
-              <Form layout="horizontal" labelCol={{ span: 10 }} wrapperCol={{ span: 14 }}>
-                <Form.Item label="Business Relationship">
+              <Form layout="horizontal" labelCol={{ span: 10 }} wrapperCol={{ span: 14 }} size="small">
+                <Form.Item label="Business Relationship" style={{ marginBottom: 6 }}>
                   <Text>{detail.businessRelationship}</Text>
                 </Form.Item>
-                <Form.Item label="Parent Supplier">
-                  <Input suffix={<SearchOutlined />} />
+                <Form.Item label="Parent Supplier" style={{ marginBottom: 6 }}>
+                  <Input suffix={<SearchOutlined />} size="small" />
                 </Form.Item>
-                <Form.Item label="Parent Supplier Number">
+                <Form.Item label="Parent Supplier Number" style={{ marginBottom: 6 }}>
                   <Text>{detail.parentSupplierNumber}</Text>
                 </Form.Item>
-                <Form.Item label="Creation Date">
+                <Form.Item label="Creation Date" style={{ marginBottom: 6 }}>
                   <Text>{detail.creationDate}</Text>
                 </Form.Item>
-                <Form.Item label="Creation Source">
+                <Form.Item label="Creation Source" style={{ marginBottom: 6 }}>
                   <Text>{detail.creationSource || 'Import'}</Text>
                 </Form.Item>
-                <Form.Item label="Registration Request">
+                <Form.Item label="Registration Request" style={{ marginBottom: 6 }}>
                   <Text>{detail.registrationRequest}</Text>
                 </Form.Item>
-                <Form.Item label="Attachments">
-                  <Button type="link" style={{ padding: 0 }}>None +</Button>
+                <Form.Item label="Attachments" style={{ marginBottom: 6 }}>
+                  <Button type="link" style={{ padding: 0 }} size="small">None +</Button>
                 </Form.Item>
               </Form>
             </Col>
@@ -869,39 +874,39 @@ const ManageSuppliers: React.FC = () => {
       {/* Identification */}
       <Collapse defaultActiveKey={['identification', 'corporate', 'financial']} bordered={false}>
         <Panel header={<Text strong>Identification</Text>} key="identification">
-          <Row gutter={48}>
+          <Row gutter={24}>
             <Col span={12}>
-              <Form layout="horizontal" labelCol={{ span: 10 }} wrapperCol={{ span: 14 }}>
-                <Form.Item label="Alias">
-                  <Input value={detail.alias} />
+              <Form layout="horizontal" labelCol={{ span: 10 }} wrapperCol={{ span: 14 }} size="small">
+                <Form.Item label="Alias" style={{ marginBottom: 6 }}>
+                  <Input value={detail.alias} size="small" />
                 </Form.Item>
-                <Form.Item label="D-U-N-S Number">
-                  <Input value={detail.dunsNumber} />
+                <Form.Item label="D-U-N-S Number" style={{ marginBottom: 6 }}>
+                  <Input value={detail.dunsNumber} size="small" />
                 </Form.Item>
-                <Form.Item label=" " colon={false}>
+                <Form.Item label=" " colon={false} style={{ marginBottom: 6 }}>
                   <Checkbox checked={detail.oneTimeSupplier}>One-time supplier</Checkbox>
                 </Form.Item>
-                <Form.Item label="Registry ID">
+                <Form.Item label="Registry ID" style={{ marginBottom: 6 }}>
                   <Text>{detail.registryId}</Text>
                 </Form.Item>
-                <Form.Item label="Relationships">
+                <Form.Item label="Relationships" style={{ marginBottom: 6 }}>
                   <Text>{detail.relationships}</Text>
                 </Form.Item>
               </Form>
             </Col>
             <Col span={12}>
-              <Form layout="horizontal" labelCol={{ span: 10 }} wrapperCol={{ span: 14 }}>
-                <Form.Item label="Customer Number">
-                  <Input value={detail.customerNumber} />
+              <Form layout="horizontal" labelCol={{ span: 10 }} wrapperCol={{ span: 14 }} size="small">
+                <Form.Item label="Customer Number" style={{ marginBottom: 6 }}>
+                  <Input value={detail.customerNumber} size="small" />
                 </Form.Item>
-                <Form.Item label="SIC">
-                  <Input value={detail.sic} />
+                <Form.Item label="SIC" style={{ marginBottom: 6 }}>
+                  <Input value={detail.sic} size="small" />
                 </Form.Item>
-                <Form.Item label="National Insurance Number">
-                  <Input value={detail.nationalInsuranceNumber} />
+                <Form.Item label="National Insurance Number" style={{ marginBottom: 6 }}>
+                  <Input value={detail.nationalInsuranceNumber} size="small" />
                 </Form.Item>
-                <Form.Item label="Corporate Web Site">
-                  <Input value={detail.corporateWebSite} />
+                <Form.Item label="Corporate Web Site" style={{ marginBottom: 6 }}>
+                  <Input value={detail.corporateWebSite} size="small" />
                 </Form.Item>
               </Form>
             </Col>
@@ -909,9 +914,9 @@ const ManageSuppliers: React.FC = () => {
         </Panel>
 
         <Panel header={<Text strong>Regional Information</Text>} key="regional">
-          <Form layout="horizontal" labelCol={{ span: 5 }} wrapperCol={{ span: 19 }}>
-            <Form.Item label="Regional Information">
-              <Select style={{ width: 300 }} allowClear>
+          <Form layout="horizontal" labelCol={{ span: 5 }} wrapperCol={{ span: 19 }} size="small">
+            <Form.Item label="Regional Information" style={{ marginBottom: 6 }}>
+              <Select style={{ width: 300 }} allowClear size="small">
                 <Option value="">Select...</Option>
               </Select>
             </Form.Item>
@@ -919,33 +924,33 @@ const ManageSuppliers: React.FC = () => {
         </Panel>
 
         <Panel header={<Text strong>Corporate Profile</Text>} key="corporate">
-          <Row gutter={48}>
+          <Row gutter={24}>
             <Col span={12}>
-              <Form layout="horizontal" labelCol={{ span: 10 }} wrapperCol={{ span: 14 }}>
-                <Form.Item label="Year Established">
-                  <Input value={detail.yearEstablished} />
+              <Form layout="horizontal" labelCol={{ span: 10 }} wrapperCol={{ span: 14 }} size="small">
+                <Form.Item label="Year Established" style={{ marginBottom: 6 }}>
+                  <Input value={detail.yearEstablished} size="small" />
                 </Form.Item>
-                <Form.Item label="Mission Statement">
-                  <Input.TextArea value={detail.missionStatement} rows={3} />
+                <Form.Item label="Mission Statement" style={{ marginBottom: 6 }}>
+                  <Input.TextArea value={detail.missionStatement} rows={2} size="small" />
                 </Form.Item>
-                <Form.Item label="Year Incorporated">
-                  <Input value={detail.yearIncorporated} />
+                <Form.Item label="Year Incorporated" style={{ marginBottom: 6 }}>
+                  <Input value={detail.yearIncorporated} size="small" />
                 </Form.Item>
               </Form>
             </Col>
             <Col span={12}>
-              <Form layout="horizontal" labelCol={{ span: 10 }} wrapperCol={{ span: 14 }}>
-                <Form.Item label="Chief Executive Title">
-                  <Input value={detail.chiefExecutiveTitle} />
+              <Form layout="horizontal" labelCol={{ span: 10 }} wrapperCol={{ span: 14 }} size="small">
+                <Form.Item label="Chief Executive Title" style={{ marginBottom: 6 }}>
+                  <Input value={detail.chiefExecutiveTitle} size="small" />
                 </Form.Item>
-                <Form.Item label="Chief Executive Name">
-                  <Input value={detail.chiefExecutiveName} />
+                <Form.Item label="Chief Executive Name" style={{ marginBottom: 6 }}>
+                  <Input value={detail.chiefExecutiveName} size="small" />
                 </Form.Item>
-                <Form.Item label="Principal Title">
-                  <Input value={detail.principalTitle} />
+                <Form.Item label="Principal Title" style={{ marginBottom: 6 }}>
+                  <Input value={detail.principalTitle} size="small" />
                 </Form.Item>
-                <Form.Item label="Principal Name">
-                  <Input value={detail.principalName} />
+                <Form.Item label="Principal Name" style={{ marginBottom: 6 }}>
+                  <Input value={detail.principalName} size="small" />
                 </Form.Item>
               </Form>
             </Col>
@@ -953,20 +958,20 @@ const ManageSuppliers: React.FC = () => {
         </Panel>
 
         <Panel header={<Text strong>Financial Profile</Text>} key="financial">
-          <Form layout="horizontal" labelCol={{ span: 10 }} wrapperCol={{ span: 14 }} style={{ maxWidth: 600 }}>
-            <Form.Item label="Fiscal Year End Month">
-              <Select style={{ width: 200 }} value={detail.fiscalYearEndMonth} allowClear>
+          <Form layout="horizontal" labelCol={{ span: 10 }} wrapperCol={{ span: 14 }} style={{ maxWidth: 600 }} size="small">
+            <Form.Item label="Fiscal Year End Month" style={{ marginBottom: 6 }}>
+              <Select style={{ width: 200 }} value={detail.fiscalYearEndMonth} allowClear size="small">
                 <Option value="January">January</Option>
                 <Option value="February">February</Option>
                 <Option value="March">March</Option>
                 <Option value="December">December</Option>
               </Select>
             </Form.Item>
-            <Form.Item label="Current Fiscal Year's Potential Revenue">
-              <Input value={detail.currentFiscalYearRevenue} />
+            <Form.Item label="Current Fiscal Year's Potential Revenue" style={{ marginBottom: 6 }}>
+              <Input value={detail.currentFiscalYearRevenue} size="small" />
             </Form.Item>
-            <Form.Item label="Preferred Functional Currency">
-              <Select style={{ width: 200 }} value={detail.preferredFunctionalCurrency} allowClear>
+            <Form.Item label="Preferred Functional Currency" style={{ marginBottom: 6 }}>
+              <Select style={{ width: 200 }} value={detail.preferredFunctionalCurrency} allowClear size="small">
                 <Option value="AED">AED</Option>
                 <Option value="USD">USD</Option>
                 <Option value="EUR">EUR</Option>
