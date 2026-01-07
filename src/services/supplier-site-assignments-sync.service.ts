@@ -147,12 +147,12 @@ export const testSiteAssignmentsConnection = async (
     }
 
     const site = sitesResult.items[0];
-    log('info', `Step 2: Fetching assignments for site ${site.SupplierSite} (ID: ${site.SupplierSiteId})...`);
+    log('info', `Step 2: Fetching assignments for site ${site.suppliersite || site.suppliersiteid} (ID: ${site.suppliersiteid})...`);
 
     // Then get assignments from Fusion
     const assignmentsResult = await fetchSiteAssignments(
-      site.SupplierId,
-      site.SupplierSiteId,
+      site.supplierid,
+      site.suppliersiteid,
       { limit: '1' },
       log,
       true
@@ -165,7 +165,7 @@ export const testSiteAssignmentsConnection = async (
     if (assignmentsResult.items.length === 0) {
       return {
         success: true,
-        message: `Connected! Site ${site.SupplierSite} has no assignments.`,
+        message: `Connected! Site ${site.suppliersite || site.suppliersiteid} has no assignments.`,
         sample: { site, assignments: [] }
       };
     }
@@ -245,9 +245,9 @@ export const syncSiteAssignments = async (
         break;
       }
 
-      const supplierId = site.SupplierId;
-      const siteId = site.SupplierSiteId;
-      const siteName = site.SupplierSite || `Site ${siteId}`;
+      const supplierId = site.supplierid;
+      const siteId = site.suppliersiteid;
+      const siteName = site.suppliersite || `Site ${siteId}`;
 
       progress.currentSite = siteName;
       progress.currentSiteId = siteId;
