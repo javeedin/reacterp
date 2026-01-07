@@ -58,21 +58,22 @@ const fetchSitesFromApex = async (
   }
 };
 
-// Fetch supplier assignments from Oracle Fusion
-const fetchSupplierAssignments = async (
+// Fetch site assignments from Oracle Fusion
+const fetchSiteAssignments = async (
   supplierId: number,
+  siteId: number,
   params: Record<string, string> = {},
   log?: LogCallback,
   verbose = true
 ): Promise<any> => {
   try {
     const queryParams = new URLSearchParams(params);
-    // Assignments are directly under suppliers/{id}/child/assignments
-    const fusionPath = `fscmRestApi/resources/11.13.18.05/suppliers/${supplierId}/child/assignments`;
+    // Assignments are under suppliers/{supplierId}/child/sites/{siteId}/child/assignments
+    const fusionPath = `fscmRestApi/resources/11.13.18.05/suppliers/${supplierId}/child/sites/${siteId}/child/assignments`;
     const proxyUrl = `${PROXY_CONFIG.baseUrl}/fusion/${fusionPath}?${queryParams.toString()}`;
 
     if (verbose) {
-      log?.('info', `Fetching assignments for supplier ${supplierId}...`);
+      log?.('info', `Fetching assignments for site ${siteId}...`);
     }
 
     const response = await fetch(proxyUrl);
@@ -136,9 +137,9 @@ export const testSiteAssignmentsConnection = async (
 ): Promise<{ success: boolean; message: string; sample?: any }> => {
   try {
     log('info', 'Testing Site Assignments endpoint...');
-    log('info', 'Step 1: Fetching sites from APEX to get supplier IDs...');
+    log('info', 'Step 1: Fetching sites from APEX...');
 
-    // First get sites from APEX to get supplier IDs
+    // First get sites from APEX
     const sitesResult = await fetchSitesFromApex(log, true);
 
     if (!sitesResult.success || !sitesResult.items || sitesResult.items.length === 0) {
@@ -147,11 +148,14 @@ export const testSiteAssignmentsConnection = async (
 
     const site = sitesResult.items[0];
     const supplierId = site.supplierid;
-    log('info', `Step 2: Fetching assignments for supplier ${supplierId}...`);
+    const siteId = site.suppliersiteid;
+    const siteName = site.suppliersite || `Site ${siteId}`;
+    log('info', `Step 2: Fetching assignments for ${siteName} (Supplier: ${supplierId}, Site: ${siteId})...`);
 
-    // Then get assignments from Fusion (per supplier, not per site)
-    const assignmentsResult = await fetchSupplierAssignments(
+    // Then get assignments from Fusion (per site)
+    const assignmentsResult = await fetchSiteAssignments(
       supplierId,
+      siteId,
       { limit: '5' },
       log,
       true
@@ -164,16 +168,16 @@ export const testSiteAssignmentsConnection = async (
     if (assignmentsResult.items.length === 0) {
       return {
         success: true,
-        message: `Connected! Supplier ${supplierId} has no assignments.`,
-        sample: { supplierId, assignments: [] }
+        message: `Connected! Site ${siteName} has no assignments.`,
+        sample: { supplierId, siteId, assignments: [] }
       };
     }
 
     const assignment = assignmentsResult.items[0];
     return {
       success: true,
-      message: `Connected! Found ${assignmentsResult.items.length} assignment(s) for supplier ${supplierId}`,
-      sample: { supplierId, assignment }
+      message: `Connected! Found ${assignmentsResult.items.length} assignment(s) for site ${siteName}`,
+      sample: { supplierId, siteId, assignment }
     };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
@@ -209,10 +213,10 @@ export const syncSiteAssignments = async (
 
   try {
     log('step', `═══════════════════════════════════════`);
-    log('info', `Starting Site Assignments sync (${testMode === 'single' ? 'Single Supplier Test' : testMode ? 'Test Mode - 25 suppliers' : 'Full Sync'})`);
+    log('info', `Starting Site Assignments sync (${testMode === 'single' ? 'Single Site Test' : testMode ? 'Test Mode - 25 sites' : 'Full Sync'})`);
     log('step', `═══════════════════════════════════════`);
 
-    // Step 1: Fetch sites from APEX to get unique supplier IDs
+    // Step 1: Fetch sites from APEX
     log('step', `\n──── Fetching Sites from APEX ────`);
     const sitesResult = await fetchSitesFromApex(log, true);
 
@@ -224,48 +228,50 @@ export const syncSiteAssignments = async (
       throw new Error('No sites found in APEX. Please sync Supplier Sites first.');
     }
 
-    // Extract unique supplier IDs from sites
-    const uniqueSupplierIds = [...new Set(sitesResult.items.map((site: any) => site.supplierid))] as number[];
+    // Limit sites based on test mode
+    const maxSites = testMode === 'single' ? 1 : (testMode ? 25 : sitesResult.items.length);
+    const sitesToProcess = sitesResult.items.slice(0, maxSites);
 
-    // Limit suppliers based on test mode
-    const maxSuppliers = testMode === 'single' ? 1 : (testMode ? 25 : uniqueSupplierIds.length);
-    const suppliersToProcess = uniqueSupplierIds.slice(0, maxSuppliers);
-
-    progress.totalSites = suppliersToProcess.length; // Using totalSites to track suppliers
+    progress.totalSites = sitesToProcess.length;
     onProgress({ totalSites: progress.totalSites });
 
-    log('info', `Found ${uniqueSupplierIds.length} unique suppliers from ${sitesResult.items.length} sites, processing ${suppliersToProcess.length}`);
+    log('info', `Found ${sitesResult.items.length} sites in APEX, processing ${sitesToProcess.length}`);
 
-    // Step 2: For each supplier, fetch assignments from Fusion and sync
+    // Step 2: For each site, fetch assignments from Fusion and sync
     progress.status = 'fetching_assignments';
     onProgress({ status: 'fetching_assignments' });
 
-    for (const supplierId of suppliersToProcess) {
+    for (const site of sitesToProcess) {
       if (signal?.aborted) {
         log('warning', 'Sync stopped by user');
         progress.status = 'stopped';
         break;
       }
 
-      progress.currentSite = `Supplier ${supplierId}`;
-      progress.currentSiteId = supplierId;
+      const supplierId = site.supplierid;
+      const siteId = site.suppliersiteid;
+      const siteName = site.suppliersite || `Site ${siteId}`;
+
+      progress.currentSite = siteName;
+      progress.currentSiteId = siteId;
       onProgress({
-        currentSite: `Supplier ${supplierId}`,
-        currentSiteId: supplierId
+        currentSite: siteName,
+        currentSiteId: siteId
       });
 
-      log('step', `\n──── Processing Supplier: ${supplierId} ────`);
+      log('step', `\n──── Processing: ${siteName} (Supplier: ${supplierId}, Site: ${siteId}) ────`);
 
-      // Fetch all assignments for this supplier
+      // Fetch all assignments for this site
       let assignmentOffset = 0;
       let assignmentHasMore = true;
-      const supplierAssignments: any[] = [];
+      const siteAssignments: any[] = [];
 
       while (assignmentHasMore) {
         if (signal?.aborted) break;
 
-        const assignmentResult = await fetchSupplierAssignments(
+        const assignmentResult = await fetchSiteAssignments(
           supplierId,
+          siteId,
           { limit: '100', offset: String(assignmentOffset) },
           log,
           assignmentOffset === 0 // Only verbose on first page
@@ -274,58 +280,59 @@ export const syncSiteAssignments = async (
         if (!assignmentResult.success) {
           progress.errors++;
           progress.lastError = assignmentResult.error || 'Failed to fetch assignments';
-          log('error', `Error fetching assignments for supplier ${supplierId}: ${progress.lastError}`);
+          log('error', `Error fetching assignments for ${siteName}: ${progress.lastError}`);
           break;
         }
 
         if (assignmentResult.items.length === 0) {
           if (assignmentOffset === 0) {
-            log('info', `No assignments for supplier ${supplierId}`);
+            log('info', `No assignments for ${siteName}`);
           }
           break;
         }
 
-        // Add SupplierId to each assignment (SupplierSiteId should already be in Fusion response)
+        // Add SupplierId and SupplierSiteId to each assignment
         const assignmentsWithIds = assignmentResult.items.map((assignment: any) => ({
           ...assignment,
-          SupplierId: supplierId
+          SupplierId: supplierId,
+          SupplierSiteId: siteId
         }));
 
-        supplierAssignments.push(...assignmentsWithIds);
+        siteAssignments.push(...assignmentsWithIds);
         assignmentHasMore = assignmentResult.hasMore === true || assignmentResult.items.length === 100;
         assignmentOffset += 100;
       }
 
-      if (supplierAssignments.length > 0) {
-        progress.totalAssignments += supplierAssignments.length;
+      if (siteAssignments.length > 0) {
+        progress.totalAssignments += siteAssignments.length;
         onProgress({ totalAssignments: progress.totalAssignments });
 
         // POST assignments to APEX
         progress.status = 'inserting';
         onProgress({ status: 'inserting' });
 
-        const payload = { items: supplierAssignments };
+        const payload = { items: siteAssignments };
 
         try {
           const insertResult = await insertToApex('suppliers/sites/assignments', payload, log, true);
 
           if (insertResult.success) {
-            const count = insertResult.inserted || supplierAssignments.length;
+            const count = insertResult.inserted || siteAssignments.length;
             progress.insertedAssignments += count;
-            log('success', `Inserted ${count} assignments for supplier ${supplierId}`);
-            onPayload?.(supplierId, `Supplier ${supplierId}`, supplierAssignments.length, payload, insertResult);
+            log('success', `Inserted ${count} assignments for ${siteName}`);
+            onPayload?.(siteId, siteName, siteAssignments.length, payload, insertResult);
           } else {
             progress.errors++;
             progress.lastError = insertResult.error || 'Insert failed';
-            log('error', `Failed to insert assignments for supplier ${supplierId}: ${progress.lastError}`);
-            onPayload?.(supplierId, `Supplier ${supplierId}`, supplierAssignments.length, payload, undefined, progress.lastError);
+            log('error', `Failed to insert assignments for ${siteName}: ${progress.lastError}`);
+            onPayload?.(siteId, siteName, siteAssignments.length, payload, undefined, progress.lastError);
           }
         } catch (error) {
           progress.errors++;
           const errorMsg = error instanceof Error ? error.message : 'Unknown error';
           progress.lastError = errorMsg;
-          log('error', `Error inserting assignments for supplier ${supplierId}: ${errorMsg}`);
-          onPayload?.(supplierId, `Supplier ${supplierId}`, supplierAssignments.length, payload, undefined, errorMsg);
+          log('error', `Error inserting assignments for ${siteName}: ${errorMsg}`);
+          onPayload?.(siteId, siteName, siteAssignments.length, payload, undefined, errorMsg);
         }
 
         onProgress({
