@@ -76,7 +76,8 @@ COMMENT ON COLUMN RR_SUPPLIER_ADDRESS.ADDR_PURPOSE_RFQ_BIDDING IS 'Address purpo
 -- 2. Create Sync Procedure
 -- =============================================
 CREATE OR REPLACE PROCEDURE RR_SYNC_SUPPLIER_ADDRESS (
-    p_json IN CLOB
+    p_json_data IN CLOB,
+    p_result    OUT VARCHAR2
 ) AS
     v_count NUMBER := 0;
 BEGIN
@@ -142,7 +143,7 @@ BEGIN
                 ELSE TO_TIMESTAMP_TZ(jt.LAST_UPDATE_DATE, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM')
             END AS LAST_UPDATE_DATE,
             jt.LAST_UPDATED_BY
-        FROM JSON_TABLE(p_json, '$.items[*]'
+        FROM JSON_TABLE(p_json_data, '$.items[*]'
             COLUMNS (
                 SUPPLIER_ADDRESS_ID       NUMBER          PATH '$.SupplierAddressId',
                 SUPPLIER_ID               NUMBER          PATH '$.SupplierId',
@@ -346,12 +347,12 @@ BEGIN
     COMMIT;
 
     -- Return success with count
-    HTP.p('{"success": true, "inserted": ' || v_count || '}');
+    p_result := '{"success": true, "inserted": ' || v_count || '}';
 
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
-        HTP.p('{"success": false, "error": "' || REPLACE(SQLERRM, '"', '\"') || '"}');
+        p_result := '{"success": false, "error": "' || REPLACE(SQLERRM, '"', '\"') || '"}';
 END RR_SYNC_SUPPLIER_ADDRESS;
 /
 
@@ -368,8 +369,29 @@ BEGIN
         p_pattern        => 'suppliers/address',
         p_method         => 'POST',
         p_source_type    => 'plsql/block',
-        p_source         => 'BEGIN RR_SYNC_SUPPLIER_ADDRESS(:body_text); END;',
-        p_items_per_page => 0
+        p_items_per_page => 0,
+        p_mimes_allowed  => 'application/json',
+        p_comments       => 'Sync Supplier Addresses from Oracle Fusion',
+        p_source         => q'[
+DECLARE
+    l_json_clob CLOB;
+    l_result    VARCHAR2(4000);
+BEGIN
+    l_json_clob := :body_text;
+
+    RR_SYNC_SUPPLIER_ADDRESS(
+        p_json_data => l_json_clob,
+        p_result    => l_result
+    );
+
+    :status_code := 200;
+    HTP.P(l_result);
+EXCEPTION
+    WHEN OTHERS THEN
+        :status_code := 500;
+        HTP.P('{"success": false, "error": "' || REPLACE(SQLERRM, '"', '\"') || '"}');
+END;
+]'
     );
     COMMIT;
 END;
