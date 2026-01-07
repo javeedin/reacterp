@@ -168,13 +168,15 @@ const syncSupplierAddresses = async (
   sendProgress(progress);
 
   try {
-    const supplierLimit = testMode === 'single' ? 1 : (testMode ? 10 : 500);
+    // Use smaller page size for reliable pagination
+    const pageSize = 100;
+    const maxSuppliers = testMode === 'single' ? 1 : (testMode ? 25 : 10000);
     let offset = 0;
     let hasMore = true;
     let pageNum = 0;
 
     sendLog('step', `═══════════════════════════════════════`);
-    sendLog('info', `Starting Supplier Address sync (${testMode === 'single' ? 'Single Supplier Test' : testMode ? 'Test Mode - 10 suppliers' : 'Full Sync'})`);
+    sendLog('info', `Starting Supplier Address sync (${testMode === 'single' ? 'Single Supplier Test' : testMode ? 'Test Mode - 25 suppliers' : 'Full Sync - up to 10000 suppliers'})`);
     sendLog('info', `Running in Web Worker (background thread)`);
     sendLog('step', `═══════════════════════════════════════`);
 
@@ -186,7 +188,7 @@ const syncSupplierAddresses = async (
       sendLog('step', `\n──── Fetching Suppliers Page ${pageNum} ────`);
 
       const queryParams: Record<string, string> = {
-        limit: String(supplierLimit),
+        limit: String(pageSize),
         offset: String(offset),
         ...parameters,
       };
@@ -206,14 +208,23 @@ const syncSupplierAddresses = async (
       progress.totalSuppliers = allSuppliers.length;
       sendProgress({ ...progress });
 
-      hasMore = result.hasMore === true && result.items.length === supplierLimit;
+      sendLog('info', `Total suppliers fetched so far: ${allSuppliers.length}`);
+
+      // Check if more pages - continue if we got a full page OR hasMore is true
+      hasMore = result.hasMore === true || result.items.length === pageSize;
+
+      // Stop if we've reached max suppliers limit
+      if (allSuppliers.length >= maxSuppliers) {
+        sendLog('info', `Reached max suppliers limit (${maxSuppliers})`);
+        break;
+      }
 
       if (testMode) {
         sendLog('info', 'Test mode - stopping supplier fetch after first page');
         break;
       }
 
-      offset += supplierLimit;
+      offset += pageSize;
     }
 
     if (allSuppliers.length === 0) {
