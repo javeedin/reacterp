@@ -56,6 +56,7 @@ import { syncUserAccountRoles, testUserAccountRolesConnection, type UserAccountR
 import { syncRoles, testRolesConnection, type RolesSyncProgress, type RolesPayloadCallback } from '../../services/roles-sync.service';
 import { syncSuppliers, testSuppliersConnection, type SuppliersSyncProgress, type SuppliersPayloadCallback } from '../../services/suppliers-sync.service';
 import { syncSupplierAddresses, testSupplierAddressConnection, type SupplierAddressSyncProgress, type SupplierAddressPayloadCallback } from '../../services/supplier-address-sync.service';
+import { syncSupplierSites, testSupplierSitesConnection, type SupplierSitesSyncProgress, type SupplierSitesPayloadCallback } from '../../services/supplier-sites-sync.service';
 import { useSyncWorker, type WorkerSyncProgress, type WorkerLog } from '../../hooks/useSyncWorker';
 import Autopilot from '../../components/Autopilot';
 import { useElectron, useElectronBackgroundSync } from '../../hooks/useElectron';
@@ -499,6 +500,32 @@ const SyncData: React.FC = () => {
     errorMessage?: string;
   }>>([]);
 
+  // Supplier Sites Progress State
+  const [supplierSitesProgress, setSupplierSitesProgress] = useState<SupplierSitesSyncProgress>({
+    status: 'idle',
+    totalSuppliers: 0,
+    processedSuppliers: 0,
+    totalSites: 0,
+    insertedSites: 0,
+    currentSupplier: '',
+    currentSupplierId: null,
+    errors: 0,
+    lastError: '',
+    startTime: null,
+    endTime: null,
+  });
+
+  // Supplier Sites payload state (for debug)
+  const [supplierSitesPayloads, setSupplierSitesPayloads] = useState<Array<{
+    supplierId: number;
+    supplierName: string;
+    siteCount: number;
+    payload: any;
+    postResult?: any;
+    status: 'pending' | 'success' | 'error';
+    errorMessage?: string;
+  }>>([]);
+
   // Determine sync type based on selected object
   const isAPInvoices = selectedObject?.id === 'ap-invoices';
   const isAPPayments = selectedObject?.id === 'ap-payments';
@@ -513,6 +540,7 @@ const SyncData: React.FC = () => {
   const isRoles = selectedObject?.id === 'roles';
   const isSuppliers = selectedObject?.id === 'suppliers';
   const isSupplierAddresses = selectedObject?.id === 'supplier-addresses';
+  const isSupplierSites = selectedObject?.id === 'supplier-sites';
 
   // Web Worker for background sync
   const handleWorkerProgress = useCallback((progress: WorkerSyncProgress) => {
@@ -1187,6 +1215,35 @@ const SyncData: React.FC = () => {
     });
   }, []);
 
+  // Supplier Sites payload callback handler
+  const handleSupplierSitesPayload: SupplierSitesPayloadCallback = useCallback((supplierId, supplierName, siteCount, payload, result, error) => {
+    setSupplierSitesPayloads((prev) => {
+      const existing = prev.find((s) => s.supplierId === supplierId);
+      if (existing) {
+        return prev.map((s) =>
+          s.supplierId === supplierId
+            ? {
+                ...s,
+                postResult: result,
+                status: error ? 'error' : (result ? 'success' : 'pending'),
+                errorMessage: error,
+              }
+            : s
+        );
+      } else {
+        return [...prev, {
+          supplierId,
+          supplierName,
+          siteCount,
+          payload,
+          postResult: result,
+          status: error ? 'error' : (result ? 'success' : 'pending'),
+          errorMessage: error,
+        }];
+      }
+    });
+  }, []);
+
   // Check proxy server status
   const checkProxyStatus = useCallback(async () => {
     setProxyStatus('checking');
@@ -1330,6 +1387,10 @@ const SyncData: React.FC = () => {
     } else if (isSupplierAddresses) {
       addLog('info', 'Testing Supplier Address endpoint...');
       const result = await testSupplierAddressConnection(addLog);
+      success = result.success;
+    } else if (isSupplierSites) {
+      addLog('info', 'Testing Supplier Sites endpoint...');
+      const result = await testSupplierSitesConnection(addLog);
       success = result.success;
     } else {
       addLog('info', 'Testing GL Journals endpoint...');
@@ -1838,6 +1899,36 @@ const SyncData: React.FC = () => {
         );
         syncResult = { inserted: result.insertedAddresses, errors: result.errors, type: 'supplier addresses' };
       }
+    } else if (isSupplierSites) {
+      // Supplier Sites Sync
+      setSupplierSitesProgress({
+        status: 'fetching',
+        totalSuppliers: 0,
+        processedSuppliers: 0,
+        totalSites: 0,
+        insertedSites: 0,
+        currentSupplier: '',
+        currentSupplierId: null,
+        errors: 0,
+        lastError: '',
+        startTime: new Date(),
+        endTime: null,
+      });
+
+      const result = await syncSupplierSites(
+        parameters,
+        testMode,
+        addLog,
+        (newProgress) => {
+          setSupplierSitesProgress((prev) => ({ ...prev, ...newProgress }));
+          if (newProgress.processedSuppliers !== undefined && newProgress.totalSuppliers) {
+            notifySyncProgress(`${newProgress.processedSuppliers}/${newProgress.totalSuppliers} suppliers, ${newProgress.insertedSites || 0} sites`);
+          }
+        },
+        abortControllerRef.current.signal,
+        handleSupplierSitesPayload
+      );
+      syncResult = { inserted: result.insertedSites, errors: result.errors, type: 'supplier sites' };
     } else {
       // GL Journals Sync
       setProgress({
@@ -2080,6 +2171,8 @@ const SyncData: React.FC = () => {
     ? suppliersProgress.status
     : isSupplierAddresses
     ? supplierAddressProgress.status
+    : isSupplierSites
+    ? supplierSitesProgress.status
     : progress.status;
   const isSyncing = !['idle', 'completed', 'error', 'stopped'].includes(currentStatus);
 
@@ -3669,6 +3762,98 @@ const SyncData: React.FC = () => {
                     </Card>
                   </Col>
                 </Row>
+              ) : isSupplierSites ? (
+                /* Supplier Sites KPI Cards */
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  {/* Suppliers Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <DatabaseOutlined style={{ fontSize: 20, color: REDWOOD.primary, marginRight: 8 }} />
+                        <Text strong>Suppliers</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {supplierSitesProgress.processedSuppliers} / {supplierSitesProgress.totalSuppliers}
+                      </div>
+                      <Progress
+                        percent={supplierSitesProgress.totalSuppliers > 0 ? Math.round((supplierSitesProgress.processedSuppliers / supplierSitesProgress.totalSuppliers) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.primary}
+                        style={{ marginTop: 8 }}
+                      />
+                      {supplierSitesProgress.currentSupplier && (
+                        <Tooltip title={supplierSitesProgress.currentSupplier}>
+                          <Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 4 }} ellipsis>
+                            {supplierSitesProgress.currentSupplier}
+                          </Text>
+                        </Tooltip>
+                      )}
+                    </Card>
+                  </Col>
+
+                  {/* Sites Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <BranchesOutlined style={{ fontSize: 20, color: REDWOOD.success, marginRight: 8 }} />
+                        <Text strong>Sites Inserted</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {supplierSitesProgress.insertedSites}
+                        <Text type="secondary" style={{ fontSize: 14, marginLeft: 8 }}>
+                          / {supplierSitesProgress.totalSites}
+                        </Text>
+                      </div>
+                      <Progress
+                        percent={supplierSitesProgress.totalSites > 0 ? Math.round((supplierSitesProgress.insertedSites / supplierSitesProgress.totalSites) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.success}
+                        style={{ marginTop: 8 }}
+                      />
+                    </Card>
+                  </Col>
+
+                  {/* Errors Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <WarningOutlined style={{ fontSize: 20, color: supplierSitesProgress.errors > 0 ? REDWOOD.error : REDWOOD.textSecondary, marginRight: 8 }} />
+                        <Text strong>Errors</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: supplierSitesProgress.errors > 0 ? REDWOOD.error : REDWOOD.textPrimary }}>
+                        {supplierSitesProgress.errors}
+                      </div>
+                      {supplierSitesProgress.lastError && (
+                        <Tooltip title={supplierSitesProgress.lastError}>
+                          <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 8 }} ellipsis>
+                            {supplierSitesProgress.lastError}
+                          </Text>
+                        </Tooltip>
+                      )}
+                    </Card>
+                  </Col>
+                </Row>
               ) : (
                 /* GL Journals KPI Cards */
                 <Row gutter={16} style={{ marginBottom: 16 }}>
@@ -3852,13 +4037,15 @@ const SyncData: React.FC = () => {
                           ? `${suppliersProgress.insertedRecords} suppliers inserted`
                           : isSupplierAddresses
                           ? `${supplierAddressProgress.insertedAddresses} addresses inserted (${supplierAddressProgress.processedSuppliers} suppliers)`
+                          : isSupplierSites
+                          ? `${supplierSitesProgress.insertedSites} sites inserted (${supplierSitesProgress.processedSuppliers} suppliers)`
                           : `${progress.totalBatchesInserted + progress.totalHeadersInserted + progress.totalLinesInserted} inserted`
                         }
                       </Text>
-                      {(isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : isRoles ? rolesProgress.errors : isSuppliers ? suppliersProgress.errors : isSupplierAddresses ? supplierAddressProgress.errors : progress.errors) > 0 && (
+                      {(isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : isRoles ? rolesProgress.errors : isSuppliers ? suppliersProgress.errors : isSupplierAddresses ? supplierAddressProgress.errors : isSupplierSites ? supplierSitesProgress.errors : progress.errors) > 0 && (
                         <Text type="danger">
                           <CloseCircleOutlined style={{ marginRight: 4 }} />
-                          {isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : isRoles ? rolesProgress.errors : isSuppliers ? suppliersProgress.errors : isSupplierAddresses ? supplierAddressProgress.errors : progress.errors} errors
+                          {isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : isRoles ? rolesProgress.errors : isSuppliers ? suppliersProgress.errors : isSupplierAddresses ? supplierAddressProgress.errors : isSupplierSites ? supplierSitesProgress.errors : progress.errors} errors
                         </Text>
                       )}
                     </Space>
