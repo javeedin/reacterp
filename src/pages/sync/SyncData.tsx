@@ -18,6 +18,7 @@ import {
   Breadcrumb,
   Tooltip,
   Modal,
+  Checkbox,
 } from 'antd';
 import {
   SyncOutlined,
@@ -55,6 +56,7 @@ import { syncUserAccountRoles, testUserAccountRolesConnection, type UserAccountR
 import { syncRoles, testRolesConnection, type RolesSyncProgress, type RolesPayloadCallback } from '../../services/roles-sync.service';
 import { syncSuppliers, testSuppliersConnection, type SuppliersSyncProgress, type SuppliersPayloadCallback } from '../../services/suppliers-sync.service';
 import { syncSupplierAddresses, testSupplierAddressConnection, type SupplierAddressSyncProgress, type SupplierAddressPayloadCallback } from '../../services/supplier-address-sync.service';
+import { useSyncWorker, type WorkerSyncProgress, type WorkerLog } from '../../hooks/useSyncWorker';
 import Autopilot from '../../components/Autopilot';
 import { useElectron } from '../../hooks/useElectron';
 
@@ -138,6 +140,7 @@ const SyncData: React.FC = () => {
   const [logs, setLogs] = useState<SyncLog[]>([]);
   const [isTesting, setIsTesting] = useState(false);
   const [testMode, setTestMode] = useState<boolean | 'single'>(true); // true=25, false=full, 'single'=1
+  const [useBackgroundWorker, setUseBackgroundWorker] = useState(false); // Run sync in Web Worker
   const [proxyStatus, setProxyStatus] = useState<ProxyStatus>('unknown');
   const [proxyError, setProxyError] = useState<string>('');
   const [logDetailVisible, setLogDetailVisible] = useState(false);
@@ -501,6 +504,53 @@ const SyncData: React.FC = () => {
   const isRoles = selectedObject?.id === 'roles';
   const isSuppliers = selectedObject?.id === 'suppliers';
   const isSupplierAddresses = selectedObject?.id === 'supplier-addresses';
+
+  // Web Worker for background sync
+  const handleWorkerProgress = useCallback((progress: WorkerSyncProgress) => {
+    if (isSupplierAddresses) {
+      setSupplierAddressProgress((prev) => ({
+        ...prev,
+        status: progress.status as any,
+        totalSuppliers: progress.totalSuppliers,
+        processedSuppliers: progress.processedSuppliers,
+        totalAddresses: progress.totalAddresses,
+        insertedAddresses: progress.insertedAddresses,
+        currentSupplier: progress.currentSupplier,
+        currentSupplierId: progress.currentSupplierId,
+        errors: progress.errors,
+        lastError: progress.lastError,
+        startTime: progress.startTime ? new Date(progress.startTime) : null,
+        endTime: progress.endTime ? new Date(progress.endTime) : null,
+      }));
+    }
+  }, [isSupplierAddresses]);
+
+  const handleWorkerLog = useCallback((log: WorkerLog) => {
+    setLogs((prev) => [log, ...prev].slice(0, 500));
+  }, []);
+
+  const handleWorkerComplete = useCallback((result: WorkerSyncProgress) => {
+    isSyncingRef.current = false;
+    const syncType = isSupplierAddresses ? 'supplier addresses' : 'data';
+    addLog('success', `Background sync completed: ${result.insertedAddresses} ${syncType} inserted`);
+  }, [isSupplierAddresses]);
+
+  const handleWorkerError = useCallback((error: string) => {
+    isSyncingRef.current = false;
+    addLog('error', `Background sync failed: ${error}`);
+  }, []);
+
+  const {
+    isSupported: isWorkerSupported,
+    isRunning: isWorkerRunning,
+    startSync: startWorkerSync,
+    stopSync: stopWorkerSync,
+  } = useSyncWorker({
+    onProgress: handleWorkerProgress,
+    onLog: handleWorkerLog,
+    onComplete: handleWorkerComplete,
+    onError: handleWorkerError,
+  });
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const isSyncingRef = useRef(false);
@@ -1684,20 +1734,34 @@ const SyncData: React.FC = () => {
         endTime: null,
       });
 
-      const result = await syncSupplierAddresses(
-        parameters,
-        testMode,
-        addLog,
-        (newProgress) => {
-          setSupplierAddressProgress((prev) => ({ ...prev, ...newProgress }));
-          if (newProgress.processedSuppliers !== undefined && newProgress.totalSuppliers) {
-            notifySyncProgress(`${newProgress.processedSuppliers}/${newProgress.totalSuppliers} suppliers, ${newProgress.insertedAddresses || 0} addresses`);
-          }
-        },
-        abortControllerRef.current.signal,
-        handleSupplierAddressPayload
-      );
-      syncResult = { inserted: result.insertedAddresses, errors: result.errors, type: 'supplier addresses' };
+      // Use Web Worker for background sync if enabled
+      if (useBackgroundWorker && isWorkerSupported) {
+        addLog('info', 'Starting sync in background thread (Web Worker)...');
+        addLog('info', 'UI will remain responsive. You can switch tabs safely.');
+        const started = startWorkerSync('supplier-addresses', parameters, testMode);
+        if (!started) {
+          addLog('error', 'Failed to start Web Worker sync');
+          syncResult = { inserted: 0, errors: 1, type: 'supplier addresses' };
+        } else {
+          // Worker handles the rest asynchronously - return early
+          return;
+        }
+      } else {
+        const result = await syncSupplierAddresses(
+          parameters,
+          testMode,
+          addLog,
+          (newProgress) => {
+            setSupplierAddressProgress((prev) => ({ ...prev, ...newProgress }));
+            if (newProgress.processedSuppliers !== undefined && newProgress.totalSuppliers) {
+              notifySyncProgress(`${newProgress.processedSuppliers}/${newProgress.totalSuppliers} suppliers, ${newProgress.insertedAddresses || 0} addresses`);
+            }
+          },
+          abortControllerRef.current.signal,
+          handleSupplierAddressPayload
+        );
+        syncResult = { inserted: result.insertedAddresses, errors: result.errors, type: 'supplier addresses' };
+      }
     } else {
       // GL Journals Sync
       setProgress({
@@ -2086,6 +2150,29 @@ const SyncData: React.FC = () => {
                         : 'Full sync - all matching records'}
                     </Text>
                   </div>
+
+                  {/* Background Worker Option - Only for Supplier Addresses */}
+                  {isSupplierAddresses && isWorkerSupported && (
+                    <div style={{
+                      marginBottom: 16,
+                      padding: '12px 16px',
+                      background: REDWOOD.surfaceSecondary,
+                      borderRadius: 8,
+                    }}>
+                      <Checkbox
+                        checked={useBackgroundWorker}
+                        onChange={(e) => setUseBackgroundWorker(e.target.checked)}
+                        disabled={isSyncing}
+                      >
+                        <Text strong>Run in Background (Web Worker)</Text>
+                      </Checkbox>
+                      <Text type="secondary" style={{ fontSize: 11, marginTop: 4, display: 'block', marginLeft: 24 }}>
+                        {useBackgroundWorker
+                          ? 'Sync runs in a background thread. UI remains responsive.'
+                          : 'Enable to prevent UI freezing during long sync operations.'}
+                      </Text>
+                    </div>
+                  )}
 
                   <Space direction="vertical" style={{ width: '100%' }} size="middle">
                     <Button
