@@ -116,6 +116,30 @@ const reportMenuItems: FloatingMenuItem[] = [
 // API Base URL
 const API_BASE_URL = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/gl/journals';
 
+// Ledger interface from API
+interface Ledger {
+  ledger_id: number;
+  ledger_name: string;
+  description: string;
+  ledger_category_code: string;
+  currency_code: string;
+  chart_of_accounts_id: string;
+}
+
+// Period interface from API
+interface Period {
+  period_name_id: string;
+  ledger_name: string;
+  app: string;
+  application_name: string;
+  status: string;
+  start_date: string;
+  end_date: string;
+  period_year: number;
+  period_number: number;
+  adj_flag: string;
+}
+
 // Journal data interface matching API response
 interface JournalLine {
   lineId: number;
@@ -171,23 +195,7 @@ interface ApiResponse {
   error?: string;
 }
 
-// Accounting periods
-const accountingPeriods = [
-  'Jan-25', 'Feb-25', 'Mar-25', 'Apr-25', 'May-25', 'Jun-25',
-  'Jul-25', 'Aug-25', 'Sep-25', 'Oct-25', 'Nov-25', 'Dec-25',
-  'Jan-24', 'Feb-24', 'Mar-24', 'Apr-24', 'May-24', 'Jun-24',
-  'Jul-24', 'Aug-24', 'Sep-24', 'Oct-24', 'Nov-24', 'Dec-24',
-];
-
-// Ledgers - BUIMERC LEDGER as default
-const ledgers = [
-  'BUIMERC LEDGER',
-  'SB LEDGER',
-  'US LEDGER',
-  'UK LEDGER',
-  'APAC LEDGER',
-  'EMEA LEDGER',
-];
+// Note: Ledgers and Periods are now fetched from API dynamically
 
 // Batch statuses
 const batchStatuses = ['Posted', 'Unposted', 'Error', 'Pending', 'All'];
@@ -220,6 +228,13 @@ const ManageJournals: React.FC = () => {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [searchExpanded, setSearchExpanded] = useState<string[]>(['search']);
+
+  // Ledger and Period state
+  const [ledgers, setLedgers] = useState<Ledger[]>([]);
+  const [selectedLedger, setSelectedLedger] = useState<Ledger | null>(null);
+  const [periods, setPeriods] = useState<Period[]>([]);
+  const [loadingLedgers, setLoadingLedgers] = useState(false);
+  const [loadingPeriods, setLoadingPeriods] = useState(false);
 
   // Debug log state
   const [debugLogs, setDebugLogs] = useState<DebugLogEntry[]>([]);
@@ -258,6 +273,77 @@ const ManageJournals: React.FC = () => {
       }
     }
   }, []);
+
+  // Fetch ledgers on component mount
+  useEffect(() => {
+    const fetchLedgers = async () => {
+      setLoadingLedgers(true);
+      try {
+        const response = await fetch('https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/ledgers');
+        const data = await response.json();
+        if (data.items && data.items.length > 0) {
+          setLedgers(data.items);
+          // Auto-select first ledger
+          const firstLedger = data.items[0];
+          setSelectedLedger(firstLedger);
+          // Set form field value
+          form.setFieldsValue({ ledger: firstLedger.ledger_name });
+        }
+      } catch (error) {
+        console.error('Error fetching ledgers:', error);
+        message.error('Failed to fetch ledgers');
+      } finally {
+        setLoadingLedgers(false);
+      }
+    };
+    fetchLedgers();
+  }, []);
+
+  // Fetch periods when ledger changes
+  useEffect(() => {
+    if (!selectedLedger) return;
+
+    const fetchPeriods = async () => {
+      setLoadingPeriods(true);
+      try {
+        const encodedLedgerName = encodeURIComponent(selectedLedger.ledger_name);
+        const response = await fetch(
+          `https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/periodsstatus/create?P_LEDGER_NAME=${encodedLedgerName}&P_APPLICATION_NAME=General Ledger`
+        );
+        const data = await response.json();
+        if (data.items && data.items.length > 0) {
+          // Sort periods by year desc, then period_number desc
+          const sortedPeriods = data.items.sort((a: Period, b: Period) => {
+            if (b.period_year !== a.period_year) return b.period_year - a.period_year;
+            return b.period_number - a.period_number;
+          });
+          setPeriods(sortedPeriods);
+          // Auto-select first open period
+          const currentPeriod = sortedPeriods.find((p: Period) => p.status === 'Open') || sortedPeriods[0];
+          if (currentPeriod) {
+            form.setFieldsValue({ accountingPeriod: currentPeriod.period_name_id });
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching periods:', error);
+        message.error('Failed to fetch periods');
+      } finally {
+        setLoadingPeriods(false);
+      }
+    };
+    fetchPeriods();
+  }, [selectedLedger]);
+
+  // Handle ledger selection change
+  const handleLedgerChange = (ledgerName: string) => {
+    const ledger = ledgers.find(l => l.ledger_name === ledgerName);
+    if (ledger) {
+      setSelectedLedger(ledger);
+      // Clear period selection when ledger changes
+      form.setFieldsValue({ accountingPeriod: undefined });
+      setPeriods([]);
+    }
+  };
 
   // Click outside handler for floating panels
   useEffect(() => {
@@ -1417,8 +1503,6 @@ const ManageJournals: React.FC = () => {
                 labelCol={{ span: 8 }}
                 wrapperCol={{ span: 16 }}
                 initialValues={{
-                  ledger: 'BUIMERC LEDGER',
-                  accountingPeriod: 'May-24',
                   journalOperator: 'Starts with',
                   batchOperator: 'Starts with',
                 }}
@@ -1431,8 +1515,14 @@ const ManageJournals: React.FC = () => {
                       name="ledger"
                       rules={[{ required: true, message: 'Ledger is required' }]}
                     >
-                      <Select placeholder="Select ledger">
-                        {ledgers.map(l => <Option key={l} value={l}>{l}</Option>)}
+                      <Select
+                        placeholder="Select ledger"
+                        loading={loadingLedgers}
+                        onChange={handleLedgerChange}
+                      >
+                        {ledgers.map(l => (
+                          <Option key={l.ledger_id} value={l.ledger_name}>{l.ledger_name}</Option>
+                        ))}
                       </Select>
                     </Form.Item>
 
@@ -1442,8 +1532,15 @@ const ManageJournals: React.FC = () => {
                       name="accountingPeriod"
                       rules={[{ required: true, message: 'Period is required' }]}
                     >
-                      <Select placeholder="Select period">
-                        {accountingPeriods.map(p => <Option key={p} value={p}>{p}</Option>)}
+                      <Select
+                        placeholder="Select period"
+                        loading={loadingPeriods}
+                      >
+                        {periods.map(p => (
+                          <Option key={p.period_name_id} value={p.period_name_id}>
+                            {p.period_year} - {p.period_name_id} ({p.status})
+                          </Option>
+                        ))}
                       </Select>
                     </Form.Item>
 
