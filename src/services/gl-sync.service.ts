@@ -212,44 +212,87 @@ export const syncGLJournals = async (
 
   try {
     // ========================================
-    // STEP 1: Fetch Journal Batches
+    // STEP 1: Fetch Journal Batches (with pagination)
     // ========================================
     updateProgress({ status: 'fetching_batches' });
     log?.('step', '═══════════════════════════════════════════════════════════');
     log?.('step', '  STEP 1: Fetching Journal Batches from Oracle Fusion');
     log?.('step', '═══════════════════════════════════════════════════════════');
 
-    const limit = testMode === 'single'
+    const pageLimit = testMode === 'single'
       ? ORACLE_FUSION_CONFIG.singleRecordLimit
       : (testMode ? ORACLE_FUSION_CONFIG.testLimit : ORACLE_FUSION_CONFIG.defaultLimit);
-    const batchParams: Record<string, string> = {
-      limit: limit.toString(),
-      offset: '0',
-    };
 
-    const modeLabel = testMode === 'single' ? 'SINGLE RECORD DEBUG' : (testMode ? 'TEST MODE (25 batches)' : 'FULL SYNC');
+    // For test modes, limit total records; for full sync, fetch all
+    const maxRecords = testMode === 'single' ? 1 : (testMode ? 25 : null);
 
-    // Add filter parameters
+    const modeLabel = testMode === 'single' ? 'SINGLE RECORD DEBUG' : (testMode ? 'TEST MODE (25 batches)' : 'FULL SYNC (all pages)');
+
+    // Build filter parameters
     const filters = Object.entries(parameters)
       .filter(([, value]) => value)
       .map(([key, value]) => `${key}=${value}`)
       .join(';');
 
-    if (filters) {
-      batchParams.q = filters;
-    }
-
     log?.('info', `Parameters: ${JSON.stringify(parameters)}`);
-    log?.('info', `Limit: ${limit} batches (${modeLabel})`);
+    log?.('info', `Page size: ${pageLimit}, Max records: ${maxRecords ?? 'unlimited'} (${modeLabel})`);
     if (!verbose) {
       log?.('info', 'Full sync mode - detailed logging disabled for performance');
     }
 
-    const batchResult = await fetchFromOracle('journalBatches', batchParams, log, verbose);
-    const batches = batchResult.items || [];
+    // Fetch all batches with pagination
+    let batches: any[] = [];
+    let offset = 0;
+    let hasMore = true;
+    let pageNum = 0;
 
-    updateProgress({ totalBatches: batches.length });
-    log?.('success', `Found ${batches.length} journal batches`);
+    while (hasMore && (maxRecords === null || batches.length < maxRecords)) {
+      if (abortSignal?.aborted) {
+        updateProgress({ status: 'stopped' });
+        log?.('warning', 'Sync stopped by user during batch fetch');
+        break;
+      }
+
+      pageNum++;
+      const fetchLimit = maxRecords !== null
+        ? Math.min(pageLimit, maxRecords - batches.length)
+        : pageLimit;
+
+      const batchParams: Record<string, string> = {
+        limit: fetchLimit.toString(),
+        offset: offset.toString(),
+      };
+
+      if (filters) {
+        batchParams.q = filters;
+      }
+
+      if (verbose || pageNum === 1 || pageNum % 10 === 0) {
+        log?.('info', `Fetching page ${pageNum} (offset: ${offset}, limit: ${fetchLimit})...`);
+      }
+
+      const batchResult = await fetchFromOracle('journalBatches', batchParams, log, verbose);
+      const items = batchResult.items || [];
+
+      batches = [...batches, ...items];
+
+      if (verbose || pageNum === 1 || pageNum % 10 === 0) {
+        log?.('success', `Page ${pageNum}: fetched ${items.length} batches (Total: ${batches.length})`);
+      }
+
+      // Check if there are more records
+      hasMore = items.length === fetchLimit;
+      offset += items.length;
+
+      // Stop if we've reached maxRecords limit
+      if (maxRecords !== null && batches.length >= maxRecords) {
+        hasMore = false;
+      }
+
+      updateProgress({ totalBatches: batches.length });
+    }
+
+    log?.('success', `Total batches fetched: ${batches.length} (${pageNum} page${pageNum > 1 ? 's' : ''})`);
 
     if (batches.length === 0) {
       updateProgress({ status: 'completed', endTime: new Date() });
