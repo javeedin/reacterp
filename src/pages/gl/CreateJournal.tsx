@@ -305,6 +305,7 @@ const CreateJournal: React.FC = () => {
   const [jsonPreviewVisible, setJsonPreviewVisible] = useState(false);
   const [jsonPayload, setJsonPayload] = useState<any>(null);
   const [postingJournal, setPostingJournal] = useState(false);
+  const [saveResponse, setSaveResponse] = useState<any>(null);
 
   // Initialize batch name with timestamp
   const [batchData, setBatchData] = useState<BatchData>(() => {
@@ -1000,6 +1001,7 @@ const CreateJournal: React.FC = () => {
     if (!jsonPayload) return;
 
     setPostingJournal(true);
+    setSaveResponse(null);
     try {
       const response = await fetch(
         'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/journals/create',
@@ -1013,22 +1015,28 @@ const CreateJournal: React.FC = () => {
       );
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
 
       const result = await response.json();
+      setSaveResponse(result);
       message.success('Journal saved successfully!');
-      setJsonPreviewVisible(false);
-      setJsonPayload(null);
-
-      // Optionally navigate or reset form
-      // navigate('/gl/manage-journals');
-    } catch (error) {
+      // Don't close modal - show the response
+    } catch (error: any) {
       console.error('Error saving journal:', error);
+      setSaveResponse({ error: true, message: error.message || 'Failed to save journal' });
       message.error('Failed to save journal. Please try again.');
     } finally {
       setPostingJournal(false);
     }
+  };
+
+  // Close JSON modal and reset
+  const handleCloseJsonModal = () => {
+    setJsonPreviewVisible(false);
+    setJsonPayload(null);
+    setSaveResponse(null);
   };
 
   // Handle Post - requires balanced journal
@@ -2319,15 +2327,26 @@ const CreateJournal: React.FC = () => {
         <Modal
           title={
             <Space>
-              <FileTextOutlined style={{ color: REDWOOD.info }} />
-              <span>Review Journal Data Before Saving</span>
+              {saveResponse ? (
+                saveResponse.error ? (
+                  <CloseOutlined style={{ color: REDWOOD.primary }} />
+                ) : (
+                  <SaveOutlined style={{ color: REDWOOD.success }} />
+                )
+              ) : (
+                <FileTextOutlined style={{ color: REDWOOD.info }} />
+              )}
+              <span>
+                {saveResponse
+                  ? saveResponse.error
+                    ? 'Save Failed'
+                    : 'Journal Saved Successfully'
+                  : 'Review Journal Data Before Saving'}
+              </span>
             </Space>
           }
           open={jsonPreviewVisible}
-          onCancel={() => {
-            setJsonPreviewVisible(false);
-            setJsonPayload(null);
-          }}
+          onCancel={handleCloseJsonModal}
           width="80vw"
           style={{ top: 20 }}
           footer={
@@ -2336,28 +2355,33 @@ const CreateJournal: React.FC = () => {
                 <Text type="secondary" style={{ fontSize: 12 }}>
                   Batch: {jsonPayload?.batch?.batchName} | Lines: {jsonPayload?.lines?.length || 0}
                 </Text>
-                {!isBalanced && (
+                {!isBalanced && !saveResponse && (
                   <Text type="danger" style={{ fontSize: 12 }}>
                     (Unbalanced)
                   </Text>
                 )}
               </Space>
               <Space>
-                <Button onClick={() => {
-                  setJsonPreviewVisible(false);
-                  setJsonPayload(null);
-                }}>
-                  Cancel
-                </Button>
-                <Button
-                  type="primary"
-                  icon={<SaveOutlined />}
-                  onClick={handleConfirmSave}
-                  loading={postingJournal}
-                  style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
-                >
-                  Confirm & Save
-                </Button>
+                {saveResponse ? (
+                  <Button type="primary" onClick={handleCloseJsonModal}>
+                    Close
+                  </Button>
+                ) : (
+                  <>
+                    <Button onClick={handleCloseJsonModal}>
+                      Cancel
+                    </Button>
+                    <Button
+                      type="primary"
+                      icon={<SaveOutlined />}
+                      onClick={handleConfirmSave}
+                      loading={postingJournal}
+                      style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+                    >
+                      Confirm & Save
+                    </Button>
+                  </>
+                )}
               </Space>
             </div>
           }
@@ -2367,6 +2391,37 @@ const CreateJournal: React.FC = () => {
         >
           {jsonPayload && (
             <div>
+              {/* API Response Section - Show after save */}
+              {saveResponse && (
+                <div style={{
+                  marginBottom: 16,
+                  padding: 16,
+                  background: saveResponse.error ? '#fff2f0' : '#f6ffed',
+                  border: `1px solid ${saveResponse.error ? REDWOOD.primary : REDWOOD.success}`,
+                  borderRadius: 6
+                }}>
+                  <Text strong style={{ fontSize: 14, color: saveResponse.error ? REDWOOD.primary : REDWOOD.success }}>
+                    {saveResponse.error ? 'Error Response:' : 'API Response (Success):'}
+                  </Text>
+                  <pre
+                    style={{
+                      marginTop: 8,
+                      background: saveResponse.error ? '#fff' : '#fff',
+                      padding: 12,
+                      borderRadius: 4,
+                      fontSize: 12,
+                      lineHeight: 1.5,
+                      overflow: 'auto',
+                      maxHeight: 300,
+                      fontFamily: 'Monaco, Consolas, "Courier New", monospace',
+                      color: REDWOOD.neutral900,
+                    }}
+                  >
+                    {JSON.stringify(saveResponse, null, 2)}
+                  </pre>
+                </div>
+              )}
+
               {/* Summary Section */}
               <div style={{ marginBottom: 16, padding: 12, background: REDWOOD.neutral100, borderRadius: 6 }}>
                 <Row gutter={[16, 8]}>
@@ -2402,7 +2457,7 @@ const CreateJournal: React.FC = () => {
 
               {/* JSON Code Section */}
               <div style={{ marginBottom: 8 }}>
-                <Text strong style={{ fontSize: 13 }}>JSON Payload (to be sent to API):</Text>
+                <Text strong style={{ fontSize: 13 }}>JSON Payload {saveResponse ? '(Sent to API):' : '(to be sent to API):'}</Text>
               </div>
               <pre
                 style={{
@@ -2413,7 +2468,7 @@ const CreateJournal: React.FC = () => {
                   fontSize: 11,
                   lineHeight: 1.5,
                   overflow: 'auto',
-                  maxHeight: 'calc(100vh - 450px)',
+                  maxHeight: saveResponse ? 200 : 'calc(100vh - 450px)',
                   fontFamily: 'Monaco, Consolas, "Courier New", monospace',
                 }}
               >
