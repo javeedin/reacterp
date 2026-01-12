@@ -66,6 +66,30 @@ const REDWOOD = {
   surface: '#FFFFFF',
 };
 
+// Ledger interface from API
+interface Ledger {
+  ledger_id: number;
+  ledger_name: string;
+  description: string;
+  ledger_category_code: string;
+  currency_code: string;
+  chart_of_accounts_id: string;
+}
+
+// Period interface from API
+interface Period {
+  period_name_id: string;
+  ledger_name: string;
+  app: string;
+  application_name: string;
+  status: string;
+  start_date: string;
+  end_date: string;
+  period_year: number;
+  period_number: number;
+  adj_flag: string;
+}
+
 // Segment detail for account
 interface SegmentDetail {
   value: string;
@@ -242,6 +266,13 @@ const CreateJournal: React.FC = () => {
   const navigate = useNavigate();
   const [saving, setSaving] = useState(false);
 
+  // Ledger and Period state
+  const [ledgers, setLedgers] = useState<Ledger[]>([]);
+  const [selectedLedger, setSelectedLedger] = useState<Ledger | null>(null);
+  const [periods, setPeriods] = useState<Period[]>([]);
+  const [loadingLedgers, setLoadingLedgers] = useState(false);
+  const [loadingPeriods, setLoadingPeriods] = useState(false);
+
   // Collapsible states
   const [batchExpanded, setBatchExpanded] = useState(true);
   const [journalExpanded, setJournalExpanded] = useState(true);
@@ -317,15 +348,93 @@ const CreateJournal: React.FC = () => {
     }
   }, []);
 
+  // Fetch ledgers on component mount
+  useEffect(() => {
+    const fetchLedgers = async () => {
+      setLoadingLedgers(true);
+      try {
+        const response = await fetch('https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/ledgers');
+        const data = await response.json();
+        if (data.items && data.items.length > 0) {
+          setLedgers(data.items);
+          // Auto-select first ledger and store it
+          const firstLedger = data.items[0];
+          setSelectedLedger(firstLedger);
+          // Update journal data with selected ledger
+          setJournalData(prev => ({ ...prev, ledger: firstLedger.ledger_name }));
+        }
+      } catch (error) {
+        console.error('Error fetching ledgers:', error);
+        message.error('Failed to fetch ledgers');
+      } finally {
+        setLoadingLedgers(false);
+      }
+    };
+    fetchLedgers();
+  }, []);
+
+  // Fetch periods when ledger changes
+  useEffect(() => {
+    if (!selectedLedger) return;
+
+    const fetchPeriods = async () => {
+      setLoadingPeriods(true);
+      try {
+        const encodedLedgerName = encodeURIComponent(selectedLedger.ledger_name);
+        const response = await fetch(
+          `https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/periodsstatus/create?P_LEDGER_NAME=${encodedLedgerName}&P_APPLICATION_NAME=General Ledger`
+        );
+        const data = await response.json();
+        if (data.items && data.items.length > 0) {
+          // Sort periods by year desc, then period_number desc to show most recent first
+          const sortedPeriods = data.items.sort((a: Period, b: Period) => {
+            if (b.period_year !== a.period_year) return b.period_year - a.period_year;
+            return b.period_number - a.period_number;
+          });
+          setPeriods(sortedPeriods);
+          // Auto-select current open period or first available
+          const currentPeriod = sortedPeriods.find((p: Period) => p.status === 'Open') || sortedPeriods[0];
+          if (currentPeriod) {
+            setBatchData(prev => ({ ...prev, accountingPeriod: currentPeriod.period_name_id }));
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching periods:', error);
+        message.error('Failed to fetch periods');
+      } finally {
+        setLoadingPeriods(false);
+      }
+    };
+    fetchPeriods();
+  }, [selectedLedger]);
+
+  // Handle ledger selection
+  const handleLedgerChange = (ledgerId: number) => {
+    const ledger = ledgers.find(l => l.ledger_id === ledgerId);
+    if (ledger) {
+      setSelectedLedger(ledger);
+      // Update journal data with selected ledger
+      setJournalData(prev => ({ ...prev, ledger: ledger.ledger_name }));
+    }
+  };
+
   // Update accounting date when period changes
   useEffect(() => {
-    const periodEndDate = getPeriodEndDate(batchData.accountingPeriod);
+    // Try to get end date from fetched periods, fallback to hardcoded values
+    const selectedPeriod = periods.find(p => p.period_name_id === batchData.accountingPeriod);
+    let periodEndDate: string;
+    if (selectedPeriod?.end_date) {
+      // Format the API date to D-MMM-YYYY format
+      periodEndDate = dayjs(selectedPeriod.end_date).format('D-MMM-YYYY');
+    } else {
+      periodEndDate = getPeriodEndDate(batchData.accountingPeriod);
+    }
     setJournalData(prev => ({
       ...prev,
       accountingDate: periodEndDate,
       conversionDate: periodEndDate,
     }));
-  }, [batchData.accountingPeriod]);
+  }, [batchData.accountingPeriod, periods]);
 
   // Calculate accounted amounts based on conversion rate
   const calculateAccountedAmounts = (enteredAmount: number | null, rateType: string, currency: string): number | null => {
@@ -1141,12 +1250,15 @@ const CreateJournal: React.FC = () => {
                         value={batchData.accountingPeriod}
                         onChange={(val) => setBatchData({ ...batchData, accountingPeriod: val })}
                         size="small"
-                        style={{ width: 150 }}
+                        style={{ width: 180 }}
+                        loading={loadingPeriods}
+                        placeholder="Select period"
                       >
-                        <Option value="Jan-26">Jan-26</Option>
-                        <Option value="Feb-26">Feb-26</Option>
-                        <Option value="Mar-26">Mar-26</Option>
-                        <Option value="Apr-26">Apr-26</Option>
+                        {periods.map(period => (
+                          <Option key={period.period_name_id} value={period.period_name_id}>
+                            {period.period_year} - {period.period_name_id} ({period.status})
+                          </Option>
+                        ))}
                       </Select>
                     </Col>
 
@@ -1273,11 +1385,21 @@ const CreateJournal: React.FC = () => {
                     <Col span={14}>
                       <Select
                         value={journalData.ledger}
-                        onChange={(val) => setJournalData({ ...journalData, ledger: val })}
+                        onChange={(val) => {
+                          setJournalData({ ...journalData, ledger: val });
+                          // Also update the selected ledger in the header
+                          const ledger = ledgers.find(l => l.ledger_name === val);
+                          if (ledger) setSelectedLedger(ledger);
+                        }}
                         size="small"
                         style={{ width: '100%' }}
+                        loading={loadingLedgers}
                       >
-                        <Option value="BUIMERC LEDGER">BUIMERC LEDGER</Option>
+                        {ledgers.map(ledger => (
+                          <Option key={ledger.ledger_id} value={ledger.ledger_name}>
+                            {ledger.ledger_name}
+                          </Option>
+                        ))}
                       </Select>
                     </Col>
 
@@ -1538,12 +1660,16 @@ const CreateJournal: React.FC = () => {
                         value={journalData.reversalPeriod}
                         onChange={(val) => setJournalData({ ...journalData, reversalPeriod: val })}
                         size="small"
-                        style={{ width: 150 }}
+                        style={{ width: 180 }}
                         placeholder="Select"
                         allowClear
+                        loading={loadingPeriods}
                       >
-                        <Option value="Apr-26">Apr-26</Option>
-                        <Option value="May-26">May-26</Option>
+                        {periods.map(period => (
+                          <Option key={period.period_name_id} value={period.period_name_id}>
+                            {period.period_year} - {period.period_name_id}
+                          </Option>
+                        ))}
                       </Select>
                     </Col>
 
@@ -1572,9 +1698,28 @@ const CreateJournal: React.FC = () => {
   return (
     <Layout style={{ minHeight: '100vh', background: REDWOOD.neutral100 }}>
       <Content>
-        {/* Data Access Set Header */}
-        <div style={{ padding: '4px 24px', background: REDWOOD.neutral100, fontSize: 11, color: REDWOOD.neutral600 }}>
-          Data Access Set: BUIMERC LEDGER
+        {/* Select Ledger Header */}
+        <div style={{ padding: '6px 24px', background: REDWOOD.neutral100, fontSize: 12, color: REDWOOD.neutral600, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Text style={{ fontSize: 12 }}>Select Ledger:</Text>
+          <Select
+            value={selectedLedger?.ledger_id}
+            onChange={handleLedgerChange}
+            loading={loadingLedgers}
+            size="small"
+            style={{ minWidth: 250 }}
+            placeholder="Select a ledger"
+          >
+            {ledgers.map(ledger => (
+              <Option key={ledger.ledger_id} value={ledger.ledger_id}>
+                {ledger.ledger_name}
+              </Option>
+            ))}
+          </Select>
+          {selectedLedger && (
+            <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>
+              Currency: {selectedLedger.currency_code}
+            </Text>
+          )}
         </div>
 
         {/* Action Header with Title */}
