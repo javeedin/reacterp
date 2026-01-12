@@ -240,7 +240,76 @@ export const syncGLJournals = async (
       log?.('info', 'Full sync mode - detailed logging disabled for performance');
     }
 
-    // Fetch all batches with pagination
+    // ========================================
+    // STEP 1a: Count total records first (all pages)
+    // ========================================
+    log?.('step', '──── Counting total records across all pages ────');
+
+    let totalCount = 0;
+    let countOffset = 0;
+    let countHasMore = true;
+    let countPageNum = 0;
+
+    while (countHasMore) {
+      if (abortSignal?.aborted) {
+        updateProgress({ status: 'stopped' });
+        log?.('warning', 'Sync stopped by user during count');
+        break;
+      }
+
+      countPageNum++;
+      const countParams: Record<string, string> = {
+        limit: pageLimit.toString(),
+        offset: countOffset.toString(),
+        onlyData: 'true',  // Request minimal data for counting
+      };
+
+      if (filters) {
+        countParams.q = filters;
+      }
+
+      log?.('info', `Counting page ${countPageNum} (offset: ${countOffset})...`);
+
+      const countResult = await fetchFromOracle('journalBatches', countParams, log, false);
+      const countItems = countResult.items || [];
+
+      totalCount += countItems.length;
+      log?.('info', `Page ${countPageNum}: ${countItems.length} records (Running total: ${totalCount})`);
+
+      // Check if there are more records - use both API hasMore and item count
+      const apiHasMore = countResult.hasMore === true;
+      const gotFullPage = countItems.length === pageLimit;
+      countHasMore = apiHasMore || gotFullPage;
+
+      // If we got 0 items, definitely stop
+      if (countItems.length === 0) {
+        countHasMore = false;
+      }
+
+      countOffset += countItems.length;
+
+      // For test modes, stop at maxRecords
+      if (maxRecords !== null && totalCount >= maxRecords) {
+        totalCount = Math.min(totalCount, maxRecords);
+        countHasMore = false;
+      }
+    }
+
+    log?.('success', `═══ TOTAL RECORDS FOUND: ${totalCount} (across ${countPageNum} pages) ═══`);
+
+    if (totalCount === 0) {
+      updateProgress({ status: 'completed', endTime: new Date() });
+      log?.('warning', 'No batches found for the given parameters');
+      return progress;
+    }
+
+    updateProgress({ totalBatches: totalCount });
+
+    // ========================================
+    // STEP 1b: Fetch all batches with pagination
+    // ========================================
+    log?.('step', '──── Fetching all batches for sync ────');
+
     let batches: any[] = [];
     let offset = 0;
     let hasMore = true;
@@ -267,21 +336,25 @@ export const syncGLJournals = async (
         batchParams.q = filters;
       }
 
-      if (verbose || pageNum === 1 || pageNum % 10 === 0) {
-        log?.('info', `Fetching page ${pageNum} (offset: ${offset}, limit: ${fetchLimit})...`);
-      }
+      log?.('info', `Fetching page ${pageNum}/${countPageNum} (offset: ${offset}, limit: ${fetchLimit})...`);
 
       const batchResult = await fetchFromOracle('journalBatches', batchParams, log, verbose);
       const items = batchResult.items || [];
 
       batches = [...batches, ...items];
 
-      if (verbose || pageNum === 1 || pageNum % 10 === 0) {
-        log?.('success', `Page ${pageNum}: fetched ${items.length} batches (Total: ${batches.length})`);
+      log?.('success', `Page ${pageNum}: fetched ${items.length} batches (Total: ${batches.length}/${totalCount})`);
+
+      // Check if there are more records - use both API hasMore and item count
+      const apiHasMore = batchResult.hasMore === true;
+      const gotFullPage = items.length === fetchLimit;
+      hasMore = apiHasMore || gotFullPage;
+
+      // If we got 0 items, definitely stop
+      if (items.length === 0) {
+        hasMore = false;
       }
 
-      // Check if there are more records
-      hasMore = items.length === fetchLimit;
       offset += items.length;
 
       // Stop if we've reached maxRecords limit
@@ -289,7 +362,7 @@ export const syncGLJournals = async (
         hasMore = false;
       }
 
-      updateProgress({ totalBatches: batches.length });
+      updateProgress({ processedBatches: batches.length, totalBatches: totalCount });
     }
 
     log?.('success', `Total batches fetched: ${batches.length} (${pageNum} page${pageNum > 1 ? 's' : ''})`);
