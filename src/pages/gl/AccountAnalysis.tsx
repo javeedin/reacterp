@@ -284,14 +284,30 @@ const AccountAnalysis: React.FC = () => {
       }
 
       const result = await response.json();
-      const items: PeriodStatusItem[] = result.items || result || [];
+      const items = result.items || result || [];
+
+      console.log('Period status response:', result);
+      console.log('Period status items count:', items.length);
+      if (items.length > 0) {
+        console.log('First item structure:', JSON.stringify(items[0], null, 2));
+      }
 
       // Extract unique period names from period_name_id field
       const periodSet = new Set<string>();
-      items.forEach((item) => {
-        const periodName = extractPeriodName(item.period_name_id);
-        if (periodName) {
-          periodSet.add(periodName);
+      items.forEach((item: any) => {
+        // Handle both lowercase and uppercase field names
+        const periodNameId = item.period_name_id || item.PERIOD_NAME_ID || item.periodNameId;
+        if (periodNameId) {
+          // Check if it contains underscore (compound format)
+          if (periodNameId.includes('_')) {
+            const periodName = extractPeriodName(periodNameId);
+            if (periodName) {
+              periodSet.add(periodName);
+            }
+          } else {
+            // Direct period name format (e.g., "Jan-24")
+            periodSet.add(periodNameId);
+          }
         }
       });
 
