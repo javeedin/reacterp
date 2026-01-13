@@ -2173,14 +2173,25 @@ const AccountAnalysis: React.FC = () => {
             size="small"
             className="compact-table"
             summary={() => {
-              const periodTotals: { [key: string]: number } = {};
+              // Calculate totals for Dr and Cr for each period
+              const periodDrTotals: { [key: string]: number } = {};
+              const periodCrTotals: { [key: string]: number } = {};
               selectedPeriods.forEach((period) => {
-                periodTotals[period] = allPivotData.reduce(
-                  (sum, row) => sum + ((row[period] as number) || 0),
+                periodDrTotals[period] = allPivotData.reduce(
+                  (sum, row) => sum + ((row[`${period}_Dr`] as number) || 0),
+                  0
+                );
+                periodCrTotals[period] = allPivotData.reduce(
+                  (sum, row) => sum + ((row[`${period}_Cr`] as number) || 0),
                   0
                 );
               });
-              const grandTotal = Object.values(periodTotals).reduce((a, b) => a + b, 0);
+
+              // Grand totals
+              const grandTotalDr = Object.values(periodDrTotals).reduce((a, b) => a + b, 0);
+              const grandTotalCr = Object.values(periodCrTotals).reduce((a, b) => a + b, 0);
+              const grandBalance = grandTotalDr - grandTotalCr;
+
               const segmentColCount = allAccountsPivotSegmentsBefore.length + 2 + allAccountsPivotSegmentsAfter.length; // +2 for Account + Description
 
               return (
@@ -2189,18 +2200,90 @@ const AccountAnalysis: React.FC = () => {
                     <Table.Summary.Cell index={0} colSpan={segmentColCount}>
                       <Text strong style={{ fontSize: 11 }}>Total</Text>
                     </Table.Summary.Cell>
-                    {selectedPeriods.map((period, idx) => (
-                      <Table.Summary.Cell key={period} index={segmentColCount + idx} align="right">
-                        <Text strong style={{ fontSize: 11, color: periodTotals[period] >= 0 ? REDWOOD.success : REDWOOD.primary }}>
-                          {formatNumber(periodTotals[period])}
-                        </Text>
-                      </Table.Summary.Cell>
-                    ))}
-                    <Table.Summary.Cell index={segmentColCount + selectedPeriods.length} align="right">
-                      <Text strong style={{ fontSize: 11, color: grandTotal >= 0 ? REDWOOD.success : REDWOOD.primary }}>
-                        {formatNumber(grandTotal)}
-                      </Text>
+                    {showDrCrColumns
+                      ? selectedPeriods.flatMap((period, idx) => [
+                          <Table.Summary.Cell key={`${period}_Dr`} index={segmentColCount + idx * 2} align="right">
+                            <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>
+                              {formatNumber(periodDrTotals[period])}
+                            </Text>
+                          </Table.Summary.Cell>,
+                          <Table.Summary.Cell key={`${period}_Cr`} index={segmentColCount + idx * 2 + 1} align="right">
+                            <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>
+                              {formatNumber(periodCrTotals[period])}
+                            </Text>
+                          </Table.Summary.Cell>,
+                        ])
+                      : selectedPeriods.map((period, idx) => (
+                          <Table.Summary.Cell key={period} index={segmentColCount + idx} align="right">
+                            <Text strong style={{ fontSize: 11, color: (periodDrTotals[period] - periodCrTotals[period]) >= 0 ? REDWOOD.success : REDWOOD.primary }}>
+                              {formatNumber(periodDrTotals[period] - periodCrTotals[period])}
+                            </Text>
+                          </Table.Summary.Cell>
+                        ))
+                    }
+                    {showDrCrColumns
+                      ? [
+                          <Table.Summary.Cell key="totalDr" index={segmentColCount + selectedPeriods.length * 2} align="right">
+                            <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>
+                              {formatNumber(grandTotalDr)}
+                            </Text>
+                          </Table.Summary.Cell>,
+                          <Table.Summary.Cell key="totalCr" index={segmentColCount + selectedPeriods.length * 2 + 1} align="right">
+                            <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>
+                              {formatNumber(grandTotalCr)}
+                            </Text>
+                          </Table.Summary.Cell>,
+                        ]
+                      : [
+                          <Table.Summary.Cell key="totalBalance" index={segmentColCount + selectedPeriods.length} align="right">
+                            <Text strong style={{ fontSize: 11, color: grandBalance >= 0 ? REDWOOD.success : REDWOOD.primary }}>
+                              {formatNumber(grandBalance)}
+                            </Text>
+                          </Table.Summary.Cell>,
+                        ]
+                    }
+                  </Table.Summary.Row>
+                  {/* Balance Row - Dr - Cr */}
+                  <Table.Summary.Row style={{ background: '#e6f7ff' }}>
+                    <Table.Summary.Cell index={0} colSpan={segmentColCount}>
+                      <Text strong style={{ fontSize: 11 }}>Balance (Dr - Cr)</Text>
                     </Table.Summary.Cell>
+                    {showDrCrColumns
+                      ? selectedPeriods.flatMap((period, idx) => [
+                          <Table.Summary.Cell key={`${period}_bal1`} index={segmentColCount + idx * 2} align="right">
+                            <Text style={{ fontSize: 11 }}>-</Text>
+                          </Table.Summary.Cell>,
+                          <Table.Summary.Cell key={`${period}_bal2`} index={segmentColCount + idx * 2 + 1} align="right">
+                            <Text strong style={{ fontSize: 11, color: (periodDrTotals[period] - periodCrTotals[period]) === 0 ? REDWOOD.success : REDWOOD.primary }}>
+                              {formatNumber(periodDrTotals[period] - periodCrTotals[period])}
+                            </Text>
+                          </Table.Summary.Cell>,
+                        ])
+                      : selectedPeriods.map((period, idx) => (
+                          <Table.Summary.Cell key={`${period}_bal`} index={segmentColCount + idx} align="right">
+                            <Text style={{ fontSize: 11 }}>-</Text>
+                          </Table.Summary.Cell>
+                        ))
+                    }
+                    {showDrCrColumns
+                      ? [
+                          <Table.Summary.Cell key="balDr" index={segmentColCount + selectedPeriods.length * 2} align="right">
+                            <Text style={{ fontSize: 11 }}>-</Text>
+                          </Table.Summary.Cell>,
+                          <Table.Summary.Cell key="balCr" index={segmentColCount + selectedPeriods.length * 2 + 1} align="right">
+                            <Text strong style={{ fontSize: 11, color: grandBalance === 0 ? REDWOOD.success : REDWOOD.primary }}>
+                              {formatNumber(grandBalance)} {grandBalance === 0 ? '✓' : ''}
+                            </Text>
+                          </Table.Summary.Cell>,
+                        ]
+                      : [
+                          <Table.Summary.Cell key="balTotal" index={segmentColCount + selectedPeriods.length} align="right">
+                            <Text strong style={{ fontSize: 11, color: grandBalance === 0 ? REDWOOD.success : REDWOOD.primary }}>
+                              {formatNumber(grandBalance)} {grandBalance === 0 ? '✓' : ''}
+                            </Text>
+                          </Table.Summary.Cell>,
+                        ]
+                    }
                   </Table.Summary.Row>
                 </Table.Summary>
               );
