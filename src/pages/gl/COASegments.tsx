@@ -230,47 +230,71 @@ const COASegments: React.FC = () => {
     }
   };
 
-  // Fetch values from Fusion API
+  // Fetch values from Fusion API (with pagination - 500 per page until all fetched)
   const fetchValuesFromFusion = async (segmentCode: string): Promise<ValueSetValue[]> => {
     const runningInElectron = isElectron();
-    let apiUrl: string;
-    let headers: HeadersInit;
+    const limit = 500;
+    let offset = 0;
+    let allItems: ValueSetValue[] = [];
+    let hasMore = true;
 
-    if (runningInElectron) {
-      apiUrl = `https://iaaobn.fa.ocs.oraclecloud.com:443/fscmRestApi/resources/11.13.18.05/valueSets/${segmentCode}/child/values?limit=100&offset=0`;
-      const credentials = btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
-      headers = { 'Authorization': `Basic ${credentials}`, 'Content-Type': 'application/json' };
-    } else {
-      apiUrl = `${PROXY_CONFIG.baseUrl}/fusion/fscmRestApi/resources/11.13.18.05/valueSets/${segmentCode}/child/values?limit=100&offset=0`;
-      headers = { 'Content-Type': 'application/json' };
+    const headers: HeadersInit = runningInElectron
+      ? {
+          'Authorization': `Basic ${btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`)}`,
+          'Content-Type': 'application/json'
+        }
+      : { 'Content-Type': 'application/json' };
+
+    while (hasMore) {
+      const baseUrl = runningInElectron
+        ? `https://iaaobn.fa.ocs.oraclecloud.com:443/fscmRestApi/resources/11.13.18.05/valueSets/${segmentCode}/child/values`
+        : `${PROXY_CONFIG.baseUrl}/fusion/fscmRestApi/resources/11.13.18.05/valueSets/${segmentCode}/child/values`;
+
+      const apiUrl = `${baseUrl}?limit=${limit}&offset=${offset}`;
+      console.log(`[COASegments] Fetching page: offset=${offset}, limit=${limit}`);
+
+      const response = await fetch(apiUrl, { method: 'GET', headers });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const result = await response.json();
+
+      const items = result.items || [];
+      console.log(`[COASegments] Got ${items.length} items at offset ${offset}`);
+
+      // Map Fusion response to our format (include all fields for APEX sync)
+      const mappedItems = items.map((item: any) => ({
+        ValueId: item.ValueId,
+        Value: item.Value,
+        Description: item.Description,
+        EnabledFlag: item.EnabledFlag,
+        StartDateActive: item.StartDateActive,
+        EndDateActive: item.EndDateActive,
+        SortOrder: item.SortOrder,
+        SummaryFlag: item.SummaryFlag || null,
+        DetailPostingAllowed: item.DetailPostingAllowed || null,
+        DetailBudgetingAllowed: item.DetailBudgetingAllowed || null,
+        AccountType: item.AccountType || null,
+        ControlAccount: item.ControlAccount || null,
+        ReconciliationFlag: item.ReconciliationFlag || null,
+        FinancialCategory: item.FinancialCategory || null,
+        ExternalDataSource: item.ExternalDataSource || null,
+        CreationDate: item.CreationDate || null,
+        CreatedBy: item.CreatedBy || null,
+        LastUpdateDate: item.LastUpdateDate || null,
+        LastUpdatedBy: item.LastUpdatedBy || null,
+      }));
+
+      allItems = [...allItems, ...mappedItems];
+
+      // Check if there are more pages
+      if (items.length < limit) {
+        hasMore = false;
+      } else {
+        offset += limit;
+      }
     }
 
-    const response = await fetch(apiUrl, { method: 'GET', headers });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const result = await response.json();
-
-    // Map Fusion response to our format (include all fields for APEX sync)
-    return (result.items || []).map((item: any) => ({
-      ValueId: item.ValueId,
-      Value: item.Value,
-      Description: item.Description,
-      EnabledFlag: item.EnabledFlag,
-      StartDateActive: item.StartDateActive,
-      EndDateActive: item.EndDateActive,
-      SortOrder: item.SortOrder,
-      SummaryFlag: item.SummaryFlag || null,
-      DetailPostingAllowed: item.DetailPostingAllowed || null,
-      DetailBudgetingAllowed: item.DetailBudgetingAllowed || null,
-      AccountType: item.AccountType || null,
-      ControlAccount: item.ControlAccount || null,
-      ReconciliationFlag: item.ReconciliationFlag || null,
-      FinancialCategory: item.FinancialCategory || null,
-      ExternalDataSource: item.ExternalDataSource || null,
-      CreationDate: item.CreationDate || null,
-      CreatedBy: item.CreatedBy || null,
-      LastUpdateDate: item.LastUpdateDate || null,
-      LastUpdatedBy: item.LastUpdatedBy || null,
-    }));
+    console.log(`[COASegments] Total fetched: ${allItems.length} values for ${segmentCode}`);
+    return allItems;
   };
 
   // Fetch values from APEX API
