@@ -36,6 +36,7 @@ import {
   UnorderedListOutlined,
   PieChartOutlined,
   LoadingOutlined,
+  BugOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -461,6 +462,27 @@ const AccountAnalysis: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Show search API URL in modal
+  const showSearchApiUrl = () => {
+    const params = new URLSearchParams();
+    params.append('ledger_name', selectedLedger);
+    params.append('period_names', selectedPeriods.join(','));
+    params.append('company', selectedCompany);
+    if (accountFilter) {
+      params.append('account', accountFilter);
+    }
+    const url = `${API_BASE_URL}/accountanalysis?${params.toString()}`;
+    Modal.info({
+      title: 'Search API Endpoint',
+      width: 700,
+      content: (
+        <div style={{ wordBreak: 'break-all', fontFamily: 'monospace', fontSize: 12, padding: '8px 0' }}>
+          {url}
+        </div>
+      ),
+    });
   };
 
   // Fetch account data for drill-down
@@ -1316,6 +1338,18 @@ const AccountAnalysis: React.FC = () => {
                 </Button>
                 <Button icon={<ReloadOutlined />} size="small" onClick={handleReset}>
                   Reset
+                </Button>
+                <Button
+                  icon={<BugOutlined />}
+                  size="small"
+                  onClick={showSearchApiUrl}
+                  style={{
+                    background: '#f0f5ff',
+                    borderColor: '#adc6ff',
+                    color: '#1d39c4',
+                  }}
+                >
+                  Log
                 </Button>
               </Space>
             </Col>
