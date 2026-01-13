@@ -172,6 +172,39 @@ const insertToApex = async (
   }
 };
 
+// Fetch from APEX via proxy (GET)
+const fetchFromApex = async (
+  endpoint: string,
+  params: Record<string, string> = {},
+  log?: LogCallback,
+  verbose = true
+): Promise<any> => {
+  try {
+    const queryParams = new URLSearchParams(params);
+    const url = `${PROXY_CONFIG.baseUrl}/apex/${endpoint}?${queryParams.toString()}`;
+    const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${endpoint}?${queryParams.toString()}`;
+
+    if (verbose) {
+      log?.('step', '──── [GET] APEX Database ────');
+      log?.('info', `APEX URL: ${apexUrl}`);
+      log?.('info', `Proxy URL: ${url}`);
+    }
+
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (verbose) {
+      log?.('success', `GET Response: ${data.items?.length || 0} items`);
+    }
+
+    return data;
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    log?.('error', `APEX GET Error: ${errorMsg}`);
+    throw error;
+  }
+};
+
 // Main GL Journal Sync Function
 export const syncGLJournals = async (
   parameters: Record<string, string>,
@@ -913,6 +946,200 @@ export const syncGLBatchesOnly = async (
     log?.('step', '═══════════════════════════════════════════════════════════');
     log?.('success', `Total Batches: ${totalCount}`);
     log?.('success', `Inserted: ${progress.insertedBatches}`);
+    log?.('info', `Errors: ${progress.errors}`);
+
+    return progress;
+
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    updateProgress({ status: 'error', lastError: errorMsg, endTime: new Date() });
+    log?.('error', `Sync failed: ${errorMsg}`);
+    return progress;
+  }
+};
+
+// ============================================================
+// GL HEADERS ONLY SYNC
+// Flow: APEX GET batches → Fusion GET headers → APEX POST headers
+// ============================================================
+export interface HeadersOnlySyncProgress {
+  status: 'idle' | 'fetching_batches' | 'fetching_headers' | 'inserting' | 'completed' | 'error' | 'stopped';
+  totalBatches: number;
+  processedBatches: number;
+  currentBatchId: number | null;
+  totalHeaders: number;
+  insertedHeaders: number;
+  errors: number;
+  lastError: string;
+  startTime: Date | null;
+  endTime: Date | null;
+}
+
+export const syncGLHeadersOnly = async (
+  parameters: Record<string, string>,
+  testMode: boolean | 'single' = true,
+  log?: LogCallback,
+  onProgress?: (progress: HeadersOnlySyncProgress) => void,
+  abortSignal?: AbortSignal
+): Promise<HeadersOnlySyncProgress> => {
+  const progress: HeadersOnlySyncProgress = {
+    status: 'idle',
+    totalBatches: 0,
+    processedBatches: 0,
+    currentBatchId: null,
+    totalHeaders: 0,
+    insertedHeaders: 0,
+    errors: 0,
+    lastError: '',
+    startTime: new Date(),
+    endTime: null,
+  };
+
+  const updateProgress = (updates: Partial<HeadersOnlySyncProgress>) => {
+    Object.assign(progress, updates);
+    onProgress?.(progress);
+  };
+
+  const maxBatches = testMode === 'single' ? 1 : (testMode ? 25 : null);
+  const modeLabel = testMode === 'single' ? 'SINGLE BATCH' : (testMode ? 'TEST (25 batches)' : 'FULL SYNC');
+
+  try {
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('step', `  GL HEADERS ONLY SYNC - ${modeLabel}`);
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('info', `Parameters: ${JSON.stringify(parameters)}`);
+
+    // ========================================
+    // STEP 1: Get batch IDs from APEX
+    // ========================================
+    updateProgress({ status: 'fetching_batches' });
+    log?.('step', '──── Step 1: Fetching batch IDs from APEX ────');
+
+    const apexParams: Record<string, string> = {};
+    if (parameters.DefaultPeriodName) {
+      apexParams.PERIOD_NAME = parameters.DefaultPeriodName;
+    }
+
+    const apexResult = await fetchFromApex('SYNC/jebatches', apexParams, log, true);
+    let batchIds: number[] = (apexResult.items || []).map((item: any) => item.je_batch_id);
+
+    if (batchIds.length === 0) {
+      updateProgress({ status: 'completed', endTime: new Date() });
+      log?.('warning', 'No batch IDs found in APEX');
+      return progress;
+    }
+
+    // Limit batches for test modes
+    if (maxBatches !== null && batchIds.length > maxBatches) {
+      batchIds = batchIds.slice(0, maxBatches);
+      log?.('info', `Limited to ${maxBatches} batches for ${modeLabel}`);
+    }
+
+    updateProgress({ totalBatches: batchIds.length });
+    log?.('success', `Found ${batchIds.length} batch IDs to process`);
+
+    // ========================================
+    // STEP 2: For each batch, fetch headers from Fusion and insert to APEX
+    // ========================================
+    log?.('step', '──── Step 2: Fetching headers from Fusion & inserting to APEX ────');
+
+    for (let i = 0; i < batchIds.length; i++) {
+      if (abortSignal?.aborted) {
+        updateProgress({ status: 'stopped' });
+        log?.('warning', 'Stopped by user');
+        break;
+      }
+
+      const batchId = batchIds[i];
+      updateProgress({
+        status: 'fetching_headers',
+        currentBatchId: batchId,
+        processedBatches: i,
+      });
+
+      log?.('info', `Processing batch ${i + 1}/${batchIds.length} (ID: ${batchId})...`);
+
+      // Fetch headers from Fusion using the batch ID
+      // URL pattern: journalBatches/{batchId}/child/journalHeaders
+      const headersUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/journalBatches/${batchId}/child/journalHeaders`;
+
+      try {
+        const headersResult = await fetchFromOracleUrl(headersUrl, log, false);
+        const headers = headersResult.items || [];
+
+        if (headers.length === 0) {
+          log?.('info', `  No headers found for batch ${batchId}`);
+          updateProgress({ processedBatches: i + 1 });
+          continue;
+        }
+
+        log?.('success', `  Found ${headers.length} headers for batch ${batchId}`);
+        updateProgress({ totalHeaders: progress.totalHeaders + headers.length });
+
+        // Insert each header to APEX
+        updateProgress({ status: 'inserting' });
+        for (const header of headers) {
+          if (abortSignal?.aborted) break;
+
+          // Extract header ID from links
+          const headerId = extractHeaderIdFromHref(findChildLink(header.links, 'journalLines') || '')
+            || extractIdFromHref(header.links?.[0]?.href || '')
+            || 0;
+
+          const headerPayload = {
+            batchId: batchId,
+            items: [{
+              JeHeaderId: headerId,
+              ...header,
+            }],
+          };
+
+          try {
+            const insertResult = await insertToApex(APEX_DB_CONFIG.endpoints.journalHeaders, headerPayload, log, false);
+            if (insertResult.success || insertResult.inserted > 0) {
+              updateProgress({ insertedHeaders: progress.insertedHeaders + 1 });
+            } else {
+              updateProgress({ errors: progress.errors + 1, lastError: insertResult.error || 'Insert failed' });
+              log?.('error', `  Header ${headerId} insert failed: ${insertResult.lastError || insertResult.error}`);
+            }
+          } catch (error) {
+            updateProgress({ errors: progress.errors + 1, lastError: String(error) });
+            log?.('error', `  Header ${headerId} error: ${error}`);
+          }
+        }
+
+        log?.('success', `  ✓ Batch ${batchId}: ${headers.length} headers processed`);
+
+      } catch (error) {
+        updateProgress({ errors: progress.errors + 1, lastError: String(error) });
+        log?.('error', `  Error fetching headers for batch ${batchId}: ${error}`);
+      }
+
+      updateProgress({ processedBatches: i + 1 });
+
+      // Log progress every 10 batches
+      if ((i + 1) % 10 === 0 || i === batchIds.length - 1) {
+        log?.('info', `Progress: ${i + 1}/${batchIds.length} batches, ${progress.insertedHeaders} headers inserted`);
+      }
+
+      // Small delay between batches
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    // ========================================
+    // COMPLETE
+    // ========================================
+    updateProgress({
+      status: abortSignal?.aborted ? 'stopped' : 'completed',
+      endTime: new Date(),
+    });
+
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('step', '  GL HEADERS SYNC COMPLETED');
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('success', `Total Batches: ${progress.processedBatches}`);
+    log?.('success', `Total Headers: ${progress.totalHeaders}`);
+    log?.('success', `Inserted: ${progress.insertedHeaders}`);
     log?.('info', `Errors: ${progress.errors}`);
 
     return progress;
