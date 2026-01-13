@@ -66,6 +66,30 @@ const REDWOOD = {
   surface: '#FFFFFF',
 };
 
+// Ledger interface from API
+interface Ledger {
+  ledger_id: number;
+  ledger_name: string;
+  description: string;
+  ledger_category_code: string;
+  currency_code: string;
+  chart_of_accounts_id: string;
+}
+
+// Period interface from API
+interface Period {
+  period_name_id: string;
+  ledger_name: string;
+  app: string;
+  application_name: string;
+  status: string;
+  start_date: string;
+  end_date: string;
+  period_year: number;
+  period_number: number;
+  adj_flag: string;
+}
+
 // Segment detail for account
 interface SegmentDetail {
   value: string;
@@ -242,6 +266,13 @@ const CreateJournal: React.FC = () => {
   const navigate = useNavigate();
   const [saving, setSaving] = useState(false);
 
+  // Ledger and Period state
+  const [ledgers, setLedgers] = useState<Ledger[]>([]);
+  const [selectedLedger, setSelectedLedger] = useState<Ledger | null>(null);
+  const [periods, setPeriods] = useState<Period[]>([]);
+  const [loadingLedgers, setLoadingLedgers] = useState(false);
+  const [loadingPeriods, setLoadingPeriods] = useState(false);
+
   // Collapsible states
   const [batchExpanded, setBatchExpanded] = useState(true);
   const [journalExpanded, setJournalExpanded] = useState(true);
@@ -269,6 +300,12 @@ const CreateJournal: React.FC = () => {
 
   // Search filter for journal lines
   const [lineSearchText, setLineSearchText] = useState('');
+
+  // JSON Preview modal state
+  const [jsonPreviewVisible, setJsonPreviewVisible] = useState(false);
+  const [jsonPayload, setJsonPayload] = useState<any>(null);
+  const [postingJournal, setPostingJournal] = useState(false);
+  const [saveResponse, setSaveResponse] = useState<any>(null);
 
   // Initialize batch name with timestamp
   const [batchData, setBatchData] = useState<BatchData>(() => {
@@ -317,15 +354,93 @@ const CreateJournal: React.FC = () => {
     }
   }, []);
 
+  // Fetch ledgers on component mount
+  useEffect(() => {
+    const fetchLedgers = async () => {
+      setLoadingLedgers(true);
+      try {
+        const response = await fetch('https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/ledgers');
+        const data = await response.json();
+        if (data.items && data.items.length > 0) {
+          setLedgers(data.items);
+          // Auto-select first ledger and store it
+          const firstLedger = data.items[0];
+          setSelectedLedger(firstLedger);
+          // Update journal data with selected ledger
+          setJournalData(prev => ({ ...prev, ledger: firstLedger.ledger_name }));
+        }
+      } catch (error) {
+        console.error('Error fetching ledgers:', error);
+        message.error('Failed to fetch ledgers');
+      } finally {
+        setLoadingLedgers(false);
+      }
+    };
+    fetchLedgers();
+  }, []);
+
+  // Fetch periods when ledger changes
+  useEffect(() => {
+    if (!selectedLedger) return;
+
+    const fetchPeriods = async () => {
+      setLoadingPeriods(true);
+      try {
+        const encodedLedgerName = encodeURIComponent(selectedLedger.ledger_name);
+        const response = await fetch(
+          `https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/periodsstatus/create?P_LEDGER_NAME=${encodedLedgerName}&P_APPLICATION_NAME=General Ledger`
+        );
+        const data = await response.json();
+        if (data.items && data.items.length > 0) {
+          // Sort periods by year desc, then period_number desc to show most recent first
+          const sortedPeriods = data.items.sort((a: Period, b: Period) => {
+            if (b.period_year !== a.period_year) return b.period_year - a.period_year;
+            return b.period_number - a.period_number;
+          });
+          setPeriods(sortedPeriods);
+          // Auto-select current open period or first available
+          const currentPeriod = sortedPeriods.find((p: Period) => p.status === 'Open') || sortedPeriods[0];
+          if (currentPeriod) {
+            setBatchData(prev => ({ ...prev, accountingPeriod: currentPeriod.period_name_id }));
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching periods:', error);
+        message.error('Failed to fetch periods');
+      } finally {
+        setLoadingPeriods(false);
+      }
+    };
+    fetchPeriods();
+  }, [selectedLedger]);
+
+  // Handle ledger selection
+  const handleLedgerChange = (ledgerId: number) => {
+    const ledger = ledgers.find(l => l.ledger_id === ledgerId);
+    if (ledger) {
+      setSelectedLedger(ledger);
+      // Update journal data with selected ledger
+      setJournalData(prev => ({ ...prev, ledger: ledger.ledger_name }));
+    }
+  };
+
   // Update accounting date when period changes
   useEffect(() => {
-    const periodEndDate = getPeriodEndDate(batchData.accountingPeriod);
+    // Try to get end date from fetched periods, fallback to hardcoded values
+    const selectedPeriod = periods.find(p => p.period_name_id === batchData.accountingPeriod);
+    let periodEndDate: string;
+    if (selectedPeriod?.end_date) {
+      // Format the API date to D-MMM-YYYY format
+      periodEndDate = dayjs(selectedPeriod.end_date).format('D-MMM-YYYY');
+    } else {
+      periodEndDate = getPeriodEndDate(batchData.accountingPeriod);
+    }
     setJournalData(prev => ({
       ...prev,
       accountingDate: periodEndDate,
       conversionDate: periodEndDate,
     }));
-  }, [batchData.accountingPeriod]);
+  }, [batchData.accountingPeriod, periods]);
 
   // Calculate accounted amounts based on conversion rate
   const calculateAccountedAmounts = (enteredAmount: number | null, rateType: string, currency: string): number | null => {
@@ -797,6 +912,72 @@ const CreateJournal: React.FC = () => {
     return { valid: true, message: '' };
   };
 
+  // Build JSON payload for API
+  const buildJsonPayload = () => {
+    // Format date from D-MMM-YYYY to YYYY-MM-DD
+    const formatDateForApi = (dateStr: string): string => {
+      if (!dateStr) return '';
+      const parsed = dayjs(dateStr, 'D-MMM-YYYY');
+      return parsed.isValid() ? parsed.format('YYYY-MM-DD') : dateStr;
+    };
+
+    const payload = {
+      batch: {
+        batchName: batchData.batchName,
+        batchDescription: batchData.description || '',
+        ledgerName: selectedLedger?.ledger_name || journalData.ledger,
+        ledgerId: selectedLedger?.ledger_id || 0,
+        status: 'NEW',
+        accountingPeriod: batchData.accountingPeriod,
+        controlTotal: journalData.controlTotal || lineTotals.enteredDr,
+        runningTotalDr: lineTotals.enteredDr,
+        runningTotalCr: lineTotals.enteredCr,
+        batchSource: 'Manual',
+        createdBy: 'user@example.com', // TODO: Get from auth context
+      },
+      header: {
+        ledgerId: selectedLedger?.ledger_id || 0,
+        ledgerName: selectedLedger?.ledger_name || journalData.ledger,
+        jeCategory: journalData.category || 'Adjustment',
+        jeSource: 'Manual',
+        periodName: batchData.accountingPeriod,
+        journalName: journalData.journalName,
+        description: journalData.description || '',
+        currencyCode: journalData.currency,
+        currencyConversionType: journalData.conversionRateType,
+        currencyConversionDate: formatDateForApi(journalData.conversionDate),
+        currencyConversionRate: journalData.conversionRate,
+        status: 'NEW',
+        runningTotalDr: lineTotals.enteredDr,
+        runningTotalCr: lineTotals.enteredCr,
+        createdBy: 'user@example.com', // TODO: Get from auth context
+      },
+      lines: lines.map(line => ({
+        enteredDr: line.enteredDr,
+        enteredCr: line.enteredCr,
+        accountedDr: line.accountedDr,
+        accountedCr: line.accountedCr,
+        statAmount: null,
+        description: line.description || '',
+        currencyCode: journalData.currency,
+        currencyConversionDate: formatDateForApi(line.conversionDate),
+        currencyConversionRate: journalData.conversionRate,
+        userCurrencyConversionType: journalData.conversionRateType,
+        accountCombination: line.account,
+        chartOfAccountsName: selectedLedger?.description || 'Chart of Accounts',
+        reference1: null,
+        reference2: null,
+        reference3: null,
+        reference4: null,
+        reference5: null,
+        createdBy: 'user@example.com', // TODO: Get from auth context
+      })),
+    };
+
+    return payload;
+  };
+
+  // Handle Save - show JSON preview
   const handleSave = async () => {
     const validation = validateMandatoryFields();
     if (!validation.valid) {
@@ -806,18 +987,56 @@ const CreateJournal: React.FC = () => {
 
     // Check balance and show warning if not balanced
     if (!isBalanced) {
-      message.warning(`Total Debit (${formatNumber(lineTotals.enteredDr)}) and Total Credit (${formatNumber(lineTotals.enteredCr)}) are not equal. Journal saved as unbalanced.`);
+      message.warning(`Total Debit (${formatNumber(lineTotals.enteredDr)}) and Total Credit (${formatNumber(lineTotals.enteredCr)}) are not equal. Journal will be saved as unbalanced.`);
     }
 
-    setSaving(true);
+    // Build payload and show preview
+    const payload = buildJsonPayload();
+    setJsonPayload(payload);
+    setJsonPreviewVisible(true);
+  };
+
+  // Handle confirm save - POST to API
+  const handleConfirmSave = async () => {
+    if (!jsonPayload) return;
+
+    setPostingJournal(true);
+    setSaveResponse(null);
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      message.success('Journal saved successfully');
-    } catch (error) {
-      message.error('Failed to save journal');
+      const response = await fetch(
+        'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/journals/create',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(jsonPayload),
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
+      const result = await response.json();
+      setSaveResponse(result);
+      message.success('Journal saved successfully!');
+      // Don't close modal - show the response
+    } catch (error: any) {
+      console.error('Error saving journal:', error);
+      setSaveResponse({ error: true, message: error.message || 'Failed to save journal' });
+      message.error('Failed to save journal. Please try again.');
     } finally {
-      setSaving(false);
+      setPostingJournal(false);
     }
+  };
+
+  // Close JSON modal and reset
+  const handleCloseJsonModal = () => {
+    setJsonPreviewVisible(false);
+    setJsonPayload(null);
+    setSaveResponse(null);
   };
 
   // Handle Post - requires balanced journal
@@ -1141,12 +1360,15 @@ const CreateJournal: React.FC = () => {
                         value={batchData.accountingPeriod}
                         onChange={(val) => setBatchData({ ...batchData, accountingPeriod: val })}
                         size="small"
-                        style={{ width: 150 }}
+                        style={{ width: 180 }}
+                        loading={loadingPeriods}
+                        placeholder="Select period"
                       >
-                        <Option value="Jan-26">Jan-26</Option>
-                        <Option value="Feb-26">Feb-26</Option>
-                        <Option value="Mar-26">Mar-26</Option>
-                        <Option value="Apr-26">Apr-26</Option>
+                        {periods.map(period => (
+                          <Option key={period.period_name_id} value={period.period_name_id}>
+                            {period.period_year} - {period.period_name_id} ({period.status})
+                          </Option>
+                        ))}
                       </Select>
                     </Col>
 
@@ -1273,11 +1495,21 @@ const CreateJournal: React.FC = () => {
                     <Col span={14}>
                       <Select
                         value={journalData.ledger}
-                        onChange={(val) => setJournalData({ ...journalData, ledger: val })}
+                        onChange={(val) => {
+                          setJournalData({ ...journalData, ledger: val });
+                          // Also update the selected ledger in the header
+                          const ledger = ledgers.find(l => l.ledger_name === val);
+                          if (ledger) setSelectedLedger(ledger);
+                        }}
                         size="small"
                         style={{ width: '100%' }}
+                        loading={loadingLedgers}
                       >
-                        <Option value="BUIMERC LEDGER">BUIMERC LEDGER</Option>
+                        {ledgers.map(ledger => (
+                          <Option key={ledger.ledger_id} value={ledger.ledger_name}>
+                            {ledger.ledger_name}
+                          </Option>
+                        ))}
                       </Select>
                     </Col>
 
@@ -1538,12 +1770,16 @@ const CreateJournal: React.FC = () => {
                         value={journalData.reversalPeriod}
                         onChange={(val) => setJournalData({ ...journalData, reversalPeriod: val })}
                         size="small"
-                        style={{ width: 150 }}
+                        style={{ width: 180 }}
                         placeholder="Select"
                         allowClear
+                        loading={loadingPeriods}
                       >
-                        <Option value="Apr-26">Apr-26</Option>
-                        <Option value="May-26">May-26</Option>
+                        {periods.map(period => (
+                          <Option key={period.period_name_id} value={period.period_name_id}>
+                            {period.period_year} - {period.period_name_id}
+                          </Option>
+                        ))}
                       </Select>
                     </Col>
 
@@ -1572,9 +1808,28 @@ const CreateJournal: React.FC = () => {
   return (
     <Layout style={{ minHeight: '100vh', background: REDWOOD.neutral100 }}>
       <Content>
-        {/* Data Access Set Header */}
-        <div style={{ padding: '4px 24px', background: REDWOOD.neutral100, fontSize: 11, color: REDWOOD.neutral600 }}>
-          Data Access Set: BUIMERC LEDGER
+        {/* Select Ledger Header */}
+        <div style={{ padding: '6px 24px', background: REDWOOD.neutral100, fontSize: 12, color: REDWOOD.neutral600, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Text style={{ fontSize: 12 }}>Select Ledger:</Text>
+          <Select
+            value={selectedLedger?.ledger_id}
+            onChange={handleLedgerChange}
+            loading={loadingLedgers}
+            size="small"
+            style={{ minWidth: 250 }}
+            placeholder="Select a ledger"
+          >
+            {ledgers.map(ledger => (
+              <Option key={ledger.ledger_id} value={ledger.ledger_id}>
+                {ledger.ledger_name}
+              </Option>
+            ))}
+          </Select>
+          {selectedLedger && (
+            <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>
+              Currency: {selectedLedger.currency_code}
+            </Text>
+          )}
         </div>
 
         {/* Action Header with Title */}
@@ -2065,6 +2320,161 @@ const CreateJournal: React.FC = () => {
               }}
               title="PDF Preview"
             />
+          )}
+        </Modal>
+
+        {/* JSON Preview Modal - Save Confirmation */}
+        <Modal
+          title={
+            <Space>
+              {saveResponse ? (
+                saveResponse.error ? (
+                  <CloseOutlined style={{ color: REDWOOD.primary }} />
+                ) : (
+                  <SaveOutlined style={{ color: REDWOOD.success }} />
+                )
+              ) : (
+                <FileTextOutlined style={{ color: REDWOOD.info }} />
+              )}
+              <span>
+                {saveResponse
+                  ? saveResponse.error
+                    ? 'Save Failed'
+                    : 'Journal Saved Successfully'
+                  : 'Review Journal Data Before Saving'}
+              </span>
+            </Space>
+          }
+          open={jsonPreviewVisible}
+          onCancel={handleCloseJsonModal}
+          width="80vw"
+          style={{ top: 20 }}
+          footer={
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Space>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  Batch: {jsonPayload?.batch?.batchName} | Lines: {jsonPayload?.lines?.length || 0}
+                </Text>
+                {!isBalanced && !saveResponse && (
+                  <Text type="danger" style={{ fontSize: 12 }}>
+                    (Unbalanced)
+                  </Text>
+                )}
+              </Space>
+              <Space>
+                {saveResponse ? (
+                  <Button type="primary" onClick={handleCloseJsonModal}>
+                    Close
+                  </Button>
+                ) : (
+                  <>
+                    <Button onClick={handleCloseJsonModal}>
+                      Cancel
+                    </Button>
+                    <Button
+                      type="primary"
+                      icon={<SaveOutlined />}
+                      onClick={handleConfirmSave}
+                      loading={postingJournal}
+                      style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+                    >
+                      Confirm & Save
+                    </Button>
+                  </>
+                )}
+              </Space>
+            </div>
+          }
+          styles={{
+            body: { padding: 16, maxHeight: 'calc(100vh - 250px)', overflow: 'auto' }
+          }}
+        >
+          {jsonPayload && (
+            <div>
+              {/* API Response Section - Show after save */}
+              {saveResponse && (
+                <div style={{
+                  marginBottom: 16,
+                  padding: 16,
+                  background: saveResponse.error ? '#fff2f0' : '#f6ffed',
+                  border: `1px solid ${saveResponse.error ? REDWOOD.primary : REDWOOD.success}`,
+                  borderRadius: 6
+                }}>
+                  <Text strong style={{ fontSize: 14, color: saveResponse.error ? REDWOOD.primary : REDWOOD.success }}>
+                    {saveResponse.error ? 'Error Response:' : 'API Response (Success):'}
+                  </Text>
+                  <pre
+                    style={{
+                      marginTop: 8,
+                      background: saveResponse.error ? '#fff' : '#fff',
+                      padding: 12,
+                      borderRadius: 4,
+                      fontSize: 12,
+                      lineHeight: 1.5,
+                      overflow: 'auto',
+                      maxHeight: 300,
+                      fontFamily: 'Monaco, Consolas, "Courier New", monospace',
+                      color: REDWOOD.neutral900,
+                    }}
+                  >
+                    {JSON.stringify(saveResponse, null, 2)}
+                  </pre>
+                </div>
+              )}
+
+              {/* Summary Section */}
+              <div style={{ marginBottom: 16, padding: 12, background: REDWOOD.neutral100, borderRadius: 6 }}>
+                <Row gutter={[16, 8]}>
+                  <Col span={8}>
+                    <Text strong>Batch Name:</Text> {jsonPayload.batch.batchName}
+                  </Col>
+                  <Col span={8}>
+                    <Text strong>Ledger:</Text> {jsonPayload.batch.ledgerName}
+                  </Col>
+                  <Col span={8}>
+                    <Text strong>Period:</Text> {jsonPayload.batch.accountingPeriod}
+                  </Col>
+                  <Col span={8}>
+                    <Text strong>Journal:</Text> {jsonPayload.header.journalName}
+                  </Col>
+                  <Col span={8}>
+                    <Text strong>Category:</Text> {jsonPayload.header.jeCategory}
+                  </Col>
+                  <Col span={8}>
+                    <Text strong>Currency:</Text> {jsonPayload.header.currencyCode}
+                  </Col>
+                  <Col span={8}>
+                    <Text strong>Total Debit:</Text> <Text style={{ color: REDWOOD.success }}>{formatNumber(jsonPayload.header.runningTotalDr)}</Text>
+                  </Col>
+                  <Col span={8}>
+                    <Text strong>Total Credit:</Text> <Text style={{ color: REDWOOD.info }}>{formatNumber(jsonPayload.header.runningTotalCr)}</Text>
+                  </Col>
+                  <Col span={8}>
+                    <Text strong>Status:</Text> {isBalanced ? <Text style={{ color: REDWOOD.success }}>Balanced</Text> : <Text type="danger">Unbalanced</Text>}
+                  </Col>
+                </Row>
+              </div>
+
+              {/* JSON Code Section */}
+              <div style={{ marginBottom: 8 }}>
+                <Text strong style={{ fontSize: 13 }}>JSON Payload {saveResponse ? '(Sent to API):' : '(to be sent to API):'}</Text>
+              </div>
+              <pre
+                style={{
+                  background: '#1e1e1e',
+                  color: '#d4d4d4',
+                  padding: 16,
+                  borderRadius: 6,
+                  fontSize: 11,
+                  lineHeight: 1.5,
+                  overflow: 'auto',
+                  maxHeight: saveResponse ? 200 : 'calc(100vh - 450px)',
+                  fontFamily: 'Monaco, Consolas, "Courier New", monospace',
+                }}
+              >
+                {JSON.stringify(jsonPayload, null, 2)}
+              </pre>
+            </div>
           )}
         </Modal>
       </Content>

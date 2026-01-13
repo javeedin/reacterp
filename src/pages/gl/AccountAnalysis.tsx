@@ -466,25 +466,64 @@ const AccountAnalysis: React.FC = () => {
   // Fetch account data for drill-down
   const fetchAccountData = async (account: string, company: string): Promise<JournalLineSegment[]> => {
     try {
-      const params = new URLSearchParams();
-      params.append('ledger_name', selectedLedger);
-      params.append('period_names', selectedPeriods.join(','));
-      params.append('company', company);
-      params.append('account', account);
+      // Fetch data for each period using the byaccount endpoint
+      const allItems: JournalLineSegment[] = [];
 
-      const response = await fetch(`${API_BASE_URL}/accountanalysis?${params.toString()}`);
+      for (const period of selectedPeriods) {
+        const params = new URLSearchParams();
+        params.append('P_ACCOUNT', account);
+        params.append('P_PERIOD_NAME', period);
+        params.append('P_CURRENCY_CODE', 'AED'); // Default currency, could be made configurable
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const url = `${API_BASE_URL}/accountanalysis/byaccount?${params.toString()}`;
+        console.log('Fetching account data from:', url);
+
+        const response = await fetch(url);
+
+        if (!response.ok) {
+          console.error(`HTTP error for period ${period}: ${response.status}`);
+          continue; // Skip this period if there's an error
+        }
+
+        const data = await response.json();
+        const items = (data.items || []).map((item: any, index: number) => ({
+          key: `${period}-${index}`,
+          batchId: item.batch_id,
+          jeHeaderId: item.je_header_id,
+          jeLineNumber: item.je_line_number,
+          currencyCode: item.currency_code,
+          company: item.company,
+          lob: item.lob,
+          department: item.department,
+          account: item.account,
+          subAccount: item.sub_account,
+          analysis: item.analysis,
+          intercompany: item.intercompany,
+          future1: item.future1,
+          future2: item.future2,
+          enteredDr: item.entered_dr || 0,
+          enteredCr: item.entered_cr || 0,
+          accountedDr: item.accounted_dr || 0,
+          accountedCr: item.accounted_cr || 0,
+          chartOfAccountsName: item.chart_of_accounts_name,
+          defaultPeriodName: item.default_period_name,
+          batchName: item.batch_name,
+          actualFlagMeaning: item.actual_flag_meaning,
+          approvalStatusMeaning: item.approval_status_meaning,
+          userPeriodSetName: item.user_period_set_name,
+          userJeSourceName: item.user_je_source_name,
+          ledgerName: item.ledger_name,
+          legalEntityName: item.legal_entity_name,
+          userJeCategoryName: item.user_je_category_name,
+          concatenatedSegments: item.account_combination || `${item.company}-${item.lob}-${item.department}-${item.account}-${item.sub_account}-${item.analysis}-${item.intercompany}`,
+          accountDescription: item.account_description || '',
+        }));
+
+        allItems.push(...items);
       }
 
-      const data = await response.json();
-
-      return (data.items || []).map((item: any, index: number) => ({
-        ...item,
-        key: `${index}`,
-        concatenatedSegments: `${item.company}-${item.lob}-${item.department}-${item.account}-${item.subAccount}-${item.analysis}-${item.intercompany}`,
-      }));
+      console.log('Fetched total items:', allItems.length);
+      return allItems;
     } catch (error) {
       console.error('Error fetching account data:', error);
       message.error('Failed to fetch account data');
@@ -1397,6 +1436,30 @@ const AccountAnalysis: React.FC = () => {
                   onClick={() => showAllJournals(tab)}
                 >
                   Show All Journals
+                </Button>
+                <Button
+                  size="small"
+                  onClick={() => {
+                    const endpoints = selectedPeriods.map((period) => {
+                      const params = new URLSearchParams();
+                      params.append('P_ACCOUNT', tab.account);
+                      params.append('P_PERIOD_NAME', period);
+                      params.append('P_CURRENCY_CODE', 'AED');
+                      return `${API_BASE_URL}/accountanalysis/byaccount?${params.toString()}`;
+                    });
+                    console.log('API Endpoints:', endpoints);
+                    message.info(
+                      <div style={{ maxWidth: 600, wordBreak: 'break-all' }}>
+                        <div style={{ fontWeight: 'bold', marginBottom: 8 }}>API Endpoints:</div>
+                        {endpoints.map((url, i) => (
+                          <div key={i} style={{ fontSize: 11, marginBottom: 4 }}>{url}</div>
+                        ))}
+                      </div>,
+                      10
+                    );
+                  }}
+                >
+                  Log
                 </Button>
                 <Button size="small" icon={<DownloadOutlined />}>
                   Export

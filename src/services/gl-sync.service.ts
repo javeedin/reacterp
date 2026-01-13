@@ -172,6 +172,39 @@ const insertToApex = async (
   }
 };
 
+// Fetch from APEX via proxy (GET)
+const fetchFromApex = async (
+  endpoint: string,
+  params: Record<string, string> = {},
+  log?: LogCallback,
+  verbose = true
+): Promise<any> => {
+  try {
+    const queryParams = new URLSearchParams(params);
+    const url = `${PROXY_CONFIG.baseUrl}/apex/${endpoint}?${queryParams.toString()}`;
+    const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${endpoint}?${queryParams.toString()}`;
+
+    if (verbose) {
+      log?.('step', '──── [GET] APEX Database ────');
+      log?.('info', `APEX URL: ${apexUrl}`);
+      log?.('info', `Proxy URL: ${url}`);
+    }
+
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (verbose) {
+      log?.('success', `GET Response: ${data.items?.length || 0} items`);
+    }
+
+    return data;
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    log?.('error', `APEX GET Error: ${errorMsg}`);
+    throw error;
+  }
+};
+
 // Main GL Journal Sync Function
 export const syncGLJournals = async (
   parameters: Record<string, string>,
@@ -212,44 +245,160 @@ export const syncGLJournals = async (
 
   try {
     // ========================================
-    // STEP 1: Fetch Journal Batches
+    // STEP 1: Fetch Journal Batches (with pagination)
     // ========================================
     updateProgress({ status: 'fetching_batches' });
     log?.('step', '═══════════════════════════════════════════════════════════');
     log?.('step', '  STEP 1: Fetching Journal Batches from Oracle Fusion');
     log?.('step', '═══════════════════════════════════════════════════════════');
 
-    const limit = testMode === 'single'
+    const pageLimit = testMode === 'single'
       ? ORACLE_FUSION_CONFIG.singleRecordLimit
       : (testMode ? ORACLE_FUSION_CONFIG.testLimit : ORACLE_FUSION_CONFIG.defaultLimit);
-    const batchParams: Record<string, string> = {
-      limit: limit.toString(),
-      offset: '0',
-    };
 
-    const modeLabel = testMode === 'single' ? 'SINGLE RECORD DEBUG' : (testMode ? 'TEST MODE (25 batches)' : 'FULL SYNC');
+    // For test modes, limit total records; for full sync, fetch all
+    const maxRecords = testMode === 'single' ? 1 : (testMode ? 25 : null);
 
-    // Add filter parameters
+    const modeLabel = testMode === 'single' ? 'SINGLE RECORD DEBUG' : (testMode ? 'TEST MODE (25 batches)' : 'FULL SYNC (all pages)');
+
+    // Build filter parameters
     const filters = Object.entries(parameters)
       .filter(([, value]) => value)
       .map(([key, value]) => `${key}=${value}`)
       .join(';');
 
-    if (filters) {
-      batchParams.q = filters;
-    }
-
     log?.('info', `Parameters: ${JSON.stringify(parameters)}`);
-    log?.('info', `Limit: ${limit} batches (${modeLabel})`);
+    log?.('info', `Page size: ${pageLimit}, Max records: ${maxRecords ?? 'unlimited'} (${modeLabel})`);
     if (!verbose) {
       log?.('info', 'Full sync mode - detailed logging disabled for performance');
     }
 
-    const batchResult = await fetchFromOracle('journalBatches', batchParams, log, verbose);
-    const batches = batchResult.items || [];
+    // ========================================
+    // STEP 1a: Count total records first (all pages)
+    // ========================================
+    log?.('step', '──── Counting total records across all pages ────');
 
-    updateProgress({ totalBatches: batches.length });
-    log?.('success', `Found ${batches.length} journal batches`);
+    let totalCount = 0;
+    let countOffset = 0;
+    let countHasMore = true;
+    let countPageNum = 0;
+
+    while (countHasMore) {
+      if (abortSignal?.aborted) {
+        updateProgress({ status: 'stopped' });
+        log?.('warning', 'Sync stopped by user during count');
+        break;
+      }
+
+      countPageNum++;
+      const countParams: Record<string, string> = {
+        limit: pageLimit.toString(),
+        offset: countOffset.toString(),
+        onlyData: 'true',  // Request minimal data for counting
+      };
+
+      if (filters) {
+        countParams.q = filters;
+      }
+
+      log?.('info', `Counting page ${countPageNum} (offset: ${countOffset})...`);
+
+      const countResult = await fetchFromOracle('journalBatches', countParams, log, false);
+      const countItems = countResult.items || [];
+
+      totalCount += countItems.length;
+      log?.('info', `Page ${countPageNum}: ${countItems.length} records (Running total: ${totalCount})`);
+
+      // Check if there are more records - use both API hasMore and item count
+      const apiHasMore = countResult.hasMore === true;
+      const gotFullPage = countItems.length === pageLimit;
+      countHasMore = apiHasMore || gotFullPage;
+
+      // If we got 0 items, definitely stop
+      if (countItems.length === 0) {
+        countHasMore = false;
+      }
+
+      countOffset += countItems.length;
+
+      // For test modes, stop at maxRecords
+      if (maxRecords !== null && totalCount >= maxRecords) {
+        totalCount = Math.min(totalCount, maxRecords);
+        countHasMore = false;
+      }
+    }
+
+    log?.('success', `═══ TOTAL RECORDS FOUND: ${totalCount} (across ${countPageNum} pages) ═══`);
+
+    if (totalCount === 0) {
+      updateProgress({ status: 'completed', endTime: new Date() });
+      log?.('warning', 'No batches found for the given parameters');
+      return progress;
+    }
+
+    updateProgress({ totalBatches: totalCount });
+
+    // ========================================
+    // STEP 1b: Fetch all batches with pagination
+    // ========================================
+    log?.('step', '──── Fetching all batches for sync ────');
+
+    let batches: any[] = [];
+    let offset = 0;
+    let hasMore = true;
+    let pageNum = 0;
+
+    while (hasMore && (maxRecords === null || batches.length < maxRecords)) {
+      if (abortSignal?.aborted) {
+        updateProgress({ status: 'stopped' });
+        log?.('warning', 'Sync stopped by user during batch fetch');
+        break;
+      }
+
+      pageNum++;
+      const fetchLimit = maxRecords !== null
+        ? Math.min(pageLimit, maxRecords - batches.length)
+        : pageLimit;
+
+      const batchParams: Record<string, string> = {
+        limit: fetchLimit.toString(),
+        offset: offset.toString(),
+      };
+
+      if (filters) {
+        batchParams.q = filters;
+      }
+
+      log?.('info', `Fetching page ${pageNum}/${countPageNum} (offset: ${offset}, limit: ${fetchLimit})...`);
+
+      const batchResult = await fetchFromOracle('journalBatches', batchParams, log, verbose);
+      const items = batchResult.items || [];
+
+      batches = [...batches, ...items];
+
+      log?.('success', `Page ${pageNum}: fetched ${items.length} batches (Total: ${batches.length}/${totalCount})`);
+
+      // Check if there are more records - use both API hasMore and item count
+      const apiHasMore = batchResult.hasMore === true;
+      const gotFullPage = items.length === fetchLimit;
+      hasMore = apiHasMore || gotFullPage;
+
+      // If we got 0 items, definitely stop
+      if (items.length === 0) {
+        hasMore = false;
+      }
+
+      offset += items.length;
+
+      // Stop if we've reached maxRecords limit
+      if (maxRecords !== null && batches.length >= maxRecords) {
+        hasMore = false;
+      }
+
+      updateProgress({ processedBatches: batches.length, totalBatches: totalCount });
+    }
+
+    log?.('success', `Total batches fetched: ${batches.length} (${pageNum} page${pageNum > 1 ? 's' : ''})`);
 
     if (batches.length === 0) {
       updateProgress({ status: 'completed', endTime: new Date() });
@@ -554,5 +703,641 @@ export const testGLConnection = async (log?: LogCallback): Promise<boolean> => {
   } catch (error) {
     log?.('error', `Connection test error: ${error}`);
     return false;
+  }
+};
+
+// ============================================================
+// GL BATCHES ONLY SYNC (Simplified - no headers/lines)
+// ============================================================
+export interface BatchOnlySyncProgress {
+  status: 'idle' | 'counting' | 'fetching' | 'inserting' | 'completed' | 'error' | 'stopped';
+  totalBatches: number;
+  fetchedBatches: number;
+  insertedBatches: number;
+  currentPage: number;
+  totalPages: number;
+  errors: number;
+  lastError: string;
+  startTime: Date | null;
+  endTime: Date | null;
+}
+
+export const syncGLBatchesOnly = async (
+  parameters: Record<string, string>,
+  testMode: boolean | 'single' = true,
+  log?: LogCallback,
+  onProgress?: (progress: BatchOnlySyncProgress) => void,
+  abortSignal?: AbortSignal
+): Promise<BatchOnlySyncProgress> => {
+  const progress: BatchOnlySyncProgress = {
+    status: 'idle',
+    totalBatches: 0,
+    fetchedBatches: 0,
+    insertedBatches: 0,
+    currentPage: 0,
+    totalPages: 0,
+    errors: 0,
+    lastError: '',
+    startTime: new Date(),
+    endTime: null,
+  };
+
+  const updateProgress = (updates: Partial<BatchOnlySyncProgress>) => {
+    Object.assign(progress, updates);
+    onProgress?.(progress);
+  };
+
+  const pageLimit = testMode === 'single'
+    ? ORACLE_FUSION_CONFIG.singleRecordLimit
+    : (testMode ? ORACLE_FUSION_CONFIG.testLimit : ORACLE_FUSION_CONFIG.defaultLimit);
+
+  const maxRecords = testMode === 'single' ? 1 : (testMode ? 25 : null);
+  const modeLabel = testMode === 'single' ? 'SINGLE RECORD' : (testMode ? 'TEST (25)' : 'FULL SYNC');
+
+  // Build filter parameters
+  const filters = Object.entries(parameters)
+    .filter(([, value]) => value)
+    .map(([key, value]) => `${key}=${value}`)
+    .join(';');
+
+  try {
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('step', `  GL BATCHES ONLY SYNC - ${modeLabel}`);
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('info', `Parameters: ${JSON.stringify(parameters)}`);
+    log?.('info', `Page size: ${pageLimit}, Max records: ${maxRecords ?? 'unlimited'}`);
+
+    // ========================================
+    // STEP 1: Count total batches (all pages)
+    // ========================================
+    updateProgress({ status: 'counting' });
+    log?.('step', '──── Step 1: Counting total batches ────');
+
+    let totalCount = 0;
+    let countOffset = 0;
+    let countHasMore = true;
+    let countPageNum = 0;
+
+    while (countHasMore) {
+      if (abortSignal?.aborted) {
+        updateProgress({ status: 'stopped' });
+        log?.('warning', 'Stopped by user during count');
+        return progress;
+      }
+
+      countPageNum++;
+      const countParams: Record<string, string> = {
+        limit: pageLimit.toString(),
+        offset: countOffset.toString(),
+        onlyData: 'true',
+      };
+      if (filters) countParams.q = filters;
+
+      log?.('info', `Counting page ${countPageNum} (offset: ${countOffset})...`);
+      const result = await fetchFromOracle('journalBatches', countParams, log, false);
+      const items = result.items || [];
+
+      totalCount += items.length;
+      log?.('info', `Page ${countPageNum}: ${items.length} batches (Total: ${totalCount})`);
+
+      countHasMore = (result.hasMore === true) || (items.length === pageLimit);
+      if (items.length === 0) countHasMore = false;
+      countOffset += items.length;
+
+      if (maxRecords !== null && totalCount >= maxRecords) {
+        totalCount = Math.min(totalCount, maxRecords);
+        countHasMore = false;
+      }
+    }
+
+    updateProgress({ totalBatches: totalCount, totalPages: countPageNum });
+    log?.('success', `═══ TOTAL BATCHES: ${totalCount} (${countPageNum} pages) ═══`);
+
+    if (totalCount === 0) {
+      updateProgress({ status: 'completed', endTime: new Date() });
+      log?.('warning', 'No batches found');
+      return progress;
+    }
+
+    // ========================================
+    // STEP 2: Fetch and Insert Batches
+    // ========================================
+    updateProgress({ status: 'fetching' });
+    log?.('step', '──── Step 2: Fetching and inserting batches ────');
+
+    let offset = 0;
+    let hasMore = true;
+    let pageNum = 0;
+
+    while (hasMore && (maxRecords === null || progress.fetchedBatches < maxRecords)) {
+      if (abortSignal?.aborted) {
+        updateProgress({ status: 'stopped' });
+        log?.('warning', 'Stopped by user');
+        break;
+      }
+
+      pageNum++;
+      const fetchLimit = maxRecords !== null
+        ? Math.min(pageLimit, maxRecords - progress.fetchedBatches)
+        : pageLimit;
+
+      const batchParams: Record<string, string> = {
+        limit: fetchLimit.toString(),
+        offset: offset.toString(),
+      };
+      if (filters) batchParams.q = filters;
+
+      log?.('info', `Fetching page ${pageNum}/${countPageNum} (offset: ${offset})...`);
+      const result = await fetchFromOracle('journalBatches', batchParams, log, false);
+      const batches = result.items || [];
+
+      updateProgress({ currentPage: pageNum, fetchedBatches: progress.fetchedBatches + batches.length });
+      log?.('success', `Fetched ${batches.length} batches (Total: ${progress.fetchedBatches}/${totalCount})`);
+
+      // Insert batches to APEX
+      updateProgress({ status: 'inserting' });
+      for (let i = 0; i < batches.length; i++) {
+        if (abortSignal?.aborted) break;
+
+        const batch = batches[i];
+        const batchId = extractBatchIdFromHref(findChildLink(batch.links, 'journalHeaders') || '') || (offset + i + 1);
+
+        const batchPayload = {
+          items: [{
+            JeBatchId: batchId,
+            AccountedPeriodType: batch.AccountedPeriodType,
+            DefaultPeriodName: batch.DefaultPeriodName,
+            BatchName: batch.JournalBatchName || batch.JournalName,
+            Status: batch.Status,
+            ControlTotal: batch.ControlTotal,
+            BatchDescription: batch.Description || batch.BatchDescription,
+            ErrorMessage: batch.ErrorMessage,
+            PostedDate: batch.PostedDate,
+            PostingRunId: batch.PostingRunId,
+            RequestId: batch.RequestId,
+            RunningTotalAccountedCr: batch.RunningTotalAccountedCr,
+            RunningTotalAccountedDr: batch.RunningTotalAccountedDr,
+            RunningTotalCr: batch.RunningTotalCr,
+            RunningTotalDr: batch.RunningTotalDr,
+            CreatedBy: batch.CreatedBy,
+            CreationDate: batch.CreationDate,
+            LastUpdateDate: batch.LastUpdateDate,
+            LastUpdatedBy: batch.LastUpdatedBy,
+            ActualFlagMeaning: batch.ActualFlagMeaning,
+            ApprovalStatusMeaning: batch.ApprovalStatusMeaning,
+            ApproverEmployeeName: batch.ApproverEmployeeName,
+            FundsStatusMeaning: batch.FundsStatusMeaning,
+            ParentJeBatchName: batch.ParentJeBatchName,
+            ChartOfAccountsName: batch.ChartOfAccountsName,
+            StatusMeaning: batch.StatusMeaning,
+            CompletionStatusMeaning: batch.CompletionStatusMeaning,
+            UserPeriodSetName: batch.UserPeriodSetName,
+            UserJeSourceName: batch.UserJeSourceName,
+            ReversalDate: batch.ReversalDate,
+            ReversalPeriod: batch.ReversalPeriod,
+            ReversalFlag: batch.ReversalFlag,
+            ReversalMethodMeaning: batch.ReversalMethodMeaning,
+            LedgerId: batch.LedgerId,
+            LedgerName: batch.LedgerName,
+            JournalName: batch.JournalName,
+          }],
+        };
+
+        try {
+          const insertResult = await insertToApex(APEX_DB_CONFIG.endpoints.journalBatches, batchPayload, log, false);
+          if (insertResult.success || insertResult.inserted > 0) {
+            updateProgress({ insertedBatches: progress.insertedBatches + 1 });
+          } else {
+            updateProgress({ errors: progress.errors + 1, lastError: insertResult.error || 'Insert failed' });
+            log?.('error', `Batch ${batchId} insert failed: ${insertResult.lastError || insertResult.error}`);
+          }
+        } catch (error) {
+          updateProgress({ errors: progress.errors + 1, lastError: String(error) });
+          log?.('error', `Batch ${batchId} error: ${error}`);
+        }
+
+        // Log progress every 50 batches
+        if ((progress.insertedBatches + progress.errors) % 50 === 0) {
+          log?.('info', `Progress: ${progress.insertedBatches} inserted, ${progress.errors} errors`);
+        }
+      }
+
+      hasMore = (result.hasMore === true) || (batches.length === fetchLimit);
+      if (batches.length === 0) hasMore = false;
+      offset += batches.length;
+
+      if (maxRecords !== null && progress.fetchedBatches >= maxRecords) {
+        hasMore = false;
+      }
+
+      updateProgress({ status: 'fetching' });
+    }
+
+    // ========================================
+    // COMPLETE
+    // ========================================
+    updateProgress({
+      status: abortSignal?.aborted ? 'stopped' : 'completed',
+      endTime: new Date(),
+    });
+
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('step', '  GL BATCHES SYNC COMPLETED');
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('success', `Total Batches: ${totalCount}`);
+    log?.('success', `Inserted: ${progress.insertedBatches}`);
+    log?.('info', `Errors: ${progress.errors}`);
+
+    return progress;
+
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    updateProgress({ status: 'error', lastError: errorMsg, endTime: new Date() });
+    log?.('error', `Sync failed: ${errorMsg}`);
+    return progress;
+  }
+};
+
+// ============================================================
+// GL HEADERS ONLY SYNC
+// Flow: APEX GET batches → Fusion GET headers → APEX POST headers
+// ============================================================
+export interface HeadersOnlySyncProgress {
+  status: 'idle' | 'fetching_batches' | 'fetching_headers' | 'inserting' | 'completed' | 'error' | 'stopped';
+  totalBatches: number;
+  processedBatches: number;
+  currentBatchId: number | null;
+  totalHeaders: number;
+  insertedHeaders: number;
+  errors: number;
+  lastError: string;
+  startTime: Date | null;
+  endTime: Date | null;
+}
+
+export const syncGLHeadersOnly = async (
+  parameters: Record<string, string>,
+  testMode: boolean | 'single' = true,
+  log?: LogCallback,
+  onProgress?: (progress: HeadersOnlySyncProgress) => void,
+  abortSignal?: AbortSignal
+): Promise<HeadersOnlySyncProgress> => {
+  const progress: HeadersOnlySyncProgress = {
+    status: 'idle',
+    totalBatches: 0,
+    processedBatches: 0,
+    currentBatchId: null,
+    totalHeaders: 0,
+    insertedHeaders: 0,
+    errors: 0,
+    lastError: '',
+    startTime: new Date(),
+    endTime: null,
+  };
+
+  const updateProgress = (updates: Partial<HeadersOnlySyncProgress>) => {
+    Object.assign(progress, updates);
+    onProgress?.(progress);
+  };
+
+  const maxBatches = testMode === 'single' ? 1 : (testMode ? 25 : null);
+  const modeLabel = testMode === 'single' ? 'SINGLE BATCH' : (testMode ? 'TEST (25 batches)' : 'FULL SYNC');
+
+  try {
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('step', `  GL HEADERS ONLY SYNC - ${modeLabel}`);
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('info', `Parameters: ${JSON.stringify(parameters)}`);
+
+    // ========================================
+    // STEP 1: Get batch IDs from APEX
+    // ========================================
+    updateProgress({ status: 'fetching_batches' });
+    log?.('step', '──── Step 1: Fetching batch IDs from APEX ────');
+
+    const apexParams: Record<string, string> = {};
+    if (parameters.DefaultPeriodName) {
+      apexParams.PERIOD_NAME = parameters.DefaultPeriodName;
+    }
+
+    const apexResult = await fetchFromApex('SYNC/jebatches', apexParams, log, true);
+    let batchIds: number[] = (apexResult.items || []).map((item: any) => item.je_batch_id);
+
+    if (batchIds.length === 0) {
+      updateProgress({ status: 'completed', endTime: new Date() });
+      log?.('warning', 'No batch IDs found in APEX');
+      return progress;
+    }
+
+    // Limit batches for test modes
+    if (maxBatches !== null && batchIds.length > maxBatches) {
+      batchIds = batchIds.slice(0, maxBatches);
+      log?.('info', `Limited to ${maxBatches} batches for ${modeLabel}`);
+    }
+
+    updateProgress({ totalBatches: batchIds.length });
+    log?.('success', `Found ${batchIds.length} batch IDs to process`);
+
+    // ========================================
+    // STEP 2: For each batch, fetch headers from Fusion and insert to APEX
+    // ========================================
+    log?.('step', '──── Step 2: Fetching headers from Fusion & inserting to APEX ────');
+
+    for (let i = 0; i < batchIds.length; i++) {
+      if (abortSignal?.aborted) {
+        updateProgress({ status: 'stopped' });
+        log?.('warning', 'Stopped by user');
+        break;
+      }
+
+      const batchId = batchIds[i];
+      updateProgress({
+        status: 'fetching_headers',
+        currentBatchId: batchId,
+        processedBatches: i,
+      });
+
+      log?.('info', `Processing batch ${i + 1}/${batchIds.length} (ID: ${batchId})...`);
+
+      // Fetch headers from Fusion using the batch ID
+      // URL pattern: journalBatches/{batchId}/child/journalHeaders
+      const headersUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/journalBatches/${batchId}/child/journalHeaders`;
+
+      try {
+        const headersResult = await fetchFromOracleUrl(headersUrl, log, false);
+        const headers = headersResult.items || [];
+
+        if (headers.length === 0) {
+          log?.('info', `  No headers found for batch ${batchId}`);
+          updateProgress({ processedBatches: i + 1 });
+          continue;
+        }
+
+        log?.('success', `  Found ${headers.length} headers for batch ${batchId}`);
+        updateProgress({ totalHeaders: progress.totalHeaders + headers.length });
+
+        // Insert each header to APEX
+        updateProgress({ status: 'inserting' });
+        for (const header of headers) {
+          if (abortSignal?.aborted) break;
+
+          // Extract header ID from links
+          const headerId = extractHeaderIdFromHref(findChildLink(header.links, 'journalLines') || '')
+            || extractIdFromHref(header.links?.[0]?.href || '')
+            || 0;
+
+          const headerPayload = {
+            batchId: batchId,
+            items: [{
+              JeHeaderId: headerId,
+              ...header,
+            }],
+          };
+
+          try {
+            const insertResult = await insertToApex(APEX_DB_CONFIG.endpoints.journalHeaders, headerPayload, log, false);
+            if (insertResult.success || insertResult.inserted > 0) {
+              updateProgress({ insertedHeaders: progress.insertedHeaders + 1 });
+            } else {
+              updateProgress({ errors: progress.errors + 1, lastError: insertResult.error || 'Insert failed' });
+              log?.('error', `  Header ${headerId} insert failed: ${insertResult.lastError || insertResult.error}`);
+            }
+          } catch (error) {
+            updateProgress({ errors: progress.errors + 1, lastError: String(error) });
+            log?.('error', `  Header ${headerId} error: ${error}`);
+          }
+        }
+
+        log?.('success', `  ✓ Batch ${batchId}: ${headers.length} headers processed`);
+
+      } catch (error) {
+        updateProgress({ errors: progress.errors + 1, lastError: String(error) });
+        log?.('error', `  Error fetching headers for batch ${batchId}: ${error}`);
+      }
+
+      updateProgress({ processedBatches: i + 1 });
+
+      // Log progress every 10 batches
+      if ((i + 1) % 10 === 0 || i === batchIds.length - 1) {
+        log?.('info', `Progress: ${i + 1}/${batchIds.length} batches, ${progress.insertedHeaders} headers inserted`);
+      }
+
+      // Small delay between batches
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    // ========================================
+    // COMPLETE
+    // ========================================
+    updateProgress({
+      status: abortSignal?.aborted ? 'stopped' : 'completed',
+      endTime: new Date(),
+    });
+
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('step', '  GL HEADERS SYNC COMPLETED');
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('success', `Total Batches: ${progress.processedBatches}`);
+    log?.('success', `Total Headers: ${progress.totalHeaders}`);
+    log?.('success', `Inserted: ${progress.insertedHeaders}`);
+    log?.('info', `Errors: ${progress.errors}`);
+
+    return progress;
+
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    updateProgress({ status: 'error', lastError: errorMsg, endTime: new Date() });
+    log?.('error', `Sync failed: ${errorMsg}`);
+    return progress;
+  }
+};
+
+// ============================================================
+// GL LINES ONLY SYNC
+// Flow: APEX GET headers → Fusion GET lines → APEX POST lines
+// ============================================================
+export interface LinesOnlySyncProgress {
+  status: 'idle' | 'fetching_headers' | 'fetching_lines' | 'inserting' | 'completed' | 'error' | 'stopped';
+  totalHeaders: number;
+  processedHeaders: number;
+  currentHeaderId: number | null;
+  currentBatchId: number | null;
+  totalLines: number;
+  insertedLines: number;
+  errors: number;
+  lastError: string;
+  startTime: Date | null;
+  endTime: Date | null;
+}
+
+export const syncGLLinesOnly = async (
+  parameters: Record<string, string>,
+  testMode: boolean | 'single' = true,
+  log?: LogCallback,
+  onProgress?: (progress: LinesOnlySyncProgress) => void,
+  abortSignal?: AbortSignal
+): Promise<LinesOnlySyncProgress> => {
+  const progress: LinesOnlySyncProgress = {
+    status: 'idle',
+    totalHeaders: 0,
+    processedHeaders: 0,
+    currentHeaderId: null,
+    currentBatchId: null,
+    totalLines: 0,
+    insertedLines: 0,
+    errors: 0,
+    lastError: '',
+    startTime: new Date(),
+    endTime: null,
+  };
+
+  const updateProgress = (updates: Partial<LinesOnlySyncProgress>) => {
+    Object.assign(progress, updates);
+    onProgress?.(progress);
+  };
+
+  const maxHeaders = testMode === 'single' ? 1 : (testMode ? 25 : null);
+  const modeLabel = testMode === 'single' ? 'SINGLE HEADER' : (testMode ? 'TEST (25 headers)' : 'FULL SYNC');
+
+  try {
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('step', `  GL LINES ONLY SYNC - ${modeLabel}`);
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('info', `Parameters: ${JSON.stringify(parameters)}`);
+
+    // ========================================
+    // STEP 1: Get header IDs and batch IDs from APEX
+    // ========================================
+    updateProgress({ status: 'fetching_headers' });
+    log?.('step', '──── Step 1: Fetching header IDs from APEX ────');
+
+    const apexParams: Record<string, string> = {};
+    if (parameters.DefaultPeriodName) {
+      apexParams.P_PERIOD_NAME = parameters.DefaultPeriodName;
+    }
+
+    const apexResult = await fetchFromApex('sync/journallines', apexParams, log, true);
+    let headerRecords: Array<{ je_header_id: number; batch_id: number }> = (apexResult.items || []).map((item: any) => ({
+      je_header_id: item.je_header_id,
+      batch_id: item.batch_id,
+    }));
+
+    if (headerRecords.length === 0) {
+      updateProgress({ status: 'completed', endTime: new Date() });
+      log?.('warning', 'No header IDs found in APEX');
+      return progress;
+    }
+
+    // Limit headers for test modes
+    if (maxHeaders !== null && headerRecords.length > maxHeaders) {
+      headerRecords = headerRecords.slice(0, maxHeaders);
+      log?.('info', `Limited to ${maxHeaders} headers for ${modeLabel}`);
+    }
+
+    updateProgress({ totalHeaders: headerRecords.length });
+    log?.('success', `Found ${headerRecords.length} header IDs to process`);
+
+    // ========================================
+    // STEP 2: For each header, fetch lines from Fusion and insert to APEX
+    // ========================================
+    log?.('step', '──── Step 2: Fetching lines from Fusion & inserting to APEX ────');
+
+    for (let i = 0; i < headerRecords.length; i++) {
+      if (abortSignal?.aborted) {
+        updateProgress({ status: 'stopped' });
+        log?.('warning', 'Stopped by user');
+        break;
+      }
+
+      const { je_header_id: headerId, batch_id: batchId } = headerRecords[i];
+      updateProgress({
+        status: 'fetching_lines',
+        currentHeaderId: headerId,
+        currentBatchId: batchId,
+        processedHeaders: i,
+      });
+
+      log?.('info', `Processing header ${i + 1}/${headerRecords.length} (Batch: ${batchId}, Header: ${headerId})...`);
+
+      // Fetch lines from Fusion using batch ID and header ID
+      // URL pattern: journalBatches/{batch_id}/child/journalHeaders/{je_header_id}/child/journalLines
+      const linesUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/journalBatches/${batchId}/child/journalHeaders/${headerId}/child/journalLines`;
+
+      try {
+        const linesResult = await fetchFromOracleUrl(linesUrl, log, false);
+        const lines = linesResult.items || [];
+
+        if (lines.length === 0) {
+          log?.('info', `  No lines found for header ${headerId}`);
+          updateProgress({ processedHeaders: i + 1 });
+          continue;
+        }
+
+        log?.('success', `  Found ${lines.length} lines for header ${headerId}`);
+        updateProgress({ totalLines: progress.totalLines + lines.length });
+
+        // Insert lines to APEX
+        updateProgress({ status: 'inserting' });
+
+        const linesPayload = {
+          batchId: batchId,
+          jeHeaderId: headerId,
+          items: lines,
+        };
+
+        try {
+          const insertResult = await insertToApex(APEX_DB_CONFIG.endpoints.journalLines, linesPayload, log, false);
+          if (insertResult.success || insertResult.inserted > 0) {
+            const insertedCount = insertResult.inserted || lines.length;
+            updateProgress({ insertedLines: progress.insertedLines + insertedCount });
+            log?.('success', `  ✓ Header ${headerId}: ${insertedCount} lines inserted`);
+          } else {
+            updateProgress({ errors: progress.errors + 1, lastError: insertResult.error || 'Insert failed' });
+            log?.('error', `  Lines insert failed: ${insertResult.lastError || insertResult.error}`);
+          }
+        } catch (error) {
+          updateProgress({ errors: progress.errors + 1, lastError: String(error) });
+          log?.('error', `  Lines insert error: ${error}`);
+        }
+
+      } catch (error) {
+        updateProgress({ errors: progress.errors + 1, lastError: String(error) });
+        log?.('error', `  Error fetching lines for header ${headerId}: ${error}`);
+      }
+
+      updateProgress({ processedHeaders: i + 1 });
+
+      // Log progress every 10 headers
+      if ((i + 1) % 10 === 0 || i === headerRecords.length - 1) {
+        log?.('info', `Progress: ${i + 1}/${headerRecords.length} headers, ${progress.insertedLines} lines inserted`);
+      }
+
+      // Small delay between headers
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    // ========================================
+    // COMPLETE
+    // ========================================
+    updateProgress({
+      status: abortSignal?.aborted ? 'stopped' : 'completed',
+      endTime: new Date(),
+    });
+
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('step', '  GL LINES SYNC COMPLETED');
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('success', `Total Headers: ${progress.processedHeaders}`);
+    log?.('success', `Total Lines: ${progress.totalLines}`);
+    log?.('success', `Inserted: ${progress.insertedLines}`);
+    log?.('info', `Errors: ${progress.errors}`);
+
+    return progress;
+
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    updateProgress({ status: 'error', lastError: errorMsg, endTime: new Date() });
+    log?.('error', `Sync failed: ${errorMsg}`);
+    return progress;
   }
 };

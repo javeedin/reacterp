@@ -42,7 +42,7 @@ import {
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { SYNC_OBJECTS, PROXY_CONFIG, APEX_DB_CONFIG, type SyncObjectConfig, type ApiType } from '../../config/api.config';
-import { syncGLJournals, testGLConnection, type SyncProgress, type LogCallback, type BatchPayloadCallback } from '../../services/gl-sync.service';
+import { syncGLJournals, syncGLBatchesOnly, syncGLHeadersOnly, syncGLLinesOnly, testGLConnection, type SyncProgress, type BatchOnlySyncProgress, type HeadersOnlySyncProgress, type LinesOnlySyncProgress, type LogCallback, type BatchPayloadCallback } from '../../services/gl-sync.service';
 import { syncAPInvoices, testAPConnection, type APSyncProgress, type InvoicePayloadCallback } from '../../services/ap-sync.service';
 import { syncAPPayments, testAPPaymentsConnection, type APPaymentsSyncProgress, type PaymentPayloadCallback } from '../../services/ap-payments-sync.service';
 import { syncGLCodeCombinations, testGLCodeCombConnection, type CodeCombSyncProgress, type CodeCombPayloadCallback } from '../../services/gl-codecomb-sync.service';
@@ -553,6 +553,49 @@ const SyncData: React.FC = () => {
     errorMessage?: string;
   }>>([]);
 
+  // GL Batches Only Progress State
+  const [glBatchesOnlyProgress, setGLBatchesOnlyProgress] = useState<BatchOnlySyncProgress>({
+    status: 'idle',
+    totalBatches: 0,
+    fetchedBatches: 0,
+    insertedBatches: 0,
+    currentPage: 0,
+    totalPages: 0,
+    errors: 0,
+    lastError: '',
+    startTime: null,
+    endTime: null,
+  });
+
+  // GL Headers Only Progress State
+  const [glHeadersOnlyProgress, setGLHeadersOnlyProgress] = useState<HeadersOnlySyncProgress>({
+    status: 'idle',
+    totalBatches: 0,
+    processedBatches: 0,
+    currentBatchId: null,
+    totalHeaders: 0,
+    insertedHeaders: 0,
+    errors: 0,
+    lastError: '',
+    startTime: null,
+    endTime: null,
+  });
+
+  // GL Lines Only Progress State
+  const [glLinesOnlyProgress, setGLLinesOnlyProgress] = useState<LinesOnlySyncProgress>({
+    status: 'idle',
+    totalHeaders: 0,
+    processedHeaders: 0,
+    currentHeaderId: null,
+    currentBatchId: null,
+    totalLines: 0,
+    insertedLines: 0,
+    errors: 0,
+    lastError: '',
+    startTime: null,
+    endTime: null,
+  });
+
   // Determine sync type based on selected object
   const isAPInvoices = selectedObject?.id === 'ap-invoices';
   const isAPPayments = selectedObject?.id === 'ap-payments';
@@ -569,6 +612,9 @@ const SyncData: React.FC = () => {
   const isSupplierAddresses = selectedObject?.id === 'supplier-addresses';
   const isSupplierSites = selectedObject?.id === 'supplier-sites';
   const isSiteAssignments = selectedObject?.id === 'supplier-site-assignments';
+  const isGLBatchesOnly = selectedObject?.id === 'gl-batches-only';
+  const isGLHeadersOnly = selectedObject?.id === 'gl-headers-only';
+  const isGLLinesOnly = selectedObject?.id === 'gl-lines-only';
 
   // Web Worker for background sync
   const handleWorkerProgress = useCallback((progress: WorkerSyncProgress) => {
@@ -2022,6 +2068,91 @@ const SyncData: React.FC = () => {
         handleSiteAssignmentsPayload
       );
       syncResult = { inserted: result.insertedAssignments, errors: result.errors, type: 'site assignments' };
+    } else if (isGLBatchesOnly) {
+      // GL Batches Only Sync
+      setGLBatchesOnlyProgress({
+        status: 'counting',
+        totalBatches: 0,
+        fetchedBatches: 0,
+        insertedBatches: 0,
+        currentPage: 0,
+        totalPages: 0,
+        errors: 0,
+        lastError: '',
+        startTime: new Date(),
+        endTime: null,
+      });
+
+      const result = await syncGLBatchesOnly(
+        parameters,
+        testMode,
+        addLog,
+        (newProgress) => {
+          setGLBatchesOnlyProgress((prev) => ({ ...prev, ...newProgress }));
+          if (newProgress.insertedBatches !== undefined && newProgress.totalBatches) {
+            notifySyncProgress(`${newProgress.insertedBatches}/${newProgress.totalBatches} batches inserted`);
+          }
+        },
+        abortControllerRef.current.signal
+      );
+      syncResult = { inserted: result.insertedBatches, errors: result.errors, type: 'batches' };
+    } else if (isGLHeadersOnly) {
+      // GL Headers Only Sync
+      setGLHeadersOnlyProgress({
+        status: 'fetching_batches',
+        totalBatches: 0,
+        processedBatches: 0,
+        currentBatchId: null,
+        totalHeaders: 0,
+        insertedHeaders: 0,
+        errors: 0,
+        lastError: '',
+        startTime: new Date(),
+        endTime: null,
+      });
+
+      const result = await syncGLHeadersOnly(
+        parameters,
+        testMode,
+        addLog,
+        (newProgress) => {
+          setGLHeadersOnlyProgress((prev) => ({ ...prev, ...newProgress }));
+          if (newProgress.insertedHeaders !== undefined && newProgress.totalHeaders) {
+            notifySyncProgress(`${newProgress.insertedHeaders}/${newProgress.totalHeaders} headers inserted`);
+          }
+        },
+        abortControllerRef.current.signal
+      );
+      syncResult = { inserted: result.insertedHeaders, errors: result.errors, type: 'headers' };
+    } else if (isGLLinesOnly) {
+      // GL Lines Only Sync
+      setGLLinesOnlyProgress({
+        status: 'fetching_headers',
+        totalHeaders: 0,
+        processedHeaders: 0,
+        currentHeaderId: null,
+        currentBatchId: null,
+        totalLines: 0,
+        insertedLines: 0,
+        errors: 0,
+        lastError: '',
+        startTime: new Date(),
+        endTime: null,
+      });
+
+      const result = await syncGLLinesOnly(
+        parameters,
+        testMode,
+        addLog,
+        (newProgress) => {
+          setGLLinesOnlyProgress((prev) => ({ ...prev, ...newProgress }));
+          if (newProgress.insertedLines !== undefined && newProgress.totalLines) {
+            notifySyncProgress(`${newProgress.insertedLines}/${newProgress.totalLines} lines inserted`);
+          }
+        },
+        abortControllerRef.current.signal
+      );
+      syncResult = { inserted: result.insertedLines, errors: result.errors, type: 'lines' };
     } else {
       // GL Journals Sync
       setProgress({
@@ -2107,6 +2238,8 @@ const SyncData: React.FC = () => {
   const getStatusText = (status: string) => {
     switch (status) {
       case 'idle': return 'Ready';
+      case 'counting': return 'Counting Records...';
+      case 'fetching': return 'Fetching Data...';
       case 'fetching_batches': return 'Fetching Batches...';
       case 'processing_batch': return 'Processing Batch...';
       case 'fetching_headers': return 'Fetching Headers...';
@@ -2242,6 +2375,12 @@ const SyncData: React.FC = () => {
     ? apPaymentsProgress.status
     : isAPInvoices
     ? apProgress.status
+    : isGLBatchesOnly
+    ? glBatchesOnlyProgress.status
+    : isGLHeadersOnly
+    ? glHeadersOnlyProgress.status
+    : isGLLinesOnly
+    ? glLinesOnlyProgress.status
     : isGLCodeComb
     ? codeCombProgress.status
     : isGLPeriodStatus
@@ -2861,6 +3000,276 @@ const SyncData: React.FC = () => {
                         <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
                           {apProgress.errors} errors
                         </Text>
+                      )}
+                    </Card>
+                  </Col>
+                </Row>
+              ) : isGLBatchesOnly ? (
+                /* GL Batches Only KPI Cards */
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  {/* Batches Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <DatabaseOutlined style={{ fontSize: 20, color: REDWOOD.primary, marginRight: 8 }} />
+                        <Text strong>GL Batches</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {glBatchesOnlyProgress.insertedBatches} / {glBatchesOnlyProgress.totalBatches}
+                      </div>
+                      <Progress
+                        percent={glBatchesOnlyProgress.totalBatches > 0 ? Math.round((glBatchesOnlyProgress.insertedBatches / glBatchesOnlyProgress.totalBatches) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.primary}
+                        style={{ marginTop: 8 }}
+                      />
+                      {glBatchesOnlyProgress.currentPage > 0 && (
+                        <Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 4 }}>
+                          Page {glBatchesOnlyProgress.currentPage}/{glBatchesOnlyProgress.totalPages}
+                        </Text>
+                      )}
+                    </Card>
+                  </Col>
+
+                  {/* Fetched Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <FileTextOutlined style={{ fontSize: 20, color: REDWOOD.success, marginRight: 8 }} />
+                        <Text strong>Fetched</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {glBatchesOnlyProgress.fetchedBatches}
+                        <Text type="secondary" style={{ fontSize: 14, marginLeft: 8 }}>
+                          / {glBatchesOnlyProgress.totalBatches}
+                        </Text>
+                      </div>
+                      <Progress
+                        percent={glBatchesOnlyProgress.totalBatches > 0 ? Math.round((glBatchesOnlyProgress.fetchedBatches / glBatchesOnlyProgress.totalBatches) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.success}
+                        style={{ marginTop: 8 }}
+                      />
+                    </Card>
+                  </Col>
+
+                  {/* Errors Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <WarningOutlined style={{ fontSize: 20, color: glBatchesOnlyProgress.errors > 0 ? REDWOOD.error : REDWOOD.textSecondary, marginRight: 8 }} />
+                        <Text strong>Errors</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: glBatchesOnlyProgress.errors > 0 ? REDWOOD.error : REDWOOD.textPrimary }}>
+                        {glBatchesOnlyProgress.errors}
+                      </div>
+                      {glBatchesOnlyProgress.lastError && (
+                        <Tooltip title={glBatchesOnlyProgress.lastError}>
+                          <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 8 }} ellipsis>
+                            {glBatchesOnlyProgress.lastError}
+                          </Text>
+                        </Tooltip>
+                      )}
+                    </Card>
+                  </Col>
+                </Row>
+              ) : isGLHeadersOnly ? (
+                /* GL Headers Only KPI Cards */
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  {/* Headers Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <DatabaseOutlined style={{ fontSize: 20, color: REDWOOD.primary, marginRight: 8 }} />
+                        <Text strong>GL Headers</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {glHeadersOnlyProgress.insertedHeaders} / {glHeadersOnlyProgress.totalHeaders}
+                      </div>
+                      <Progress
+                        percent={glHeadersOnlyProgress.totalHeaders > 0 ? Math.round((glHeadersOnlyProgress.insertedHeaders / glHeadersOnlyProgress.totalHeaders) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.primary}
+                        style={{ marginTop: 8 }}
+                      />
+                      {glHeadersOnlyProgress.currentBatchId && (
+                        <Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 4 }}>
+                          Batch ID: {glHeadersOnlyProgress.currentBatchId}
+                        </Text>
+                      )}
+                    </Card>
+                  </Col>
+
+                  {/* Batches Processed Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <FileTextOutlined style={{ fontSize: 20, color: REDWOOD.success, marginRight: 8 }} />
+                        <Text strong>Batches Processed</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {glHeadersOnlyProgress.processedBatches}
+                        <Text type="secondary" style={{ fontSize: 14, marginLeft: 8 }}>
+                          / {glHeadersOnlyProgress.totalBatches}
+                        </Text>
+                      </div>
+                      <Progress
+                        percent={glHeadersOnlyProgress.totalBatches > 0 ? Math.round((glHeadersOnlyProgress.processedBatches / glHeadersOnlyProgress.totalBatches) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.success}
+                        style={{ marginTop: 8 }}
+                      />
+                    </Card>
+                  </Col>
+
+                  {/* Errors Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <WarningOutlined style={{ fontSize: 20, color: glHeadersOnlyProgress.errors > 0 ? REDWOOD.error : REDWOOD.textSecondary, marginRight: 8 }} />
+                        <Text strong>Errors</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: glHeadersOnlyProgress.errors > 0 ? REDWOOD.error : REDWOOD.textPrimary }}>
+                        {glHeadersOnlyProgress.errors}
+                      </div>
+                      {glHeadersOnlyProgress.lastError && (
+                        <Tooltip title={glHeadersOnlyProgress.lastError}>
+                          <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 8 }} ellipsis>
+                            {glHeadersOnlyProgress.lastError}
+                          </Text>
+                        </Tooltip>
+                      )}
+                    </Card>
+                  </Col>
+                </Row>
+              ) : isGLLinesOnly ? (
+                /* GL Lines Only KPI Cards */
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  {/* Lines Inserted Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <UnorderedListOutlined style={{ fontSize: 20, color: REDWOOD.primary, marginRight: 8 }} />
+                        <Text strong>Lines Inserted</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {glLinesOnlyProgress.insertedLines} / {glLinesOnlyProgress.totalLines}
+                      </div>
+                      <Progress
+                        percent={glLinesOnlyProgress.totalLines > 0 ? Math.round((glLinesOnlyProgress.insertedLines / glLinesOnlyProgress.totalLines) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.primary}
+                        style={{ marginTop: 8 }}
+                      />
+                      {glLinesOnlyProgress.currentHeaderId && (
+                        <Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 4 }}>
+                          Header ID: {glLinesOnlyProgress.currentHeaderId} | Batch ID: {glLinesOnlyProgress.currentBatchId}
+                        </Text>
+                      )}
+                    </Card>
+                  </Col>
+
+                  {/* Headers Processed Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <FileTextOutlined style={{ fontSize: 20, color: REDWOOD.success, marginRight: 8 }} />
+                        <Text strong>Headers Processed</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {glLinesOnlyProgress.processedHeaders}
+                        <Text type="secondary" style={{ fontSize: 14, marginLeft: 8 }}>
+                          / {glLinesOnlyProgress.totalHeaders}
+                        </Text>
+                      </div>
+                      <Progress
+                        percent={glLinesOnlyProgress.totalHeaders > 0 ? Math.round((glLinesOnlyProgress.processedHeaders / glLinesOnlyProgress.totalHeaders) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.success}
+                        style={{ marginTop: 8 }}
+                      />
+                    </Card>
+                  </Col>
+
+                  {/* Errors Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <WarningOutlined style={{ fontSize: 20, color: glLinesOnlyProgress.errors > 0 ? REDWOOD.error : REDWOOD.textSecondary, marginRight: 8 }} />
+                        <Text strong>Errors</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: glLinesOnlyProgress.errors > 0 ? REDWOOD.error : REDWOOD.textPrimary }}>
+                        {glLinesOnlyProgress.errors}
+                      </div>
+                      {glLinesOnlyProgress.lastError && (
+                        <Tooltip title={glLinesOnlyProgress.lastError}>
+                          <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 8 }} ellipsis>
+                            {glLinesOnlyProgress.lastError}
+                          </Text>
+                        </Tooltip>
                       )}
                     </Card>
                   </Col>
@@ -4202,6 +4611,12 @@ const SyncData: React.FC = () => {
                           ? `${apPaymentsProgress.insertedPayments} payments, ${apPaymentsProgress.processedRelatedInvoices} related invoices inserted`
                           : isAPInvoices
                           ? `${apProgress.insertedInvoices} invoices inserted`
+                          : isGLBatchesOnly
+                          ? `${glBatchesOnlyProgress.insertedBatches} batches inserted`
+                          : isGLHeadersOnly
+                          ? `${glHeadersOnlyProgress.insertedHeaders} headers inserted (${glHeadersOnlyProgress.processedBatches} batches)`
+                          : isGLLinesOnly
+                          ? `${glLinesOnlyProgress.insertedLines} lines inserted (${glLinesOnlyProgress.processedHeaders} headers)`
                           : isGLCodeComb
                           ? `${codeCombProgress.insertedRecords} code combinations inserted`
                           : isGLPeriodStatus
@@ -4229,10 +4644,10 @@ const SyncData: React.FC = () => {
                           : `${progress.totalBatchesInserted + progress.totalHeadersInserted + progress.totalLinesInserted} inserted`
                         }
                       </Text>
-                      {(isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : isRoles ? rolesProgress.errors : isSuppliers ? suppliersProgress.errors : isSupplierAddresses ? supplierAddressProgress.errors : isSupplierSites ? supplierSitesProgress.errors : progress.errors) > 0 && (
+                      {(isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLBatchesOnly ? glBatchesOnlyProgress.errors : isGLHeadersOnly ? glHeadersOnlyProgress.errors : isGLLinesOnly ? glLinesOnlyProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : isRoles ? rolesProgress.errors : isSuppliers ? suppliersProgress.errors : isSupplierAddresses ? supplierAddressProgress.errors : isSupplierSites ? supplierSitesProgress.errors : progress.errors) > 0 && (
                         <Text type="danger">
                           <CloseCircleOutlined style={{ marginRight: 4 }} />
-                          {isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : isRoles ? rolesProgress.errors : isSuppliers ? suppliersProgress.errors : isSupplierAddresses ? supplierAddressProgress.errors : isSupplierSites ? supplierSitesProgress.errors : progress.errors} errors
+                          {isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLBatchesOnly ? glBatchesOnlyProgress.errors : isGLHeadersOnly ? glHeadersOnlyProgress.errors : isGLLinesOnly ? glLinesOnlyProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : isRoles ? rolesProgress.errors : isSuppliers ? suppliersProgress.errors : isSupplierAddresses ? supplierAddressProgress.errors : isSupplierSites ? supplierSitesProgress.errors : progress.errors} errors
                         </Text>
                       )}
                     </Space>
