@@ -800,6 +800,7 @@ const AccountAnalysis: React.FC = () => {
         const pivotRow: PivotDataRow = {
           key,
           account: row.account,
+          accountDescription: row.accountDescription || '',
           company: row.company,
           lob: row.lob,
           department: row.department,
@@ -1785,6 +1786,14 @@ const AccountAnalysis: React.FC = () => {
         width: 100,
         fixed: 'left' as const,
       },
+      {
+        title: 'Description',
+        dataIndex: 'accountDescription',
+        key: 'accountDescription',
+        width: 180,
+        fixed: 'left' as const,
+        ellipsis: true,
+      },
       ...allAccountsPivotSegmentsAfter.map((segment) => ({
         title: getSegmentLabel(segment),
         dataIndex: segment,
@@ -2172,7 +2181,7 @@ const AccountAnalysis: React.FC = () => {
                 );
               });
               const grandTotal = Object.values(periodTotals).reduce((a, b) => a + b, 0);
-              const segmentColCount = allAccountsPivotSegmentsBefore.length + 1 + allAccountsPivotSegmentsAfter.length;
+              const segmentColCount = allAccountsPivotSegmentsBefore.length + 2 + allAccountsPivotSegmentsAfter.length; // +2 for Account + Description
 
               return (
                 <Table.Summary fixed>
