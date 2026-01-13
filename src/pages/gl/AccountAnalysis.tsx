@@ -1437,6 +1437,30 @@ const AccountAnalysis: React.FC = () => {
                 >
                   Show All Journals
                 </Button>
+                <Button
+                  size="small"
+                  onClick={() => {
+                    const endpoints = selectedPeriods.map((period) => {
+                      const params = new URLSearchParams();
+                      params.append('P_ACCOUNT', tab.account);
+                      params.append('P_PERIOD_NAME', period);
+                      params.append('P_CURRENCY_CODE', 'AED');
+                      return `${API_BASE_URL}/accountanalysis/byaccount?${params.toString()}`;
+                    });
+                    console.log('API Endpoints:', endpoints);
+                    message.info(
+                      <div style={{ maxWidth: 600, wordBreak: 'break-all' }}>
+                        <div style={{ fontWeight: 'bold', marginBottom: 8 }}>API Endpoints:</div>
+                        {endpoints.map((url, i) => (
+                          <div key={i} style={{ fontSize: 11, marginBottom: 4 }}>{url}</div>
+                        ))}
+                      </div>,
+                      10
+                    );
+                  }}
+                >
+                  Log
+                </Button>
                 <Button size="small" icon={<DownloadOutlined />}>
                   Export
                 </Button>
