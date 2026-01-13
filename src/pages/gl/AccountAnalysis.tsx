@@ -96,6 +96,7 @@ interface JournalLineSegment {
   legalEntityName: string;
   userJeCategoryName: string;
   concatenatedSegments?: string;
+  accountDescription?: string;
 }
 
 interface PivotDataRow {
@@ -170,6 +171,13 @@ interface PeriodStatusItem {
   adj_flag: string;
 }
 
+// Account item interface (from glaccountslist endpoint)
+interface AccountItem {
+  account: string;
+  description: string;
+  account_type: string;
+}
+
 // Helper to parse period string to sortable date
 const parsePeriodToDate = (period: string): Date => {
   const monthMap: Record<string, number> = {
@@ -202,6 +210,12 @@ const AccountAnalysis: React.FC = () => {
   const [selectedCompany, setSelectedCompany] = useState<string>('01');
   const [selectedPeriods, setSelectedPeriods] = useState<string[]>([]);
   const [accountFilter, setAccountFilter] = useState<string>('');
+
+  // Account lookup modal state
+  const [accountLookupVisible, setAccountLookupVisible] = useState(false);
+  const [accountsList, setAccountsList] = useState<AccountItem[]>([]);
+  const [accountsLoading, setAccountsLoading] = useState(false);
+  const [accountSearchText, setAccountSearchText] = useState('');
 
   // Segment filters for pivot
   const [segmentFilters, setSegmentFilters] = useState<SegmentFilter[]>([
@@ -331,6 +345,54 @@ const AccountAnalysis: React.FC = () => {
     fetchPeriods();
   }, [fetchPeriods]);
 
+  // Fetch accounts list from APEX glaccountslist endpoint
+  const fetchAccounts = useCallback(async () => {
+    setAccountsLoading(true);
+    try {
+      const url = `${PROXY_CONFIG.baseUrl}/apex/glaccountslist`;
+      console.log('Fetching accounts from:', url);
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`API Error: ${response.status} ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      const items: AccountItem[] = result.items || result || [];
+      console.log('Fetched accounts:', items.length);
+      setAccountsList(items);
+    } catch (error) {
+      console.error('Error fetching accounts:', error);
+      message.error('Failed to load accounts list.');
+    } finally {
+      setAccountsLoading(false);
+    }
+  }, []);
+
+  // Open account lookup modal
+  const openAccountLookup = () => {
+    setAccountLookupVisible(true);
+    setAccountSearchText('');
+    if (accountsList.length === 0) {
+      fetchAccounts();
+    }
+  };
+
+  // Select account from lookup
+  const handleAccountSelect = (account: string) => {
+    setAccountFilter(account);
+    setAccountLookupVisible(false);
+  };
+
+  // Filter accounts based on search text
+  const filteredAccounts = accountsList.filter((item) => {
+    const searchLower = accountSearchText.toLowerCase();
+    return (
+      item.account.toLowerCase().includes(searchLower) ||
+      item.description.toLowerCase().includes(searchLower)
+    );
+  });
+
   const closePanel = () => {
     setIsClosing(true);
     setTimeout(() => {
@@ -381,6 +443,7 @@ const AccountAnalysis: React.FC = () => {
         ...item,
         key: `${index}`,
         concatenatedSegments: `${item.company}-${item.lob}-${item.department}-${item.account}-${item.subAccount}-${item.analysis}-${item.intercompany}`,
+        accountDescription: item.ACCOUNT_DESCRIPTION || item.account_description || item.accountDescription || '',
       }));
 
       setSearchData(items);
@@ -611,8 +674,11 @@ const AccountAnalysis: React.FC = () => {
 
       const pivotRow = pivotMap.get(key)!;
       const periodKey = row.defaultPeriodName;
-      const netAmount = (row.accountedDr || 0) - (row.accountedCr || 0);
-      pivotRow[periodKey] = ((pivotRow[periodKey] as number) || 0) + netAmount;
+      // Store Debit and Credit separately for each period
+      const drKey = `${periodKey}_Dr`;
+      const crKey = `${periodKey}_Cr`;
+      pivotRow[drKey] = ((pivotRow[drKey] as number) || 0) + (row.accountedDr || 0);
+      pivotRow[crKey] = ((pivotRow[crKey] as number) || 0) + (row.accountedCr || 0);
     });
 
     return Array.from(pivotMap.values());
@@ -682,8 +748,11 @@ const AccountAnalysis: React.FC = () => {
 
       const pivotRow = pivotMap.get(key)!;
       const periodKey = row.defaultPeriodName;
-      const netAmount = (row.accountedDr || 0) - (row.accountedCr || 0);
-      pivotRow[periodKey] = ((pivotRow[periodKey] as number) || 0) + netAmount;
+      // Store Debit and Credit separately for each period
+      const drKey = `${periodKey}_Dr`;
+      const crKey = `${periodKey}_Cr`;
+      pivotRow[drKey] = ((pivotRow[drKey] as number) || 0) + (row.accountedDr || 0);
+      pivotRow[crKey] = ((pivotRow[crKey] as number) || 0) + (row.accountedCr || 0);
     });
 
     return Array.from(pivotMap.values());
@@ -695,7 +764,7 @@ const AccountAnalysis: React.FC = () => {
       title: 'Account',
       dataIndex: 'concatenatedSegments',
       key: 'concatenatedSegments',
-      width: 280,
+      width: 240,
       fixed: 'left',
       render: (text: string, record: JournalLineSegment) => (
         <a
@@ -704,6 +773,18 @@ const AccountAnalysis: React.FC = () => {
         >
           {text || `${record.company}-${record.lob}-${record.department}-${record.account}-${record.subAccount}-${record.analysis}-${record.intercompany}`}
         </a>
+      ),
+    },
+    {
+      title: 'Description',
+      dataIndex: 'accountDescription',
+      key: 'accountDescription',
+      width: 180,
+      ellipsis: true,
+      render: (text: string) => (
+        <Tooltip title={text}>
+          <span style={{ fontSize: 11 }}>{text || '-'}</span>
+        </Tooltip>
       ),
     },
     { title: 'Period', dataIndex: 'defaultPeriodName', key: 'defaultPeriodName', width: 80 },
@@ -777,37 +858,65 @@ const AccountAnalysis: React.FC = () => {
       width: 100,
       fixed: 'left' as const,
     })),
-    // Dynamic period columns
-    ...selectedPeriods.map((period) => ({
-      title: period,
-      dataIndex: period,
-      key: period,
-      width: 110,
-      align: 'right' as const,
-      render: (v: number) => {
-        const formatted = formatNumber(v);
-        if (!formatted) return '';
-        return (
-          <span style={{ color: v >= 0 ? REDWOOD.success : REDWOOD.primary }}>
-            {formatted}
+    // Dynamic period columns with Debit and Credit
+    ...selectedPeriods.flatMap((period) => [
+      {
+        title: `${period} Dr`,
+        dataIndex: `${period}_Dr`,
+        key: `${period}_Dr`,
+        width: 100,
+        align: 'right' as const,
+        render: (v: number) => (
+          <span style={{ color: REDWOOD.success }}>
+            {formatNumber(v || 0)}
           </span>
-        );
+        ),
       },
-    })),
+      {
+        title: `${period} Cr`,
+        dataIndex: `${period}_Cr`,
+        key: `${period}_Cr`,
+        width: 100,
+        align: 'right' as const,
+        render: (v: number) => (
+          <span style={{ color: REDWOOD.primary }}>
+            {formatNumber(v || 0)}
+          </span>
+        ),
+      },
+    ]),
     {
-      title: 'Total',
-      key: 'total',
-      width: 120,
+      title: 'Total Dr',
+      key: 'totalDr',
+      width: 110,
       align: 'right' as const,
       fixed: 'right',
       render: (_: any, record: PivotDataRow) => {
-        const total = selectedPeriods.reduce(
-          (sum, period) => sum + ((record[period] as number) || 0),
+        const totalDr = selectedPeriods.reduce(
+          (sum, period) => sum + ((record[`${period}_Dr`] as number) || 0),
           0
         );
         return (
-          <Text strong style={{ color: total >= 0 ? REDWOOD.success : REDWOOD.primary }}>
-            {formatNumber(total)}
+          <Text strong style={{ color: REDWOOD.success }}>
+            {formatNumber(totalDr)}
+          </Text>
+        );
+      },
+    },
+    {
+      title: 'Total Cr',
+      key: 'totalCr',
+      width: 110,
+      align: 'right' as const,
+      fixed: 'right',
+      render: (_: any, record: PivotDataRow) => {
+        const totalCr = selectedPeriods.reduce(
+          (sum, period) => sum + ((record[`${period}_Cr`] as number) || 0),
+          0
+        );
+        return (
+          <Text strong style={{ color: REDWOOD.primary }}>
+            {formatNumber(totalCr)}
           </Text>
         );
       },
@@ -1096,13 +1205,15 @@ const AccountAnalysis: React.FC = () => {
             </Col>
             <Col xs={24} sm={12} md={4}>
               <Text style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Account</Text>
-              <Input
+              <Input.Search
                 allowClear
                 value={accountFilter}
                 onChange={(e) => setAccountFilter(e.target.value)}
                 style={{ width: '100%' }}
                 size="small"
                 placeholder="e.g. 1116100"
+                enterButton={<SearchOutlined />}
+                onSearch={openAccountLookup}
               />
             </Col>
             <Col xs={24} sm={12} md={7}>
@@ -1529,36 +1640,64 @@ const AccountAnalysis: React.FC = () => {
         width: 100,
         fixed: 'left' as const,
       })),
-      ...selectedPeriods.map((period) => ({
-        title: period,
-        dataIndex: period,
-        key: period,
-        width: 110,
-        align: 'right' as const,
-        render: (v: number) => {
-          const formatted = formatNumber(v);
-          if (!formatted) return '';
-          return (
-            <span style={{ color: v >= 0 ? REDWOOD.success : REDWOOD.primary }}>
-              {formatted}
+      ...selectedPeriods.flatMap((period) => [
+        {
+          title: `${period} Dr`,
+          dataIndex: `${period}_Dr`,
+          key: `${period}_Dr`,
+          width: 100,
+          align: 'right' as const,
+          render: (v: number) => (
+            <span style={{ color: REDWOOD.success }}>
+              {formatNumber(v || 0)}
             </span>
-          );
+          ),
         },
-      })),
+        {
+          title: `${period} Cr`,
+          dataIndex: `${period}_Cr`,
+          key: `${period}_Cr`,
+          width: 100,
+          align: 'right' as const,
+          render: (v: number) => (
+            <span style={{ color: REDWOOD.primary }}>
+              {formatNumber(v || 0)}
+            </span>
+          ),
+        },
+      ]),
       {
-        title: 'Total',
-        key: 'total',
-        width: 120,
+        title: 'Total Dr',
+        key: 'totalDr',
+        width: 110,
         align: 'right' as const,
         fixed: 'right',
         render: (_: any, record: PivotDataRow) => {
-          const total = selectedPeriods.reduce(
-            (sum, period) => sum + ((record[period] as number) || 0),
+          const totalDr = selectedPeriods.reduce(
+            (sum, period) => sum + ((record[`${period}_Dr`] as number) || 0),
             0
           );
           return (
-            <Text strong style={{ color: total >= 0 ? REDWOOD.success : REDWOOD.primary }}>
-              {formatNumber(total)}
+            <Text strong style={{ color: REDWOOD.success }}>
+              {formatNumber(totalDr)}
+            </Text>
+          );
+        },
+      },
+      {
+        title: 'Total Cr',
+        key: 'totalCr',
+        width: 110,
+        align: 'right' as const,
+        fixed: 'right',
+        render: (_: any, record: PivotDataRow) => {
+          const totalCr = selectedPeriods.reduce(
+            (sum, period) => sum + ((record[`${period}_Cr`] as number) || 0),
+            0
+          );
+          return (
+            <Text strong style={{ color: REDWOOD.primary }}>
+              {formatNumber(totalCr)}
             </Text>
           );
         },
@@ -2060,6 +2199,69 @@ const AccountAnalysis: React.FC = () => {
                 </Table.Summary>
               );
             }}
+          />
+        </Modal>
+
+        {/* Account Lookup Modal */}
+        <Modal
+          title="Select Account"
+          open={accountLookupVisible}
+          onCancel={() => setAccountLookupVisible(false)}
+          footer={null}
+          width={700}
+          style={{ top: 50 }}
+        >
+          <div style={{ marginBottom: 16 }}>
+            <Input.Search
+              placeholder="Search by account number or description..."
+              value={accountSearchText}
+              onChange={(e) => setAccountSearchText(e.target.value)}
+              allowClear
+              size="middle"
+            />
+          </div>
+          <Table
+            dataSource={filteredAccounts}
+            loading={accountsLoading}
+            size="small"
+            pagination={{ pageSize: 10, size: 'small', showTotal: (total) => `${total} accounts` }}
+            rowKey="account"
+            onRow={(record) => ({
+              onClick: () => handleAccountSelect(record.account),
+              style: { cursor: 'pointer' },
+            })}
+            columns={[
+              {
+                title: 'Account',
+                dataIndex: 'account',
+                key: 'account',
+                width: 120,
+                render: (text: string) => <Text code style={{ fontSize: 12 }}>{text}</Text>,
+              },
+              {
+                title: 'Description',
+                dataIndex: 'description',
+                key: 'description',
+                render: (text: string) => <Text style={{ fontSize: 12 }}>{text}</Text>,
+              },
+              {
+                title: 'Type',
+                dataIndex: 'account_type',
+                key: 'account_type',
+                width: 80,
+                render: (type: string) => {
+                  const typeMap: Record<string, { label: string; color: string }> = {
+                    'A': { label: 'Asset', color: 'blue' },
+                    'L': { label: 'Liability', color: 'orange' },
+                    'E': { label: 'Equity', color: 'purple' },
+                    'R': { label: 'Revenue', color: 'green' },
+                    'X': { label: 'Expense', color: 'red' },
+                  };
+                  const info = typeMap[type] || { label: type, color: 'default' };
+                  return <Tag color={info.color} style={{ fontSize: 10 }}>{info.label}</Tag>;
+                },
+              },
+            ]}
           />
         </Modal>
       </Content>
