@@ -1848,65 +1848,25 @@ const AccountAnalysis: React.FC = () => {
           },
         ],
       })),
-      // Total columns grouped
+      // Total Balance column only
       {
-        title: 'Total',
-        key: 'totals',
+        title: 'Total Balance',
+        key: 'totalBalance',
+        width: 120,
+        align: 'right' as const,
         fixed: 'right' as const,
-        children: [
-          {
-            title: 'Debit',
-            key: 'totalDr',
-            width: 110,
-            align: 'right' as const,
-            render: (_: any, record: PivotDataRow) => {
-              const totalDr = selectedPeriods.reduce(
-                (sum, period) => sum + ((record[`${period}_Dr`] as number) || 0),
-                0
-              );
-              return (
-                <Text strong style={{ color: REDWOOD.success }}>
-                  {formatNumber(totalDr)}
-                </Text>
-              );
-            },
-          },
-          {
-            title: 'Credit',
-            key: 'totalCr',
-            width: 110,
-            align: 'right' as const,
-            render: (_: any, record: PivotDataRow) => {
-              const totalCr = selectedPeriods.reduce(
-                (sum, period) => sum + ((record[`${period}_Cr`] as number) || 0),
-                0
-              );
-              return (
-                <Text strong style={{ color: REDWOOD.primary }}>
-                  {formatNumber(totalCr)}
-                </Text>
-              );
-            },
-          },
-          {
-            title: 'Balance',
-            key: 'totalBalance',
-            width: 110,
-            align: 'right' as const,
-            render: (_: any, record: PivotDataRow) => {
-              const totalBalance = selectedPeriods.reduce((sum, period) => {
-                const dr = (record[`${period}_Dr`] as number) || 0;
-                const cr = (record[`${period}_Cr`] as number) || 0;
-                return sum + (dr - cr);
-              }, 0);
-              return (
-                <Text strong style={{ color: totalBalance >= 0 ? REDWOOD.success : REDWOOD.primary }}>
-                  {formatNumber(totalBalance)}
-                </Text>
-              );
-            },
-          },
-        ],
+        render: (_: any, record: PivotDataRow) => {
+          const totalBalance = selectedPeriods.reduce((sum, period) => {
+            const dr = (record[`${period}_Dr`] as number) || 0;
+            const cr = (record[`${period}_Cr`] as number) || 0;
+            return sum + (dr - cr);
+          }, 0);
+          return (
+            <Text strong style={{ color: totalBalance >= 0 ? REDWOOD.success : REDWOOD.primary }}>
+              {formatNumber(totalBalance)}
+            </Text>
+          );
+        },
       },
     ];
 
@@ -2214,18 +2174,8 @@ const AccountAnalysis: React.FC = () => {
                         </Table.Summary.Cell>,
                       ];
                     })}
-                    {/* Total columns: Debit, Credit, Balance */}
-                    <Table.Summary.Cell key="totalDr" index={segmentColCount + selectedPeriods.length * 3} align="right">
-                      <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>
-                        {formatNumber(grandTotalDr)}
-                      </Text>
-                    </Table.Summary.Cell>
-                    <Table.Summary.Cell key="totalCr" index={segmentColCount + selectedPeriods.length * 3 + 1} align="right">
-                      <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>
-                        {formatNumber(grandTotalCr)}
-                      </Text>
-                    </Table.Summary.Cell>
-                    <Table.Summary.Cell key="totalBal" index={segmentColCount + selectedPeriods.length * 3 + 2} align="right">
+                    {/* Total Balance only */}
+                    <Table.Summary.Cell key="totalBal" index={segmentColCount + selectedPeriods.length * 3} align="right">
                       <Text strong style={{ fontSize: 11, color: grandBalance === 0 ? REDWOOD.success : (grandBalance > 0 ? REDWOOD.success : REDWOOD.primary) }}>
                         {formatNumber(grandBalance)} {grandBalance === 0 ? '✓' : ''}
                       </Text>
