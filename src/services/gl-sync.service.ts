@@ -1151,3 +1151,193 @@ export const syncGLHeadersOnly = async (
     return progress;
   }
 };
+
+// ============================================================
+// GL LINES ONLY SYNC
+// Flow: APEX GET headers → Fusion GET lines → APEX POST lines
+// ============================================================
+export interface LinesOnlySyncProgress {
+  status: 'idle' | 'fetching_headers' | 'fetching_lines' | 'inserting' | 'completed' | 'error' | 'stopped';
+  totalHeaders: number;
+  processedHeaders: number;
+  currentHeaderId: number | null;
+  currentBatchId: number | null;
+  totalLines: number;
+  insertedLines: number;
+  errors: number;
+  lastError: string;
+  startTime: Date | null;
+  endTime: Date | null;
+}
+
+export const syncGLLinesOnly = async (
+  parameters: Record<string, string>,
+  testMode: boolean | 'single' = true,
+  log?: LogCallback,
+  onProgress?: (progress: LinesOnlySyncProgress) => void,
+  abortSignal?: AbortSignal
+): Promise<LinesOnlySyncProgress> => {
+  const progress: LinesOnlySyncProgress = {
+    status: 'idle',
+    totalHeaders: 0,
+    processedHeaders: 0,
+    currentHeaderId: null,
+    currentBatchId: null,
+    totalLines: 0,
+    insertedLines: 0,
+    errors: 0,
+    lastError: '',
+    startTime: new Date(),
+    endTime: null,
+  };
+
+  const updateProgress = (updates: Partial<LinesOnlySyncProgress>) => {
+    Object.assign(progress, updates);
+    onProgress?.(progress);
+  };
+
+  const maxHeaders = testMode === 'single' ? 1 : (testMode ? 25 : null);
+  const modeLabel = testMode === 'single' ? 'SINGLE HEADER' : (testMode ? 'TEST (25 headers)' : 'FULL SYNC');
+
+  try {
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('step', `  GL LINES ONLY SYNC - ${modeLabel}`);
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('info', `Parameters: ${JSON.stringify(parameters)}`);
+
+    // ========================================
+    // STEP 1: Get header IDs and batch IDs from APEX
+    // ========================================
+    updateProgress({ status: 'fetching_headers' });
+    log?.('step', '──── Step 1: Fetching header IDs from APEX ────');
+
+    const apexParams: Record<string, string> = {};
+    if (parameters.DefaultPeriodName) {
+      apexParams.P_PERIOD_NAME = parameters.DefaultPeriodName;
+    }
+
+    const apexResult = await fetchFromApex('sync/journallines', apexParams, log, true);
+    let headerRecords: Array<{ je_header_id: number; batch_id: number }> = (apexResult.items || []).map((item: any) => ({
+      je_header_id: item.je_header_id,
+      batch_id: item.batch_id,
+    }));
+
+    if (headerRecords.length === 0) {
+      updateProgress({ status: 'completed', endTime: new Date() });
+      log?.('warning', 'No header IDs found in APEX');
+      return progress;
+    }
+
+    // Limit headers for test modes
+    if (maxHeaders !== null && headerRecords.length > maxHeaders) {
+      headerRecords = headerRecords.slice(0, maxHeaders);
+      log?.('info', `Limited to ${maxHeaders} headers for ${modeLabel}`);
+    }
+
+    updateProgress({ totalHeaders: headerRecords.length });
+    log?.('success', `Found ${headerRecords.length} header IDs to process`);
+
+    // ========================================
+    // STEP 2: For each header, fetch lines from Fusion and insert to APEX
+    // ========================================
+    log?.('step', '──── Step 2: Fetching lines from Fusion & inserting to APEX ────');
+
+    for (let i = 0; i < headerRecords.length; i++) {
+      if (abortSignal?.aborted) {
+        updateProgress({ status: 'stopped' });
+        log?.('warning', 'Stopped by user');
+        break;
+      }
+
+      const { je_header_id: headerId, batch_id: batchId } = headerRecords[i];
+      updateProgress({
+        status: 'fetching_lines',
+        currentHeaderId: headerId,
+        currentBatchId: batchId,
+        processedHeaders: i,
+      });
+
+      log?.('info', `Processing header ${i + 1}/${headerRecords.length} (Batch: ${batchId}, Header: ${headerId})...`);
+
+      // Fetch lines from Fusion using batch ID and header ID
+      // URL pattern: journalBatches/{batch_id}/child/journalHeaders/{je_header_id}/child/journalLines
+      const linesUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/journalBatches/${batchId}/child/journalHeaders/${headerId}/child/journalLines`;
+
+      try {
+        const linesResult = await fetchFromOracleUrl(linesUrl, log, false);
+        const lines = linesResult.items || [];
+
+        if (lines.length === 0) {
+          log?.('info', `  No lines found for header ${headerId}`);
+          updateProgress({ processedHeaders: i + 1 });
+          continue;
+        }
+
+        log?.('success', `  Found ${lines.length} lines for header ${headerId}`);
+        updateProgress({ totalLines: progress.totalLines + lines.length });
+
+        // Insert lines to APEX
+        updateProgress({ status: 'inserting' });
+
+        const linesPayload = {
+          batchId: batchId,
+          jeHeaderId: headerId,
+          items: lines,
+        };
+
+        try {
+          const insertResult = await insertToApex(APEX_DB_CONFIG.endpoints.journalLines, linesPayload, log, false);
+          if (insertResult.success || insertResult.inserted > 0) {
+            const insertedCount = insertResult.inserted || lines.length;
+            updateProgress({ insertedLines: progress.insertedLines + insertedCount });
+            log?.('success', `  ✓ Header ${headerId}: ${insertedCount} lines inserted`);
+          } else {
+            updateProgress({ errors: progress.errors + 1, lastError: insertResult.error || 'Insert failed' });
+            log?.('error', `  Lines insert failed: ${insertResult.lastError || insertResult.error}`);
+          }
+        } catch (error) {
+          updateProgress({ errors: progress.errors + 1, lastError: String(error) });
+          log?.('error', `  Lines insert error: ${error}`);
+        }
+
+      } catch (error) {
+        updateProgress({ errors: progress.errors + 1, lastError: String(error) });
+        log?.('error', `  Error fetching lines for header ${headerId}: ${error}`);
+      }
+
+      updateProgress({ processedHeaders: i + 1 });
+
+      // Log progress every 10 headers
+      if ((i + 1) % 10 === 0 || i === headerRecords.length - 1) {
+        log?.('info', `Progress: ${i + 1}/${headerRecords.length} headers, ${progress.insertedLines} lines inserted`);
+      }
+
+      // Small delay between headers
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    // ========================================
+    // COMPLETE
+    // ========================================
+    updateProgress({
+      status: abortSignal?.aborted ? 'stopped' : 'completed',
+      endTime: new Date(),
+    });
+
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('step', '  GL LINES SYNC COMPLETED');
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('success', `Total Headers: ${progress.processedHeaders}`);
+    log?.('success', `Total Lines: ${progress.totalLines}`);
+    log?.('success', `Inserted: ${progress.insertedLines}`);
+    log?.('info', `Errors: ${progress.errors}`);
+
+    return progress;
+
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    updateProgress({ status: 'error', lastError: errorMsg, endTime: new Date() });
+    log?.('error', `Sync failed: ${errorMsg}`);
+    return progress;
+  }
+};
