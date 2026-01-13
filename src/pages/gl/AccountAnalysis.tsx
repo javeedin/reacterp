@@ -156,17 +156,18 @@ const availableLedgers = ['BUIMERC LEDGER'];
 // Available companies
 const availableCompanies = ['01', '02', '03'];
 
-// Period response interface
-interface CurrentPeriodStatusItem {
-  ledger_name: string;
-  app: string;
-  application_name: string;
-  prior_period: string | null;
-  current_period: string | null;
-  next_period: string | null;
-  prior_status: string | null;
-  current_status: string | null;
-  next_status: string | null;
+// Period status response interface (from gl/periodstatus endpoint)
+interface PeriodStatusItem {
+  PeriodNameId: string;
+  ApplicationId: number;
+  LedgerId: number;
+  ClosingStatus: string;
+  EndDate: string;
+  StartDate: string;
+  EffectivePeriodNumber: number;
+  PeriodYear: number;
+  PeriodNumber: number;
+  AdjustmentPeriodFlag: string;
 }
 
 // Helper to parse period string to sortable date
@@ -255,12 +256,23 @@ const AccountAnalysis: React.FC = () => {
     };
   }, [activePanel]);
 
-  // Fetch periods from APEX on component mount
+  // Helper to extract period name from PeriodNameId (format: "PERIODSET_Jan-24_101_300000000774004")
+  const extractPeriodName = (periodNameId: string): string | null => {
+    if (!periodNameId) return null;
+    const parts = periodNameId.split('_');
+    // Format is typically: PERIODSET_Jan-24_101_300000000774004
+    if (parts.length >= 2) {
+      return parts[1];
+    }
+    return null;
+  };
+
+  // Fetch all periods from APEX gl/periodstatus endpoint
   const fetchPeriods = useCallback(async () => {
     setPeriodsLoading(true);
     try {
-      const url = `${PROXY_CONFIG.baseUrl}/apex/currentperiodstatus`;
-      console.log('Fetching periods from:', url);
+      const url = `${PROXY_CONFIG.baseUrl}/apex/gl/periodstatus`;
+      console.log('Fetching all periods from:', url);
 
       const response = await fetch(url);
       if (!response.ok) {
@@ -268,14 +280,15 @@ const AccountAnalysis: React.FC = () => {
       }
 
       const result = await response.json();
-      const items: CurrentPeriodStatusItem[] = result.items || result || [];
+      const items: PeriodStatusItem[] = result.items || result || [];
 
-      // Extract unique period names from prior, current, and next periods
+      // Extract unique period names from PeriodNameId
       const periodSet = new Set<string>();
       items.forEach((item) => {
-        if (item.prior_period) periodSet.add(item.prior_period);
-        if (item.current_period) periodSet.add(item.current_period);
-        if (item.next_period) periodSet.add(item.next_period);
+        const periodName = extractPeriodName(item.PeriodNameId);
+        if (periodName) {
+          periodSet.add(periodName);
+        }
       });
 
       // Convert to array and sort chronologically
@@ -283,7 +296,7 @@ const AccountAnalysis: React.FC = () => {
         return parsePeriodToDate(a).getTime() - parsePeriodToDate(b).getTime();
       });
 
-      console.log('Fetched periods:', sortedPeriods);
+      console.log('Fetched periods:', sortedPeriods.length, sortedPeriods);
       setAvailablePeriods(sortedPeriods);
     } catch (error) {
       console.error('Error fetching periods:', error);
