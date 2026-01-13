@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Layout,
   Typography,
@@ -34,9 +34,11 @@ import {
   DragOutlined,
   UnorderedListOutlined,
   PieChartOutlined,
+  LoadingOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
+import { PROXY_CONFIG } from '../../config/api.config';
 
 const { Content } = Layout;
 const { Text } = Typography;
@@ -154,12 +156,33 @@ const availableLedgers = ['BUIMERC LEDGER'];
 // Available companies
 const availableCompanies = ['01', '02', '03'];
 
-// Available periods (can be loaded from API)
-const availablePeriods = [
-  'Jan-24', 'Feb-24', 'Mar-24', 'Apr-24', 'May-24', 'Jun-24',
-  'Jul-24', 'Aug-24', 'Sep-24', 'Oct-24', 'Nov-24', 'Dec-24',
-  'Jan-25', 'Feb-25', 'Mar-25', 'Apr-25', 'May-25', 'Jun-25',
-];
+// Period response interface
+interface CurrentPeriodStatusItem {
+  ledger_name: string;
+  app: string;
+  application_name: string;
+  prior_period: string | null;
+  current_period: string | null;
+  next_period: string | null;
+  prior_status: string | null;
+  current_status: string | null;
+  next_status: string | null;
+}
+
+// Helper to parse period string to sortable date
+const parsePeriodToDate = (period: string): Date => {
+  const monthMap: Record<string, number> = {
+    'Jan': 0, 'Feb': 1, 'Mar': 2, 'Apr': 3, 'May': 4, 'Jun': 5,
+    'Jul': 6, 'Aug': 7, 'Sep': 8, 'Oct': 9, 'Nov': 10, 'Dec': 11
+  };
+  const parts = period.split('-');
+  if (parts.length === 2) {
+    const month = monthMap[parts[0]] ?? 0;
+    const year = 2000 + parseInt(parts[1], 10);
+    return new Date(year, month, 1);
+  }
+  return new Date();
+};
 
 const AccountAnalysis: React.FC = () => {
   // State
@@ -168,6 +191,10 @@ const AccountAnalysis: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [searchData, setSearchData] = useState<JournalLineSegment[]>([]);
   const [totalCount, setTotalCount] = useState(0);
+
+  // Periods state - loaded from API
+  const [availablePeriods, setAvailablePeriods] = useState<string[]>([]);
+  const [periodsLoading, setPeriodsLoading] = useState(false);
 
   // Search filters - default ledger is BUIMERC LEDGER
   const [selectedLedger, setSelectedLedger] = useState<string>('BUIMERC LEDGER');
@@ -227,6 +254,49 @@ const AccountAnalysis: React.FC = () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [activePanel]);
+
+  // Fetch periods from APEX on component mount
+  const fetchPeriods = useCallback(async () => {
+    setPeriodsLoading(true);
+    try {
+      const url = `${PROXY_CONFIG.baseUrl}/apex/currentperiodstatus`;
+      console.log('Fetching periods from:', url);
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`API Error: ${response.status} ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      const items: CurrentPeriodStatusItem[] = result.items || result || [];
+
+      // Extract unique period names from prior, current, and next periods
+      const periodSet = new Set<string>();
+      items.forEach((item) => {
+        if (item.prior_period) periodSet.add(item.prior_period);
+        if (item.current_period) periodSet.add(item.current_period);
+        if (item.next_period) periodSet.add(item.next_period);
+      });
+
+      // Convert to array and sort chronologically
+      const sortedPeriods = Array.from(periodSet).sort((a, b) => {
+        return parsePeriodToDate(a).getTime() - parsePeriodToDate(b).getTime();
+      });
+
+      console.log('Fetched periods:', sortedPeriods);
+      setAvailablePeriods(sortedPeriods);
+    } catch (error) {
+      console.error('Error fetching periods:', error);
+      message.error('Failed to load periods. Please refresh the page.');
+    } finally {
+      setPeriodsLoading(false);
+    }
+  }, []);
+
+  // Load periods on mount
+  useEffect(() => {
+    fetchPeriods();
+  }, [fetchPeriods]);
 
   const closePanel = () => {
     setIsClosing(true);
@@ -979,7 +1049,10 @@ const AccountAnalysis: React.FC = () => {
                 style={{ width: '100%' }}
                 size="small"
                 maxTagCount={3}
-                placeholder="Select periods"
+                placeholder={periodsLoading ? 'Loading periods...' : 'Select periods'}
+                loading={periodsLoading}
+                notFoundContent={periodsLoading ? <Spin size="small" indicator={<LoadingOutlined />} /> : 'No periods found'}
+                disabled={periodsLoading}
               >
                 {availablePeriods.map((period) => (
                   <Option key={period} value={period}>
