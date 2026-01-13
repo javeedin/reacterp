@@ -2150,6 +2150,8 @@ const SyncData: React.FC = () => {
   const getStatusText = (status: string) => {
     switch (status) {
       case 'idle': return 'Ready';
+      case 'counting': return 'Counting Records...';
+      case 'fetching': return 'Fetching Data...';
       case 'fetching_batches': return 'Fetching Batches...';
       case 'processing_batch': return 'Processing Batch...';
       case 'fetching_headers': return 'Fetching Headers...';
@@ -2285,6 +2287,8 @@ const SyncData: React.FC = () => {
     ? apPaymentsProgress.status
     : isAPInvoices
     ? apProgress.status
+    : isGLBatchesOnly
+    ? glBatchesOnlyProgress.status
     : isGLCodeComb
     ? codeCombProgress.status
     : isGLPeriodStatus
@@ -2904,6 +2908,96 @@ const SyncData: React.FC = () => {
                         <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
                           {apProgress.errors} errors
                         </Text>
+                      )}
+                    </Card>
+                  </Col>
+                </Row>
+              ) : isGLBatchesOnly ? (
+                /* GL Batches Only KPI Cards */
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  {/* Batches Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <DatabaseOutlined style={{ fontSize: 20, color: REDWOOD.primary, marginRight: 8 }} />
+                        <Text strong>GL Batches</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {glBatchesOnlyProgress.insertedBatches} / {glBatchesOnlyProgress.totalBatches}
+                      </div>
+                      <Progress
+                        percent={glBatchesOnlyProgress.totalBatches > 0 ? Math.round((glBatchesOnlyProgress.insertedBatches / glBatchesOnlyProgress.totalBatches) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.primary}
+                        style={{ marginTop: 8 }}
+                      />
+                      {glBatchesOnlyProgress.currentPage > 0 && (
+                        <Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 4 }}>
+                          Page {glBatchesOnlyProgress.currentPage}/{glBatchesOnlyProgress.totalPages}
+                        </Text>
+                      )}
+                    </Card>
+                  </Col>
+
+                  {/* Fetched Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <FileTextOutlined style={{ fontSize: 20, color: REDWOOD.success, marginRight: 8 }} />
+                        <Text strong>Fetched</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {glBatchesOnlyProgress.fetchedBatches}
+                        <Text type="secondary" style={{ fontSize: 14, marginLeft: 8 }}>
+                          / {glBatchesOnlyProgress.totalBatches}
+                        </Text>
+                      </div>
+                      <Progress
+                        percent={glBatchesOnlyProgress.totalBatches > 0 ? Math.round((glBatchesOnlyProgress.fetchedBatches / glBatchesOnlyProgress.totalBatches) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.success}
+                        style={{ marginTop: 8 }}
+                      />
+                    </Card>
+                  </Col>
+
+                  {/* Errors Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <WarningOutlined style={{ fontSize: 20, color: glBatchesOnlyProgress.errors > 0 ? REDWOOD.error : REDWOOD.textSecondary, marginRight: 8 }} />
+                        <Text strong>Errors</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: glBatchesOnlyProgress.errors > 0 ? REDWOOD.error : REDWOOD.textPrimary }}>
+                        {glBatchesOnlyProgress.errors}
+                      </div>
+                      {glBatchesOnlyProgress.lastError && (
+                        <Tooltip title={glBatchesOnlyProgress.lastError}>
+                          <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 8 }} ellipsis>
+                            {glBatchesOnlyProgress.lastError}
+                          </Text>
+                        </Tooltip>
                       )}
                     </Card>
                   </Col>
@@ -4245,6 +4339,8 @@ const SyncData: React.FC = () => {
                           ? `${apPaymentsProgress.insertedPayments} payments, ${apPaymentsProgress.processedRelatedInvoices} related invoices inserted`
                           : isAPInvoices
                           ? `${apProgress.insertedInvoices} invoices inserted`
+                          : isGLBatchesOnly
+                          ? `${glBatchesOnlyProgress.insertedBatches} batches inserted`
                           : isGLCodeComb
                           ? `${codeCombProgress.insertedRecords} code combinations inserted`
                           : isGLPeriodStatus
@@ -4272,10 +4368,10 @@ const SyncData: React.FC = () => {
                           : `${progress.totalBatchesInserted + progress.totalHeadersInserted + progress.totalLinesInserted} inserted`
                         }
                       </Text>
-                      {(isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : isRoles ? rolesProgress.errors : isSuppliers ? suppliersProgress.errors : isSupplierAddresses ? supplierAddressProgress.errors : isSupplierSites ? supplierSitesProgress.errors : progress.errors) > 0 && (
+                      {(isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLBatchesOnly ? glBatchesOnlyProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : isRoles ? rolesProgress.errors : isSuppliers ? suppliersProgress.errors : isSupplierAddresses ? supplierAddressProgress.errors : isSupplierSites ? supplierSitesProgress.errors : progress.errors) > 0 && (
                         <Text type="danger">
                           <CloseCircleOutlined style={{ marginRight: 4 }} />
-                          {isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : isRoles ? rolesProgress.errors : isSuppliers ? suppliersProgress.errors : isSupplierAddresses ? supplierAddressProgress.errors : isSupplierSites ? supplierSitesProgress.errors : progress.errors} errors
+                          {isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLBatchesOnly ? glBatchesOnlyProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : isRoles ? rolesProgress.errors : isSuppliers ? suppliersProgress.errors : isSupplierAddresses ? supplierAddressProgress.errors : isSupplierSites ? supplierSitesProgress.errors : progress.errors} errors
                         </Text>
                       )}
                     </Space>
