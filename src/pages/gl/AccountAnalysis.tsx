@@ -156,18 +156,18 @@ const availableLedgers = ['BUIMERC LEDGER'];
 // Available companies
 const availableCompanies = ['01', '02', '03'];
 
-// Period status response interface (from gl/periodstatus endpoint)
+// Period status response interface (from periodsstatus/create endpoint)
 interface PeriodStatusItem {
-  PeriodNameId: string;
-  ApplicationId: number;
-  LedgerId: number;
-  ClosingStatus: string;
-  EndDate: string;
-  StartDate: string;
-  EffectivePeriodNumber: number;
-  PeriodYear: number;
-  PeriodNumber: number;
-  AdjustmentPeriodFlag: string;
+  period_name_id: string;
+  ledger_name: string;
+  app: string;
+  application_name: string;
+  status: string;
+  start_date: string;
+  end_date: string;
+  period_year: number;
+  period_number: number;
+  adj_flag: string;
 }
 
 // Helper to parse period string to sortable date
@@ -267,11 +267,15 @@ const AccountAnalysis: React.FC = () => {
     return null;
   };
 
-  // Fetch all periods from APEX gl/periodstatus endpoint
+  // Fetch all periods from APEX periodsstatus/create endpoint
   const fetchPeriods = useCallback(async () => {
     setPeriodsLoading(true);
     try {
-      const url = `${PROXY_CONFIG.baseUrl}/apex/gl/periodstatus`;
+      const params = new URLSearchParams();
+      params.append('P_APPLICATION_NAME', 'General Ledger');
+      params.append('P_LEDGER_NAME', selectedLedger);
+
+      const url = `${PROXY_CONFIG.baseUrl}/apex/periodsstatus/create?${params.toString()}`;
       console.log('Fetching all periods from:', url);
 
       const response = await fetch(url);
@@ -282,10 +286,10 @@ const AccountAnalysis: React.FC = () => {
       const result = await response.json();
       const items: PeriodStatusItem[] = result.items || result || [];
 
-      // Extract unique period names from PeriodNameId
+      // Extract unique period names from period_name_id field
       const periodSet = new Set<string>();
       items.forEach((item) => {
-        const periodName = extractPeriodName(item.PeriodNameId);
+        const periodName = extractPeriodName(item.period_name_id);
         if (periodName) {
           periodSet.add(periodName);
         }
@@ -304,7 +308,7 @@ const AccountAnalysis: React.FC = () => {
     } finally {
       setPeriodsLoading(false);
     }
-  }, []);
+  }, [selectedLedger]);
 
   // Load periods on mount
   useEffect(() => {
