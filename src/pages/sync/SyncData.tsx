@@ -42,7 +42,7 @@ import {
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { SYNC_OBJECTS, PROXY_CONFIG, APEX_DB_CONFIG, type SyncObjectConfig, type ApiType } from '../../config/api.config';
-import { syncGLJournals, testGLConnection, type SyncProgress, type LogCallback, type BatchPayloadCallback } from '../../services/gl-sync.service';
+import { syncGLJournals, syncGLBatchesOnly, testGLConnection, type SyncProgress, type BatchOnlySyncProgress, type LogCallback, type BatchPayloadCallback } from '../../services/gl-sync.service';
 import { syncAPInvoices, testAPConnection, type APSyncProgress, type InvoicePayloadCallback } from '../../services/ap-sync.service';
 import { syncAPPayments, testAPPaymentsConnection, type APPaymentsSyncProgress, type PaymentPayloadCallback } from '../../services/ap-payments-sync.service';
 import { syncGLCodeCombinations, testGLCodeCombConnection, type CodeCombSyncProgress, type CodeCombPayloadCallback } from '../../services/gl-codecomb-sync.service';
@@ -553,6 +553,20 @@ const SyncData: React.FC = () => {
     errorMessage?: string;
   }>>([]);
 
+  // GL Batches Only Progress State
+  const [glBatchesOnlyProgress, setGLBatchesOnlyProgress] = useState<BatchOnlySyncProgress>({
+    status: 'idle',
+    totalBatches: 0,
+    fetchedBatches: 0,
+    insertedBatches: 0,
+    currentPage: 0,
+    totalPages: 0,
+    errors: 0,
+    lastError: '',
+    startTime: null,
+    endTime: null,
+  });
+
   // Determine sync type based on selected object
   const isAPInvoices = selectedObject?.id === 'ap-invoices';
   const isAPPayments = selectedObject?.id === 'ap-payments';
@@ -569,6 +583,7 @@ const SyncData: React.FC = () => {
   const isSupplierAddresses = selectedObject?.id === 'supplier-addresses';
   const isSupplierSites = selectedObject?.id === 'supplier-sites';
   const isSiteAssignments = selectedObject?.id === 'supplier-site-assignments';
+  const isGLBatchesOnly = selectedObject?.id === 'gl-batches-only';
 
   // Web Worker for background sync
   const handleWorkerProgress = useCallback((progress: WorkerSyncProgress) => {
@@ -2022,6 +2037,34 @@ const SyncData: React.FC = () => {
         handleSiteAssignmentsPayload
       );
       syncResult = { inserted: result.insertedAssignments, errors: result.errors, type: 'site assignments' };
+    } else if (isGLBatchesOnly) {
+      // GL Batches Only Sync
+      setGLBatchesOnlyProgress({
+        status: 'counting',
+        totalBatches: 0,
+        fetchedBatches: 0,
+        insertedBatches: 0,
+        currentPage: 0,
+        totalPages: 0,
+        errors: 0,
+        lastError: '',
+        startTime: new Date(),
+        endTime: null,
+      });
+
+      const result = await syncGLBatchesOnly(
+        parameters,
+        testMode,
+        addLog,
+        (newProgress) => {
+          setGLBatchesOnlyProgress((prev) => ({ ...prev, ...newProgress }));
+          if (newProgress.insertedBatches !== undefined && newProgress.totalBatches) {
+            notifySyncProgress(`${newProgress.insertedBatches}/${newProgress.totalBatches} batches inserted`);
+          }
+        },
+        abortControllerRef.current.signal
+      );
+      syncResult = { inserted: result.insertedBatches, errors: result.errors, type: 'batches' };
     } else {
       // GL Journals Sync
       setProgress({
