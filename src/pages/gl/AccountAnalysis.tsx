@@ -19,6 +19,7 @@ import {
   Divider,
   message,
   Modal,
+  Checkbox,
 } from 'antd';
 import {
   HomeOutlined,
@@ -216,6 +217,9 @@ const AccountAnalysis: React.FC = () => {
   const [accountsList, setAccountsList] = useState<AccountItem[]>([]);
   const [accountsLoading, setAccountsLoading] = useState(false);
   const [accountSearchText, setAccountSearchText] = useState('');
+
+  // Pivot view options
+  const [showDrCrColumns, setShowDrCrColumns] = useState(false);
 
   // Segment filters for pivot
   const [segmentFilters, setSegmentFilters] = useState<SegmentFilter[]>([
@@ -858,69 +862,113 @@ const AccountAnalysis: React.FC = () => {
       width: 100,
       fixed: 'left' as const,
     })),
-    // Dynamic period columns with Debit and Credit
-    ...selectedPeriods.flatMap((period) => [
-      {
-        title: `${period} Dr`,
-        dataIndex: `${period}_Dr`,
-        key: `${period}_Dr`,
-        width: 100,
-        align: 'right' as const,
-        render: (v: number) => (
-          <span style={{ color: REDWOOD.success }}>
-            {formatNumber(v || 0)}
-          </span>
-        ),
-      },
-      {
-        title: `${period} Cr`,
-        dataIndex: `${period}_Cr`,
-        key: `${period}_Cr`,
-        width: 100,
-        align: 'right' as const,
-        render: (v: number) => (
-          <span style={{ color: REDWOOD.primary }}>
-            {formatNumber(v || 0)}
-          </span>
-        ),
-      },
-    ]),
-    {
-      title: 'Total Dr',
-      key: 'totalDr',
-      width: 110,
-      align: 'right' as const,
-      fixed: 'right',
-      render: (_: any, record: PivotDataRow) => {
-        const totalDr = selectedPeriods.reduce(
-          (sum, period) => sum + ((record[`${period}_Dr`] as number) || 0),
-          0
-        );
-        return (
-          <Text strong style={{ color: REDWOOD.success }}>
-            {formatNumber(totalDr)}
-          </Text>
-        );
-      },
-    },
-    {
-      title: 'Total Cr',
-      key: 'totalCr',
-      width: 110,
-      align: 'right' as const,
-      fixed: 'right',
-      render: (_: any, record: PivotDataRow) => {
-        const totalCr = selectedPeriods.reduce(
-          (sum, period) => sum + ((record[`${period}_Cr`] as number) || 0),
-          0
-        );
-        return (
-          <Text strong style={{ color: REDWOOD.primary }}>
-            {formatNumber(totalCr)}
-          </Text>
-        );
-      },
-    },
+    // Dynamic period columns - Balance or Dr/Cr based on toggle
+    ...(showDrCrColumns
+      ? // Show Dr and Cr columns
+        selectedPeriods.flatMap((period) => [
+          {
+            title: `${period} Dr`,
+            dataIndex: `${period}_Dr`,
+            key: `${period}_Dr`,
+            width: 100,
+            align: 'right' as const,
+            render: (v: number) => (
+              <span style={{ color: REDWOOD.success }}>
+                {formatNumber(v || 0)}
+              </span>
+            ),
+          },
+          {
+            title: `${period} Cr`,
+            dataIndex: `${period}_Cr`,
+            key: `${period}_Cr`,
+            width: 100,
+            align: 'right' as const,
+            render: (v: number) => (
+              <span style={{ color: REDWOOD.primary }}>
+                {formatNumber(v || 0)}
+              </span>
+            ),
+          },
+        ])
+      : // Show Balance columns (Dr - Cr)
+        selectedPeriods.map((period) => ({
+          title: period,
+          key: `${period}_Balance`,
+          width: 110,
+          align: 'right' as const,
+          render: (_: any, record: PivotDataRow) => {
+            const dr = (record[`${period}_Dr`] as number) || 0;
+            const cr = (record[`${period}_Cr`] as number) || 0;
+            const balance = dr - cr;
+            return (
+              <span style={{ color: balance >= 0 ? REDWOOD.success : REDWOOD.primary }}>
+                {formatNumber(balance)}
+              </span>
+            );
+          },
+        }))),
+    // Total columns
+    ...(showDrCrColumns
+      ? [
+          {
+            title: 'Total Dr',
+            key: 'totalDr',
+            width: 110,
+            align: 'right' as const,
+            fixed: 'right' as const,
+            render: (_: any, record: PivotDataRow) => {
+              const totalDr = selectedPeriods.reduce(
+                (sum, period) => sum + ((record[`${period}_Dr`] as number) || 0),
+                0
+              );
+              return (
+                <Text strong style={{ color: REDWOOD.success }}>
+                  {formatNumber(totalDr)}
+                </Text>
+              );
+            },
+          },
+          {
+            title: 'Total Cr',
+            key: 'totalCr',
+            width: 110,
+            align: 'right' as const,
+            fixed: 'right' as const,
+            render: (_: any, record: PivotDataRow) => {
+              const totalCr = selectedPeriods.reduce(
+                (sum, period) => sum + ((record[`${period}_Cr`] as number) || 0),
+                0
+              );
+              return (
+                <Text strong style={{ color: REDWOOD.primary }}>
+                  {formatNumber(totalCr)}
+                </Text>
+              );
+            },
+          },
+        ]
+      : [
+          {
+            title: 'Total Balance',
+            key: 'totalBalance',
+            width: 120,
+            align: 'right' as const,
+            fixed: 'right' as const,
+            render: (_: any, record: PivotDataRow) => {
+              const totalBalance = selectedPeriods.reduce((sum, period) => {
+                const dr = (record[`${period}_Dr`] as number) || 0;
+                const cr = (record[`${period}_Cr`] as number) || 0;
+                return sum + (dr - cr);
+              }, 0);
+              return (
+                <Text strong style={{ color: totalBalance >= 0 ? REDWOOD.success : REDWOOD.primary }}>
+                  {formatNumber(totalBalance)}
+                </Text>
+              );
+            },
+          },
+        ]),
   ];
 
   // Create column title with filter input
@@ -1353,6 +1401,13 @@ const AccountAnalysis: React.FC = () => {
                 <Button size="small" icon={<DownloadOutlined />}>
                   Export
                 </Button>
+                <Checkbox
+                  checked={showDrCrColumns}
+                  onChange={(e) => setShowDrCrColumns(e.target.checked)}
+                  style={{ fontSize: 11 }}
+                >
+                  Show Dr/Cr
+                </Checkbox>
               </Space>
             </Col>
           </Row>
@@ -1640,68 +1695,111 @@ const AccountAnalysis: React.FC = () => {
         width: 100,
         fixed: 'left' as const,
       })),
-      ...selectedPeriods.flatMap((period) => [
-        {
-          title: `${period} Dr`,
-          dataIndex: `${period}_Dr`,
-          key: `${period}_Dr`,
-          width: 100,
-          align: 'right' as const,
-          render: (v: number) => (
-            <span style={{ color: REDWOOD.success }}>
-              {formatNumber(v || 0)}
-            </span>
-          ),
-        },
-        {
-          title: `${period} Cr`,
-          dataIndex: `${period}_Cr`,
-          key: `${period}_Cr`,
-          width: 100,
-          align: 'right' as const,
-          render: (v: number) => (
-            <span style={{ color: REDWOOD.primary }}>
-              {formatNumber(v || 0)}
-            </span>
-          ),
-        },
-      ]),
-      {
-        title: 'Total Dr',
-        key: 'totalDr',
-        width: 110,
-        align: 'right' as const,
-        fixed: 'right',
-        render: (_: any, record: PivotDataRow) => {
-          const totalDr = selectedPeriods.reduce(
-            (sum, period) => sum + ((record[`${period}_Dr`] as number) || 0),
-            0
-          );
-          return (
-            <Text strong style={{ color: REDWOOD.success }}>
-              {formatNumber(totalDr)}
-            </Text>
-          );
-        },
-      },
-      {
-        title: 'Total Cr',
-        key: 'totalCr',
-        width: 110,
-        align: 'right' as const,
-        fixed: 'right',
-        render: (_: any, record: PivotDataRow) => {
-          const totalCr = selectedPeriods.reduce(
-            (sum, period) => sum + ((record[`${period}_Cr`] as number) || 0),
-            0
-          );
-          return (
-            <Text strong style={{ color: REDWOOD.primary }}>
-              {formatNumber(totalCr)}
-            </Text>
-          );
-        },
-      },
+      // Dynamic period columns - Balance or Dr/Cr based on toggle
+      ...(showDrCrColumns
+        ? selectedPeriods.flatMap((period) => [
+            {
+              title: `${period} Dr`,
+              dataIndex: `${period}_Dr`,
+              key: `${period}_Dr`,
+              width: 100,
+              align: 'right' as const,
+              render: (v: number) => (
+                <span style={{ color: REDWOOD.success }}>
+                  {formatNumber(v || 0)}
+                </span>
+              ),
+            },
+            {
+              title: `${period} Cr`,
+              dataIndex: `${period}_Cr`,
+              key: `${period}_Cr`,
+              width: 100,
+              align: 'right' as const,
+              render: (v: number) => (
+                <span style={{ color: REDWOOD.primary }}>
+                  {formatNumber(v || 0)}
+                </span>
+              ),
+            },
+          ])
+        : selectedPeriods.map((period) => ({
+            title: period,
+            key: `${period}_Balance`,
+            width: 110,
+            align: 'right' as const,
+            render: (_: any, record: PivotDataRow) => {
+              const dr = (record[`${period}_Dr`] as number) || 0;
+              const cr = (record[`${period}_Cr`] as number) || 0;
+              const balance = dr - cr;
+              return (
+                <span style={{ color: balance >= 0 ? REDWOOD.success : REDWOOD.primary }}>
+                  {formatNumber(balance)}
+                </span>
+              );
+            },
+          }))),
+      // Total columns
+      ...(showDrCrColumns
+        ? [
+            {
+              title: 'Total Dr',
+              key: 'totalDr',
+              width: 110,
+              align: 'right' as const,
+              fixed: 'right' as const,
+              render: (_: any, record: PivotDataRow) => {
+                const totalDr = selectedPeriods.reduce(
+                  (sum, period) => sum + ((record[`${period}_Dr`] as number) || 0),
+                  0
+                );
+                return (
+                  <Text strong style={{ color: REDWOOD.success }}>
+                    {formatNumber(totalDr)}
+                  </Text>
+                );
+              },
+            },
+            {
+              title: 'Total Cr',
+              key: 'totalCr',
+              width: 110,
+              align: 'right' as const,
+              fixed: 'right' as const,
+              render: (_: any, record: PivotDataRow) => {
+                const totalCr = selectedPeriods.reduce(
+                  (sum, period) => sum + ((record[`${period}_Cr`] as number) || 0),
+                  0
+                );
+                return (
+                  <Text strong style={{ color: REDWOOD.primary }}>
+                    {formatNumber(totalCr)}
+                  </Text>
+                );
+              },
+            },
+          ]
+        : [
+            {
+              title: 'Total Balance',
+              key: 'totalBalance',
+              width: 120,
+              align: 'right' as const,
+              fixed: 'right' as const,
+              render: (_: any, record: PivotDataRow) => {
+                const totalBalance = selectedPeriods.reduce((sum, period) => {
+                  const dr = (record[`${period}_Dr`] as number) || 0;
+                  const cr = (record[`${period}_Cr`] as number) || 0;
+                  return sum + (dr - cr);
+                }, 0);
+                return (
+                  <Text strong style={{ color: totalBalance >= 0 ? REDWOOD.success : REDWOOD.primary }}>
+                    {formatNumber(totalBalance)}
+                  </Text>
+                );
+              },
+            },
+          ]),
     ];
 
     return (
@@ -1737,9 +1835,18 @@ const AccountAnalysis: React.FC = () => {
               </Space>
             </Col>
             <Col>
-              <Button size="small" icon={<DownloadOutlined />}>
-                Export
-              </Button>
+              <Space>
+                <Button size="small" icon={<DownloadOutlined />}>
+                  Export
+                </Button>
+                <Checkbox
+                  checked={showDrCrColumns}
+                  onChange={(e) => setShowDrCrColumns(e.target.checked)}
+                  style={{ fontSize: 11 }}
+                >
+                  Show Dr/Cr
+                </Checkbox>
+              </Space>
             </Col>
           </Row>
 
