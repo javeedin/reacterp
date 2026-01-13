@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Layout,
   Typography,
@@ -19,6 +19,7 @@ import {
   Divider,
   message,
   Modal,
+  Checkbox,
 } from 'antd';
 import {
   HomeOutlined,
@@ -34,9 +35,11 @@ import {
   DragOutlined,
   UnorderedListOutlined,
   PieChartOutlined,
+  LoadingOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
+import { PROXY_CONFIG } from '../../config/api.config';
 
 const { Content } = Layout;
 const { Text } = Typography;
@@ -94,6 +97,7 @@ interface JournalLineSegment {
   legalEntityName: string;
   userJeCategoryName: string;
   concatenatedSegments?: string;
+  accountDescription?: string;
 }
 
 interface PivotDataRow {
@@ -154,12 +158,41 @@ const availableLedgers = ['BUIMERC LEDGER'];
 // Available companies
 const availableCompanies = ['01', '02', '03'];
 
-// Available periods (can be loaded from API)
-const availablePeriods = [
-  'Jan-24', 'Feb-24', 'Mar-24', 'Apr-24', 'May-24', 'Jun-24',
-  'Jul-24', 'Aug-24', 'Sep-24', 'Oct-24', 'Nov-24', 'Dec-24',
-  'Jan-25', 'Feb-25', 'Mar-25', 'Apr-25', 'May-25', 'Jun-25',
-];
+// Period status response interface (from periodsstatus/create endpoint)
+interface PeriodStatusItem {
+  period_name_id: string;
+  ledger_name: string;
+  app: string;
+  application_name: string;
+  status: string;
+  start_date: string;
+  end_date: string;
+  period_year: number;
+  period_number: number;
+  adj_flag: string;
+}
+
+// Account item interface (from glaccountslist endpoint)
+interface AccountItem {
+  account: string;
+  description: string;
+  account_type: string;
+}
+
+// Helper to parse period string to sortable date
+const parsePeriodToDate = (period: string): Date => {
+  const monthMap: Record<string, number> = {
+    'Jan': 0, 'Feb': 1, 'Mar': 2, 'Apr': 3, 'May': 4, 'Jun': 5,
+    'Jul': 6, 'Aug': 7, 'Sep': 8, 'Oct': 9, 'Nov': 10, 'Dec': 11
+  };
+  const parts = period.split('-');
+  if (parts.length === 2) {
+    const month = monthMap[parts[0]] ?? 0;
+    const year = 2000 + parseInt(parts[1], 10);
+    return new Date(year, month, 1);
+  }
+  return new Date();
+};
 
 const AccountAnalysis: React.FC = () => {
   // State
@@ -169,11 +202,24 @@ const AccountAnalysis: React.FC = () => {
   const [searchData, setSearchData] = useState<JournalLineSegment[]>([]);
   const [totalCount, setTotalCount] = useState(0);
 
+  // Periods state - loaded from API
+  const [availablePeriods, setAvailablePeriods] = useState<string[]>([]);
+  const [periodsLoading, setPeriodsLoading] = useState(false);
+
   // Search filters - default ledger is BUIMERC LEDGER
   const [selectedLedger, setSelectedLedger] = useState<string>('BUIMERC LEDGER');
   const [selectedCompany, setSelectedCompany] = useState<string>('01');
   const [selectedPeriods, setSelectedPeriods] = useState<string[]>([]);
   const [accountFilter, setAccountFilter] = useState<string>('');
+
+  // Account lookup modal state
+  const [accountLookupVisible, setAccountLookupVisible] = useState(false);
+  const [accountsList, setAccountsList] = useState<AccountItem[]>([]);
+  const [accountsLoading, setAccountsLoading] = useState(false);
+  const [accountSearchText, setAccountSearchText] = useState('');
+
+  // Pivot view options
+  const [showDrCrColumns, setShowDrCrColumns] = useState(false);
 
   // Segment filters for pivot
   const [segmentFilters, setSegmentFilters] = useState<SegmentFilter[]>([
@@ -228,6 +274,129 @@ const AccountAnalysis: React.FC = () => {
     };
   }, [activePanel]);
 
+  // Helper to extract period name from PeriodNameId (format: "PERIODSET_Jan-24_101_300000000774004")
+  const extractPeriodName = (periodNameId: string): string | null => {
+    if (!periodNameId) return null;
+    const parts = periodNameId.split('_');
+    // Format is typically: PERIODSET_Jan-24_101_300000000774004
+    if (parts.length >= 2) {
+      return parts[1];
+    }
+    return null;
+  };
+
+  // Fetch all periods from APEX periodsstatus/create endpoint
+  const fetchPeriods = useCallback(async () => {
+    setPeriodsLoading(true);
+    try {
+      const params = new URLSearchParams();
+      params.append('P_APPLICATION_NAME', 'General Ledger');
+      params.append('P_LEDGER_NAME', selectedLedger);
+
+      const url = `${PROXY_CONFIG.baseUrl}/apex/periodsstatus/create?${params.toString()}`;
+      console.log('Fetching all periods from:', url);
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`API Error: ${response.status} ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      const items = result.items || result || [];
+
+      console.log('Period status response:', result);
+      console.log('Period status items count:', items.length);
+      if (items.length > 0) {
+        console.log('First item structure:', JSON.stringify(items[0], null, 2));
+      }
+
+      // Extract unique period names from period_name_id field
+      const periodSet = new Set<string>();
+      items.forEach((item: any) => {
+        // Handle both lowercase and uppercase field names
+        const periodNameId = item.period_name_id || item.PERIOD_NAME_ID || item.periodNameId;
+        if (periodNameId) {
+          // Check if it contains underscore (compound format)
+          if (periodNameId.includes('_')) {
+            const periodName = extractPeriodName(periodNameId);
+            if (periodName) {
+              periodSet.add(periodName);
+            }
+          } else {
+            // Direct period name format (e.g., "Jan-24")
+            periodSet.add(periodNameId);
+          }
+        }
+      });
+
+      // Convert to array and sort chronologically
+      const sortedPeriods = Array.from(periodSet).sort((a, b) => {
+        return parsePeriodToDate(a).getTime() - parsePeriodToDate(b).getTime();
+      });
+
+      console.log('Fetched periods:', sortedPeriods.length, sortedPeriods);
+      setAvailablePeriods(sortedPeriods);
+    } catch (error) {
+      console.error('Error fetching periods:', error);
+      message.error('Failed to load periods. Please refresh the page.');
+    } finally {
+      setPeriodsLoading(false);
+    }
+  }, [selectedLedger]);
+
+  // Load periods on mount
+  useEffect(() => {
+    fetchPeriods();
+  }, [fetchPeriods]);
+
+  // Fetch accounts list from APEX glaccountslist endpoint
+  const fetchAccounts = useCallback(async () => {
+    setAccountsLoading(true);
+    try {
+      const url = `${PROXY_CONFIG.baseUrl}/apex/glaccountslist`;
+      console.log('Fetching accounts from:', url);
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`API Error: ${response.status} ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      const items: AccountItem[] = result.items || result || [];
+      console.log('Fetched accounts:', items.length);
+      setAccountsList(items);
+    } catch (error) {
+      console.error('Error fetching accounts:', error);
+      message.error('Failed to load accounts list.');
+    } finally {
+      setAccountsLoading(false);
+    }
+  }, []);
+
+  // Open account lookup modal
+  const openAccountLookup = () => {
+    setAccountLookupVisible(true);
+    setAccountSearchText('');
+    if (accountsList.length === 0) {
+      fetchAccounts();
+    }
+  };
+
+  // Select account from lookup
+  const handleAccountSelect = (account: string) => {
+    setAccountFilter(account);
+    setAccountLookupVisible(false);
+  };
+
+  // Filter accounts based on search text
+  const filteredAccounts = accountsList.filter((item) => {
+    const searchLower = accountSearchText.toLowerCase();
+    return (
+      item.account.toLowerCase().includes(searchLower) ||
+      item.description.toLowerCase().includes(searchLower)
+    );
+  });
+
   const closePanel = () => {
     setIsClosing(true);
     setTimeout(() => {
@@ -278,6 +447,7 @@ const AccountAnalysis: React.FC = () => {
         ...item,
         key: `${index}`,
         concatenatedSegments: `${item.company}-${item.lob}-${item.department}-${item.account}-${item.subAccount}-${item.analysis}-${item.intercompany}`,
+        accountDescription: item.ACCOUNT_DESCRIPTION || item.account_description || item.accountDescription || '',
       }));
 
       setSearchData(items);
@@ -508,8 +678,11 @@ const AccountAnalysis: React.FC = () => {
 
       const pivotRow = pivotMap.get(key)!;
       const periodKey = row.defaultPeriodName;
-      const netAmount = (row.accountedDr || 0) - (row.accountedCr || 0);
-      pivotRow[periodKey] = ((pivotRow[periodKey] as number) || 0) + netAmount;
+      // Store Debit and Credit separately for each period
+      const drKey = `${periodKey}_Dr`;
+      const crKey = `${periodKey}_Cr`;
+      pivotRow[drKey] = ((pivotRow[drKey] as number) || 0) + (row.accountedDr || 0);
+      pivotRow[crKey] = ((pivotRow[crKey] as number) || 0) + (row.accountedCr || 0);
     });
 
     return Array.from(pivotMap.values());
@@ -579,8 +752,11 @@ const AccountAnalysis: React.FC = () => {
 
       const pivotRow = pivotMap.get(key)!;
       const periodKey = row.defaultPeriodName;
-      const netAmount = (row.accountedDr || 0) - (row.accountedCr || 0);
-      pivotRow[periodKey] = ((pivotRow[periodKey] as number) || 0) + netAmount;
+      // Store Debit and Credit separately for each period
+      const drKey = `${periodKey}_Dr`;
+      const crKey = `${periodKey}_Cr`;
+      pivotRow[drKey] = ((pivotRow[drKey] as number) || 0) + (row.accountedDr || 0);
+      pivotRow[crKey] = ((pivotRow[crKey] as number) || 0) + (row.accountedCr || 0);
     });
 
     return Array.from(pivotMap.values());
@@ -592,7 +768,7 @@ const AccountAnalysis: React.FC = () => {
       title: 'Account',
       dataIndex: 'concatenatedSegments',
       key: 'concatenatedSegments',
-      width: 280,
+      width: 240,
       fixed: 'left',
       render: (text: string, record: JournalLineSegment) => (
         <a
@@ -601,6 +777,18 @@ const AccountAnalysis: React.FC = () => {
         >
           {text || `${record.company}-${record.lob}-${record.department}-${record.account}-${record.subAccount}-${record.analysis}-${record.intercompany}`}
         </a>
+      ),
+    },
+    {
+      title: 'Description',
+      dataIndex: 'accountDescription',
+      key: 'accountDescription',
+      width: 180,
+      ellipsis: true,
+      render: (text: string) => (
+        <Tooltip title={text}>
+          <span style={{ fontSize: 11 }}>{text || '-'}</span>
+        </Tooltip>
       ),
     },
     { title: 'Period', dataIndex: 'defaultPeriodName', key: 'defaultPeriodName', width: 80 },
@@ -674,41 +862,113 @@ const AccountAnalysis: React.FC = () => {
       width: 100,
       fixed: 'left' as const,
     })),
-    // Dynamic period columns
-    ...selectedPeriods.map((period) => ({
-      title: period,
-      dataIndex: period,
-      key: period,
-      width: 110,
-      align: 'right' as const,
-      render: (v: number) => {
-        const formatted = formatNumber(v);
-        if (!formatted) return '';
-        return (
-          <span style={{ color: v >= 0 ? REDWOOD.success : REDWOOD.primary }}>
-            {formatted}
-          </span>
-        );
-      },
-    })),
-    {
-      title: 'Total',
-      key: 'total',
-      width: 120,
-      align: 'right' as const,
-      fixed: 'right',
-      render: (_: any, record: PivotDataRow) => {
-        const total = selectedPeriods.reduce(
-          (sum, period) => sum + ((record[period] as number) || 0),
-          0
-        );
-        return (
-          <Text strong style={{ color: total >= 0 ? REDWOOD.success : REDWOOD.primary }}>
-            {formatNumber(total)}
-          </Text>
-        );
-      },
-    },
+    // Dynamic period columns - Balance or Dr/Cr based on toggle
+    ...(showDrCrColumns
+      ? // Show Dr and Cr columns
+        selectedPeriods.flatMap((period) => [
+          {
+            title: `${period} Dr`,
+            dataIndex: `${period}_Dr`,
+            key: `${period}_Dr`,
+            width: 100,
+            align: 'right' as const,
+            render: (v: number) => (
+              <span style={{ color: REDWOOD.success }}>
+                {formatNumber(v || 0)}
+              </span>
+            ),
+          },
+          {
+            title: `${period} Cr`,
+            dataIndex: `${period}_Cr`,
+            key: `${period}_Cr`,
+            width: 100,
+            align: 'right' as const,
+            render: (v: number) => (
+              <span style={{ color: REDWOOD.primary }}>
+                {formatNumber(v || 0)}
+              </span>
+            ),
+          },
+        ])
+      : // Show Balance columns (Dr - Cr)
+        selectedPeriods.map((period) => ({
+          title: period,
+          key: `${period}_Balance`,
+          width: 110,
+          align: 'right' as const,
+          render: (_: any, record: PivotDataRow) => {
+            const dr = (record[`${period}_Dr`] as number) || 0;
+            const cr = (record[`${period}_Cr`] as number) || 0;
+            const balance = dr - cr;
+            return (
+              <span style={{ color: balance >= 0 ? REDWOOD.success : REDWOOD.primary }}>
+                {formatNumber(balance)}
+              </span>
+            );
+          },
+        }))),
+    // Total columns
+    ...(showDrCrColumns
+      ? [
+          {
+            title: 'Total Dr',
+            key: 'totalDr',
+            width: 110,
+            align: 'right' as const,
+            fixed: 'right' as const,
+            render: (_: any, record: PivotDataRow) => {
+              const totalDr = selectedPeriods.reduce(
+                (sum, period) => sum + ((record[`${period}_Dr`] as number) || 0),
+                0
+              );
+              return (
+                <Text strong style={{ color: REDWOOD.success }}>
+                  {formatNumber(totalDr)}
+                </Text>
+              );
+            },
+          },
+          {
+            title: 'Total Cr',
+            key: 'totalCr',
+            width: 110,
+            align: 'right' as const,
+            fixed: 'right' as const,
+            render: (_: any, record: PivotDataRow) => {
+              const totalCr = selectedPeriods.reduce(
+                (sum, period) => sum + ((record[`${period}_Cr`] as number) || 0),
+                0
+              );
+              return (
+                <Text strong style={{ color: REDWOOD.primary }}>
+                  {formatNumber(totalCr)}
+                </Text>
+              );
+            },
+          },
+        ]
+      : [
+          {
+            title: 'Total Balance',
+            key: 'totalBalance',
+            width: 120,
+            align: 'right' as const,
+            fixed: 'right' as const,
+            render: (_: any, record: PivotDataRow) => {
+              const totalBalance = selectedPeriods.reduce((sum, period) => {
+                const dr = (record[`${period}_Dr`] as number) || 0;
+                const cr = (record[`${period}_Cr`] as number) || 0;
+                return sum + (dr - cr);
+              }, 0);
+              return (
+                <Text strong style={{ color: totalBalance >= 0 ? REDWOOD.success : REDWOOD.primary }}>
+                  {formatNumber(totalBalance)}
+                </Text>
+              );
+            },
+          },
+        ]),
   ];
 
   // Create column title with filter input
@@ -979,7 +1239,10 @@ const AccountAnalysis: React.FC = () => {
                 style={{ width: '100%' }}
                 size="small"
                 maxTagCount={3}
-                placeholder="Select periods"
+                placeholder={periodsLoading ? 'Loading periods...' : 'Select periods'}
+                loading={periodsLoading}
+                notFoundContent={periodsLoading ? <Spin size="small" indicator={<LoadingOutlined />} /> : 'No periods found'}
+                disabled={periodsLoading}
               >
                 {availablePeriods.map((period) => (
                   <Option key={period} value={period}>
@@ -990,13 +1253,15 @@ const AccountAnalysis: React.FC = () => {
             </Col>
             <Col xs={24} sm={12} md={4}>
               <Text style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Account</Text>
-              <Input
+              <Input.Search
                 allowClear
                 value={accountFilter}
                 onChange={(e) => setAccountFilter(e.target.value)}
                 style={{ width: '100%' }}
                 size="small"
                 placeholder="e.g. 1116100"
+                enterButton={<SearchOutlined />}
+                onSearch={openAccountLookup}
               />
             </Col>
             <Col xs={24} sm={12} md={7}>
@@ -1133,33 +1398,16 @@ const AccountAnalysis: React.FC = () => {
                 >
                   Show All Journals
                 </Button>
-                <Button
-                  size="small"
-                  onClick={() => {
-                    const endpoints = selectedPeriods.map((period) => {
-                      const params = new URLSearchParams();
-                      params.append('P_ACCOUNT', tab.account);
-                      params.append('P_PERIOD_NAME', period);
-                      params.append('P_CURRENCY_CODE', 'AED');
-                      return `${API_BASE_URL}/accountanalysis/byaccount?${params.toString()}`;
-                    });
-                    console.log('API Endpoints:', endpoints);
-                    message.info(
-                      <div style={{ maxWidth: 600, wordBreak: 'break-all' }}>
-                        <div style={{ fontWeight: 'bold', marginBottom: 8 }}>API Endpoints:</div>
-                        {endpoints.map((url, i) => (
-                          <div key={i} style={{ fontSize: 11, marginBottom: 4 }}>{url}</div>
-                        ))}
-                      </div>,
-                      10
-                    );
-                  }}
-                >
-                  Log
-                </Button>
                 <Button size="small" icon={<DownloadOutlined />}>
                   Export
                 </Button>
+                <Checkbox
+                  checked={showDrCrColumns}
+                  onChange={(e) => setShowDrCrColumns(e.target.checked)}
+                  style={{ fontSize: 11 }}
+                >
+                  Show Dr/Cr
+                </Checkbox>
               </Space>
             </Col>
           </Row>
@@ -1447,40 +1695,111 @@ const AccountAnalysis: React.FC = () => {
         width: 100,
         fixed: 'left' as const,
       })),
-      ...selectedPeriods.map((period) => ({
-        title: period,
-        dataIndex: period,
-        key: period,
-        width: 110,
-        align: 'right' as const,
-        render: (v: number) => {
-          const formatted = formatNumber(v);
-          if (!formatted) return '';
-          return (
-            <span style={{ color: v >= 0 ? REDWOOD.success : REDWOOD.primary }}>
-              {formatted}
-            </span>
-          );
-        },
-      })),
-      {
-        title: 'Total',
-        key: 'total',
-        width: 120,
-        align: 'right' as const,
-        fixed: 'right',
-        render: (_: any, record: PivotDataRow) => {
-          const total = selectedPeriods.reduce(
-            (sum, period) => sum + ((record[period] as number) || 0),
-            0
-          );
-          return (
-            <Text strong style={{ color: total >= 0 ? REDWOOD.success : REDWOOD.primary }}>
-              {formatNumber(total)}
-            </Text>
-          );
-        },
-      },
+      // Dynamic period columns - Balance or Dr/Cr based on toggle
+      ...(showDrCrColumns
+        ? selectedPeriods.flatMap((period) => [
+            {
+              title: `${period} Dr`,
+              dataIndex: `${period}_Dr`,
+              key: `${period}_Dr`,
+              width: 100,
+              align: 'right' as const,
+              render: (v: number) => (
+                <span style={{ color: REDWOOD.success }}>
+                  {formatNumber(v || 0)}
+                </span>
+              ),
+            },
+            {
+              title: `${period} Cr`,
+              dataIndex: `${period}_Cr`,
+              key: `${period}_Cr`,
+              width: 100,
+              align: 'right' as const,
+              render: (v: number) => (
+                <span style={{ color: REDWOOD.primary }}>
+                  {formatNumber(v || 0)}
+                </span>
+              ),
+            },
+          ])
+        : selectedPeriods.map((period) => ({
+            title: period,
+            key: `${period}_Balance`,
+            width: 110,
+            align: 'right' as const,
+            render: (_: any, record: PivotDataRow) => {
+              const dr = (record[`${period}_Dr`] as number) || 0;
+              const cr = (record[`${period}_Cr`] as number) || 0;
+              const balance = dr - cr;
+              return (
+                <span style={{ color: balance >= 0 ? REDWOOD.success : REDWOOD.primary }}>
+                  {formatNumber(balance)}
+                </span>
+              );
+            },
+          }))),
+      // Total columns
+      ...(showDrCrColumns
+        ? [
+            {
+              title: 'Total Dr',
+              key: 'totalDr',
+              width: 110,
+              align: 'right' as const,
+              fixed: 'right' as const,
+              render: (_: any, record: PivotDataRow) => {
+                const totalDr = selectedPeriods.reduce(
+                  (sum, period) => sum + ((record[`${period}_Dr`] as number) || 0),
+                  0
+                );
+                return (
+                  <Text strong style={{ color: REDWOOD.success }}>
+                    {formatNumber(totalDr)}
+                  </Text>
+                );
+              },
+            },
+            {
+              title: 'Total Cr',
+              key: 'totalCr',
+              width: 110,
+              align: 'right' as const,
+              fixed: 'right' as const,
+              render: (_: any, record: PivotDataRow) => {
+                const totalCr = selectedPeriods.reduce(
+                  (sum, period) => sum + ((record[`${period}_Cr`] as number) || 0),
+                  0
+                );
+                return (
+                  <Text strong style={{ color: REDWOOD.primary }}>
+                    {formatNumber(totalCr)}
+                  </Text>
+                );
+              },
+            },
+          ]
+        : [
+            {
+              title: 'Total Balance',
+              key: 'totalBalance',
+              width: 120,
+              align: 'right' as const,
+              fixed: 'right' as const,
+              render: (_: any, record: PivotDataRow) => {
+                const totalBalance = selectedPeriods.reduce((sum, period) => {
+                  const dr = (record[`${period}_Dr`] as number) || 0;
+                  const cr = (record[`${period}_Cr`] as number) || 0;
+                  return sum + (dr - cr);
+                }, 0);
+                return (
+                  <Text strong style={{ color: totalBalance >= 0 ? REDWOOD.success : REDWOOD.primary }}>
+                    {formatNumber(totalBalance)}
+                  </Text>
+                );
+              },
+            },
+          ]),
     ];
 
     return (
@@ -1516,9 +1835,18 @@ const AccountAnalysis: React.FC = () => {
               </Space>
             </Col>
             <Col>
-              <Button size="small" icon={<DownloadOutlined />}>
-                Export
-              </Button>
+              <Space>
+                <Button size="small" icon={<DownloadOutlined />}>
+                  Export
+                </Button>
+                <Checkbox
+                  checked={showDrCrColumns}
+                  onChange={(e) => setShowDrCrColumns(e.target.checked)}
+                  style={{ fontSize: 11 }}
+                >
+                  Show Dr/Cr
+                </Checkbox>
+              </Space>
             </Col>
           </Row>
 
@@ -1978,6 +2306,69 @@ const AccountAnalysis: React.FC = () => {
                 </Table.Summary>
               );
             }}
+          />
+        </Modal>
+
+        {/* Account Lookup Modal */}
+        <Modal
+          title="Select Account"
+          open={accountLookupVisible}
+          onCancel={() => setAccountLookupVisible(false)}
+          footer={null}
+          width={700}
+          style={{ top: 50 }}
+        >
+          <div style={{ marginBottom: 16 }}>
+            <Input.Search
+              placeholder="Search by account number or description..."
+              value={accountSearchText}
+              onChange={(e) => setAccountSearchText(e.target.value)}
+              allowClear
+              size="middle"
+            />
+          </div>
+          <Table
+            dataSource={filteredAccounts}
+            loading={accountsLoading}
+            size="small"
+            pagination={{ pageSize: 10, size: 'small', showTotal: (total) => `${total} accounts` }}
+            rowKey="account"
+            onRow={(record) => ({
+              onClick: () => handleAccountSelect(record.account),
+              style: { cursor: 'pointer' },
+            })}
+            columns={[
+              {
+                title: 'Account',
+                dataIndex: 'account',
+                key: 'account',
+                width: 120,
+                render: (text: string) => <Text code style={{ fontSize: 12 }}>{text}</Text>,
+              },
+              {
+                title: 'Description',
+                dataIndex: 'description',
+                key: 'description',
+                render: (text: string) => <Text style={{ fontSize: 12 }}>{text}</Text>,
+              },
+              {
+                title: 'Type',
+                dataIndex: 'account_type',
+                key: 'account_type',
+                width: 80,
+                render: (type: string) => {
+                  const typeMap: Record<string, { label: string; color: string }> = {
+                    'A': { label: 'Asset', color: 'blue' },
+                    'L': { label: 'Liability', color: 'orange' },
+                    'E': { label: 'Equity', color: 'purple' },
+                    'R': { label: 'Revenue', color: 'green' },
+                    'X': { label: 'Expense', color: 'red' },
+                  };
+                  const info = typeMap[type] || { label: type, color: 'default' };
+                  return <Tag color={info.color} style={{ fontSize: 10 }}>{info.label}</Tag>;
+                },
+              },
+            ]}
           />
         </Modal>
       </Content>
