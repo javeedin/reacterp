@@ -582,6 +582,13 @@ const IncomeStatementTemplates: React.FC = () => {
   const renderTemplateList = () => {
     const columns = [
       {
+        title: 'ID',
+        dataIndex: 'template_id',
+        key: 'template_id',
+        width: 60,
+        render: (id: number) => <Text type="secondary">{id}</Text>,
+      },
+      {
         title: 'Template Code',
         dataIndex: 'template_code',
         key: 'template_code',
