@@ -346,84 +346,128 @@ CREATE OR REPLACE PACKAGE BODY rr_pl_template_pkg AS
     -- Get template structure as JSON
     FUNCTION get_template_structure(p_template_id NUMBER) RETURN CLOB IS
         v_result CLOB;
+        v_groups CLOB;
+        v_sections CLOB;
+        v_accounts CLOB;
+        v_totals CLOB;
+        v_template CLOB;
+        v_first_group BOOLEAN := TRUE;
+        v_first_section BOOLEAN;
+        v_first_account BOOLEAN;
     BEGIN
+        -- Build groups array
+        v_groups := '[';
+        FOR grp IN (
+            SELECT group_id, group_code, group_name, group_label, group_type,
+                   display_order, sign_convention, show_subtotal, subtotal_label
+            FROM rr_pl_groups
+            WHERE template_id = p_template_id AND is_active = 'Y'
+            ORDER BY display_order
+        ) LOOP
+            IF NOT v_first_group THEN
+                v_groups := v_groups || ',';
+            END IF;
+            v_first_group := FALSE;
+
+            -- Build sections for this group
+            v_sections := '[';
+            v_first_section := TRUE;
+            FOR sec IN (
+                SELECT section_id, section_code, section_name, section_label, display_order
+                FROM rr_pl_sections
+                WHERE group_id = grp.group_id AND is_active = 'Y'
+                ORDER BY display_order
+            ) LOOP
+                IF NOT v_first_section THEN
+                    v_sections := v_sections || ',';
+                END IF;
+                v_first_section := FALSE;
+
+                -- Build accounts for this section
+                v_accounts := '[';
+                v_first_account := TRUE;
+                FOR acct IN (
+                    SELECT account_code, account_from, account_to
+                    FROM rr_pl_section_accounts
+                    WHERE section_id = sec.section_id AND is_active = 'Y'
+                    ORDER BY display_order
+                ) LOOP
+                    IF NOT v_first_account THEN
+                        v_accounts := v_accounts || ',';
+                    END IF;
+                    v_first_account := FALSE;
+
+                    v_accounts := v_accounts || JSON_OBJECT(
+                        'account_code' VALUE acct.account_code,
+                        'account_from' VALUE acct.account_from,
+                        'account_to' VALUE acct.account_to
+                    );
+                END LOOP;
+                v_accounts := v_accounts || ']';
+
+                v_sections := v_sections || JSON_OBJECT(
+                    'section_id' VALUE sec.section_id,
+                    'section_code' VALUE sec.section_code,
+                    'section_name' VALUE sec.section_name,
+                    'section_label' VALUE sec.section_label,
+                    'display_order' VALUE sec.display_order,
+                    'accounts' VALUE JSON(v_accounts) FORMAT JSON
+                );
+            END LOOP;
+            v_sections := v_sections || ']';
+
+            v_groups := v_groups || JSON_OBJECT(
+                'group_id' VALUE grp.group_id,
+                'group_code' VALUE grp.group_code,
+                'group_name' VALUE grp.group_name,
+                'group_label' VALUE grp.group_label,
+                'group_type' VALUE grp.group_type,
+                'display_order' VALUE grp.display_order,
+                'sign_convention' VALUE grp.sign_convention,
+                'show_subtotal' VALUE grp.show_subtotal,
+                'subtotal_label' VALUE grp.subtotal_label,
+                'sections' VALUE JSON(v_sections) FORMAT JSON
+            );
+        END LOOP;
+        v_groups := v_groups || ']';
+
+        -- Build totals array
+        SELECT JSON_ARRAYAGG(
+            JSON_OBJECT(
+                'total_id' VALUE total_id,
+                'total_code' VALUE total_code,
+                'total_name' VALUE total_name,
+                'total_label' VALUE total_label,
+                'calculation_formula' VALUE calculation_formula,
+                'display_order' VALUE display_order,
+                'after_group_code' VALUE after_group_code,
+                'font_style' VALUE font_style,
+                'row_style' VALUE row_style
+            ) ORDER BY display_order
+        ) INTO v_totals
+        FROM rr_pl_totals
+        WHERE template_id = p_template_id AND is_active = 'Y';
+
+        IF v_totals IS NULL THEN
+            v_totals := '[]';
+        END IF;
+
+        -- Build template object
         SELECT JSON_OBJECT(
-            'template' VALUE (
-                SELECT JSON_OBJECT(
-                    'template_id' VALUE t.template_id,
-                    'template_code' VALUE t.template_code,
-                    'template_name' VALUE t.template_name,
-                    'description' VALUE t.description,
-                    'template_type' VALUE t.template_type,
-                    'is_default' VALUE t.is_default,
-                    'groups' VALUE (
-                        SELECT JSON_ARRAYAGG(
-                            JSON_OBJECT(
-                                'group_id' VALUE g.group_id,
-                                'group_code' VALUE g.group_code,
-                                'group_name' VALUE g.group_name,
-                                'group_label' VALUE g.group_label,
-                                'group_type' VALUE g.group_type,
-                                'display_order' VALUE g.display_order,
-                                'sign_convention' VALUE g.sign_convention,
-                                'show_subtotal' VALUE g.show_subtotal,
-                                'subtotal_label' VALUE g.subtotal_label,
-                                'sections' VALUE (
-                                    SELECT JSON_ARRAYAGG(
-                                        JSON_OBJECT(
-                                            'section_id' VALUE s.section_id,
-                                            'section_code' VALUE s.section_code,
-                                            'section_name' VALUE s.section_name,
-                                            'section_label' VALUE s.section_label,
-                                            'display_order' VALUE s.display_order,
-                                            'accounts' VALUE (
-                                                SELECT JSON_ARRAYAGG(
-                                                    JSON_OBJECT(
-                                                        'account_code' VALUE a.account_code,
-                                                        'account_from' VALUE a.account_from,
-                                                        'account_to' VALUE a.account_to
-                                                    ) ORDER BY a.display_order
-                                                )
-                                                FROM rr_pl_section_accounts a
-                                                WHERE a.section_id = s.section_id
-                                                AND a.is_active = 'Y'
-                                            )
-                                        ) ORDER BY s.display_order
-                                    )
-                                    FROM rr_pl_sections s
-                                    WHERE s.group_id = g.group_id
-                                    AND s.is_active = 'Y'
-                                )
-                            ) ORDER BY g.display_order
-                        )
-                        FROM rr_pl_groups g
-                        WHERE g.template_id = t.template_id
-                        AND g.is_active = 'Y'
-                    ),
-                    'totals' VALUE (
-                        SELECT JSON_ARRAYAGG(
-                            JSON_OBJECT(
-                                'total_id' VALUE tot.total_id,
-                                'total_code' VALUE tot.total_code,
-                                'total_name' VALUE tot.total_name,
-                                'total_label' VALUE tot.total_label,
-                                'calculation_formula' VALUE tot.calculation_formula,
-                                'display_order' VALUE tot.display_order,
-                                'after_group_code' VALUE tot.after_group_code,
-                                'font_style' VALUE tot.font_style,
-                                'row_style' VALUE tot.row_style
-                            ) ORDER BY tot.display_order
-                        )
-                        FROM rr_pl_totals tot
-                        WHERE tot.template_id = t.template_id
-                        AND tot.is_active = 'Y'
-                    )
-                )
-                FROM rr_pl_templates t
-                WHERE t.template_id = p_template_id
-            )
-        ) INTO v_result
-        FROM DUAL;
+            'template_id' VALUE template_id,
+            'template_code' VALUE template_code,
+            'template_name' VALUE template_name,
+            'description' VALUE description,
+            'template_type' VALUE template_type,
+            'is_default' VALUE is_default,
+            'groups' VALUE JSON(v_groups) FORMAT JSON,
+            'totals' VALUE JSON(v_totals) FORMAT JSON
+        ) INTO v_template
+        FROM rr_pl_templates
+        WHERE template_id = p_template_id;
+
+        -- Wrap in result object
+        v_result := JSON_OBJECT('template' VALUE JSON(v_template) FORMAT JSON);
 
         RETURN v_result;
     END get_template_structure;
