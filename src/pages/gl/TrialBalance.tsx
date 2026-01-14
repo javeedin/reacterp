@@ -81,9 +81,16 @@ interface GLBalanceRecord {
 }
 
 interface PeriodInfo {
-  period_name: string;
-  period_year: string;
-  period_num: string;
+  period_name_id: string;
+  ledger_name: string;
+  app: string;
+  application_name: string;
+  status: string;
+  start_date: string;
+  end_date: string;
+  period_year: number;
+  period_number: number;
+  adj_flag: string;
 }
 
 interface TabData {
@@ -103,7 +110,7 @@ const TrialBalance: React.FC = () => {
   const [periods, setPeriods] = useState<PeriodInfo[]>([]);
   const [loadingPeriods, setLoadingPeriods] = useState(false);
   const [periodsError, setPeriodsError] = useState<string | null>(null);
-  const [selectedYear, setSelectedYear] = useState<string | null>(null);
+  const [selectedYear, setSelectedYear] = useState<number | null>(null);
 
   // Tabs state
   const [activeTab, setActiveTab] = useState('periods');
@@ -111,7 +118,7 @@ const TrialBalance: React.FC = () => {
 
   // Get unique years from periods
   const availableYears = useMemo(() => {
-    const years = [...new Set(periods.map(p => p.period_year))].sort((a, b) => b.localeCompare(a));
+    const years = [...new Set(periods.map(p => p.period_year))].sort((a, b) => b - a);
     return years;
   }, [periods]);
 
@@ -121,14 +128,17 @@ const TrialBalance: React.FC = () => {
     return periods.filter(p => p.period_year === selectedYear);
   }, [periods, selectedYear]);
 
-  // Fetch periods list (get unique periods from trial balance data)
+  // Fetch periods list from APEX periods status endpoint
   const fetchPeriods = useCallback(async () => {
     setLoadingPeriods(true);
     setPeriodsError(null);
 
     try {
-      // Fetch all periods - we'll use a special endpoint or fetch without period filter
-      const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.glBalances}`;
+      const params = new URLSearchParams({
+        'P_APPLICATION_NAME': 'General Ledger',
+        'P_LEDGER_NAME': 'BUIMERC LEDGER',
+      });
+      const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.periodsStatus}?${params}`;
       const response = await fetch(url);
 
       if (!response.ok) {
@@ -136,33 +146,21 @@ const TrialBalance: React.FC = () => {
       }
 
       const data = await response.json();
-      const items: GLBalanceRecord[] = data.items || [];
+      const items: PeriodInfo[] = data.items || [];
 
-      // Extract unique periods
-      const periodMap = new Map<string, PeriodInfo>();
-      items.forEach(item => {
-        if (!periodMap.has(item.period_name)) {
-          periodMap.set(item.period_name, {
-            period_name: item.period_name,
-            period_year: item.period_year,
-            period_num: item.period_num,
-          });
-        }
-      });
-
-      const uniquePeriods = Array.from(periodMap.values()).sort((a, b) => {
-        // Sort by year desc, then by period_num desc
+      // Sort by year desc, then by period_number desc
+      const sortedPeriods = items.sort((a, b) => {
         if (a.period_year !== b.period_year) {
-          return b.period_year.localeCompare(a.period_year);
+          return b.period_year - a.period_year;
         }
-        return parseInt(b.period_num) - parseInt(a.period_num);
+        return b.period_number - a.period_number;
       });
 
-      setPeriods(uniquePeriods);
+      setPeriods(sortedPeriods);
 
       // Auto-select most recent year
-      if (uniquePeriods.length > 0 && !selectedYear) {
-        setSelectedYear(uniquePeriods[0].period_year);
+      if (sortedPeriods.length > 0 && !selectedYear) {
+        setSelectedYear(sortedPeriods[0].period_year);
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Failed to fetch periods';
@@ -259,40 +257,82 @@ const TrialBalance: React.FC = () => {
     }).format(value);
   };
 
+  // Get status tag color
+  const getStatusColor = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'open': return 'green';
+      case 'closed': return 'red';
+      case 'future': return 'blue';
+      case 'never opened': return 'default';
+      default: return 'default';
+    }
+  };
+
   // Periods table columns
   const periodColumns = [
     {
+      title: '#',
+      dataIndex: 'period_number',
+      key: 'period_number',
+      width: 60,
+      align: 'center' as const,
+      render: (num: number) => (
+        <Text style={{ fontFamily: 'monospace' }}>{num}</Text>
+      ),
+    },
+    {
       title: 'Period',
-      dataIndex: 'period_name',
-      key: 'period_name',
+      dataIndex: 'period_name_id',
+      key: 'period_name_id',
+      width: 120,
       render: (text: string) => (
         <Text strong style={{ color: REDWOOD.primary }}>{text}</Text>
+      ),
+    },
+    {
+      title: 'Status',
+      dataIndex: 'status',
+      key: 'status',
+      width: 100,
+      render: (status: string) => (
+        <Tag color={getStatusColor(status)}>{status}</Tag>
       ),
     },
     {
       title: 'Year',
       dataIndex: 'period_year',
       key: 'period_year',
-      width: 100,
-      render: (text: string) => <Tag color="blue">{text}</Tag>,
+      width: 80,
+      render: (year: number) => <Tag color="blue">{year}</Tag>,
     },
     {
-      title: 'Period #',
-      dataIndex: 'period_num',
-      key: 'period_num',
-      width: 100,
-      align: 'center' as const,
+      title: 'Start Date',
+      dataIndex: 'start_date',
+      key: 'start_date',
+      width: 120,
+      render: (date: string) => (
+        <Text type="secondary">{date ? new Date(date).toLocaleDateString() : '-'}</Text>
+      ),
+    },
+    {
+      title: 'End Date',
+      dataIndex: 'end_date',
+      key: 'end_date',
+      width: 120,
+      render: (date: string) => (
+        <Text type="secondary">{date ? new Date(date).toLocaleDateString() : '-'}</Text>
+      ),
     },
     {
       title: 'Action',
       key: 'action',
-      width: 120,
+      width: 100,
       render: (_: unknown, record: PeriodInfo) => (
         <Button
           type="primary"
           icon={<TableOutlined />}
           size="small"
-          onClick={() => fetchTrialBalance(record.period_name)}
+          onClick={() => fetchTrialBalance(record.period_name_id)}
           style={{
             background: REDWOOD.primary,
             borderColor: REDWOOD.primary,
@@ -443,11 +483,12 @@ const TrialBalance: React.FC = () => {
       <Table
         columns={periodColumns}
         dataSource={filteredPeriods}
-        rowKey="period_name"
+        rowKey="period_name_id"
         loading={loadingPeriods}
         pagination={{
           pageSize: 12,
-          showSizeChanger: false,
+          showSizeChanger: true,
+          pageSizeOptions: ['12', '24', '48'],
           showTotal: (total) => `${total} periods`,
         }}
         size="middle"
