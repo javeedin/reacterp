@@ -130,7 +130,7 @@ BEGIN
         p_pattern        => 'template/create',
         p_method         => 'POST',
         p_source_type    => 'plsql/block',
-        p_source         => '
+        p_source         => q'[
 DECLARE
     v_template_id NUMBER;
 BEGIN
@@ -138,15 +138,16 @@ BEGIN
         p_template_code => :template_code,
         p_template_name => :template_name,
         p_description   => :description,
-        p_template_type => NVL(:template_type, ''CUSTOM''),
+        p_template_type => NVL(:template_type, 'CUSTOM'),
         p_template_id   => v_template_id
     );
 
-    :result := ''{"success":true,"template_id":'' || v_template_id || ''}'';
+    :result := '{"success":true,"template_id":' || v_template_id || '}';
 EXCEPTION
     WHEN OTHERS THEN
-        :result := ''{"success":false,"error":"'' || REPLACE(SQLERRM, ''"'', ''\"'') || ''"}'';
-END;',
+        :result := '{"success":false,"error":"' || REPLACE(SQLERRM, '"', '\"') || '"}';
+END;
+]',
         p_items_per_page => 0,
         p_mimes_allowed  => 'application/json',
         p_comments       => 'Create a new P&L template'
@@ -188,7 +189,7 @@ BEGIN
         p_pattern        => 'group/create',
         p_method         => 'POST',
         p_source_type    => 'plsql/block',
-        p_source         => '
+        p_source         => q'[
 DECLARE
     v_group_id NUMBER;
 BEGIN
@@ -203,11 +204,12 @@ BEGIN
         p_group_id        => v_group_id
     );
 
-    :result := ''{"success":true,"group_id":'' || v_group_id || ''}'';
+    :result := '{"success":true,"group_id":' || v_group_id || '}';
 EXCEPTION
     WHEN OTHERS THEN
-        :result := ''{"success":false,"error":"'' || REPLACE(SQLERRM, ''"'', ''\"'') || ''"}'';
-END;',
+        :result := '{"success":false,"error":"' || REPLACE(SQLERRM, '"', '\"') || '"}';
+END;
+]',
         p_items_per_page => 0,
         p_mimes_allowed  => 'application/json',
         p_comments       => 'Add a group to a P&L template'
@@ -249,7 +251,7 @@ BEGIN
         p_pattern        => 'section/create',
         p_method         => 'POST',
         p_source_type    => 'plsql/block',
-        p_source         => '
+        p_source         => q'[
 DECLARE
     v_section_id NUMBER;
 BEGIN
@@ -262,11 +264,12 @@ BEGIN
         p_section_id    => v_section_id
     );
 
-    :result := ''{"success":true,"section_id":'' || v_section_id || ''}'';
+    :result := '{"success":true,"section_id":' || v_section_id || '}';
 EXCEPTION
     WHEN OTHERS THEN
-        :result := ''{"success":false,"error":"'' || REPLACE(SQLERRM, ''"'', ''\"'') || ''"}'';
-END;',
+        :result := '{"success":false,"error":"' || REPLACE(SQLERRM, '"', '\"') || '"}';
+END;
+]',
         p_items_per_page => 0,
         p_mimes_allowed  => 'application/json',
         p_comments       => 'Add a section to a P&L group'
@@ -308,7 +311,7 @@ BEGIN
         p_pattern        => 'account/assign',
         p_method         => 'POST',
         p_source_type    => 'plsql/block',
-        p_source         => '
+        p_source         => q'[
 BEGIN
     rr_pl_template_pkg.assign_account(
         p_section_id   => :section_id,
@@ -317,11 +320,12 @@ BEGIN
         p_account_to   => :account_to
     );
 
-    :result := ''{"success":true}'';
+    :result := '{"success":true}';
 EXCEPTION
     WHEN OTHERS THEN
-        :result := ''{"success":false,"error":"'' || REPLACE(SQLERRM, ''"'', ''\"'') || ''"}'';
-END;',
+        :result := '{"success":false,"error":"' || REPLACE(SQLERRM, '"', '\"') || '"}';
+END;
+]',
         p_items_per_page => 0,
         p_mimes_allowed  => 'application/json',
         p_comments       => 'Assign an account or account range to a section'
@@ -363,7 +367,7 @@ BEGIN
         p_pattern        => 'total/create',
         p_method         => 'POST',
         p_source_type    => 'plsql/block',
-        p_source         => '
+        p_source         => q'[
 BEGIN
     rr_pl_template_pkg.add_total(
         p_template_id         => :template_id,
@@ -374,11 +378,12 @@ BEGIN
         p_after_group_code    => :after_group_code
     );
 
-    :result := ''{"success":true}'';
+    :result := '{"success":true}';
 EXCEPTION
     WHEN OTHERS THEN
-        :result := ''{"success":false,"error":"'' || REPLACE(SQLERRM, ''"'', ''\"'') || ''"}'';
-END;',
+        :result := '{"success":false,"error":"' || REPLACE(SQLERRM, '"', '\"') || '"}';
+END;
+]',
         p_items_per_page => 0,
         p_mimes_allowed  => 'application/json',
         p_comments       => 'Add a calculated total row to a template'
@@ -420,7 +425,7 @@ BEGIN
         p_pattern        => 'template/clone',
         p_method         => 'POST',
         p_source_type    => 'plsql/block',
-        p_source         => '
+        p_source         => q'[
 DECLARE
     v_new_template_id NUMBER;
 BEGIN
@@ -431,11 +436,12 @@ BEGIN
         p_new_template_id    => v_new_template_id
     );
 
-    :result := ''{"success":true,"template_id":'' || v_new_template_id || ''}'';
+    :result := '{"success":true,"template_id":' || v_new_template_id || '}';
 EXCEPTION
     WHEN OTHERS THEN
-        :result := ''{"success":false,"error":"'' || REPLACE(SQLERRM, ''"'', ''\"'') || ''"}'';
-END;',
+        :result := '{"success":false,"error":"' || REPLACE(SQLERRM, '"', '\"') || '"}';
+END;
+]',
         p_items_per_page => 0,
         p_mimes_allowed  => 'application/json',
         p_comments       => 'Clone an existing template'
@@ -464,22 +470,23 @@ BEGIN
         p_pattern        => 'template/:template_id',
         p_method         => 'DELETE',
         p_source_type    => 'plsql/block',
-        p_source         => '
+        p_source         => q'[
 BEGIN
     UPDATE rr_pl_templates
-    SET is_active = ''N'', updated_date = CURRENT_TIMESTAMP
+    SET is_active = 'N', updated_date = CURRENT_TIMESTAMP
     WHERE template_id = :template_id;
 
     IF SQL%ROWCOUNT > 0 THEN
         COMMIT;
-        :result := ''{"success":true}'';
+        :result := '{"success":true}';
     ELSE
-        :result := ''{"success":false,"error":"Template not found"}'';
+        :result := '{"success":false,"error":"Template not found"}';
     END IF;
 EXCEPTION
     WHEN OTHERS THEN
-        :result := ''{"success":false,"error":"'' || REPLACE(SQLERRM, ''"'', ''\"'') || ''"}'';
-END;',
+        :result := '{"success":false,"error":"' || REPLACE(SQLERRM, '"', '\"') || '"}';
+END;
+]',
         p_items_per_page => 0,
         p_mimes_allowed  => NULL,
         p_comments       => 'Soft delete a template'
@@ -521,7 +528,7 @@ BEGIN
         p_pattern        => 'group/:group_id',
         p_method         => 'PUT',
         p_source_type    => 'plsql/block',
-        p_source         => '
+        p_source         => q'[
 BEGIN
     UPDATE rr_pl_groups
     SET group_name      = NVL(:group_name, group_name),
@@ -536,14 +543,15 @@ BEGIN
 
     IF SQL%ROWCOUNT > 0 THEN
         COMMIT;
-        :result := ''{"success":true}'';
+        :result := '{"success":true}';
     ELSE
-        :result := ''{"success":false,"error":"Group not found"}'';
+        :result := '{"success":false,"error":"Group not found"}';
     END IF;
 EXCEPTION
     WHEN OTHERS THEN
-        :result := ''{"success":false,"error":"'' || REPLACE(SQLERRM, ''"'', ''\"'') || ''"}'';
-END;',
+        :result := '{"success":false,"error":"' || REPLACE(SQLERRM, '"', '\"') || '"}';
+END;
+]',
         p_items_per_page => 0,
         p_mimes_allowed  => 'application/json',
         p_comments       => 'Update a group'
@@ -572,22 +580,23 @@ BEGIN
         p_pattern        => 'group/:group_id',
         p_method         => 'DELETE',
         p_source_type    => 'plsql/block',
-        p_source         => '
+        p_source         => q'[
 BEGIN
     UPDATE rr_pl_groups
-    SET is_active = ''N'', updated_date = CURRENT_TIMESTAMP
+    SET is_active = 'N', updated_date = CURRENT_TIMESTAMP
     WHERE group_id = :group_id;
 
     IF SQL%ROWCOUNT > 0 THEN
         COMMIT;
-        :result := ''{"success":true}'';
+        :result := '{"success":true}';
     ELSE
-        :result := ''{"success":false,"error":"Group not found"}'';
+        :result := '{"success":false,"error":"Group not found"}';
     END IF;
 EXCEPTION
     WHEN OTHERS THEN
-        :result := ''{"success":false,"error":"'' || REPLACE(SQLERRM, ''"'', ''\"'') || ''"}'';
-END;',
+        :result := '{"success":false,"error":"' || REPLACE(SQLERRM, '"', '\"') || '"}';
+END;
+]',
         p_items_per_page => 0,
         p_mimes_allowed  => NULL,
         p_comments       => 'Soft delete a group'
@@ -629,7 +638,7 @@ BEGIN
         p_pattern        => 'section/:section_id',
         p_method         => 'PUT',
         p_source_type    => 'plsql/block',
-        p_source         => '
+        p_source         => q'[
 BEGIN
     UPDATE rr_pl_sections
     SET section_name   = NVL(:section_name, section_name),
@@ -642,14 +651,15 @@ BEGIN
 
     IF SQL%ROWCOUNT > 0 THEN
         COMMIT;
-        :result := ''{"success":true}'';
+        :result := '{"success":true}';
     ELSE
-        :result := ''{"success":false,"error":"Section not found"}'';
+        :result := '{"success":false,"error":"Section not found"}';
     END IF;
 EXCEPTION
     WHEN OTHERS THEN
-        :result := ''{"success":false,"error":"'' || REPLACE(SQLERRM, ''"'', ''\"'') || ''"}'';
-END;',
+        :result := '{"success":false,"error":"' || REPLACE(SQLERRM, '"', '\"') || '"}';
+END;
+]',
         p_items_per_page => 0,
         p_mimes_allowed  => 'application/json',
         p_comments       => 'Update a section'
@@ -678,22 +688,23 @@ BEGIN
         p_pattern        => 'section/:section_id',
         p_method         => 'DELETE',
         p_source_type    => 'plsql/block',
-        p_source         => '
+        p_source         => q'[
 BEGIN
     UPDATE rr_pl_sections
-    SET is_active = ''N'', updated_date = CURRENT_TIMESTAMP
+    SET is_active = 'N', updated_date = CURRENT_TIMESTAMP
     WHERE section_id = :section_id;
 
     IF SQL%ROWCOUNT > 0 THEN
         COMMIT;
-        :result := ''{"success":true}'';
+        :result := '{"success":true}';
     ELSE
-        :result := ''{"success":false,"error":"Section not found"}'';
+        :result := '{"success":false,"error":"Section not found"}';
     END IF;
 EXCEPTION
     WHEN OTHERS THEN
-        :result := ''{"success":false,"error":"'' || REPLACE(SQLERRM, ''"'', ''\"'') || ''"}'';
-END;',
+        :result := '{"success":false,"error":"' || REPLACE(SQLERRM, '"', '\"') || '"}';
+END;
+]',
         p_items_per_page => 0,
         p_mimes_allowed  => NULL,
         p_comments       => 'Soft delete a section'
@@ -735,22 +746,23 @@ BEGIN
         p_pattern        => 'account/:section_account_id',
         p_method         => 'DELETE',
         p_source_type    => 'plsql/block',
-        p_source         => '
+        p_source         => q'[
 BEGIN
     UPDATE rr_pl_section_accounts
-    SET is_active = ''N'', updated_date = CURRENT_TIMESTAMP
+    SET is_active = 'N', updated_date = CURRENT_TIMESTAMP
     WHERE section_account_id = :section_account_id;
 
     IF SQL%ROWCOUNT > 0 THEN
         COMMIT;
-        :result := ''{"success":true}'';
+        :result := '{"success":true}';
     ELSE
-        :result := ''{"success":false,"error":"Account assignment not found"}'';
+        :result := '{"success":false,"error":"Account assignment not found"}';
     END IF;
 EXCEPTION
     WHEN OTHERS THEN
-        :result := ''{"success":false,"error":"'' || REPLACE(SQLERRM, ''"'', ''\"'') || ''"}'';
-END;',
+        :result := '{"success":false,"error":"' || REPLACE(SQLERRM, '"', '\"') || '"}';
+END;
+]',
         p_items_per_page => 0,
         p_mimes_allowed  => NULL,
         p_comments       => 'Remove account from section'
@@ -792,7 +804,7 @@ BEGIN
         p_pattern        => 'total/:total_id',
         p_method         => 'PUT',
         p_source_type    => 'plsql/block',
-        p_source         => '
+        p_source         => q'[
 BEGIN
     UPDATE rr_pl_totals
     SET total_name          = NVL(:total_name, total_name),
@@ -807,14 +819,15 @@ BEGIN
 
     IF SQL%ROWCOUNT > 0 THEN
         COMMIT;
-        :result := ''{"success":true}'';
+        :result := '{"success":true}';
     ELSE
-        :result := ''{"success":false,"error":"Total not found"}'';
+        :result := '{"success":false,"error":"Total not found"}';
     END IF;
 EXCEPTION
     WHEN OTHERS THEN
-        :result := ''{"success":false,"error":"'' || REPLACE(SQLERRM, ''"'', ''\"'') || ''"}'';
-END;',
+        :result := '{"success":false,"error":"' || REPLACE(SQLERRM, '"', '\"') || '"}';
+END;
+]',
         p_items_per_page => 0,
         p_mimes_allowed  => 'application/json',
         p_comments       => 'Update a total row'
@@ -843,22 +856,23 @@ BEGIN
         p_pattern        => 'total/:total_id',
         p_method         => 'DELETE',
         p_source_type    => 'plsql/block',
-        p_source         => '
+        p_source         => q'[
 BEGIN
     UPDATE rr_pl_totals
-    SET is_active = ''N'', updated_date = CURRENT_TIMESTAMP
+    SET is_active = 'N', updated_date = CURRENT_TIMESTAMP
     WHERE total_id = :total_id;
 
     IF SQL%ROWCOUNT > 0 THEN
         COMMIT;
-        :result := ''{"success":true}'';
+        :result := '{"success":true}';
     ELSE
-        :result := ''{"success":false,"error":"Total not found"}'';
+        :result := '{"success":false,"error":"Total not found"}';
     END IF;
 EXCEPTION
     WHEN OTHERS THEN
-        :result := ''{"success":false,"error":"'' || REPLACE(SQLERRM, ''"'', ''\"'') || ''"}'';
-END;',
+        :result := '{"success":false,"error":"' || REPLACE(SQLERRM, '"', '\"') || '"}';
+END;
+]',
         p_items_per_page => 0,
         p_mimes_allowed  => NULL,
         p_comments       => 'Soft delete a total'
