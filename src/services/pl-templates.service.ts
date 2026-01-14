@@ -3,6 +3,7 @@
 
 import { APEX_DB_CONFIG } from '../config/api.config';
 
+// Direct API calls to APEX
 const BASE_URL = APEX_DB_CONFIG.baseUrl;
 
 // Types
@@ -80,7 +81,8 @@ export interface ApiResponse<T> {
 // Get all templates
 export const getTemplates = async (): Promise<ApiResponse<PLTemplate[]>> => {
   try {
-    const response = await fetch(`${BASE_URL}/pl/templates`);
+    const baseUrl = BASE_URL;
+    const response = await fetch(`${baseUrl}/pl/templates`);
     const result = await response.json();
 
     if (result.templates) {
@@ -96,7 +98,8 @@ export const getTemplates = async (): Promise<ApiResponse<PLTemplate[]>> => {
 // Get template structure by ID
 export const getTemplateStructure = async (templateId: number): Promise<ApiResponse<PLTemplateStructure>> => {
   try {
-    const response = await fetch(`${BASE_URL}/pl/template/${templateId}`);
+    const baseUrl = BASE_URL;
+    const response = await fetch(`${baseUrl}/pl/template/${templateId}`);
     const result = await response.json();
 
     return { success: true, data: result };
@@ -114,7 +117,8 @@ export const createTemplate = async (
   templateType: string = 'CUSTOM'
 ): Promise<ApiResponse<{ template_id: number }>> => {
   try {
-    const response = await fetch(`${BASE_URL}/pl/template/create`, {
+    const baseUrl = BASE_URL;
+    const response = await fetch(`${baseUrl}/pl/template/create`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -147,7 +151,8 @@ export const addGroup = async (
   signConvention: number = 1
 ): Promise<ApiResponse<{ group_id: number }>> => {
   try {
-    const response = await fetch(`${BASE_URL}/pl/group/create`, {
+    const baseUrl = BASE_URL;
+    const response = await fetch(`${baseUrl}/pl/group/create`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -181,7 +186,8 @@ export const addSection = async (
   displayOrder: number
 ): Promise<ApiResponse<{ section_id: number }>> => {
   try {
-    const response = await fetch(`${BASE_URL}/pl/section/create`, {
+    const baseUrl = BASE_URL;
+    const response = await fetch(`${baseUrl}/pl/section/create`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -212,7 +218,8 @@ export const assignAccount = async (
   accountTo?: string
 ): Promise<ApiResponse<void>> => {
   try {
-    const response = await fetch(`${BASE_URL}/pl/account/assign`, {
+    const baseUrl = BASE_URL;
+    const response = await fetch(`${baseUrl}/pl/account/assign`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -244,7 +251,8 @@ export const addTotal = async (
   afterGroupCode?: string
 ): Promise<ApiResponse<void>> => {
   try {
-    const response = await fetch(`${BASE_URL}/pl/total/create`, {
+    const baseUrl = BASE_URL;
+    const response = await fetch(`${baseUrl}/pl/total/create`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -275,7 +283,8 @@ export const cloneTemplate = async (
   newTemplateName: string
 ): Promise<ApiResponse<{ template_id: number }>> => {
   try {
-    const response = await fetch(`${BASE_URL}/pl/template/clone`, {
+    const baseUrl = BASE_URL;
+    const response = await fetch(`${baseUrl}/pl/template/clone`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -299,7 +308,8 @@ export const cloneTemplate = async (
 // Delete template (soft delete)
 export const deleteTemplate = async (templateId: number): Promise<ApiResponse<void>> => {
   try {
-    const response = await fetch(`${BASE_URL}/pl/template/${templateId}`, {
+    const baseUrl = BASE_URL;
+    const response = await fetch(`${baseUrl}/pl/template/${templateId}`, {
       method: 'DELETE',
     });
     const result = await response.json();
@@ -317,7 +327,8 @@ export const deleteTemplate = async (templateId: number): Promise<ApiResponse<vo
 // Delete group (soft delete)
 export const deleteGroup = async (groupId: number): Promise<ApiResponse<void>> => {
   try {
-    const response = await fetch(`${BASE_URL}/pl/group/${groupId}`, {
+    const baseUrl = BASE_URL;
+    const response = await fetch(`${baseUrl}/pl/group/${groupId}`, {
       method: 'DELETE',
     });
     const result = await response.json();
@@ -335,7 +346,8 @@ export const deleteGroup = async (groupId: number): Promise<ApiResponse<void>> =
 // Delete section (soft delete)
 export const deleteSection = async (sectionId: number): Promise<ApiResponse<void>> => {
   try {
-    const response = await fetch(`${BASE_URL}/pl/section/${sectionId}`, {
+    const baseUrl = BASE_URL;
+    const response = await fetch(`${baseUrl}/pl/section/${sectionId}`, {
       method: 'DELETE',
     });
     const result = await response.json();
@@ -353,7 +365,8 @@ export const deleteSection = async (sectionId: number): Promise<ApiResponse<void
 // Delete account assignment
 export const deleteAccountAssignment = async (sectionAccountId: number): Promise<ApiResponse<void>> => {
   try {
-    const response = await fetch(`${BASE_URL}/pl/account/${sectionAccountId}`, {
+    const baseUrl = BASE_URL;
+    const response = await fetch(`${baseUrl}/pl/account/${sectionAccountId}`, {
       method: 'DELETE',
     });
     const result = await response.json();
@@ -371,7 +384,8 @@ export const deleteAccountAssignment = async (sectionAccountId: number): Promise
 // Delete total
 export const deleteTotal = async (totalId: number): Promise<ApiResponse<void>> => {
   try {
-    const response = await fetch(`${BASE_URL}/pl/total/${totalId}`, {
+    const baseUrl = BASE_URL;
+    const response = await fetch(`${baseUrl}/pl/total/${totalId}`, {
       method: 'DELETE',
     });
     const result = await response.json();
