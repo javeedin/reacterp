@@ -1611,7 +1611,7 @@ const IncomeStatementTemplates: React.FC = () => {
           onOk={() => totalForm.submit()}
           okText="Add"
           okButtonProps={{ style: { background: REDWOOD.primary } }}
-          width={600}
+          width={700}
         >
           <Form form={totalForm} layout="vertical" onFinish={handleAddTotal}>
             <Row gutter={16}>
@@ -1634,14 +1634,149 @@ const IncomeStatementTemplates: React.FC = () => {
                 </Form.Item>
               </Col>
             </Row>
+
+            {/* Formula Builder */}
             <Form.Item
               name="calculation_formula"
               label="Calculation Formula"
-              rules={[{ required: true, message: 'Enter formula' }]}
-              tooltip="Use group codes (G1, G2) or total codes (T1, T2) with +/- operators"
+              rules={[{ required: true, message: 'Build formula using buttons below' }]}
             >
-              <Input placeholder="e.g., G1+G2-G3 or T2+T3" />
+              <Input
+                placeholder="Click groups/totals below to build formula"
+                style={{ fontFamily: 'monospace', fontSize: 16, fontWeight: 600 }}
+                readOnly
+              />
             </Form.Item>
+
+            {/* Formula Builder Buttons */}
+            <Card size="small" style={{ marginBottom: 16, background: REDWOOD.neutral100 }}>
+              <div style={{ marginBottom: 12 }}>
+                <Text strong style={{ marginRight: 8 }}>Groups:</Text>
+                <Space wrap>
+                  {(getCurrentTemplateTab()?.template?.template.groups || []).map(g => (
+                    <Button
+                      key={g.group_code}
+                      size="small"
+                      style={{
+                        background: GROUP_TYPE_COLORS[g.group_type] || '#1890ff',
+                        borderColor: GROUP_TYPE_COLORS[g.group_type] || '#1890ff',
+                        color: '#fff'
+                      }}
+                      onClick={() => {
+                        const currentFormula = totalForm.getFieldValue('calculation_formula') || '';
+                        totalForm.setFieldsValue({
+                          calculation_formula: currentFormula + g.group_code
+                        });
+                      }}
+                    >
+                      {g.group_code} ({g.group_name})
+                    </Button>
+                  ))}
+                </Space>
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <Text strong style={{ marginRight: 8 }}>Existing Totals:</Text>
+                <Space wrap>
+                  {(getCurrentTemplateTab()?.template?.template.totals || []).map(t => (
+                    <Button
+                      key={t.total_code}
+                      size="small"
+                      style={{ background: '#722ed1', borderColor: '#722ed1', color: '#fff' }}
+                      onClick={() => {
+                        const currentFormula = totalForm.getFieldValue('calculation_formula') || '';
+                        totalForm.setFieldsValue({
+                          calculation_formula: currentFormula + t.total_code
+                        });
+                      }}
+                    >
+                      {t.total_code} ({t.total_name})
+                    </Button>
+                  ))}
+                  {(getCurrentTemplateTab()?.template?.template.totals || []).length === 0 && (
+                    <Text type="secondary">No totals defined yet</Text>
+                  )}
+                </Space>
+              </div>
+
+              <div>
+                <Text strong style={{ marginRight: 8 }}>Operators:</Text>
+                <Space>
+                  <Button
+                    size="small"
+                    type="primary"
+                    style={{ background: REDWOOD.success, borderColor: REDWOOD.success, fontWeight: 600, fontSize: 16 }}
+                    onClick={() => {
+                      const currentFormula = totalForm.getFieldValue('calculation_formula') || '';
+                      totalForm.setFieldsValue({
+                        calculation_formula: currentFormula + '+'
+                      });
+                    }}
+                  >
+                    +
+                  </Button>
+                  <Button
+                    size="small"
+                    type="primary"
+                    danger
+                    style={{ fontWeight: 600, fontSize: 16 }}
+                    onClick={() => {
+                      const currentFormula = totalForm.getFieldValue('calculation_formula') || '';
+                      totalForm.setFieldsValue({
+                        calculation_formula: currentFormula + '-'
+                      });
+                    }}
+                  >
+                    −
+                  </Button>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      const currentFormula = totalForm.getFieldValue('calculation_formula') || '';
+                      totalForm.setFieldsValue({
+                        calculation_formula: currentFormula + '('
+                      });
+                    }}
+                  >
+                    (
+                  </Button>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      const currentFormula = totalForm.getFieldValue('calculation_formula') || '';
+                      totalForm.setFieldsValue({
+                        calculation_formula: currentFormula + ')'
+                      });
+                    }}
+                  >
+                    )
+                  </Button>
+                  <Divider type="vertical" />
+                  <Button
+                    size="small"
+                    icon={<DeleteOutlined />}
+                    onClick={() => {
+                      const currentFormula = totalForm.getFieldValue('calculation_formula') || '';
+                      totalForm.setFieldsValue({
+                        calculation_formula: currentFormula.slice(0, -1)
+                      });
+                    }}
+                  >
+                    Backspace
+                  </Button>
+                  <Button
+                    size="small"
+                    danger
+                    onClick={() => {
+                      totalForm.setFieldsValue({ calculation_formula: '' });
+                    }}
+                  >
+                    Clear
+                  </Button>
+                </Space>
+              </div>
+            </Card>
+
             <Row gutter={16}>
               <Col span={12}>
                 <Form.Item
@@ -1658,10 +1793,10 @@ const IncomeStatementTemplates: React.FC = () => {
                     allowClear
                     placeholder="Select group"
                     options={
-                      getCurrentTemplateTab()?.template?.template.groups.map(g => ({
+                      (getCurrentTemplateTab()?.template?.template.groups || []).map(g => ({
                         value: g.group_code,
                         label: `${g.group_code} - ${g.group_name}`,
-                      })) || []
+                      }))
                     }
                   />
                 </Form.Item>
