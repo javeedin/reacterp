@@ -40,24 +40,19 @@ BEGIN
         p_pattern        => 'templates',
         p_method         => 'GET',
         p_source_type    => 'plsql/block',
-        p_source         => '
+        p_source         => q'[
+DECLARE
+    v_clob CLOB;
 BEGIN
-    :result := rr_pl_template_pkg.get_templates;
-END;',
+    v_clob := rr_pl_template_pkg.get_templates;
+    owa_util.mime_header('application/json', FALSE);
+    owa_util.http_header_close;
+    htp.p(v_clob);
+END;
+]',
         p_items_per_page => 0,
         p_mimes_allowed  => NULL,
         p_comments       => 'Get list of all P&L templates'
-    );
-
-    ORDS.DEFINE_PARAMETER(
-        p_module_name        => 'pl',
-        p_pattern            => 'templates',
-        p_method             => 'GET',
-        p_name               => 'result',
-        p_bind_variable_name => 'result',
-        p_source_type        => 'RESPONSE',
-        p_param_type         => 'STRING',
-        p_access_method      => 'OUT'
     );
     COMMIT;
 END;
@@ -85,24 +80,19 @@ BEGIN
         p_pattern        => 'template/:template_id',
         p_method         => 'GET',
         p_source_type    => 'plsql/block',
-        p_source         => '
+        p_source         => q'[
+DECLARE
+    v_clob CLOB;
 BEGIN
-    :result := rr_pl_template_pkg.get_template_structure(:template_id);
-END;',
+    v_clob := rr_pl_template_pkg.get_template_structure(:template_id);
+    owa_util.mime_header('application/json', FALSE);
+    owa_util.http_header_close;
+    htp.p(v_clob);
+END;
+]',
         p_items_per_page => 0,
         p_mimes_allowed  => NULL,
         p_comments       => 'Get template structure with groups, sections, accounts, and totals'
-    );
-
-    ORDS.DEFINE_PARAMETER(
-        p_module_name        => 'pl',
-        p_pattern            => 'template/:template_id',
-        p_method             => 'GET',
-        p_name               => 'result',
-        p_bind_variable_name => 'result',
-        p_source_type        => 'RESPONSE',
-        p_param_type         => 'STRING',
-        p_access_method      => 'OUT'
     );
     COMMIT;
 END;
