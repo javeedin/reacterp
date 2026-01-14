@@ -178,25 +178,48 @@ export const addGroup = async (
 ): Promise<ApiResponse<{ group_id: number }>> => {
   try {
     const baseUrl = BASE_URL;
-    const response = await fetch(`${baseUrl}/pl/group/create`, {
+    const url = `${baseUrl}/pl/group/create`;
+    const payload = {
+      template_id: templateId,
+      group_code: groupCode,
+      group_name: groupName,
+      group_label: groupLabel,
+      group_type: groupType,
+      display_order: displayOrder,
+      sign_convention: signConvention,
+    };
+
+    console.log('=== ADD GROUP REQUEST ===');
+    console.log('URL:', url);
+    console.log('Payload:', JSON.stringify(payload, null, 2));
+
+    const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        template_id: templateId,
-        group_code: groupCode,
-        group_name: groupName,
-        group_label: groupLabel,
-        group_type: groupType,
-        display_order: displayOrder,
-        sign_convention: signConvention,
-      }),
+      body: JSON.stringify(payload),
     });
-    const result = await response.json();
+
+    console.log('Response Status:', response.status);
+    console.log('Response OK:', response.ok);
+
+    const responseText = await response.text();
+    console.log('Response Text:', responseText);
+
+    // Try to parse JSON
+    let result;
+    try {
+      result = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('JSON Parse Error:', parseError);
+      return { success: false, error: `Invalid JSON response: ${responseText}` };
+    }
+
+    console.log('Parsed Result:', result);
 
     if (result.success) {
       return { success: true, data: { group_id: result.group_id } };
     }
-    return { success: false, error: result.error };
+    return { success: false, error: result.error || 'Unknown error' };
   } catch (error) {
     console.error('Error adding group:', error);
     return { success: false, error: String(error) };
