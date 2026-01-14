@@ -58,6 +58,7 @@ import { syncSuppliers, testSuppliersConnection, type SuppliersSyncProgress, typ
 import { syncSupplierAddresses, testSupplierAddressConnection, type SupplierAddressSyncProgress, type SupplierAddressPayloadCallback } from '../../services/supplier-address-sync.service';
 import { syncSupplierSites, testSupplierSitesConnection, type SupplierSitesSyncProgress, type SupplierSitesPayloadCallback } from '../../services/supplier-sites-sync.service';
 import { syncSiteAssignments, testSiteAssignmentsConnection, type SiteAssignmentsSyncProgress, type SiteAssignmentsPayloadCallback } from '../../services/supplier-site-assignments-sync.service';
+import { syncGLBalances, testGLBalancesConnection, type GLBalancesSyncProgress, type BalancePayloadCallback, type GLBalanceRecord } from '../../services/gl-balances-sync.service';
 import { useSyncWorker, type WorkerSyncProgress, type WorkerLog } from '../../hooks/useSyncWorker';
 import Autopilot from '../../components/Autopilot';
 import { useElectron, useElectronBackgroundSync } from '../../hooks/useElectron';
@@ -596,6 +597,29 @@ const SyncData: React.FC = () => {
     endTime: null,
   });
 
+  // GL Balances (SOAP) Progress State
+  const [glBalancesProgress, setGLBalancesProgress] = useState<GLBalancesSyncProgress>({
+    status: 'idle',
+    totalRecords: 0,
+    processedRecords: 0,
+    insertedRecords: 0,
+    updatedRecords: 0,
+    errors: 0,
+    lastError: '',
+    startTime: null,
+    endTime: null,
+  });
+
+  // GL Balances payload state (for debug)
+  const [glBalancesPayloads, setGLBalancesPayloads] = useState<Array<{
+    batchNum: number;
+    recordCount: number;
+    payload: GLBalanceRecord[];
+    postResult?: any;
+    status: 'pending' | 'success' | 'error';
+    errorMessage?: string;
+  }>>([]);
+
   // Determine sync type based on selected object
   const isAPInvoices = selectedObject?.id === 'ap-invoices';
   const isAPPayments = selectedObject?.id === 'ap-payments';
@@ -615,6 +639,7 @@ const SyncData: React.FC = () => {
   const isGLBatchesOnly = selectedObject?.id === 'gl-batches-only';
   const isGLHeadersOnly = selectedObject?.id === 'gl-headers-only';
   const isGLLinesOnly = selectedObject?.id === 'gl-lines-only';
+  const isGLBalances = selectedObject?.id === 'gl-balances-soap';
 
   // Web Worker for background sync
   const handleWorkerProgress = useCallback((progress: WorkerSyncProgress) => {
@@ -1499,6 +1524,11 @@ const SyncData: React.FC = () => {
       addLog('info', 'Testing Site Assignments endpoint...');
       const result = await testSiteAssignmentsConnection(addLog);
       success = result.success;
+    } else if (isGLBalances) {
+      addLog('info', 'Testing GL Balances SOAP endpoint...');
+      const parameters = getParameters();
+      const result = await testGLBalancesConnection(parameters, addLog);
+      success = result.success;
     } else {
       addLog('info', 'Testing GL Journals endpoint...');
       success = await testGLConnection(addLog);
@@ -2068,6 +2098,49 @@ const SyncData: React.FC = () => {
         handleSiteAssignmentsPayload
       );
       syncResult = { inserted: result.insertedAssignments, errors: result.errors, type: 'site assignments' };
+    } else if (isGLBalances) {
+      // GL Balances (SOAP) Sync
+      setGLBalancesProgress({
+        status: 'fetching',
+        totalRecords: 0,
+        processedRecords: 0,
+        insertedRecords: 0,
+        updatedRecords: 0,
+        errors: 0,
+        lastError: '',
+        startTime: new Date(),
+        endTime: null,
+      });
+
+      const handleGLBalancesPayload: BalancePayloadCallback = (batchNum, payload, result, error) => {
+        setGLBalancesPayloads((prev) => [
+          ...prev,
+          {
+            batchNum,
+            recordCount: payload.length,
+            payload,
+            postResult: result,
+            status: error ? 'error' : (result ? 'success' : 'pending'),
+            errorMessage: error,
+          },
+        ].slice(-100)); // Keep last 100 batches
+      };
+
+      const result = await syncGLBalances(
+        parameters,
+        testMode,
+        addLog,
+        (newProgress) => {
+          setGLBalancesProgress((prev) => ({ ...prev, ...newProgress }));
+          if (newProgress.processedRecords !== undefined && newProgress.totalRecords) {
+            notifySyncProgress(`${newProgress.processedRecords}/${newProgress.totalRecords} balances`);
+          }
+        },
+        abortControllerRef.current.signal,
+        handleGLBalancesPayload,
+        verboseConsole
+      );
+      syncResult = { inserted: result.insertedRecords + result.updatedRecords, errors: result.errors, type: 'GL balances' };
     } else if (isGLBatchesOnly) {
       // GL Batches Only Sync
       setGLBatchesOnlyProgress({
