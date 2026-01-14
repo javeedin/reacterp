@@ -42,7 +42,8 @@ export const buildOracleUrl = (
 export const testOracleConnection = async (
   _objectConfig: SyncObjectConfig,
   _parameters: Record<string, string>,
-  log?: LogCallback
+  log?: LogCallback,
+  verboseConsole: boolean = false
 ): Promise<SyncResult> => {
   log?.('info', 'Testing connection via proxy server...');
   log?.('info', `Proxy URL: ${PROXY_CONFIG.baseUrl}`);
@@ -67,7 +68,7 @@ export const testOracleConnection = async (
 
     const response = await fetch(url);
     const data = await response.json();
-    console.log('Test Oracle Response:', data);
+    if (verboseConsole) console.log('Test Oracle Response:', data);
 
     if (data.success) {
       log?.('success', `Oracle connection successful! (${data.duration}ms)`);
@@ -94,7 +95,8 @@ export const fetchFromOracle = async (
   parameters: Record<string, string>,
   offset: number = 0,
   limit: number = ORACLE_FUSION_CONFIG.defaultLimit,
-  log?: LogCallback
+  log?: LogCallback,
+  verboseConsole: boolean = false
 ): Promise<SyncResult> => {
   try {
     // Build query params
@@ -114,8 +116,10 @@ export const fetchFromOracle = async (
 
     const url = `${PROXY_CONFIG.baseUrl}/oracle/${objectConfig.oracleEndpoint}?${queryParams.toString()}`;
 
-    console.log('=== FETCH FROM ORACLE (via proxy) ===');
-    console.log('URL:', url);
+    if (verboseConsole) {
+      console.log('=== FETCH FROM ORACLE (via proxy) ===');
+      console.log('URL:', url);
+    }
 
     log?.('info', `Fetching via proxy: ${objectConfig.oracleEndpoint}`);
     log?.('info', `Params: offset=${offset}, limit=${limit}`);
@@ -125,7 +129,7 @@ export const fetchFromOracle = async (
     const duration = Date.now() - startTime;
 
     const data = await response.json();
-    console.log('Response:', { success: data.success, items: data.items?.length, hasMore: data.hasMore });
+    if (verboseConsole) console.log('Response:', { success: data.success, items: data.items?.length, hasMore: data.hasMore });
 
     if (!data.success) {
       log?.('error', `Fetch failed: ${data.error}`);
@@ -149,7 +153,7 @@ export const fetchFromOracle = async (
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('Fetch error:', error);
+    if (verboseConsole) console.error('Fetch error:', error);
     log?.('error', `Fetch error: ${errorMessage}`);
     return { success: false, error: errorMessage };
   }
@@ -159,14 +163,17 @@ export const fetchFromOracle = async (
 export const insertToApex = async (
   objectConfig: SyncObjectConfig,
   records: unknown[],
-  log?: LogCallback
+  log?: LogCallback,
+  verboseConsole: boolean = false
 ): Promise<SyncResult> => {
   try {
     const url = `${PROXY_CONFIG.baseUrl}/apex/${objectConfig.apexEndpoint}`;
 
-    console.log('=== INSERT TO APEX (via proxy) ===');
-    console.log('URL:', url);
-    console.log('Records:', records.length);
+    if (verboseConsole) {
+      console.log('=== INSERT TO APEX (via proxy) ===');
+      console.log('URL:', url);
+      console.log('Records:', records.length);
+    }
 
     log?.('info', `Inserting via proxy: ${objectConfig.apexEndpoint}`);
     log?.('info', `Payload: ${records.length} records`);
@@ -182,7 +189,7 @@ export const insertToApex = async (
     const duration = Date.now() - startTime;
 
     const data = await response.json();
-    console.log('Response:', data);
+    if (verboseConsole) console.log('Response:', data);
 
     if (!data.success) {
       log?.('error', `Insert failed: ${data.error}`);
@@ -201,7 +208,7 @@ export const insertToApex = async (
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('Insert error:', error);
+    if (verboseConsole) console.error('Insert error:', error);
     log?.('error', `Insert error: ${errorMessage}`);
     return { success: false, error: errorMessage, count: 0 };
   }
@@ -211,7 +218,8 @@ export const insertToApex = async (
 export const getOracleTotalCount = async (
   objectConfig: SyncObjectConfig,
   parameters: Record<string, string>,
-  log?: LogCallback
+  log?: LogCallback,
+  verboseConsole: boolean = false
 ): Promise<number> => {
   try {
     const queryParams = new URLSearchParams();
@@ -231,8 +239,10 @@ export const getOracleTotalCount = async (
 
     const url = `${PROXY_CONFIG.baseUrl}/oracle/${objectConfig.oracleEndpoint}?${queryParams.toString()}`;
 
-    console.log('=== GET ORACLE COUNT (via proxy) ===');
-    console.log('URL:', url);
+    if (verboseConsole) {
+      console.log('=== GET ORACLE COUNT (via proxy) ===');
+      console.log('URL:', url);
+    }
 
     log?.('info', `Getting count via proxy...`);
 
@@ -250,7 +260,7 @@ export const getOracleTotalCount = async (
     return count;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('Get count error:', error);
+    if (verboseConsole) console.error('Get count error:', error);
     log?.('error', `Failed to get count: ${errorMessage}`);
     return 0;
   }
