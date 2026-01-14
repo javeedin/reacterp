@@ -1429,10 +1429,25 @@ const SyncData: React.FC = () => {
 
   const handleObjectChange = (objectId: string) => {
     const object = SYNC_OBJECTS.find((o) => o.id === objectId);
-    setSelectedObject(object || null);
-    form.resetFields(['parameters']);
 
+    // Reset all parameter fields from ALL sync objects to clear any cached values
+    const allParamKeys = SYNC_OBJECTS.flatMap(obj => obj.parameters.map(p => p.key));
+    const uniqueParamKeys = [...new Set(allParamKeys)];
+    form.resetFields(uniqueParamKeys);
+
+    setSelectedObject(object || null);
+
+    // Set default values for new object's parameters
     if (object) {
+      const defaults: Record<string, string> = {};
+      object.parameters.forEach((param) => {
+        if (param.defaultValue) {
+          defaults[param.key] = param.defaultValue;
+        }
+      });
+      if (Object.keys(defaults).length > 0) {
+        form.setFieldsValue(defaults);
+      }
       addLog('info', `Selected: ${object.name}`);
     }
   };
