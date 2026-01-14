@@ -22,7 +22,7 @@ export const APEX_DB_CONFIG = {
     journalBatches: 'gl/journalbatches',
     journalHeaders: 'gl/journals/headers',
     journalLines: 'gl/journals/lines',
-    glBalances: 'gl/balances',
+    glBalances: 'gl/trialbalance',
     // AP Endpoints
     apInvoices: 'ap/invoices',
     apInvoicesBulk: 'ap/invoices/bulk',
