@@ -223,19 +223,21 @@ export const syncGLBalances = async (
 
   try {
     // ========================================
-    // STEP 1: Build and send SOAP request
+    // STEP 1: Build SOAP Request
     // ========================================
     updateProgress({ status: 'fetching' });
     log?.('step', '═══════════════════════════════════════════════════════════');
-    log?.('step', '  STEP 1: Fetching GL Balances from Oracle BI Publisher');
+    log?.('step', '  STEP 1: Building SOAP Request');
     log?.('step', '═══════════════════════════════════════════════════════════');
 
     const environment = (parameters.environment || 'prod') as 'prod' | 'test';
     const config = ORACLE_SOAP_CONFIG[environment];
 
-    log?.('info', `Environment: ${environment}`);
-    log?.('info', `Report: ${ORACLE_SOAP_CONFIG.reports.glBalances}`);
-    log?.('info', `Period: ${parameters.P_PERIOD_NAME}`);
+    log?.('info', `Environment: ${environment.toUpperCase()}`);
+    log?.('info', `SOAP Endpoint: ${config.baseUrl}`);
+    log?.('info', `Report Path: ${ORACLE_SOAP_CONFIG.reports.glBalances}`);
+    log?.('info', `Parameter P_PERIOD_NAME: ${parameters.P_PERIOD_NAME}`);
+    log?.('info', `Username: ${config.username}`);
 
     const soapEnvelope = buildSoapEnvelope(
       ORACLE_SOAP_CONFIG.reports.glBalances,
@@ -244,13 +246,26 @@ export const syncGLBalances = async (
       config.password
     );
 
+    // Log SOAP Envelope
+    log?.('step', '──── SOAP ENVELOPE ────');
+    log?.('info', soapEnvelope);
+
     if (verboseConsole) {
       console.log('=== SOAP REQUEST ===');
       console.log('URL:', config.baseUrl);
-      console.log('Envelope:', soapEnvelope.substring(0, 500) + '...');
+      console.log('Envelope:', soapEnvelope);
     }
 
-    log?.('info', 'Sending SOAP request to proxy...');
+    // ========================================
+    // STEP 2: Send SOAP Request via Proxy
+    // ========================================
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('step', '  STEP 2: Sending SOAP Request to Oracle BI Publisher');
+    log?.('step', '═══════════════════════════════════════════════════════════');
+
+    const proxyUrl = `${PROXY_CONFIG.baseUrl}/soap/bip-report`;
+    log?.('info', `Proxy URL: ${proxyUrl}`);
+    log?.('info', 'Sending request...');
 
     if (abortSignal?.aborted) {
       updateProgress({ status: 'stopped' });
@@ -259,7 +274,7 @@ export const syncGLBalances = async (
     }
 
     const startTime = Date.now();
-    const response = await fetch(`${PROXY_CONFIG.baseUrl}/soap/bip-report`, {
+    const response = await fetch(proxyUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -273,27 +288,26 @@ export const syncGLBalances = async (
     const duration = Date.now() - startTime;
     const result = await response.json();
 
+    log?.('info', `Response received in ${duration}ms`);
+
     if (!result.success) {
       log?.('error', `SOAP request failed: ${result.error}`);
+      if (result.details) {
+        log?.('error', `Details: ${result.details}`);
+      }
       updateProgress({ status: 'error', lastError: result.error });
       return progress;
     }
 
-    log?.('success', `SOAP response received in ${duration}ms`);
+    log?.('success', `SOAP Response: Success`);
+    log?.('info', `Records found in response: ${result.recordCount}`);
 
     // ========================================
-    // STEP 2: Parse XML response
+    // STEP 3: Show Base64 & Decoded XML
     // ========================================
-    updateProgress({ status: 'parsing' });
     log?.('step', '═══════════════════════════════════════════════════════════');
-    log?.('step', '  STEP 2: Parsing XML Response');
+    log?.('step', '  STEP 3: Decoding Base64 Response');
     log?.('step', '═══════════════════════════════════════════════════════════');
-
-    if (abortSignal?.aborted) {
-      updateProgress({ status: 'stopped' });
-      log?.('warning', 'Sync stopped by user');
-      return progress;
-    }
 
     const decodedXml = result.decodedXml;
 
@@ -303,7 +317,30 @@ export const syncGLBalances = async (
       return progress;
     }
 
-    log?.('info', `Decoded XML length: ${decodedXml.length} characters`);
+    log?.('info', `Decoded XML Length: ${decodedXml.length} characters`);
+
+    // Show sample of decoded XML (first 2000 chars)
+    log?.('step', '──── DECODED XML (Sample - first 2000 chars) ────');
+    log?.('info', decodedXml.substring(0, 2000) + (decodedXml.length > 2000 ? '...' : ''));
+
+    if (verboseConsole) {
+      console.log('=== DECODED XML ===');
+      console.log(decodedXml.substring(0, 5000));
+    }
+
+    // ========================================
+    // STEP 4: Parse XML to JSON Records
+    // ========================================
+    updateProgress({ status: 'parsing' });
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('step', '  STEP 4: Parsing XML to JSON Records');
+    log?.('step', '═══════════════════════════════════════════════════════════');
+
+    if (abortSignal?.aborted) {
+      updateProgress({ status: 'stopped' });
+      log?.('warning', 'Sync stopped by user');
+      return progress;
+    }
 
     // Parse XML to records
     const records = parseGLBalancesXml(decodedXml);
@@ -317,25 +354,42 @@ export const syncGLBalances = async (
       return progress;
     }
 
+    // Show sample JSON record
+    log?.('step', '──── SAMPLE JSON RECORD (First Record) ────');
+    log?.('info', JSON.stringify(records[0], null, 2));
+
+    if (verboseConsole) {
+      console.log('=== PARSED JSON RECORDS (first 3) ===');
+      console.log(JSON.stringify(records.slice(0, 3), null, 2));
+    }
+
     // Apply test mode limits
     let recordsToProcess = records;
     if (testMode === 'single') {
       recordsToProcess = records.slice(0, 1);
-      log?.('info', `SINGLE RECORD MODE: Processing 1 of ${records.length} records`);
+      log?.('warning', `SINGLE RECORD MODE: Processing 1 of ${records.length} records`);
     } else if (testMode === true) {
       recordsToProcess = records.slice(0, 25);
-      log?.('info', `TEST MODE: Processing ${recordsToProcess.length} of ${records.length} records`);
+      log?.('warning', `TEST MODE: Processing ${recordsToProcess.length} of ${records.length} records`);
+    } else {
+      log?.('info', `FULL SYNC MODE: Processing all ${records.length} records`);
     }
 
     updateProgress({ totalRecords: recordsToProcess.length });
 
     // ========================================
-    // STEP 3: Insert to APEX
+    // STEP 5: Insert to APEX Database
     // ========================================
     updateProgress({ status: 'inserting' });
     log?.('step', '═══════════════════════════════════════════════════════════');
-    log?.('step', '  STEP 3: Inserting to APEX Database');
+    log?.('step', '  STEP 5: Inserting Records to APEX Database');
     log?.('step', '═══════════════════════════════════════════════════════════');
+
+    const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.glBalances}`;
+    const proxyApexUrl = `${PROXY_CONFIG.baseUrl}/apex/${APEX_DB_CONFIG.endpoints.glBalances}`;
+
+    log?.('info', `APEX Direct URL: ${apexUrl}`);
+    log?.('info', `APEX Proxy URL: ${proxyApexUrl}`);
 
     const batchSize = 500;
     let batchNum = 0;
@@ -353,19 +407,29 @@ export const syncGLBalances = async (
       batchNum++;
       const batch = recordsToProcess.slice(i, i + batchSize);
 
-      log?.('info', `Processing batch ${batchNum}: ${batch.length} records (${i + 1}-${i + batch.length} of ${recordsToProcess.length})`);
+      log?.('step', `──── BATCH ${batchNum} ────`);
+      log?.('info', `Records: ${batch.length} (${i + 1}-${i + batch.length} of ${recordsToProcess.length})`);
+
+      // Show POST payload for first batch
+      if (batchNum === 1) {
+        log?.('step', '──── APEX POST PAYLOAD (First Batch Sample) ────');
+        const payloadSample = { items: batch.slice(0, 2) };
+        log?.('info', JSON.stringify(payloadSample, null, 2));
+        if (batch.length > 2) {
+          log?.('info', `... and ${batch.length - 2} more records in this batch`);
+        }
+      }
 
       try {
-        const insertUrl = `${PROXY_CONFIG.baseUrl}/apex/${APEX_DB_CONFIG.endpoints.glBalances}`;
-
         if (verboseConsole) {
-          console.log('=== APEX POST ===');
-          console.log('URL:', insertUrl);
+          console.log(`=== APEX POST BATCH ${batchNum} ===`);
+          console.log('URL:', proxyApexUrl);
           console.log('Records:', batch.length);
+          console.log('Payload:', JSON.stringify({ items: batch.slice(0, 2) }, null, 2));
         }
 
         const insertStart = Date.now();
-        const insertResponse = await fetch(insertUrl, {
+        const insertResponse = await fetch(proxyApexUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -376,6 +440,10 @@ export const syncGLBalances = async (
         const insertDuration = Date.now() - insertStart;
         const insertResult = await insertResponse.json();
 
+        // Log response
+        log?.('step', '──── APEX RESPONSE ────');
+        log?.('info', JSON.stringify(insertResult, null, 2));
+
         if (verboseConsole) {
           console.log('Response:', insertResult);
         }
@@ -385,7 +453,10 @@ export const syncGLBalances = async (
           totalUpdated += insertResult.updated || 0;
           totalErrors += insertResult.errors || 0;
 
-          log?.('success', `Batch ${batchNum}: Inserted ${insertResult.inserted || 0}, Updated ${insertResult.updated || 0}, Errors ${insertResult.errors || 0} (${insertDuration}ms)`);
+          log?.('success', `Batch ${batchNum} completed in ${insertDuration}ms`);
+          log?.('info', `  Inserted: ${insertResult.inserted || 0}`);
+          log?.('info', `  Updated: ${insertResult.updated || 0}`);
+          log?.('info', `  Errors: ${insertResult.errors || 0}`);
 
           onPayload?.(batchNum, batch, insertResult);
         } else {
@@ -416,15 +487,22 @@ export const syncGLBalances = async (
     }
 
     // ========================================
-    // STEP 4: Summary
+    // STEP 6: Summary
     // ========================================
     log?.('step', '═══════════════════════════════════════════════════════════');
     log?.('step', '  SYNC COMPLETED');
     log?.('step', '═══════════════════════════════════════════════════════════');
-    log?.('success', `Total Records: ${recordsToProcess.length}`);
+    log?.('success', `Total Records Processed: ${recordsToProcess.length}`);
     log?.('success', `Inserted: ${totalInserted}`);
     log?.('success', `Updated: ${totalUpdated}`);
-    log?.('info', `Errors: ${totalErrors}`);
+    if (totalErrors > 0) {
+      log?.('error', `Errors: ${totalErrors}`);
+    } else {
+      log?.('info', `Errors: 0`);
+    }
+
+    const totalDuration = Date.now() - progress.startTime!.getTime();
+    log?.('info', `Total Duration: ${(totalDuration / 1000).toFixed(1)}s`);
 
     updateProgress({
       status: 'completed',
