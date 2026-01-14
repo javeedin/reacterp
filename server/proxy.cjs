@@ -4,6 +4,9 @@ const cors = require('cors');
 const app = express();
 const PORT = 3001;
 
+// Verbose logging - set VERBOSE=true to enable detailed console logs
+const VERBOSE = process.env.VERBOSE === 'true';
+
 // Oracle Fusion Configuration
 const ORACLE_CONFIG = {
   baseUrl: 'https://iaaobn.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05',
@@ -29,7 +32,7 @@ app.use(express.json({ limit: '50mb' }));
 
 // Logging middleware
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  if (VERBOSE) console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
   next();
 });
 
@@ -58,8 +61,10 @@ app.get('/api/oracle-url', async (req, res) => {
     return res.status(400).json({ success: false, error: 'URL parameter required' });
   }
 
-  console.log('=== ORACLE URL PROXY REQUEST ===');
-  console.log('Full URL:', fullUrl);
+  if (VERBOSE) {
+    console.log('=== ORACLE URL PROXY REQUEST ===');
+    console.log('Full URL:', fullUrl);
+  }
 
   try {
     const response = await fetch(fullUrl, {
@@ -71,11 +76,11 @@ app.get('/api/oracle-url', async (req, res) => {
       },
     });
 
-    console.log('Oracle Response Status:', response.status);
+    if (VERBOSE) console.log('Oracle Response Status:', response.status);
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.log('Oracle Error:', errorText.substring(0, 300));
+      if (VERBOSE) console.log('Oracle Error:', errorText.substring(0, 300));
       return res.status(response.status).json({
         success: false,
         error: `Oracle API Error: ${response.status} ${response.statusText}`,
@@ -84,14 +89,14 @@ app.get('/api/oracle-url', async (req, res) => {
     }
 
     const data = await response.json();
-    console.log('Oracle Response - Items:', data.items?.length || 0, 'HasMore:', data.hasMore);
+    if (VERBOSE) console.log('Oracle Response - Items:', data.items?.length || 0, 'HasMore:', data.hasMore);
 
     res.json({
       success: true,
       ...data,
     });
   } catch (error) {
-    console.error('Oracle URL Proxy Error:', error.message);
+    if (VERBOSE) console.error('Oracle URL Proxy Error:', error.message);
     res.status(500).json({
       success: false,
       error: error.message,
@@ -105,10 +110,12 @@ app.get('/api/oracle/:endpoint', async (req, res) => {
   const queryString = new URLSearchParams(req.query).toString();
   const url = `${ORACLE_CONFIG.baseUrl}/${endpoint}${queryString ? '?' + queryString : ''}`;
 
-  console.log('=== ORACLE PROXY REQUEST ===');
-  console.log('Endpoint:', endpoint);
-  console.log('Query:', req.query);
-  console.log('Full URL:', url);
+  if (VERBOSE) {
+    console.log('=== ORACLE PROXY REQUEST ===');
+    console.log('Endpoint:', endpoint);
+    console.log('Query:', req.query);
+    console.log('Full URL:', url);
+  }
 
   try {
     const response = await fetch(url, {
@@ -120,11 +127,11 @@ app.get('/api/oracle/:endpoint', async (req, res) => {
       },
     });
 
-    console.log('Oracle Response Status:', response.status);
+    if (VERBOSE) console.log('Oracle Response Status:', response.status);
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.log('Oracle Error:', errorText);
+      if (VERBOSE) console.log('Oracle Error:', errorText);
       return res.status(response.status).json({
         success: false,
         error: `Oracle API Error: ${response.status} ${response.statusText}`,
@@ -133,14 +140,14 @@ app.get('/api/oracle/:endpoint', async (req, res) => {
     }
 
     const data = await response.json();
-    console.log('Oracle Response - Items:', data.items?.length || 0, 'HasMore:', data.hasMore);
+    if (VERBOSE) console.log('Oracle Response - Items:', data.items?.length || 0, 'HasMore:', data.hasMore);
 
     res.json({
       success: true,
       ...data,
     });
   } catch (error) {
-    console.error('Oracle Proxy Error:', error.message);
+    if (VERBOSE) console.error('Oracle Proxy Error:', error.message);
     res.status(500).json({
       success: false,
       error: error.message,
@@ -158,10 +165,12 @@ app.get(/^\/api\/fusion\/(.+)$/, async (req, res) => {
   // Construct URL - the path already includes /fscmRestApi/...
   const url = `https://iaaobn.fa.ocs.oraclecloud.com:443/${path}${queryString}`;
 
-  console.log('=== FUSION PROXY REQUEST ===');
-  console.log('Path:', path);
-  console.log('Query:', req.query);
-  console.log('Full URL:', url);
+  if (VERBOSE) {
+    console.log('=== FUSION PROXY REQUEST ===');
+    console.log('Path:', path);
+    console.log('Query:', req.query);
+    console.log('Full URL:', url);
+  }
 
   try {
     const response = await fetch(url, {
@@ -173,11 +182,11 @@ app.get(/^\/api\/fusion\/(.+)$/, async (req, res) => {
       },
     });
 
-    console.log('Fusion Response Status:', response.status);
+    if (VERBOSE) console.log('Fusion Response Status:', response.status);
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.log('Fusion Error:', errorText.substring(0, 300));
+      if (VERBOSE) console.log('Fusion Error:', errorText.substring(0, 300));
       return res.status(response.status).json({
         success: false,
         error: `Fusion API Error: ${response.status} ${response.statusText}`,
@@ -186,11 +195,11 @@ app.get(/^\/api\/fusion\/(.+)$/, async (req, res) => {
     }
 
     const data = await response.json();
-    console.log('Fusion Response - Items:', data.items?.length || 0, 'HasMore:', data.hasMore);
+    if (VERBOSE) console.log('Fusion Response - Items:', data.items?.length || 0, 'HasMore:', data.hasMore);
 
     res.json(data);
   } catch (error) {
-    console.error('Fusion Proxy Error:', error.message);
+    if (VERBOSE) console.error('Fusion Proxy Error:', error.message);
     res.status(500).json({
       success: false,
       error: error.message,
@@ -208,10 +217,12 @@ app.get(/^\/api\/hcm\/(.+)$/, async (req, res) => {
   // Construct URL using HCM test environment
   const url = `${ORACLE_HCM_CONFIG.baseUrl}/${path}${queryString}`;
 
-  console.log('=== HCM PROXY REQUEST ===');
-  console.log('Path:', path);
-  console.log('Query:', req.query);
-  console.log('Full URL:', url);
+  if (VERBOSE) {
+    console.log('=== HCM PROXY REQUEST ===');
+    console.log('Path:', path);
+    console.log('Query:', req.query);
+    console.log('Full URL:', url);
+  }
 
   try {
     const response = await fetch(url, {
@@ -223,11 +234,11 @@ app.get(/^\/api\/hcm\/(.+)$/, async (req, res) => {
       },
     });
 
-    console.log('HCM Response Status:', response.status);
+    if (VERBOSE) console.log('HCM Response Status:', response.status);
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.log('HCM Error:', errorText.substring(0, 300));
+      if (VERBOSE) console.log('HCM Error:', errorText.substring(0, 300));
       return res.status(response.status).json({
         success: false,
         error: `HCM API Error: ${response.status} ${response.statusText}`,
@@ -236,11 +247,11 @@ app.get(/^\/api\/hcm\/(.+)$/, async (req, res) => {
     }
 
     const data = await response.json();
-    console.log('HCM Response - Items:', data.items?.length || 0, 'HasMore:', data.hasMore);
+    if (VERBOSE) console.log('HCM Response - Items:', data.items?.length || 0, 'HasMore:', data.hasMore);
 
     res.json(data);
   } catch (error) {
-    console.error('HCM Proxy Error:', error.message);
+    if (VERBOSE) console.error('HCM Proxy Error:', error.message);
     res.status(500).json({
       success: false,
       error: error.message,
@@ -256,8 +267,10 @@ app.get('/api/hcm-url', async (req, res) => {
     return res.status(400).json({ success: false, error: 'URL parameter required' });
   }
 
-  console.log('=== HCM URL PROXY REQUEST ===');
-  console.log('Full URL:', fullUrl);
+  if (VERBOSE) {
+    console.log('=== HCM URL PROXY REQUEST ===');
+    console.log('Full URL:', fullUrl);
+  }
 
   try {
     const response = await fetch(fullUrl, {
@@ -269,11 +282,11 @@ app.get('/api/hcm-url', async (req, res) => {
       },
     });
 
-    console.log('HCM URL Response Status:', response.status);
+    if (VERBOSE) console.log('HCM URL Response Status:', response.status);
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.log('HCM URL Error:', errorText.substring(0, 300));
+      if (VERBOSE) console.log('HCM URL Error:', errorText.substring(0, 300));
       return res.status(response.status).json({
         success: false,
         error: `HCM API Error: ${response.status} ${response.statusText}`,
@@ -282,11 +295,11 @@ app.get('/api/hcm-url', async (req, res) => {
     }
 
     const data = await response.json();
-    console.log('HCM URL Response - Items:', data.items?.length || 0);
+    if (VERBOSE) console.log('HCM URL Response - Items:', data.items?.length || 0);
 
     res.json(data);
   } catch (error) {
-    console.error('HCM URL Proxy Error:', error.message);
+    if (VERBOSE) console.error('HCM URL Proxy Error:', error.message);
     res.status(500).json({
       success: false,
       error: error.message,
@@ -302,9 +315,11 @@ app.get(/^\/api\/apex\/(.+)$/, async (req, res) => {
     : '';
   const url = `${APEX_CONFIG.baseUrl}/${path}${queryString}`;
 
-  console.log('=== APEX GET REQUEST ===');
-  console.log('Path:', path);
-  console.log('Full URL:', url);
+  if (VERBOSE) {
+    console.log('=== APEX GET REQUEST ===');
+    console.log('Path:', path);
+    console.log('Full URL:', url);
+  }
 
   try {
     const response = await fetch(url, {
@@ -314,7 +329,7 @@ app.get(/^\/api\/apex\/(.+)$/, async (req, res) => {
       },
     });
 
-    console.log('APEX Response Status:', response.status);
+    if (VERBOSE) console.log('APEX Response Status:', response.status);
 
     const responseText = await response.text();
     let data;
@@ -326,7 +341,7 @@ app.get(/^\/api\/apex\/(.+)$/, async (req, res) => {
     }
 
     if (!response.ok) {
-      console.log('APEX Error:', responseText.substring(0, 500));
+      if (VERBOSE) console.log('APEX Error:', responseText.substring(0, 500));
       return res.status(response.status).json({
         success: false,
         error: `APEX API Error: ${response.status}`,
@@ -334,10 +349,10 @@ app.get(/^\/api\/apex\/(.+)$/, async (req, res) => {
       });
     }
 
-    console.log('APEX Success - Items:', data.items?.length || 0);
+    if (VERBOSE) console.log('APEX Success - Items:', data.items?.length || 0);
     res.json(data);
   } catch (error) {
-    console.error('APEX GET Error:', error.message);
+    if (VERBOSE) console.error('APEX GET Error:', error.message);
     res.status(500).json({
       success: false,
       error: error.message,
@@ -351,12 +366,14 @@ app.post(/^\/api\/apex\/(.+)$/, async (req, res) => {
   const path = req.params[0]; // Gets everything after /api/apex/
   const url = `${APEX_CONFIG.baseUrl}/${path}`;
 
-  console.log('=== APEX PROXY REQUEST ===');
-  console.log('Path:', path);
-  console.log('Full URL:', url);
-  console.log('Records:', req.body.items?.length || 0);
-  console.log('BatchId:', req.body.batchId);
-  console.log('JeHeaderId:', req.body.jeHeaderId);
+  if (VERBOSE) {
+    console.log('=== APEX PROXY REQUEST ===');
+    console.log('Path:', path);
+    console.log('Full URL:', url);
+    console.log('Records:', req.body.items?.length || 0);
+    console.log('BatchId:', req.body.batchId);
+    console.log('JeHeaderId:', req.body.jeHeaderId);
+  }
 
   try {
     const response = await fetch(url, {
@@ -368,7 +385,7 @@ app.post(/^\/api\/apex\/(.+)$/, async (req, res) => {
       body: JSON.stringify(req.body),
     });
 
-    console.log('APEX Response Status:', response.status);
+    if (VERBOSE) console.log('APEX Response Status:', response.status);
 
     const responseText = await response.text();
     let data;
@@ -380,7 +397,7 @@ app.post(/^\/api\/apex\/(.+)$/, async (req, res) => {
     }
 
     if (!response.ok) {
-      console.log('APEX Error:', responseText.substring(0, 500));
+      if (VERBOSE) console.log('APEX Error:', responseText.substring(0, 500));
       return res.status(response.status).json({
         success: false,
         error: `APEX API Error: ${response.status}`,
@@ -388,13 +405,13 @@ app.post(/^\/api\/apex\/(.+)$/, async (req, res) => {
       });
     }
 
-    console.log('APEX Success:', data);
+    if (VERBOSE) console.log('APEX Success:', data);
     res.json({
       success: true,
       ...data,
     });
   } catch (error) {
-    console.error('APEX Proxy Error:', error.message);
+    if (VERBOSE) console.error('APEX Proxy Error:', error.message);
     res.status(500).json({
       success: false,
       error: error.message,
@@ -406,9 +423,11 @@ app.post(/^\/api\/apex\/(.+)$/, async (req, res) => {
 app.get('/api/test/oracle', async (req, res) => {
   const url = `${ORACLE_CONFIG.baseUrl}/journalBatches?offset=0&limit=1`;
 
-  console.log('=== TESTING ORACLE CONNECTION ===');
-  console.log('URL:', url);
-  console.log('User:', ORACLE_CONFIG.username);
+  if (VERBOSE) {
+    console.log('=== TESTING ORACLE CONNECTION ===');
+    console.log('URL:', url);
+    console.log('User:', ORACLE_CONFIG.username);
+  }
 
   try {
     const startTime = Date.now();
@@ -423,12 +442,14 @@ app.get('/api/test/oracle', async (req, res) => {
     });
 
     const duration = Date.now() - startTime;
-    console.log('Response Status:', response.status);
-    console.log('Response Time:', duration, 'ms');
+    if (VERBOSE) {
+      console.log('Response Status:', response.status);
+      console.log('Response Time:', duration, 'ms');
+    }
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.log('Error:', errorText.substring(0, 300));
+      if (VERBOSE) console.log('Error:', errorText.substring(0, 300));
       return res.json({
         success: false,
         status: response.status,
@@ -439,7 +460,7 @@ app.get('/api/test/oracle', async (req, res) => {
     }
 
     const data = await response.json();
-    console.log('Success! Count:', data.count || data.totalResults || data.items?.length);
+    if (VERBOSE) console.log('Success! Count:', data.count || data.totalResults || data.items?.length);
 
     res.json({
       success: true,
@@ -450,7 +471,7 @@ app.get('/api/test/oracle', async (req, res) => {
       sampleKeys: data.items?.[0] ? Object.keys(data.items[0]) : [],
     });
   } catch (error) {
-    console.error('Connection Error:', error.message);
+    if (VERBOSE) console.error('Connection Error:', error.message);
     res.json({
       success: false,
       error: error.message,
@@ -462,8 +483,10 @@ app.get('/api/test/oracle', async (req, res) => {
 app.get('/api/test/apex', async (req, res) => {
   const url = `${APEX_CONFIG.baseUrl}/gl/journalbatches`;
 
-  console.log('=== TESTING APEX CONNECTION ===');
-  console.log('URL:', url);
+  if (VERBOSE) {
+    console.log('=== TESTING APEX CONNECTION ===');
+    console.log('URL:', url);
+  }
 
   try {
     const startTime = Date.now();
@@ -476,8 +499,10 @@ app.get('/api/test/apex', async (req, res) => {
     });
 
     const duration = Date.now() - startTime;
-    console.log('Response Status:', response.status);
-    console.log('Response Time:', duration, 'ms');
+    if (VERBOSE) {
+      console.log('Response Status:', response.status);
+      console.log('Response Time:', duration, 'ms');
+    }
 
     const text = await response.text();
     let data;
@@ -494,7 +519,7 @@ app.get('/api/test/apex', async (req, res) => {
       data: response.ok ? data : text.substring(0, 300),
     });
   } catch (error) {
-    console.error('Connection Error:', error.message);
+    if (VERBOSE) console.error('Connection Error:', error.message);
     res.json({
       success: false,
       error: error.message,
