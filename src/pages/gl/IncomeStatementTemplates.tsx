@@ -124,6 +124,28 @@ const IncomeStatementTemplates: React.FC = () => {
   const [totalForm] = Form.useForm();
   const [cloneForm] = Form.useForm();
 
+  // GL Accounts state
+  const [glAccounts, setGlAccounts] = useState<plService.GLAccount[]>([]);
+  const [glAccountsLoading, setGlAccountsLoading] = useState(false);
+  const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
+  const [accountSearchText, setAccountSearchText] = useState('');
+
+  // Load GL accounts
+  const loadGLAccounts = async () => {
+    setGlAccountsLoading(true);
+    try {
+      const response = await plService.getGLAccounts();
+      if (response.success && response.data) {
+        setGlAccounts(response.data);
+      } else {
+        message.error(response.error || 'Failed to load GL accounts');
+      }
+    } catch (error) {
+      message.error('Failed to load GL accounts');
+    }
+    setGlAccountsLoading(false);
+  };
+
   // Load templates on mount
   useEffect(() => {
     loadTemplates();
@@ -392,6 +414,48 @@ const IncomeStatementTemplates: React.FC = () => {
     }
   };
 
+  // Handle assigning multiple selected accounts
+  const handleAssignSelectedAccounts = async () => {
+    if (!selectedSectionId || selectedAccounts.length === 0) {
+      message.warning('Please select at least one account');
+      return;
+    }
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const accountCode of selectedAccounts) {
+      try {
+        const response = await plService.assignAccount(
+          selectedSectionId,
+          accountCode,
+          undefined,
+          undefined
+        );
+        if (response.success) {
+          successCount++;
+        } else {
+          failCount++;
+        }
+      } catch {
+        failCount++;
+      }
+    }
+
+    if (successCount > 0) {
+      message.success(`${successCount} account(s) assigned successfully`);
+    }
+    if (failCount > 0) {
+      message.error(`${failCount} account(s) failed to assign`);
+    }
+
+    setAccountModalVisible(false);
+    setSelectedAccounts([]);
+    setAccountSearchText('');
+    setSelectedSectionId(null);
+    refreshCurrentTab();
+  };
+
   // Total CRUD
   const handleAddTotal = async (values: any) => {
     const tab = getCurrentTemplateTab();
@@ -502,6 +566,9 @@ const IncomeStatementTemplates: React.FC = () => {
                     onClick={() => {
                       setSelectedSectionId(section.section_id);
                       setAccountModalVisible(true);
+                      if (glAccounts.length === 0) {
+                        loadGLAccounts();
+                      }
                     }}
                   />
                 </Tooltip>
@@ -1564,40 +1631,164 @@ const IncomeStatementTemplates: React.FC = () => {
 
         {/* Add Account Modal */}
         <Modal
-          title="Assign Account"
+          title={
+            <Space>
+              <BankOutlined style={{ color: REDWOOD.primary }} />
+              <span>Assign Accounts to Section</span>
+            </Space>
+          }
           open={accountModalVisible}
           onCancel={() => {
             setAccountModalVisible(false);
             accountForm.resetFields();
             setSelectedSectionId(null);
+            setSelectedAccounts([]);
+            setAccountSearchText('');
           }}
-          onOk={() => accountForm.submit()}
-          okText="Assign"
-          okButtonProps={{ style: { background: REDWOOD.primary } }}
+          footer={
+            <Space>
+              <Button onClick={() => {
+                setAccountModalVisible(false);
+                setSelectedAccounts([]);
+                setAccountSearchText('');
+                setSelectedSectionId(null);
+              }}>
+                Cancel
+              </Button>
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={handleAssignSelectedAccounts}
+                disabled={selectedAccounts.length === 0}
+                style={{ background: REDWOOD.primary }}
+              >
+                Assign Selected ({selectedAccounts.length})
+              </Button>
+            </Space>
+          }
+          width={800}
+          bodyStyle={{ padding: 0 }}
         >
-          <Form form={accountForm} layout="vertical" onFinish={handleAssignAccount}>
-            <Form.Item
-              name="account_code"
-              label="Account Code"
-              rules={[{ required: true, message: 'Enter account code' }]}
-              tooltip="Enter a single account code"
-            >
-              <Input placeholder="e.g., 4100000" />
-            </Form.Item>
-            <Divider>Or specify an account range</Divider>
-            <Row gutter={16}>
-              <Col span={12}>
-                <Form.Item name="account_from" label="From Account">
-                  <Input placeholder="e.g., 4100000" />
-                </Form.Item>
+          {/* Search and Filter Bar */}
+          <div style={{ padding: 16, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
+            <Row gutter={16} align="middle">
+              <Col flex="auto">
+                <Input.Search
+                  placeholder="Search by account code or description..."
+                  value={accountSearchText}
+                  onChange={(e) => setAccountSearchText(e.target.value)}
+                  allowClear
+                  style={{ width: '100%' }}
+                />
               </Col>
-              <Col span={12}>
-                <Form.Item name="account_to" label="To Account">
-                  <Input placeholder="e.g., 4199999" />
-                </Form.Item>
+              <Col>
+                <Button
+                  icon={<ReloadOutlined />}
+                  onClick={loadGLAccounts}
+                  loading={glAccountsLoading}
+                >
+                  Refresh
+                </Button>
               </Col>
             </Row>
-          </Form>
+            <div style={{ marginTop: 8 }}>
+              <Text type="secondary">
+                {selectedAccounts.length > 0 ? (
+                  <Tag color="blue">{selectedAccounts.length} account(s) selected</Tag>
+                ) : (
+                  'Select accounts from the list below'
+                )}
+              </Text>
+            </div>
+          </div>
+
+          {/* Accounts Table */}
+          <div style={{ maxHeight: 400, overflow: 'auto' }}>
+            <Table
+              loading={glAccountsLoading}
+              dataSource={glAccounts.filter(acc =>
+                accountSearchText === '' ||
+                acc.account.toLowerCase().includes(accountSearchText.toLowerCase()) ||
+                acc.description.toLowerCase().includes(accountSearchText.toLowerCase())
+              )}
+              rowKey="account"
+              size="small"
+              pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total) => `Total ${total} accounts` }}
+              rowSelection={{
+                type: 'checkbox',
+                selectedRowKeys: selectedAccounts,
+                onChange: (selectedRowKeys) => {
+                  setSelectedAccounts(selectedRowKeys as string[]);
+                },
+              }}
+              columns={[
+                {
+                  title: 'Account Code',
+                  dataIndex: 'account',
+                  key: 'account',
+                  width: 150,
+                  sorter: (a, b) => a.account.localeCompare(b.account),
+                  render: (code: string) => (
+                    <Text strong style={{ fontFamily: 'monospace' }}>{code}</Text>
+                  ),
+                },
+                {
+                  title: 'Description',
+                  dataIndex: 'description',
+                  key: 'description',
+                  sorter: (a, b) => a.description.localeCompare(b.description),
+                },
+                {
+                  title: 'Type',
+                  dataIndex: 'account_type',
+                  key: 'account_type',
+                  width: 80,
+                  filters: [
+                    { text: 'Asset', value: 'A' },
+                    { text: 'Liability', value: 'L' },
+                    { text: 'Equity', value: 'O' },
+                    { text: 'Revenue', value: 'R' },
+                    { text: 'Expense', value: 'E' },
+                  ],
+                  onFilter: (value, record) => record.account_type === value,
+                  render: (type: string) => {
+                    const typeMap: Record<string, { label: string; color: string }> = {
+                      A: { label: 'Asset', color: 'blue' },
+                      L: { label: 'Liability', color: 'orange' },
+                      O: { label: 'Equity', color: 'purple' },
+                      R: { label: 'Revenue', color: 'green' },
+                      E: { label: 'Expense', color: 'red' },
+                    };
+                    const info = typeMap[type] || { label: type, color: 'default' };
+                    return <Tag color={info.color}>{info.label}</Tag>;
+                  },
+                },
+              ]}
+            />
+          </div>
+
+          {/* Manual Entry Option */}
+          <Divider style={{ margin: '12px 0' }}>Or enter account range manually</Divider>
+          <div style={{ padding: '0 16px 16px 16px' }}>
+            <Form form={accountForm} layout="inline" onFinish={handleAssignAccount}>
+              <Form.Item name="account_code" style={{ marginBottom: 0 }}>
+                <Input placeholder="Single account code" style={{ width: 150 }} />
+              </Form.Item>
+              <Text style={{ margin: '0 8px', lineHeight: '32px' }}>or range:</Text>
+              <Form.Item name="account_from" style={{ marginBottom: 0 }}>
+                <Input placeholder="From" style={{ width: 120 }} />
+              </Form.Item>
+              <Text style={{ margin: '0 4px', lineHeight: '32px' }}>to</Text>
+              <Form.Item name="account_to" style={{ marginBottom: 0 }}>
+                <Input placeholder="To" style={{ width: 120 }} />
+              </Form.Item>
+              <Form.Item style={{ marginBottom: 0 }}>
+                <Button type="primary" htmlType="submit" ghost>
+                  Add Range
+                </Button>
+              </Form.Item>
+            </Form>
+          </div>
         </Modal>
 
         {/* Add Total Modal */}

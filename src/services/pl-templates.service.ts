@@ -78,6 +78,30 @@ export interface ApiResponse<T> {
   error?: string;
 }
 
+// GL Account interface
+export interface GLAccount {
+  account: string;
+  description: string;
+  account_type: string;
+}
+
+// Get GL Accounts list
+export const getGLAccounts = async (): Promise<ApiResponse<GLAccount[]>> => {
+  try {
+    const baseUrl = BASE_URL;
+    const response = await fetch(`${baseUrl}/glaccountslist`);
+    const result = await response.json();
+
+    if (result.items) {
+      return { success: true, data: result.items };
+    }
+    return { success: true, data: [] };
+  } catch (error) {
+    console.error('Error fetching GL accounts:', error);
+    return { success: false, error: String(error) };
+  }
+};
+
 // Get all templates
 export const getTemplates = async (): Promise<ApiResponse<PLTemplate[]>> => {
   try {
