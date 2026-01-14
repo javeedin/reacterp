@@ -99,8 +99,8 @@ export const getTemplates = async (): Promise<ApiResponse<PLTemplate[]>> => {
 export const getTemplateStructure = async (templateId: number): Promise<ApiResponse<PLTemplateStructure>> => {
   try {
     const baseUrl = BASE_URL;
-    console.log('Fetching template structure:', `${baseUrl}/pl/template/${templateId}`);
-    const response = await fetch(`${baseUrl}/pl/template/${templateId}`);
+    console.log('Fetching template structure:', `${baseUrl}/pl/templates/${templateId}`);
+    const response = await fetch(`${baseUrl}/pl/templates/${templateId}`);
     const result = await response.json();
     console.log('Template structure response:', result);
 

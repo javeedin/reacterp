@@ -59,12 +59,12 @@ END;
 /
 
 -- ============================================================================
--- 2. GET /pl/template/:id - Get template structure
+-- 2. GET /pl/templates/:id - Get template structure
 -- ============================================================================
 BEGIN
     ORDS.DEFINE_TEMPLATE(
         p_module_name    => 'pl',
-        p_pattern        => 'template/:template_id',
+        p_pattern        => 'templates/:template_id',
         p_priority       => 0,
         p_etag_type      => 'HASH',
         p_etag_query     => NULL,
@@ -77,17 +77,22 @@ END;
 BEGIN
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'pl',
-        p_pattern        => 'template/:template_id',
+        p_pattern        => 'templates/:template_id',
         p_method         => 'GET',
         p_source_type    => 'plsql/block',
         p_source         => q'[
 DECLARE
     v_clob CLOB;
 BEGIN
-    v_clob := rr_pl_template_pkg.get_template_structure(:template_id);
+    v_clob := rr_pl_template_pkg.get_template_structure(TO_NUMBER(:template_id));
     owa_util.mime_header('application/json', FALSE);
     owa_util.http_header_close;
     htp.p(v_clob);
+EXCEPTION
+    WHEN OTHERS THEN
+        owa_util.mime_header('application/json', FALSE);
+        owa_util.http_header_close;
+        htp.p('{"error":"' || REPLACE(SQLERRM, '"', '\"') || '"}');
 END;
 ]',
         p_items_per_page => 0,
