@@ -34,6 +34,7 @@ import {
   EyeOutlined,
   SaveOutlined,
   FileTextOutlined,
+  FileExcelOutlined,
   FolderOutlined,
   FolderOpenOutlined,
   AppstoreOutlined,
@@ -106,6 +107,8 @@ const IncomeStatementTemplates: React.FC = () => {
   const [totalModalVisible, setTotalModalVisible] = useState(false);
   const [cloneModalVisible, setCloneModalVisible] = useState(false);
   const [previewModalVisible, setPreviewModalVisible] = useState(false);
+  const [excelModalVisible, setExcelModalVisible] = useState(false);
+  const [excelTemplate, setExcelTemplate] = useState<plService.PLTemplateStructure | null>(null);
 
   // Edit context
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
@@ -768,6 +771,16 @@ const IncomeStatementTemplates: React.FC = () => {
             <Col>
               <Space>
                 <Button
+                  icon={<FileExcelOutlined />}
+                  onClick={() => {
+                    setExcelTemplate(tab.template);
+                    setExcelModalVisible(true);
+                  }}
+                  style={{ background: '#217346', borderColor: '#217346', color: '#fff' }}
+                >
+                  Edit in Excel
+                </Button>
+                <Button
                   icon={<EyeOutlined />}
                   onClick={() => {
                     setPreviewTemplate(tab.template);
@@ -979,6 +992,323 @@ const IncomeStatementTemplates: React.FC = () => {
             },
           ]}
         />
+      </Modal>
+    );
+  };
+
+  // Excel View Modal
+  const renderExcelModal = () => {
+    if (!excelTemplate) return null;
+
+    const template = excelTemplate?.template;
+    if (!template) return null;
+
+    // Build Excel-like data rows
+    const excelData: Array<{
+      key: string;
+      rowNum: number;
+      type: string;
+      code: string;
+      name: string;
+      label: string;
+      displayOrder: number;
+      formula: string;
+      parentCode: string;
+    }> = [];
+
+    let rowNum = 1;
+
+    // Add groups and their sections
+    (template.groups || []).forEach(group => {
+      excelData.push({
+        key: `group-${group.group_id}`,
+        rowNum: rowNum++,
+        type: 'GROUP',
+        code: group.group_code,
+        name: group.group_name,
+        label: group.group_label || '',
+        displayOrder: group.display_order,
+        formula: '',
+        parentCode: '',
+      });
+
+      (group.sections || []).forEach(section => {
+        excelData.push({
+          key: `section-${section.section_id}`,
+          rowNum: rowNum++,
+          type: 'SECTION',
+          code: section.section_code,
+          name: section.section_name,
+          label: section.section_label || '',
+          displayOrder: section.display_order,
+          formula: '',
+          parentCode: group.group_code,
+        });
+
+        (section.accounts || []).forEach((account, idx) => {
+          excelData.push({
+            key: `account-${section.section_id}-${idx}`,
+            rowNum: rowNum++,
+            type: 'ACCOUNT',
+            code: account.account_code,
+            name: account.account_from && account.account_to
+              ? `${account.account_from} - ${account.account_to}`
+              : account.account_code,
+            label: '',
+            displayOrder: idx + 1,
+            formula: '',
+            parentCode: section.section_code,
+          });
+        });
+      });
+    });
+
+    // Add totals
+    (template.totals || []).forEach(total => {
+      excelData.push({
+        key: `total-${total.total_id}`,
+        rowNum: rowNum++,
+        type: 'TOTAL',
+        code: total.total_code,
+        name: total.total_name,
+        label: total.total_label || '',
+        displayOrder: total.display_order,
+        formula: total.calculation_formula,
+        parentCode: total.after_group_code || '',
+      });
+    });
+
+    const excelColumns = [
+      {
+        title: '',
+        dataIndex: 'rowNum',
+        key: 'rowNum',
+        width: 40,
+        fixed: 'left' as const,
+        render: (num: number) => (
+          <div style={{
+            background: '#f0f0f0',
+            textAlign: 'center',
+            fontWeight: 500,
+            color: '#666',
+            padding: '4px 0',
+          }}>
+            {num}
+          </div>
+        ),
+      },
+      {
+        title: 'A',
+        dataIndex: 'type',
+        key: 'type',
+        width: 100,
+        render: (type: string) => (
+          <Tag
+            color={
+              type === 'GROUP' ? 'blue' :
+              type === 'SECTION' ? 'green' :
+              type === 'ACCOUNT' ? 'default' :
+              'purple'
+            }
+            style={{ margin: 0 }}
+          >
+            {type}
+          </Tag>
+        ),
+      },
+      {
+        title: 'B',
+        dataIndex: 'code',
+        key: 'code',
+        width: 100,
+        render: (code: string) => (
+          <Input
+            size="small"
+            defaultValue={code}
+            style={{ border: 'none', background: 'transparent' }}
+          />
+        ),
+      },
+      {
+        title: 'C',
+        dataIndex: 'name',
+        key: 'name',
+        width: 200,
+        render: (name: string) => (
+          <Input
+            size="small"
+            defaultValue={name}
+            style={{ border: 'none', background: 'transparent' }}
+          />
+        ),
+      },
+      {
+        title: 'D',
+        dataIndex: 'label',
+        key: 'label',
+        width: 200,
+        render: (label: string) => (
+          <Input
+            size="small"
+            defaultValue={label}
+            placeholder="Display Label"
+            style={{ border: 'none', background: 'transparent' }}
+          />
+        ),
+      },
+      {
+        title: 'E',
+        dataIndex: 'displayOrder',
+        key: 'displayOrder',
+        width: 80,
+        render: (order: number) => (
+          <InputNumber
+            size="small"
+            defaultValue={order}
+            style={{ width: '100%', border: 'none', background: 'transparent' }}
+          />
+        ),
+      },
+      {
+        title: 'F',
+        dataIndex: 'formula',
+        key: 'formula',
+        width: 120,
+        render: (formula: string) => (
+          <Input
+            size="small"
+            defaultValue={formula}
+            placeholder="Formula"
+            style={{ border: 'none', background: 'transparent', fontFamily: 'monospace' }}
+          />
+        ),
+      },
+      {
+        title: 'G',
+        dataIndex: 'parentCode',
+        key: 'parentCode',
+        width: 100,
+        render: (parent: string) => (
+          <Input
+            size="small"
+            defaultValue={parent}
+            placeholder="Parent"
+            style={{ border: 'none', background: 'transparent' }}
+          />
+        ),
+      },
+    ];
+
+    return (
+      <Modal
+        title={
+          <Space>
+            <FileExcelOutlined style={{ color: '#217346' }} />
+            <span>Edit in Excel - {template.template_name}</span>
+          </Space>
+        }
+        open={excelModalVisible}
+        onCancel={() => {
+          setExcelModalVisible(false);
+          setExcelTemplate(null);
+        }}
+        width={1200}
+        footer={
+          <Space>
+            <Button onClick={() => {
+              setExcelModalVisible(false);
+              setExcelTemplate(null);
+            }}>
+              Cancel
+            </Button>
+            <Button type="primary" icon={<SaveOutlined />} style={{ background: '#217346' }}>
+              Save Changes
+            </Button>
+          </Space>
+        }
+        bodyStyle={{ padding: 0 }}
+      >
+        {/* Excel-like toolbar */}
+        <div style={{
+          background: '#217346',
+          padding: '8px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 16,
+        }}>
+          <Text style={{ color: '#fff', fontWeight: 600 }}>
+            {template.template_code}
+          </Text>
+          <div style={{ flex: 1 }} />
+          <Space>
+            <Button size="small" icon={<PlusOutlined />} style={{ background: '#fff' }}>
+              Add Row
+            </Button>
+            <Button size="small" icon={<DeleteOutlined />} style={{ background: '#fff' }}>
+              Delete Row
+            </Button>
+          </Space>
+        </div>
+
+        {/* Column headers row */}
+        <div style={{
+          background: '#e8e8e8',
+          borderBottom: '2px solid #217346',
+          padding: '4px 0',
+          display: 'flex',
+        }}>
+          <div style={{ width: 40, textAlign: 'center', fontWeight: 600, color: '#333' }}></div>
+          <div style={{ width: 100, textAlign: 'center', fontWeight: 600, color: '#333', borderLeft: '1px solid #ccc' }}>Type</div>
+          <div style={{ width: 100, textAlign: 'center', fontWeight: 600, color: '#333', borderLeft: '1px solid #ccc' }}>Code</div>
+          <div style={{ width: 200, textAlign: 'center', fontWeight: 600, color: '#333', borderLeft: '1px solid #ccc' }}>Name</div>
+          <div style={{ width: 200, textAlign: 'center', fontWeight: 600, color: '#333', borderLeft: '1px solid #ccc' }}>Label</div>
+          <div style={{ width: 80, textAlign: 'center', fontWeight: 600, color: '#333', borderLeft: '1px solid #ccc' }}>Order</div>
+          <div style={{ width: 120, textAlign: 'center', fontWeight: 600, color: '#333', borderLeft: '1px solid #ccc' }}>Formula</div>
+          <div style={{ width: 100, textAlign: 'center', fontWeight: 600, color: '#333', borderLeft: '1px solid #ccc' }}>Parent</div>
+        </div>
+
+        {/* Excel-like table */}
+        <div style={{ maxHeight: 500, overflow: 'auto' }}>
+          <Table
+            columns={excelColumns}
+            dataSource={excelData}
+            pagination={false}
+            size="small"
+            showHeader={false}
+            rowClassName={(record) =>
+              record.type === 'GROUP' ? 'excel-row-group' :
+              record.type === 'SECTION' ? 'excel-row-section' :
+              record.type === 'TOTAL' ? 'excel-row-total' : ''
+            }
+            style={{
+              border: '1px solid #d9d9d9',
+            }}
+            onRow={(record) => ({
+              style: {
+                background: record.type === 'GROUP' ? '#e6f7ff' :
+                            record.type === 'TOTAL' ? '#f6ffed' :
+                            '#fff',
+              },
+            })}
+          />
+        </div>
+
+        {/* Status bar */}
+        <div style={{
+          background: '#217346',
+          padding: '4px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 16,
+        }}>
+          <Text style={{ color: '#fff', fontSize: 12 }}>
+            {excelData.length} rows | {(template.groups || []).length} groups | {(template.totals || []).length} totals
+          </Text>
+          <div style={{ flex: 1 }} />
+          <Text style={{ color: '#fff', fontSize: 12 }}>
+            Ready
+          </Text>
+        </div>
       </Modal>
     );
   };
@@ -1342,6 +1672,9 @@ const IncomeStatementTemplates: React.FC = () => {
 
         {/* Preview Modal */}
         {renderPreviewModal()}
+
+        {/* Excel View Modal */}
+        {renderExcelModal()}
       </Content>
 
       {/* Autopilot */}
