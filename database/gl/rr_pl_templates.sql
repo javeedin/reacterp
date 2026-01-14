@@ -377,7 +377,17 @@ CREATE OR REPLACE PACKAGE BODY rr_pl_template_pkg AS
         v_description VARCHAR2(1000);
         v_template_type VARCHAR2(50);
         v_is_default VARCHAR2(1);
+        v_count NUMBER;
     BEGIN
+        -- Check if template exists
+        SELECT COUNT(*) INTO v_count
+        FROM rr_pl_templates
+        WHERE template_id = p_template_id AND is_active = 'Y';
+
+        IF v_count = 0 THEN
+            RETURN '{"error":"Template not found","template_id":' || p_template_id || '}';
+        END IF;
+
         -- Get template info
         SELECT template_code, template_name, description, template_type, is_default
         INTO v_template_code, v_template_name, v_description, v_template_type, v_is_default
