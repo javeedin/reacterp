@@ -431,8 +431,10 @@ const IncomeStatementTemplates: React.FC = () => {
   };
 
   // Build tree data for template structure
-  const buildTreeData = (template: plService.PLTemplateStructure): DataNode[] => {
-    const { groups, totals } = template.template;
+  const buildTreeData = (templateData: plService.PLTemplateStructure): DataNode[] => {
+    // Safe access with defaults
+    const groups = templateData?.template?.groups || [];
+    const totals = templateData?.template?.totals || [];
 
     const treeData: DataNode[] = [];
 
@@ -461,7 +463,7 @@ const IncomeStatementTemplates: React.FC = () => {
                   onClick={() => {
                     setSelectedGroupId(group.group_id);
                     sectionForm.setFieldsValue({
-                      display_order: (group.sections.length + 1) * 10,
+                      display_order: ((group.sections || []).length + 1) * 10,
                     });
                     setSectionModalVisible(true);
                   }}
@@ -480,7 +482,7 @@ const IncomeStatementTemplates: React.FC = () => {
           </div>
         ),
         icon: <FolderOutlined style={{ color: GROUP_TYPE_COLORS[group.group_type] }} />,
-        children: group.sections.map(section => ({
+        children: (group.sections || []).map(section => ({
           key: `section-${section.section_id}`,
           title: (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '2px 0' }}>
@@ -512,7 +514,7 @@ const IncomeStatementTemplates: React.FC = () => {
             </div>
           ),
           icon: <AppstoreOutlined style={{ color: REDWOOD.info }} />,
-          children: section.accounts.length > 0 ? section.accounts.map((account, idx) => ({
+          children: (section.accounts || []).length > 0 ? (section.accounts || []).map((account, idx) => ({
             key: `account-${section.section_id}-${idx}`,
             title: (
               <Space>
@@ -725,13 +727,17 @@ const IncomeStatementTemplates: React.FC = () => {
       );
     }
 
-    if (!tab.template) {
+    if (!tab.template || !tab.template.template) {
       return (
-        <Empty description="Failed to load template. Click refresh to try again." />
+        <div style={{ padding: 16 }}>
+          <Empty description="Failed to load template. Click refresh to try again.">
+            <Button onClick={refreshCurrentTab}>Refresh</Button>
+          </Empty>
+        </div>
       );
     }
 
-    const { template } = tab.template;
+    const template = tab.template.template;
     const treeData = buildTreeData(tab.template);
 
     return (
@@ -782,7 +788,7 @@ const IncomeStatementTemplates: React.FC = () => {
               icon={<PlusOutlined />}
               onClick={() => {
                 groupForm.setFieldsValue({
-                  display_order: (template.groups.length + 1) * 10,
+                  display_order: ((template.groups || []).length + 1) * 10,
                   sign_convention: 1,
                 });
                 setGroupModalVisible(true);
@@ -795,7 +801,7 @@ const IncomeStatementTemplates: React.FC = () => {
               icon={<CalculatorOutlined />}
               onClick={() => {
                 totalForm.setFieldsValue({
-                  display_order: (template.totals.length + 1) * 10,
+                  display_order: ((template.totals || []).length + 1) * 10,
                 });
                 setTotalModalVisible(true);
               }}
@@ -812,14 +818,14 @@ const IncomeStatementTemplates: React.FC = () => {
               <FolderOpenOutlined style={{ color: REDWOOD.primary }} />
               <span>Template Structure</span>
               <Text type="secondary" style={{ fontWeight: 'normal', fontSize: 12 }}>
-                ({template.groups.length} groups, {template.totals.length} totals)
+                ({(template.groups || []).length} groups, {(template.totals || []).length} totals)
               </Text>
             </Space>
           }
           style={{ borderRadius: 8 }}
-          bodyStyle={{ padding: template.groups.length === 0 ? 24 : 0 }}
+          bodyStyle={{ padding: (template.groups || []).length === 0 ? 24 : 0 }}
         >
-          {template.groups.length === 0 && template.totals.length === 0 ? (
+          {(template.groups || []).length === 0 && (template.totals || []).length === 0 ? (
             <Empty description="No structure defined. Add a group to get started." />
           ) : (
             <Tree
@@ -846,7 +852,8 @@ const IncomeStatementTemplates: React.FC = () => {
   const renderPreviewModal = () => {
     if (!previewTemplate) return null;
 
-    const { template } = previewTemplate;
+    const template = previewTemplate?.template;
+    if (!template) return null;
 
     // Build preview rows
     const previewRows: Array<{
@@ -859,9 +866,11 @@ const IncomeStatementTemplates: React.FC = () => {
     }> = [];
 
     // Sort groups and totals by display_order
+    const groups = template.groups || [];
+    const totals = template.totals || [];
     const items: Array<{type: 'group' | 'total', order: number, data: any}> = [
-      ...template.groups.map(g => ({ type: 'group' as const, order: g.display_order, data: g })),
-      ...template.totals.map(t => ({ type: 'total' as const, order: t.display_order, data: t })),
+      ...groups.map(g => ({ type: 'group' as const, order: g.display_order, data: g })),
+      ...totals.map(t => ({ type: 'total' as const, order: t.display_order, data: t })),
     ].sort((a, b) => a.order - b.order);
 
     items.forEach(item => {
@@ -873,7 +882,7 @@ const IncomeStatementTemplates: React.FC = () => {
           indent: 0,
           isBold: true,
         });
-        group.sections.forEach(section => {
+        (group.sections || []).forEach(section => {
           previewRows.push({
             key: `section-${section.section_id}`,
             label: section.section_label || section.section_name,

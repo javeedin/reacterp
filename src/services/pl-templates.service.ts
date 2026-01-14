@@ -99,10 +99,36 @@ export const getTemplates = async (): Promise<ApiResponse<PLTemplate[]>> => {
 export const getTemplateStructure = async (templateId: number): Promise<ApiResponse<PLTemplateStructure>> => {
   try {
     const baseUrl = BASE_URL;
+    console.log('Fetching template structure:', `${baseUrl}/pl/template/${templateId}`);
     const response = await fetch(`${baseUrl}/pl/template/${templateId}`);
     const result = await response.json();
+    console.log('Template structure response:', result);
 
-    return { success: true, data: result };
+    // Handle different response structures
+    if (result.template) {
+      // Response has template wrapper - use as-is
+      return { success: true, data: result };
+    } else if (result.template_id) {
+      // Response is the template directly without wrapper
+      return {
+        success: true,
+        data: {
+          template: {
+            template_id: result.template_id,
+            template_code: result.template_code || '',
+            template_name: result.template_name || '',
+            description: result.description || null,
+            template_type: result.template_type || 'CUSTOM',
+            is_default: result.is_default || 'N',
+            groups: result.groups || [],
+            totals: result.totals || [],
+          }
+        }
+      };
+    } else {
+      console.error('Unexpected response structure:', result);
+      return { success: false, error: 'Invalid response structure from API' };
+    }
   } catch (error) {
     console.error('Error fetching template structure:', error);
     return { success: false, error: String(error) };
