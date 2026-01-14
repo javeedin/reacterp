@@ -19,6 +19,7 @@ import COASegments from './pages/gl/COASegments';
 import AccountCombinations from './pages/gl/AccountCombinations';
 import AccountingPeriods from './pages/gl/AccountingPeriods';
 import TrialBalance from './pages/gl/TrialBalance';
+import IncomeStatementTemplates from './pages/gl/IncomeStatementTemplates';
 import { APModule } from './pages/ap';
 import ManageInvoices from './pages/ap/ManageInvoices';
 import ManagePayments from './pages/ap/ManagePayments';
@@ -84,6 +85,7 @@ function App() {
               <Route path="gl/account-combinations" element={<AccountCombinations />} />
               <Route path="gl/accounting-periods" element={<AccountingPeriods />} />
               <Route path="gl/trial-balance" element={<TrialBalance />} />
+              <Route path="gl/income-statement-templates" element={<IncomeStatementTemplates />} />
               <Route path="ap" element={<APModule />} />
               <Route path="ap/manage-invoices" element={<ManageInvoices />} />
               <Route path="ap/manage-payments" element={<ManagePayments />} />

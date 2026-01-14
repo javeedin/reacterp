@@ -90,6 +90,7 @@ const setupMenuItems: MenuItemType[] = [
   { key: 'currencies', icon: <DollarOutlined />, label: 'Currencies', description: 'Currency configurations', color: REDWOOD.warning },
   { key: 'account-combinations', icon: <SettingOutlined />, label: 'Account Combinations', description: 'Valid account combinations', color: REDWOOD.primaryDark, path: '/gl/account-combinations' },
   { key: 'cross-validation', icon: <SolutionOutlined />, label: 'Cross Validation', description: 'Validation rules setup', color: REDWOOD.reportGreen },
+  { key: 'income-statement-templates', icon: <LineChartOutlined />, label: 'Income Statement Templates', description: 'Manage P&L statement templates', color: REDWOOD.success, path: '/gl/income-statement-templates' },
 ];
 
 // GL KPI Data (mock - would come from API)
