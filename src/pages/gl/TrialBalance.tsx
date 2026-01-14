@@ -29,9 +29,11 @@ import {
   DollarOutlined,
   BankOutlined,
   CalendarOutlined,
+  DragOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../../config/api.config';
+import { Divider } from 'antd';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -93,6 +95,21 @@ interface PeriodInfo {
   adj_flag: string;
 }
 
+interface SegmentConfig {
+  key: string;
+  label: string;
+}
+
+// Available segments for pivot
+const AVAILABLE_SEGMENTS: SegmentConfig[] = [
+  { key: 'company', label: 'Company' },
+  { key: 'lob', label: 'LOB' },
+  { key: 'department', label: 'Department' },
+  { key: 'sub_account', label: 'Sub Account' },
+  { key: 'analysis', label: 'Analysis' },
+  { key: 'intercompany', label: 'Intercompany' },
+];
+
 interface TabData {
   key: string;
   periodName: string;
@@ -103,6 +120,19 @@ interface TabData {
   currencies: string[];
   selectedCompany: string | null;
   selectedCurrency: string | null;
+  segmentsBefore: string[];
+  segmentsAfter: string[];
+}
+
+interface PivotRow {
+  key: string;
+  account: string;
+  account_desc: string;
+  opening_balance: number;
+  debit: number;
+  credit: number;
+  closing_balance: number;
+  [key: string]: string | number;
 }
 
 const TrialBalance: React.FC = () => {
@@ -192,6 +222,8 @@ const TrialBalance: React.FC = () => {
       currencies: [],
       selectedCompany: null,
       selectedCurrency: null,
+      segmentsBefore: [],
+      segmentsAfter: [],
     };
 
     setTabs(prev => [...prev, newTab]);
@@ -243,6 +275,83 @@ const TrialBalance: React.FC = () => {
         : t
     ));
   }, []);
+
+  // Handle segment drop
+  const handleSegmentDrop = useCallback((tabKey: string, segment: string, position: 'before' | 'after') => {
+    setTabs(prev => prev.map(t => {
+      if (t.key !== tabKey) return t;
+
+      // Remove from both arrays first
+      const newBefore = t.segmentsBefore.filter(s => s !== segment);
+      const newAfter = t.segmentsAfter.filter(s => s !== segment);
+
+      if (position === 'before') {
+        return { ...t, segmentsBefore: [...newBefore, segment], segmentsAfter: newAfter };
+      } else {
+        return { ...t, segmentsBefore: newBefore, segmentsAfter: [...newAfter, segment] };
+      }
+    }));
+  }, []);
+
+  // Remove dropped segment
+  const removeDroppedSegment = useCallback((tabKey: string, segment: string) => {
+    setTabs(prev => prev.map(t => {
+      if (t.key !== tabKey) return t;
+      return {
+        ...t,
+        segmentsBefore: t.segmentsBefore.filter(s => s !== segment),
+        segmentsAfter: t.segmentsAfter.filter(s => s !== segment),
+      };
+    }));
+  }, []);
+
+  // Get segment label
+  const getSegmentLabel = (segmentKey: string): string => {
+    const segment = AVAILABLE_SEGMENTS.find(s => s.key === segmentKey);
+    return segment?.label || segmentKey;
+  };
+
+  // Generate pivot data - group by segments + account
+  const generatePivotData = (data: GLBalanceRecord[], segmentsBefore: string[], segmentsAfter: string[]): PivotRow[] => {
+    const pivotMap = new Map<string, PivotRow>();
+    const groupByKeys = [...segmentsBefore, 'account', ...segmentsAfter];
+
+    data.forEach(row => {
+      // Build key from selected segments
+      const keyParts = groupByKeys.map(key => (row as any)[key] || '');
+      const pivotKey = keyParts.join('|');
+
+      if (!pivotMap.has(pivotKey)) {
+        const pivotRow: PivotRow = {
+          key: pivotKey,
+          account: row.account,
+          account_desc: row.account_desc,
+          opening_balance: 0,
+          debit: 0,
+          credit: 0,
+          closing_balance: 0,
+        };
+
+        // Add segment values
+        segmentsBefore.forEach(seg => {
+          pivotRow[seg] = (row as any)[seg] || '';
+        });
+        segmentsAfter.forEach(seg => {
+          pivotRow[seg] = (row as any)[seg] || '';
+        });
+
+        pivotMap.set(pivotKey, pivotRow);
+      }
+
+      const pivotRow = pivotMap.get(pivotKey)!;
+      pivotRow.opening_balance += row.opening_balance || 0;
+      pivotRow.debit += row.debit || 0;
+      pivotRow.credit += row.credit || 0;
+      pivotRow.closing_balance += row.closing_balance || 0;
+    });
+
+    return Array.from(pivotMap.values());
+  };
 
   // Initial load
   useEffect(() => {
@@ -345,92 +454,6 @@ const TrialBalance: React.FC = () => {
     },
   ];
 
-  // Trial Balance table columns
-  const tbColumns = [
-    {
-      title: 'Account',
-      dataIndex: 'account',
-      key: 'account',
-      width: 120,
-      fixed: 'left' as const,
-      render: (text: string) => (
-        <Text strong style={{ fontFamily: 'monospace' }}>{text}</Text>
-      ),
-    },
-    {
-      title: 'Description',
-      dataIndex: 'account_desc',
-      key: 'account_desc',
-      width: 280,
-      ellipsis: true,
-      render: (text: string) => (
-        <Tooltip title={text}>
-          <Text>{text}</Text>
-        </Tooltip>
-      ),
-    },
-    {
-      title: 'Opening',
-      dataIndex: 'opening_balance',
-      key: 'opening_balance',
-      width: 140,
-      align: 'right' as const,
-      render: (value: number) => (
-        <Text style={{
-          fontFamily: 'monospace',
-          color: value < 0 ? REDWOOD.error : REDWOOD.textPrimary,
-        }}>
-          {formatCurrency(value)}
-        </Text>
-      ),
-    },
-    {
-      title: 'Debit',
-      dataIndex: 'debit',
-      key: 'debit',
-      width: 140,
-      align: 'right' as const,
-      render: (value: number) => (
-        <Text style={{
-          fontFamily: 'monospace',
-          color: value > 0 ? REDWOOD.info : REDWOOD.textSecondary,
-        }}>
-          {formatCurrency(value)}
-        </Text>
-      ),
-    },
-    {
-      title: 'Credit',
-      dataIndex: 'credit',
-      key: 'credit',
-      width: 140,
-      align: 'right' as const,
-      render: (value: number) => (
-        <Text style={{
-          fontFamily: 'monospace',
-          color: value > 0 ? REDWOOD.success : REDWOOD.textSecondary,
-        }}>
-          {formatCurrency(value)}
-        </Text>
-      ),
-    },
-    {
-      title: 'Closing',
-      dataIndex: 'closing_balance',
-      key: 'closing_balance',
-      width: 140,
-      align: 'right' as const,
-      render: (value: number) => (
-        <Text strong style={{
-          fontFamily: 'monospace',
-          color: value < 0 ? REDWOOD.error : REDWOOD.textPrimary,
-        }}>
-          {formatCurrency(value)}
-        </Text>
-      ),
-    },
-  ];
-
   // Render periods tab content
   const renderPeriodsTab = () => (
     <Card
@@ -506,8 +529,11 @@ const TrialBalance: React.FC = () => {
       return true;
     });
 
-    // Calculate totals
-    const totals = filteredData.reduce(
+    // Generate pivot data
+    const pivotData = generatePivotData(filteredData, tab.segmentsBefore, tab.segmentsAfter);
+
+    // Calculate totals from pivot data
+    const totals = pivotData.reduce(
       (acc, item) => ({
         opening: acc.opening + item.opening_balance,
         debit: acc.debit + item.debit,
@@ -516,6 +542,95 @@ const TrialBalance: React.FC = () => {
       }),
       { opening: 0, debit: 0, credit: 0, closing: 0 }
     );
+
+    // Build dynamic columns based on dropped segments
+    const dynamicColumns = [
+      // Segments before Account
+      ...tab.segmentsBefore.map(seg => ({
+        title: getSegmentLabel(seg),
+        dataIndex: seg,
+        key: seg,
+        width: 100,
+        render: (text: string) => <Text style={{ fontFamily: 'monospace' }}>{text}</Text>,
+      })),
+      // Account column (fixed)
+      {
+        title: 'Account',
+        dataIndex: 'account',
+        key: 'account',
+        width: 120,
+        render: (text: string) => <Text strong style={{ fontFamily: 'monospace' }}>{text}</Text>,
+      },
+      // Account Description
+      {
+        title: 'Description',
+        dataIndex: 'account_desc',
+        key: 'account_desc',
+        width: 250,
+        ellipsis: true,
+        render: (text: string) => <Tooltip title={text}><Text>{text}</Text></Tooltip>,
+      },
+      // Segments after Account
+      ...tab.segmentsAfter.map(seg => ({
+        title: getSegmentLabel(seg),
+        dataIndex: seg,
+        key: seg,
+        width: 100,
+        render: (text: string) => <Text style={{ fontFamily: 'monospace' }}>{text}</Text>,
+      })),
+      // Amount columns
+      {
+        title: 'Opening',
+        dataIndex: 'opening_balance',
+        key: 'opening_balance',
+        width: 130,
+        align: 'right' as const,
+        render: (value: number) => (
+          <Text style={{ fontFamily: 'monospace', color: value < 0 ? REDWOOD.error : REDWOOD.textPrimary }}>
+            {formatCurrency(value)}
+          </Text>
+        ),
+      },
+      {
+        title: 'Debit',
+        dataIndex: 'debit',
+        key: 'debit',
+        width: 130,
+        align: 'right' as const,
+        render: (value: number) => (
+          <Text style={{ fontFamily: 'monospace', color: value > 0 ? REDWOOD.info : REDWOOD.textSecondary }}>
+            {formatCurrency(value)}
+          </Text>
+        ),
+      },
+      {
+        title: 'Credit',
+        dataIndex: 'credit',
+        key: 'credit',
+        width: 130,
+        align: 'right' as const,
+        render: (value: number) => (
+          <Text style={{ fontFamily: 'monospace', color: value > 0 ? REDWOOD.success : REDWOOD.textSecondary }}>
+            {formatCurrency(value)}
+          </Text>
+        ),
+      },
+      {
+        title: 'Closing',
+        dataIndex: 'closing_balance',
+        key: 'closing_balance',
+        width: 130,
+        align: 'right' as const,
+        render: (value: number) => (
+          <Text strong style={{ fontFamily: 'monospace', color: value < 0 ? REDWOOD.error : REDWOOD.textPrimary }}>
+            {formatCurrency(value)}
+          </Text>
+        ),
+      },
+    ];
+
+    // Calculate segment column count for summary row
+    const segmentColCount = tab.segmentsBefore.length + 2 + tab.segmentsAfter.length; // +2 for Account + Description
 
     if (tab.loading) {
       return (
@@ -549,7 +664,7 @@ const TrialBalance: React.FC = () => {
         }}
       >
         {/* Filters */}
-        <Row gutter={16} style={{ marginBottom: 16 }}>
+        <Row gutter={16} style={{ marginBottom: 12 }}>
           <Col span={6}>
             <Select
               placeholder="Filter by Company"
@@ -557,7 +672,6 @@ const TrialBalance: React.FC = () => {
               onChange={(value) => updateTabFilter(tab.key, 'selectedCompany', value)}
               allowClear
               style={{ width: '100%' }}
-              size="large"
             >
               {tab.companies.map(company => (
                 <Select.Option key={company} value={company}>
@@ -574,7 +688,6 @@ const TrialBalance: React.FC = () => {
               onChange={(value) => updateTabFilter(tab.key, 'selectedCurrency', value)}
               allowClear
               style={{ width: '100%' }}
-              size="large"
             >
               {tab.currencies.map(currency => (
                 <Select.Option key={currency} value={currency}>
@@ -584,88 +697,168 @@ const TrialBalance: React.FC = () => {
               ))}
             </Select>
           </Col>
-          <Col span={12}>
-            <Row gutter={16} justify="end">
-              <Col>
-                <Statistic
-                  title="Total Debit"
-                  value={totals.debit}
-                  precision={2}
-                  valueStyle={{ color: REDWOOD.info, fontSize: 16 }}
-                />
-              </Col>
-              <Col>
-                <Statistic
-                  title="Total Credit"
-                  value={totals.credit}
-                  precision={2}
-                  valueStyle={{ color: REDWOOD.success, fontSize: 16 }}
-                />
-              </Col>
-            </Row>
+          <Col span={12} style={{ textAlign: 'right' }}>
+            <Text type="secondary">{pivotData.length} rows</Text>
           </Col>
         </Row>
 
-        {/* Summary Cards */}
-        <Row gutter={16} style={{ marginBottom: 16 }}>
-          <Col span={6}>
-            <Card size="small" style={{ background: REDWOOD.surfaceSecondary, borderRadius: 8 }}>
-              <Statistic
-                title="Records"
-                value={filteredData.length}
-                prefix={<FileTextOutlined />}
-                valueStyle={{ fontSize: 20 }}
-              />
-            </Card>
-          </Col>
-          <Col span={6}>
-            <Card size="small" style={{ background: REDWOOD.surfaceSecondary, borderRadius: 8 }}>
-              <Statistic
-                title="Total Opening"
-                value={totals.opening}
-                precision={2}
-                valueStyle={{ fontSize: 20 }}
-              />
-            </Card>
-          </Col>
-          <Col span={6}>
-            <Card size="small" style={{ background: REDWOOD.surfaceSecondary, borderRadius: 8 }}>
-              <Statistic
-                title="Total Closing"
-                value={totals.closing}
-                precision={2}
-                valueStyle={{ fontSize: 20 }}
-              />
-            </Card>
-          </Col>
-          <Col span={6}>
-            <Card size="small" style={{
-              background: Math.abs(totals.debit - totals.credit) < 0.01 ? '#f6ffed' : '#fff2f0',
-              borderRadius: 8
-            }}>
-              <Statistic
-                title="Debit - Credit"
-                value={totals.debit - totals.credit}
-                precision={2}
-                valueStyle={{
-                  fontSize: 20,
-                  color: Math.abs(totals.debit - totals.credit) < 0.01 ? REDWOOD.success : REDWOOD.error,
+        {/* Draggable Segment Filters */}
+        <Divider style={{ margin: '12px 0' }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+          <Text style={{ fontSize: 12, color: REDWOOD.textSecondary }}>
+            <FilterOutlined /> Segments (drag to pivot):
+          </Text>
+          {AVAILABLE_SEGMENTS.map((segment) => {
+            const isDropped = tab.segmentsBefore.includes(segment.key) || tab.segmentsAfter.includes(segment.key);
+            return (
+              <Tag
+                key={segment.key}
+                style={{
+                  cursor: 'grab',
+                  padding: '4px 8px',
+                  fontSize: 11,
+                  background: isDropped ? `${REDWOOD.info}15` : REDWOOD.surfaceSecondary,
+                  borderColor: isDropped ? REDWOOD.info : REDWOOD.border,
                 }}
-              />
-            </Card>
-          </Col>
-        </Row>
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('segment', segment.key);
+                }}
+              >
+                <DragOutlined style={{ marginRight: 4 }} />
+                {segment.label}
+              </Tag>
+            );
+          })}
+        </div>
+
+        {/* Pivot columns drop zones */}
+        <div
+          style={{
+            marginBottom: 16,
+            padding: 8,
+            background: `${REDWOOD.info}08`,
+            borderRadius: 6,
+            border: `1px dashed ${REDWOOD.info}`,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            flexWrap: 'wrap',
+          }}
+        >
+          <Text style={{ fontSize: 11, color: REDWOOD.textSecondary }}>Pivot columns:</Text>
+
+          {/* Drop zone BEFORE Account */}
+          <div
+            onDrop={(e) => {
+              e.preventDefault();
+              const segment = e.dataTransfer.getData('segment');
+              if (segment) handleSegmentDrop(tab.key, segment, 'before');
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.currentTarget.style.background = `${REDWOOD.info}30`;
+            }}
+            onDragLeave={(e) => {
+              e.currentTarget.style.background = `${REDWOOD.info}10`;
+            }}
+            style={{
+              minWidth: 80,
+              minHeight: 28,
+              padding: '4px 8px',
+              background: `${REDWOOD.info}10`,
+              border: `1px dashed ${REDWOOD.info}`,
+              borderRadius: 4,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              flexWrap: 'wrap',
+            }}
+          >
+            {tab.segmentsBefore.length === 0 && (
+              <Text type="secondary" style={{ fontSize: 10 }}>Drop here (before)</Text>
+            )}
+            {tab.segmentsBefore.map((segment) => (
+              <Tag
+                key={segment}
+                closable
+                onClose={() => removeDroppedSegment(tab.key, segment)}
+                style={{ fontSize: 11, margin: 0 }}
+                color="blue"
+              >
+                {getSegmentLabel(segment)}
+              </Tag>
+            ))}
+          </div>
+
+          {/* Account (fixed) */}
+          <Tag style={{ fontSize: 11, margin: 0, fontWeight: 'bold' }} color="gold">
+            Account
+          </Tag>
+          <Tag style={{ fontSize: 11, margin: 0 }} color="default">
+            Description
+          </Tag>
+
+          {/* Drop zone AFTER Account */}
+          <div
+            onDrop={(e) => {
+              e.preventDefault();
+              const segment = e.dataTransfer.getData('segment');
+              if (segment) handleSegmentDrop(tab.key, segment, 'after');
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.currentTarget.style.background = `${REDWOOD.info}30`;
+            }}
+            onDragLeave={(e) => {
+              e.currentTarget.style.background = `${REDWOOD.info}10`;
+            }}
+            style={{
+              minWidth: 80,
+              minHeight: 28,
+              padding: '4px 8px',
+              background: `${REDWOOD.info}10`,
+              border: `1px dashed ${REDWOOD.info}`,
+              borderRadius: 4,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              flexWrap: 'wrap',
+            }}
+          >
+            {tab.segmentsAfter.length === 0 && (
+              <Text type="secondary" style={{ fontSize: 10 }}>Drop here (after)</Text>
+            )}
+            {tab.segmentsAfter.map((segment) => (
+              <Tag
+                key={segment}
+                closable
+                onClose={() => removeDroppedSegment(tab.key, segment)}
+                style={{ fontSize: 11, margin: 0 }}
+                color="blue"
+              >
+                {getSegmentLabel(segment)}
+              </Tag>
+            ))}
+          </div>
+
+          {/* Amount columns (fixed) */}
+          <Tag style={{ fontSize: 11, margin: 0 }} color="default">Opening</Tag>
+          <Tag style={{ fontSize: 11, margin: 0 }} color="default">Debit</Tag>
+          <Tag style={{ fontSize: 11, margin: 0 }} color="default">Credit</Tag>
+          <Tag style={{ fontSize: 11, margin: 0 }} color="default">Closing</Tag>
+        </div>
 
         {/* Table */}
         <Table
-          columns={tbColumns}
-          dataSource={filteredData}
-          rowKey={(record) => `${record.account}-${record.company}-${record.currency}`}
+          columns={dynamicColumns}
+          dataSource={pivotData}
+          rowKey="key"
           pagination={{
             pageSize: 50,
             showSizeChanger: true,
             pageSizeOptions: ['25', '50', '100', '200'],
-            showTotal: (total) => `${total} accounts`,
+            showTotal: (total) => `${total} rows`,
           }}
           scroll={{ x: 1000 }}
           size="small"
@@ -673,25 +866,25 @@ const TrialBalance: React.FC = () => {
           summary={() => (
             <Table.Summary fixed>
               <Table.Summary.Row style={{ background: REDWOOD.surfaceSecondary, fontWeight: 'bold' }}>
-                <Table.Summary.Cell index={0} colSpan={2}>
+                <Table.Summary.Cell index={0} colSpan={segmentColCount}>
                   <Text strong>TOTAL</Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={2} align="right">
+                <Table.Summary.Cell index={segmentColCount} align="right">
                   <Text strong style={{ fontFamily: 'monospace' }}>
                     {formatCurrency(totals.opening)}
                   </Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={3} align="right">
+                <Table.Summary.Cell index={segmentColCount + 1} align="right">
                   <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.info }}>
                     {formatCurrency(totals.debit)}
                   </Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={4} align="right">
+                <Table.Summary.Cell index={segmentColCount + 2} align="right">
                   <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.success }}>
                     {formatCurrency(totals.credit)}
                   </Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={5} align="right">
+                <Table.Summary.Cell index={segmentColCount + 3} align="right">
                   <Text strong style={{ fontFamily: 'monospace' }}>
                     {formatCurrency(totals.closing)}
                   </Text>
