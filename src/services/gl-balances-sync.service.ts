@@ -386,10 +386,8 @@ export const syncGLBalances = async (
     log?.('step', '═══════════════════════════════════════════════════════════');
 
     const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.glBalances}`;
-    const proxyApexUrl = `${PROXY_CONFIG.baseUrl}/apex/${APEX_DB_CONFIG.endpoints.glBalances}`;
 
-    log?.('info', `APEX Direct URL: ${apexUrl}`);
-    log?.('info', `APEX Proxy URL: ${proxyApexUrl}`);
+    log?.('info', `APEX URL: ${apexUrl}`);
 
     const batchSize = 500;
     let batchNum = 0;
@@ -423,13 +421,13 @@ export const syncGLBalances = async (
       try {
         if (verboseConsole) {
           console.log(`=== APEX POST BATCH ${batchNum} ===`);
-          console.log('URL:', proxyApexUrl);
+          console.log('URL:', apexUrl);
           console.log('Records:', batch.length);
           console.log('Payload:', JSON.stringify({ items: batch.slice(0, 2) }, null, 2));
         }
 
         const insertStart = Date.now();
-        const insertResponse = await fetch(proxyApexUrl, {
+        const insertResponse = await fetch(apexUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
