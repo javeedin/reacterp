@@ -133,12 +133,23 @@ BEGIN
         p_source         => q'[
 DECLARE
     v_template_id NUMBER;
+    v_template_code VARCHAR2(50);
+    v_template_name VARCHAR2(200);
+    v_description VARCHAR2(1000);
+    v_template_type VARCHAR2(50);
 BEGIN
+    SELECT JSON_VALUE(:body, '$.template_code'),
+           JSON_VALUE(:body, '$.template_name'),
+           JSON_VALUE(:body, '$.description'),
+           NVL(JSON_VALUE(:body, '$.template_type'), 'CUSTOM')
+    INTO v_template_code, v_template_name, v_description, v_template_type
+    FROM DUAL;
+
     rr_pl_template_pkg.create_template(
-        p_template_code => :template_code,
-        p_template_name => :template_name,
-        p_description   => :description,
-        p_template_type => NVL(:template_type, 'CUSTOM'),
+        p_template_code => v_template_code,
+        p_template_name => v_template_name,
+        p_description   => v_description,
+        p_template_type => v_template_type,
         p_template_id   => v_template_id
     );
 
@@ -192,15 +203,30 @@ BEGIN
         p_source         => q'[
 DECLARE
     v_group_id NUMBER;
+    v_template_id NUMBER;
+    v_group_code VARCHAR2(50);
+    v_group_name VARCHAR2(200);
+    v_group_label VARCHAR2(200);
+    v_group_type VARCHAR2(50);
+    v_display_order NUMBER;
+    v_sign_convention NUMBER;
 BEGIN
+    v_template_id := JSON_VALUE(:body, '$.template_id' RETURNING NUMBER);
+    v_group_code := JSON_VALUE(:body, '$.group_code');
+    v_group_name := JSON_VALUE(:body, '$.group_name');
+    v_group_label := JSON_VALUE(:body, '$.group_label');
+    v_group_type := JSON_VALUE(:body, '$.group_type');
+    v_display_order := JSON_VALUE(:body, '$.display_order' RETURNING NUMBER);
+    v_sign_convention := NVL(JSON_VALUE(:body, '$.sign_convention' RETURNING NUMBER), 1);
+
     rr_pl_template_pkg.add_group(
-        p_template_id     => :template_id,
-        p_group_code      => :group_code,
-        p_group_name      => :group_name,
-        p_group_label     => :group_label,
-        p_group_type      => :group_type,
-        p_display_order   => :display_order,
-        p_sign_convention => NVL(:sign_convention, 1),
+        p_template_id     => v_template_id,
+        p_group_code      => v_group_code,
+        p_group_name      => v_group_name,
+        p_group_label     => v_group_label,
+        p_group_type      => v_group_type,
+        p_display_order   => v_display_order,
+        p_sign_convention => v_sign_convention,
         p_group_id        => v_group_id
     );
 
@@ -254,13 +280,24 @@ BEGIN
         p_source         => q'[
 DECLARE
     v_section_id NUMBER;
+    v_group_id NUMBER;
+    v_section_code VARCHAR2(50);
+    v_section_name VARCHAR2(200);
+    v_section_label VARCHAR2(200);
+    v_display_order NUMBER;
 BEGIN
+    v_group_id := JSON_VALUE(:body, '$.group_id' RETURNING NUMBER);
+    v_section_code := JSON_VALUE(:body, '$.section_code');
+    v_section_name := JSON_VALUE(:body, '$.section_name');
+    v_section_label := JSON_VALUE(:body, '$.section_label');
+    v_display_order := JSON_VALUE(:body, '$.display_order' RETURNING NUMBER);
+
     rr_pl_template_pkg.add_section(
-        p_group_id      => :group_id,
-        p_section_code  => :section_code,
-        p_section_name  => :section_name,
-        p_section_label => :section_label,
-        p_display_order => :display_order,
+        p_group_id      => v_group_id,
+        p_section_code  => v_section_code,
+        p_section_name  => v_section_name,
+        p_section_label => v_section_label,
+        p_display_order => v_display_order,
         p_section_id    => v_section_id
     );
 
@@ -312,12 +349,22 @@ BEGIN
         p_method         => 'POST',
         p_source_type    => 'plsql/block',
         p_source         => q'[
+DECLARE
+    v_section_id NUMBER;
+    v_account_code VARCHAR2(50);
+    v_account_from VARCHAR2(50);
+    v_account_to VARCHAR2(50);
 BEGIN
+    v_section_id := JSON_VALUE(:body, '$.section_id' RETURNING NUMBER);
+    v_account_code := JSON_VALUE(:body, '$.account_code');
+    v_account_from := JSON_VALUE(:body, '$.account_from');
+    v_account_to := JSON_VALUE(:body, '$.account_to');
+
     rr_pl_template_pkg.assign_account(
-        p_section_id   => :section_id,
-        p_account_code => :account_code,
-        p_account_from => :account_from,
-        p_account_to   => :account_to
+        p_section_id   => v_section_id,
+        p_account_code => v_account_code,
+        p_account_from => v_account_from,
+        p_account_to   => v_account_to
     );
 
     :result := '{"success":true}';
@@ -368,14 +415,28 @@ BEGIN
         p_method         => 'POST',
         p_source_type    => 'plsql/block',
         p_source         => q'[
+DECLARE
+    v_template_id NUMBER;
+    v_total_code VARCHAR2(50);
+    v_total_name VARCHAR2(200);
+    v_calculation_formula VARCHAR2(500);
+    v_display_order NUMBER;
+    v_after_group_code VARCHAR2(50);
 BEGIN
+    v_template_id := JSON_VALUE(:body, '$.template_id' RETURNING NUMBER);
+    v_total_code := JSON_VALUE(:body, '$.total_code');
+    v_total_name := JSON_VALUE(:body, '$.total_name');
+    v_calculation_formula := JSON_VALUE(:body, '$.calculation_formula');
+    v_display_order := JSON_VALUE(:body, '$.display_order' RETURNING NUMBER);
+    v_after_group_code := JSON_VALUE(:body, '$.after_group_code');
+
     rr_pl_template_pkg.add_total(
-        p_template_id         => :template_id,
-        p_total_code          => :total_code,
-        p_total_name          => :total_name,
-        p_calculation_formula => :calculation_formula,
-        p_display_order       => :display_order,
-        p_after_group_code    => :after_group_code
+        p_template_id         => v_template_id,
+        p_total_code          => v_total_code,
+        p_total_name          => v_total_name,
+        p_calculation_formula => v_calculation_formula,
+        p_display_order       => v_display_order,
+        p_after_group_code    => v_after_group_code
     );
 
     :result := '{"success":true}';
@@ -428,11 +489,18 @@ BEGIN
         p_source         => q'[
 DECLARE
     v_new_template_id NUMBER;
+    v_source_template_id NUMBER;
+    v_new_template_code VARCHAR2(50);
+    v_new_template_name VARCHAR2(200);
 BEGIN
+    v_source_template_id := JSON_VALUE(:body, '$.source_template_id' RETURNING NUMBER);
+    v_new_template_code := JSON_VALUE(:body, '$.new_template_code');
+    v_new_template_name := JSON_VALUE(:body, '$.new_template_name');
+
     rr_pl_template_pkg.clone_template(
-        p_source_template_id => :source_template_id,
-        p_new_template_code  => :new_template_code,
-        p_new_template_name  => :new_template_name,
+        p_source_template_id => v_source_template_id,
+        p_new_template_code  => v_new_template_code,
+        p_new_template_name  => v_new_template_name,
         p_new_template_id    => v_new_template_id
     );
 
