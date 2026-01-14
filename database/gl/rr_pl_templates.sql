@@ -626,12 +626,19 @@ CREATE OR REPLACE PACKAGE BODY rr_pl_template_pkg AS
     ) IS
         v_new_group_id NUMBER;
         v_new_section_id NUMBER;
+        v_description VARCHAR2(1000);
+        v_ledger_id NUMBER;
+        v_currency_code VARCHAR2(10);
     BEGIN
+        -- Get source template info
+        SELECT description, ledger_id, currency_code
+        INTO v_description, v_ledger_id, v_currency_code
+        FROM rr_pl_templates
+        WHERE template_id = p_source_template_id;
+
         -- Clone template
         INSERT INTO rr_pl_templates (template_code, template_name, description, template_type, ledger_id, currency_code)
-        SELECT p_new_template_code, p_new_template_name, description, 'CUSTOM', ledger_id, currency_code
-        FROM rr_pl_templates
-        WHERE template_id = p_source_template_id
+        VALUES (p_new_template_code, p_new_template_name, v_description, 'CUSTOM', v_ledger_id, v_currency_code)
         RETURNING template_id INTO p_new_template_id;
 
         -- Clone groups
