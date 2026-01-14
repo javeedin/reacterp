@@ -39,6 +39,8 @@ import {
   SendOutlined,
   BugOutlined,
   BankOutlined,
+  CloudDownloadOutlined,
+  CloudUploadOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { SYNC_OBJECTS, PROXY_CONFIG, APEX_DB_CONFIG, type SyncObjectConfig, type ApiType } from '../../config/api.config';
@@ -4517,6 +4519,95 @@ const SyncData: React.FC = () => {
                         <Tooltip title={siteAssignmentsProgress.lastError}>
                           <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 8 }} ellipsis>
                             {siteAssignmentsProgress.lastError}
+                          </Text>
+                        </Tooltip>
+                      )}
+                    </Card>
+                  </Col>
+                </Row>
+              ) : isGLBalances ? (
+                /* GL Balances (SOAP) KPI Cards */
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  {/* Records Fetched from SOAP Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <CloudDownloadOutlined style={{ fontSize: 20, color: REDWOOD.primary, marginRight: 8 }} />
+                        <Text strong>Fetched from SOAP</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {glBalancesProgress.totalRecords}
+                      </div>
+                      <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 8 }}>
+                        {glBalancesProgress.status === 'fetching' ? 'Fetching from Oracle BI Publisher...' :
+                         glBalancesProgress.status === 'parsing' ? 'Parsing XML response...' :
+                         glBalancesProgress.status === 'inserting' ? 'Records ready for insert' :
+                         glBalancesProgress.status === 'completed' ? 'Fetch completed' :
+                         glBalancesProgress.status === 'error' ? 'Error during fetch' : 'Ready'}
+                      </Text>
+                    </Card>
+                  </Col>
+
+                  {/* Records Inserted to APEX Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <CloudUploadOutlined style={{ fontSize: 20, color: REDWOOD.success, marginRight: 8 }} />
+                        <Text strong>Inserted to APEX</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {glBalancesProgress.insertedRecords + glBalancesProgress.updatedRecords}
+                        <Text type="secondary" style={{ fontSize: 14, marginLeft: 8 }}>
+                          / {glBalancesProgress.totalRecords}
+                        </Text>
+                      </div>
+                      <Progress
+                        percent={glBalancesProgress.totalRecords > 0 ? Math.round(((glBalancesProgress.insertedRecords + glBalancesProgress.updatedRecords) / glBalancesProgress.totalRecords) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.success}
+                        style={{ marginTop: 8 }}
+                      />
+                      <Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 4 }}>
+                        Inserted: {glBalancesProgress.insertedRecords} | Updated: {glBalancesProgress.updatedRecords}
+                      </Text>
+                    </Card>
+                  </Col>
+
+                  {/* Errors Card */}
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <WarningOutlined style={{ fontSize: 20, color: glBalancesProgress.errors > 0 ? REDWOOD.error : REDWOOD.textSecondary, marginRight: 8 }} />
+                        <Text strong>Errors</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: glBalancesProgress.errors > 0 ? REDWOOD.error : REDWOOD.textPrimary }}>
+                        {glBalancesProgress.errors}
+                      </div>
+                      {glBalancesProgress.lastError && (
+                        <Tooltip title={glBalancesProgress.lastError}>
+                          <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 8 }} ellipsis>
+                            {glBalancesProgress.lastError}
                           </Text>
                         </Tooltip>
                       )}
