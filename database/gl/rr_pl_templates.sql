@@ -343,6 +343,15 @@ END rr_pl_template_pkg;
 
 CREATE OR REPLACE PACKAGE BODY rr_pl_template_pkg AS
 
+    -- Helper function to escape JSON string values
+    FUNCTION escape_json(p_str VARCHAR2) RETURN VARCHAR2 IS
+    BEGIN
+        IF p_str IS NULL THEN
+            RETURN 'null';
+        END IF;
+        RETURN '"' || REPLACE(REPLACE(REPLACE(p_str, '\', '\\'), '"', '\"'), CHR(10), '\n') || '"';
+    END escape_json;
+
     -- Get template structure as JSON
     FUNCTION get_template_structure(p_template_id NUMBER) RETURN CLOB IS
         v_result CLOB;
@@ -350,11 +359,22 @@ CREATE OR REPLACE PACKAGE BODY rr_pl_template_pkg AS
         v_sections CLOB;
         v_accounts CLOB;
         v_totals CLOB;
-        v_template CLOB;
         v_first_group BOOLEAN := TRUE;
         v_first_section BOOLEAN;
         v_first_account BOOLEAN;
+        v_first_total BOOLEAN;
+        v_template_code VARCHAR2(50);
+        v_template_name VARCHAR2(200);
+        v_description VARCHAR2(1000);
+        v_template_type VARCHAR2(50);
+        v_is_default VARCHAR2(1);
     BEGIN
+        -- Get template info
+        SELECT template_code, template_name, description, template_type, is_default
+        INTO v_template_code, v_template_name, v_description, v_template_type, v_is_default
+        FROM rr_pl_templates
+        WHERE template_id = p_template_id;
+
         -- Build groups array
         v_groups := '[';
         FOR grp IN (
@@ -397,77 +417,80 @@ CREATE OR REPLACE PACKAGE BODY rr_pl_template_pkg AS
                     END IF;
                     v_first_account := FALSE;
 
-                    v_accounts := v_accounts || JSON_OBJECT(
-                        'account_code' VALUE acct.account_code,
-                        'account_from' VALUE acct.account_from,
-                        'account_to' VALUE acct.account_to
-                    );
+                    v_accounts := v_accounts || '{' ||
+                        '"account_code":' || escape_json(acct.account_code) || ',' ||
+                        '"account_from":' || escape_json(acct.account_from) || ',' ||
+                        '"account_to":' || escape_json(acct.account_to) ||
+                    '}';
                 END LOOP;
                 v_accounts := v_accounts || ']';
 
-                v_sections := v_sections || JSON_OBJECT(
-                    'section_id' VALUE sec.section_id,
-                    'section_code' VALUE sec.section_code,
-                    'section_name' VALUE sec.section_name,
-                    'section_label' VALUE sec.section_label,
-                    'display_order' VALUE sec.display_order,
-                    'accounts' VALUE JSON(v_accounts) FORMAT JSON
-                );
+                v_sections := v_sections || '{' ||
+                    '"section_id":' || sec.section_id || ',' ||
+                    '"section_code":' || escape_json(sec.section_code) || ',' ||
+                    '"section_name":' || escape_json(sec.section_name) || ',' ||
+                    '"section_label":' || escape_json(sec.section_label) || ',' ||
+                    '"display_order":' || sec.display_order || ',' ||
+                    '"accounts":' || v_accounts ||
+                '}';
             END LOOP;
             v_sections := v_sections || ']';
 
-            v_groups := v_groups || JSON_OBJECT(
-                'group_id' VALUE grp.group_id,
-                'group_code' VALUE grp.group_code,
-                'group_name' VALUE grp.group_name,
-                'group_label' VALUE grp.group_label,
-                'group_type' VALUE grp.group_type,
-                'display_order' VALUE grp.display_order,
-                'sign_convention' VALUE grp.sign_convention,
-                'show_subtotal' VALUE grp.show_subtotal,
-                'subtotal_label' VALUE grp.subtotal_label,
-                'sections' VALUE JSON(v_sections) FORMAT JSON
-            );
+            v_groups := v_groups || '{' ||
+                '"group_id":' || grp.group_id || ',' ||
+                '"group_code":' || escape_json(grp.group_code) || ',' ||
+                '"group_name":' || escape_json(grp.group_name) || ',' ||
+                '"group_label":' || escape_json(grp.group_label) || ',' ||
+                '"group_type":' || escape_json(grp.group_type) || ',' ||
+                '"display_order":' || grp.display_order || ',' ||
+                '"sign_convention":' || grp.sign_convention || ',' ||
+                '"show_subtotal":' || escape_json(grp.show_subtotal) || ',' ||
+                '"subtotal_label":' || escape_json(grp.subtotal_label) || ',' ||
+                '"sections":' || v_sections ||
+            '}';
         END LOOP;
         v_groups := v_groups || ']';
 
         -- Build totals array
-        SELECT JSON_ARRAYAGG(
-            JSON_OBJECT(
-                'total_id' VALUE total_id,
-                'total_code' VALUE total_code,
-                'total_name' VALUE total_name,
-                'total_label' VALUE total_label,
-                'calculation_formula' VALUE calculation_formula,
-                'display_order' VALUE display_order,
-                'after_group_code' VALUE after_group_code,
-                'font_style' VALUE font_style,
-                'row_style' VALUE row_style
-            ) ORDER BY display_order
-        ) INTO v_totals
-        FROM rr_pl_totals
-        WHERE template_id = p_template_id AND is_active = 'Y';
+        v_totals := '[';
+        v_first_total := TRUE;
+        FOR tot IN (
+            SELECT total_id, total_code, total_name, total_label, calculation_formula,
+                   display_order, after_group_code, font_style, row_style
+            FROM rr_pl_totals
+            WHERE template_id = p_template_id AND is_active = 'Y'
+            ORDER BY display_order
+        ) LOOP
+            IF NOT v_first_total THEN
+                v_totals := v_totals || ',';
+            END IF;
+            v_first_total := FALSE;
 
-        IF v_totals IS NULL THEN
-            v_totals := '[]';
-        END IF;
+            v_totals := v_totals || '{' ||
+                '"total_id":' || tot.total_id || ',' ||
+                '"total_code":' || escape_json(tot.total_code) || ',' ||
+                '"total_name":' || escape_json(tot.total_name) || ',' ||
+                '"total_label":' || escape_json(tot.total_label) || ',' ||
+                '"calculation_formula":' || escape_json(tot.calculation_formula) || ',' ||
+                '"display_order":' || tot.display_order || ',' ||
+                '"after_group_code":' || escape_json(tot.after_group_code) || ',' ||
+                '"font_style":' || escape_json(tot.font_style) || ',' ||
+                '"row_style":' || escape_json(tot.row_style) ||
+            '}';
+        END LOOP;
+        v_totals := v_totals || ']';
 
-        -- Build template object
-        SELECT JSON_OBJECT(
-            'template_id' VALUE template_id,
-            'template_code' VALUE template_code,
-            'template_name' VALUE template_name,
-            'description' VALUE description,
-            'template_type' VALUE template_type,
-            'is_default' VALUE is_default,
-            'groups' VALUE JSON(v_groups) FORMAT JSON,
-            'totals' VALUE JSON(v_totals) FORMAT JSON
-        ) INTO v_template
-        FROM rr_pl_templates
-        WHERE template_id = p_template_id;
-
-        -- Wrap in result object
-        v_result := JSON_OBJECT('template' VALUE JSON(v_template) FORMAT JSON);
+        -- Build final result
+        v_result := '{"template":{' ||
+            '"template_id":' || p_template_id || ',' ||
+            '"template_code":' || escape_json(v_template_code) || ',' ||
+            '"template_name":' || escape_json(v_template_name) || ',' ||
+            '"description":' || escape_json(v_description) || ',' ||
+            '"template_type":' || escape_json(v_template_type) || ',' ||
+            '"is_default":' || escape_json(v_is_default) || ',' ||
+            '"groups":' || v_groups || ',' ||
+            '"totals":' || v_totals ||
+        '}}';
 
         RETURN v_result;
     END get_template_structure;
@@ -475,24 +498,35 @@ CREATE OR REPLACE PACKAGE BODY rr_pl_template_pkg AS
     -- Get template list
     FUNCTION get_templates RETURN CLOB IS
         v_result CLOB;
+        v_first BOOLEAN := TRUE;
     BEGIN
-        SELECT JSON_OBJECT(
-            'templates' VALUE JSON_ARRAYAGG(
-                JSON_OBJECT(
-                    'template_id' VALUE template_id,
-                    'template_code' VALUE template_code,
-                    'template_name' VALUE template_name,
-                    'description' VALUE description,
-                    'template_type' VALUE template_type,
-                    'is_active' VALUE is_active,
-                    'is_default' VALUE is_default,
-                    'created_date' VALUE TO_CHAR(created_date, 'YYYY-MM-DD HH24:MI:SS')
-                ) ORDER BY template_name
-            )
-        ) INTO v_result
-        FROM rr_pl_templates
-        WHERE is_active = 'Y';
+        v_result := '{"templates":[';
 
+        FOR t IN (
+            SELECT template_id, template_code, template_name, description,
+                   template_type, is_active, is_default, created_date
+            FROM rr_pl_templates
+            WHERE is_active = 'Y'
+            ORDER BY template_name
+        ) LOOP
+            IF NOT v_first THEN
+                v_result := v_result || ',';
+            END IF;
+            v_first := FALSE;
+
+            v_result := v_result || '{' ||
+                '"template_id":' || t.template_id || ',' ||
+                '"template_code":' || escape_json(t.template_code) || ',' ||
+                '"template_name":' || escape_json(t.template_name) || ',' ||
+                '"description":' || escape_json(t.description) || ',' ||
+                '"template_type":' || escape_json(t.template_type) || ',' ||
+                '"is_active":' || escape_json(t.is_active) || ',' ||
+                '"is_default":' || escape_json(t.is_default) || ',' ||
+                '"created_date":' || escape_json(TO_CHAR(t.created_date, 'YYYY-MM-DD HH24:MI:SS')) ||
+            '}';
+        END LOOP;
+
+        v_result := v_result || ']}';
         RETURN v_result;
     END get_templates;
 
