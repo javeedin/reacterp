@@ -80,6 +80,7 @@ export interface ParameterConfig {
   required: boolean;
   options?: { label: string; value: string }[];
   defaultValue?: string;
+  placeholder?: string;
 }
 
 export const SYNC_OBJECTS: SyncObjectConfig[] = [
@@ -433,7 +434,7 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
         label: 'Period Name',
         type: 'text',
         required: true,
-        defaultValue: 'Oct-25',
+        placeholder: 'e.g. Dec-25, Jan-26',
       },
       {
         key: 'environment',

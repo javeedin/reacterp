@@ -2597,7 +2597,15 @@ const SyncData: React.FC = () => {
                       rules={[{ required: param.required, message: `Please enter ${param.label}` }]}
                       initialValue={param.defaultValue}
                     >
-                      <Input placeholder={`Enter ${param.label}`} disabled={isSyncing || isTesting} />
+                      {param.type === 'select' && param.options ? (
+                        <Select placeholder={param.placeholder || `Select ${param.label}`} disabled={isSyncing || isTesting}>
+                          {param.options.map((opt) => (
+                            <Option key={opt.value} value={opt.value}>{opt.label}</Option>
+                          ))}
+                        </Select>
+                      ) : (
+                        <Input placeholder={param.placeholder || `Enter ${param.label}`} disabled={isSyncing || isTesting} />
+                      )}
                     </Form.Item>
                   ))}
 
