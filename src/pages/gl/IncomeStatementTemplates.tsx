@@ -16,14 +16,15 @@ import {
   Spin,
   Tag,
   Tooltip,
-  Collapse,
   Divider,
   Empty,
   Popconfirm,
   Row,
   Col,
   Tabs,
+  Tree,
 } from 'antd';
+import type { DataNode } from 'antd/es/tree';
 import {
   HomeOutlined,
   PlusOutlined,
@@ -31,15 +32,22 @@ import {
   DeleteOutlined,
   CopyOutlined,
   EyeOutlined,
-  ArrowLeftOutlined,
   SaveOutlined,
   FileTextOutlined,
   FolderOutlined,
+  FolderOpenOutlined,
   AppstoreOutlined,
   CalculatorOutlined,
   ReloadOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
+  CloseOutlined,
+  BankOutlined,
+  NumberOutlined,
+  MinusCircleOutlined,
+  PlusCircleOutlined,
+  CaretDownOutlined,
+  CaretRightOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import Autopilot from '../../components/Autopilot';
@@ -47,8 +55,6 @@ import * as plService from '../../services/pl-templates.service';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
-const { Panel } = Collapse;
-const { TabPane } = Tabs;
 const { TextArea } = Input;
 
 // Oracle Redwood Color Palette
@@ -68,21 +74,29 @@ const REDWOOD = {
 
 // Group type colors
 const GROUP_TYPE_COLORS: Record<string, string> = {
-  REVENUE: REDWOOD.success,
-  EXPENSE: REDWOOD.primary,
-  OTHER_INCOME: REDWOOD.info,
-  OTHER_EXPENSE: REDWOOD.warning,
+  REVENUE: '#52c41a',
+  EXPENSE: '#f5222d',
+  OTHER_INCOME: '#1890ff',
+  OTHER_EXPENSE: '#fa8c16',
   TAX: '#722ed1',
   COMPREHENSIVE: '#13c2c2',
-  CALCULATED: REDWOOD.neutral600,
+  CALCULATED: '#8c8c8c',
 };
+
+interface TemplateTab {
+  key: string;
+  label: string;
+  templateId: number;
+  template: plService.PLTemplateStructure | null;
+  loading: boolean;
+}
 
 const IncomeStatementTemplates: React.FC = () => {
   // State
   const [loading, setLoading] = useState(false);
   const [templates, setTemplates] = useState<plService.PLTemplate[]>([]);
-  const [selectedTemplate, setSelectedTemplate] = useState<plService.PLTemplateStructure | null>(null);
-  const [view, setView] = useState<'list' | 'editor' | 'preview'>('list');
+  const [activeTabKey, setActiveTabKey] = useState('list');
+  const [templateTabs, setTemplateTabs] = useState<TemplateTab[]>([]);
 
   // Modal states
   const [templateModalVisible, setTemplateModalVisible] = useState(false);
@@ -91,11 +105,13 @@ const IncomeStatementTemplates: React.FC = () => {
   const [accountModalVisible, setAccountModalVisible] = useState(false);
   const [totalModalVisible, setTotalModalVisible] = useState(false);
   const [cloneModalVisible, setCloneModalVisible] = useState(false);
+  const [previewModalVisible, setPreviewModalVisible] = useState(false);
 
   // Edit context
-  const [editingTemplateId, setEditingTemplateId] = useState<number | null>(null);
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
   const [selectedSectionId, setSelectedSectionId] = useState<number | null>(null);
+  const [cloneTemplateId, setCloneTemplateId] = useState<number | null>(null);
+  const [previewTemplate, setPreviewTemplate] = useState<plService.PLTemplateStructure | null>(null);
 
   // Forms
   const [templateForm] = Form.useForm();
@@ -125,21 +141,74 @@ const IncomeStatementTemplates: React.FC = () => {
     setLoading(false);
   };
 
-  const loadTemplateStructure = async (templateId: number) => {
-    setLoading(true);
+  const loadTemplateStructure = async (templateId: number, tabKey: string) => {
+    // Update tab loading state
+    setTemplateTabs(prev => prev.map(t =>
+      t.key === tabKey ? { ...t, loading: true } : t
+    ));
+
     try {
       const response = await plService.getTemplateStructure(templateId);
       if (response.success && response.data) {
-        setSelectedTemplate(response.data);
-        setEditingTemplateId(templateId);
-        setView('editor');
+        setTemplateTabs(prev => prev.map(t =>
+          t.key === tabKey ? { ...t, template: response.data!, loading: false } : t
+        ));
       } else {
         message.error(response.error || 'Failed to load template structure');
+        setTemplateTabs(prev => prev.map(t =>
+          t.key === tabKey ? { ...t, loading: false } : t
+        ));
       }
     } catch (error) {
       message.error('Failed to load template structure');
+      setTemplateTabs(prev => prev.map(t =>
+        t.key === tabKey ? { ...t, loading: false } : t
+      ));
     }
-    setLoading(false);
+  };
+
+  const openTemplateTab = (template: plService.PLTemplate) => {
+    const tabKey = `template-${template.template_id}`;
+
+    // Check if tab already exists
+    const existingTab = templateTabs.find(t => t.key === tabKey);
+    if (existingTab) {
+      setActiveTabKey(tabKey);
+      return;
+    }
+
+    // Create new tab
+    const newTab: TemplateTab = {
+      key: tabKey,
+      label: template.template_name,
+      templateId: template.template_id,
+      template: null,
+      loading: true,
+    };
+
+    setTemplateTabs(prev => [...prev, newTab]);
+    setActiveTabKey(tabKey);
+    loadTemplateStructure(template.template_id, tabKey);
+  };
+
+  const closeTemplateTab = (tabKey: string) => {
+    const newTabs = templateTabs.filter(t => t.key !== tabKey);
+    setTemplateTabs(newTabs);
+
+    if (activeTabKey === tabKey) {
+      setActiveTabKey(newTabs.length > 0 ? newTabs[newTabs.length - 1].key : 'list');
+    }
+  };
+
+  const getCurrentTemplateTab = (): TemplateTab | undefined => {
+    return templateTabs.find(t => t.key === activeTabKey);
+  };
+
+  const refreshCurrentTab = () => {
+    const tab = getCurrentTemplateTab();
+    if (tab) {
+      loadTemplateStructure(tab.templateId, tab.key);
+    }
   };
 
   // Template CRUD
@@ -156,8 +225,18 @@ const IncomeStatementTemplates: React.FC = () => {
         setTemplateModalVisible(false);
         templateForm.resetFields();
         loadTemplates();
-        // Load the new template in editor
-        loadTemplateStructure(response.data.template_id);
+        // Open the new template in a tab
+        const newTemplate: plService.PLTemplate = {
+          template_id: response.data.template_id,
+          template_code: values.template_code,
+          template_name: values.template_name,
+          description: values.description,
+          template_type: values.template_type,
+          is_active: 'Y',
+          is_default: 'N',
+          created_date: new Date().toISOString(),
+        };
+        openTemplateTab(newTemplate);
       } else {
         message.error(response.error || 'Failed to create template');
       }
@@ -172,6 +251,9 @@ const IncomeStatementTemplates: React.FC = () => {
       if (response.success) {
         message.success('Template deleted successfully');
         loadTemplates();
+        // Close tab if open
+        const tabKey = `template-${templateId}`;
+        closeTemplateTab(tabKey);
       } else {
         message.error(response.error || 'Failed to delete template');
       }
@@ -181,10 +263,10 @@ const IncomeStatementTemplates: React.FC = () => {
   };
 
   const handleCloneTemplate = async (values: any) => {
-    if (!editingTemplateId) return;
+    if (!cloneTemplateId) return;
     try {
       const response = await plService.cloneTemplate(
-        editingTemplateId,
+        cloneTemplateId,
         values.new_template_code,
         values.new_template_name
       );
@@ -192,8 +274,8 @@ const IncomeStatementTemplates: React.FC = () => {
         message.success('Template cloned successfully');
         setCloneModalVisible(false);
         cloneForm.resetFields();
+        setCloneTemplateId(null);
         loadTemplates();
-        loadTemplateStructure(response.data.template_id);
       } else {
         message.error(response.error || 'Failed to clone template');
       }
@@ -204,10 +286,12 @@ const IncomeStatementTemplates: React.FC = () => {
 
   // Group CRUD
   const handleAddGroup = async (values: any) => {
-    if (!editingTemplateId) return;
+    const tab = getCurrentTemplateTab();
+    if (!tab) return;
+
     try {
       const response = await plService.addGroup(
-        editingTemplateId,
+        tab.templateId,
         values.group_code,
         values.group_name,
         values.group_label || values.group_name,
@@ -219,7 +303,7 @@ const IncomeStatementTemplates: React.FC = () => {
         message.success('Group added successfully');
         setGroupModalVisible(false);
         groupForm.resetFields();
-        loadTemplateStructure(editingTemplateId);
+        refreshCurrentTab();
       } else {
         message.error(response.error || 'Failed to add group');
       }
@@ -229,12 +313,11 @@ const IncomeStatementTemplates: React.FC = () => {
   };
 
   const handleDeleteGroup = async (groupId: number) => {
-    if (!editingTemplateId) return;
     try {
       const response = await plService.deleteGroup(groupId);
       if (response.success) {
         message.success('Group deleted successfully');
-        loadTemplateStructure(editingTemplateId);
+        refreshCurrentTab();
       } else {
         message.error(response.error || 'Failed to delete group');
       }
@@ -245,7 +328,7 @@ const IncomeStatementTemplates: React.FC = () => {
 
   // Section CRUD
   const handleAddSection = async (values: any) => {
-    if (!selectedGroupId || !editingTemplateId) return;
+    if (!selectedGroupId) return;
     try {
       const response = await plService.addSection(
         selectedGroupId,
@@ -259,7 +342,7 @@ const IncomeStatementTemplates: React.FC = () => {
         setSectionModalVisible(false);
         sectionForm.resetFields();
         setSelectedGroupId(null);
-        loadTemplateStructure(editingTemplateId);
+        refreshCurrentTab();
       } else {
         message.error(response.error || 'Failed to add section');
       }
@@ -269,12 +352,11 @@ const IncomeStatementTemplates: React.FC = () => {
   };
 
   const handleDeleteSection = async (sectionId: number) => {
-    if (!editingTemplateId) return;
     try {
       const response = await plService.deleteSection(sectionId);
       if (response.success) {
         message.success('Section deleted successfully');
-        loadTemplateStructure(editingTemplateId);
+        refreshCurrentTab();
       } else {
         message.error(response.error || 'Failed to delete section');
       }
@@ -285,7 +367,7 @@ const IncomeStatementTemplates: React.FC = () => {
 
   // Account CRUD
   const handleAssignAccount = async (values: any) => {
-    if (!selectedSectionId || !editingTemplateId) return;
+    if (!selectedSectionId) return;
     try {
       const response = await plService.assignAccount(
         selectedSectionId,
@@ -298,7 +380,7 @@ const IncomeStatementTemplates: React.FC = () => {
         setAccountModalVisible(false);
         accountForm.resetFields();
         setSelectedSectionId(null);
-        loadTemplateStructure(editingTemplateId);
+        refreshCurrentTab();
       } else {
         message.error(response.error || 'Failed to assign account');
       }
@@ -309,10 +391,12 @@ const IncomeStatementTemplates: React.FC = () => {
 
   // Total CRUD
   const handleAddTotal = async (values: any) => {
-    if (!editingTemplateId) return;
+    const tab = getCurrentTemplateTab();
+    if (!tab) return;
+
     try {
       const response = await plService.addTotal(
-        editingTemplateId,
+        tab.templateId,
         values.total_code,
         values.total_name,
         values.calculation_formula,
@@ -323,7 +407,7 @@ const IncomeStatementTemplates: React.FC = () => {
         message.success('Total added successfully');
         setTotalModalVisible(false);
         totalForm.resetFields();
-        loadTemplateStructure(editingTemplateId);
+        refreshCurrentTab();
       } else {
         message.error(response.error || 'Failed to add total');
       }
@@ -333,18 +417,163 @@ const IncomeStatementTemplates: React.FC = () => {
   };
 
   const handleDeleteTotal = async (totalId: number) => {
-    if (!editingTemplateId) return;
     try {
       const response = await plService.deleteTotal(totalId);
       if (response.success) {
         message.success('Total deleted successfully');
-        loadTemplateStructure(editingTemplateId);
+        refreshCurrentTab();
       } else {
         message.error(response.error || 'Failed to delete total');
       }
     } catch (error) {
       message.error('Failed to delete total');
     }
+  };
+
+  // Build tree data for template structure
+  const buildTreeData = (template: plService.PLTemplateStructure): DataNode[] => {
+    const { groups, totals } = template.template;
+
+    const treeData: DataNode[] = [];
+
+    // Add groups with their sections and accounts
+    groups.forEach(group => {
+      const groupNode: DataNode = {
+        key: `group-${group.group_id}`,
+        title: (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '4px 0' }}>
+            <Space>
+              <Tag color={GROUP_TYPE_COLORS[group.group_type]} style={{ margin: 0 }}>
+                {group.group_type}
+              </Tag>
+              <Text strong style={{ fontSize: 14 }}>{group.group_name}</Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>({group.group_code})</Text>
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                Order: {group.display_order} | Sign: {group.sign_convention === 1 ? '+' : '-'}
+              </Text>
+            </Space>
+            <Space size="small" onClick={e => e.stopPropagation()}>
+              <Tooltip title="Add Section">
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<PlusOutlined />}
+                  onClick={() => {
+                    setSelectedGroupId(group.group_id);
+                    sectionForm.setFieldsValue({
+                      display_order: (group.sections.length + 1) * 10,
+                    });
+                    setSectionModalVisible(true);
+                  }}
+                />
+              </Tooltip>
+              <Popconfirm
+                title="Delete this group?"
+                description="All sections and accounts will also be deleted."
+                onConfirm={() => handleDeleteGroup(group.group_id)}
+                okText="Delete"
+                okButtonProps={{ danger: true }}
+              >
+                <Button type="text" size="small" danger icon={<DeleteOutlined />} />
+              </Popconfirm>
+            </Space>
+          </div>
+        ),
+        icon: <FolderOutlined style={{ color: GROUP_TYPE_COLORS[group.group_type] }} />,
+        children: group.sections.map(section => ({
+          key: `section-${section.section_id}`,
+          title: (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '2px 0' }}>
+              <Space>
+                <Text style={{ fontSize: 13 }}>{section.section_name}</Text>
+                <Text type="secondary" style={{ fontSize: 11 }}>({section.section_code})</Text>
+              </Space>
+              <Space size="small" onClick={e => e.stopPropagation()}>
+                <Tooltip title="Add Account">
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<PlusOutlined />}
+                    onClick={() => {
+                      setSelectedSectionId(section.section_id);
+                      setAccountModalVisible(true);
+                    }}
+                  />
+                </Tooltip>
+                <Popconfirm
+                  title="Delete this section?"
+                  onConfirm={() => handleDeleteSection(section.section_id)}
+                  okText="Delete"
+                  okButtonProps={{ danger: true }}
+                >
+                  <Button type="text" size="small" danger icon={<DeleteOutlined />} />
+                </Popconfirm>
+              </Space>
+            </div>
+          ),
+          icon: <AppstoreOutlined style={{ color: REDWOOD.info }} />,
+          children: section.accounts.length > 0 ? section.accounts.map((account, idx) => ({
+            key: `account-${section.section_id}-${idx}`,
+            title: (
+              <Space>
+                <Text style={{ fontSize: 12 }}>
+                  {account.account_from && account.account_to
+                    ? `${account.account_from} - ${account.account_to}`
+                    : account.account_code}
+                </Text>
+              </Space>
+            ),
+            icon: <NumberOutlined style={{ color: REDWOOD.neutral600 }} />,
+            isLeaf: true,
+          })) : undefined,
+        })),
+      };
+      treeData.push(groupNode);
+    });
+
+    // Add totals section
+    if (totals.length > 0) {
+      const totalsNode: DataNode = {
+        key: 'totals',
+        title: (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '4px 0' }}>
+            <Space>
+              <Text strong style={{ fontSize: 14, color: REDWOOD.primary }}>Calculated Totals</Text>
+              <Tag color="purple">{totals.length} items</Tag>
+            </Space>
+          </div>
+        ),
+        icon: <CalculatorOutlined style={{ color: REDWOOD.primary }} />,
+        children: totals.map(total => ({
+          key: `total-${total.total_id}`,
+          title: (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '2px 0' }}>
+              <Space>
+                <Tag color="purple" style={{ margin: 0 }}>{total.total_code}</Tag>
+                <Text style={{ fontSize: 13 }}>{total.total_name}</Text>
+                <Text code style={{ fontSize: 11 }}>{total.calculation_formula}</Text>
+                {total.after_group_code && (
+                  <Text type="secondary" style={{ fontSize: 11 }}>after {total.after_group_code}</Text>
+                )}
+              </Space>
+              <Popconfirm
+                title="Delete this total?"
+                onConfirm={() => handleDeleteTotal(total.total_id)}
+                okText="Delete"
+                okButtonProps={{ danger: true }}
+              >
+                <Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={e => e.stopPropagation()} />
+              </Popconfirm>
+            </div>
+          ),
+          icon: <CalculatorOutlined style={{ color: '#722ed1' }} />,
+          isLeaf: true,
+        })),
+      };
+      treeData.push(totalsNode);
+    }
+
+    return treeData;
   };
 
   // Template List View
@@ -361,7 +590,6 @@ const IncomeStatementTemplates: React.FC = () => {
         title: 'Template Name',
         dataIndex: 'template_name',
         key: 'template_name',
-        render: (text: string) => text,
       },
       {
         title: 'Type',
@@ -392,18 +620,24 @@ const IncomeStatementTemplates: React.FC = () => {
           <Space size="small">
             <Tooltip title="Edit">
               <Button
-                type="text"
+                type="primary"
+                size="small"
                 icon={<EditOutlined />}
-                onClick={() => loadTemplateStructure(record.template_id)}
-              />
+                onClick={() => openTemplateTab(record)}
+              >
+                Edit
+              </Button>
             </Tooltip>
             <Tooltip title="Preview">
               <Button
                 type="text"
                 icon={<EyeOutlined />}
-                onClick={() => {
-                  loadTemplateStructure(record.template_id);
-                  setTimeout(() => setView('preview'), 500);
+                onClick={async () => {
+                  const response = await plService.getTemplateStructure(record.template_id);
+                  if (response.success && response.data) {
+                    setPreviewTemplate(response.data);
+                    setPreviewModalVisible(true);
+                  }
                 }}
               />
             </Tooltip>
@@ -412,7 +646,7 @@ const IncomeStatementTemplates: React.FC = () => {
                 type="text"
                 icon={<CopyOutlined />}
                 onClick={() => {
-                  setEditingTemplateId(record.template_id);
+                  setCloneTemplateId(record.template_id);
                   setCloneModalVisible(true);
                 }}
               />
@@ -432,106 +666,106 @@ const IncomeStatementTemplates: React.FC = () => {
     ];
 
     return (
-      <Card
-        title={
-          <Space>
-            <FileTextOutlined style={{ color: REDWOOD.primary }} />
-            <span>Income Statement Templates</span>
-          </Space>
-        }
-        extra={
-          <Space>
-            <Button icon={<ReloadOutlined />} onClick={loadTemplates}>
-              Refresh
-            </Button>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={() => setTemplateModalVisible(true)}
-              style={{ background: REDWOOD.primary }}
-            >
-              New Template
-            </Button>
-          </Space>
-        }
-        style={{ borderRadius: 8 }}
-      >
-        <Table
-          columns={columns}
-          dataSource={templates}
-          rowKey="template_id"
-          loading={loading}
-          pagination={{ pageSize: 10 }}
-          locale={{
-            emptyText: (
-              <Empty
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description="No templates found"
+      <div style={{ padding: 16 }}>
+        <Card
+          title={
+            <Space>
+              <FileTextOutlined style={{ color: REDWOOD.primary }} />
+              <span>P&L Statement Templates</span>
+            </Space>
+          }
+          extra={
+            <Space>
+              <Button icon={<ReloadOutlined />} onClick={loadTemplates}>
+                Refresh
+              </Button>
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => setTemplateModalVisible(true)}
+                style={{ background: REDWOOD.primary }}
               >
-                <Button type="primary" onClick={() => setTemplateModalVisible(true)}>
-                  Create Template
-                </Button>
-              </Empty>
-            ),
-          }}
-        />
-      </Card>
+                New Template
+              </Button>
+            </Space>
+          }
+          style={{ borderRadius: 8 }}
+        >
+          <Table
+            columns={columns}
+            dataSource={templates}
+            rowKey="template_id"
+            loading={loading}
+            pagination={{ pageSize: 10 }}
+            locale={{
+              emptyText: (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description="No templates found"
+                >
+                  <Button type="primary" onClick={() => setTemplateModalVisible(true)}>
+                    Create Template
+                  </Button>
+                </Empty>
+              ),
+            }}
+          />
+        </Card>
+      </div>
     );
   };
 
-  // Template Editor View
-  const renderTemplateEditor = () => {
-    if (!selectedTemplate) return null;
+  // Template Editor View (Tab Content)
+  const renderTemplateEditor = (tab: TemplateTab) => {
+    if (tab.loading) {
+      return (
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 400 }}>
+          <Spin size="large" />
+        </div>
+      );
+    }
 
-    const { template } = selectedTemplate;
+    if (!tab.template) {
+      return (
+        <Empty description="Failed to load template. Click refresh to try again." />
+      );
+    }
+
+    const { template } = tab.template;
+    const treeData = buildTreeData(tab.template);
 
     return (
-      <div>
-        {/* Header */}
-        <Card style={{ marginBottom: 16, borderRadius: 8 }}>
+      <div style={{ padding: 16 }}>
+        {/* Template Header */}
+        <Card size="small" style={{ marginBottom: 16, borderRadius: 8 }}>
           <Row justify="space-between" align="middle">
             <Col>
-              <Space direction="vertical" size={0}>
-                <Space>
-                  <Button
-                    icon={<ArrowLeftOutlined />}
-                    onClick={() => {
-                      setView('list');
-                      setSelectedTemplate(null);
-                      setEditingTemplateId(null);
-                    }}
-                  >
-                    Back
-                  </Button>
-                  <Divider type="vertical" />
-                  <Title level={4} style={{ margin: 0 }}>
-                    {template.template_name}
-                  </Title>
-                  <Tag color="blue">{template.template_code}</Tag>
-                  <Tag>{template.template_type}</Tag>
-                </Space>
-                <Text type="secondary" style={{ marginLeft: 80 }}>
-                  {template.description || 'No description'}
-                </Text>
+              <Space>
+                <Tag color="blue" style={{ fontSize: 14, padding: '4px 12px' }}>{template.template_code}</Tag>
+                <Title level={4} style={{ margin: 0 }}>{template.template_name}</Title>
+                <Tag>{template.template_type}</Tag>
+                {template.is_default === 'Y' && <Tag color="green">Default</Tag>}
               </Space>
+              {template.description && (
+                <div style={{ marginTop: 4 }}>
+                  <Text type="secondary">{template.description}</Text>
+                </div>
+              )}
             </Col>
             <Col>
               <Space>
                 <Button
                   icon={<EyeOutlined />}
-                  onClick={() => setView('preview')}
+                  onClick={() => {
+                    setPreviewTemplate(tab.template);
+                    setPreviewModalVisible(true);
+                  }}
                 >
                   Preview
                 </Button>
                 <Button
-                  icon={<CopyOutlined />}
-                  onClick={() => setCloneModalVisible(true)}
-                >
-                  Clone
-                </Button>
-                <Button
                   icon={<ReloadOutlined />}
-                  onClick={() => editingTemplateId && loadTemplateStructure(editingTemplateId)}
+                  onClick={refreshCurrentTab}
                 >
                   Refresh
                 </Button>
@@ -540,255 +774,86 @@ const IncomeStatementTemplates: React.FC = () => {
           </Row>
         </Card>
 
-        {/* Editor Tabs */}
-        <Card style={{ borderRadius: 8 }}>
-          <Tabs defaultActiveKey="structure">
-            <TabPane
-              tab={<span><FolderOutlined /> Structure</span>}
-              key="structure"
+        {/* Action Buttons */}
+        <Card size="small" style={{ marginBottom: 16, borderRadius: 8 }}>
+          <Space>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => {
+                groupForm.setFieldsValue({
+                  display_order: (template.groups.length + 1) * 10,
+                  sign_convention: 1,
+                });
+                setGroupModalVisible(true);
+              }}
+              style={{ background: REDWOOD.success }}
             >
-              {/* Groups and Sections */}
-              <div style={{ marginBottom: 16 }}>
-                <Button
-                  type="primary"
-                  icon={<PlusOutlined />}
-                  onClick={() => {
-                    groupForm.setFieldsValue({
-                      display_order: (template.groups.length + 1) * 10,
-                      sign_convention: 1,
-                    });
-                    setGroupModalVisible(true);
-                  }}
-                  style={{ background: REDWOOD.primary }}
-                >
-                  Add Group
-                </Button>
-              </div>
-
-              {template.groups.length === 0 ? (
-                <Empty description="No groups defined. Add a group to get started." />
-              ) : (
-                <Collapse defaultActiveKey={template.groups.map(g => g.group_id.toString())}>
-                  {template.groups.map((group) => (
-                    <Panel
-                      key={group.group_id.toString()}
-                      header={
-                        <Row justify="space-between" align="middle" style={{ width: '100%' }}>
-                          <Col>
-                            <Space>
-                              <Tag color={GROUP_TYPE_COLORS[group.group_type] || 'default'}>
-                                {group.group_type}
-                              </Tag>
-                              <Text strong>{group.group_name}</Text>
-                              <Text type="secondary">({group.group_code})</Text>
-                              <Text type="secondary">Order: {group.display_order}</Text>
-                              <Text type="secondary">
-                                Sign: {group.sign_convention === 1 ? '+' : '-'}
-                              </Text>
-                            </Space>
-                          </Col>
-                          <Col onClick={e => e.stopPropagation()}>
-                            <Space>
-                              <Button
-                                type="primary"
-                                size="small"
-                                icon={<PlusOutlined />}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedGroupId(group.group_id);
-                                  sectionForm.setFieldsValue({
-                                    display_order: (group.sections.length + 1) * 10,
-                                  });
-                                  setSectionModalVisible(true);
-                                }}
-                              >
-                                Add Section
-                              </Button>
-                              <Popconfirm
-                                title="Delete this group?"
-                                description="All sections and accounts will also be deleted."
-                                onConfirm={() => handleDeleteGroup(group.group_id)}
-                                okText="Delete"
-                                okButtonProps={{ danger: true }}
-                              >
-                                <Button size="small" danger icon={<DeleteOutlined />} />
-                              </Popconfirm>
-                            </Space>
-                          </Col>
-                        </Row>
-                      }
-                    >
-                      {/* Sections */}
-                      {group.sections.length === 0 ? (
-                        <Empty
-                          image={Empty.PRESENTED_IMAGE_SIMPLE}
-                          description="No sections in this group"
-                        />
-                      ) : (
-                        group.sections.map((section) => (
-                          <Card
-                            key={section.section_id}
-                            size="small"
-                            style={{ marginBottom: 8 }}
-                            title={
-                              <Space>
-                                <AppstoreOutlined style={{ color: REDWOOD.info }} />
-                                <Text strong>{section.section_name}</Text>
-                                <Text type="secondary">({section.section_code})</Text>
-                              </Space>
-                            }
-                            extra={
-                              <Space>
-                                <Button
-                                  size="small"
-                                  icon={<PlusOutlined />}
-                                  onClick={() => {
-                                    setSelectedSectionId(section.section_id);
-                                    setAccountModalVisible(true);
-                                  }}
-                                >
-                                  Add Account
-                                </Button>
-                                <Popconfirm
-                                  title="Delete this section?"
-                                  onConfirm={() => handleDeleteSection(section.section_id)}
-                                  okText="Delete"
-                                  okButtonProps={{ danger: true }}
-                                >
-                                  <Button size="small" danger icon={<DeleteOutlined />} />
-                                </Popconfirm>
-                              </Space>
-                            }
-                          >
-                            {/* Accounts */}
-                            {section.accounts.length === 0 ? (
-                              <Text type="secondary">No accounts assigned</Text>
-                            ) : (
-                              <Space wrap>
-                                {section.accounts.map((account, idx) => (
-                                  <Tag key={idx} closable={false}>
-                                    {account.account_from && account.account_to ? (
-                                      `${account.account_from} - ${account.account_to}`
-                                    ) : (
-                                      account.account_code
-                                    )}
-                                  </Tag>
-                                ))}
-                              </Space>
-                            )}
-                          </Card>
-                        ))
-                      )}
-                    </Panel>
-                  ))}
-                </Collapse>
-              )}
-            </TabPane>
-
-            <TabPane
-              tab={<span><CalculatorOutlined /> Calculated Totals</span>}
-              key="totals"
+              Add Group
+            </Button>
+            <Button
+              icon={<CalculatorOutlined />}
+              onClick={() => {
+                totalForm.setFieldsValue({
+                  display_order: (template.totals.length + 1) * 10,
+                });
+                setTotalModalVisible(true);
+              }}
             >
-              <div style={{ marginBottom: 16 }}>
-                <Button
-                  type="primary"
-                  icon={<PlusOutlined />}
-                  onClick={() => {
-                    totalForm.setFieldsValue({
-                      display_order: (template.totals.length + 1) * 10,
-                    });
-                    setTotalModalVisible(true);
-                  }}
-                  style={{ background: REDWOOD.primary }}
-                >
-                  Add Calculated Total
-                </Button>
-              </div>
+              Add Calculated Total
+            </Button>
+          </Space>
+        </Card>
 
-              {template.totals.length === 0 ? (
-                <Empty description="No calculated totals defined." />
-              ) : (
-                <Table
-                  dataSource={template.totals}
-                  rowKey="total_id"
-                  pagination={false}
-                  columns={[
-                    {
-                      title: 'Code',
-                      dataIndex: 'total_code',
-                      key: 'total_code',
-                      width: 100,
-                      render: (text) => <Tag color="purple">{text}</Tag>,
-                    },
-                    {
-                      title: 'Name',
-                      dataIndex: 'total_name',
-                      key: 'total_name',
-                    },
-                    {
-                      title: 'Formula',
-                      dataIndex: 'calculation_formula',
-                      key: 'calculation_formula',
-                      render: (text) => <Text code>{text}</Text>,
-                    },
-                    {
-                      title: 'After Group',
-                      dataIndex: 'after_group_code',
-                      key: 'after_group_code',
-                      render: (text) => text ? <Tag>{text}</Tag> : '-',
-                    },
-                    {
-                      title: 'Order',
-                      dataIndex: 'display_order',
-                      key: 'display_order',
-                      width: 80,
-                    },
-                    {
-                      title: 'Style',
-                      dataIndex: 'font_style',
-                      key: 'font_style',
-                      width: 100,
-                      render: (text) => <Tag>{text}</Tag>,
-                    },
-                    {
-                      title: 'Actions',
-                      key: 'actions',
-                      width: 80,
-                      render: (_, record: plService.PLTotal) => (
-                        <Popconfirm
-                          title="Delete this total?"
-                          onConfirm={() => handleDeleteTotal(record.total_id)}
-                          okText="Delete"
-                          okButtonProps={{ danger: true }}
-                        >
-                          <Button size="small" danger icon={<DeleteOutlined />} />
-                        </Popconfirm>
-                      ),
-                    },
-                  ]}
-                />
-              )}
-            </TabPane>
-          </Tabs>
+        {/* Hierarchical Tree View */}
+        <Card
+          title={
+            <Space>
+              <FolderOpenOutlined style={{ color: REDWOOD.primary }} />
+              <span>Template Structure</span>
+              <Text type="secondary" style={{ fontWeight: 'normal', fontSize: 12 }}>
+                ({template.groups.length} groups, {template.totals.length} totals)
+              </Text>
+            </Space>
+          }
+          style={{ borderRadius: 8 }}
+          bodyStyle={{ padding: template.groups.length === 0 ? 24 : 0 }}
+        >
+          {template.groups.length === 0 && template.totals.length === 0 ? (
+            <Empty description="No structure defined. Add a group to get started." />
+          ) : (
+            <Tree
+              showIcon
+              showLine={{ showLeafIcon: false }}
+              defaultExpandAll
+              selectable={false}
+              treeData={treeData}
+              style={{
+                padding: 16,
+                background: REDWOOD.neutral100,
+              }}
+              switcherIcon={({ expanded }) =>
+                expanded ? <CaretDownOutlined /> : <CaretRightOutlined />
+              }
+            />
+          )}
         </Card>
       </div>
     );
   };
 
-  // Preview View
-  const renderPreview = () => {
-    if (!selectedTemplate) return null;
+  // Preview Modal
+  const renderPreviewModal = () => {
+    if (!previewTemplate) return null;
 
-    const { template } = selectedTemplate;
+    const { template } = previewTemplate;
 
     // Build preview rows
     const previewRows: Array<{
       key: string;
-      type: 'group' | 'section' | 'total';
       label: string;
-      code: string;
       indent: number;
-      style: string;
+      isBold: boolean;
       isTotal?: boolean;
       formula?: string;
     }> = [];
@@ -802,35 +867,26 @@ const IncomeStatementTemplates: React.FC = () => {
     items.forEach(item => {
       if (item.type === 'group') {
         const group = item.data as plService.PLGroup;
-        // Add group header
         previewRows.push({
           key: `group-${group.group_id}`,
-          type: 'group',
           label: group.group_label || group.group_name,
-          code: group.group_code,
           indent: 0,
-          style: 'BOLD',
+          isBold: true,
         });
-        // Add sections
         group.sections.forEach(section => {
           previewRows.push({
             key: `section-${section.section_id}`,
-            type: 'section',
             label: section.section_label || section.section_name,
-            code: section.section_code,
             indent: 1,
-            style: 'NORMAL',
+            isBold: false,
           });
         });
-        // Add group subtotal if enabled
         if (group.show_subtotal === 'Y' && group.subtotal_label) {
           previewRows.push({
             key: `subtotal-${group.group_id}`,
-            type: 'group',
             label: group.subtotal_label,
-            code: '',
             indent: 0,
-            style: 'BOLD',
+            isBold: true,
             isTotal: true,
           });
         }
@@ -838,11 +894,9 @@ const IncomeStatementTemplates: React.FC = () => {
         const total = item.data as plService.PLTotal;
         previewRows.push({
           key: `total-${total.total_id}`,
-          type: 'total',
           label: total.total_label || total.total_name,
-          code: total.total_code,
           indent: 0,
-          style: total.font_style,
+          isBold: true,
           isTotal: true,
           formula: total.calculation_formula,
         });
@@ -850,85 +904,94 @@ const IncomeStatementTemplates: React.FC = () => {
     });
 
     return (
-      <div>
-        <Card style={{ marginBottom: 16, borderRadius: 8 }}>
-          <Row justify="space-between" align="middle">
-            <Col>
-              <Space>
-                <Button
-                  icon={<ArrowLeftOutlined />}
-                  onClick={() => setView('editor')}
-                >
-                  Back to Editor
-                </Button>
-                <Divider type="vertical" />
-                <Title level={4} style={{ margin: 0 }}>
-                  Preview: {template.template_name}
-                </Title>
-              </Space>
-            </Col>
-          </Row>
-        </Card>
+      <Modal
+        title={`Preview: ${template.template_name}`}
+        open={previewModalVisible}
+        onCancel={() => {
+          setPreviewModalVisible(false);
+          setPreviewTemplate(null);
+        }}
+        footer={null}
+        width={700}
+      >
+        <div style={{ textAlign: 'center', marginBottom: 24 }}>
+          <Title level={4}>Profit and Loss Statement</Title>
+          <Text type="secondary">For the Period Ending December 31, 2024</Text>
+        </div>
 
-        <Card
-          title="Income Statement Preview"
-          style={{ borderRadius: 8 }}
-        >
-          <div style={{ maxWidth: 800, margin: '0 auto' }}>
-            <div style={{ textAlign: 'center', marginBottom: 24 }}>
-              <Title level={3}>Profit and Loss Statement</Title>
-              <Text type="secondary">For the Period Ending December 31, 2024</Text>
-            </div>
-
-            <Table
-              dataSource={previewRows}
-              pagination={false}
-              showHeader={false}
-              rowKey="key"
-              columns={[
-                {
-                  dataIndex: 'label',
-                  key: 'label',
-                  render: (text, record) => (
-                    <div style={{
-                      paddingLeft: record.indent * 24,
-                      fontWeight: record.style === 'BOLD' ? 600 : 400,
-                      borderTop: record.isTotal ? '1px solid #e5e5e5' : 'none',
-                      paddingTop: record.isTotal ? 8 : 0,
-                      marginTop: record.isTotal ? 8 : 0,
-                    }}>
-                      {text}
-                      {record.formula && (
-                        <Text type="secondary" style={{ marginLeft: 8 }}>
-                          [{record.formula}]
-                        </Text>
-                      )}
-                    </div>
-                  ),
-                },
-                {
-                  dataIndex: 'amount',
-                  key: 'amount',
-                  width: 150,
-                  align: 'right' as const,
-                  render: (_, record) => (
-                    <div style={{
-                      fontWeight: record.style === 'BOLD' ? 600 : 400,
-                      borderTop: record.isTotal ? '1px solid #e5e5e5' : 'none',
-                      paddingTop: record.isTotal ? 8 : 0,
-                      marginTop: record.isTotal ? 8 : 0,
-                    }}>
-                      {record.type === 'section' ? '0.00' : record.isTotal ? '0.00' : ''}
-                    </div>
-                  ),
-                },
-              ]}
-            />
-          </div>
-        </Card>
-      </div>
+        <Table
+          dataSource={previewRows}
+          pagination={false}
+          showHeader={false}
+          rowKey="key"
+          size="small"
+          columns={[
+            {
+              dataIndex: 'label',
+              key: 'label',
+              render: (text, record) => (
+                <div style={{
+                  paddingLeft: record.indent * 24,
+                  fontWeight: record.isBold ? 600 : 400,
+                  borderTop: record.isTotal ? `1px solid ${REDWOOD.neutral200}` : 'none',
+                  paddingTop: record.isTotal ? 8 : 4,
+                  paddingBottom: 4,
+                }}>
+                  {text}
+                  {record.formula && (
+                    <Text type="secondary" style={{ marginLeft: 8, fontSize: 11 }}>
+                      [{record.formula}]
+                    </Text>
+                  )}
+                </div>
+              ),
+            },
+            {
+              key: 'amount',
+              width: 120,
+              align: 'right' as const,
+              render: (_, record) => (
+                <div style={{
+                  fontWeight: record.isBold ? 600 : 400,
+                  borderTop: record.isTotal ? `1px solid ${REDWOOD.neutral200}` : 'none',
+                  paddingTop: record.isTotal ? 8 : 4,
+                  paddingBottom: 4,
+                }}>
+                  {record.indent === 1 || record.isTotal ? '0.00' : ''}
+                </div>
+              ),
+            },
+          ]}
+        />
+      </Modal>
     );
   };
+
+  // Tab items
+  const tabItems = [
+    {
+      key: 'list',
+      label: (
+        <span>
+          <FileTextOutlined />
+          Templates
+        </span>
+      ),
+      children: renderTemplateList(),
+      closable: false,
+    },
+    ...templateTabs.map(tab => ({
+      key: tab.key,
+      label: (
+        <span>
+          <EditOutlined />
+          {tab.label}
+        </span>
+      ),
+      children: renderTemplateEditor(tab),
+      closable: true,
+    })),
+  ];
 
   return (
     <Layout style={{ minHeight: 'calc(100vh - 64px)', background: REDWOOD.neutral100 }}>
@@ -948,14 +1011,25 @@ const IncomeStatementTemplates: React.FC = () => {
           />
         </div>
 
-        {/* Main Content */}
-        <div style={{ padding: 24 }}>
-          <Spin spinning={loading}>
-            {view === 'list' && renderTemplateList()}
-            {view === 'editor' && renderTemplateEditor()}
-            {view === 'preview' && renderPreview()}
-          </Spin>
-        </div>
+        {/* Tabs */}
+        <Tabs
+          type="editable-card"
+          activeKey={activeTabKey}
+          onChange={setActiveTabKey}
+          onEdit={(targetKey, action) => {
+            if (action === 'remove' && typeof targetKey === 'string') {
+              closeTemplateTab(targetKey);
+            }
+          }}
+          hideAdd
+          items={tabItems}
+          style={{ background: REDWOOD.surface }}
+          tabBarStyle={{
+            margin: 0,
+            padding: '8px 16px 0 16px',
+            background: REDWOOD.surface,
+          }}
+        />
 
         {/* Create Template Modal */}
         <Modal
@@ -1000,6 +1074,7 @@ const IncomeStatementTemplates: React.FC = () => {
           onCancel={() => {
             setCloneModalVisible(false);
             cloneForm.resetFields();
+            setCloneTemplateId(null);
           }}
           onOk={() => cloneForm.submit()}
           okText="Clone"
@@ -1237,7 +1312,7 @@ const IncomeStatementTemplates: React.FC = () => {
                     allowClear
                     placeholder="Select group"
                     options={
-                      selectedTemplate?.template.groups.map(g => ({
+                      getCurrentTemplateTab()?.template?.template.groups.map(g => ({
                         value: g.group_code,
                         label: `${g.group_code} - ${g.group_name}`,
                       })) || []
@@ -1248,6 +1323,9 @@ const IncomeStatementTemplates: React.FC = () => {
             </Row>
           </Form>
         </Modal>
+
+        {/* Preview Modal */}
+        {renderPreviewModal()}
       </Content>
 
       {/* Autopilot */}
