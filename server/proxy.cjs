@@ -527,10 +527,132 @@ app.get('/api/test/apex', async (req, res) => {
   }
 });
 
+// =====================================================
+// SOAP PROXY ENDPOINTS (for BI Publisher Reports)
+// =====================================================
+
+// Test SOAP connection
+app.post('/api/soap/test', async (req, res) => {
+  const { url, envelope } = req.body;
+
+  if (!url || !envelope) {
+    return res.status(400).json({ success: false, error: 'URL and envelope required' });
+  }
+
+  if (VERBOSE) {
+    console.log('=== SOAP TEST REQUEST ===');
+    console.log('URL:', url);
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/xml; charset=utf-8',
+        'SOAPAction': '"runReport"',
+      },
+      body: envelope,
+    });
+
+    if (VERBOSE) console.log('SOAP Response Status:', response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      if (VERBOSE) console.log('SOAP Error:', errorText.substring(0, 500));
+      return res.json({
+        success: false,
+        error: `SOAP Error: ${response.status} ${response.statusText}`,
+        details: errorText.substring(0, 500),
+      });
+    }
+
+    res.json({ success: true, status: response.status });
+  } catch (error) {
+    if (VERBOSE) console.error('SOAP Test Error:', error.message);
+    res.json({ success: false, error: error.message });
+  }
+});
+
+// SOAP BI Publisher Report - Returns decoded XML
+app.post('/api/soap/bip-report', async (req, res) => {
+  const { url, envelope } = req.body;
+
+  if (!url || !envelope) {
+    return res.status(400).json({ success: false, error: 'URL and envelope required' });
+  }
+
+  if (VERBOSE) {
+    console.log('=== SOAP BIP REPORT REQUEST ===');
+    console.log('URL:', url);
+    console.log('Envelope length:', envelope.length);
+  }
+
+  try {
+    const startTime = Date.now();
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/xml; charset=utf-8',
+        'SOAPAction': '"runReport"',
+      },
+      body: envelope,
+    });
+
+    const duration = Date.now() - startTime;
+    if (VERBOSE) console.log('SOAP Response Status:', response.status, `(${duration}ms)`);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      if (VERBOSE) console.log('SOAP Error:', errorText.substring(0, 500));
+      return res.json({
+        success: false,
+        error: `SOAP Error: ${response.status} ${response.statusText}`,
+        details: errorText.substring(0, 500),
+      });
+    }
+
+    const soapResponse = await response.text();
+    if (VERBOSE) console.log('SOAP Response length:', soapResponse.length);
+
+    // Extract Base64 content from reportBytes element
+    const reportBytesMatch = soapResponse.match(/<reportBytes[^>]*>([^<]+)<\/reportBytes>/);
+
+    if (!reportBytesMatch || !reportBytesMatch[1]) {
+      if (VERBOSE) console.log('No reportBytes found in response');
+      return res.json({
+        success: false,
+        error: 'No reportBytes found in SOAP response',
+      });
+    }
+
+    const base64Content = reportBytesMatch[1].trim();
+    if (VERBOSE) console.log('Base64 content length:', base64Content.length);
+
+    // Decode Base64 to XML
+    const decodedXml = Buffer.from(base64Content, 'base64').toString('utf-8');
+    if (VERBOSE) console.log('Decoded XML length:', decodedXml.length);
+
+    // Count records (G_1 elements)
+    const recordCount = (decodedXml.match(/<G_1>/g) || []).length;
+    if (VERBOSE) console.log('Records found:', recordCount);
+
+    res.json({
+      success: true,
+      duration,
+      decodedXml,
+      recordCount,
+    });
+  } catch (error) {
+    if (VERBOSE) console.error('SOAP BIP Error:', error.message);
+    res.json({ success: false, error: error.message });
+  }
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log('='.repeat(50));
-  console.log('ReactERP Proxy Server v1.1.0');
+  console.log('ReactERP Proxy Server v1.2.0');
   console.log('='.repeat(50));
   console.log(`Server running on http://localhost:${PORT}`);
   console.log('');
@@ -543,6 +665,8 @@ app.listen(PORT, () => {
   console.log('  GET  /api/fusion/*              - Proxy Fusion REST API requests');
   console.log('  GET  /api/apex/*                - Proxy APEX GET requests');
   console.log('  POST /api/apex/*                - Proxy APEX POST requests');
+  console.log('  POST /api/soap/test             - Test SOAP connection');
+  console.log('  POST /api/soap/bip-report       - SOAP BI Publisher report (decodes Base64)');
   console.log('');
   console.log('Oracle Host:', ORACLE_CONFIG.baseUrl);
   console.log('APEX Host:', APEX_CONFIG.baseUrl);

@@ -22,10 +22,28 @@ export const APEX_DB_CONFIG = {
     journalBatches: 'gl/journalbatches',
     journalHeaders: 'gl/journals/headers',
     journalLines: 'gl/journals/lines',
+    glBalances: 'gl/balances',
     // AP Endpoints
     apInvoices: 'ap/invoices',
     apInvoicesBulk: 'ap/invoices/bulk',
     apInvoicesStats: 'ap/invoices/stats',
+  },
+};
+
+// Oracle BI Publisher SOAP Configuration
+export const ORACLE_SOAP_CONFIG = {
+  prod: {
+    baseUrl: 'https://iaaobn.fa.ocs.oraclecloud.com/xmlpserver/services/v2/ReportService',
+    username: 'ratheesh@buimerccorp.com',
+    password: 'BCL#261285',
+  },
+  test: {
+    baseUrl: 'https://iaaobn-test.fa.ocs.oraclecloud.com/xmlpserver/services/v2/ReportService',
+    username: 'javeedindia@gmail.com',
+    password: 'Bumeric2026',
+  },
+  reports: {
+    glBalances: '/Custom/FA_REPORTS/GL_REPORTS/GL_BALANCES_BIP.xdo',
   },
 };
 
@@ -37,6 +55,11 @@ export interface SyncObjectConfig {
   oracleEndpoint: string;
   apexEndpoint: string;
   parameters: ParameterConfig[];
+  apiType?: 'REST' | 'SOAP';  // Default is REST
+  soapConfig?: {
+    reportPath: string;
+    environment?: 'prod' | 'test';
+  };
   hasChildren?: boolean;
   childConfig?: {
     headers?: {
@@ -389,6 +412,39 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
         label: 'Payment Date To',
         type: 'date',
         required: false,
+      },
+    ],
+  },
+  // ===== SOAP Sync Objects =====
+  {
+    id: 'gl-balances-soap',
+    name: 'GL Balances (Trial Balance)',
+    description: 'Sync GL Balances from Oracle Fusion BI Publisher (SOAP)',
+    oracleEndpoint: 'soap/glBalances',
+    apexEndpoint: 'gl/balances',
+    apiType: 'SOAP',
+    soapConfig: {
+      reportPath: '/Custom/FA_REPORTS/GL_REPORTS/GL_BALANCES_BIP.xdo',
+      environment: 'prod',
+    },
+    parameters: [
+      {
+        key: 'P_PERIOD_NAME',
+        label: 'Period Name',
+        type: 'text',
+        required: true,
+        defaultValue: 'Oct-25',
+      },
+      {
+        key: 'environment',
+        label: 'Environment',
+        type: 'select',
+        required: true,
+        defaultValue: 'prod',
+        options: [
+          { label: 'Production', value: 'prod' },
+          { label: 'Test', value: 'test' },
+        ],
       },
     ],
   },
