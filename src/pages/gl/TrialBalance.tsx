@@ -17,6 +17,7 @@ import {
   Tooltip,
   Statistic,
   Empty,
+  Modal,
 } from 'antd';
 import {
   HomeOutlined,
@@ -30,6 +31,7 @@ import {
   BankOutlined,
   CalendarOutlined,
   DragOutlined,
+  ExpandAltOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../../config/api.config';
@@ -132,7 +134,9 @@ interface PivotRow {
   debit: number;
   credit: number;
   closing_balance: number;
-  [key: string]: string | number;
+  segmentCount: number; // Number of segment combinations for this account
+  rawRows: GLBalanceRecord[]; // Raw data rows for detail popup
+  [key: string]: string | number | GLBalanceRecord[];
 }
 
 const TrialBalance: React.FC = () => {
@@ -145,6 +149,10 @@ const TrialBalance: React.FC = () => {
   // Tabs state
   const [activeTab, setActiveTab] = useState('periods');
   const [tabs, setTabs] = useState<TabData[]>([]);
+
+  // Detail modal state
+  const [detailModalVisible, setDetailModalVisible] = useState(false);
+  const [detailModalData, setDetailModalData] = useState<{ account: string; account_desc: string; rows: GLBalanceRecord[] } | null>(null);
 
   // Get unique years from periods
   const availableYears = useMemo(() => {
@@ -316,7 +324,16 @@ const TrialBalance: React.FC = () => {
     const pivotMap = new Map<string, PivotRow>();
     const groupByKeys = [...segmentsBefore, 'account', ...segmentsAfter];
 
+    // Also track raw rows per account (regardless of segments) for the detail popup
+    const accountRawRows = new Map<string, GLBalanceRecord[]>();
+
     data.forEach(row => {
+      // Track raw rows by account
+      if (!accountRawRows.has(row.account)) {
+        accountRawRows.set(row.account, []);
+      }
+      accountRawRows.get(row.account)!.push(row);
+
       // Build key from selected segments
       const keyParts = groupByKeys.map(key => (row as any)[key] || '');
       const pivotKey = keyParts.join('|');
@@ -330,6 +347,8 @@ const TrialBalance: React.FC = () => {
           debit: 0,
           credit: 0,
           closing_balance: 0,
+          segmentCount: 0,
+          rawRows: [],
         };
 
         // Add segment values
@@ -348,9 +367,21 @@ const TrialBalance: React.FC = () => {
       pivotRow.debit += row.debit || 0;
       pivotRow.credit += row.credit || 0;
       pivotRow.closing_balance += row.closing_balance || 0;
+      pivotRow.segmentCount += 1;
+      (pivotRow.rawRows as GLBalanceRecord[]).push(row);
     });
 
-    return Array.from(pivotMap.values());
+    // Convert to array and sort by account
+    const result = Array.from(pivotMap.values());
+    result.sort((a, b) => a.account.localeCompare(b.account));
+
+    return result;
+  };
+
+  // Show account detail modal
+  const showAccountDetail = (account: string, account_desc: string, rows: GLBalanceRecord[]) => {
+    setDetailModalData({ account, account_desc, rows });
+    setDetailModalVisible(true);
   };
 
   // Initial load
@@ -553,13 +584,30 @@ const TrialBalance: React.FC = () => {
         width: 100,
         render: (text: string) => <Text style={{ fontFamily: 'monospace' }}>{text}</Text>,
       })),
-      // Account column (fixed)
+      // Account column (fixed) with expand icon for multiple segments
       {
         title: 'Account',
         dataIndex: 'account',
         key: 'account',
-        width: 120,
-        render: (text: string) => <Text strong style={{ fontFamily: 'monospace' }}>{text}</Text>,
+        width: 140,
+        sorter: (a: PivotRow, b: PivotRow) => a.account.localeCompare(b.account),
+        defaultSortOrder: 'ascend' as const,
+        render: (text: string, record: PivotRow) => (
+          <Space size={4}>
+            <Text strong style={{ fontFamily: 'monospace' }}>{text}</Text>
+            {record.segmentCount > 1 && (
+              <Tooltip title={`${record.segmentCount} segment combinations - click to view details`}>
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<ExpandAltOutlined />}
+                  onClick={() => showAccountDetail(record.account, record.account_desc as string, record.rawRows as GLBalanceRecord[])}
+                  style={{ padding: 0, height: 'auto', color: REDWOOD.info }}
+                />
+              </Tooltip>
+            )}
+          </Space>
+        ),
       },
       // Account Description
       {
@@ -969,6 +1017,162 @@ const TrialBalance: React.FC = () => {
             boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
           }}
         />
+
+        {/* Account Detail Modal */}
+        <Modal
+          title={
+            <Space>
+              <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>
+                {detailModalData?.account}
+              </Text>
+              <Text type="secondary">-</Text>
+              <Text>{detailModalData?.account_desc}</Text>
+            </Space>
+          }
+          open={detailModalVisible}
+          onCancel={() => setDetailModalVisible(false)}
+          footer={null}
+          width={1000}
+        >
+          {detailModalData && (
+            <Table
+              dataSource={detailModalData.rows}
+              rowKey={(record, index) => `${record.company}-${record.currency}-${record.sub_account}-${index}`}
+              size="small"
+              pagination={{ pageSize: 20 }}
+              scroll={{ x: 900 }}
+              columns={[
+                {
+                  title: 'Company',
+                  dataIndex: 'company',
+                  key: 'company',
+                  width: 80,
+                  render: (text: string) => <Text style={{ fontFamily: 'monospace' }}>{text}</Text>,
+                },
+                {
+                  title: 'LOB',
+                  dataIndex: 'lob',
+                  key: 'lob',
+                  width: 60,
+                  render: (text: string) => <Text style={{ fontFamily: 'monospace' }}>{text}</Text>,
+                },
+                {
+                  title: 'Dept',
+                  dataIndex: 'department',
+                  key: 'department',
+                  width: 60,
+                  render: (text: string) => <Text style={{ fontFamily: 'monospace' }}>{text}</Text>,
+                },
+                {
+                  title: 'Sub Acct',
+                  dataIndex: 'sub_account',
+                  key: 'sub_account',
+                  width: 80,
+                  render: (text: string) => <Text style={{ fontFamily: 'monospace' }}>{text}</Text>,
+                },
+                {
+                  title: 'Analysis',
+                  dataIndex: 'analysis',
+                  key: 'analysis',
+                  width: 70,
+                  render: (text: string) => <Text style={{ fontFamily: 'monospace' }}>{text}</Text>,
+                },
+                {
+                  title: 'IC',
+                  dataIndex: 'intercompany',
+                  key: 'intercompany',
+                  width: 50,
+                  render: (text: string) => <Text style={{ fontFamily: 'monospace' }}>{text}</Text>,
+                },
+                {
+                  title: 'Currency',
+                  dataIndex: 'currency',
+                  key: 'currency',
+                  width: 70,
+                  render: (text: string) => <Tag>{text}</Tag>,
+                },
+                {
+                  title: 'Opening',
+                  dataIndex: 'opening_balance',
+                  key: 'opening_balance',
+                  width: 110,
+                  align: 'right' as const,
+                  render: (value: number) => (
+                    <Text style={{ fontFamily: 'monospace', color: value < 0 ? REDWOOD.error : REDWOOD.textPrimary }}>
+                      {formatCurrency(value)}
+                    </Text>
+                  ),
+                },
+                {
+                  title: 'Debit',
+                  dataIndex: 'debit',
+                  key: 'debit',
+                  width: 110,
+                  align: 'right' as const,
+                  render: (value: number) => (
+                    <Text style={{ fontFamily: 'monospace', color: value > 0 ? REDWOOD.info : REDWOOD.textSecondary }}>
+                      {formatCurrency(value)}
+                    </Text>
+                  ),
+                },
+                {
+                  title: 'Credit',
+                  dataIndex: 'credit',
+                  key: 'credit',
+                  width: 110,
+                  align: 'right' as const,
+                  render: (value: number) => (
+                    <Text style={{ fontFamily: 'monospace', color: value > 0 ? REDWOOD.success : REDWOOD.textSecondary }}>
+                      {formatCurrency(value)}
+                    </Text>
+                  ),
+                },
+                {
+                  title: 'Closing',
+                  dataIndex: 'closing_balance',
+                  key: 'closing_balance',
+                  width: 110,
+                  align: 'right' as const,
+                  render: (value: number) => (
+                    <Text strong style={{ fontFamily: 'monospace', color: value < 0 ? REDWOOD.error : REDWOOD.textPrimary }}>
+                      {formatCurrency(value)}
+                    </Text>
+                  ),
+                },
+              ]}
+              summary={(pageData) => {
+                const totals = pageData.reduce(
+                  (acc, row) => ({
+                    opening: acc.opening + (row.opening_balance || 0),
+                    debit: acc.debit + (row.debit || 0),
+                    credit: acc.credit + (row.credit || 0),
+                    closing: acc.closing + (row.closing_balance || 0),
+                  }),
+                  { opening: 0, debit: 0, credit: 0, closing: 0 }
+                );
+                return (
+                  <Table.Summary.Row style={{ background: REDWOOD.surfaceSecondary }}>
+                    <Table.Summary.Cell index={0} colSpan={7}>
+                      <Text strong>Page Total</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={7} align="right">
+                      <Text strong style={{ fontFamily: 'monospace' }}>{formatCurrency(totals.opening)}</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={8} align="right">
+                      <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.info }}>{formatCurrency(totals.debit)}</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={9} align="right">
+                      <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.success }}>{formatCurrency(totals.credit)}</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={10} align="right">
+                      <Text strong style={{ fontFamily: 'monospace' }}>{formatCurrency(totals.closing)}</Text>
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                );
+              }}
+            />
+          )}
+        </Modal>
       </Content>
     </Layout>
   );
