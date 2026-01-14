@@ -345,11 +345,23 @@ CREATE OR REPLACE PACKAGE BODY rr_pl_template_pkg AS
 
     -- Helper function to escape JSON string values
     FUNCTION escape_json(p_str VARCHAR2) RETURN VARCHAR2 IS
+        v_result VARCHAR2(4000);
     BEGIN
         IF p_str IS NULL THEN
             RETURN 'null';
         END IF;
-        RETURN '"' || REPLACE(REPLACE(REPLACE(p_str, '\', '\\'), '"', '\"'), CHR(10), '\n') || '"';
+        v_result := p_str;
+        -- Escape backslash first (CHR(92) = backslash)
+        v_result := REPLACE(v_result, CHR(92), CHR(92) || CHR(92));
+        -- Escape double quote (CHR(34) = double quote)
+        v_result := REPLACE(v_result, CHR(34), CHR(92) || CHR(34));
+        -- Escape newline
+        v_result := REPLACE(v_result, CHR(10), CHR(92) || 'n');
+        -- Escape carriage return
+        v_result := REPLACE(v_result, CHR(13), CHR(92) || 'r');
+        -- Escape tab
+        v_result := REPLACE(v_result, CHR(9), CHR(92) || 't');
+        RETURN CHR(34) || v_result || CHR(34);
     END escape_json;
 
     -- Get template structure as JSON
