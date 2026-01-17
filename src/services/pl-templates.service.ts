@@ -316,7 +316,6 @@ export const assignAccount = async (
     const responseText = await response.text();
     console.log('Response Text:', responseText);
 
-    // Try to parse JSON
     let result;
     try {
       result = JSON.parse(responseText);
