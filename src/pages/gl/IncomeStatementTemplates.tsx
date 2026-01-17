@@ -416,15 +416,22 @@ const IncomeStatementTemplates: React.FC = () => {
 
   // Handle assigning multiple selected accounts
   const handleAssignSelectedAccounts = async () => {
+    console.log('=== handleAssignSelectedAccounts START ===');
+    console.log('selectedSectionId:', selectedSectionId);
+    console.log('selectedAccounts:', selectedAccounts);
+
     if (!selectedSectionId || selectedAccounts.length === 0) {
+      console.log('Validation failed - sectionId or accounts missing');
       message.warning('Please select at least one account');
       return;
     }
 
     let successCount = 0;
     let failCount = 0;
+    const errors: string[] = [];
 
     for (const accountCode of selectedAccounts) {
+      console.log(`Assigning account ${accountCode} to section ${selectedSectionId}...`);
       try {
         const response = await plService.assignAccount(
           selectedSectionId,
@@ -432,21 +439,33 @@ const IncomeStatementTemplates: React.FC = () => {
           undefined,
           undefined
         );
+        console.log(`Response for ${accountCode}:`, response);
         if (response.success) {
           successCount++;
+          console.log(`SUCCESS: Account ${accountCode} assigned`);
         } else {
           failCount++;
+          errors.push(`${accountCode}: ${response.error}`);
+          console.log(`FAILED: Account ${accountCode} - ${response.error}`);
         }
-      } catch {
+      } catch (err) {
         failCount++;
+        errors.push(`${accountCode}: ${String(err)}`);
+        console.error(`EXCEPTION for ${accountCode}:`, err);
       }
+    }
+
+    console.log('=== handleAssignSelectedAccounts COMPLETE ===');
+    console.log(`Success: ${successCount}, Failed: ${failCount}`);
+    if (errors.length > 0) {
+      console.log('Errors:', errors);
     }
 
     if (successCount > 0) {
       message.success(`${successCount} account(s) assigned successfully`);
     }
     if (failCount > 0) {
-      message.error(`${failCount} account(s) failed to assign`);
+      message.error(`${failCount} account(s) failed to assign. Check console for details.`);
     }
 
     setAccountModalVisible(false);
@@ -1635,6 +1654,9 @@ const IncomeStatementTemplates: React.FC = () => {
             <Space>
               <BankOutlined style={{ color: REDWOOD.primary }} />
               <span>Assign Accounts to Section</span>
+              {selectedSectionId && (
+                <Tag color="blue" style={{ marginLeft: 8 }}>Section ID: {selectedSectionId}</Tag>
+              )}
             </Space>
           }
           open={accountModalVisible}
@@ -1669,6 +1691,22 @@ const IncomeStatementTemplates: React.FC = () => {
           width={800}
           bodyStyle={{ padding: 0 }}
         >
+          {/* Section ID Info Banner */}
+          <div style={{
+            padding: '8px 16px',
+            background: '#e6f7ff',
+            borderBottom: `1px solid ${REDWOOD.neutral200}`,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8
+          }}>
+            <Text strong>Target Section ID:</Text>
+            <Tag color="blue" style={{ fontSize: 14 }}>{selectedSectionId || 'Not selected'}</Tag>
+            <Text type="secondary" style={{ marginLeft: 'auto', fontSize: 12 }}>
+              (Check browser console F12 for API logs)
+            </Text>
+          </div>
+
           {/* Search and Filter Bar */}
           <div style={{ padding: 16, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
             <Row gutter={16} align="middle">

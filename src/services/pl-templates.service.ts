@@ -292,24 +292,49 @@ export const assignAccount = async (
 ): Promise<ApiResponse<void>> => {
   try {
     const baseUrl = BASE_URL;
-    const response = await fetch(`${baseUrl}/pl/account/assign`, {
+    const url = `${baseUrl}/pl/account/assign`;
+    const payload = {
+      section_id: sectionId,
+      account_code: accountCode,
+      account_from: accountFrom || null,
+      account_to: accountTo || null,
+    };
+
+    console.log('=== ASSIGN ACCOUNT REQUEST ===');
+    console.log('URL:', url);
+    console.log('Payload:', JSON.stringify(payload, null, 2));
+
+    const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        section_id: sectionId,
-        account_code: accountCode,
-        account_from: accountFrom || null,
-        account_to: accountTo || null,
-      }),
+      body: JSON.stringify(payload),
     });
-    const result = await response.json();
+
+    console.log('Response Status:', response.status);
+    console.log('Response OK:', response.ok);
+
+    const responseText = await response.text();
+    console.log('Response Text:', responseText);
+
+    // Try to parse JSON
+    let result;
+    try {
+      result = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('JSON Parse Error:', parseError);
+      return { success: false, error: `Invalid JSON response: ${responseText}` };
+    }
+
+    console.log('Parsed Result:', result);
 
     if (result.success) {
+      console.log('=== ASSIGN ACCOUNT SUCCESS ===');
       return { success: true };
     }
-    return { success: false, error: result.error };
+    console.log('=== ASSIGN ACCOUNT FAILED ===', result.error);
+    return { success: false, error: result.error || 'Unknown error' };
   } catch (error) {
-    console.error('Error assigning account:', error);
+    console.error('=== ASSIGN ACCOUNT EXCEPTION ===', error);
     return { success: false, error: String(error) };
   }
 };
