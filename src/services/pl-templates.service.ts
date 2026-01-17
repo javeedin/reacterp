@@ -300,9 +300,20 @@ export const assignAccount = async (
       account_to: accountTo || null,
     };
 
-    console.log('=== ASSIGN ACCOUNT REQUEST ===');
-    console.log('URL:', url);
-    console.log('Payload:', JSON.stringify(payload, null, 2));
+    // ========== DEBUG LOGGING ==========
+    const debugInfo = `
+========================================
+ASSIGN ACCOUNT - POST REQUEST
+========================================
+URL: ${url}
+
+JSON PAYLOAD:
+${JSON.stringify(payload, null, 2)}
+========================================`;
+
+    console.log(debugInfo);
+    // Uncomment below to show alert popup:
+    // alert(debugInfo);
 
     const response = await fetch(url, {
       method: 'POST',
@@ -310,30 +321,36 @@ export const assignAccount = async (
       body: JSON.stringify(payload),
     });
 
-    console.log('Response Status:', response.status);
-    console.log('Response OK:', response.ok);
+    const responseDebug = `
+Response Status: ${response.status}
+Response OK: ${response.ok}`;
+    console.log(responseDebug);
 
     const responseText = await response.text();
-    console.log('Response Text:', responseText);
+    console.log('Response Body:', responseText);
 
     let result;
     try {
       result = JSON.parse(responseText);
     } catch (parseError) {
-      console.error('JSON Parse Error:', parseError);
-      return { success: false, error: `Invalid JSON response: ${responseText}` };
+      const errorMsg = `JSON Parse Error - Raw Response: ${responseText}`;
+      console.error(errorMsg);
+      return { success: false, error: errorMsg };
     }
 
     console.log('Parsed Result:', result);
 
     if (result.success) {
-      console.log('=== ASSIGN ACCOUNT SUCCESS ===');
+      console.log('=== SUCCESS ===');
       return { success: true };
     }
-    console.log('=== ASSIGN ACCOUNT FAILED ===', result.error);
+
+    const failMsg = `FAILED: ${result.error || 'Unknown error'}`;
+    console.error(failMsg);
     return { success: false, error: result.error || 'Unknown error' };
   } catch (error) {
-    console.error('=== ASSIGN ACCOUNT EXCEPTION ===', error);
+    const exceptionMsg = `EXCEPTION: ${String(error)}`;
+    console.error(exceptionMsg);
     return { success: false, error: String(error) };
   }
 };
