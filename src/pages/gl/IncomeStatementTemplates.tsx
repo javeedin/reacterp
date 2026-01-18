@@ -22,6 +22,7 @@ import {
   Row,
   Col,
   Tabs,
+  Collapse,
 } from 'antd';
 import {
   HomeOutlined,
@@ -530,275 +531,278 @@ const IncomeStatementTemplates: React.FC = () => {
     }
   };
 
-  // Render clean template structure without Tree component
+  // Render clean template structure with collapsible groups
   const renderTemplateStructure = (templateData: plService.PLTemplateStructure) => {
     const groups = templateData?.template?.groups || [];
     const totals = templateData?.template?.totals || [];
 
-    return (
-      <div style={{ padding: '16px 20px' }}>
-        {/* Groups */}
-        {groups.map(group => (
-          <div
-            key={group.group_id}
-            style={{
-              marginBottom: 16,
-              background: '#fff',
-              borderRadius: 10,
-              overflow: 'hidden',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-            }}
-          >
-            {/* Group Header */}
+    // Build collapse items for groups
+    const groupItems = groups.map(group => ({
+      key: `group-${group.group_id}`,
+      label: (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', paddingRight: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div
               style={{
-                background: `linear-gradient(135deg, ${GROUP_TYPE_COLORS[group.group_type]}15 0%, ${GROUP_TYPE_COLORS[group.group_type]}08 100%)`,
-                borderBottom: `2px solid ${GROUP_TYPE_COLORS[group.group_type]}`,
-                padding: '12px 16px',
+                width: 32,
+                height: 32,
+                borderRadius: 6,
+                background: GROUP_TYPE_COLORS[group.group_type],
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'space-between',
+                justifyContent: 'center',
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div
+              <FolderOutlined style={{ color: '#fff', fontSize: 16 }} />
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Text strong style={{ fontSize: 14 }}>{group.group_name}</Text>
+                <Tag
                   style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 8,
+                    margin: 0,
+                    fontSize: 10,
                     background: GROUP_TYPE_COLORS[group.group_type],
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
+                    border: 'none',
+                    color: '#fff',
+                    fontWeight: 600,
                   }}
                 >
-                  <FolderOutlined style={{ color: '#fff', fontSize: 18 }} />
-                </div>
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Text strong style={{ fontSize: 15 }}>{group.group_name}</Text>
-                    <Tag
-                      style={{
-                        margin: 0,
-                        fontSize: 10,
-                        background: GROUP_TYPE_COLORS[group.group_type],
-                        border: 'none',
-                        color: '#fff',
-                        fontWeight: 600,
-                      }}
-                    >
-                      {group.group_type.replace('_', ' ')}
-                    </Tag>
-                  </div>
-                  <Text type="secondary" style={{ fontSize: 11 }}>
-                    {group.group_code} • Order {group.display_order} • {group.sign_convention === 1 ? 'Adds to total' : 'Subtracts from total'}
-                  </Text>
-                </div>
+                  {group.group_type.replace('_', ' ')}
+                </Tag>
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                  {(group.sections || []).length} sections
+                </Text>
               </div>
-              <Space onClick={e => e.stopPropagation()}>
-                <Button
-                  size="small"
-                  icon={<PlusOutlined />}
-                  onClick={() => {
-                    setSelectedGroupId(group.group_id);
-                    sectionForm.setFieldsValue({
-                      display_order: ((group.sections || []).length + 1) * 10,
-                    });
-                    setSectionModalVisible(true);
+              <Text type="secondary" style={{ fontSize: 10 }}>
+                {group.group_code} • Order {group.display_order} • {group.sign_convention === 1 ? '+' : '−'}
+              </Text>
+            </div>
+          </div>
+          <Space onClick={e => e.stopPropagation()}>
+            <Button
+              size="small"
+              icon={<PlusOutlined />}
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedGroupId(group.group_id);
+                sectionForm.setFieldsValue({
+                  display_order: ((group.sections || []).length + 1) * 10,
+                });
+                setSectionModalVisible(true);
+              }}
+            >
+              Section
+            </Button>
+            <Popconfirm
+              title="Delete this group?"
+              description="All sections and accounts will also be deleted."
+              onConfirm={() => handleDeleteGroup(group.group_id)}
+              okText="Delete"
+              okButtonProps={{ danger: true }}
+            >
+              <Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={e => e.stopPropagation()} />
+            </Popconfirm>
+          </Space>
+        </div>
+      ),
+      children: (
+        <div style={{ padding: '4px 0' }}>
+          {(group.sections || []).length === 0 ? (
+            <Text type="secondary" style={{ fontStyle: 'italic', padding: '8px 0', display: 'block' }}>
+              No sections yet. Click "+ Section" to add one.
+            </Text>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {(group.sections || []).map(section => (
+                <div
+                  key={section.section_id}
+                  style={{
+                    background: '#fff',
+                    borderRadius: 8,
+                    border: '1px solid #e9ecef',
+                    overflow: 'hidden',
                   }}
                 >
-                  Section
-                </Button>
+                  {/* Section Header */}
+                  <div
+                    style={{
+                      padding: '8px 12px',
+                      borderBottom: (section.accounts || []).length > 0 ? '1px solid #f0f0f0' : 'none',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      background: '#fafafa',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <AppstoreOutlined style={{ color: REDWOOD.info, fontSize: 14 }} />
+                      <Text strong style={{ fontSize: 13 }}>{section.section_name}</Text>
+                      <Text type="secondary" style={{ fontSize: 10 }}>
+                        {section.section_code}
+                      </Text>
+                    </div>
+                    <Space size={4}>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<PlusOutlined />}
+                        onClick={() => {
+                          setSelectedSectionId(section.section_id);
+                          setAccountModalVisible(true);
+                          if (glAccounts.length === 0) {
+                            loadGLAccounts();
+                          }
+                        }}
+                        style={{ color: REDWOOD.info, fontSize: 12 }}
+                      >
+                        Account
+                      </Button>
+                      <Popconfirm
+                        title="Delete this section?"
+                        onConfirm={() => handleDeleteSection(section.section_id)}
+                        okText="Delete"
+                        okButtonProps={{ danger: true }}
+                      >
+                        <Button type="text" size="small" danger icon={<DeleteOutlined />} />
+                      </Popconfirm>
+                    </Space>
+                  </div>
+
+                  {/* Accounts List - Compact */}
+                  {(section.accounts || []).length > 0 && (
+                    <div style={{ padding: '8px 12px', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {(section.accounts || []).map((account, idx) => (
+                        <Tag
+                          key={idx}
+                          closable={!!account.section_account_id}
+                          onClose={(e) => {
+                            e.preventDefault();
+                            if (account.section_account_id) {
+                              handleDeleteAccount(account.section_account_id, account.account_code);
+                            }
+                          }}
+                          style={{
+                            margin: 0,
+                            padding: '3px 8px',
+                            borderRadius: 4,
+                            background: '#f6f8fa',
+                            border: '1px solid #e1e4e8',
+                            fontSize: 12,
+                          }}
+                        >
+                          <Text strong style={{ fontFamily: 'monospace', fontSize: 11 }}>
+                            {account.account_from && account.account_to
+                              ? `${account.account_from}→${account.account_to}`
+                              : account.account_code}
+                          </Text>
+                          {account.account_description && (
+                            <Text type="secondary" style={{ fontSize: 10, marginLeft: 4 }}>
+                              {account.account_description}
+                            </Text>
+                          )}
+                        </Tag>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ),
+      style: {
+        marginBottom: 12,
+        background: '#fff',
+        borderRadius: 10,
+        border: `2px solid ${GROUP_TYPE_COLORS[group.group_type]}30`,
+        overflow: 'hidden',
+      },
+    }));
+
+    // Add totals as a collapse item
+    if (totals.length > 0) {
+      groupItems.push({
+        key: 'totals',
+        label: (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 6,
+                background: '#722ed1',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <CalculatorOutlined style={{ color: '#fff', fontSize: 16 }} />
+            </div>
+            <div>
+              <Text strong style={{ fontSize: 14 }}>Calculated Totals</Text>
+              <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>
+                {totals.length} formulas
+              </Text>
+            </div>
+          </div>
+        ),
+        children: (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {totals.map(total => (
+              <div
+                key={total.total_id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '8px 12px',
+                  background: '#faf5ff',
+                  borderRadius: 6,
+                  border: '1px solid #e8d4f8',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <Tag color="purple" style={{ margin: 0, fontWeight: 600, fontSize: 11 }}>{total.total_code}</Tag>
+                  <Text strong style={{ fontSize: 12 }}>{total.total_name}</Text>
+                  <Text code style={{ fontSize: 11, background: '#fff' }}>{total.calculation_formula}</Text>
+                  {total.after_group_code && (
+                    <Text type="secondary" style={{ fontSize: 10 }}>after {total.after_group_code}</Text>
+                  )}
+                </div>
                 <Popconfirm
-                  title="Delete this group?"
-                  description="All sections and accounts will also be deleted."
-                  onConfirm={() => handleDeleteGroup(group.group_id)}
+                  title="Delete this total?"
+                  onConfirm={() => handleDeleteTotal(total.total_id)}
                   okText="Delete"
                   okButtonProps={{ danger: true }}
                 >
                   <Button type="text" size="small" danger icon={<DeleteOutlined />} />
                 </Popconfirm>
-              </Space>
-            </div>
-
-            {/* Sections */}
-            <div style={{ padding: '12px 16px' }}>
-              {(group.sections || []).length === 0 ? (
-                <Text type="secondary" style={{ fontStyle: 'italic' }}>No sections yet. Click "+ Section" to add one.</Text>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {(group.sections || []).map(section => (
-                    <div
-                      key={section.section_id}
-                      style={{
-                        background: '#f8f9fa',
-                        borderRadius: 8,
-                        border: '1px solid #e9ecef',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      {/* Section Header */}
-                      <div
-                        style={{
-                          padding: '10px 14px',
-                          borderBottom: (section.accounts || []).length > 0 ? '1px solid #e9ecef' : 'none',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          background: '#fff',
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          <AppstoreOutlined style={{ color: REDWOOD.info, fontSize: 16 }} />
-                          <div>
-                            <Text strong style={{ fontSize: 13 }}>{section.section_name}</Text>
-                            <Text type="secondary" style={{ fontSize: 10, marginLeft: 8 }}>
-                              {section.section_code}
-                            </Text>
-                          </div>
-                        </div>
-                        <Space size={4} onClick={e => e.stopPropagation()}>
-                          <Button
-                            type="text"
-                            size="small"
-                            icon={<PlusOutlined />}
-                            onClick={() => {
-                              setSelectedSectionId(section.section_id);
-                              setAccountModalVisible(true);
-                              if (glAccounts.length === 0) {
-                                loadGLAccounts();
-                              }
-                            }}
-                            style={{ color: REDWOOD.info }}
-                          >
-                            Account
-                          </Button>
-                          <Popconfirm
-                            title="Delete this section?"
-                            onConfirm={() => handleDeleteSection(section.section_id)}
-                            okText="Delete"
-                            okButtonProps={{ danger: true }}
-                          >
-                            <Button type="text" size="small" danger icon={<DeleteOutlined />} />
-                          </Popconfirm>
-                        </Space>
-                      </div>
-
-                      {/* Accounts List - Compact */}
-                      {(section.accounts || []).length > 0 && (
-                        <div style={{ padding: '8px 14px', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                          {(section.accounts || []).map((account, idx) => (
-                            <Tag
-                              key={idx}
-                              closable={!!account.section_account_id}
-                              onClose={(e) => {
-                                e.preventDefault();
-                                if (account.section_account_id) {
-                                  handleDeleteAccount(account.section_account_id, account.account_code);
-                                }
-                              }}
-                              style={{
-                                margin: 0,
-                                padding: '4px 10px',
-                                borderRadius: 6,
-                                background: '#fff',
-                                border: '1px solid #d9d9d9',
-                                fontSize: 12,
-                              }}
-                            >
-                              <Text strong style={{ fontFamily: 'monospace', fontSize: 12 }}>
-                                {account.account_from && account.account_to
-                                  ? `${account.account_from}→${account.account_to}`
-                                  : account.account_code}
-                              </Text>
-                              {account.account_description && (
-                                <Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>
-                                  {account.account_description}
-                                </Text>
-                              )}
-                            </Tag>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-
-        {/* Calculated Totals */}
-        {totals.length > 0 && (
-          <div
-            style={{
-              marginBottom: 16,
-              background: '#fff',
-              borderRadius: 10,
-              overflow: 'hidden',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-            }}
-          >
-            {/* Totals Header */}
-            <div
-              style={{
-                background: 'linear-gradient(135deg, #722ed1 0%, #9254de 100%)',
-                padding: '12px 16px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <CalculatorOutlined style={{ color: '#fff', fontSize: 20 }} />
-                <Text strong style={{ color: '#fff', fontSize: 15 }}>Calculated Totals</Text>
-                <Tag style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', margin: 0 }}>
-                  {totals.length}
-                </Tag>
               </div>
-            </div>
-
-            {/* Totals List */}
-            <div style={{ padding: '12px 16px' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {totals.map(total => (
-                  <div
-                    key={total.total_id}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '10px 14px',
-                      background: '#faf5ff',
-                      borderRadius: 8,
-                      border: '1px solid #e8d4f8',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <Tag color="purple" style={{ margin: 0, fontWeight: 600 }}>{total.total_code}</Tag>
-                      <Text strong style={{ fontSize: 13 }}>{total.total_name}</Text>
-                      <Text code style={{ fontSize: 12, background: '#fff' }}>{total.calculation_formula}</Text>
-                      {total.after_group_code && (
-                        <Text type="secondary" style={{ fontSize: 11 }}>after {total.after_group_code}</Text>
-                      )}
-                    </div>
-                    <Popconfirm
-                      title="Delete this total?"
-                      onConfirm={() => handleDeleteTotal(total.total_id)}
-                      okText="Delete"
-                      okButtonProps={{ danger: true }}
-                    >
-                      <Button type="text" size="small" danger icon={<DeleteOutlined />} />
-                    </Popconfirm>
-                  </div>
-                ))}
-              </div>
-            </div>
+            ))}
           </div>
-        )}
+        ),
+        style: {
+          marginBottom: 12,
+          background: '#fff',
+          borderRadius: 10,
+          border: '2px solid #722ed130',
+          overflow: 'hidden',
+        },
+      });
+    }
 
-        {groups.length === 0 && totals.length === 0 && (
+    return (
+      <div style={{ padding: '16px 20px' }}>
+        {groups.length === 0 && totals.length === 0 ? (
           <Empty description="No structure defined. Add a group to get started." />
+        ) : (
+          <Collapse
+            defaultActiveKey={groups.map(g => `group-${g.group_id}`).concat(totals.length > 0 ? ['totals'] : [])}
+            ghost
+            items={groupItems}
+            style={{ background: 'transparent' }}
+          />
         )}
       </div>
     );
