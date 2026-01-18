@@ -22,9 +22,7 @@ import {
   Row,
   Col,
   Tabs,
-  Tree,
 } from 'antd';
-import type { DataNode } from 'antd/es/tree';
 import {
   HomeOutlined,
   PlusOutlined,
@@ -44,11 +42,6 @@ import {
   CloseCircleOutlined,
   CloseOutlined,
   BankOutlined,
-  NumberOutlined,
-  MinusCircleOutlined,
-  PlusCircleOutlined,
-  CaretDownOutlined,
-  CaretRightOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import Autopilot from '../../components/Autopilot';
@@ -537,70 +530,85 @@ const IncomeStatementTemplates: React.FC = () => {
     }
   };
 
-  // Build tree data for template structure - Modern Card-based UI
-  const buildTreeData = (templateData: plService.PLTemplateStructure): DataNode[] => {
-    // Safe access with defaults
+  // Render clean template structure without Tree component
+  const renderTemplateStructure = (templateData: plService.PLTemplateStructure) => {
     const groups = templateData?.template?.groups || [];
     const totals = templateData?.template?.totals || [];
 
-    const treeData: DataNode[] = [];
-
-    // Add groups with their sections and accounts
-    groups.forEach(group => {
-      const groupNode: DataNode = {
-        key: `group-${group.group_id}`,
-        title: (
-          <div style={{
-            background: '#fff',
-            borderRadius: 8,
-            padding: '10px 16px',
-            marginBottom: 4,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
-            borderLeft: `4px solid ${GROUP_TYPE_COLORS[group.group_type]}`,
-            minWidth: 400,
-          }}>
-            {/* Type label on top */}
-            <div style={{ marginBottom: 6 }}>
-              <Tag
-                color={GROUP_TYPE_COLORS[group.group_type]}
-                style={{
-                  margin: 0,
-                  fontSize: 10,
-                  fontWeight: 600,
-                  letterSpacing: '0.5px',
-                  textTransform: 'uppercase',
-                }}
-              >
-                {group.group_type.replace('_', ' ')}
-              </Tag>
-              <Tag style={{ margin: '0 0 0 8px', fontSize: 10, background: '#f5f5f5', border: 'none' }}>
-                {group.sign_convention === 1 ? '+ Add' : '− Subtract'}
-              </Tag>
-            </div>
-            {/* Group name and actions */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div>
-                <Text strong style={{ fontSize: 15 }}>{group.group_name}</Text>
-                <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
-                  {group.group_code} • Order {group.display_order}
-                </Text>
+    return (
+      <div style={{ padding: '16px 20px' }}>
+        {/* Groups */}
+        {groups.map(group => (
+          <div
+            key={group.group_id}
+            style={{
+              marginBottom: 16,
+              background: '#fff',
+              borderRadius: 10,
+              overflow: 'hidden',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+            }}
+          >
+            {/* Group Header */}
+            <div
+              style={{
+                background: `linear-gradient(135deg, ${GROUP_TYPE_COLORS[group.group_type]}15 0%, ${GROUP_TYPE_COLORS[group.group_type]}08 100%)`,
+                borderBottom: `2px solid ${GROUP_TYPE_COLORS[group.group_type]}`,
+                padding: '12px 16px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 8,
+                    background: GROUP_TYPE_COLORS[group.group_type],
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <FolderOutlined style={{ color: '#fff', fontSize: 18 }} />
+                </div>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Text strong style={{ fontSize: 15 }}>{group.group_name}</Text>
+                    <Tag
+                      style={{
+                        margin: 0,
+                        fontSize: 10,
+                        background: GROUP_TYPE_COLORS[group.group_type],
+                        border: 'none',
+                        color: '#fff',
+                        fontWeight: 600,
+                      }}
+                    >
+                      {group.group_type.replace('_', ' ')}
+                    </Tag>
+                  </div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>
+                    {group.group_code} • Order {group.display_order} • {group.sign_convention === 1 ? 'Adds to total' : 'Subtracts from total'}
+                  </Text>
+                </div>
               </div>
-              <Space size="small" onClick={e => e.stopPropagation()}>
-                <Tooltip title="Add Section">
-                  <Button
-                    type="primary"
-                    size="small"
-                    ghost
-                    icon={<PlusOutlined />}
-                    onClick={() => {
-                      setSelectedGroupId(group.group_id);
-                      sectionForm.setFieldsValue({
-                        display_order: ((group.sections || []).length + 1) * 10,
-                      });
-                      setSectionModalVisible(true);
-                    }}
-                  />
-                </Tooltip>
+              <Space onClick={e => e.stopPropagation()}>
+                <Button
+                  size="small"
+                  icon={<PlusOutlined />}
+                  onClick={() => {
+                    setSelectedGroupId(group.group_id);
+                    sectionForm.setFieldsValue({
+                      display_order: ((group.sections || []).length + 1) * 10,
+                    });
+                    setSectionModalVisible(true);
+                  }}
+                >
+                  Section
+                </Button>
                 <Popconfirm
                   title="Delete this group?"
                   description="All sections and accounts will also be deleted."
@@ -612,221 +620,188 @@ const IncomeStatementTemplates: React.FC = () => {
                 </Popconfirm>
               </Space>
             </div>
-          </div>
-        ),
-        icon: null,
-        children: (group.sections || []).map(section => ({
-          key: `section-${section.section_id}`,
-          title: (
-            <div style={{
-              background: '#fafbfc',
-              borderRadius: 6,
-              padding: '8px 14px',
-              marginBottom: 4,
-              border: '1px solid #e8e8e8',
-              minWidth: 350,
-            }}>
-              {/* Section label on top */}
-              <div style={{ marginBottom: 4 }}>
-                <Tag
-                  color="blue"
-                  style={{
-                    margin: 0,
-                    fontSize: 9,
-                    fontWeight: 500,
-                    padding: '0 6px',
-                  }}
-                >
-                  SECTION
-                </Tag>
-                <Text type="secondary" style={{ fontSize: 10, marginLeft: 6 }}>
-                  {section.section_code}
-                </Text>
-              </div>
-              {/* Section name and actions */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Text style={{ fontSize: 13, fontWeight: 500 }}>{section.section_name}</Text>
-                <Space size="small" onClick={e => e.stopPropagation()}>
-                  <Tooltip title="Add Account">
-                    <Button
-                      type="default"
-                      size="small"
-                      icon={<PlusOutlined />}
-                      onClick={() => {
-                        setSelectedSectionId(section.section_id);
-                        setAccountModalVisible(true);
-                        if (glAccounts.length === 0) {
-                          loadGLAccounts();
-                        }
+
+            {/* Sections */}
+            <div style={{ padding: '12px 16px' }}>
+              {(group.sections || []).length === 0 ? (
+                <Text type="secondary" style={{ fontStyle: 'italic' }}>No sections yet. Click "+ Section" to add one.</Text>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {(group.sections || []).map(section => (
+                    <div
+                      key={section.section_id}
+                      style={{
+                        background: '#f8f9fa',
+                        borderRadius: 8,
+                        border: '1px solid #e9ecef',
+                        overflow: 'hidden',
                       }}
-                    />
-                  </Tooltip>
-                  <Popconfirm
-                    title="Delete this section?"
-                    onConfirm={() => handleDeleteSection(section.section_id)}
-                    okText="Delete"
-                    okButtonProps={{ danger: true }}
-                  >
-                    <Button type="text" size="small" danger icon={<DeleteOutlined />} />
-                  </Popconfirm>
-                </Space>
+                    >
+                      {/* Section Header */}
+                      <div
+                        style={{
+                          padding: '10px 14px',
+                          borderBottom: (section.accounts || []).length > 0 ? '1px solid #e9ecef' : 'none',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          background: '#fff',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <AppstoreOutlined style={{ color: REDWOOD.info, fontSize: 16 }} />
+                          <div>
+                            <Text strong style={{ fontSize: 13 }}>{section.section_name}</Text>
+                            <Text type="secondary" style={{ fontSize: 10, marginLeft: 8 }}>
+                              {section.section_code}
+                            </Text>
+                          </div>
+                        </div>
+                        <Space size={4} onClick={e => e.stopPropagation()}>
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={<PlusOutlined />}
+                            onClick={() => {
+                              setSelectedSectionId(section.section_id);
+                              setAccountModalVisible(true);
+                              if (glAccounts.length === 0) {
+                                loadGLAccounts();
+                              }
+                            }}
+                            style={{ color: REDWOOD.info }}
+                          >
+                            Account
+                          </Button>
+                          <Popconfirm
+                            title="Delete this section?"
+                            onConfirm={() => handleDeleteSection(section.section_id)}
+                            okText="Delete"
+                            okButtonProps={{ danger: true }}
+                          >
+                            <Button type="text" size="small" danger icon={<DeleteOutlined />} />
+                          </Popconfirm>
+                        </Space>
+                      </div>
+
+                      {/* Accounts List - Compact */}
+                      {(section.accounts || []).length > 0 && (
+                        <div style={{ padding: '8px 14px', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                          {(section.accounts || []).map((account, idx) => (
+                            <Tag
+                              key={idx}
+                              closable={!!account.section_account_id}
+                              onClose={(e) => {
+                                e.preventDefault();
+                                if (account.section_account_id) {
+                                  handleDeleteAccount(account.section_account_id, account.account_code);
+                                }
+                              }}
+                              style={{
+                                margin: 0,
+                                padding: '4px 10px',
+                                borderRadius: 6,
+                                background: '#fff',
+                                border: '1px solid #d9d9d9',
+                                fontSize: 12,
+                              }}
+                            >
+                              <Text strong style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                                {account.account_from && account.account_to
+                                  ? `${account.account_from}→${account.account_to}`
+                                  : account.account_code}
+                              </Text>
+                              {account.account_description && (
+                                <Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>
+                                  {account.account_description}
+                                </Text>
+                              )}
+                            </Tag>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+
+        {/* Calculated Totals */}
+        {totals.length > 0 && (
+          <div
+            style={{
+              marginBottom: 16,
+              background: '#fff',
+              borderRadius: 10,
+              overflow: 'hidden',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+            }}
+          >
+            {/* Totals Header */}
+            <div
+              style={{
+                background: 'linear-gradient(135deg, #722ed1 0%, #9254de 100%)',
+                padding: '12px 16px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <CalculatorOutlined style={{ color: '#fff', fontSize: 20 }} />
+                <Text strong style={{ color: '#fff', fontSize: 15 }}>Calculated Totals</Text>
+                <Tag style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', margin: 0 }}>
+                  {totals.length}
+                </Tag>
               </div>
             </div>
-          ),
-          icon: null,
-          children: (section.accounts || []).length > 0 ? (section.accounts || []).map((account, idx) => ({
-            key: `account-${section.section_id}-${idx}`,
-            title: (
-              <div style={{
-                background: '#fff',
-                borderRadius: 4,
-                padding: '6px 12px',
-                marginBottom: 2,
-                border: '1px dashed #d9d9d9',
-                minWidth: 300,
-              }}>
-                {/* Account label on top */}
-                <div style={{ marginBottom: 2 }}>
-                  <Tag
+
+            {/* Totals List */}
+            <div style={{ padding: '12px 16px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {totals.map(total => (
+                  <div
+                    key={total.total_id}
                     style={{
-                      margin: 0,
-                      fontSize: 9,
-                      fontWeight: 500,
-                      padding: '0 5px',
-                      background: '#f0f0f0',
-                      border: 'none',
-                      color: '#666',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '10px 14px',
+                      background: '#faf5ff',
+                      borderRadius: 8,
+                      border: '1px solid #e8d4f8',
                     }}
                   >
-                    ACCOUNT
-                  </Tag>
-                </div>
-                {/* Account code/range and description */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div>
-                    <Text strong style={{ fontSize: 13, fontFamily: 'monospace' }}>
-                      {account.account_from && account.account_to
-                        ? `${account.account_from} → ${account.account_to}`
-                        : account.account_code}
-                    </Text>
-                    {account.account_description && (
-                      <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>
-                        {account.account_description}
-                      </Text>
-                    )}
-                  </div>
-                  {account.section_account_id && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <Tag color="purple" style={{ margin: 0, fontWeight: 600 }}>{total.total_code}</Tag>
+                      <Text strong style={{ fontSize: 13 }}>{total.total_name}</Text>
+                      <Text code style={{ fontSize: 12, background: '#fff' }}>{total.calculation_formula}</Text>
+                      {total.after_group_code && (
+                        <Text type="secondary" style={{ fontSize: 11 }}>after {total.after_group_code}</Text>
+                      )}
+                    </div>
                     <Popconfirm
-                      title="Remove this account?"
-                      description={`Remove ${account.account_code} from this section?`}
-                      onConfirm={() => handleDeleteAccount(account.section_account_id!, account.account_code)}
-                      okText="Remove"
-                      cancelText="Cancel"
+                      title="Delete this total?"
+                      onConfirm={() => handleDeleteTotal(total.total_id)}
+                      okText="Delete"
                       okButtonProps={{ danger: true }}
                     >
-                      <Button
-                        type="text"
-                        size="small"
-                        danger
-                        icon={<DeleteOutlined />}
-                      />
+                      <Button type="text" size="small" danger icon={<DeleteOutlined />} />
                     </Popconfirm>
-                  )}
-                </div>
+                  </div>
+                ))}
               </div>
-            ),
-            icon: null,
-            isLeaf: true,
-          })) : undefined,
-        })),
-      };
-      treeData.push(groupNode);
-    });
-
-    // Add totals section
-    if (totals.length > 0) {
-      const totalsNode: DataNode = {
-        key: 'totals',
-        title: (
-          <div style={{
-            background: 'linear-gradient(135deg, #722ed1 0%, #9254de 100%)',
-            borderRadius: 8,
-            padding: '10px 16px',
-            marginBottom: 4,
-            minWidth: 400,
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Space>
-                <CalculatorOutlined style={{ color: '#fff', fontSize: 16 }} />
-                <Text strong style={{ fontSize: 14, color: '#fff' }}>Calculated Totals</Text>
-                <Tag style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff' }}>
-                  {totals.length} items
-                </Tag>
-              </Space>
             </div>
           </div>
-        ),
-        icon: null,
-        children: totals.map(total => ({
-          key: `total-${total.total_id}`,
-          title: (
-            <div style={{
-              background: '#f9f0ff',
-              borderRadius: 6,
-              padding: '8px 14px',
-              marginBottom: 4,
-              border: '1px solid #d3adf7',
-              minWidth: 350,
-            }}>
-              {/* Total label on top */}
-              <div style={{ marginBottom: 4 }}>
-                <Tag
-                  color="purple"
-                  style={{
-                    margin: 0,
-                    fontSize: 9,
-                    fontWeight: 500,
-                    padding: '0 6px',
-                  }}
-                >
-                  TOTAL
-                </Tag>
-                <Text type="secondary" style={{ fontSize: 10, marginLeft: 6 }}>
-                  {total.total_code}
-                </Text>
-                {total.after_group_code && (
-                  <Text type="secondary" style={{ fontSize: 10, marginLeft: 8 }}>
-                    after {total.after_group_code}
-                  </Text>
-                )}
-              </div>
-              {/* Total name, formula and actions */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div>
-                  <Text style={{ fontSize: 13, fontWeight: 500 }}>{total.total_name}</Text>
-                  <Text code style={{ fontSize: 11, marginLeft: 8, background: '#fff' }}>
-                    {total.calculation_formula}
-                  </Text>
-                </div>
-                <Popconfirm
-                  title="Delete this total?"
-                  onConfirm={() => handleDeleteTotal(total.total_id)}
-                  okText="Delete"
-                  okButtonProps={{ danger: true }}
-                >
-                  <Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={e => e.stopPropagation()} />
-                </Popconfirm>
-              </div>
-            </div>
-          ),
-          icon: null,
-          isLeaf: true,
-        })),
-      };
-      treeData.push(totalsNode);
-    }
+        )}
 
-    return treeData;
+        {groups.length === 0 && totals.length === 0 && (
+          <Empty description="No structure defined. Add a group to get started." />
+        )}
+      </div>
+    );
   };
 
   // Template List View
@@ -996,7 +971,6 @@ const IncomeStatementTemplates: React.FC = () => {
     }
 
     const template = tab.template.template;
-    const treeData = buildTreeData(tab.template);
 
     return (
       <div style={{ padding: 16 }}>
@@ -1079,7 +1053,7 @@ const IncomeStatementTemplates: React.FC = () => {
           </Space>
         </Card>
 
-        {/* Hierarchical Tree View */}
+        {/* Template Structure - Clean Card Layout */}
         <Card
           title={
             <Space>
@@ -1091,28 +1065,9 @@ const IncomeStatementTemplates: React.FC = () => {
             </Space>
           }
           style={{ borderRadius: 8 }}
-          bodyStyle={{ padding: (template.groups || []).length === 0 ? 24 : 0 }}
+          bodyStyle={{ padding: 0, background: '#f5f5f5' }}
         >
-          {(template.groups || []).length === 0 && (template.totals || []).length === 0 ? (
-            <Empty description="No structure defined. Add a group to get started." />
-          ) : (
-            <Tree
-              showIcon={false}
-              showLine={false}
-              defaultExpandAll
-              selectable={false}
-              treeData={treeData}
-              style={{
-                padding: 20,
-                background: 'linear-gradient(180deg, #f8f9fa 0%, #f0f2f5 100%)',
-              }}
-              switcherIcon={({ expanded }) =>
-                expanded ?
-                  <CaretDownOutlined style={{ fontSize: 12, color: '#999' }} /> :
-                  <CaretRightOutlined style={{ fontSize: 12, color: '#999' }} />
-              }
-            />
-          )}
+          {renderTemplateStructure(tab.template)}
         </Card>
       </div>
     );
