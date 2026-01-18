@@ -43,6 +43,7 @@ export interface PLSection {
 export interface PLSectionAccount {
   section_account_id?: number;
   account_code: string;
+  account_description?: string | null;
   account_from: string | null;
   account_to: string | null;
 }
@@ -287,6 +288,7 @@ export const addSection = async (
 export const assignAccount = async (
   sectionId: number,
   accountCode: string,
+  accountDescription?: string,
   accountFrom?: string,
   accountTo?: string
 ): Promise<ApiResponse<void>> => {
@@ -296,6 +298,7 @@ export const assignAccount = async (
     const payload = {
       section_id: sectionId,
       account_code: accountCode,
+      account_description: accountDescription || null,
       account_from: accountFrom || null,
       account_to: accountTo || null,
     };
@@ -312,8 +315,6 @@ ${JSON.stringify(payload, null, 2)}
 ========================================`;
 
     console.log(debugInfo);
-    // Uncomment below to show alert popup:
-    // alert(debugInfo);
 
     const response = await fetch(url, {
       method: 'POST',
@@ -351,6 +352,46 @@ Response OK: ${response.ok}`;
   } catch (error) {
     const exceptionMsg = `EXCEPTION: ${String(error)}`;
     console.error(exceptionMsg);
+    return { success: false, error: String(error) };
+  }
+};
+
+// Delete account from section
+export const deleteAccount = async (
+  sectionAccountId: number
+): Promise<ApiResponse<void>> => {
+  try {
+    const baseUrl = BASE_URL;
+    const url = `${baseUrl}/pl/account/${sectionAccountId}`;
+
+    console.log('=== DELETE ACCOUNT ===');
+    console.log('URL:', url);
+
+    const response = await fetch(url, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    console.log('Response Status:', response.status);
+
+    const responseText = await response.text();
+    console.log('Response Body:', responseText);
+
+    let result;
+    try {
+      result = JSON.parse(responseText);
+    } catch (parseError) {
+      const errorMsg = `JSON Parse Error - Raw Response: ${responseText}`;
+      console.error(errorMsg);
+      return { success: false, error: errorMsg };
+    }
+
+    if (result.success) {
+      return { success: true };
+    }
+    return { success: false, error: result.error || 'Unknown error' };
+  } catch (error) {
+    console.error('Error deleting account:', error);
     return { success: false, error: String(error) };
   }
 };

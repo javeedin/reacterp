@@ -431,11 +431,16 @@ const IncomeStatementTemplates: React.FC = () => {
     const errors: string[] = [];
 
     for (const accountCode of selectedAccounts) {
-      console.log(`Assigning account ${accountCode} to section ${selectedSectionId}...`);
+      // Find account description from glAccounts
+      const accountInfo = glAccounts.find(acc => acc.account === accountCode);
+      const accountDescription = accountInfo?.description || '';
+
+      console.log(`Assigning account ${accountCode} (${accountDescription}) to section ${selectedSectionId}...`);
       try {
         const response = await plService.assignAccount(
           selectedSectionId,
           accountCode,
+          accountDescription,
           undefined,
           undefined
         );
@@ -473,6 +478,22 @@ const IncomeStatementTemplates: React.FC = () => {
     setAccountSearchText('');
     setSelectedSectionId(null);
     refreshCurrentTab();
+  };
+
+  // Delete account from section
+  const handleDeleteAccount = async (sectionAccountId: number, accountCode: string) => {
+    try {
+      console.log(`Deleting account ${accountCode} (sectionAccountId: ${sectionAccountId})...`);
+      const response = await plService.deleteAccount(sectionAccountId);
+      if (response.success) {
+        message.success(`Account ${accountCode} removed successfully`);
+        refreshCurrentTab();
+      } else {
+        message.error(response.error || 'Failed to remove account');
+      }
+    } catch (error) {
+      message.error('Failed to remove account');
+    }
   };
 
   // Total CRUD
@@ -606,13 +627,38 @@ const IncomeStatementTemplates: React.FC = () => {
           children: (section.accounts || []).length > 0 ? (section.accounts || []).map((account, idx) => ({
             key: `account-${section.section_id}-${idx}`,
             title: (
-              <Space>
-                <Text style={{ fontSize: 12 }}>
-                  {account.account_from && account.account_to
-                    ? `${account.account_from} - ${account.account_to}`
-                    : account.account_code}
-                </Text>
-              </Space>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '2px 0' }}>
+                <Space>
+                  <Text style={{ fontSize: 12, fontWeight: 500 }}>
+                    {account.account_from && account.account_to
+                      ? `${account.account_from} - ${account.account_to}`
+                      : account.account_code}
+                  </Text>
+                  {account.account_description && (
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      - {account.account_description}
+                    </Text>
+                  )}
+                </Space>
+                {account.section_account_id && (
+                  <Popconfirm
+                    title="Remove this account?"
+                    description={`Remove ${account.account_code} from this section?`}
+                    onConfirm={() => handleDeleteAccount(account.section_account_id!, account.account_code)}
+                    okText="Remove"
+                    cancelText="Cancel"
+                    okButtonProps={{ danger: true }}
+                  >
+                    <Button
+                      type="text"
+                      size="small"
+                      danger
+                      icon={<DeleteOutlined />}
+                      style={{ marginLeft: 8 }}
+                    />
+                  </Popconfirm>
+                )}
+              </div>
             ),
             icon: <NumberOutlined style={{ color: REDWOOD.neutral600 }} />,
             isLeaf: true,
