@@ -374,7 +374,6 @@ export const deleteAccount = async (
 
     const response = await fetch(url, {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
     });
 
     console.log('Response Status:', response.status);
