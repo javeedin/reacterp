@@ -537,7 +537,7 @@ const IncomeStatementTemplates: React.FC = () => {
     }
   };
 
-  // Build tree data for template structure
+  // Build tree data for template structure - Modern Card-based UI
   const buildTreeData = (templateData: plService.PLTemplateStructure): DataNode[] => {
     // Safe access with defaults
     const groups = templateData?.template?.groups || [];
@@ -550,71 +550,61 @@ const IncomeStatementTemplates: React.FC = () => {
       const groupNode: DataNode = {
         key: `group-${group.group_id}`,
         title: (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '4px 0' }}>
-            <Space>
-              <Tag color={GROUP_TYPE_COLORS[group.group_type]} style={{ margin: 0 }}>
-                {group.group_type}
-              </Tag>
-              <Text strong style={{ fontSize: 14 }}>{group.group_name}</Text>
-              <Text type="secondary" style={{ fontSize: 12 }}>({group.group_code})</Text>
-              <Text type="secondary" style={{ fontSize: 11 }}>
-                Order: {group.display_order} | Sign: {group.sign_convention === 1 ? '+' : '-'}
-              </Text>
-            </Space>
-            <Space size="small" onClick={e => e.stopPropagation()}>
-              <Tooltip title="Add Section">
-                <Button
-                  type="text"
-                  size="small"
-                  icon={<PlusOutlined />}
-                  onClick={() => {
-                    setSelectedGroupId(group.group_id);
-                    sectionForm.setFieldsValue({
-                      display_order: ((group.sections || []).length + 1) * 10,
-                    });
-                    setSectionModalVisible(true);
-                  }}
-                />
-              </Tooltip>
-              <Popconfirm
-                title="Delete this group?"
-                description="All sections and accounts will also be deleted."
-                onConfirm={() => handleDeleteGroup(group.group_id)}
-                okText="Delete"
-                okButtonProps={{ danger: true }}
+          <div style={{
+            background: '#fff',
+            borderRadius: 8,
+            padding: '10px 16px',
+            marginBottom: 4,
+            boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+            borderLeft: `4px solid ${GROUP_TYPE_COLORS[group.group_type]}`,
+            minWidth: 400,
+          }}>
+            {/* Type label on top */}
+            <div style={{ marginBottom: 6 }}>
+              <Tag
+                color={GROUP_TYPE_COLORS[group.group_type]}
+                style={{
+                  margin: 0,
+                  fontSize: 10,
+                  fontWeight: 600,
+                  letterSpacing: '0.5px',
+                  textTransform: 'uppercase',
+                }}
               >
-                <Button type="text" size="small" danger icon={<DeleteOutlined />} />
-              </Popconfirm>
-            </Space>
-          </div>
-        ),
-        icon: <FolderOutlined style={{ color: GROUP_TYPE_COLORS[group.group_type] }} />,
-        children: (group.sections || []).map(section => ({
-          key: `section-${section.section_id}`,
-          title: (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '2px 0' }}>
-              <Space>
-                <Text style={{ fontSize: 13 }}>{section.section_name}</Text>
-                <Text type="secondary" style={{ fontSize: 11 }}>({section.section_code})</Text>
-              </Space>
+                {group.group_type.replace('_', ' ')}
+              </Tag>
+              <Tag style={{ margin: '0 0 0 8px', fontSize: 10, background: '#f5f5f5', border: 'none' }}>
+                {group.sign_convention === 1 ? '+ Add' : '− Subtract'}
+              </Tag>
+            </div>
+            {/* Group name and actions */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <Text strong style={{ fontSize: 15 }}>{group.group_name}</Text>
+                <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
+                  {group.group_code} • Order {group.display_order}
+                </Text>
+              </div>
               <Space size="small" onClick={e => e.stopPropagation()}>
-                <Tooltip title="Add Account">
+                <Tooltip title="Add Section">
                   <Button
-                    type="text"
+                    type="primary"
                     size="small"
+                    ghost
                     icon={<PlusOutlined />}
                     onClick={() => {
-                      setSelectedSectionId(section.section_id);
-                      setAccountModalVisible(true);
-                      if (glAccounts.length === 0) {
-                        loadGLAccounts();
-                      }
+                      setSelectedGroupId(group.group_id);
+                      sectionForm.setFieldsValue({
+                        display_order: ((group.sections || []).length + 1) * 10,
+                      });
+                      setSectionModalVisible(true);
                     }}
                   />
                 </Tooltip>
                 <Popconfirm
-                  title="Delete this section?"
-                  onConfirm={() => handleDeleteSection(section.section_id)}
+                  title="Delete this group?"
+                  description="All sections and accounts will also be deleted."
+                  onConfirm={() => handleDeleteGroup(group.group_id)}
                   okText="Delete"
                   okButtonProps={{ danger: true }}
                 >
@@ -622,45 +612,130 @@ const IncomeStatementTemplates: React.FC = () => {
                 </Popconfirm>
               </Space>
             </div>
+          </div>
+        ),
+        icon: null,
+        children: (group.sections || []).map(section => ({
+          key: `section-${section.section_id}`,
+          title: (
+            <div style={{
+              background: '#fafbfc',
+              borderRadius: 6,
+              padding: '8px 14px',
+              marginBottom: 4,
+              border: '1px solid #e8e8e8',
+              minWidth: 350,
+            }}>
+              {/* Section label on top */}
+              <div style={{ marginBottom: 4 }}>
+                <Tag
+                  color="blue"
+                  style={{
+                    margin: 0,
+                    fontSize: 9,
+                    fontWeight: 500,
+                    padding: '0 6px',
+                  }}
+                >
+                  SECTION
+                </Tag>
+                <Text type="secondary" style={{ fontSize: 10, marginLeft: 6 }}>
+                  {section.section_code}
+                </Text>
+              </div>
+              {/* Section name and actions */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Text style={{ fontSize: 13, fontWeight: 500 }}>{section.section_name}</Text>
+                <Space size="small" onClick={e => e.stopPropagation()}>
+                  <Tooltip title="Add Account">
+                    <Button
+                      type="default"
+                      size="small"
+                      icon={<PlusOutlined />}
+                      onClick={() => {
+                        setSelectedSectionId(section.section_id);
+                        setAccountModalVisible(true);
+                        if (glAccounts.length === 0) {
+                          loadGLAccounts();
+                        }
+                      }}
+                    />
+                  </Tooltip>
+                  <Popconfirm
+                    title="Delete this section?"
+                    onConfirm={() => handleDeleteSection(section.section_id)}
+                    okText="Delete"
+                    okButtonProps={{ danger: true }}
+                  >
+                    <Button type="text" size="small" danger icon={<DeleteOutlined />} />
+                  </Popconfirm>
+                </Space>
+              </div>
+            </div>
           ),
-          icon: <AppstoreOutlined style={{ color: REDWOOD.info }} />,
+          icon: null,
           children: (section.accounts || []).length > 0 ? (section.accounts || []).map((account, idx) => ({
             key: `account-${section.section_id}-${idx}`,
             title: (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '2px 0' }}>
-                <Space>
-                  <Text style={{ fontSize: 12, fontWeight: 500 }}>
-                    {account.account_from && account.account_to
-                      ? `${account.account_from} - ${account.account_to}`
-                      : account.account_code}
-                  </Text>
-                  {account.account_description && (
-                    <Text type="secondary" style={{ fontSize: 11 }}>
-                      - {account.account_description}
-                    </Text>
-                  )}
-                </Space>
-                {account.section_account_id && (
-                  <Popconfirm
-                    title="Remove this account?"
-                    description={`Remove ${account.account_code} from this section?`}
-                    onConfirm={() => handleDeleteAccount(account.section_account_id!, account.account_code)}
-                    okText="Remove"
-                    cancelText="Cancel"
-                    okButtonProps={{ danger: true }}
+              <div style={{
+                background: '#fff',
+                borderRadius: 4,
+                padding: '6px 12px',
+                marginBottom: 2,
+                border: '1px dashed #d9d9d9',
+                minWidth: 300,
+              }}>
+                {/* Account label on top */}
+                <div style={{ marginBottom: 2 }}>
+                  <Tag
+                    style={{
+                      margin: 0,
+                      fontSize: 9,
+                      fontWeight: 500,
+                      padding: '0 5px',
+                      background: '#f0f0f0',
+                      border: 'none',
+                      color: '#666',
+                    }}
                   >
-                    <Button
-                      type="text"
-                      size="small"
-                      danger
-                      icon={<DeleteOutlined />}
-                      style={{ marginLeft: 8 }}
-                    />
-                  </Popconfirm>
-                )}
+                    ACCOUNT
+                  </Tag>
+                </div>
+                {/* Account code/range and description */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div>
+                    <Text strong style={{ fontSize: 13, fontFamily: 'monospace' }}>
+                      {account.account_from && account.account_to
+                        ? `${account.account_from} → ${account.account_to}`
+                        : account.account_code}
+                    </Text>
+                    {account.account_description && (
+                      <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>
+                        {account.account_description}
+                      </Text>
+                    )}
+                  </div>
+                  {account.section_account_id && (
+                    <Popconfirm
+                      title="Remove this account?"
+                      description={`Remove ${account.account_code} from this section?`}
+                      onConfirm={() => handleDeleteAccount(account.section_account_id!, account.account_code)}
+                      okText="Remove"
+                      cancelText="Cancel"
+                      okButtonProps={{ danger: true }}
+                    >
+                      <Button
+                        type="text"
+                        size="small"
+                        danger
+                        icon={<DeleteOutlined />}
+                      />
+                    </Popconfirm>
+                  )}
+                </div>
               </div>
             ),
-            icon: <NumberOutlined style={{ color: REDWOOD.neutral600 }} />,
+            icon: null,
             isLeaf: true,
           })) : undefined,
         })),
@@ -673,37 +748,78 @@ const IncomeStatementTemplates: React.FC = () => {
       const totalsNode: DataNode = {
         key: 'totals',
         title: (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '4px 0' }}>
-            <Space>
-              <Text strong style={{ fontSize: 14, color: REDWOOD.primary }}>Calculated Totals</Text>
-              <Tag color="purple">{totals.length} items</Tag>
-            </Space>
+          <div style={{
+            background: 'linear-gradient(135deg, #722ed1 0%, #9254de 100%)',
+            borderRadius: 8,
+            padding: '10px 16px',
+            marginBottom: 4,
+            minWidth: 400,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Space>
+                <CalculatorOutlined style={{ color: '#fff', fontSize: 16 }} />
+                <Text strong style={{ fontSize: 14, color: '#fff' }}>Calculated Totals</Text>
+                <Tag style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff' }}>
+                  {totals.length} items
+                </Tag>
+              </Space>
+            </div>
           </div>
         ),
-        icon: <CalculatorOutlined style={{ color: REDWOOD.primary }} />,
+        icon: null,
         children: totals.map(total => ({
           key: `total-${total.total_id}`,
           title: (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '2px 0' }}>
-              <Space>
-                <Tag color="purple" style={{ margin: 0 }}>{total.total_code}</Tag>
-                <Text style={{ fontSize: 13 }}>{total.total_name}</Text>
-                <Text code style={{ fontSize: 11 }}>{total.calculation_formula}</Text>
+            <div style={{
+              background: '#f9f0ff',
+              borderRadius: 6,
+              padding: '8px 14px',
+              marginBottom: 4,
+              border: '1px solid #d3adf7',
+              minWidth: 350,
+            }}>
+              {/* Total label on top */}
+              <div style={{ marginBottom: 4 }}>
+                <Tag
+                  color="purple"
+                  style={{
+                    margin: 0,
+                    fontSize: 9,
+                    fontWeight: 500,
+                    padding: '0 6px',
+                  }}
+                >
+                  TOTAL
+                </Tag>
+                <Text type="secondary" style={{ fontSize: 10, marginLeft: 6 }}>
+                  {total.total_code}
+                </Text>
                 {total.after_group_code && (
-                  <Text type="secondary" style={{ fontSize: 11 }}>after {total.after_group_code}</Text>
+                  <Text type="secondary" style={{ fontSize: 10, marginLeft: 8 }}>
+                    after {total.after_group_code}
+                  </Text>
                 )}
-              </Space>
-              <Popconfirm
-                title="Delete this total?"
-                onConfirm={() => handleDeleteTotal(total.total_id)}
-                okText="Delete"
-                okButtonProps={{ danger: true }}
-              >
-                <Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={e => e.stopPropagation()} />
-              </Popconfirm>
+              </div>
+              {/* Total name, formula and actions */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div>
+                  <Text style={{ fontSize: 13, fontWeight: 500 }}>{total.total_name}</Text>
+                  <Text code style={{ fontSize: 11, marginLeft: 8, background: '#fff' }}>
+                    {total.calculation_formula}
+                  </Text>
+                </div>
+                <Popconfirm
+                  title="Delete this total?"
+                  onConfirm={() => handleDeleteTotal(total.total_id)}
+                  okText="Delete"
+                  okButtonProps={{ danger: true }}
+                >
+                  <Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={e => e.stopPropagation()} />
+                </Popconfirm>
+              </div>
             </div>
           ),
-          icon: <CalculatorOutlined style={{ color: '#722ed1' }} />,
+          icon: null,
           isLeaf: true,
         })),
       };
@@ -981,17 +1097,19 @@ const IncomeStatementTemplates: React.FC = () => {
             <Empty description="No structure defined. Add a group to get started." />
           ) : (
             <Tree
-              showIcon
-              showLine={{ showLeafIcon: false }}
+              showIcon={false}
+              showLine={false}
               defaultExpandAll
               selectable={false}
               treeData={treeData}
               style={{
-                padding: 16,
-                background: REDWOOD.neutral100,
+                padding: 20,
+                background: 'linear-gradient(180deg, #f8f9fa 0%, #f0f2f5 100%)',
               }}
               switcherIcon={({ expanded }) =>
-                expanded ? <CaretDownOutlined /> : <CaretRightOutlined />
+                expanded ?
+                  <CaretDownOutlined style={{ fontSize: 12, color: '#999' }} /> :
+                  <CaretRightOutlined style={{ fontSize: 12, color: '#999' }} />
               }
             />
           )}
