@@ -364,8 +364,13 @@ export const deleteAccount = async (
     const baseUrl = BASE_URL;
     const url = `${baseUrl}/pl/account/${sectionAccountId}`;
 
-    console.log('=== DELETE ACCOUNT ===');
-    console.log('URL:', url);
+    console.log('========================================');
+    console.log('DELETE ACCOUNT REQUEST');
+    console.log('========================================');
+    console.log('Full URL:', url);
+    console.log('Method: DELETE');
+    console.log('section_account_id:', sectionAccountId);
+    console.log('========================================');
 
     const response = await fetch(url, {
       method: 'DELETE',
@@ -373,6 +378,7 @@ export const deleteAccount = async (
     });
 
     console.log('Response Status:', response.status);
+    console.log('Response OK:', response.ok);
 
     const responseText = await response.text();
     console.log('Response Body:', responseText);
@@ -386,12 +392,16 @@ export const deleteAccount = async (
       return { success: false, error: errorMsg };
     }
 
+    console.log('Parsed Result:', result);
+
     if (result.success) {
+      console.log('=== DELETE SUCCESS ===');
       return { success: true };
     }
+    console.log('=== DELETE FAILED ===', result.error);
     return { success: false, error: result.error || 'Unknown error' };
   } catch (error) {
-    console.error('Error deleting account:', error);
+    console.error('=== DELETE EXCEPTION ===', error);
     return { success: false, error: String(error) };
   }
 };
