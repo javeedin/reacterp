@@ -1778,7 +1778,7 @@ const IncomeStatementTemplates: React.FC = () => {
               <BankOutlined style={{ color: REDWOOD.primary }} />
               <span>Assign Accounts to Section</span>
               {selectedSectionId && (
-                <Tag color="blue" style={{ marginLeft: 8 }}>Section ID: {selectedSectionId}</Tag>
+                <Tag color="blue" style={{ marginLeft: 8 }}>ID: {selectedSectionId}</Tag>
               )}
             </Space>
           }
@@ -1811,60 +1811,31 @@ const IncomeStatementTemplates: React.FC = () => {
               </Button>
             </Space>
           }
-          width={800}
-          bodyStyle={{ padding: 0 }}
+          width={700}
+          styles={{ body: { padding: 0 } }}
         >
-          {/* Section ID Info Banner */}
-          <div style={{
-            padding: '8px 16px',
-            background: '#e6f7ff',
-            borderBottom: `1px solid ${REDWOOD.neutral200}`,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8
-          }}>
-            <Text strong>Target Section ID:</Text>
-            <Tag color="blue" style={{ fontSize: 14 }}>{selectedSectionId || 'Not selected'}</Tag>
-            <Text type="secondary" style={{ marginLeft: 'auto', fontSize: 12 }}>
-              (Check browser console F12 for API logs)
-            </Text>
+          {/* Search Bar - Compact */}
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', gap: 8, alignItems: 'center' }}>
+            <Input.Search
+              placeholder="Search accounts..."
+              value={accountSearchText}
+              onChange={(e) => setAccountSearchText(e.target.value)}
+              allowClear
+              style={{ flex: 1 }}
+            />
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={loadGLAccounts}
+              loading={glAccountsLoading}
+              size="small"
+            />
+            {selectedAccounts.length > 0 && (
+              <Tag color="blue">{selectedAccounts.length} selected</Tag>
+            )}
           </div>
 
-          {/* Search and Filter Bar */}
-          <div style={{ padding: 16, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
-            <Row gutter={16} align="middle">
-              <Col flex="auto">
-                <Input.Search
-                  placeholder="Search by account code or description..."
-                  value={accountSearchText}
-                  onChange={(e) => setAccountSearchText(e.target.value)}
-                  allowClear
-                  style={{ width: '100%' }}
-                />
-              </Col>
-              <Col>
-                <Button
-                  icon={<ReloadOutlined />}
-                  onClick={loadGLAccounts}
-                  loading={glAccountsLoading}
-                >
-                  Refresh
-                </Button>
-              </Col>
-            </Row>
-            <div style={{ marginTop: 8 }}>
-              <Text type="secondary">
-                {selectedAccounts.length > 0 ? (
-                  <Tag color="blue">{selectedAccounts.length} account(s) selected</Tag>
-                ) : (
-                  'Select accounts from the list below'
-                )}
-              </Text>
-            </div>
-          </div>
-
-          {/* Accounts Table */}
-          <div style={{ maxHeight: 400, overflow: 'auto' }}>
+          {/* Accounts Table - Compact */}
+          <div style={{ maxHeight: 280, overflow: 'auto' }}>
             <Table
               loading={glAccountsLoading}
               dataSource={glAccounts.filter(acc =>
@@ -1874,7 +1845,7 @@ const IncomeStatementTemplates: React.FC = () => {
               )}
               rowKey="account"
               size="small"
-              pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total) => `Total ${total} accounts` }}
+              pagination={{ pageSize: 8, size: 'small', showTotal: (total) => `${total} accounts` }}
               rowSelection={{
                 type: 'checkbox',
                 selectedRowKeys: selectedAccounts,
@@ -1884,68 +1855,58 @@ const IncomeStatementTemplates: React.FC = () => {
               }}
               columns={[
                 {
-                  title: 'Account Code',
+                  title: 'Code',
                   dataIndex: 'account',
                   key: 'account',
-                  width: 150,
-                  sorter: (a, b) => a.account.localeCompare(b.account),
+                  width: 100,
                   render: (code: string) => (
-                    <Text strong style={{ fontFamily: 'monospace' }}>{code}</Text>
+                    <Text strong style={{ fontFamily: 'monospace', fontSize: 12 }}>{code}</Text>
                   ),
                 },
                 {
                   title: 'Description',
                   dataIndex: 'description',
                   key: 'description',
-                  sorter: (a, b) => a.description.localeCompare(b.description),
+                  ellipsis: true,
                 },
                 {
                   title: 'Type',
                   dataIndex: 'account_type',
                   key: 'account_type',
-                  width: 80,
-                  filters: [
-                    { text: 'Asset', value: 'A' },
-                    { text: 'Liability', value: 'L' },
-                    { text: 'Equity', value: 'O' },
-                    { text: 'Revenue', value: 'R' },
-                    { text: 'Expense', value: 'E' },
-                  ],
-                  onFilter: (value, record) => record.account_type === value,
+                  width: 70,
                   render: (type: string) => {
                     const typeMap: Record<string, { label: string; color: string }> = {
                       A: { label: 'Asset', color: 'blue' },
-                      L: { label: 'Liability', color: 'orange' },
-                      O: { label: 'Equity', color: 'purple' },
-                      R: { label: 'Revenue', color: 'green' },
-                      E: { label: 'Expense', color: 'red' },
+                      L: { label: 'Liab', color: 'orange' },
+                      O: { label: 'Eqty', color: 'purple' },
+                      R: { label: 'Rev', color: 'green' },
+                      E: { label: 'Exp', color: 'red' },
                     };
                     const info = typeMap[type] || { label: type, color: 'default' };
-                    return <Tag color={info.color}>{info.label}</Tag>;
+                    return <Tag color={info.color} style={{ fontSize: 10 }}>{info.label}</Tag>;
                   },
                 },
               ]}
             />
           </div>
 
-          {/* Manual Entry Option */}
-          <Divider style={{ margin: '12px 0' }}>Or enter account range manually</Divider>
-          <div style={{ padding: '0 16px 16px 16px' }}>
-            <Form form={accountForm} layout="inline" onFinish={handleAssignAccount}>
+          {/* Manual Entry - Compact */}
+          <div style={{ padding: '10px 16px', borderTop: '1px solid #f0f0f0', background: '#fafafa' }}>
+            <Form form={accountForm} layout="inline" onFinish={handleAssignAccount} style={{ flexWrap: 'wrap', gap: 4 }}>
               <Form.Item name="account_code" style={{ marginBottom: 0 }}>
-                <Input placeholder="Single account code" style={{ width: 150 }} />
+                <Input placeholder="Account code" style={{ width: 120 }} size="small" />
               </Form.Item>
-              <Text style={{ margin: '0 8px', lineHeight: '32px' }}>or range:</Text>
+              <Text type="secondary" style={{ lineHeight: '24px', fontSize: 12 }}>or range:</Text>
               <Form.Item name="account_from" style={{ marginBottom: 0 }}>
-                <Input placeholder="From" style={{ width: 120 }} />
+                <Input placeholder="From" style={{ width: 80 }} size="small" />
               </Form.Item>
-              <Text style={{ margin: '0 4px', lineHeight: '32px' }}>to</Text>
+              <Text type="secondary" style={{ lineHeight: '24px' }}>→</Text>
               <Form.Item name="account_to" style={{ marginBottom: 0 }}>
-                <Input placeholder="To" style={{ width: 120 }} />
+                <Input placeholder="To" style={{ width: 80 }} size="small" />
               </Form.Item>
               <Form.Item style={{ marginBottom: 0 }}>
-                <Button type="primary" htmlType="submit" ghost>
-                  Add Range
+                <Button type="primary" htmlType="submit" ghost size="small">
+                  Add
                 </Button>
               </Form.Item>
             </Form>
