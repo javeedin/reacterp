@@ -825,10 +825,8 @@ const IncomeStatementTemplates: React.FC = () => {
     setSelectedPeriods(prev => [...prev, { year, num, name }].sort((a, b) =>
       a.year !== b.year ? a.year - b.year : a.num - b.num
     ));
-    // Fetch companies for this period (only on first add)
-    if (selectedPeriods.length === 0) {
-      fetchCompanies(name);
-    }
+    // Fetch companies for this period
+    fetchCompanies(name);
     // Clear selection after adding
     reportPeriodForm.setFieldValue('selected_period', undefined);
   };
@@ -3521,7 +3519,7 @@ const IncomeStatementTemplates: React.FC = () => {
           {/* Company Filter */}
           <Card size="small" title="Company Filter (Optional)" style={{ marginBottom: 16, background: '#f9f9f9' }}>
             <Select
-              placeholder="All Companies"
+              placeholder={loadingCompanies ? "Loading companies..." : "All Companies"}
               style={{ width: '100%' }}
               value={selectedCompany}
               onChange={(value) => setSelectedCompany(value)}
@@ -3529,7 +3527,7 @@ const IncomeStatementTemplates: React.FC = () => {
               allowClear
               showSearch
               optionFilterProp="children"
-              disabled={availableCompanies.length === 0}
+              disabled={loadingCompanies}
             >
               {availableCompanies.map(c => (
                 <Select.Option key={c} value={c}>
@@ -3537,9 +3535,14 @@ const IncomeStatementTemplates: React.FC = () => {
                 </Select.Option>
               ))}
             </Select>
-            {selectedPeriods.length === 0 && (
+            {selectedPeriods.length === 0 && !loadingCompanies && (
               <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
                 Add a period first to load available companies
+              </Text>
+            )}
+            {availableCompanies.length > 0 && (
+              <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
+                {availableCompanies.length} companies available
               </Text>
             )}
           </Card>
