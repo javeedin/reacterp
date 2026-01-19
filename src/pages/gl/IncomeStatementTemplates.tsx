@@ -238,8 +238,11 @@ const IncomeStatementTemplates: React.FC = () => {
     try {
       const params = new URLSearchParams({
         ledger_id: String(ledgerId),
+        application_name: 'General Ledger',  // Filter for GL periods only
       });
       const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.periodsStatus}?${params}`;
+      console.log('Fetching periods from:', url);  // Log the URL
+
       const response = await fetch(url);
 
       if (!response.ok) {
@@ -247,6 +250,8 @@ const IncomeStatementTemplates: React.FC = () => {
       }
 
       const data = await response.json();
+      console.log('Periods API response:', data);  // Log the response
+
       const items: PeriodInfo[] = data.items || [];
 
       // Sort by year desc, then by period_number desc
@@ -257,6 +262,7 @@ const IncomeStatementTemplates: React.FC = () => {
         return b.period_number - a.period_number;
       });
 
+      console.log('Periods loaded:', sortedPeriods.length);  // Log count
       setAvailablePeriods(sortedPeriods);
     } catch (error) {
       console.error('Error fetching periods:', error);
