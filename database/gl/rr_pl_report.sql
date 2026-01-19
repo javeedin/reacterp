@@ -75,7 +75,7 @@ CREATE OR REPLACE PACKAGE rr_pl_template_pkg AS
         p_template_id   IN NUMBER,
         p_section_code  IN VARCHAR2,
         p_period_name   IN VARCHAR2,
-        p_ledger_id     IN NUMBER DEFAULT NULL
+        p_ledger_name   IN VARCHAR2 DEFAULT NULL
     ) RETURN CLOB;
 
 END rr_pl_template_pkg;
@@ -761,7 +761,7 @@ CREATE OR REPLACE PACKAGE BODY rr_pl_template_pkg AS
         p_template_id   IN NUMBER,
         p_section_code  IN VARCHAR2,
         p_period_name   IN VARCHAR2,
-        p_ledger_id     IN NUMBER DEFAULT NULL
+        p_ledger_name   IN VARCHAR2 DEFAULT NULL
     ) RETURN CLOB
     IS
         v_result CLOB;
@@ -773,8 +773,7 @@ CREATE OR REPLACE PACKAGE BODY rr_pl_template_pkg AS
         v_sign_convention NUMBER := 1;
         v_total_amount NUMBER := 0;
         v_period_year NUMBER;
-        v_period_num NUMBER;
-        v_ledger_id NUMBER;
+        v_ledger_name VARCHAR2(200);
     BEGIN
         -- Get section info by template_id and section_code
         SELECT s.section_id, s.section_name, s.group_id
@@ -792,31 +791,23 @@ CREATE OR REPLACE PACKAGE BODY rr_pl_template_pkg AS
         FROM rr_pl_groups
         WHERE group_id = v_group_id;
 
-        -- Parse period_name to get year and period number
-        -- Expected format: "May-24" or "Jan-2024" or similar
+        -- Get period_year from VV_RR_PERIOD_STATUS
         BEGIN
-            SELECT period_year, period_num, ledger_id
-            INTO v_period_year, v_period_num, v_ledger_id
-            FROM gl_period_statuses
-            WHERE period_name = p_period_name
-              AND application_id = 101  -- General Ledger
-              AND (p_ledger_id IS NULL OR ledger_id = p_ledger_id)
+            SELECT period_year, ledger_name
+            INTO v_period_year, v_ledger_name
+            FROM VV_RR_PERIOD_STATUS
+            WHERE period_name_id = p_period_name
+              AND application_name = 'General Ledger'
+              AND (p_ledger_name IS NULL OR ledger_name = p_ledger_name)
               AND ROWNUM = 1;
         EXCEPTION
             WHEN NO_DATA_FOUND THEN
-                -- Try to parse from period name format
+                -- Try to parse from period name format (e.g., "May-24")
                 v_period_year := 2000 + TO_NUMBER(SUBSTR(p_period_name, -2));
-                v_period_num := CASE SUBSTR(UPPER(p_period_name), 1, 3)
-                    WHEN 'JAN' THEN 1 WHEN 'FEB' THEN 2 WHEN 'MAR' THEN 3
-                    WHEN 'APR' THEN 4 WHEN 'MAY' THEN 5 WHEN 'JUN' THEN 6
-                    WHEN 'JUL' THEN 7 WHEN 'AUG' THEN 8 WHEN 'SEP' THEN 9
-                    WHEN 'OCT' THEN 10 WHEN 'NOV' THEN 11 WHEN 'DEC' THEN 12
-                    ELSE 1
-                END;
-                v_ledger_id := p_ledger_id;
+                v_ledger_name := p_ledger_name;
         END;
 
-        -- Get accounts and their balances
+        -- Get accounts and their balances (sum by account)
         FOR acct IN (
             SELECT account_code, account_from, account_to
             FROM rr_pl_section_accounts
@@ -824,18 +815,17 @@ CREATE OR REPLACE PACKAGE BODY rr_pl_template_pkg AS
             ORDER BY display_order
         ) LOOP
             IF acct.account_from IS NOT NULL AND acct.account_to IS NOT NULL THEN
-                -- Account range
+                -- Account range - get sum of closing_balance per account
                 FOR bal IN (
                     SELECT b.account,
-                           NVL((SELECT g.description FROM gl_code_combinations g
-                                WHERE g.account = b.account AND ROWNUM = 1), b.account) as description,
-                           NVL(b.closing_balance, 0) as closing_balance
+                           MAX(b.account_desc) as description,
+                           SUM(NVL(b.closing_balance, 0)) as closing_balance
                     FROM rr_gl_balances b
-                    WHERE b.period_year = v_period_year
-                      AND b.period_num = v_period_num
-                      AND (v_ledger_id IS NULL OR b.ledger_id = v_ledger_id)
+                    WHERE b.period_name = p_period_name
+                      AND (v_ledger_name IS NULL OR b.ledger_name = v_ledger_name)
                       AND b.account >= acct.account_from
                       AND b.account <= acct.account_to
+                    GROUP BY b.account
                     ORDER BY b.account
                 ) LOOP
                     IF NOT v_first_acct THEN
@@ -853,17 +843,16 @@ CREATE OR REPLACE PACKAGE BODY rr_pl_template_pkg AS
                     v_total_amount := v_total_amount + (bal.closing_balance * v_sign_convention);
                 END LOOP;
             ELSIF acct.account_code IS NOT NULL THEN
-                -- Single account
+                -- Single account - get sum of closing_balance
                 FOR bal IN (
                     SELECT b.account,
-                           NVL((SELECT g.description FROM gl_code_combinations g
-                                WHERE g.account = b.account AND ROWNUM = 1), acct.account_code) as description,
-                           NVL(b.closing_balance, 0) as closing_balance
+                           MAX(b.account_desc) as description,
+                           SUM(NVL(b.closing_balance, 0)) as closing_balance
                     FROM rr_gl_balances b
-                    WHERE b.period_year = v_period_year
-                      AND b.period_num = v_period_num
-                      AND (v_ledger_id IS NULL OR b.ledger_id = v_ledger_id)
+                    WHERE b.period_name = p_period_name
+                      AND (v_ledger_name IS NULL OR b.ledger_name = v_ledger_name)
                       AND b.account = acct.account_code
+                    GROUP BY b.account
                 ) LOOP
                     IF NOT v_first_acct THEN
                         v_accounts := v_accounts || ',';
@@ -892,7 +881,7 @@ CREATE OR REPLACE PACKAGE BODY rr_pl_template_pkg AS
             '"section_name":' || escape_json(v_section_name) || ',' ||
             '"period_name":' || escape_json(p_period_name) || ',' ||
             '"period_year":' || v_period_year || ',' ||
-            '"period_num":' || v_period_num || ',' ||
+            '"ledger_name":' || escape_json(v_ledger_name) || ',' ||
             '"sign_convention":' || v_sign_convention || ',' ||
             '"total_amount":' || v_total_amount || ',' ||
             '"accounts":' || v_accounts ||
@@ -947,7 +936,7 @@ END;
 -- ============================================================================
 -- APEX REST Handler for Section Accounts
 -- ============================================================================
--- GET /pl/section-accounts?template_id=1&section_code=REV001&period_name=May-24&ledger_id=123
+-- GET /pl/section-accounts?template_id=1&section_code=REV001&period_name=May-24&ledger_name=BUIMERC%20LEDGER
 -- ============================================================================
 
 /*
@@ -963,7 +952,7 @@ DECLARE
     v_template_id NUMBER := :template_id;
     v_section_code VARCHAR2(100) := :section_code;
     v_period_name VARCHAR2(100) := :period_name;
-    v_ledger_id NUMBER := :ledger_id;
+    v_ledger_name VARCHAR2(200) := :ledger_name;
     v_result CLOB;
 BEGIN
     owa_util.mime_header('application/json', FALSE);
@@ -973,7 +962,7 @@ BEGIN
         p_template_id => v_template_id,
         p_section_code => v_section_code,
         p_period_name => v_period_name,
-        p_ledger_id => v_ledger_id
+        p_ledger_name => v_ledger_name
     );
 
     htp.p(v_result);
