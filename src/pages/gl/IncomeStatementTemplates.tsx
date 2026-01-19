@@ -1667,7 +1667,7 @@ const IncomeStatementTemplates: React.FC = () => {
                 </th>
                 {reports.map((r, idx) => (
                   <th key={idx} style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600 }}>
-                    {isMultiPeriod ? r.period_name : 'Amount'}
+                    {r.period_name || 'Amount'}
                   </th>
                 ))}
               </tr>
@@ -1757,24 +1757,26 @@ const IncomeStatementTemplates: React.FC = () => {
                           ({row.code})
                         </Text>
                       )}
+                      {/* Show accounts tag if accounts data exists */}
                       {hasAccounts && (
-                        <>
-                          <Tag color="blue" style={{ marginLeft: 8, fontSize: 10 }}>
-                            {row.accounts?.length} accounts
-                          </Tag>
-                          <Tooltip title="View accounts detail">
-                            <Button
-                              type="link"
-                              size="small"
-                              icon={<SearchOutlined />}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openAccountsModal(row.label, row.code, row.accounts || [], reports);
-                              }}
-                              style={{ padding: '0 4px', height: 'auto', marginLeft: 4 }}
-                            />
-                          </Tooltip>
-                        </>
+                        <Tag color="blue" style={{ marginLeft: 8, fontSize: 10 }}>
+                          {row.accounts?.length} accounts
+                        </Tag>
+                      )}
+                      {/* Show drill-down icon for all sections */}
+                      {isSection && (
+                        <Tooltip title="View accounts detail">
+                          <Button
+                            type="link"
+                            size="small"
+                            icon={<SearchOutlined />}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openAccountsModal(row.label, row.code, row.accounts || [], reports);
+                            }}
+                            style={{ padding: '0 4px', height: 'auto', marginLeft: 4 }}
+                          />
+                        </Tooltip>
                       )}
                     </td>
                     {reports.map((r, rptIdx) => {
