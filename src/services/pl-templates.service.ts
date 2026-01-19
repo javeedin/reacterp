@@ -86,6 +86,36 @@ export interface GLAccount {
   account_type: string;
 }
 
+// P&L Report Types
+export interface PLReportRow {
+  row_order: number;
+  row_type: 'group_header' | 'section' | 'group_total' | 'calculated_total';
+  code: string;
+  label: string;
+  group_type: string;
+  indent: number;
+  amount: number | null;
+  style: string;
+  row_style?: string;
+}
+
+export interface PLReport {
+  template_id: number;
+  template_code: string;
+  template_name: string;
+  period_year: number;
+  period_num: number;
+  period_name: string;
+  ledger_id: number;
+  generated_at: string;
+  rows: PLReportRow[];
+}
+
+export interface PLReportResponse {
+  report: PLReport;
+  error?: string;
+}
+
 // Get GL Accounts list
 export const getGLAccounts = async (): Promise<ApiResponse<GLAccount[]>> => {
   try {
@@ -560,6 +590,37 @@ export const deleteTotal = async (totalId: number): Promise<ApiResponse<void>> =
     return { success: false, error: result.error };
   } catch (error) {
     console.error('Error deleting total:', error);
+    return { success: false, error: String(error) };
+  }
+};
+
+// Get P&L Report
+export const getPLReport = async (
+  templateId: number,
+  periodYear: number,
+  periodNum: number,
+  ledgerId: number = 1
+): Promise<ApiResponse<PLReport>> => {
+  try {
+    const baseUrl = BASE_URL;
+    const url = `${baseUrl}/pl/report/${templateId}?period_year=${periodYear}&period_num=${periodNum}&ledger_id=${ledgerId}`;
+
+    console.log('Fetching P&L Report:', url);
+
+    const response = await fetch(url);
+    const result: PLReportResponse = await response.json();
+
+    if (result.error) {
+      return { success: false, error: result.error };
+    }
+
+    if (result.report) {
+      return { success: true, data: result.report };
+    }
+
+    return { success: false, error: 'Invalid response format' };
+  } catch (error) {
+    console.error('Error fetching P&L report:', error);
     return { success: false, error: String(error) };
   }
 };

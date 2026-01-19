@@ -86,6 +86,16 @@ interface TemplateTab {
   loading: boolean;
 }
 
+interface ReportTab {
+  key: string;
+  label: string;
+  templateId: number;
+  periodYear: number;
+  periodNum: number;
+  report: plService.PLReport | null;
+  loading: boolean;
+}
+
 const IncomeStatementTemplates: React.FC = () => {
   // State
   const [loading, setLoading] = useState(false);
@@ -104,6 +114,12 @@ const IncomeStatementTemplates: React.FC = () => {
   const [excelModalVisible, setExcelModalVisible] = useState(false);
   const [excelTemplate, setExcelTemplate] = useState<plService.PLTemplateStructure | null>(null);
 
+  // Report states
+  const [reportTabs, setReportTabs] = useState<ReportTab[]>([]);
+  const [reportPeriodModalVisible, setReportPeriodModalVisible] = useState(false);
+  const [reportTemplateId, setReportTemplateId] = useState<number | null>(null);
+  const [reportTemplateName, setReportTemplateName] = useState<string>('');
+
   // Edit context
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
   const [selectedSectionId, setSelectedSectionId] = useState<number | null>(null);
@@ -117,6 +133,7 @@ const IncomeStatementTemplates: React.FC = () => {
   const [accountForm] = Form.useForm();
   const [totalForm] = Form.useForm();
   const [cloneForm] = Form.useForm();
+  const [reportPeriodForm] = Form.useForm();
 
   // GL Accounts state
   const [glAccounts, setGlAccounts] = useState<plService.GLAccount[]>([]);
@@ -211,11 +228,25 @@ const IncomeStatementTemplates: React.FC = () => {
   };
 
   const closeTemplateTab = (tabKey: string) => {
-    const newTabs = templateTabs.filter(t => t.key !== tabKey);
-    setTemplateTabs(newTabs);
+    // Check if it's a template tab
+    if (tabKey.startsWith('template-')) {
+      const newTabs = templateTabs.filter(t => t.key !== tabKey);
+      setTemplateTabs(newTabs);
 
-    if (activeTabKey === tabKey) {
-      setActiveTabKey(newTabs.length > 0 ? newTabs[newTabs.length - 1].key : 'list');
+      if (activeTabKey === tabKey) {
+        const allTabs = [...newTabs, ...reportTabs];
+        setActiveTabKey(allTabs.length > 0 ? allTabs[allTabs.length - 1].key : 'list');
+      }
+    }
+    // Check if it's a report tab
+    else if (tabKey.startsWith('report-')) {
+      const newReportTabs = reportTabs.filter(t => t.key !== tabKey);
+      setReportTabs(newReportTabs);
+
+      if (activeTabKey === tabKey) {
+        const allTabs = [...templateTabs, ...newReportTabs];
+        setActiveTabKey(allTabs.length > 0 ? allTabs[allTabs.length - 1].key : 'list');
+      }
     }
   };
 
@@ -528,6 +559,69 @@ const IncomeStatementTemplates: React.FC = () => {
       }
     } catch (error) {
       message.error('Failed to delete total');
+    }
+  };
+
+  // Open report period selection modal
+  const openReportPeriodModal = (templateId: number, templateName: string) => {
+    setReportTemplateId(templateId);
+    setReportTemplateName(templateName);
+    // Set default period to current month
+    const now = new Date();
+    reportPeriodForm.setFieldsValue({
+      period_year: now.getFullYear(),
+      period_num: now.getMonth() + 1,
+    });
+    setReportPeriodModalVisible(true);
+  };
+
+  // Generate P&L Report
+  const handleGenerateReport = async (values: { period_year: number; period_num: number }) => {
+    if (!reportTemplateId) return;
+
+    const tabKey = `report-${reportTemplateId}-${values.period_year}-${values.period_num}`;
+
+    // Check if report tab already exists
+    const existingTab = reportTabs.find(t => t.key === tabKey);
+    if (existingTab) {
+      setActiveTabKey(tabKey);
+      setReportPeriodModalVisible(false);
+      return;
+    }
+
+    // Create new report tab
+    const newTab: ReportTab = {
+      key: tabKey,
+      label: `${reportTemplateName} (${values.period_year}-${String(values.period_num).padStart(2, '0')})`,
+      templateId: reportTemplateId,
+      periodYear: values.period_year,
+      periodNum: values.period_num,
+      report: null,
+      loading: true,
+    };
+
+    setReportTabs(prev => [...prev, newTab]);
+    setActiveTabKey(tabKey);
+    setReportPeriodModalVisible(false);
+
+    // Fetch the report
+    try {
+      const response = await plService.getPLReport(reportTemplateId, values.period_year, values.period_num);
+      if (response.success && response.data) {
+        setReportTabs(prev => prev.map(t =>
+          t.key === tabKey ? { ...t, report: response.data!, loading: false } : t
+        ));
+      } else {
+        message.error(response.error || 'Failed to generate report');
+        setReportTabs(prev => prev.map(t =>
+          t.key === tabKey ? { ...t, loading: false } : t
+        ));
+      }
+    } catch (error) {
+      message.error('Failed to generate report');
+      setReportTabs(prev => prev.map(t =>
+        t.key === tabKey ? { ...t, loading: false } : t
+      ));
     }
   };
 
@@ -1007,13 +1101,12 @@ const IncomeStatementTemplates: React.FC = () => {
                   Edit in Excel
                 </Button>
                 <Button
+                  type="primary"
                   icon={<EyeOutlined />}
-                  onClick={() => {
-                    setPreviewTemplate(tab.template);
-                    setPreviewModalVisible(true);
-                  }}
+                  onClick={() => openReportPeriodModal(tab.templateId, template.template_name)}
+                  style={{ background: REDWOOD.primary }}
                 >
-                  Preview
+                  Run Report
                 </Button>
                 <Button
                   icon={<ReloadOutlined />}
@@ -1072,6 +1165,174 @@ const IncomeStatementTemplates: React.FC = () => {
           bodyStyle={{ padding: 0, background: '#f5f5f5' }}
         >
           {renderTemplateStructure(tab.template)}
+        </Card>
+      </div>
+    );
+  };
+
+  // Render P&L Report View
+  const renderReportView = (tab: ReportTab) => {
+    if (tab.loading) {
+      return (
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 400 }}>
+          <Spin size="large" tip="Generating P&L Report..." />
+        </div>
+      );
+    }
+
+    if (!tab.report) {
+      return (
+        <div style={{ padding: 16 }}>
+          <Empty description="Failed to generate report." />
+        </div>
+      );
+    }
+
+    const report = tab.report;
+
+    // Format number as currency
+    const formatAmount = (amount: number | null) => {
+      if (amount === null) return '';
+      return new Intl.NumberFormat('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(amount);
+    };
+
+    return (
+      <div style={{ padding: 16 }}>
+        {/* Report Header */}
+        <Card size="small" style={{ marginBottom: 16, borderRadius: 8 }}>
+          <Row justify="space-between" align="middle">
+            <Col>
+              <Space direction="vertical" size={0}>
+                <Title level={4} style={{ margin: 0 }}>{report.template_name}</Title>
+                <Text type="secondary">
+                  Period: {report.period_name} | Generated: {report.generated_at}
+                </Text>
+              </Space>
+            </Col>
+            <Col>
+              <Space>
+                <Button icon={<ReloadOutlined />} onClick={() => {
+                  // Refresh report
+                  handleGenerateReport({ period_year: tab.periodYear, period_num: tab.periodNum });
+                }}>
+                  Refresh
+                </Button>
+              </Space>
+            </Col>
+          </Row>
+        </Card>
+
+        {/* P&L Report Table */}
+        <Card
+          title={
+            <Space>
+              <CalculatorOutlined style={{ color: REDWOOD.primary }} />
+              <span>Profit & Loss Statement</span>
+            </Space>
+          }
+          style={{ borderRadius: 8 }}
+          bodyStyle={{ padding: 0 }}
+        >
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: '#fafafa', borderBottom: '2px solid #e8e8e8' }}>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, width: '70%' }}>
+                  Description
+                </th>
+                <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600 }}>
+                  Amount
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {report.rows.map((row, index) => {
+                const isGroupHeader = row.row_type === 'group_header';
+                const isGroupTotal = row.row_type === 'group_total';
+                const isCalculatedTotal = row.row_type === 'calculated_total';
+                const isTotal = isGroupTotal || isCalculatedTotal;
+                const isHighlight = row.row_style === 'highlight';
+                const isDoubleLine = row.row_style === 'double_line';
+
+                let bgColor = '#fff';
+                let fontWeight: 'normal' | 'bold' = 'normal';
+                let borderTop = 'none';
+                let borderBottom = '1px solid #f0f0f0';
+
+                if (isGroupHeader) {
+                  bgColor = GROUP_TYPE_COLORS[row.group_type] ? `${GROUP_TYPE_COLORS[row.group_type]}10` : '#f9f9f9';
+                  fontWeight = 'bold';
+                }
+                if (isTotal) {
+                  fontWeight = 'bold';
+                  borderTop = '1px solid #d9d9d9';
+                }
+                if (isHighlight) {
+                  bgColor = '#fffbe6';
+                }
+                if (isCalculatedTotal) {
+                  bgColor = '#f0f5ff';
+                  borderTop = '2px solid #1890ff';
+                }
+                if (isDoubleLine) {
+                  bgColor = '#e6fffb';
+                  borderTop = '3px double #13c2c2';
+                  borderBottom = '3px double #13c2c2';
+                }
+
+                return (
+                  <tr
+                    key={index}
+                    style={{
+                      background: bgColor,
+                      borderTop,
+                      borderBottom,
+                    }}
+                  >
+                    <td
+                      style={{
+                        padding: '10px 16px',
+                        paddingLeft: 16 + (row.indent * 24),
+                        fontWeight,
+                        color: isGroupHeader ? GROUP_TYPE_COLORS[row.group_type] || '#333' : '#333',
+                      }}
+                    >
+                      {isGroupHeader && (
+                        <span style={{
+                          display: 'inline-block',
+                          width: 8,
+                          height: 8,
+                          borderRadius: 2,
+                          background: GROUP_TYPE_COLORS[row.group_type] || '#ccc',
+                          marginRight: 8,
+                        }} />
+                      )}
+                      {row.label}
+                      {row.code && !isGroupHeader && (
+                        <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>
+                          ({row.code})
+                        </Text>
+                      )}
+                    </td>
+                    <td
+                      style={{
+                        padding: '10px 16px',
+                        textAlign: 'right',
+                        fontWeight,
+                        fontFamily: 'monospace',
+                        fontSize: 14,
+                        color: row.amount !== null && row.amount < 0 ? '#cf1322' : '#333',
+                      }}
+                    >
+                      {row.amount !== null && formatAmount(row.amount)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </Card>
       </div>
     );
@@ -1544,6 +1805,17 @@ const IncomeStatementTemplates: React.FC = () => {
         </span>
       ),
       children: renderTemplateEditor(tab),
+      closable: true,
+    })),
+    ...reportTabs.map(tab => ({
+      key: tab.key,
+      label: (
+        <span>
+          <CalculatorOutlined style={{ color: REDWOOD.primary }} />
+          {tab.label}
+        </span>
+      ),
+      children: renderReportView(tab),
       closable: true,
     })),
   ];
@@ -2111,6 +2383,73 @@ const IncomeStatementTemplates: React.FC = () => {
                         label: `${g.group_code} - ${g.group_name}`,
                       }))
                     }
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+          </Form>
+        </Modal>
+
+        {/* Report Period Selection Modal */}
+        <Modal
+          title={
+            <Space>
+              <CalculatorOutlined style={{ color: REDWOOD.primary }} />
+              <span>Generate P&L Report</span>
+            </Space>
+          }
+          open={reportPeriodModalVisible}
+          onCancel={() => {
+            setReportPeriodModalVisible(false);
+            reportPeriodForm.resetFields();
+          }}
+          onOk={() => reportPeriodForm.submit()}
+          okText="Generate Report"
+          okButtonProps={{ style: { background: REDWOOD.primary } }}
+          width={400}
+        >
+          <Form form={reportPeriodForm} layout="vertical" onFinish={handleGenerateReport}>
+            <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
+              Select the accounting period to generate the Profit & Loss statement for <strong>{reportTemplateName}</strong>.
+            </Text>
+            <Row gutter={16}>
+              <Col span={12}>
+                <Form.Item
+                  name="period_year"
+                  label="Year"
+                  rules={[{ required: true, message: 'Select year' }]}
+                >
+                  <Select
+                    placeholder="Select year"
+                    options={Array.from({ length: 10 }, (_, i) => ({
+                      value: new Date().getFullYear() - i,
+                      label: String(new Date().getFullYear() - i),
+                    }))}
+                  />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item
+                  name="period_num"
+                  label="Period"
+                  rules={[{ required: true, message: 'Select period' }]}
+                >
+                  <Select
+                    placeholder="Select period"
+                    options={[
+                      { value: 1, label: 'January (01)' },
+                      { value: 2, label: 'February (02)' },
+                      { value: 3, label: 'March (03)' },
+                      { value: 4, label: 'April (04)' },
+                      { value: 5, label: 'May (05)' },
+                      { value: 6, label: 'June (06)' },
+                      { value: 7, label: 'July (07)' },
+                      { value: 8, label: 'August (08)' },
+                      { value: 9, label: 'September (09)' },
+                      { value: 10, label: 'October (10)' },
+                      { value: 11, label: 'November (11)' },
+                      { value: 12, label: 'December (12)' },
+                    ]}
                   />
                 </Form.Item>
               </Col>
