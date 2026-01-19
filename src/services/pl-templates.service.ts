@@ -608,8 +608,43 @@ export const getPLReport = async (
     console.log('Fetching P&L Report:', url);
 
     const response = await fetch(url);
-    const result: PLReportResponse = await response.json();
+    const responseText = await response.text();
+    console.log('P&L Report Raw Response:', responseText);
 
+    let result;
+    try {
+      result = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('JSON Parse Error:', parseError);
+      return { success: false, error: `Invalid JSON response: ${responseText.substring(0, 200)}` };
+    }
+
+    // Handle APEX Query wrapper format: {"items": [{"pl_report": "{...}"}]}
+    if (result.items && Array.isArray(result.items) && result.items.length > 0) {
+      const item = result.items[0];
+      if (item.pl_report) {
+        // The pl_report field contains a JSON string that needs to be parsed
+        let reportData;
+        if (typeof item.pl_report === 'string') {
+          try {
+            reportData = JSON.parse(item.pl_report);
+          } catch (e) {
+            console.error('Error parsing pl_report string:', e);
+            return { success: false, error: 'Invalid report data format' };
+          }
+        } else {
+          reportData = item.pl_report;
+        }
+
+        if (reportData.report) {
+          return { success: true, data: reportData.report };
+        } else if (reportData.error) {
+          return { success: false, error: reportData.error };
+        }
+      }
+    }
+
+    // Handle direct PL/SQL response format: {"report": {...}}
     if (result.error) {
       return { success: false, error: result.error };
     }
@@ -618,6 +653,7 @@ export const getPLReport = async (
       return { success: true, data: result.report };
     }
 
+    console.error('Unexpected response structure:', result);
     return { success: false, error: 'Invalid response format' };
   } catch (error) {
     console.error('Error fetching P&L report:', error);
