@@ -49,10 +49,13 @@ import {
   RightOutlined,
   CaretDownOutlined,
   CaretRightOutlined,
+  BugOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import Autopilot from '../../components/Autopilot';
 import * as plService from '../../services/pl-templates.service';
+import { APEX_DB_CONFIG } from '../../config/api.config';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -135,6 +138,11 @@ const IncomeStatementTemplates: React.FC = () => {
   const [reportTemplateName, setReportTemplateName] = useState<string>('');
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
   const [selectedPeriods, setSelectedPeriods] = useState<ReportPeriod[]>([]);
+
+  // Debug states
+  const [debugModalVisible, setDebugModalVisible] = useState(false);
+  const [debugData, setDebugData] = useState<any>(null);
+  const [debugLoading, setDebugLoading] = useState(false);
 
   // Edit context
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
@@ -818,6 +826,47 @@ const IncomeStatementTemplates: React.FC = () => {
     printWindow.document.close();
   };
 
+  // Debug: Show raw report data
+  const handleDebugReport = async (templateId: number, periodYear: number, periodNum: number) => {
+    setDebugLoading(true);
+    setDebugModalVisible(true);
+
+    try {
+      const baseUrl = APEX_DB_CONFIG.baseUrl;
+      const url = `${baseUrl}/pl/report/${templateId}?period_year=${periodYear}&period_num=${periodNum}&ledger_id=1`;
+
+      console.log('Debug - Fetching:', url);
+
+      const response = await fetch(url);
+      const responseText = await response.text();
+
+      console.log('Debug - Raw Response:', responseText);
+
+      let parsed;
+      try {
+        parsed = JSON.parse(responseText);
+      } catch (e) {
+        parsed = { parseError: String(e), rawText: responseText };
+      }
+
+      setDebugData({
+        url,
+        status: response.status,
+        statusText: response.statusText,
+        rawResponse: responseText.substring(0, 5000), // Limit size
+        parsedResponse: parsed,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      setDebugData({
+        error: String(error),
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    setDebugLoading(false);
+  };
+
   // Render clean template structure with collapsible groups
   const renderTemplateStructure = (templateData: plService.PLTemplateStructure) => {
     const groups = templateData?.template?.groups || [];
@@ -1402,16 +1451,34 @@ const IncomeStatementTemplates: React.FC = () => {
             <Col>
               <Space direction="vertical" size={0}>
                 <Title level={4} style={{ margin: 0 }}>{firstReport.template_name}</Title>
-                <Text type="secondary">
-                  {isMultiPeriod
-                    ? `Comparative Report: ${reports.map(r => r.period_name).join(' | ')}`
-                    : `Period: ${firstReport.period_name}`
-                  } | Generated: {firstReport.generated_at}
-                </Text>
+                <Space>
+                  <Text type="secondary">
+                    {isMultiPeriod
+                      ? `Comparative Report: ${reports.map(r => r.period_name).join(' | ')}`
+                      : `Period: ${firstReport.period_name}`
+                    } | Generated: {firstReport.generated_at}
+                  </Text>
+                  <Tooltip title="Debug: View raw API response">
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<BugOutlined />}
+                      onClick={() => handleDebugReport(tab.templateId, tab.periodYear, tab.periodNum)}
+                      style={{ color: '#faad14' }}
+                    />
+                  </Tooltip>
+                </Space>
               </Space>
             </Col>
             <Col>
               <Space>
+                <Button
+                  icon={<BugOutlined />}
+                  onClick={() => handleDebugReport(tab.templateId, tab.periodYear, tab.periodNum)}
+                  style={{ background: '#faad14', borderColor: '#faad14', color: '#fff' }}
+                >
+                  Debug Data
+                </Button>
                 <Button
                   icon={<FilePdfOutlined />}
                   onClick={() => handlePrintReport(tab)}
@@ -2884,6 +2951,74 @@ const IncomeStatementTemplates: React.FC = () => {
 
         {/* Excel View Modal */}
         {renderExcelModal()}
+
+        {/* Debug Modal */}
+        <Modal
+          title={
+            <Space>
+              <BugOutlined style={{ color: '#faad14' }} />
+              <span>Debug: Raw API Response</span>
+            </Space>
+          }
+          open={debugModalVisible}
+          onCancel={() => {
+            setDebugModalVisible(false);
+            setDebugData(null);
+          }}
+          footer={
+            <Button onClick={() => {
+              setDebugModalVisible(false);
+              setDebugData(null);
+            }}>
+              Close
+            </Button>
+          }
+          width={900}
+        >
+          {debugLoading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}>
+              <Spin size="large" tip="Fetching data..." />
+            </div>
+          ) : debugData ? (
+            <div>
+              {/* Request Info */}
+              <Card size="small" title="Request Info" style={{ marginBottom: 16 }}>
+                <p><strong>URL:</strong> <Text code copyable>{debugData.url}</Text></p>
+                <p><strong>Status:</strong> {debugData.status} {debugData.statusText}</p>
+                <p><strong>Timestamp:</strong> {debugData.timestamp}</p>
+              </Card>
+
+              {/* Error if any */}
+              {debugData.error && (
+                <Card size="small" title="Error" style={{ marginBottom: 16, borderColor: '#ff4d4f' }}>
+                  <Text type="danger">{debugData.error}</Text>
+                </Card>
+              )}
+
+              {/* Parsed Response */}
+              {debugData.parsedResponse && (
+                <Card size="small" title="Parsed Response" style={{ marginBottom: 16 }}>
+                  <div style={{ maxHeight: 400, overflow: 'auto' }}>
+                    <pre style={{ fontSize: 11, margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                      {JSON.stringify(debugData.parsedResponse, null, 2)}
+                    </pre>
+                  </div>
+                </Card>
+              )}
+
+              {/* Raw Response */}
+              <Card size="small" title="Raw Response (first 5000 chars)">
+                <div style={{ maxHeight: 200, overflow: 'auto' }}>
+                  <pre style={{ fontSize: 10, margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: '#666' }}>
+                    {debugData.rawResponse}
+                  </pre>
+                </div>
+              </Card>
+            </div>
+          ) : (
+            <Empty description="No debug data" />
+          )}
+        </Modal>
       </Content>
 
       {/* Autopilot */}
