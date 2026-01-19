@@ -145,6 +145,10 @@ const IncomeStatementTemplates: React.FC = () => {
   const [debugData, setDebugData] = useState<any>(null);
   const [debugLoading, setDebugLoading] = useState(false);
 
+  // PDF Preview states
+  const [pdfPreviewVisible, setPdfPreviewVisible] = useState(false);
+  const [pdfPreviewContent, setPdfPreviewContent] = useState<string>('');
+
   // Ledger states
   const [ledgers, setLedgers] = useState<{ ledger_id: number; ledger_name: string }[]>([]);
   const [selectedLedgerId, setSelectedLedgerId] = useState<number | null>(null);
@@ -754,16 +758,10 @@ const IncomeStatementTemplates: React.FC = () => {
     }));
   };
 
-  // Print/Export to PDF
-  const handlePrintReport = (tab: ReportTab) => {
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      message.error('Please allow popups to print the report');
-      return;
-    }
-
+  // Generate PDF HTML content
+  const generatePdfHtml = (tab: ReportTab): string => {
     const reports = tab.reports.length > 0 ? tab.reports : (tab.report ? [tab.report] : []);
-    if (reports.length === 0) return;
+    if (reports.length === 0) return '';
 
     const formatAmount = (amount: number | null) => {
       if (amount === null) return '';
@@ -780,22 +778,22 @@ const IncomeStatementTemplates: React.FC = () => {
       <head>
         <title>P&L Report - ${tab.label}</title>
         <style>
-          body { font-family: Arial, sans-serif; margin: 20px; }
-          h1 { text-align: center; color: #333; margin-bottom: 5px; }
-          .subtitle { text-align: center; color: #666; margin-bottom: 20px; }
+          body { font-family: Arial, sans-serif; margin: 20px; background: #fff; }
+          h1 { text-align: center; color: #333; margin-bottom: 5px; font-size: 24px; }
+          .subtitle { text-align: center; color: #666; margin-bottom: 20px; font-size: 14px; }
           table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-          th, td { padding: 8px 12px; border-bottom: 1px solid #ddd; }
-          th { background: #f5f5f5; text-align: left; font-weight: 600; }
+          th, td { padding: 10px 12px; border-bottom: 1px solid #ddd; }
+          th { background: #f5f5f5; text-align: left; font-weight: 600; font-size: 13px; }
           th.amount { text-align: right; }
-          td.amount { text-align: right; font-family: monospace; }
-          .group-header { background: #f0f7ff; font-weight: bold; }
-          .group-total { font-weight: bold; border-top: 2px solid #333; }
+          td { font-size: 13px; }
+          td.amount { text-align: right; font-family: 'Courier New', monospace; }
+          .group-header { background: #e6f3ff; font-weight: bold; }
+          .group-total { font-weight: bold; border-top: 2px solid #333; background: #f9f9f9; }
           .calculated-total { font-weight: bold; background: #e6f7ff; border-top: 2px solid #1890ff; }
-          .section { padding-left: 24px; }
+          .section td:first-child { padding-left: 30px; }
           .negative { color: #cf1322; }
-          .account-detail { padding-left: 48px; font-size: 0.9em; color: #666; }
           @media print {
-            body { margin: 0; }
+            body { margin: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
             table { page-break-inside: auto; }
             tr { page-break-inside: avoid; }
           }
@@ -850,13 +848,30 @@ const IncomeStatementTemplates: React.FC = () => {
     html += `
           </tbody>
         </table>
-        <script>window.onload = function() { window.print(); }</script>
       </body>
       </html>
     `;
 
-    printWindow.document.write(html);
-    printWindow.document.close();
+    return html;
+  };
+
+  // Show PDF Preview in modal
+  const handlePrintReport = (tab: ReportTab) => {
+    const html = generatePdfHtml(tab);
+    if (!html) {
+      message.error('No report data to print');
+      return;
+    }
+    setPdfPreviewContent(html);
+    setPdfPreviewVisible(true);
+  };
+
+  // Print from modal
+  const handlePrintFromModal = () => {
+    const iframe = document.getElementById('pdf-preview-iframe') as HTMLIFrameElement;
+    if (iframe && iframe.contentWindow) {
+      iframe.contentWindow.print();
+    }
   };
 
   // Debug: Show raw report data
@@ -3070,6 +3085,54 @@ const IncomeStatementTemplates: React.FC = () => {
           ) : (
             <Empty description="No debug data" />
           )}
+        </Modal>
+
+        {/* PDF Preview Modal */}
+        <Modal
+          title={
+            <Space>
+              <FilePdfOutlined style={{ color: '#ff4d4f' }} />
+              <span>Print Preview</span>
+            </Space>
+          }
+          open={pdfPreviewVisible}
+          onCancel={() => {
+            setPdfPreviewVisible(false);
+            setPdfPreviewContent('');
+          }}
+          footer={
+            <Space>
+              <Button onClick={() => {
+                setPdfPreviewVisible(false);
+                setPdfPreviewContent('');
+              }}>
+                Close
+              </Button>
+              <Button
+                type="primary"
+                icon={<PrinterOutlined />}
+                onClick={handlePrintFromModal}
+                style={{ background: '#ff4d4f', borderColor: '#ff4d4f' }}
+              >
+                Print / Save as PDF
+              </Button>
+            </Space>
+          }
+          width={900}
+          bodyStyle={{ padding: 0, height: '70vh' }}
+          centered
+        >
+          <iframe
+            id="pdf-preview-iframe"
+            srcDoc={pdfPreviewContent}
+            style={{
+              width: '100%',
+              height: '100%',
+              border: 'none',
+              background: '#fff',
+            }}
+            title="PDF Preview"
+          />
         </Modal>
       </Content>
 
