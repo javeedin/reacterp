@@ -232,15 +232,19 @@ const IncomeStatementTemplates: React.FC = () => {
     setLoadingLedgers(false);
   };
 
-  // Fetch periods from API (same endpoint as Trial Balance)
+  // Fetch periods from API
   const fetchPeriods = async (ledgerId: number) => {
     setLoadingPeriods(true);
     try {
+      // Get ledger name from ledgers list
+      const selectedLedger = ledgers.find(l => l.ledger_id === ledgerId);
+      const ledgerName = selectedLedger?.ledger_name || '';
+
       const params = new URLSearchParams({
-        ledger_id: String(ledgerId),
-        application_name: 'General Ledger',  // Filter for GL periods only
+        P_LEDGER_NAME: ledgerName,
+        P_APPLICATION_NAME: 'General Ledger',
       });
-      const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.periodsStatus}?${params}`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/periodsstatus/create?${params}`;
       console.log('Fetching periods from:', url);  // Log the URL
 
       const response = await fetch(url);
@@ -256,10 +260,10 @@ const IncomeStatementTemplates: React.FC = () => {
 
       // Sort by year desc, then by period_number desc
       const sortedPeriods = items.sort((a, b) => {
-        if (a.period_year !== b.period_year) {
-          return b.period_year - a.period_year;
+        if (Number(a.period_year) !== Number(b.period_year)) {
+          return Number(b.period_year) - Number(a.period_year);
         }
-        return b.period_number - a.period_number;
+        return Number(b.period_number) - Number(a.period_number);
       });
 
       console.log('Periods loaded:', sortedPeriods.length);  // Log count
@@ -2998,11 +3002,13 @@ const IncomeStatementTemplates: React.FC = () => {
                 size="small"
                 icon={<BugOutlined />}
                 onClick={() => {
+                  const selectedLedger = ledgers.find(l => l.ledger_id === selectedLedgerId);
+                  const ledgerName = selectedLedger?.ledger_name || '';
                   const params = new URLSearchParams({
-                    ledger_id: String(selectedLedgerId || ''),
-                    application_name: 'General Ledger',
+                    P_LEDGER_NAME: ledgerName,
+                    P_APPLICATION_NAME: 'General Ledger',
                   });
-                  const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.periodsStatus}?${params}`;
+                  const url = `${APEX_DB_CONFIG.baseUrl}/periodsstatus/create?${params}`;
                   const filteredPeriods = availablePeriods.filter(p => Number(p.period_year) === Number(selectedPeriodYear));
                   Modal.info({
                     title: 'Periods Debug Info',
