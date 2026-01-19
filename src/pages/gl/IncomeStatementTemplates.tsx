@@ -705,11 +705,11 @@ const IncomeStatementTemplates: React.FC = () => {
       message.warning('Invalid period selected');
       return;
     }
-    const year = periodInfo.period_year;
-    const num = periodInfo.period_number;
+    const year = Number(periodInfo.period_year);
+    const num = Number(periodInfo.period_number);
     const name = periodInfo.period_name_id;
     // Check if already added
-    if (selectedPeriods.some(p => p.year === year && p.num === num)) {
+    if (selectedPeriods.some(p => Number(p.year) === year && Number(p.num) === num)) {
       message.warning('Period already added');
       return;
     }
@@ -2975,10 +2975,10 @@ const IncomeStatementTemplates: React.FC = () => {
                 disabled={!selectedLedgerId || !selectedPeriodYear}
               >
                 {availablePeriods
-                  .filter(p => p.period_year === selectedPeriodYear)
-                  .sort((a, b) => a.period_number - b.period_number)
+                  .filter(p => Number(p.period_year) === Number(selectedPeriodYear))
+                  .sort((a, b) => Number(a.period_number) - Number(b.period_number))
                   .map(p => (
-                    <Select.Option key={p.period_name_id} value={p.period_name_id}>
+                    <Select.Option key={`${p.period_name_id}-${p.period_year}`} value={p.period_name_id}>
                       {p.period_name_id} ({p.status})
                     </Select.Option>
                   ))}
@@ -3003,7 +3003,7 @@ const IncomeStatementTemplates: React.FC = () => {
                     application_name: 'General Ledger',
                   });
                   const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.periodsStatus}?${params}`;
-                  const filteredPeriods = availablePeriods.filter(p => p.period_year === selectedPeriodYear);
+                  const filteredPeriods = availablePeriods.filter(p => Number(p.period_year) === Number(selectedPeriodYear));
                   Modal.info({
                     title: 'Periods Debug Info',
                     width: 700,
@@ -3102,7 +3102,7 @@ const IncomeStatementTemplates: React.FC = () => {
                 // Use selected year or fall back to most recent
                 const targetYear = selectedPeriodYear;
                 const yearPeriods = targetYear
-                  ? availablePeriods.filter(p => p.period_year === targetYear)
+                  ? availablePeriods.filter(p => Number(p.period_year) === Number(targetYear))
                   : [];
                 return (
                   <>
@@ -3113,7 +3113,7 @@ const IncomeStatementTemplates: React.FC = () => {
                         // Select all periods for the selected year (excluding adj periods)
                         const periods = yearPeriods
                           .filter(p => p.adj_flag !== 'Y')
-                          .map(p => ({ year: p.period_year, num: p.period_number, name: p.period_name_id }))
+                          .map(p => ({ year: Number(p.period_year), num: Number(p.period_number), name: p.period_name_id }))
                           .sort((a, b) => a.num - b.num);
                         setSelectedPeriods(periods);
                       }}
@@ -3126,8 +3126,8 @@ const IncomeStatementTemplates: React.FC = () => {
                       onClick={() => {
                         // Q1: periods 1-3 for selected year
                         const q1Periods = yearPeriods
-                          .filter(p => p.period_number >= 1 && p.period_number <= 3)
-                          .map(p => ({ year: p.period_year, num: p.period_number, name: p.period_name_id }))
+                          .filter(p => Number(p.period_number) >= 1 && Number(p.period_number) <= 3)
+                          .map(p => ({ year: Number(p.period_year), num: Number(p.period_number), name: p.period_name_id }))
                           .sort((a, b) => a.num - b.num);
                         setSelectedPeriods(q1Periods);
                       }}
@@ -3140,8 +3140,8 @@ const IncomeStatementTemplates: React.FC = () => {
                       onClick={() => {
                         // Q2: periods 4-6 for selected year
                         const q2Periods = yearPeriods
-                          .filter(p => p.period_number >= 4 && p.period_number <= 6)
-                          .map(p => ({ year: p.period_year, num: p.period_number, name: p.period_name_id }))
+                          .filter(p => Number(p.period_number) >= 4 && Number(p.period_number) <= 6)
+                          .map(p => ({ year: Number(p.period_year), num: Number(p.period_number), name: p.period_name_id }))
                           .sort((a, b) => a.num - b.num);
                         setSelectedPeriods(q2Periods);
                       }}
@@ -3154,8 +3154,8 @@ const IncomeStatementTemplates: React.FC = () => {
                       onClick={() => {
                         // Q3: periods 7-9 for selected year
                         const q3Periods = yearPeriods
-                          .filter(p => p.period_number >= 7 && p.period_number <= 9)
-                          .map(p => ({ year: p.period_year, num: p.period_number, name: p.period_name_id }))
+                          .filter(p => Number(p.period_number) >= 7 && Number(p.period_number) <= 9)
+                          .map(p => ({ year: Number(p.period_year), num: Number(p.period_number), name: p.period_name_id }))
                           .sort((a, b) => a.num - b.num);
                         setSelectedPeriods(q3Periods);
                       }}
@@ -3168,8 +3168,8 @@ const IncomeStatementTemplates: React.FC = () => {
                       onClick={() => {
                         // Q4: periods 10-12 for selected year
                         const q4Periods = yearPeriods
-                          .filter(p => p.period_number >= 10 && p.period_number <= 12)
-                          .map(p => ({ year: p.period_year, num: p.period_number, name: p.period_name_id }))
+                          .filter(p => Number(p.period_number) >= 10 && Number(p.period_number) <= 12)
+                          .map(p => ({ year: Number(p.period_year), num: Number(p.period_number), name: p.period_name_id }))
                           .sort((a, b) => a.num - b.num);
                         setSelectedPeriods(q4Periods);
                       }}
