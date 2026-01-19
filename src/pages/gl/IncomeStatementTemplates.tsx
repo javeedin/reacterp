@@ -163,6 +163,15 @@ const IncomeStatementTemplates: React.FC = () => {
   const [pdfPreviewVisible, setPdfPreviewVisible] = useState(false);
   const [pdfPreviewContent, setPdfPreviewContent] = useState<string>('');
 
+  // Accounts Drill-down Modal states
+  const [accountsModalVisible, setAccountsModalVisible] = useState(false);
+  const [accountsModalData, setAccountsModalData] = useState<{
+    sectionLabel: string;
+    sectionCode: string;
+    accounts: plService.PLReportAccountDetail[];
+    reports: plService.PLReport[];
+  } | null>(null);
+
   // Ledger states
   const [ledgers, setLedgers] = useState<{ ledger_id: number; ledger_name: string }[]>([]);
   const [selectedLedgerId, setSelectedLedgerId] = useState<number | null>(null);
@@ -835,6 +844,17 @@ const IncomeStatementTemplates: React.FC = () => {
       ...prev,
       [key]: !prev[key]
     }));
+  };
+
+  // Open accounts drill-down modal
+  const openAccountsModal = (
+    sectionLabel: string,
+    sectionCode: string,
+    accounts: plService.PLReportAccountDetail[],
+    reports: plService.PLReport[]
+  ) => {
+    setAccountsModalData({ sectionLabel, sectionCode, accounts, reports });
+    setAccountsModalVisible(true);
   };
 
   // Generate PDF HTML content
@@ -1738,9 +1758,23 @@ const IncomeStatementTemplates: React.FC = () => {
                         </Text>
                       )}
                       {hasAccounts && (
-                        <Tag color="blue" style={{ marginLeft: 8, fontSize: 10 }}>
-                          {row.accounts?.length} accounts
-                        </Tag>
+                        <>
+                          <Tag color="blue" style={{ marginLeft: 8, fontSize: 10 }}>
+                            {row.accounts?.length} accounts
+                          </Tag>
+                          <Tooltip title="View accounts detail">
+                            <Button
+                              type="link"
+                              size="small"
+                              icon={<SearchOutlined />}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openAccountsModal(row.label, row.code, row.accounts || [], reports);
+                              }}
+                              style={{ padding: '0 4px', height: 'auto', marginLeft: 4 }}
+                            />
+                          </Tooltip>
+                        </>
                       )}
                     </td>
                     {reports.map((r, rptIdx) => {
@@ -3201,6 +3235,111 @@ const IncomeStatementTemplates: React.FC = () => {
 
         {/* Excel View Modal */}
         {renderExcelModal()}
+
+        {/* Accounts Drill-down Modal */}
+        <Modal
+          title={
+            <Space>
+              <SearchOutlined style={{ color: REDWOOD.info }} />
+              <span>Account Details: {accountsModalData?.sectionLabel}</span>
+              {accountsModalData?.sectionCode && (
+                <Tag color="blue">{accountsModalData.sectionCode}</Tag>
+              )}
+            </Space>
+          }
+          open={accountsModalVisible}
+          onCancel={() => {
+            setAccountsModalVisible(false);
+            setAccountsModalData(null);
+          }}
+          footer={[
+            <Button key="close" onClick={() => setAccountsModalVisible(false)}>
+              Close
+            </Button>
+          ]}
+          width={800}
+        >
+          {accountsModalData && (
+            <Table
+              dataSource={accountsModalData.accounts.map((acct, idx) => ({ ...acct, key: idx }))}
+              size="small"
+              pagination={false}
+              scroll={{ y: 400 }}
+              columns={[
+                {
+                  title: 'Account',
+                  dataIndex: 'account',
+                  key: 'account',
+                  width: 120,
+                  render: (text: string) => <Text code style={{ fontSize: 11 }}>{text}</Text>
+                },
+                {
+                  title: 'Description',
+                  dataIndex: 'description',
+                  key: 'description',
+                  ellipsis: true,
+                },
+                ...accountsModalData.reports.map((report, rptIdx) => ({
+                  title: report.period_name || `Period ${rptIdx + 1}`,
+                  key: `period_${rptIdx}`,
+                  align: 'right' as const,
+                  width: 120,
+                  render: (_: unknown, record: plService.PLReportAccountDetail) => {
+                    // Find matching account in this report
+                    const matchingSection = report.rows.find(
+                      r => r.code === accountsModalData.sectionCode && r.row_type === 'section'
+                    );
+                    const matchingAcct = matchingSection?.accounts?.find(
+                      a => a.account === record.account
+                    );
+                    const amount = matchingAcct?.amount ?? null;
+                    return (
+                      <Text
+                        style={{
+                          fontFamily: 'monospace',
+                          color: amount !== null && amount < 0 ? '#cf1322' : undefined
+                        }}
+                      >
+                        {amount !== null ? formatAmount(amount) : '-'}
+                      </Text>
+                    );
+                  }
+                }))
+              ]}
+              summary={() => {
+                // Calculate totals for each period
+                const totals = accountsModalData.reports.map(report => {
+                  const matchingSection = report.rows.find(
+                    r => r.code === accountsModalData.sectionCode && r.row_type === 'section'
+                  );
+                  return matchingSection?.amount ?? 0;
+                });
+                return (
+                  <Table.Summary fixed>
+                    <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 'bold' }}>
+                      <Table.Summary.Cell index={0} colSpan={2}>
+                        <Text strong>Section Total</Text>
+                      </Table.Summary.Cell>
+                      {totals.map((total, idx) => (
+                        <Table.Summary.Cell key={idx} index={idx + 2} align="right">
+                          <Text
+                            strong
+                            style={{
+                              fontFamily: 'monospace',
+                              color: total < 0 ? '#cf1322' : undefined
+                            }}
+                          >
+                            {formatAmount(total)}
+                          </Text>
+                        </Table.Summary.Cell>
+                      ))}
+                    </Table.Summary.Row>
+                  </Table.Summary>
+                );
+              }}
+            />
+          )}
+        </Modal>
 
         {/* Debug Modal */}
         <Modal
