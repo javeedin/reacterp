@@ -165,6 +165,8 @@ const IncomeStatementTemplates: React.FC = () => {
 
   // Accounts Drill-down Modal states
   const [accountsModalVisible, setAccountsModalVisible] = useState(false);
+  const [accountsModalLoading, setAccountsModalLoading] = useState(false);
+  const [accountsModalUrl, setAccountsModalUrl] = useState<string>('');
   const [accountsModalData, setAccountsModalData] = useState<{
     sectionLabel: string;
     sectionCode: string;
@@ -855,15 +857,71 @@ const IncomeStatementTemplates: React.FC = () => {
     }));
   };
 
-  // Open accounts drill-down modal
-  const openAccountsModal = (
+  // Open accounts drill-down modal - fetch from API
+  const openAccountsModal = async (
     sectionLabel: string,
     sectionCode: string,
     accounts: plService.PLReportAccountDetail[],
     reports: plService.PLReport[]
   ) => {
-    setAccountsModalData({ sectionLabel, sectionCode, accounts, reports });
+    // Get selected template and period info
+    const activeTab = reportTabs.find(t => t.key === activeReportTabKey);
+    if (!activeTab) {
+      // Fallback to existing accounts data
+      setAccountsModalData({ sectionLabel, sectionCode, accounts, reports });
+      setAccountsModalVisible(true);
+      return;
+    }
+
+    // Build the API URL
+    const templateId = activeTab.templateId;
+    const periodName = activeTab.periodName || (activeTab.report?.period_name);
+    const ledgerId = selectedLedgerId || 1;
+
+    const params = new URLSearchParams({
+      template_id: String(templateId),
+      section_code: sectionCode,
+      period_name: periodName || '',
+      ledger_id: String(ledgerId),
+    });
+    const url = `${APEX_DB_CONFIG.baseUrl}/pl/section-accounts?${params}`;
+
+    console.log('Section Accounts API URL:', url);
+    setAccountsModalUrl(url);
+    setAccountsModalLoading(true);
+    setAccountsModalData({ sectionLabel, sectionCode, accounts: [], reports });
     setAccountsModalVisible(true);
+
+    try {
+      const response = await fetch(url);
+      const data = await response.json();
+      console.log('Section Accounts API Response:', data);
+
+      if (data.error) {
+        message.error(`API Error: ${data.error}`);
+        // Fallback to existing accounts
+        setAccountsModalData({ sectionLabel, sectionCode, accounts, reports });
+      } else if (data.accounts && Array.isArray(data.accounts)) {
+        // Map API response to expected format
+        const apiAccounts: plService.PLReportAccountDetail[] = data.accounts.map((acc: { account: string; description: string; tb_balance: number; amount: number }) => ({
+          account: acc.account,
+          description: acc.description,
+          tb_balance: acc.tb_balance,
+          amount: acc.amount,
+        }));
+        setAccountsModalData({ sectionLabel, sectionCode, accounts: apiAccounts, reports });
+      } else {
+        // No accounts from API, use existing
+        setAccountsModalData({ sectionLabel, sectionCode, accounts, reports });
+      }
+    } catch (error) {
+      console.error('Error fetching section accounts:', error);
+      message.error('Failed to fetch section accounts');
+      // Fallback to existing accounts
+      setAccountsModalData({ sectionLabel, sectionCode, accounts, reports });
+    } finally {
+      setAccountsModalLoading(false);
+    }
   };
 
   // Generate PDF HTML content
@@ -3262,15 +3320,49 @@ const IncomeStatementTemplates: React.FC = () => {
           onCancel={() => {
             setAccountsModalVisible(false);
             setAccountsModalData(null);
+            setAccountsModalUrl('');
           }}
           footer={[
+            <Button
+              key="debug"
+              icon={<BugOutlined />}
+              onClick={() => {
+                Modal.info({
+                  title: 'API URL',
+                  content: (
+                    <div>
+                      <p style={{ wordBreak: 'break-all', fontFamily: 'monospace', fontSize: 11, background: '#f5f5f5', padding: 8, borderRadius: 4 }}>
+                        {accountsModalUrl || 'No URL'}
+                      </p>
+                      <Button
+                        size="small"
+                        onClick={() => {
+                          navigator.clipboard.writeText(accountsModalUrl);
+                          message.success('URL copied to clipboard');
+                        }}
+                      >
+                        Copy URL
+                      </Button>
+                    </div>
+                  ),
+                  width: 600,
+                });
+              }}
+            >
+              Show URL
+            </Button>,
             <Button key="close" onClick={() => setAccountsModalVisible(false)}>
               Close
             </Button>
           ]}
           width={800}
         >
-          {accountsModalData && (
+          {accountsModalLoading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}>
+              <Spin size="large" />
+              <p style={{ marginTop: 16 }}>Loading accounts...</p>
+            </div>
+          ) : accountsModalData && (
             <Table
               dataSource={accountsModalData.accounts.map((acct, idx) => ({ ...acct, key: idx }))}
               size="small"
