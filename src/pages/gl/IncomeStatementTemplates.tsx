@@ -2993,6 +2993,37 @@ const IncomeStatementTemplates: React.FC = () => {
             >
               Add
             </Button>
+            <Tooltip title="Show API URL">
+              <Button
+                size="small"
+                icon={<BugOutlined />}
+                onClick={() => {
+                  const params = new URLSearchParams({
+                    ledger_id: String(selectedLedgerId || ''),
+                    application_name: 'General Ledger',
+                  });
+                  const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.periodsStatus}?${params}`;
+                  Modal.info({
+                    title: 'Periods API URL',
+                    width: 700,
+                    content: (
+                      <div>
+                        <p><strong>URL:</strong></p>
+                        <Input.TextArea
+                          value={url}
+                          rows={3}
+                          readOnly
+                          style={{ fontFamily: 'monospace', fontSize: 12 }}
+                        />
+                        <p style={{ marginTop: 16 }}><strong>Periods Loaded:</strong> {availablePeriods.length}</p>
+                        <p><strong>Unique Years:</strong> {[...new Set(availablePeriods.map(p => p.period_year))].sort((a, b) => b - a).join(', ') || 'None'}</p>
+                      </div>
+                    ),
+                  });
+                }}
+                style={{ marginLeft: 8 }}
+              />
+            </Tooltip>
           </Form>
           {!selectedLedgerId && (
             <Text type="warning" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
