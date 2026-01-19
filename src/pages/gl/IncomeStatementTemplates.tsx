@@ -109,6 +109,8 @@ interface ReportTab {
   periodYear: number;
   periodNum: number;
   ledgerId: number;  // Ledger ID
+  company: string | null;  // Company filter
+  periodName?: string;  // Period name for API calls
   periods: ReportPeriod[];  // For multi-period comparison
   report: plService.PLReport | null;
   reports: plService.PLReport[];  // For multi-period comparison
@@ -226,6 +228,11 @@ const IncomeStatementTemplates: React.FC = () => {
   const [loadingPeriods, setLoadingPeriods] = useState(false);
   const [selectedPeriodYear, setSelectedPeriodYear] = useState<number | null>(null);
 
+  // Company states for P&L report filter
+  const [availableCompanies, setAvailableCompanies] = useState<string[]>([]);
+  const [selectedCompany, setSelectedCompany] = useState<string | null>(null);
+  const [loadingCompanies, setLoadingCompanies] = useState(false);
+
   // Edit context
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
   const [selectedSectionId, setSelectedSectionId] = useState<number | null>(null);
@@ -335,6 +342,32 @@ const IncomeStatementTemplates: React.FC = () => {
       setAvailablePeriods([]);
     }
     setLoadingPeriods(false);
+  };
+
+  // Fetch companies from GL balances for a period
+  const fetchCompanies = async (periodName: string) => {
+    setLoadingCompanies(true);
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.glBalances}?p_period_name=${encodeURIComponent(periodName)}`;
+      console.log('Fetching companies from:', url);
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      const items = data.items || [];
+
+      // Get unique companies
+      const companies = [...new Set(items.map((i: TBRecord) => i.company))].filter(Boolean).sort() as string[];
+      console.log('Companies loaded:', companies);
+      setAvailableCompanies(companies);
+    } catch (error) {
+      console.error('Error fetching companies:', error);
+      setAvailableCompanies([]);
+    }
+    setLoadingCompanies(false);
   };
 
   // Fetch periods when ledger changes
@@ -792,6 +825,10 @@ const IncomeStatementTemplates: React.FC = () => {
     setSelectedPeriods(prev => [...prev, { year, num, name }].sort((a, b) =>
       a.year !== b.year ? a.year - b.year : a.num - b.num
     ));
+    // Fetch companies for this period (only on first add)
+    if (selectedPeriods.length === 0) {
+      fetchCompanies(name);
+    }
     // Clear selection after adding
     reportPeriodForm.setFieldValue('selected_period', undefined);
   };
@@ -814,7 +851,8 @@ const IncomeStatementTemplates: React.FC = () => {
     }
 
     const periodsKey = selectedPeriods.map(p => `${p.year}-${p.num}`).join('_');
-    const tabKey = `report-${reportTemplateId}-${selectedLedgerId}-${periodsKey}`;
+    const companyKey = selectedCompany ? `-${selectedCompany.replace(/\s+/g, '_')}` : '';
+    const tabKey = `report-${reportTemplateId}-${selectedLedgerId}-${periodsKey}${companyKey}`;
 
     // Check if report tab already exists
     const existingTab = reportTabs.find(t => t.key === tabKey);
@@ -836,6 +874,9 @@ const IncomeStatementTemplates: React.FC = () => {
     } else {
       tabLabel += ` (${selectedPeriods.length} periods)`;
     }
+    if (selectedCompany) {
+      tabLabel += ` - ${selectedCompany}`;
+    }
 
     // Create new report tab
     const newTab: ReportTab = {
@@ -845,6 +886,8 @@ const IncomeStatementTemplates: React.FC = () => {
       periodYear: selectedPeriods[0].year,
       periodNum: selectedPeriods[0].num,
       ledgerId: selectedLedgerId,
+      company: selectedCompany,
+      periodName: selectedPeriods[0].name,
       periods: [...selectedPeriods],
       report: null,
       reports: [],
@@ -854,11 +897,15 @@ const IncomeStatementTemplates: React.FC = () => {
     setReportTabs(prev => [...prev, newTab]);
     setActiveTabKey(tabKey);
     setReportPeriodModalVisible(false);
+    // Reset company filter after generating report
+    setSelectedCompany(null);
+    setAvailableCompanies([]);
 
-    // Fetch reports for all periods with the selected ledger
+    // Fetch reports for all periods with the selected ledger and company
+    const companyFilter = selectedCompany;
     try {
       const reportPromises = selectedPeriods.map(p =>
-        plService.getPLReport(reportTemplateId, p.year, p.num, selectedLedgerId)
+        plService.getPLReport(reportTemplateId, p.year, p.num, selectedLedgerId, companyFilter)
       );
       const responses = await Promise.all(reportPromises);
 
@@ -3422,12 +3469,16 @@ const IncomeStatementTemplates: React.FC = () => {
             setReportPeriodModalVisible(false);
             reportPeriodForm.resetFields();
             setSelectedPeriods([]);
+            setSelectedCompany(null);
+            setAvailableCompanies([]);
           }}
           footer={
             <Space>
               <Button onClick={() => {
                 setReportPeriodModalVisible(false);
                 setSelectedPeriods([]);
+                setSelectedCompany(null);
+                setAvailableCompanies([]);
               }}>
                 Cancel
               </Button>
@@ -3465,6 +3516,32 @@ const IncomeStatementTemplates: React.FC = () => {
                 </Select.Option>
               ))}
             </Select>
+          </Card>
+
+          {/* Company Filter */}
+          <Card size="small" title="Company Filter (Optional)" style={{ marginBottom: 16, background: '#f9f9f9' }}>
+            <Select
+              placeholder="All Companies"
+              style={{ width: '100%' }}
+              value={selectedCompany}
+              onChange={(value) => setSelectedCompany(value)}
+              loading={loadingCompanies}
+              allowClear
+              showSearch
+              optionFilterProp="children"
+              disabled={availableCompanies.length === 0}
+            >
+              {availableCompanies.map(c => (
+                <Select.Option key={c} value={c}>
+                  {c}
+                </Select.Option>
+              ))}
+            </Select>
+            {selectedPeriods.length === 0 && (
+              <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
+                Add a period first to load available companies
+              </Text>
+            )}
           </Card>
 
           {/* Period Selection - Year first, then Period */}

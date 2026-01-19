@@ -607,11 +607,15 @@ export const getPLReport = async (
   templateId: number,
   periodYear: number,
   periodNum: number,
-  ledgerId: number = 1
+  ledgerId: number = 1,
+  company: string | null = null
 ): Promise<ApiResponse<PLReport>> => {
   try {
     const baseUrl = BASE_URL;
-    const url = `${baseUrl}/pl/report/${templateId}?period_year=${periodYear}&period_num=${periodNum}&ledger_id=${ledgerId}`;
+    let url = `${baseUrl}/pl/report/${templateId}?period_year=${periodYear}&period_num=${periodNum}&ledger_id=${ledgerId}`;
+    if (company) {
+      url += `&company=${encodeURIComponent(company)}`;
+    }
 
     console.log('Fetching P&L Report:', url);
 
