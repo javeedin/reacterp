@@ -556,55 +556,93 @@ CREATE OR REPLACE PACKAGE BODY rr_pl_template_pkg AS
             ) LOOP
                 v_section_amount := 0;
 
-                -- Calculate section amount from GL balances
-                FOR acct IN (
-                    SELECT account_code, account_from, account_to
-                    FROM rr_pl_section_accounts
-                    WHERE section_id = sec.section_id AND is_active = 'Y'
-                ) LOOP
-                    DECLARE
-                        v_acct_amount NUMBER := 0;
-                    BEGIN
+                DECLARE
+                    v_accounts CLOB := '[';
+                    v_first_acct BOOLEAN := TRUE;
+                BEGIN
+                    -- Calculate section amount from GL balances and collect account details
+                    FOR acct IN (
+                        SELECT account_code, account_from, account_to
+                        FROM rr_pl_section_accounts
+                        WHERE section_id = sec.section_id AND is_active = 'Y'
+                    ) LOOP
                         IF acct.account_from IS NOT NULL AND acct.account_to IS NOT NULL THEN
-                            -- Account range
-                            SELECT NVL(SUM(closing_balance), 0)
-                            INTO v_acct_amount
-                            FROM rr_gl_balances
-                            WHERE period_year = p_period_year
-                              AND period_num = p_period_num
-                              AND ledger_id = p_ledger_id
-                              AND account >= acct.account_from
-                              AND account <= acct.account_to;
+                            -- Account range - get individual accounts
+                            FOR bal IN (
+                                SELECT b.account,
+                                       NVL((SELECT g.description FROM gl_code_combinations g WHERE g.account = b.account AND ROWNUM = 1), b.account) as description,
+                                       NVL(b.closing_balance, 0) as closing_balance
+                                FROM rr_gl_balances b
+                                WHERE b.period_year = p_period_year
+                                  AND b.period_num = p_period_num
+                                  AND b.ledger_id = p_ledger_id
+                                  AND b.account >= acct.account_from
+                                  AND b.account <= acct.account_to
+                                ORDER BY b.account
+                            ) LOOP
+                                IF NOT v_first_acct THEN
+                                    v_accounts := v_accounts || ',';
+                                END IF;
+                                v_first_acct := FALSE;
+
+                                v_accounts := v_accounts || '{' ||
+                                    '"account":' || escape_json(bal.account) || ',' ||
+                                    '"description":' || escape_json(bal.description) || ',' ||
+                                    '"tb_balance":' || bal.closing_balance || ',' ||
+                                    '"amount":' || (bal.closing_balance * grp.sign_convention) ||
+                                '}';
+
+                                v_section_amount := v_section_amount + bal.closing_balance;
+                            END LOOP;
                         ELSE
                             -- Single account
-                            SELECT NVL(SUM(closing_balance), 0)
-                            INTO v_acct_amount
-                            FROM rr_gl_balances
-                            WHERE period_year = p_period_year
-                              AND period_num = p_period_num
-                              AND ledger_id = p_ledger_id
-                              AND account = acct.account_code;
+                            FOR bal IN (
+                                SELECT b.account,
+                                       NVL((SELECT g.description FROM gl_code_combinations g WHERE g.account = b.account AND ROWNUM = 1), acct.account_code) as description,
+                                       NVL(b.closing_balance, 0) as closing_balance
+                                FROM rr_gl_balances b
+                                WHERE b.period_year = p_period_year
+                                  AND b.period_num = p_period_num
+                                  AND b.ledger_id = p_ledger_id
+                                  AND b.account = acct.account_code
+                            ) LOOP
+                                IF NOT v_first_acct THEN
+                                    v_accounts := v_accounts || ',';
+                                END IF;
+                                v_first_acct := FALSE;
+
+                                v_accounts := v_accounts || '{' ||
+                                    '"account":' || escape_json(bal.account) || ',' ||
+                                    '"description":' || escape_json(bal.description) || ',' ||
+                                    '"tb_balance":' || bal.closing_balance || ',' ||
+                                    '"amount":' || (bal.closing_balance * grp.sign_convention) ||
+                                '}';
+
+                                v_section_amount := v_section_amount + bal.closing_balance;
+                            END LOOP;
                         END IF;
-                        v_section_amount := v_section_amount + v_acct_amount;
-                    END;
-                END LOOP;
+                    END LOOP;
 
-                -- Apply sign convention
-                v_section_amount := v_section_amount * grp.sign_convention;
-                v_group_amount := v_group_amount + v_section_amount;
+                    v_accounts := v_accounts || ']';
 
-                -- Add section row
-                v_row_order := v_row_order + 1;
-                v_rows := v_rows || ',{' ||
-                    '"row_order":' || v_row_order || ',' ||
-                    '"row_type":"section",' ||
-                    '"code":' || escape_json(sec.section_code) || ',' ||
-                    '"label":' || escape_json(NVL(sec.section_label, sec.section_name)) || ',' ||
-                    '"group_type":' || escape_json(grp.group_type) || ',' ||
-                    '"indent":1,' ||
-                    '"amount":' || v_section_amount || ',' ||
-                    '"style":"normal"' ||
-                '}';
+                    -- Apply sign convention
+                    v_section_amount := v_section_amount * grp.sign_convention;
+                    v_group_amount := v_group_amount + v_section_amount;
+
+                    -- Add section row with accounts array
+                    v_row_order := v_row_order + 1;
+                    v_rows := v_rows || ',{' ||
+                        '"row_order":' || v_row_order || ',' ||
+                        '"row_type":"section",' ||
+                        '"code":' || escape_json(sec.section_code) || ',' ||
+                        '"label":' || escape_json(NVL(sec.section_label, sec.section_name)) || ',' ||
+                        '"group_type":' || escape_json(grp.group_type) || ',' ||
+                        '"indent":1,' ||
+                        '"amount":' || v_section_amount || ',' ||
+                        '"style":"normal",' ||
+                        '"accounts":' || v_accounts ||
+                    '}';
+                END;
             END LOOP;
 
             -- Store group total for formula evaluation

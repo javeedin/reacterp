@@ -43,6 +43,12 @@ import {
   CloseCircleOutlined,
   CloseOutlined,
   BankOutlined,
+  FilePdfOutlined,
+  PrinterOutlined,
+  DownOutlined,
+  RightOutlined,
+  CaretDownOutlined,
+  CaretRightOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import Autopilot from '../../components/Autopilot';
@@ -86,13 +92,21 @@ interface TemplateTab {
   loading: boolean;
 }
 
+interface ReportPeriod {
+  year: number;
+  num: number;
+  name?: string;
+}
+
 interface ReportTab {
   key: string;
   label: string;
   templateId: number;
   periodYear: number;
   periodNum: number;
+  periods: ReportPeriod[];  // For multi-period comparison
   report: plService.PLReport | null;
+  reports: plService.PLReport[];  // For multi-period comparison
   loading: boolean;
 }
 
@@ -119,6 +133,8 @@ const IncomeStatementTemplates: React.FC = () => {
   const [reportPeriodModalVisible, setReportPeriodModalVisible] = useState(false);
   const [reportTemplateId, setReportTemplateId] = useState<number | null>(null);
   const [reportTemplateName, setReportTemplateName] = useState<string>('');
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
+  const [selectedPeriods, setSelectedPeriods] = useState<ReportPeriod[]>([]);
 
   // Edit context
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
@@ -568,6 +584,7 @@ const IncomeStatementTemplates: React.FC = () => {
     setReportTemplateName(templateName);
     // Set default period to current month
     const now = new Date();
+    setSelectedPeriods([{ year: now.getFullYear(), num: now.getMonth() + 1 }]);
     reportPeriodForm.setFieldsValue({
       period_year: now.getFullYear(),
       period_num: now.getMonth() + 1,
@@ -575,11 +592,38 @@ const IncomeStatementTemplates: React.FC = () => {
     setReportPeriodModalVisible(true);
   };
 
-  // Generate P&L Report
-  const handleGenerateReport = async (values: { period_year: number; period_num: number }) => {
-    if (!reportTemplateId) return;
+  // Add period to selected periods
+  const addPeriodToSelection = () => {
+    const year = reportPeriodForm.getFieldValue('period_year');
+    const num = reportPeriodForm.getFieldValue('period_num');
+    if (!year || !num) {
+      message.warning('Please select year and period');
+      return;
+    }
+    // Check if already added
+    if (selectedPeriods.some(p => p.year === year && p.num === num)) {
+      message.warning('Period already added');
+      return;
+    }
+    setSelectedPeriods(prev => [...prev, { year, num }].sort((a, b) =>
+      a.year !== b.year ? a.year - b.year : a.num - b.num
+    ));
+  };
 
-    const tabKey = `report-${reportTemplateId}-${values.period_year}-${values.period_num}`;
+  // Remove period from selection
+  const removePeriodFromSelection = (year: number, num: number) => {
+    setSelectedPeriods(prev => prev.filter(p => !(p.year === year && p.num === num)));
+  };
+
+  // Generate P&L Report (supports multiple periods)
+  const handleGenerateReport = async () => {
+    if (!reportTemplateId || selectedPeriods.length === 0) {
+      message.warning('Please select at least one period');
+      return;
+    }
+
+    const periodsKey = selectedPeriods.map(p => `${p.year}-${p.num}`).join('_');
+    const tabKey = `report-${reportTemplateId}-${periodsKey}`;
 
     // Check if report tab already exists
     const existingTab = reportTabs.find(t => t.key === tabKey);
@@ -589,14 +633,25 @@ const IncomeStatementTemplates: React.FC = () => {
       return;
     }
 
+    // Create label
+    let tabLabel = reportTemplateName;
+    if (selectedPeriods.length === 1) {
+      const p = selectedPeriods[0];
+      tabLabel += ` (${p.year}-${String(p.num).padStart(2, '0')})`;
+    } else {
+      tabLabel += ` (${selectedPeriods.length} periods)`;
+    }
+
     // Create new report tab
     const newTab: ReportTab = {
       key: tabKey,
-      label: `${reportTemplateName} (${values.period_year}-${String(values.period_num).padStart(2, '0')})`,
+      label: tabLabel,
       templateId: reportTemplateId,
-      periodYear: values.period_year,
-      periodNum: values.period_num,
+      periodYear: selectedPeriods[0].year,
+      periodNum: selectedPeriods[0].num,
+      periods: [...selectedPeriods],
       report: null,
+      reports: [],
       loading: true,
     };
 
@@ -604,15 +659,39 @@ const IncomeStatementTemplates: React.FC = () => {
     setActiveTabKey(tabKey);
     setReportPeriodModalVisible(false);
 
-    // Fetch the report
+    // Fetch reports for all periods
     try {
-      const response = await plService.getPLReport(reportTemplateId, values.period_year, values.period_num);
-      if (response.success && response.data) {
+      const reportPromises = selectedPeriods.map(p =>
+        plService.getPLReport(reportTemplateId, p.year, p.num)
+      );
+      const responses = await Promise.all(reportPromises);
+
+      const successfulReports: plService.PLReport[] = [];
+      let hasError = false;
+
+      responses.forEach((response, idx) => {
+        if (response.success && response.data) {
+          successfulReports.push(response.data);
+        } else {
+          hasError = true;
+          console.error(`Failed to fetch period ${selectedPeriods[idx].year}-${selectedPeriods[idx].num}:`, response.error);
+        }
+      });
+
+      if (successfulReports.length > 0) {
         setReportTabs(prev => prev.map(t =>
-          t.key === tabKey ? { ...t, report: response.data!, loading: false } : t
+          t.key === tabKey ? {
+            ...t,
+            report: successfulReports[0],
+            reports: successfulReports,
+            loading: false
+          } : t
         ));
+        if (hasError) {
+          message.warning('Some periods failed to load');
+        }
       } else {
-        message.error(response.error || 'Failed to generate report');
+        message.error('Failed to generate report');
         setReportTabs(prev => prev.map(t =>
           t.key === tabKey ? { ...t, loading: false } : t
         ));
@@ -623,6 +702,120 @@ const IncomeStatementTemplates: React.FC = () => {
         t.key === tabKey ? { ...t, loading: false } : t
       ));
     }
+  };
+
+  // Toggle section expansion for drill-down
+  const toggleSectionExpansion = (tabKey: string, sectionCode: string) => {
+    const key = `${tabKey}-${sectionCode}`;
+    setExpandedSections(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  };
+
+  // Print/Export to PDF
+  const handlePrintReport = (tab: ReportTab) => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      message.error('Please allow popups to print the report');
+      return;
+    }
+
+    const reports = tab.reports.length > 0 ? tab.reports : (tab.report ? [tab.report] : []);
+    if (reports.length === 0) return;
+
+    const formatAmount = (amount: number | null) => {
+      if (amount === null) return '';
+      return new Intl.NumberFormat('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(amount);
+    };
+
+    // Build HTML content
+    let html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>P&L Report - ${tab.label}</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 20px; }
+          h1 { text-align: center; color: #333; margin-bottom: 5px; }
+          .subtitle { text-align: center; color: #666; margin-bottom: 20px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+          th, td { padding: 8px 12px; border-bottom: 1px solid #ddd; }
+          th { background: #f5f5f5; text-align: left; font-weight: 600; }
+          th.amount { text-align: right; }
+          td.amount { text-align: right; font-family: monospace; }
+          .group-header { background: #f0f7ff; font-weight: bold; }
+          .group-total { font-weight: bold; border-top: 2px solid #333; }
+          .calculated-total { font-weight: bold; background: #e6f7ff; border-top: 2px solid #1890ff; }
+          .section { padding-left: 24px; }
+          .negative { color: #cf1322; }
+          .account-detail { padding-left: 48px; font-size: 0.9em; color: #666; }
+          @media print {
+            body { margin: 0; }
+            table { page-break-inside: auto; }
+            tr { page-break-inside: avoid; }
+          }
+        </style>
+      </head>
+      <body>
+        <h1>${reports[0].template_name}</h1>
+        <div class="subtitle">
+          ${reports.length === 1
+            ? `Period: ${reports[0].period_name} | Generated: ${reports[0].generated_at}`
+            : `Comparative Report - ${reports.length} Periods | Generated: ${new Date().toLocaleString()}`
+          }
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 50%">Description</th>
+              ${reports.map(r => `<th class="amount">${r.period_name}</th>`).join('')}
+            </tr>
+          </thead>
+          <tbody>
+    `;
+
+    // Use first report's rows as structure, merge amounts from all reports
+    const firstReport = reports[0];
+    firstReport.rows.forEach(row => {
+      const isGroupHeader = row.row_type === 'group_header';
+      const isGroupTotal = row.row_type === 'group_total';
+      const isCalculatedTotal = row.row_type === 'calculated_total';
+      const isSection = row.row_type === 'section';
+
+      let rowClass = '';
+      if (isGroupHeader) rowClass = 'group-header';
+      else if (isGroupTotal) rowClass = 'group-total';
+      else if (isCalculatedTotal) rowClass = 'calculated-total';
+      else if (isSection) rowClass = 'section';
+
+      html += `<tr class="${rowClass}">`;
+      html += `<td>${row.label}</td>`;
+
+      // Add amount columns for each period
+      reports.forEach(r => {
+        const matchingRow = r.rows.find(rr => rr.code === row.code && rr.row_type === row.row_type);
+        const amount = matchingRow?.amount;
+        const amountClass = amount !== null && amount < 0 ? 'amount negative' : 'amount';
+        html += `<td class="${amountClass}">${amount !== null ? formatAmount(amount) : ''}</td>`;
+      });
+
+      html += '</tr>';
+    });
+
+    html += `
+          </tbody>
+        </table>
+        <script>window.onload = function() { window.print(); }</script>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.write(html);
+    printWindow.document.close();
   };
 
   // Render clean template structure with collapsible groups
@@ -1180,7 +1373,8 @@ const IncomeStatementTemplates: React.FC = () => {
       );
     }
 
-    if (!tab.report) {
+    const reports = tab.reports.length > 0 ? tab.reports : (tab.report ? [tab.report] : []);
+    if (reports.length === 0) {
       return (
         <div style={{ padding: 16 }}>
           <Empty description="Failed to generate report." />
@@ -1188,7 +1382,8 @@ const IncomeStatementTemplates: React.FC = () => {
       );
     }
 
-    const report = tab.report;
+    const firstReport = reports[0];
+    const isMultiPeriod = reports.length > 1;
 
     // Format number as currency
     const formatAmount = (amount: number | null) => {
@@ -1206,19 +1401,30 @@ const IncomeStatementTemplates: React.FC = () => {
           <Row justify="space-between" align="middle">
             <Col>
               <Space direction="vertical" size={0}>
-                <Title level={4} style={{ margin: 0 }}>{report.template_name}</Title>
+                <Title level={4} style={{ margin: 0 }}>{firstReport.template_name}</Title>
                 <Text type="secondary">
-                  Period: {report.period_name} | Generated: {report.generated_at}
+                  {isMultiPeriod
+                    ? `Comparative Report: ${reports.map(r => r.period_name).join(' | ')}`
+                    : `Period: ${firstReport.period_name}`
+                  } | Generated: {firstReport.generated_at}
                 </Text>
               </Space>
             </Col>
             <Col>
               <Space>
+                <Button
+                  icon={<FilePdfOutlined />}
+                  onClick={() => handlePrintReport(tab)}
+                  style={{ background: '#ff4d4f', borderColor: '#ff4d4f', color: '#fff' }}
+                >
+                  Print / PDF
+                </Button>
                 <Button icon={<ReloadOutlined />} onClick={() => {
-                  // Refresh report
-                  handleGenerateReport({ period_year: tab.periodYear, period_num: tab.periodNum });
+                  // Close and regenerate
+                  closeTemplateTab(tab.key);
+                  openReportPeriodModal(tab.templateId, firstReport.template_name);
                 }}>
-                  Refresh
+                  New Report
                 </Button>
               </Space>
             </Col>
@@ -1231,6 +1437,9 @@ const IncomeStatementTemplates: React.FC = () => {
             <Space>
               <CalculatorOutlined style={{ color: REDWOOD.primary }} />
               <span>Profit & Loss Statement</span>
+              <Text type="secondary" style={{ fontSize: 12, fontWeight: 'normal' }}>
+                (Click on sections to drill-down into accounts)
+              </Text>
             </Space>
           }
           style={{ borderRadius: 8 }}
@@ -1239,22 +1448,30 @@ const IncomeStatementTemplates: React.FC = () => {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ background: '#fafafa', borderBottom: '2px solid #e8e8e8' }}>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, width: '70%' }}>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, width: isMultiPeriod ? '40%' : '70%' }}>
                   Description
                 </th>
-                <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600 }}>
-                  Amount
-                </th>
+                {reports.map((r, idx) => (
+                  <th key={idx} style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600 }}>
+                    {isMultiPeriod ? r.period_name : 'Amount'}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {report.rows.map((row, index) => {
+              {firstReport.rows.map((row, rowIndex) => {
                 const isGroupHeader = row.row_type === 'group_header';
+                const isSection = row.row_type === 'section';
                 const isGroupTotal = row.row_type === 'group_total';
                 const isCalculatedTotal = row.row_type === 'calculated_total';
                 const isTotal = isGroupTotal || isCalculatedTotal;
                 const isHighlight = row.row_style === 'highlight';
                 const isDoubleLine = row.row_style === 'double_line';
+
+                // Check if section is expanded
+                const expansionKey = `${tab.key}-${row.code}`;
+                const isExpanded = expandedSections[expansionKey];
+                const hasAccounts = isSection && row.accounts && row.accounts.length > 0;
 
                 let bgColor = '#fff';
                 let fontWeight: 'normal' | 'bold' = 'normal';
@@ -1282,14 +1499,19 @@ const IncomeStatementTemplates: React.FC = () => {
                   borderBottom = '3px double #13c2c2';
                 }
 
-                return (
+                const rowElements = [];
+
+                // Main row
+                rowElements.push(
                   <tr
-                    key={index}
+                    key={`row-${rowIndex}`}
                     style={{
                       background: bgColor,
                       borderTop,
                       borderBottom,
+                      cursor: hasAccounts ? 'pointer' : 'default',
                     }}
+                    onClick={hasAccounts ? () => toggleSectionExpansion(tab.key, row.code) : undefined}
                   >
                     <td
                       style={{
@@ -1299,6 +1521,12 @@ const IncomeStatementTemplates: React.FC = () => {
                         color: isGroupHeader ? GROUP_TYPE_COLORS[row.group_type] || '#333' : '#333',
                       }}
                     >
+                      {/* Expand/Collapse icon for sections with accounts */}
+                      {hasAccounts && (
+                        <span style={{ marginRight: 8, color: '#1890ff' }}>
+                          {isExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
+                        </span>
+                      )}
                       {isGroupHeader && (
                         <span style={{
                           display: 'inline-block',
@@ -1315,24 +1543,100 @@ const IncomeStatementTemplates: React.FC = () => {
                           ({row.code})
                         </Text>
                       )}
+                      {hasAccounts && (
+                        <Tag color="blue" style={{ marginLeft: 8, fontSize: 10 }}>
+                          {row.accounts?.length} accounts
+                        </Tag>
+                      )}
                     </td>
-                    <td
-                      style={{
-                        padding: '10px 16px',
-                        textAlign: 'right',
-                        fontWeight,
-                        fontFamily: 'monospace',
-                        fontSize: 14,
-                        color: row.amount !== null && row.amount < 0 ? '#cf1322' : '#333',
-                      }}
-                    >
-                      {row.amount !== null && formatAmount(row.amount)}
-                    </td>
+                    {reports.map((r, rptIdx) => {
+                      const matchingRow = r.rows.find(rr => rr.code === row.code && rr.row_type === row.row_type);
+                      const amount = matchingRow?.amount ?? null;
+                      return (
+                        <td
+                          key={rptIdx}
+                          style={{
+                            padding: '10px 16px',
+                            textAlign: 'right',
+                            fontWeight,
+                            fontFamily: 'monospace',
+                            fontSize: 14,
+                            color: amount !== null && amount < 0 ? '#cf1322' : '#333',
+                          }}
+                        >
+                          {amount !== null && formatAmount(amount)}
+                        </td>
+                      );
+                    })}
                   </tr>
                 );
+
+                // Account detail rows (drill-down)
+                if (hasAccounts && isExpanded) {
+                  row.accounts?.forEach((acct, acctIdx) => {
+                    rowElements.push(
+                      <tr
+                        key={`row-${rowIndex}-acct-${acctIdx}`}
+                        style={{
+                          background: '#f9f9f9',
+                          borderBottom: '1px dashed #e8e8e8',
+                        }}
+                      >
+                        <td
+                          style={{
+                            padding: '6px 16px',
+                            paddingLeft: 16 + ((row.indent + 1) * 24) + 24,
+                            fontSize: 12,
+                            color: '#666',
+                          }}
+                        >
+                          <Text code style={{ fontSize: 11, marginRight: 8 }}>{acct.account}</Text>
+                          <Text type="secondary">{acct.description}</Text>
+                        </td>
+                        {reports.map((r, rptIdx) => {
+                          // Find matching account in this report's section
+                          const matchingRow = r.rows.find(rr => rr.code === row.code && rr.row_type === 'section');
+                          const matchingAcct = matchingRow?.accounts?.find(a => a.account === acct.account);
+                          const amount = matchingAcct?.amount ?? null;
+                          const tbBalance = matchingAcct?.tb_balance ?? null;
+                          return (
+                            <td
+                              key={rptIdx}
+                              style={{
+                                padding: '6px 16px',
+                                textAlign: 'right',
+                                fontFamily: 'monospace',
+                                fontSize: 12,
+                                color: amount !== null && amount < 0 ? '#cf1322' : '#666',
+                              }}
+                            >
+                              <Tooltip title={`TB Balance: ${tbBalance !== null ? formatAmount(tbBalance) : 'N/A'}`}>
+                                <span>{amount !== null ? formatAmount(amount) : '-'}</span>
+                              </Tooltip>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  });
+                }
+
+                return rowElements;
               })}
             </tbody>
           </table>
+        </Card>
+
+        {/* Legend */}
+        <Card size="small" style={{ marginTop: 16, borderRadius: 8 }}>
+          <Space wrap>
+            <Text type="secondary" style={{ fontSize: 12 }}>Legend:</Text>
+            {Object.entries(GROUP_TYPE_COLORS).map(([type, color]) => (
+              <Tag key={type} style={{ background: `${color}20`, borderColor: color, color }}>
+                {type.replace('_', ' ')}
+              </Tag>
+            ))}
+          </Space>
         </Card>
       </div>
     );
@@ -2402,59 +2706,177 @@ const IncomeStatementTemplates: React.FC = () => {
           onCancel={() => {
             setReportPeriodModalVisible(false);
             reportPeriodForm.resetFields();
+            setSelectedPeriods([]);
           }}
-          onOk={() => reportPeriodForm.submit()}
-          okText="Generate Report"
-          okButtonProps={{ style: { background: REDWOOD.primary } }}
-          width={400}
+          footer={
+            <Space>
+              <Button onClick={() => {
+                setReportPeriodModalVisible(false);
+                setSelectedPeriods([]);
+              }}>
+                Cancel
+              </Button>
+              <Button
+                type="primary"
+                onClick={handleGenerateReport}
+                disabled={selectedPeriods.length === 0}
+                style={{ background: REDWOOD.primary }}
+              >
+                Generate Report ({selectedPeriods.length} period{selectedPeriods.length !== 1 ? 's' : ''})
+              </Button>
+            </Space>
+          }
+          width={500}
         >
-          <Form form={reportPeriodForm} layout="vertical" onFinish={handleGenerateReport}>
-            <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
-              Select the accounting period to generate the Profit & Loss statement for <strong>{reportTemplateName}</strong>.
-            </Text>
-            <Row gutter={16}>
-              <Col span={12}>
-                <Form.Item
-                  name="period_year"
-                  label="Year"
-                  rules={[{ required: true, message: 'Select year' }]}
-                >
-                  <Select
-                    placeholder="Select year"
-                    options={Array.from({ length: 10 }, (_, i) => ({
-                      value: new Date().getFullYear() - i,
-                      label: String(new Date().getFullYear() - i),
-                    }))}
-                  />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item
-                  name="period_num"
-                  label="Period"
-                  rules={[{ required: true, message: 'Select period' }]}
-                >
-                  <Select
-                    placeholder="Select period"
-                    options={[
-                      { value: 1, label: 'January (01)' },
-                      { value: 2, label: 'February (02)' },
-                      { value: 3, label: 'March (03)' },
-                      { value: 4, label: 'April (04)' },
-                      { value: 5, label: 'May (05)' },
-                      { value: 6, label: 'June (06)' },
-                      { value: 7, label: 'July (07)' },
-                      { value: 8, label: 'August (08)' },
-                      { value: 9, label: 'September (09)' },
-                      { value: 10, label: 'October (10)' },
-                      { value: 11, label: 'November (11)' },
-                      { value: 12, label: 'December (12)' },
-                    ]}
-                  />
-                </Form.Item>
-              </Col>
-            </Row>
+          <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
+            Select accounting periods for <strong>{reportTemplateName}</strong>.
+            Add multiple periods for a comparative P&L report.
+          </Text>
+
+          {/* Period Selection */}
+          <Form form={reportPeriodForm} layout="inline" style={{ marginBottom: 16 }}>
+            <Form.Item name="period_year" style={{ marginBottom: 8 }}>
+              <Select
+                placeholder="Year"
+                style={{ width: 100 }}
+                options={Array.from({ length: 10 }, (_, i) => ({
+                  value: new Date().getFullYear() - i,
+                  label: String(new Date().getFullYear() - i),
+                }))}
+              />
+            </Form.Item>
+            <Form.Item name="period_num" style={{ marginBottom: 8 }}>
+              <Select
+                placeholder="Period"
+                style={{ width: 150 }}
+                options={[
+                  { value: 1, label: 'Jan (01)' },
+                  { value: 2, label: 'Feb (02)' },
+                  { value: 3, label: 'Mar (03)' },
+                  { value: 4, label: 'Apr (04)' },
+                  { value: 5, label: 'May (05)' },
+                  { value: 6, label: 'Jun (06)' },
+                  { value: 7, label: 'Jul (07)' },
+                  { value: 8, label: 'Aug (08)' },
+                  { value: 9, label: 'Sep (09)' },
+                  { value: 10, label: 'Oct (10)' },
+                  { value: 11, label: 'Nov (11)' },
+                  { value: 12, label: 'Dec (12)' },
+                  { value: 13, label: 'Adj (13)' },
+                ]}
+              />
+            </Form.Item>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={addPeriodToSelection}
+              style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+            >
+              Add Period
+            </Button>
           </Form>
+
+          {/* Selected Periods Display */}
+          <Card
+            size="small"
+            title={
+              <Space>
+                <Text strong>Selected Periods</Text>
+                {selectedPeriods.length > 1 && (
+                  <Tag color="blue">Comparative Report</Tag>
+                )}
+              </Space>
+            }
+            style={{ background: '#f9f9f9' }}
+          >
+            {selectedPeriods.length === 0 ? (
+              <Text type="secondary">No periods selected. Add at least one period.</Text>
+            ) : (
+              <Space wrap>
+                {selectedPeriods.map((p, idx) => {
+                  const monthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Adj'];
+                  return (
+                    <Tag
+                      key={`${p.year}-${p.num}`}
+                      closable
+                      onClose={() => removePeriodFromSelection(p.year, p.num)}
+                      color="blue"
+                      style={{ padding: '4px 8px', fontSize: 13 }}
+                    >
+                      {monthNames[p.num]} {p.year}
+                    </Tag>
+                  );
+                })}
+              </Space>
+            )}
+          </Card>
+
+          {/* Quick Select Options */}
+          <div style={{ marginTop: 16 }}>
+            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+              Quick Select:
+            </Text>
+            <Space wrap>
+              <Button
+                size="small"
+                onClick={() => {
+                  const year = new Date().getFullYear();
+                  setSelectedPeriods([
+                    { year, num: 1 }, { year, num: 2 }, { year, num: 3 },
+                    { year, num: 4 }, { year, num: 5 }, { year, num: 6 },
+                    { year, num: 7 }, { year, num: 8 }, { year, num: 9 },
+                    { year, num: 10 }, { year, num: 11 }, { year, num: 12 },
+                  ]);
+                }}
+              >
+                Full Year {new Date().getFullYear()}
+              </Button>
+              <Button
+                size="small"
+                onClick={() => {
+                  const year = new Date().getFullYear();
+                  setSelectedPeriods([
+                    { year, num: 1 }, { year, num: 2 }, { year, num: 3 },
+                  ]);
+                }}
+              >
+                Q1 {new Date().getFullYear()}
+              </Button>
+              <Button
+                size="small"
+                onClick={() => {
+                  const year = new Date().getFullYear();
+                  setSelectedPeriods([
+                    { year, num: 4 }, { year, num: 5 }, { year, num: 6 },
+                  ]);
+                }}
+              >
+                Q2 {new Date().getFullYear()}
+              </Button>
+              <Button
+                size="small"
+                onClick={() => {
+                  // Last 3 months
+                  const now = new Date();
+                  const periods: ReportPeriod[] = [];
+                  for (let i = 2; i >= 0; i--) {
+                    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+                    periods.push({ year: d.getFullYear(), num: d.getMonth() + 1 });
+                  }
+                  setSelectedPeriods(periods);
+                }}
+              >
+                Last 3 Months
+              </Button>
+              <Button
+                size="small"
+                danger
+                onClick={() => setSelectedPeriods([])}
+              >
+                Clear All
+              </Button>
+            </Space>
+          </div>
         </Modal>
 
         {/* Preview Modal */}

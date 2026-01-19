@@ -87,6 +87,13 @@ export interface GLAccount {
 }
 
 // P&L Report Types
+export interface PLReportAccountDetail {
+  account: string;
+  description: string;
+  tb_balance: number;  // Original TB balance
+  amount: number;      // After sign convention applied
+}
+
 export interface PLReportRow {
   row_order: number;
   row_type: 'group_header' | 'section' | 'group_total' | 'calculated_total';
@@ -97,6 +104,7 @@ export interface PLReportRow {
   amount: number | null;
   style: string;
   row_style?: string;
+  accounts?: PLReportAccountDetail[];  // Account details for sections (drill-down)
 }
 
 export interface PLReport {
