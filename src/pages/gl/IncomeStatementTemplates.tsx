@@ -171,6 +171,7 @@ const IncomeStatementTemplates: React.FC = () => {
   // Period states (fetched from API)
   const [availablePeriods, setAvailablePeriods] = useState<PeriodInfo[]>([]);
   const [loadingPeriods, setLoadingPeriods] = useState(false);
+  const [selectedPeriodYear, setSelectedPeriodYear] = useState<number | null>(null);
 
   // Edit context
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
@@ -2935,22 +2936,46 @@ const IncomeStatementTemplates: React.FC = () => {
             </Select>
           </Card>
 
-          {/* Period Selection */}
+          {/* Period Selection - Year first, then Period */}
           <Form form={reportPeriodForm} layout="inline" style={{ marginBottom: 16 }}>
-            <Form.Item name="selected_period" style={{ marginBottom: 8, flex: 1 }}>
+            <Form.Item label="Year" style={{ marginBottom: 8 }}>
+              <Select
+                placeholder="Select Year"
+                style={{ width: 120 }}
+                value={selectedPeriodYear}
+                onChange={(value) => {
+                  setSelectedPeriodYear(value);
+                  reportPeriodForm.setFieldValue('selected_period', undefined);
+                }}
+                loading={loadingPeriods}
+                disabled={!selectedLedgerId || loadingPeriods}
+              >
+                {[...new Set(availablePeriods.map(p => p.period_year))]
+                  .sort((a, b) => b - a)
+                  .map(year => (
+                    <Select.Option key={year} value={year}>
+                      {year}
+                    </Select.Option>
+                  ))}
+              </Select>
+            </Form.Item>
+            <Form.Item name="selected_period" label="Period" style={{ marginBottom: 8 }}>
               <Select
                 placeholder="Select Period"
-                style={{ width: 280 }}
+                style={{ width: 180 }}
                 loading={loadingPeriods}
                 showSearch
                 optionFilterProp="children"
-                disabled={!selectedLedgerId}
+                disabled={!selectedLedgerId || !selectedPeriodYear}
               >
-                {availablePeriods.map(p => (
-                  <Select.Option key={p.period_name_id} value={p.period_name_id}>
-                    {p.period_name_id} ({p.status})
-                  </Select.Option>
-                ))}
+                {availablePeriods
+                  .filter(p => p.period_year === selectedPeriodYear)
+                  .sort((a, b) => a.period_number - b.period_number)
+                  .map(p => (
+                    <Select.Option key={p.period_name_id} value={p.period_name_id}>
+                      {p.period_name_id} ({p.status})
+                    </Select.Option>
+                  ))}
               </Select>
             </Form.Item>
             <Button
@@ -2958,9 +2983,9 @@ const IncomeStatementTemplates: React.FC = () => {
               icon={<PlusOutlined />}
               onClick={addPeriodToSelection}
               style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
-              disabled={!selectedLedgerId || loadingPeriods}
+              disabled={!selectedLedgerId || loadingPeriods || !selectedPeriodYear}
             >
-              Add Period
+              Add
             </Button>
           </Form>
           {!selectedLedgerId && (
@@ -2971,6 +2996,11 @@ const IncomeStatementTemplates: React.FC = () => {
           {selectedLedgerId && loadingPeriods && (
             <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
               Loading periods...
+            </Text>
+          )}
+          {selectedLedgerId && !loadingPeriods && availablePeriods.length === 0 && (
+            <Text type="warning" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+              No periods found for this ledger.
             </Text>
           )}
 
@@ -3009,71 +3039,86 @@ const IncomeStatementTemplates: React.FC = () => {
           {/* Quick Select Options */}
           <div style={{ marginTop: 16 }}>
             <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
-              Quick Select (from available periods):
+              Quick Select {selectedPeriodYear ? `for ${selectedPeriodYear}` : '(select a year first)'}:
             </Text>
             <Space wrap>
               {(() => {
-                // Get unique years from available periods
-                const years = [...new Set(availablePeriods.map(p => p.period_year))].sort((a, b) => b - a);
-                const currentYear = years[0] || new Date().getFullYear();
+                // Use selected year or fall back to most recent
+                const targetYear = selectedPeriodYear;
+                const yearPeriods = targetYear
+                  ? availablePeriods.filter(p => p.period_year === targetYear)
+                  : [];
                 return (
                   <>
                     <Button
                       size="small"
-                      disabled={availablePeriods.length === 0}
+                      disabled={!targetYear || yearPeriods.length === 0}
                       onClick={() => {
-                        // Select all periods for the most recent year (excluding adj periods)
-                        const yearPeriods = availablePeriods
-                          .filter(p => p.period_year === currentYear && p.adj_flag !== 'Y')
+                        // Select all periods for the selected year (excluding adj periods)
+                        const periods = yearPeriods
+                          .filter(p => p.adj_flag !== 'Y')
                           .map(p => ({ year: p.period_year, num: p.period_number, name: p.period_name_id }))
                           .sort((a, b) => a.num - b.num);
-                        setSelectedPeriods(yearPeriods);
+                        setSelectedPeriods(periods);
                       }}
                     >
-                      Full Year {currentYear}
+                      Full Year {targetYear || '----'}
                     </Button>
                     <Button
                       size="small"
-                      disabled={availablePeriods.length === 0}
+                      disabled={!targetYear || yearPeriods.length === 0}
                       onClick={() => {
-                        // Q1: periods 1-3 for current year
-                        const q1Periods = availablePeriods
-                          .filter(p => p.period_year === currentYear && p.period_number >= 1 && p.period_number <= 3)
+                        // Q1: periods 1-3 for selected year
+                        const q1Periods = yearPeriods
+                          .filter(p => p.period_number >= 1 && p.period_number <= 3)
                           .map(p => ({ year: p.period_year, num: p.period_number, name: p.period_name_id }))
                           .sort((a, b) => a.num - b.num);
                         setSelectedPeriods(q1Periods);
                       }}
                     >
-                      Q1 {currentYear}
+                      Q1 {targetYear || '----'}
                     </Button>
                     <Button
                       size="small"
-                      disabled={availablePeriods.length === 0}
+                      disabled={!targetYear || yearPeriods.length === 0}
                       onClick={() => {
-                        // Q2: periods 4-6 for current year
-                        const q2Periods = availablePeriods
-                          .filter(p => p.period_year === currentYear && p.period_number >= 4 && p.period_number <= 6)
+                        // Q2: periods 4-6 for selected year
+                        const q2Periods = yearPeriods
+                          .filter(p => p.period_number >= 4 && p.period_number <= 6)
                           .map(p => ({ year: p.period_year, num: p.period_number, name: p.period_name_id }))
                           .sort((a, b) => a.num - b.num);
                         setSelectedPeriods(q2Periods);
                       }}
                     >
-                      Q2 {currentYear}
+                      Q2 {targetYear || '----'}
                     </Button>
                     <Button
                       size="small"
-                      disabled={availablePeriods.length === 0}
+                      disabled={!targetYear || yearPeriods.length === 0}
                       onClick={() => {
-                        // Last 3 available periods
-                        const last3 = availablePeriods
-                          .filter(p => p.adj_flag !== 'Y')
-                          .slice(0, 3)
+                        // Q3: periods 7-9 for selected year
+                        const q3Periods = yearPeriods
+                          .filter(p => p.period_number >= 7 && p.period_number <= 9)
                           .map(p => ({ year: p.period_year, num: p.period_number, name: p.period_name_id }))
-                          .sort((a, b) => a.year !== b.year ? a.year - b.year : a.num - b.num);
-                        setSelectedPeriods(last3);
+                          .sort((a, b) => a.num - b.num);
+                        setSelectedPeriods(q3Periods);
                       }}
                     >
-                      Last 3 Periods
+                      Q3 {targetYear || '----'}
+                    </Button>
+                    <Button
+                      size="small"
+                      disabled={!targetYear || yearPeriods.length === 0}
+                      onClick={() => {
+                        // Q4: periods 10-12 for selected year
+                        const q4Periods = yearPeriods
+                          .filter(p => p.period_number >= 10 && p.period_number <= 12)
+                          .map(p => ({ year: p.period_year, num: p.period_number, name: p.period_name_id }))
+                          .sort((a, b) => a.num - b.num);
+                        setSelectedPeriods(q4Periods);
+                      }}
+                    >
+                      Q4 {targetYear || '----'}
                     </Button>
                   </>
                 );
