@@ -203,6 +203,15 @@ const IncomeStatementTemplates: React.FC = () => {
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
   const [accountSearchText, setAccountSearchText] = useState('');
 
+  // Format amount helper (component-level for use in modals)
+  const formatAmount = (amount: number | null) => {
+    if (amount === null || amount === undefined) return '-';
+    return new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  };
+
   // Load GL accounts
   const loadGLAccounts = async () => {
     setGlAccountsLoading(true);
