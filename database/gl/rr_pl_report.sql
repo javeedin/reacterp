@@ -72,7 +72,8 @@ CREATE OR REPLACE PACKAGE rr_pl_template_pkg AS
 
     -- NEW: Get Section Accounts with Period Balances
     FUNCTION get_section_accounts(
-        p_section_id    IN NUMBER,
+        p_template_id   IN NUMBER,
+        p_section_code  IN VARCHAR2,
         p_period_name   IN VARCHAR2,
         p_ledger_id     IN NUMBER DEFAULT NULL
     ) RETURN CLOB;
@@ -757,7 +758,8 @@ CREATE OR REPLACE PACKAGE BODY rr_pl_template_pkg AS
     -- Get Section Accounts with Period Balances
     -- ============================================================================
     FUNCTION get_section_accounts(
-        p_section_id    IN NUMBER,
+        p_template_id   IN NUMBER,
+        p_section_code  IN VARCHAR2,
         p_period_name   IN VARCHAR2,
         p_ledger_id     IN NUMBER DEFAULT NULL
     ) RETURN CLOB
@@ -765,7 +767,7 @@ CREATE OR REPLACE PACKAGE BODY rr_pl_template_pkg AS
         v_result CLOB;
         v_accounts CLOB := '[';
         v_first_acct BOOLEAN := TRUE;
-        v_section_code VARCHAR2(100);
+        v_section_id NUMBER;
         v_section_name VARCHAR2(200);
         v_group_id NUMBER;
         v_sign_convention NUMBER := 1;
@@ -774,11 +776,15 @@ CREATE OR REPLACE PACKAGE BODY rr_pl_template_pkg AS
         v_period_num NUMBER;
         v_ledger_id NUMBER;
     BEGIN
-        -- Get section info
-        SELECT section_code, section_name, group_id
-        INTO v_section_code, v_section_name, v_group_id
-        FROM rr_pl_sections
-        WHERE section_id = p_section_id;
+        -- Get section info by template_id and section_code
+        SELECT s.section_id, s.section_name, s.group_id
+        INTO v_section_id, v_section_name, v_group_id
+        FROM rr_pl_sections s
+        JOIN rr_pl_groups g ON g.group_id = s.group_id
+        WHERE g.template_id = p_template_id
+          AND s.section_code = p_section_code
+          AND s.is_active = 'Y'
+          AND ROWNUM = 1;
 
         -- Get sign convention from group
         SELECT NVL(sign_convention, 1)
@@ -814,7 +820,7 @@ CREATE OR REPLACE PACKAGE BODY rr_pl_template_pkg AS
         FOR acct IN (
             SELECT account_code, account_from, account_to
             FROM rr_pl_section_accounts
-            WHERE section_id = p_section_id AND is_active = 'Y'
+            WHERE section_id = v_section_id AND is_active = 'Y'
             ORDER BY display_order
         ) LOOP
             IF acct.account_from IS NOT NULL AND acct.account_to IS NOT NULL THEN
@@ -880,8 +886,9 @@ CREATE OR REPLACE PACKAGE BODY rr_pl_template_pkg AS
 
         -- Build result JSON
         v_result := '{' ||
-            '"section_id":' || p_section_id || ',' ||
-            '"section_code":' || escape_json(v_section_code) || ',' ||
+            '"template_id":' || p_template_id || ',' ||
+            '"section_id":' || v_section_id || ',' ||
+            '"section_code":' || escape_json(p_section_code) || ',' ||
             '"section_name":' || escape_json(v_section_name) || ',' ||
             '"period_name":' || escape_json(p_period_name) || ',' ||
             '"period_year":' || v_period_year || ',' ||
@@ -940,7 +947,7 @@ END;
 -- ============================================================================
 -- APEX REST Handler for Section Accounts
 -- ============================================================================
--- GET /pl/section-accounts?section_id=1&period_name=May-24&ledger_id=123
+-- GET /pl/section-accounts?template_id=1&section_code=REV001&period_name=May-24&ledger_id=123
 -- ============================================================================
 
 /*
@@ -953,7 +960,8 @@ Source Type: PL/SQL
 Source:
 
 DECLARE
-    v_section_id NUMBER := :section_id;
+    v_template_id NUMBER := :template_id;
+    v_section_code VARCHAR2(100) := :section_code;
     v_period_name VARCHAR2(100) := :period_name;
     v_ledger_id NUMBER := :ledger_id;
     v_result CLOB;
@@ -962,7 +970,8 @@ BEGIN
     owa_util.http_header_close;
 
     v_result := rr_pl_template_pkg.get_section_accounts(
-        p_section_id => v_section_id,
+        p_template_id => v_template_id,
+        p_section_code => v_section_code,
         p_period_name => v_period_name,
         p_ledger_id => v_ledger_id
     );
