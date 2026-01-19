@@ -865,7 +865,7 @@ const IncomeStatementTemplates: React.FC = () => {
     reports: plService.PLReport[]
   ) => {
     // Get selected template and period info
-    const activeTab = reportTabs.find(t => t.key === activeReportTabKey);
+    const activeTab = reportTabs.find(t => t.key === activeTabKey);
     if (!activeTab) {
       // Fallback to existing accounts data
       setAccountsModalData({ sectionLabel, sectionCode, accounts, reports });
