@@ -2993,7 +2993,7 @@ const IncomeStatementTemplates: React.FC = () => {
             >
               Add
             </Button>
-            <Tooltip title="Show API URL">
+            <Tooltip title="Show API URL & Debug Info">
               <Button
                 size="small"
                 icon={<BugOutlined />}
@@ -3003,20 +3003,39 @@ const IncomeStatementTemplates: React.FC = () => {
                     application_name: 'General Ledger',
                   });
                   const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.periodsStatus}?${params}`;
+                  const filteredPeriods = availablePeriods.filter(p => p.period_year === selectedPeriodYear);
                   Modal.info({
-                    title: 'Periods API URL',
+                    title: 'Periods Debug Info',
                     width: 700,
                     content: (
                       <div>
                         <p><strong>URL:</strong></p>
                         <Input.TextArea
                           value={url}
-                          rows={3}
+                          rows={2}
                           readOnly
                           style={{ fontFamily: 'monospace', fontSize: 12 }}
                         />
-                        <p style={{ marginTop: 16 }}><strong>Periods Loaded:</strong> {availablePeriods.length}</p>
+                        <Divider style={{ margin: '12px 0' }} />
+                        <p><strong>Total Periods Loaded:</strong> {availablePeriods.length}</p>
                         <p><strong>Unique Years:</strong> {[...new Set(availablePeriods.map(p => p.period_year))].sort((a, b) => b - a).join(', ') || 'None'}</p>
+                        <p><strong>Selected Year:</strong> {selectedPeriodYear || 'None'} (type: {typeof selectedPeriodYear})</p>
+                        <p><strong>Periods for Selected Year:</strong> {filteredPeriods.length}</p>
+                        {filteredPeriods.length > 0 && (
+                          <div style={{ maxHeight: 150, overflow: 'auto', background: '#f5f5f5', padding: 8, fontSize: 12 }}>
+                            {filteredPeriods.map(p => (
+                              <div key={p.period_name_id}>{p.period_name_id} - Year: {p.period_year} (type: {typeof p.period_year})</div>
+                            ))}
+                          </div>
+                        )}
+                        <Divider style={{ margin: '12px 0' }} />
+                        <p><strong>Sample Period Data:</strong></p>
+                        <Input.TextArea
+                          value={JSON.stringify(availablePeriods.slice(0, 3), null, 2)}
+                          rows={6}
+                          readOnly
+                          style={{ fontFamily: 'monospace', fontSize: 11 }}
+                        />
                       </div>
                     ),
                   });
