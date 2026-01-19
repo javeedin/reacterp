@@ -51,6 +51,7 @@ import {
   CaretRightOutlined,
   BugOutlined,
   SearchOutlined,
+  TableOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import Autopilot from '../../components/Autopilot';
@@ -128,6 +129,30 @@ interface PeriodInfo {
   adj_flag: string;
 }
 
+// Trial Balance record interface
+interface TBRecord {
+  account: string;
+  account_desc: string;
+  company: string;
+  currency: string;
+  opening_balance: number;
+  debit_amount: number;
+  credit_amount: number;
+  closing_balance: number;
+  period_name: string;
+  ledger_name: string;
+}
+
+// Trial Balance tab interface
+interface TBTab {
+  key: string;
+  label: string;
+  periodName: string;
+  data: TBRecord[];
+  loading: boolean;
+  error: string | null;
+}
+
 const IncomeStatementTemplates: React.FC = () => {
   // State
   const [loading, setLoading] = useState(false);
@@ -153,6 +178,9 @@ const IncomeStatementTemplates: React.FC = () => {
   const [reportTemplateName, setReportTemplateName] = useState<string>('');
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
   const [selectedPeriods, setSelectedPeriods] = useState<ReportPeriod[]>([]);
+
+  // Trial Balance tabs
+  const [tbTabs, setTbTabs] = useState<TBTab[]>([]);
 
   // Debug states
   const [debugModalVisible, setDebugModalVisible] = useState(false);
@@ -374,7 +402,7 @@ const IncomeStatementTemplates: React.FC = () => {
       setTemplateTabs(newTabs);
 
       if (activeTabKey === tabKey) {
-        const allTabs = [...newTabs, ...reportTabs];
+        const allTabs = [...newTabs, ...reportTabs, ...tbTabs];
         setActiveTabKey(allTabs.length > 0 ? allTabs[allTabs.length - 1].key : 'list');
       }
     }
@@ -384,7 +412,17 @@ const IncomeStatementTemplates: React.FC = () => {
       setReportTabs(newReportTabs);
 
       if (activeTabKey === tabKey) {
-        const allTabs = [...templateTabs, ...newReportTabs];
+        const allTabs = [...templateTabs, ...newReportTabs, ...tbTabs];
+        setActiveTabKey(allTabs.length > 0 ? allTabs[allTabs.length - 1].key : 'list');
+      }
+    }
+    // Check if it's a TB tab
+    else if (tabKey.startsWith('tb-')) {
+      const newTbTabs = tbTabs.filter(t => t.key !== tabKey);
+      setTbTabs(newTbTabs);
+
+      if (activeTabKey === tabKey) {
+        const allTabs = [...templateTabs, ...reportTabs, ...newTbTabs];
         setActiveTabKey(allTabs.length > 0 ? allTabs[allTabs.length - 1].key : 'list');
       }
     }
@@ -921,6 +959,67 @@ const IncomeStatementTemplates: React.FC = () => {
       setAccountsModalData({ sectionLabel, sectionCode, accounts, reports });
     } finally {
       setAccountsModalLoading(false);
+    }
+  };
+
+  // Open Trial Balance in new tab
+  const openTrialBalanceTab = async (periodName: string) => {
+    const tabKey = `tb-${periodName}`;
+
+    // Check if tab already exists
+    const existingTab = tbTabs.find(t => t.key === tabKey);
+    if (existingTab) {
+      setActiveTabKey(tabKey);
+      return;
+    }
+
+    // Create new TB tab in loading state
+    const newTab: TBTab = {
+      key: tabKey,
+      label: `TB: ${periodName}`,
+      periodName,
+      data: [],
+      loading: true,
+      error: null,
+    };
+
+    setTbTabs(prev => [...prev, newTab]);
+    setActiveTabKey(tabKey);
+
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.glBalances}?p_period_name=${encodeURIComponent(periodName)}`;
+      console.log('Trial Balance API URL:', url);
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      console.log('Trial Balance API Response:', data);
+      const items: TBRecord[] = data.items || [];
+
+      setTbTabs(prev => prev.map(t =>
+        t.key === tabKey
+          ? { ...t, data: items, loading: false }
+          : t
+      ));
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Failed to fetch trial balance';
+      console.error('Error fetching trial balance:', error);
+      setTbTabs(prev => prev.map(t =>
+        t.key === tabKey
+          ? { ...t, loading: false, error: errorMsg }
+          : t
+      ));
+    }
+  };
+
+  // Close TB tab
+  const closeTbTab = (tabKey: string) => {
+    setTbTabs(prev => prev.filter(t => t.key !== tabKey));
+    if (activeTabKey === tabKey) {
+      setActiveTabKey('list');
     }
   };
 
@@ -1626,6 +1725,189 @@ const IncomeStatementTemplates: React.FC = () => {
     );
   };
 
+  // Render Trial Balance View
+  const renderTBView = (tab: TBTab) => {
+    if (tab.loading) {
+      return (
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 400 }}>
+          <Spin size="large" tip="Loading Trial Balance..." />
+        </div>
+      );
+    }
+
+    if (tab.error) {
+      return (
+        <div style={{ padding: 16 }}>
+          <Empty description={`Error: ${tab.error}`} />
+        </div>
+      );
+    }
+
+    // Format number
+    const formatTBAmount = (amount: number | null) => {
+      if (amount === null || amount === undefined) return '-';
+      return new Intl.NumberFormat('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(amount);
+    };
+
+    // Calculate totals
+    const totals = tab.data.reduce(
+      (acc, item) => ({
+        opening: acc.opening + (item.opening_balance || 0),
+        debit: acc.debit + (item.debit_amount || 0),
+        credit: acc.credit + (item.credit_amount || 0),
+        closing: acc.closing + (item.closing_balance || 0),
+      }),
+      { opening: 0, debit: 0, credit: 0, closing: 0 }
+    );
+
+    return (
+      <div style={{ padding: 16 }}>
+        <Card size="small" style={{ marginBottom: 16, borderRadius: 8 }}>
+          <Row justify="space-between" align="middle">
+            <Col>
+              <Space>
+                <TableOutlined style={{ color: '#1890ff', fontSize: 20 }} />
+                <Title level={4} style={{ margin: 0 }}>Trial Balance: {tab.periodName}</Title>
+                <Tag color="blue">{tab.data.length} accounts</Tag>
+              </Space>
+            </Col>
+            <Col>
+              <Button
+                icon={<ReloadOutlined />}
+                onClick={() => {
+                  // Re-fetch TB data
+                  closeTbTab(tab.key);
+                  openTrialBalanceTab(tab.periodName);
+                }}
+              >
+                Refresh
+              </Button>
+            </Col>
+          </Row>
+        </Card>
+
+        <Card style={{ borderRadius: 8 }} bodyStyle={{ padding: 0 }}>
+          <Table
+            dataSource={tab.data.map((item, idx) => ({ ...item, key: idx }))}
+            size="small"
+            pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (total) => `Total ${total} accounts` }}
+            scroll={{ y: 500 }}
+            columns={[
+              {
+                title: 'Account',
+                dataIndex: 'account',
+                key: 'account',
+                width: 120,
+                fixed: 'left',
+                render: (text: string) => <Text code style={{ fontSize: 11 }}>{text}</Text>,
+                sorter: (a, b) => (a.account || '').localeCompare(b.account || ''),
+              },
+              {
+                title: 'Description',
+                dataIndex: 'account_desc',
+                key: 'account_desc',
+                ellipsis: true,
+                sorter: (a, b) => (a.account_desc || '').localeCompare(b.account_desc || ''),
+              },
+              {
+                title: 'Company',
+                dataIndex: 'company',
+                key: 'company',
+                width: 100,
+                filters: [...new Set(tab.data.map(i => i.company))].map(c => ({ text: c, value: c })),
+                onFilter: (value, record) => record.company === value,
+              },
+              {
+                title: 'Currency',
+                dataIndex: 'currency',
+                key: 'currency',
+                width: 80,
+                filters: [...new Set(tab.data.map(i => i.currency))].map(c => ({ text: c, value: c })),
+                onFilter: (value, record) => record.currency === value,
+              },
+              {
+                title: 'Opening Balance',
+                dataIndex: 'opening_balance',
+                key: 'opening_balance',
+                align: 'right',
+                width: 130,
+                render: (val: number) => (
+                  <Text style={{ fontFamily: 'monospace', color: val < 0 ? '#cf1322' : undefined }}>
+                    {formatTBAmount(val)}
+                  </Text>
+                ),
+                sorter: (a, b) => (a.opening_balance || 0) - (b.opening_balance || 0),
+              },
+              {
+                title: 'Debit',
+                dataIndex: 'debit_amount',
+                key: 'debit_amount',
+                align: 'right',
+                width: 120,
+                render: (val: number) => (
+                  <Text style={{ fontFamily: 'monospace', color: '#389e0d' }}>
+                    {formatTBAmount(val)}
+                  </Text>
+                ),
+                sorter: (a, b) => (a.debit_amount || 0) - (b.debit_amount || 0),
+              },
+              {
+                title: 'Credit',
+                dataIndex: 'credit_amount',
+                key: 'credit_amount',
+                align: 'right',
+                width: 120,
+                render: (val: number) => (
+                  <Text style={{ fontFamily: 'monospace', color: '#cf1322' }}>
+                    {formatTBAmount(val)}
+                  </Text>
+                ),
+                sorter: (a, b) => (a.credit_amount || 0) - (b.credit_amount || 0),
+              },
+              {
+                title: 'Closing Balance',
+                dataIndex: 'closing_balance',
+                key: 'closing_balance',
+                align: 'right',
+                width: 130,
+                render: (val: number) => (
+                  <Text strong style={{ fontFamily: 'monospace', color: val < 0 ? '#cf1322' : undefined }}>
+                    {formatTBAmount(val)}
+                  </Text>
+                ),
+                sorter: (a, b) => (a.closing_balance || 0) - (b.closing_balance || 0),
+              },
+            ]}
+            summary={() => (
+              <Table.Summary fixed>
+                <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 'bold' }}>
+                  <Table.Summary.Cell index={0} colSpan={4}>
+                    <Text strong>Total</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={4} align="right">
+                    <Text strong style={{ fontFamily: 'monospace' }}>{formatTBAmount(totals.opening)}</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={5} align="right">
+                    <Text strong style={{ fontFamily: 'monospace', color: '#389e0d' }}>{formatTBAmount(totals.debit)}</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={6} align="right">
+                    <Text strong style={{ fontFamily: 'monospace', color: '#cf1322' }}>{formatTBAmount(totals.credit)}</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={7} align="right">
+                    <Text strong style={{ fontFamily: 'monospace' }}>{formatTBAmount(totals.closing)}</Text>
+                  </Table.Summary.Cell>
+                </Table.Summary.Row>
+              </Table.Summary>
+            )}
+          />
+        </Card>
+      </div>
+    );
+  };
+
   // Render P&L Report View
   const renderReportView = (tab: ReportTab) => {
     if (tab.loading) {
@@ -1734,7 +2016,20 @@ const IncomeStatementTemplates: React.FC = () => {
                 </th>
                 {reports.map((r, idx) => (
                   <th key={idx} style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600 }}>
-                    {r.period_name || 'Amount'}
+                    <Space size={4}>
+                      <span>{r.period_name || 'Amount'}</span>
+                      {r.period_name && (
+                        <Tooltip title={`View Trial Balance for ${r.period_name}`}>
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={<TableOutlined />}
+                            onClick={() => openTrialBalanceTab(r.period_name)}
+                            style={{ padding: '0 4px', height: 20, color: '#1890ff' }}
+                          />
+                        </Tooltip>
+                      )}
+                    </Space>
                   </th>
                 ))}
               </tr>
@@ -2417,6 +2712,17 @@ const IncomeStatementTemplates: React.FC = () => {
         </span>
       ),
       children: renderReportView(tab),
+      closable: true,
+    })),
+    ...tbTabs.map(tab => ({
+      key: tab.key,
+      label: (
+        <span>
+          <TableOutlined style={{ color: '#1890ff' }} />
+          {tab.label}
+        </span>
+      ),
+      children: renderTBView(tab),
       closable: true,
     })),
   ];
