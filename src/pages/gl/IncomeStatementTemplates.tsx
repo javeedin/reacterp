@@ -114,6 +114,20 @@ interface ReportTab {
   loading: boolean;
 }
 
+// Period info from API (same as TrialBalance)
+interface PeriodInfo {
+  period_name_id: string;
+  ledger_name: string;
+  app: string;
+  application_name: string;
+  status: string;
+  start_date: string;
+  end_date: string;
+  period_year: number;
+  period_number: number;
+  adj_flag: string;
+}
+
 const IncomeStatementTemplates: React.FC = () => {
   // State
   const [loading, setLoading] = useState(false);
@@ -153,6 +167,10 @@ const IncomeStatementTemplates: React.FC = () => {
   const [ledgers, setLedgers] = useState<{ ledger_id: number; ledger_name: string }[]>([]);
   const [selectedLedgerId, setSelectedLedgerId] = useState<number | null>(null);
   const [loadingLedgers, setLoadingLedgers] = useState(false);
+
+  // Period states (fetched from API)
+  const [availablePeriods, setAvailablePeriods] = useState<PeriodInfo[]>([]);
+  const [loadingPeriods, setLoadingPeriods] = useState(false);
 
   // Edit context
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
@@ -212,6 +230,46 @@ const IncomeStatementTemplates: React.FC = () => {
     }
     setLoadingLedgers(false);
   };
+
+  // Fetch periods from API (same endpoint as Trial Balance)
+  const fetchPeriods = async (ledgerId: number) => {
+    setLoadingPeriods(true);
+    try {
+      const params = new URLSearchParams({
+        ledger_id: String(ledgerId),
+      });
+      const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.periodsStatus}?${params}`;
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      const items: PeriodInfo[] = data.items || [];
+
+      // Sort by year desc, then by period_number desc
+      const sortedPeriods = items.sort((a, b) => {
+        if (a.period_year !== b.period_year) {
+          return b.period_year - a.period_year;
+        }
+        return b.period_number - a.period_number;
+      });
+
+      setAvailablePeriods(sortedPeriods);
+    } catch (error) {
+      console.error('Error fetching periods:', error);
+      setAvailablePeriods([]);
+    }
+    setLoadingPeriods(false);
+  };
+
+  // Fetch periods when ledger changes
+  useEffect(() => {
+    if (selectedLedgerId) {
+      fetchPeriods(selectedLedgerId);
+    }
+  }, [selectedLedgerId]);
 
   const loadTemplates = async () => {
     setLoading(true);
@@ -629,20 +687,30 @@ const IncomeStatementTemplates: React.FC = () => {
 
   // Add period to selected periods
   const addPeriodToSelection = () => {
-    const year = reportPeriodForm.getFieldValue('period_year');
-    const num = reportPeriodForm.getFieldValue('period_num');
-    if (!year || !num) {
-      message.warning('Please select year and period');
+    const periodKey = reportPeriodForm.getFieldValue('selected_period');
+    if (!periodKey) {
+      message.warning('Please select a period');
       return;
     }
+    // Find the period info from availablePeriods
+    const periodInfo = availablePeriods.find(p => p.period_name_id === periodKey);
+    if (!periodInfo) {
+      message.warning('Invalid period selected');
+      return;
+    }
+    const year = periodInfo.period_year;
+    const num = periodInfo.period_number;
+    const name = periodInfo.period_name_id;
     // Check if already added
     if (selectedPeriods.some(p => p.year === year && p.num === num)) {
       message.warning('Period already added');
       return;
     }
-    setSelectedPeriods(prev => [...prev, { year, num }].sort((a, b) =>
+    setSelectedPeriods(prev => [...prev, { year, num, name }].sort((a, b) =>
       a.year !== b.year ? a.year - b.year : a.num - b.num
     ));
+    // Clear selection after adding
+    reportPeriodForm.setFieldValue('selected_period', undefined);
   };
 
   // Remove period from selection
@@ -2869,46 +2937,42 @@ const IncomeStatementTemplates: React.FC = () => {
 
           {/* Period Selection */}
           <Form form={reportPeriodForm} layout="inline" style={{ marginBottom: 16 }}>
-            <Form.Item name="period_year" style={{ marginBottom: 8 }}>
+            <Form.Item name="selected_period" style={{ marginBottom: 8, flex: 1 }}>
               <Select
-                placeholder="Year"
-                style={{ width: 100 }}
-                options={Array.from({ length: 10 }, (_, i) => ({
-                  value: new Date().getFullYear() - i,
-                  label: String(new Date().getFullYear() - i),
-                }))}
-              />
-            </Form.Item>
-            <Form.Item name="period_num" style={{ marginBottom: 8 }}>
-              <Select
-                placeholder="Period"
-                style={{ width: 150 }}
-                options={[
-                  { value: 1, label: 'Jan (01)' },
-                  { value: 2, label: 'Feb (02)' },
-                  { value: 3, label: 'Mar (03)' },
-                  { value: 4, label: 'Apr (04)' },
-                  { value: 5, label: 'May (05)' },
-                  { value: 6, label: 'Jun (06)' },
-                  { value: 7, label: 'Jul (07)' },
-                  { value: 8, label: 'Aug (08)' },
-                  { value: 9, label: 'Sep (09)' },
-                  { value: 10, label: 'Oct (10)' },
-                  { value: 11, label: 'Nov (11)' },
-                  { value: 12, label: 'Dec (12)' },
-                  { value: 13, label: 'Adj (13)' },
-                ]}
-              />
+                placeholder="Select Period"
+                style={{ width: 280 }}
+                loading={loadingPeriods}
+                showSearch
+                optionFilterProp="children"
+                disabled={!selectedLedgerId}
+              >
+                {availablePeriods.map(p => (
+                  <Select.Option key={p.period_name_id} value={p.period_name_id}>
+                    {p.period_name_id} ({p.status})
+                  </Select.Option>
+                ))}
+              </Select>
             </Form.Item>
             <Button
               type="primary"
               icon={<PlusOutlined />}
               onClick={addPeriodToSelection}
               style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+              disabled={!selectedLedgerId || loadingPeriods}
             >
               Add Period
             </Button>
           </Form>
+          {!selectedLedgerId && (
+            <Text type="warning" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+              Please select a ledger first to load available periods.
+            </Text>
+          )}
+          {selectedLedgerId && loadingPeriods && (
+            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+              Loading periods...
+            </Text>
+          )}
 
           {/* Selected Periods Display */}
           <Card
@@ -2927,20 +2991,17 @@ const IncomeStatementTemplates: React.FC = () => {
               <Text type="secondary">No periods selected. Add at least one period.</Text>
             ) : (
               <Space wrap>
-                {selectedPeriods.map((p, idx) => {
-                  const monthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Adj'];
-                  return (
-                    <Tag
-                      key={`${p.year}-${p.num}`}
-                      closable
-                      onClose={() => removePeriodFromSelection(p.year, p.num)}
-                      color="blue"
-                      style={{ padding: '4px 8px', fontSize: 13 }}
-                    >
-                      {monthNames[p.num]} {p.year}
-                    </Tag>
-                  );
-                })}
+                {selectedPeriods.map((p) => (
+                  <Tag
+                    key={`${p.year}-${p.num}`}
+                    closable
+                    onClose={() => removePeriodFromSelection(p.year, p.num)}
+                    color="blue"
+                    style={{ padding: '4px 8px', fontSize: 13 }}
+                  >
+                    {p.name || `${p.year}-${String(p.num).padStart(2, '0')}`}
+                  </Tag>
+                ))}
               </Space>
             )}
           </Card>
@@ -2948,60 +3009,75 @@ const IncomeStatementTemplates: React.FC = () => {
           {/* Quick Select Options */}
           <div style={{ marginTop: 16 }}>
             <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
-              Quick Select:
+              Quick Select (from available periods):
             </Text>
             <Space wrap>
-              <Button
-                size="small"
-                onClick={() => {
-                  const year = new Date().getFullYear();
-                  setSelectedPeriods([
-                    { year, num: 1 }, { year, num: 2 }, { year, num: 3 },
-                    { year, num: 4 }, { year, num: 5 }, { year, num: 6 },
-                    { year, num: 7 }, { year, num: 8 }, { year, num: 9 },
-                    { year, num: 10 }, { year, num: 11 }, { year, num: 12 },
-                  ]);
-                }}
-              >
-                Full Year {new Date().getFullYear()}
-              </Button>
-              <Button
-                size="small"
-                onClick={() => {
-                  const year = new Date().getFullYear();
-                  setSelectedPeriods([
-                    { year, num: 1 }, { year, num: 2 }, { year, num: 3 },
-                  ]);
-                }}
-              >
-                Q1 {new Date().getFullYear()}
-              </Button>
-              <Button
-                size="small"
-                onClick={() => {
-                  const year = new Date().getFullYear();
-                  setSelectedPeriods([
-                    { year, num: 4 }, { year, num: 5 }, { year, num: 6 },
-                  ]);
-                }}
-              >
-                Q2 {new Date().getFullYear()}
-              </Button>
-              <Button
-                size="small"
-                onClick={() => {
-                  // Last 3 months
-                  const now = new Date();
-                  const periods: ReportPeriod[] = [];
-                  for (let i = 2; i >= 0; i--) {
-                    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-                    periods.push({ year: d.getFullYear(), num: d.getMonth() + 1 });
-                  }
-                  setSelectedPeriods(periods);
-                }}
-              >
-                Last 3 Months
-              </Button>
+              {(() => {
+                // Get unique years from available periods
+                const years = [...new Set(availablePeriods.map(p => p.period_year))].sort((a, b) => b - a);
+                const currentYear = years[0] || new Date().getFullYear();
+                return (
+                  <>
+                    <Button
+                      size="small"
+                      disabled={availablePeriods.length === 0}
+                      onClick={() => {
+                        // Select all periods for the most recent year (excluding adj periods)
+                        const yearPeriods = availablePeriods
+                          .filter(p => p.period_year === currentYear && p.adj_flag !== 'Y')
+                          .map(p => ({ year: p.period_year, num: p.period_number, name: p.period_name_id }))
+                          .sort((a, b) => a.num - b.num);
+                        setSelectedPeriods(yearPeriods);
+                      }}
+                    >
+                      Full Year {currentYear}
+                    </Button>
+                    <Button
+                      size="small"
+                      disabled={availablePeriods.length === 0}
+                      onClick={() => {
+                        // Q1: periods 1-3 for current year
+                        const q1Periods = availablePeriods
+                          .filter(p => p.period_year === currentYear && p.period_number >= 1 && p.period_number <= 3)
+                          .map(p => ({ year: p.period_year, num: p.period_number, name: p.period_name_id }))
+                          .sort((a, b) => a.num - b.num);
+                        setSelectedPeriods(q1Periods);
+                      }}
+                    >
+                      Q1 {currentYear}
+                    </Button>
+                    <Button
+                      size="small"
+                      disabled={availablePeriods.length === 0}
+                      onClick={() => {
+                        // Q2: periods 4-6 for current year
+                        const q2Periods = availablePeriods
+                          .filter(p => p.period_year === currentYear && p.period_number >= 4 && p.period_number <= 6)
+                          .map(p => ({ year: p.period_year, num: p.period_number, name: p.period_name_id }))
+                          .sort((a, b) => a.num - b.num);
+                        setSelectedPeriods(q2Periods);
+                      }}
+                    >
+                      Q2 {currentYear}
+                    </Button>
+                    <Button
+                      size="small"
+                      disabled={availablePeriods.length === 0}
+                      onClick={() => {
+                        // Last 3 available periods
+                        const last3 = availablePeriods
+                          .filter(p => p.adj_flag !== 'Y')
+                          .slice(0, 3)
+                          .map(p => ({ year: p.period_year, num: p.period_number, name: p.period_name_id }))
+                          .sort((a, b) => a.year !== b.year ? a.year - b.year : a.num - b.num);
+                        setSelectedPeriods(last3);
+                      }}
+                    >
+                      Last 3 Periods
+                    </Button>
+                  </>
+                );
+              })()}
               <Button
                 size="small"
                 danger
