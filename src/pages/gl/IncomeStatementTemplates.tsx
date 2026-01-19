@@ -3800,60 +3800,51 @@ const IncomeStatementTemplates: React.FC = () => {
                   key: 'description',
                   ellipsis: true,
                 },
-                ...accountsModalData.reports.map((report, rptIdx) => ({
-                  title: report.period_name || `Period ${rptIdx + 1}`,
-                  key: `period_${rptIdx}`,
+                {
+                  title: 'TB Balance',
+                  dataIndex: 'tb_balance',
+                  key: 'tb_balance',
                   align: 'right' as const,
-                  width: 120,
-                  render: (_: unknown, record: plService.PLReportAccountDetail) => {
-                    // Find matching account in this report
-                    const matchingSection = report.rows.find(
-                      r => r.code === accountsModalData.sectionCode && r.row_type === 'section'
-                    );
-                    const matchingAcct = matchingSection?.accounts?.find(
-                      a => a.account === record.account
-                    );
-                    const amount = matchingAcct?.amount ?? null;
-                    return (
-                      <Text
-                        style={{
-                          fontFamily: 'monospace',
-                          color: amount !== null && amount < 0 ? '#cf1322' : undefined
-                        }}
-                      >
-                        {amount !== null ? formatAmount(amount) : '-'}
-                      </Text>
-                    );
-                  }
-                }))
+                  width: 130,
+                  render: (val: number) => (
+                    <Text style={{ fontFamily: 'monospace', color: val < 0 ? '#cf1322' : undefined }}>
+                      {val != null ? formatAmount(val) : '-'}
+                    </Text>
+                  )
+                },
+                {
+                  title: 'Amount',
+                  dataIndex: 'amount',
+                  key: 'amount',
+                  align: 'right' as const,
+                  width: 130,
+                  render: (val: number) => (
+                    <Text strong style={{ fontFamily: 'monospace', color: val < 0 ? '#cf1322' : undefined }}>
+                      {val != null ? formatAmount(val) : '-'}
+                    </Text>
+                  )
+                },
               ]}
               summary={() => {
-                // Calculate totals for each period
-                const totals = accountsModalData.reports.map(report => {
-                  const matchingSection = report.rows.find(
-                    r => r.code === accountsModalData.sectionCode && r.row_type === 'section'
-                  );
-                  return matchingSection?.amount ?? 0;
-                });
+                // Calculate totals from accounts
+                const totalTb = accountsModalData.accounts.reduce((sum, acc) => sum + (acc.tb_balance || 0), 0);
+                const totalAmount = accountsModalData.accounts.reduce((sum, acc) => sum + (acc.amount || 0), 0);
                 return (
                   <Table.Summary fixed>
                     <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 'bold' }}>
                       <Table.Summary.Cell index={0} colSpan={2}>
                         <Text strong>Section Total</Text>
                       </Table.Summary.Cell>
-                      {totals.map((total, idx) => (
-                        <Table.Summary.Cell key={idx} index={idx + 2} align="right">
-                          <Text
-                            strong
-                            style={{
-                              fontFamily: 'monospace',
-                              color: total < 0 ? '#cf1322' : undefined
-                            }}
-                          >
-                            {formatAmount(total)}
-                          </Text>
-                        </Table.Summary.Cell>
-                      ))}
+                      <Table.Summary.Cell index={2} align="right">
+                        <Text strong style={{ fontFamily: 'monospace', color: totalTb < 0 ? '#cf1322' : undefined }}>
+                          {formatAmount(totalTb)}
+                        </Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={3} align="right">
+                        <Text strong style={{ fontFamily: 'monospace', color: totalAmount < 0 ? '#cf1322' : undefined }}>
+                          {formatAmount(totalAmount)}
+                        </Text>
+                      </Table.Summary.Cell>
                     </Table.Summary.Row>
                   </Table.Summary>
                 );
