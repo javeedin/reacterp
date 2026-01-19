@@ -70,6 +70,13 @@ CREATE OR REPLACE PACKAGE rr_pl_template_pkg AS
         p_ledger_id     IN NUMBER DEFAULT 1
     ) RETURN CLOB;
 
+    -- NEW: Get Section Accounts with Period Balances
+    FUNCTION get_section_accounts(
+        p_section_id    IN NUMBER,
+        p_period_name   IN VARCHAR2,
+        p_ledger_id     IN NUMBER DEFAULT NULL
+    ) RETURN CLOB;
+
 END rr_pl_template_pkg;
 /
 
@@ -746,6 +753,150 @@ CREATE OR REPLACE PACKAGE BODY rr_pl_template_pkg AS
         RETURN v_result;
     END get_pl_report;
 
+    -- ============================================================================
+    -- Get Section Accounts with Period Balances
+    -- ============================================================================
+    FUNCTION get_section_accounts(
+        p_section_id    IN NUMBER,
+        p_period_name   IN VARCHAR2,
+        p_ledger_id     IN NUMBER DEFAULT NULL
+    ) RETURN CLOB
+    IS
+        v_result CLOB;
+        v_accounts CLOB := '[';
+        v_first_acct BOOLEAN := TRUE;
+        v_section_code VARCHAR2(100);
+        v_section_name VARCHAR2(200);
+        v_group_id NUMBER;
+        v_sign_convention NUMBER := 1;
+        v_total_amount NUMBER := 0;
+        v_period_year NUMBER;
+        v_period_num NUMBER;
+        v_ledger_id NUMBER;
+    BEGIN
+        -- Get section info
+        SELECT section_code, section_name, group_id
+        INTO v_section_code, v_section_name, v_group_id
+        FROM rr_pl_sections
+        WHERE section_id = p_section_id;
+
+        -- Get sign convention from group
+        SELECT NVL(sign_convention, 1)
+        INTO v_sign_convention
+        FROM rr_pl_groups
+        WHERE group_id = v_group_id;
+
+        -- Parse period_name to get year and period number
+        -- Expected format: "May-24" or "Jan-2024" or similar
+        BEGIN
+            SELECT period_year, period_num, ledger_id
+            INTO v_period_year, v_period_num, v_ledger_id
+            FROM gl_period_statuses
+            WHERE period_name = p_period_name
+              AND application_id = 101  -- General Ledger
+              AND (p_ledger_id IS NULL OR ledger_id = p_ledger_id)
+              AND ROWNUM = 1;
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+                -- Try to parse from period name format
+                v_period_year := 2000 + TO_NUMBER(SUBSTR(p_period_name, -2));
+                v_period_num := CASE SUBSTR(UPPER(p_period_name), 1, 3)
+                    WHEN 'JAN' THEN 1 WHEN 'FEB' THEN 2 WHEN 'MAR' THEN 3
+                    WHEN 'APR' THEN 4 WHEN 'MAY' THEN 5 WHEN 'JUN' THEN 6
+                    WHEN 'JUL' THEN 7 WHEN 'AUG' THEN 8 WHEN 'SEP' THEN 9
+                    WHEN 'OCT' THEN 10 WHEN 'NOV' THEN 11 WHEN 'DEC' THEN 12
+                    ELSE 1
+                END;
+                v_ledger_id := p_ledger_id;
+        END;
+
+        -- Get accounts and their balances
+        FOR acct IN (
+            SELECT account_code, account_from, account_to
+            FROM rr_pl_section_accounts
+            WHERE section_id = p_section_id AND is_active = 'Y'
+            ORDER BY display_order
+        ) LOOP
+            IF acct.account_from IS NOT NULL AND acct.account_to IS NOT NULL THEN
+                -- Account range
+                FOR bal IN (
+                    SELECT b.account,
+                           NVL((SELECT g.description FROM gl_code_combinations g
+                                WHERE g.account = b.account AND ROWNUM = 1), b.account) as description,
+                           NVL(b.closing_balance, 0) as closing_balance
+                    FROM rr_gl_balances b
+                    WHERE b.period_year = v_period_year
+                      AND b.period_num = v_period_num
+                      AND (v_ledger_id IS NULL OR b.ledger_id = v_ledger_id)
+                      AND b.account >= acct.account_from
+                      AND b.account <= acct.account_to
+                    ORDER BY b.account
+                ) LOOP
+                    IF NOT v_first_acct THEN
+                        v_accounts := v_accounts || ',';
+                    END IF;
+                    v_first_acct := FALSE;
+
+                    v_accounts := v_accounts || '{' ||
+                        '"account":' || escape_json(bal.account) || ',' ||
+                        '"description":' || escape_json(bal.description) || ',' ||
+                        '"tb_balance":' || bal.closing_balance || ',' ||
+                        '"amount":' || (bal.closing_balance * v_sign_convention) ||
+                    '}';
+
+                    v_total_amount := v_total_amount + (bal.closing_balance * v_sign_convention);
+                END LOOP;
+            ELSIF acct.account_code IS NOT NULL THEN
+                -- Single account
+                FOR bal IN (
+                    SELECT b.account,
+                           NVL((SELECT g.description FROM gl_code_combinations g
+                                WHERE g.account = b.account AND ROWNUM = 1), acct.account_code) as description,
+                           NVL(b.closing_balance, 0) as closing_balance
+                    FROM rr_gl_balances b
+                    WHERE b.period_year = v_period_year
+                      AND b.period_num = v_period_num
+                      AND (v_ledger_id IS NULL OR b.ledger_id = v_ledger_id)
+                      AND b.account = acct.account_code
+                ) LOOP
+                    IF NOT v_first_acct THEN
+                        v_accounts := v_accounts || ',';
+                    END IF;
+                    v_first_acct := FALSE;
+
+                    v_accounts := v_accounts || '{' ||
+                        '"account":' || escape_json(bal.account) || ',' ||
+                        '"description":' || escape_json(bal.description) || ',' ||
+                        '"tb_balance":' || bal.closing_balance || ',' ||
+                        '"amount":' || (bal.closing_balance * v_sign_convention) ||
+                    '}';
+
+                    v_total_amount := v_total_amount + (bal.closing_balance * v_sign_convention);
+                END LOOP;
+            END IF;
+        END LOOP;
+
+        v_accounts := v_accounts || ']';
+
+        -- Build result JSON
+        v_result := '{' ||
+            '"section_id":' || p_section_id || ',' ||
+            '"section_code":' || escape_json(v_section_code) || ',' ||
+            '"section_name":' || escape_json(v_section_name) || ',' ||
+            '"period_name":' || escape_json(p_period_name) || ',' ||
+            '"period_year":' || v_period_year || ',' ||
+            '"period_num":' || v_period_num || ',' ||
+            '"sign_convention":' || v_sign_convention || ',' ||
+            '"total_amount":' || v_total_amount || ',' ||
+            '"accounts":' || v_accounts ||
+        '}';
+
+        RETURN v_result;
+    EXCEPTION
+        WHEN OTHERS THEN
+            RETURN '{"error":' || escape_json(SQLERRM) || '}';
+    END get_section_accounts;
+
 END rr_pl_template_pkg;
 /
 
@@ -775,6 +926,44 @@ BEGIN
         p_template_id => v_template_id,
         p_period_year => v_period_year,
         p_period_num => v_period_num,
+        p_ledger_id => v_ledger_id
+    );
+
+    htp.p(v_result);
+EXCEPTION
+    WHEN OTHERS THEN
+        htp.p('{"error":"' || REPLACE(SQLERRM, '"', '\"') || '"}');
+END;
+
+*/
+
+-- ============================================================================
+-- APEX REST Handler for Section Accounts
+-- ============================================================================
+-- GET /pl/section-accounts?section_id=1&period_name=May-24&ledger_id=123
+-- ============================================================================
+
+/*
+-- Add this handler in APEX REST Services:
+-- Module: reerp
+-- Template: pl/section-accounts
+-- Handler: GET
+
+Source Type: PL/SQL
+Source:
+
+DECLARE
+    v_section_id NUMBER := :section_id;
+    v_period_name VARCHAR2(100) := :period_name;
+    v_ledger_id NUMBER := :ledger_id;
+    v_result CLOB;
+BEGIN
+    owa_util.mime_header('application/json', FALSE);
+    owa_util.http_header_close;
+
+    v_result := rr_pl_template_pkg.get_section_accounts(
+        p_section_id => v_section_id,
+        p_period_name => v_period_name,
         p_ledger_id => v_ledger_id
     );
 
