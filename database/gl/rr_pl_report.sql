@@ -562,38 +562,31 @@ CREATE OR REPLACE PACKAGE BODY rr_pl_template_pkg AS
                     FROM rr_pl_section_accounts
                     WHERE section_id = sec.section_id AND is_active = 'Y'
                 ) LOOP
-                    IF acct.account_from IS NOT NULL AND acct.account_to IS NOT NULL THEN
-                        -- Account range
-                        SELECT NVL(SUM(closing_balance), 0)
-                        INTO v_section_amount
-                        FROM (
-                            SELECT v_section_amount + NVL(SUM(closing_balance), 0) as closing_balance
+                    DECLARE
+                        v_acct_amount NUMBER := 0;
+                    BEGIN
+                        IF acct.account_from IS NOT NULL AND acct.account_to IS NOT NULL THEN
+                            -- Account range
+                            SELECT NVL(SUM(closing_balance), 0)
+                            INTO v_acct_amount
                             FROM rr_gl_balances
                             WHERE period_year = p_period_year
                               AND period_num = p_period_num
                               AND ledger_id = p_ledger_id
                               AND account >= acct.account_from
-                              AND account <= acct.account_to
-                        );
-
-                        SELECT v_section_amount + NVL(SUM(closing_balance), 0)
-                        INTO v_section_amount
-                        FROM rr_gl_balances
-                        WHERE period_year = p_period_year
-                          AND period_num = p_period_num
-                          AND ledger_id = p_ledger_id
-                          AND account >= acct.account_from
-                          AND account <= acct.account_to;
-                    ELSE
-                        -- Single account
-                        SELECT v_section_amount + NVL(SUM(closing_balance), 0)
-                        INTO v_section_amount
-                        FROM rr_gl_balances
-                        WHERE period_year = p_period_year
-                          AND period_num = p_period_num
-                          AND ledger_id = p_ledger_id
-                          AND account = acct.account_code;
-                    END IF;
+                              AND account <= acct.account_to;
+                        ELSE
+                            -- Single account
+                            SELECT NVL(SUM(closing_balance), 0)
+                            INTO v_acct_amount
+                            FROM rr_gl_balances
+                            WHERE period_year = p_period_year
+                              AND period_num = p_period_num
+                              AND ledger_id = p_ledger_id
+                              AND account = acct.account_code;
+                        END IF;
+                        v_section_amount := v_section_amount + v_acct_amount;
+                    END;
                 END LOOP;
 
                 -- Apply sign convention
