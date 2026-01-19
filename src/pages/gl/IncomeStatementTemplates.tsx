@@ -143,6 +143,16 @@ interface TBRecord {
   ledger_name: string;
 }
 
+// Trial Balance summarized record (grouped by account)
+interface TBSummaryRecord {
+  account: string;
+  account_desc: string;
+  opening_balance: number;
+  debit_amount: number;
+  credit_amount: number;
+  closing_balance: number;
+}
+
 // Trial Balance tab interface
 interface TBTab {
   key: string;
@@ -151,6 +161,10 @@ interface TBTab {
   data: TBRecord[];
   loading: boolean;
   error: string | null;
+  // Filters
+  filterCompany: string | null;
+  filterCurrency: string | null;
+  filterAccount: string;
 }
 
 const IncomeStatementTemplates: React.FC = () => {
@@ -981,6 +995,9 @@ const IncomeStatementTemplates: React.FC = () => {
       data: [],
       loading: true,
       error: null,
+      filterCompany: null,
+      filterCurrency: null,
+      filterAccount: '',
     };
 
     setTbTabs(prev => [...prev, newTab]);
@@ -1021,6 +1038,15 @@ const IncomeStatementTemplates: React.FC = () => {
     if (activeTabKey === tabKey) {
       setActiveTabKey('list');
     }
+  };
+
+  // Update TB tab filter
+  const updateTbFilter = (tabKey: string, field: 'filterCompany' | 'filterCurrency' | 'filterAccount', value: string | null) => {
+    setTbTabs(prev => prev.map(t =>
+      t.key === tabKey
+        ? { ...t, [field]: value }
+        : t
+    ));
   };
 
   // Generate PDF HTML content
@@ -1752,13 +1778,58 @@ const IncomeStatementTemplates: React.FC = () => {
       }).format(amount);
     };
 
-    // Calculate totals
-    const totals = tab.data.reduce(
+    // Get unique filter options
+    const companies = [...new Set(tab.data.map(i => i.company))].filter(Boolean).sort();
+    const currencies = [...new Set(tab.data.map(i => i.currency))].filter(Boolean).sort();
+    const accounts = [...new Set(tab.data.map(i => i.account))].filter(Boolean).sort();
+
+    // Filter data based on selections
+    let filteredData = tab.data;
+    if (tab.filterCompany) {
+      filteredData = filteredData.filter(i => i.company === tab.filterCompany);
+    }
+    if (tab.filterCurrency) {
+      filteredData = filteredData.filter(i => i.currency === tab.filterCurrency);
+    }
+    if (tab.filterAccount) {
+      filteredData = filteredData.filter(i =>
+        i.account?.toLowerCase().includes(tab.filterAccount.toLowerCase()) ||
+        i.account_desc?.toLowerCase().includes(tab.filterAccount.toLowerCase())
+      );
+    }
+
+    // Summarize by account (group by account, sum balances)
+    const summaryMap = new Map<string, TBSummaryRecord>();
+    filteredData.forEach(item => {
+      const key = item.account;
+      if (summaryMap.has(key)) {
+        const existing = summaryMap.get(key)!;
+        existing.opening_balance += item.opening_balance || 0;
+        existing.debit_amount += item.debit_amount || 0;
+        existing.credit_amount += item.credit_amount || 0;
+        existing.closing_balance += item.closing_balance || 0;
+      } else {
+        summaryMap.set(key, {
+          account: item.account,
+          account_desc: item.account_desc,
+          opening_balance: item.opening_balance || 0,
+          debit_amount: item.debit_amount || 0,
+          credit_amount: item.credit_amount || 0,
+          closing_balance: item.closing_balance || 0,
+        });
+      }
+    });
+    const summarizedData = Array.from(summaryMap.values()).sort((a, b) =>
+      (a.account || '').localeCompare(b.account || '')
+    );
+
+    // Calculate totals from summarized data
+    const totals = summarizedData.reduce(
       (acc, item) => ({
-        opening: acc.opening + (item.opening_balance || 0),
-        debit: acc.debit + (item.debit_amount || 0),
-        credit: acc.credit + (item.credit_amount || 0),
-        closing: acc.closing + (item.closing_balance || 0),
+        opening: acc.opening + item.opening_balance,
+        debit: acc.debit + item.debit_amount,
+        credit: acc.credit + item.credit_amount,
+        closing: acc.closing + item.closing_balance,
       }),
       { opening: 0, debit: 0, credit: 0, closing: 0 }
     );
@@ -1771,14 +1842,16 @@ const IncomeStatementTemplates: React.FC = () => {
               <Space>
                 <TableOutlined style={{ color: '#1890ff', fontSize: 20 }} />
                 <Title level={4} style={{ margin: 0 }}>Trial Balance: {tab.periodName}</Title>
-                <Tag color="blue">{tab.data.length} accounts</Tag>
+                <Tag color="blue">{summarizedData.length} accounts</Tag>
+                {(tab.filterCompany || tab.filterCurrency || tab.filterAccount) && (
+                  <Tag color="orange">Filtered</Tag>
+                )}
               </Space>
             </Col>
             <Col>
               <Button
                 icon={<ReloadOutlined />}
                 onClick={() => {
-                  // Re-fetch TB data
                   closeTbTab(tab.key);
                   openTrialBalanceTab(tab.periodName);
                 }}
@@ -1789,9 +1862,64 @@ const IncomeStatementTemplates: React.FC = () => {
           </Row>
         </Card>
 
+        {/* Filters */}
+        <Card size="small" style={{ marginBottom: 16, borderRadius: 8 }}>
+          <Row gutter={16} align="middle">
+            <Col>
+              <Text strong style={{ marginRight: 8 }}>Filters:</Text>
+            </Col>
+            <Col>
+              <Select
+                placeholder="Company"
+                allowClear
+                style={{ width: 150 }}
+                value={tab.filterCompany}
+                onChange={(value) => updateTbFilter(tab.key, 'filterCompany', value || null)}
+                options={companies.map(c => ({ label: c, value: c }))}
+              />
+            </Col>
+            <Col>
+              <Select
+                placeholder="Currency"
+                allowClear
+                style={{ width: 120 }}
+                value={tab.filterCurrency}
+                onChange={(value) => updateTbFilter(tab.key, 'filterCurrency', value || null)}
+                options={currencies.map(c => ({ label: c, value: c }))}
+              />
+            </Col>
+            <Col>
+              <Select
+                placeholder="Search Account"
+                allowClear
+                showSearch
+                style={{ width: 200 }}
+                value={tab.filterAccount || undefined}
+                onChange={(value) => updateTbFilter(tab.key, 'filterAccount', value || '')}
+                filterOption={(input, option) =>
+                  (option?.label?.toString() || '').toLowerCase().includes(input.toLowerCase())
+                }
+                options={accounts.map(a => ({ label: a, value: a }))}
+              />
+            </Col>
+            <Col>
+              <Button
+                size="small"
+                onClick={() => {
+                  updateTbFilter(tab.key, 'filterCompany', null);
+                  updateTbFilter(tab.key, 'filterCurrency', null);
+                  updateTbFilter(tab.key, 'filterAccount', '');
+                }}
+              >
+                Clear Filters
+              </Button>
+            </Col>
+          </Row>
+        </Card>
+
         <Card style={{ borderRadius: 8 }} bodyStyle={{ padding: 0 }}>
           <Table
-            dataSource={tab.data.map((item, idx) => ({ ...item, key: idx }))}
+            dataSource={summarizedData.map((item, idx) => ({ ...item, key: idx }))}
             size="small"
             pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (total) => `Total ${total} accounts` }}
             scroll={{ y: 500 }}
@@ -1813,90 +1941,74 @@ const IncomeStatementTemplates: React.FC = () => {
                 sorter: (a, b) => (a.account_desc || '').localeCompare(b.account_desc || ''),
               },
               {
-                title: 'Company',
-                dataIndex: 'company',
-                key: 'company',
-                width: 100,
-                filters: [...new Set(tab.data.map(i => i.company))].map(c => ({ text: c, value: c })),
-                onFilter: (value, record) => record.company === value,
-              },
-              {
-                title: 'Currency',
-                dataIndex: 'currency',
-                key: 'currency',
-                width: 80,
-                filters: [...new Set(tab.data.map(i => i.currency))].map(c => ({ text: c, value: c })),
-                onFilter: (value, record) => record.currency === value,
-              },
-              {
                 title: 'Opening Balance',
                 dataIndex: 'opening_balance',
                 key: 'opening_balance',
                 align: 'right',
-                width: 130,
+                width: 140,
                 render: (val: number) => (
                   <Text style={{ fontFamily: 'monospace', color: val < 0 ? '#cf1322' : undefined }}>
                     {formatTBAmount(val)}
                   </Text>
                 ),
-                sorter: (a, b) => (a.opening_balance || 0) - (b.opening_balance || 0),
+                sorter: (a, b) => a.opening_balance - b.opening_balance,
               },
               {
                 title: 'Debit',
                 dataIndex: 'debit_amount',
                 key: 'debit_amount',
                 align: 'right',
-                width: 120,
+                width: 130,
                 render: (val: number) => (
                   <Text style={{ fontFamily: 'monospace', color: '#389e0d' }}>
                     {formatTBAmount(val)}
                   </Text>
                 ),
-                sorter: (a, b) => (a.debit_amount || 0) - (b.debit_amount || 0),
+                sorter: (a, b) => a.debit_amount - b.debit_amount,
               },
               {
                 title: 'Credit',
                 dataIndex: 'credit_amount',
                 key: 'credit_amount',
                 align: 'right',
-                width: 120,
+                width: 130,
                 render: (val: number) => (
                   <Text style={{ fontFamily: 'monospace', color: '#cf1322' }}>
                     {formatTBAmount(val)}
                   </Text>
                 ),
-                sorter: (a, b) => (a.credit_amount || 0) - (b.credit_amount || 0),
+                sorter: (a, b) => a.credit_amount - b.credit_amount,
               },
               {
                 title: 'Closing Balance',
                 dataIndex: 'closing_balance',
                 key: 'closing_balance',
                 align: 'right',
-                width: 130,
+                width: 140,
                 render: (val: number) => (
                   <Text strong style={{ fontFamily: 'monospace', color: val < 0 ? '#cf1322' : undefined }}>
                     {formatTBAmount(val)}
                   </Text>
                 ),
-                sorter: (a, b) => (a.closing_balance || 0) - (b.closing_balance || 0),
+                sorter: (a, b) => a.closing_balance - b.closing_balance,
               },
             ]}
             summary={() => (
               <Table.Summary fixed>
                 <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 'bold' }}>
-                  <Table.Summary.Cell index={0} colSpan={4}>
+                  <Table.Summary.Cell index={0} colSpan={2}>
                     <Text strong>Total</Text>
                   </Table.Summary.Cell>
-                  <Table.Summary.Cell index={4} align="right">
+                  <Table.Summary.Cell index={2} align="right">
                     <Text strong style={{ fontFamily: 'monospace' }}>{formatTBAmount(totals.opening)}</Text>
                   </Table.Summary.Cell>
-                  <Table.Summary.Cell index={5} align="right">
+                  <Table.Summary.Cell index={3} align="right">
                     <Text strong style={{ fontFamily: 'monospace', color: '#389e0d' }}>{formatTBAmount(totals.debit)}</Text>
                   </Table.Summary.Cell>
-                  <Table.Summary.Cell index={6} align="right">
+                  <Table.Summary.Cell index={4} align="right">
                     <Text strong style={{ fontFamily: 'monospace', color: '#cf1322' }}>{formatTBAmount(totals.credit)}</Text>
                   </Table.Summary.Cell>
-                  <Table.Summary.Cell index={7} align="right">
+                  <Table.Summary.Cell index={5} align="right">
                     <Text strong style={{ fontFamily: 'monospace' }}>{formatTBAmount(totals.closing)}</Text>
                   </Table.Summary.Cell>
                 </Table.Summary.Row>
