@@ -107,6 +107,7 @@ interface ReportTab {
   templateId: number;
   periodYear: number;
   periodNum: number;
+  ledgerId: number;  // Ledger ID
   periods: ReportPeriod[];  // For multi-period comparison
   report: plService.PLReport | null;
   reports: plService.PLReport[];  // For multi-period comparison
@@ -143,6 +144,11 @@ const IncomeStatementTemplates: React.FC = () => {
   const [debugModalVisible, setDebugModalVisible] = useState(false);
   const [debugData, setDebugData] = useState<any>(null);
   const [debugLoading, setDebugLoading] = useState(false);
+
+  // Ledger states
+  const [ledgers, setLedgers] = useState<{ ledger_id: number; ledger_name: string }[]>([]);
+  const [selectedLedgerId, setSelectedLedgerId] = useState<number | null>(null);
+  const [loadingLedgers, setLoadingLedgers] = useState(false);
 
   // Edit context
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
@@ -181,10 +187,27 @@ const IncomeStatementTemplates: React.FC = () => {
     setGlAccountsLoading(false);
   };
 
-  // Load templates on mount
+  // Load templates and ledgers on mount
   useEffect(() => {
     loadTemplates();
+    loadLedgers();
   }, []);
+
+  const loadLedgers = async () => {
+    setLoadingLedgers(true);
+    try {
+      const response = await fetch(`${APEX_DB_CONFIG.baseUrl.replace('/reerp', '/reerp')}/ledgers`);
+      const data = await response.json();
+      if (data.items && data.items.length > 0) {
+        setLedgers(data.items);
+        // Auto-select first ledger
+        setSelectedLedgerId(data.items[0].ledger_id);
+      }
+    } catch (error) {
+      console.error('Error fetching ledgers:', error);
+    }
+    setLoadingLedgers(false);
+  };
 
   const loadTemplates = async () => {
     setLoading(true);
@@ -630,8 +653,13 @@ const IncomeStatementTemplates: React.FC = () => {
       return;
     }
 
+    if (!selectedLedgerId) {
+      message.warning('Please select a ledger');
+      return;
+    }
+
     const periodsKey = selectedPeriods.map(p => `${p.year}-${p.num}`).join('_');
-    const tabKey = `report-${reportTemplateId}-${periodsKey}`;
+    const tabKey = `report-${reportTemplateId}-${selectedLedgerId}-${periodsKey}`;
 
     // Check if report tab already exists
     const existingTab = reportTabs.find(t => t.key === tabKey);
@@ -640,6 +668,10 @@ const IncomeStatementTemplates: React.FC = () => {
       setReportPeriodModalVisible(false);
       return;
     }
+
+    // Get ledger name for label
+    const ledger = ledgers.find(l => l.ledger_id === selectedLedgerId);
+    const ledgerName = ledger?.ledger_name || 'Unknown Ledger';
 
     // Create label
     let tabLabel = reportTemplateName;
@@ -657,6 +689,7 @@ const IncomeStatementTemplates: React.FC = () => {
       templateId: reportTemplateId,
       periodYear: selectedPeriods[0].year,
       periodNum: selectedPeriods[0].num,
+      ledgerId: selectedLedgerId,
       periods: [...selectedPeriods],
       report: null,
       reports: [],
@@ -667,10 +700,10 @@ const IncomeStatementTemplates: React.FC = () => {
     setActiveTabKey(tabKey);
     setReportPeriodModalVisible(false);
 
-    // Fetch reports for all periods
+    // Fetch reports for all periods with the selected ledger
     try {
       const reportPromises = selectedPeriods.map(p =>
-        plService.getPLReport(reportTemplateId, p.year, p.num)
+        plService.getPLReport(reportTemplateId, p.year, p.num, selectedLedgerId)
       );
       const responses = await Promise.all(reportPromises);
 
@@ -827,13 +860,13 @@ const IncomeStatementTemplates: React.FC = () => {
   };
 
   // Debug: Show raw report data
-  const handleDebugReport = async (templateId: number, periodYear: number, periodNum: number) => {
+  const handleDebugReport = async (templateId: number, periodYear: number, periodNum: number, ledgerId: number) => {
     setDebugLoading(true);
     setDebugModalVisible(true);
 
     try {
       const baseUrl = APEX_DB_CONFIG.baseUrl;
-      const url = `${baseUrl}/pl/report/${templateId}?period_year=${periodYear}&period_num=${periodNum}&ledger_id=1`;
+      const url = `${baseUrl}/pl/report/${templateId}?period_year=${periodYear}&period_num=${periodNum}&ledger_id=${ledgerId}`;
 
       console.log('Debug - Fetching:', url);
 
@@ -1463,7 +1496,7 @@ const IncomeStatementTemplates: React.FC = () => {
                       type="text"
                       size="small"
                       icon={<BugOutlined />}
-                      onClick={() => handleDebugReport(tab.templateId, tab.periodYear, tab.periodNum)}
+                      onClick={() => handleDebugReport(tab.templateId, tab.periodYear, tab.periodNum, tab.ledgerId)}
                       style={{ color: '#faad14' }}
                     />
                   </Tooltip>
@@ -1474,7 +1507,7 @@ const IncomeStatementTemplates: React.FC = () => {
               <Space>
                 <Button
                   icon={<BugOutlined />}
-                  onClick={() => handleDebugReport(tab.templateId, tab.periodYear, tab.periodNum)}
+                  onClick={() => handleDebugReport(tab.templateId, tab.periodYear, tab.periodNum, tab.ledgerId)}
                   style={{ background: '#faad14', borderColor: '#faad14', color: '#fff' }}
                 >
                   Debug Data
@@ -2786,7 +2819,7 @@ const IncomeStatementTemplates: React.FC = () => {
               <Button
                 type="primary"
                 onClick={handleGenerateReport}
-                disabled={selectedPeriods.length === 0}
+                disabled={selectedPeriods.length === 0 || !selectedLedgerId}
                 style={{ background: REDWOOD.primary }}
               >
                 Generate Report ({selectedPeriods.length} period{selectedPeriods.length !== 1 ? 's' : ''})
@@ -2799,6 +2832,25 @@ const IncomeStatementTemplates: React.FC = () => {
             Select accounting periods for <strong>{reportTemplateName}</strong>.
             Add multiple periods for a comparative P&L report.
           </Text>
+
+          {/* Ledger Selection */}
+          <Card size="small" title="Select Ledger" style={{ marginBottom: 16, background: '#f9f9f9' }}>
+            <Select
+              placeholder="Select Ledger"
+              style={{ width: '100%' }}
+              value={selectedLedgerId}
+              onChange={(value) => setSelectedLedgerId(value)}
+              loading={loadingLedgers}
+              showSearch
+              optionFilterProp="children"
+            >
+              {ledgers.map(l => (
+                <Select.Option key={l.ledger_id} value={l.ledger_id}>
+                  {l.ledger_name} (ID: {l.ledger_id})
+                </Select.Option>
+              ))}
+            </Select>
+          </Card>
 
           {/* Period Selection */}
           <Form form={reportPeriodForm} layout="inline" style={{ marginBottom: 16 }}>
