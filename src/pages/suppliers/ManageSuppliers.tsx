@@ -377,6 +377,38 @@ const ManageSuppliers: React.FC = () => {
         params: '',
         description: 'Fetches suppliers from APEX database',
       },
+      {
+        name: 'Supplier Balance Dashboard',
+        method: 'GET',
+        proxyUrl: `${PROXY_CONFIG.baseUrl}/apex/suppliers/balance/dashboard/{supplierNumber}`,
+        actualUrl: 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/suppliers/balance/dashboard/{supplierNumber}',
+        params: '',
+        description: 'Fetches supplier balance summary, aging report, and supplier details',
+      },
+      {
+        name: 'Supplier Balance Invoices',
+        method: 'GET',
+        proxyUrl: `${PROXY_CONFIG.baseUrl}/apex/suppliers/balance/invoices/{supplierNumber}`,
+        actualUrl: 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/suppliers/balance/invoices/{supplierNumber}',
+        params: '',
+        description: 'Fetches all invoices for a supplier with amounts and status',
+      },
+      {
+        name: 'Supplier Balance Payments',
+        method: 'GET',
+        proxyUrl: `${PROXY_CONFIG.baseUrl}/apex/suppliers/balance/payments/{supplierNumber}`,
+        actualUrl: 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/suppliers/balance/payments/{supplierNumber}',
+        params: '',
+        description: 'Fetches all payments made to a supplier',
+      },
+      {
+        name: 'Payment Drilldown (Related Invoices)',
+        method: 'GET',
+        proxyUrl: `${PROXY_CONFIG.baseUrl}/apex/suppliers/balance/payment-invoices/{checkId}`,
+        actualUrl: 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/suppliers/balance/payment-invoices/{checkId}',
+        params: '',
+        description: 'Fetches invoices related to a specific payment check',
+      },
     ],
   };
 
