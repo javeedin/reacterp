@@ -338,24 +338,34 @@ export const syncAPInvoices = async (
   };
 
   // Determine limits based on mode
-  const pageSize = 25; // Always fetch 25 per page
-  const maxRecords = testMode === 'single' ? 1 : (testMode ? 25 : 500);
-  const totalPages = Math.ceil(maxRecords / pageSize);
-  const verbose = testMode !== false;
+  let pageSize: number;
+  let maxRecords: number | null; // null means no limit (fetch all)
 
-  const modeLabel = testMode === 'single' ? 'SINGLE RECORD DEBUG' : (testMode ? 'TEST MODE (25 invoices)' : 'FULL SYNC (500 invoices)');
+  if (testMode === 'single') {
+    pageSize = 1;
+    maxRecords = 1;
+  } else if (testMode === true) {
+    pageSize = 25;
+    maxRecords = 25;
+  } else {
+    pageSize = 25; // Fetch 25 per page for full sync (AP has child records to process)
+    maxRecords = null; // No limit - fetch all pages
+  }
+
+  const verbose = testMode !== false;
+  const modeLabel = testMode === 'single' ? 'SINGLE RECORD DEBUG' : (testMode ? 'TEST MODE (25 invoices)' : 'FULL SYNC (all invoices)');
 
   try {
     // ========================================
     // STEP 1: Fetch Invoices from Oracle Fusion
     // ========================================
-    updateProgress({ status: 'fetching', totalPages });
+    updateProgress({ status: 'fetching' });
     if (verbose) {
       log?.('step', '═══════════════════════════════════════════════════════════');
       log?.('step', `  AP INVOICES SYNC - ${modeLabel}`);
       log?.('step', '═══════════════════════════════════════════════════════════');
       log?.('info', `Parameters: ${JSON.stringify(parameters)}`);
-      log?.('info', `Max Records: ${maxRecords}, Page Size: ${pageSize}, Total Pages: ${totalPages}`);
+      log?.('info', `Max Records: ${maxRecords === null ? 'Unlimited (all pages)' : maxRecords}, Page Size: ${pageSize}`);
     }
 
     let allInvoices: APInvoice[] = [];
@@ -363,16 +373,17 @@ export const syncAPInvoices = async (
     let hasMore = true;
 
     // Fetch with pagination
-    while (hasMore && allInvoices.length < maxRecords && !abortSignal?.aborted) {
+    while (hasMore && (maxRecords === null || allInvoices.length < maxRecords) && !abortSignal?.aborted) {
       currentPage++;
       updateProgress({ currentPage });
 
       const offset = (currentPage - 1) * pageSize;
-      const remainingNeeded = maxRecords - allInvoices.length;
-      const fetchLimit = Math.min(pageSize, remainingNeeded);
+      const fetchLimit = maxRecords !== null
+        ? Math.min(pageSize, maxRecords - allInvoices.length)
+        : pageSize;
 
       if (verbose) {
-        log?.('info', `Page ${currentPage}/${totalPages}: Fetching offset=${offset}, limit=${fetchLimit}`);
+        log?.('info', `Page ${currentPage}: Fetching offset=${offset}, limit=${fetchLimit}`);
       }
 
       // Build query parameters
@@ -411,7 +422,12 @@ export const syncAPInvoices = async (
       }
 
       allInvoices = [...allInvoices, ...result.items];
-      hasMore = result.hasMore && allInvoices.length < maxRecords;
+      // Check if there are more records - also check if we got less than requested (end of data)
+      hasMore = result.hasMore && result.items.length === fetchLimit;
+      // Also check if we've reached maxRecords limit (for test modes)
+      if (maxRecords !== null && allInvoices.length >= maxRecords) {
+        hasMore = false;
+      }
 
       if (verbose) {
         log?.('success', `Page ${currentPage}: Fetched ${result.items.length} invoices (Total: ${allInvoices.length})`);
