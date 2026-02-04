@@ -24,6 +24,8 @@ import {
   Modal,
   Tag,
   Tooltip,
+  Statistic,
+  Progress,
 } from 'antd';
 import {
   HomeOutlined,
@@ -46,6 +48,10 @@ import {
   CopyOutlined,
   CheckOutlined,
   DollarOutlined,
+  FileTextOutlined,
+  CreditCardOutlined,
+  ExclamationCircleOutlined,
+  CalendarOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -137,6 +143,82 @@ interface SupplierTab {
   supplier: SupplierRecord;
   detail?: SupplierDetail;
   loading?: boolean;
+  tabType: 'detail' | 'balance';
+}
+
+// Balance tab interfaces
+interface BalanceSummary {
+  totalInvoices: number;
+  totalInvoiceAmount: number;
+  totalPayments: number;
+  totalPaymentAmount: number;
+  balance: number;
+  currency: string;
+}
+
+interface AgingBucket {
+  bucket: string;
+  amount: number;
+  invoiceCount: number;
+  percentage: number;
+}
+
+interface SupplierAddress {
+  addressLine1: string;
+  addressLine2: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  country: string;
+}
+
+interface BalanceData {
+  supplier: {
+    supplierId: number;
+    supplierNumber: string;
+    supplierName: string;
+    supplierType: string | null;
+    status: string;
+    taxRegistrationNumber: string | null;
+    creationDate: string | null;
+    address: SupplierAddress | null;
+  };
+  balanceSummary: BalanceSummary;
+  agingReport: AgingBucket[];
+}
+
+interface InvoiceRecord {
+  key: string;
+  invoiceId: number;
+  invoiceNumber: string;
+  invoiceDate: string;
+  invoiceAmount: number;
+  amountPaid: number;
+  amountRemaining: number;
+  invoiceStatus: string;
+  currency: string;
+  description: string;
+}
+
+interface PaymentRecord {
+  key: string;
+  paymentId: number;
+  checkId: number;
+  paymentNumber: string;
+  paymentDate: string;
+  paymentAmount: number;
+  paymentStatus: string;
+  paymentMethod: string;
+  currency: string;
+  bankAccountName: string;
+}
+
+interface RelatedInvoice {
+  key: string;
+  invoiceId: number;
+  invoiceNumber: string;
+  invoiceAmount: number;
+  amountApplied: number;
 }
 
 // Helper function to format date
@@ -248,6 +330,20 @@ const ManageSuppliers: React.FC = () => {
   const [activeTab, setActiveTab] = useState('search');
   const [openTabs, setOpenTabs] = useState<SupplierTab[]>([]);
 
+  // Balance tab state - stored per tab key
+  const [balanceDataMap, setBalanceDataMap] = useState<Record<string, BalanceData | null>>({});
+  const [invoicesMap, setInvoicesMap] = useState<Record<string, InvoiceRecord[]>>({});
+  const [paymentsMap, setPaymentsMap] = useState<Record<string, PaymentRecord[]>>({});
+  const [balanceLoadingMap, setBalanceLoadingMap] = useState<Record<string, boolean>>({});
+  const [invoicesLoadingMap, setInvoicesLoadingMap] = useState<Record<string, boolean>>({});
+  const [paymentsLoadingMap, setPaymentsLoadingMap] = useState<Record<string, boolean>>({});
+
+  // Payment drilldown modal
+  const [drilldownVisible, setDrilldownVisible] = useState(false);
+  const [drilldownPayment, setDrilldownPayment] = useState<PaymentRecord | null>(null);
+  const [relatedInvoices, setRelatedInvoices] = useState<RelatedInvoice[]>([]);
+  const [drilldownLoading, setDrilldownLoading] = useState(false);
+
   // API Info Modal state
   const [apiModalVisible, setApiModalVisible] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
@@ -312,7 +408,159 @@ const ManageSuppliers: React.FC = () => {
     }
   };
 
-  // Open supplier in new tab
+  // Fetch balance dashboard data
+  const fetchBalanceDashboard = async (supplierNumber: string): Promise<BalanceData | null> => {
+    try {
+      const url = `${PROXY_CONFIG.baseUrl}/apex/suppliers/balance/dashboard/${supplierNumber}`;
+      console.log('Fetching balance dashboard:', url);
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('Balance dashboard response:', data);
+
+      if (data.success === 'false') {
+        throw new Error(data.error || 'Failed to load balance data');
+      }
+
+      return {
+        supplier: {
+          supplierId: data.supplier?.supplier_id || 0,
+          supplierNumber: data.supplier?.supplier_number || supplierNumber,
+          supplierName: data.supplier?.supplier_name || '',
+          supplierType: data.supplier?.supplier_type || null,
+          status: data.supplier?.status || 'Active',
+          taxRegistrationNumber: data.supplier?.tax_registration_number || null,
+          creationDate: data.supplier?.creation_date || null,
+          address: data.supplier?.address ? {
+            addressLine1: data.supplier.address.address_line_1 || '',
+            addressLine2: data.supplier.address.address_line_2 || '',
+            city: data.supplier.address.city || '',
+            state: data.supplier.address.state || '',
+            postalCode: data.supplier.address.postal_code || '',
+            country: data.supplier.address.country || '',
+          } : null,
+        },
+        balanceSummary: {
+          totalInvoices: data.balance_summary?.total_invoices || 0,
+          totalInvoiceAmount: data.balance_summary?.total_invoice_amount || 0,
+          totalPayments: data.balance_summary?.total_payments || 0,
+          totalPaymentAmount: data.balance_summary?.total_payment_amount || 0,
+          balance: data.balance_summary?.balance || 0,
+          currency: data.balance_summary?.currency || 'AED',
+        },
+        agingReport: (data.aging_report || []).map((item: any) => ({
+          bucket: item.bucket || '',
+          amount: item.amount || 0,
+          invoiceCount: item.invoice_count || 0,
+          percentage: item.percentage || 0,
+        })),
+      };
+    } catch (error) {
+      console.error('Error fetching balance dashboard:', error);
+      message.error(`Failed to load balance: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return null;
+    }
+  };
+
+  // Fetch invoices for balance tab
+  const fetchBalanceInvoices = async (supplierNumber: string, tabKey: string) => {
+    setInvoicesLoadingMap(prev => ({ ...prev, [tabKey]: true }));
+    try {
+      const url = `${PROXY_CONFIG.baseUrl}/apex/suppliers/balance/invoices/${supplierNumber}`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+      const data = await response.json();
+      const items = data.invoices || [];
+      setInvoicesMap(prev => ({
+        ...prev,
+        [tabKey]: items.map((item: any, index: number) => ({
+          key: item.invoice_id?.toString() || index.toString(),
+          invoiceId: item.invoice_id,
+          invoiceNumber: item.invoice_number || '',
+          invoiceDate: item.invoice_date || '',
+          invoiceAmount: item.invoice_amount || 0,
+          amountPaid: item.amount_paid || 0,
+          amountRemaining: item.amount_remaining || 0,
+          invoiceStatus: item.invoice_status || '',
+          currency: item.currency || 'AED',
+          description: item.description || '',
+        })),
+      }));
+    } catch (error) {
+      console.error('Error fetching invoices:', error);
+      message.error('Failed to load invoices');
+    } finally {
+      setInvoicesLoadingMap(prev => ({ ...prev, [tabKey]: false }));
+    }
+  };
+
+  // Fetch payments for balance tab
+  const fetchBalancePayments = async (supplierNumber: string, tabKey: string) => {
+    setPaymentsLoadingMap(prev => ({ ...prev, [tabKey]: true }));
+    try {
+      const url = `${PROXY_CONFIG.baseUrl}/apex/suppliers/balance/payments/${supplierNumber}`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+      const data = await response.json();
+      const items = data.payments || [];
+      setPaymentsMap(prev => ({
+        ...prev,
+        [tabKey]: items.map((item: any, index: number) => ({
+          key: item.payment_id?.toString() || index.toString(),
+          paymentId: item.payment_id,
+          checkId: item.check_id,
+          paymentNumber: item.payment_number || '',
+          paymentDate: item.payment_date || '',
+          paymentAmount: item.payment_amount || 0,
+          paymentStatus: item.payment_status || '',
+          paymentMethod: item.payment_method || '',
+          currency: item.currency || 'AED',
+          bankAccountName: item.bank_account_name || '',
+        })),
+      }));
+    } catch (error) {
+      console.error('Error fetching payments:', error);
+      message.error('Failed to load payments');
+    } finally {
+      setPaymentsLoadingMap(prev => ({ ...prev, [tabKey]: false }));
+    }
+  };
+
+  // Fetch payment drilldown
+  const fetchPaymentDrilldown = async (payment: PaymentRecord) => {
+    setDrilldownPayment(payment);
+    setDrilldownVisible(true);
+    setDrilldownLoading(true);
+
+    try {
+      const url = `${PROXY_CONFIG.baseUrl}/apex/suppliers/balance/payment-invoices/${payment.checkId}`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+      const data = await response.json();
+      const items = data.invoices || [];
+      setRelatedInvoices(items.map((item: any, index: number) => ({
+        key: item.invoice_id?.toString() || index.toString(),
+        invoiceId: item.invoice_id,
+        invoiceNumber: item.invoice_number || '',
+        invoiceAmount: item.invoice_amount || 0,
+        amountApplied: item.amount_applied || 0,
+      })));
+    } catch (error) {
+      console.error('Error fetching drilldown:', error);
+      message.error('Failed to load related invoices');
+    } finally {
+      setDrilldownLoading(false);
+    }
+  };
+
+  // Open supplier detail in new tab
   const openSupplierTab = async (record: SupplierRecord) => {
     const tabKey = `supplier-${record.supplierId}`;
 
@@ -329,6 +577,7 @@ const ManageSuppliers: React.FC = () => {
       label: record.supplier,
       supplier: record,
       loading: dataSource === 'fusion',
+      tabType: 'detail',
     };
     setOpenTabs([...openTabs, newTab]);
     setActiveTab(tabKey);
@@ -342,6 +591,40 @@ const ManageSuppliers: React.FC = () => {
         )
       );
     }
+  };
+
+  // Open supplier balance in new tab
+  const openBalanceTab = async (record: SupplierRecord) => {
+    const tabKey = `balance-${record.supplierNumber}`;
+
+    // Check if tab already exists
+    const existingTab = openTabs.find((tab) => tab.key === tabKey);
+    if (existingTab) {
+      setActiveTab(tabKey);
+      return;
+    }
+
+    // Add new tab with loading state
+    const newTab: SupplierTab = {
+      key: tabKey,
+      label: record.supplier,
+      supplier: record,
+      loading: true,
+      tabType: 'balance',
+    };
+    setOpenTabs([...openTabs, newTab]);
+    setActiveTab(tabKey);
+    setBalanceLoadingMap(prev => ({ ...prev, [tabKey]: true }));
+
+    // Fetch balance dashboard
+    const balanceData = await fetchBalanceDashboard(record.supplierNumber);
+    setBalanceDataMap(prev => ({ ...prev, [tabKey]: balanceData }));
+    setBalanceLoadingMap(prev => ({ ...prev, [tabKey]: false }));
+    setOpenTabs((prevTabs) =>
+      prevTabs.map((tab) =>
+        tab.key === tabKey ? { ...tab, loading: false } : tab
+      )
+    );
   };
 
   // Close supplier tab
@@ -506,7 +789,7 @@ const ManageSuppliers: React.FC = () => {
           icon={<DollarOutlined />}
           onClick={(e) => {
             e.stopPropagation();
-            navigate(`/suppliers/balance/${record.supplierNumber}`);
+            openBalanceTab(record);
           }}
           style={{ background: REDWOOD.success }}
         >
@@ -1055,6 +1338,255 @@ const ManageSuppliers: React.FC = () => {
     </div>
   );
 
+  // Format currency helper
+  const formatCurrency = (amount: number, currency: string = 'AED'): string => {
+    return new Intl.NumberFormat('en-AE', {
+      style: 'currency',
+      currency: currency,
+      minimumFractionDigits: 2,
+    }).format(amount);
+  };
+
+  // Get aging color helper
+  const getAgingColor = (bucket: string): string => {
+    switch (bucket) {
+      case 'Current': return REDWOOD.success;
+      case '1-30 Days': return REDWOOD.info;
+      case '31-60 Days': return REDWOOD.warning;
+      case '61-90 Days': return '#FF8C00';
+      case '91-120 Days': return REDWOOD.primary;
+      case '120+ Days': return REDWOOD.error;
+      default: return REDWOOD.neutral600;
+    }
+  };
+
+  // Render supplier balance tab content
+  const renderSupplierBalanceTab = (tab: SupplierTab) => {
+    const tabKey = tab.key;
+    const balanceData = balanceDataMap[tabKey];
+    const invoices = invoicesMap[tabKey] || [];
+    const payments = paymentsMap[tabKey] || [];
+    const isLoading = balanceLoadingMap[tabKey];
+    const invoicesLoading = invoicesLoadingMap[tabKey];
+    const paymentsLoading = paymentsLoadingMap[tabKey];
+
+    if (tab.loading || isLoading) {
+      return (
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 400 }}>
+          <Spin size="large" tip="Loading supplier balance..." />
+        </div>
+      );
+    }
+
+    if (!balanceData) {
+      return (
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 400 }}>
+          <Text type="secondary">Failed to load balance data</Text>
+        </div>
+      );
+    }
+
+    const { supplier, balanceSummary, agingReport } = balanceData;
+
+    // Invoice columns
+    const invoiceColumns = [
+      { title: 'Invoice Number', dataIndex: 'invoiceNumber', key: 'invoiceNumber', width: 140 },
+      { title: 'Invoice Date', dataIndex: 'invoiceDate', key: 'invoiceDate', width: 110 },
+      {
+        title: 'Amount', dataIndex: 'invoiceAmount', key: 'invoiceAmount', width: 130, align: 'right' as const,
+        render: (amt: number) => <Text strong>{formatCurrency(amt)}</Text>
+      },
+      {
+        title: 'Paid', dataIndex: 'amountPaid', key: 'amountPaid', width: 130, align: 'right' as const,
+        render: (amt: number) => <Text style={{ color: REDWOOD.success }}>{formatCurrency(amt)}</Text>
+      },
+      {
+        title: 'Balance', dataIndex: 'amountRemaining', key: 'amountRemaining', width: 130, align: 'right' as const,
+        render: (amt: number) => <Text style={{ color: amt > 0 ? REDWOOD.error : REDWOOD.success }}>{formatCurrency(amt)}</Text>
+      },
+      {
+        title: 'Status', dataIndex: 'invoiceStatus', key: 'invoiceStatus', width: 100,
+        render: (status: string) => <Tag>{status || '-'}</Tag>
+      },
+      { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
+    ];
+
+    // Payment columns
+    const paymentColumns = [
+      {
+        title: 'Payment Number', dataIndex: 'paymentNumber', key: 'paymentNumber', width: 150,
+        render: (text: string, record: PaymentRecord) => (
+          <a onClick={() => fetchPaymentDrilldown(record)} style={{ color: REDWOOD.info }}>{text}</a>
+        )
+      },
+      { title: 'Payment Date', dataIndex: 'paymentDate', key: 'paymentDate', width: 110 },
+      {
+        title: 'Amount', dataIndex: 'paymentAmount', key: 'paymentAmount', width: 140, align: 'right' as const,
+        render: (amt: number) => <Text strong style={{ color: REDWOOD.success }}>{formatCurrency(amt)}</Text>
+      },
+      {
+        title: 'Status', dataIndex: 'paymentStatus', key: 'paymentStatus', width: 100,
+        render: (status: string) => <Tag color={status === 'NEGOTIABLE' ? 'green' : 'default'}>{status}</Tag>
+      },
+      { title: 'Method', dataIndex: 'paymentMethod', key: 'paymentMethod', width: 100 },
+      { title: 'Bank Account', dataIndex: 'bankAccountName', key: 'bankAccountName', ellipsis: true },
+    ];
+
+    // Handle balance tab change to lazy load data
+    const handleBalanceTabChange = (key: string) => {
+      if (key === 'invoices' && invoices.length === 0 && !invoicesLoading) {
+        fetchBalanceInvoices(tab.supplier.supplierNumber, tabKey);
+      } else if (key === 'payments' && payments.length === 0 && !paymentsLoading) {
+        fetchBalancePayments(tab.supplier.supplierNumber, tabKey);
+      }
+    };
+
+    return (
+      <div style={{ padding: '0 24px 24px' }}>
+        {/* Supplier Header */}
+        <Card style={{ marginBottom: 16, borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
+          <Row gutter={24} align="middle">
+            <Col span={16}>
+              <Row align="middle" gutter={16}>
+                <Col>
+                  <div style={{ width: 56, height: 56, borderRadius: '50%', background: REDWOOD.primary, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <UserOutlined style={{ fontSize: 24, color: '#fff' }} />
+                  </div>
+                </Col>
+                <Col>
+                  <Title level={4} style={{ margin: 0 }}>{supplier.supplierName}</Title>
+                  <Space>
+                    <Tag color={REDWOOD.info}>{supplier.supplierNumber}</Tag>
+                    <Tag color={supplier.status === 'Active' ? REDWOOD.success : REDWOOD.error}>{supplier.status}</Tag>
+                    {supplier.supplierType && <Tag>{supplier.supplierType}</Tag>}
+                  </Space>
+                </Col>
+              </Row>
+              {supplier.address && (
+                <>
+                  <Divider style={{ margin: '12px 0' }} />
+                  <Space>
+                    <EnvironmentOutlined style={{ color: REDWOOD.neutral600 }} />
+                    <Text type="secondary">
+                      {[supplier.address.addressLine1, supplier.address.city, supplier.address.country].filter(Boolean).join(', ')}
+                    </Text>
+                  </Space>
+                </>
+              )}
+            </Col>
+            <Col span={8}>
+              <Card style={{ background: balanceSummary.balance > 0 ? '#fff2f0' : '#f6ffed', borderColor: balanceSummary.balance > 0 ? REDWOOD.error : REDWOOD.success }}>
+                <Statistic
+                  title={<Text strong>Outstanding Balance</Text>}
+                  value={balanceSummary.balance}
+                  precision={2}
+                  prefix={balanceSummary.currency}
+                  valueStyle={{ color: balanceSummary.balance > 0 ? REDWOOD.error : REDWOOD.success, fontSize: 24 }}
+                />
+              </Card>
+            </Col>
+          </Row>
+        </Card>
+
+        {/* Balance Tabs */}
+        <Card style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
+          <Tabs
+            defaultActiveKey="summary"
+            onChange={handleBalanceTabChange}
+            items={[
+              {
+                key: 'summary',
+                label: <Space><DollarOutlined />Balance Summary</Space>,
+                children: (
+                  <div>
+                    {/* Summary Cards */}
+                    <Row gutter={16} style={{ marginBottom: 24 }}>
+                      <Col span={6}>
+                        <Card size="small">
+                          <Statistic title="Total Invoices" value={balanceSummary.totalInvoices} prefix={<FileTextOutlined style={{ color: REDWOOD.info }} />} />
+                        </Card>
+                      </Col>
+                      <Col span={6}>
+                        <Card size="small">
+                          <Statistic title="Invoice Amount" value={balanceSummary.totalInvoiceAmount} precision={2} suffix={balanceSummary.currency} valueStyle={{ fontSize: 18 }} />
+                        </Card>
+                      </Col>
+                      <Col span={6}>
+                        <Card size="small">
+                          <Statistic title="Total Payments" value={balanceSummary.totalPayments} prefix={<CreditCardOutlined style={{ color: REDWOOD.success }} />} />
+                        </Card>
+                      </Col>
+                      <Col span={6}>
+                        <Card size="small">
+                          <Statistic title="Paid Amount" value={balanceSummary.totalPaymentAmount} precision={2} suffix={balanceSummary.currency} valueStyle={{ color: REDWOOD.success, fontSize: 18 }} />
+                        </Card>
+                      </Col>
+                    </Row>
+
+                    {/* Aging Report */}
+                    <Card title={<Space><ExclamationCircleOutlined style={{ color: REDWOOD.warning }} /><Text strong>Aging Report</Text></Space>} size="small" style={{ marginBottom: 16 }}>
+                      <Row gutter={12}>
+                        {agingReport.map((bucket, index) => (
+                          <Col span={4} key={index}>
+                            <Card size="small" style={{ borderTop: `3px solid ${getAgingColor(bucket.bucket)}`, textAlign: 'center' }}>
+                              <Text type="secondary" style={{ fontSize: 11 }}>{bucket.bucket}</Text>
+                              <div style={{ margin: '8px 0' }}>
+                                <Text strong style={{ fontSize: 16, color: getAgingColor(bucket.bucket) }}>{formatCurrency(bucket.amount)}</Text>
+                              </div>
+                              <Tag style={{ fontSize: 10 }}>{bucket.invoiceCount} inv</Tag>
+                              <Progress percent={bucket.percentage} size="small" strokeColor={getAgingColor(bucket.bucket)} showInfo={false} style={{ marginTop: 8 }} />
+                              <Text type="secondary" style={{ fontSize: 10 }}>{bucket.percentage.toFixed(1)}%</Text>
+                            </Card>
+                          </Col>
+                        ))}
+                      </Row>
+                    </Card>
+
+                    {/* Balance Calculation */}
+                    <Card title="Balance Calculation" size="small">
+                      <Descriptions column={1} bordered size="small">
+                        <Descriptions.Item label="Total Invoice Amount"><Text strong>{formatCurrency(balanceSummary.totalInvoiceAmount)}</Text></Descriptions.Item>
+                        <Descriptions.Item label="Total Payment Amount"><Text style={{ color: REDWOOD.success }}>- {formatCurrency(balanceSummary.totalPaymentAmount)}</Text></Descriptions.Item>
+                        <Descriptions.Item label="Outstanding Balance">
+                          <Text strong style={{ fontSize: 16, color: balanceSummary.balance > 0 ? REDWOOD.error : REDWOOD.success }}>= {formatCurrency(balanceSummary.balance)}</Text>
+                        </Descriptions.Item>
+                      </Descriptions>
+                    </Card>
+                  </div>
+                ),
+              },
+              {
+                key: 'invoices',
+                label: <Space><FileTextOutlined />Invoices ({invoices.length})</Space>,
+                children: (
+                  <div>
+                    <div style={{ marginBottom: 16 }}>
+                      <Button icon={<ReloadOutlined />} onClick={() => fetchBalanceInvoices(tab.supplier.supplierNumber, tabKey)} loading={invoicesLoading}>Refresh</Button>
+                    </div>
+                    <Table columns={invoiceColumns} dataSource={invoices} loading={invoicesLoading} scroll={{ x: 900 }} pagination={{ pageSize: 10, showTotal: (total) => `${total} invoices` }} size="small" />
+                  </div>
+                ),
+              },
+              {
+                key: 'payments',
+                label: <Space><CreditCardOutlined />Payments ({payments.length})</Space>,
+                children: (
+                  <div>
+                    <div style={{ marginBottom: 16 }}>
+                      <Button icon={<ReloadOutlined />} onClick={() => fetchBalancePayments(tab.supplier.supplierNumber, tabKey)} loading={paymentsLoading}>Refresh</Button>
+                      <Text type="secondary" style={{ marginLeft: 16 }}>Click payment number to view related invoices</Text>
+                    </div>
+                    <Table columns={paymentColumns} dataSource={payments} loading={paymentsLoading} scroll={{ x: 800 }} pagination={{ pageSize: 10, showTotal: (total) => `${total} payments` }} size="small" />
+                  </div>
+                ),
+              },
+            ]}
+          />
+        </Card>
+      </div>
+    );
+  };
+
   // Build tab items
   const tabItems = [
     {
@@ -1072,10 +1604,11 @@ const ManageSuppliers: React.FC = () => {
       key: tab.key,
       label: (
         <Space>
-          <Text>Supplier: {tab.label}</Text>
+          {tab.tabType === 'balance' ? <DollarOutlined style={{ color: REDWOOD.success }} /> : <UserOutlined />}
+          <Text>{tab.tabType === 'balance' ? 'Balance: ' : 'Supplier: '}{tab.label}</Text>
         </Space>
       ),
-      children: renderSupplierDetailTab(tab),
+      children: tab.tabType === 'balance' ? renderSupplierBalanceTab(tab) : renderSupplierDetailTab(tab),
       closable: true,
     })),
   ];
@@ -1337,6 +1870,56 @@ const ManageSuppliers: React.FC = () => {
                 </div>
               </div>
             ))}
+          </Card>
+        </Modal>
+
+        {/* Payment Drilldown Modal */}
+        <Modal
+          title={
+            <Space>
+              <CreditCardOutlined style={{ color: REDWOOD.success }} />
+              <span>Payment: {drilldownPayment?.paymentNumber}</span>
+            </Space>
+          }
+          open={drilldownVisible}
+          onCancel={() => {
+            setDrilldownVisible(false);
+            setDrilldownPayment(null);
+            setRelatedInvoices([]);
+          }}
+          footer={[
+            <Button key="close" onClick={() => setDrilldownVisible(false)}>Close</Button>,
+          ]}
+          width={800}
+        >
+          {drilldownPayment && (
+            <div style={{ marginBottom: 16 }}>
+              <Descriptions bordered size="small" column={2}>
+                <Descriptions.Item label="Payment Number">{drilldownPayment.paymentNumber}</Descriptions.Item>
+                <Descriptions.Item label="Payment Date">{drilldownPayment.paymentDate}</Descriptions.Item>
+                <Descriptions.Item label="Amount">
+                  <Text strong style={{ color: REDWOOD.success }}>{formatCurrency(drilldownPayment.paymentAmount, drilldownPayment.currency)}</Text>
+                </Descriptions.Item>
+                <Descriptions.Item label="Status"><Tag>{drilldownPayment.paymentStatus}</Tag></Descriptions.Item>
+                <Descriptions.Item label="Method">{drilldownPayment.paymentMethod}</Descriptions.Item>
+                <Descriptions.Item label="Bank Account">{drilldownPayment.bankAccountName}</Descriptions.Item>
+              </Descriptions>
+            </div>
+          )}
+
+          <Card title="Related Invoices" size="small">
+            <Table
+              columns={[
+                { title: 'Invoice Number', dataIndex: 'invoiceNumber', key: 'invoiceNumber', width: 150 },
+                { title: 'Invoice Amount', dataIndex: 'invoiceAmount', key: 'invoiceAmount', width: 140, align: 'right' as const, render: (amt: number) => formatCurrency(amt) },
+                { title: 'Amount Applied', dataIndex: 'amountApplied', key: 'amountApplied', width: 140, align: 'right' as const, render: (amt: number) => <Text style={{ color: REDWOOD.success }}>{formatCurrency(amt)}</Text> },
+              ]}
+              dataSource={relatedInvoices}
+              loading={drilldownLoading}
+              pagination={false}
+              size="small"
+              locale={{ emptyText: 'No related invoices found' }}
+            />
           </Card>
         </Modal>
       </Content>
