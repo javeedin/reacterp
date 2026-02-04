@@ -378,10 +378,28 @@ export const syncAPPayments = async (
     // STEP 1: Fetch Payments from Oracle Fusion
     // ========================================
     updateProgress({ status: 'fetching', totalPages });
+
+    // Always log API endpoints for debugging
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('step', `  AP PAYMENTS SYNC - ${modeLabel}`);
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('step', '  API ENDPOINTS:');
+    log?.('info', '  ┌─────────────────────────────────────────────────────────');
+    log?.('info', '  │ FUSION GET (Source):');
+    log?.('info', `  │   Payments:         ${ORACLE_FUSION_CONFIG.baseUrl}/payablesPayments`);
+    log?.('info', `  │   Related Invoices: ${ORACLE_FUSION_CONFIG.baseUrl}/payablesPayments/{checkId}/child/relatedInvoices`);
+    log?.('info', '  │');
+    log?.('info', '  │ APEX POST (Target):');
+    log?.('info', `  │   Payments:         ${APEX_DB_CONFIG.baseUrl}/${APEX_PAYMENTS_ENDPOINT}`);
+    log?.('info', `  │   Related Invoices: ${APEX_DB_CONFIG.baseUrl}/${APEX_RELATED_INVOICES_ENDPOINT}`);
+    log?.('info', '  │');
+    log?.('info', '  │ PROXY URLs:');
+    log?.('info', `  │   Payments:         ${PROXY_CONFIG.baseUrl}/apex/${APEX_PAYMENTS_ENDPOINT}`);
+    log?.('info', `  │   Related Invoices: ${PROXY_CONFIG.baseUrl}/apex/${APEX_RELATED_INVOICES_ENDPOINT}`);
+    log?.('info', '  └─────────────────────────────────────────────────────────');
+    log?.('step', '═══════════════════════════════════════════════════════════');
+
     if (verbose) {
-      log?.('step', '═══════════════════════════════════════════════════════════');
-      log?.('step', `  AP PAYMENTS SYNC - ${modeLabel}`);
-      log?.('step', '═══════════════════════════════════════════════════════════');
       log?.('info', `Parameters: ${JSON.stringify(parameters)}`);
       log?.('info', `Max Records: ${maxRecords}, Page Size: ${pageSize}, Total Pages: ${totalPages}`);
     } else {

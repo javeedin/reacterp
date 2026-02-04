@@ -360,10 +360,28 @@ export const syncAPInvoices = async (
     // STEP 1: Fetch Invoices from Oracle Fusion
     // ========================================
     updateProgress({ status: 'fetching' });
+
+    // Always log API endpoints for debugging
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('step', `  AP INVOICES SYNC - ${modeLabel}`);
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('step', '  API ENDPOINTS:');
+    log?.('info', '  ┌─────────────────────────────────────────────────────────');
+    log?.('info', '  │ FUSION GET (Source):');
+    log?.('info', `  │   Invoices:       ${ORACLE_FUSION_CONFIG.baseUrl}/invoices`);
+    log?.('info', `  │   Invoice Lines:  ${ORACLE_FUSION_CONFIG.baseUrl}/invoices/{invoiceId}/child/invoiceLines`);
+    log?.('info', '  │');
+    log?.('info', '  │ APEX POST (Target):');
+    log?.('info', `  │   Invoices:       ${APEX_DB_CONFIG.baseUrl}/${APEX_CREATE_INVOICE_ENDPOINT}`);
+    log?.('info', `  │   Invoice Lines:  ${APEX_DB_CONFIG.baseUrl}/${APEX_CREATE_INVOICE_LINES_ENDPOINT}`);
+    log?.('info', '  │');
+    log?.('info', '  │ PROXY URLs:');
+    log?.('info', `  │   Invoices:       ${PROXY_CONFIG.baseUrl}/apex/${APEX_CREATE_INVOICE_ENDPOINT}`);
+    log?.('info', `  │   Invoice Lines:  ${PROXY_CONFIG.baseUrl}/apex/${APEX_CREATE_INVOICE_LINES_ENDPOINT}`);
+    log?.('info', '  └─────────────────────────────────────────────────────────');
+    log?.('step', '═══════════════════════════════════════════════════════════');
+
     if (verbose) {
-      log?.('step', '═══════════════════════════════════════════════════════════');
-      log?.('step', `  AP INVOICES SYNC - ${modeLabel}`);
-      log?.('step', '═══════════════════════════════════════════════════════════');
       log?.('info', `Parameters: ${JSON.stringify(parameters)}`);
       log?.('info', `Max Records: ${maxRecords === null ? 'Unlimited (all pages)' : maxRecords}, Page Size: ${pageSize}`);
     }
