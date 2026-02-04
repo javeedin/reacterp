@@ -656,14 +656,41 @@ const ManageSuppliers: React.FC = () => {
       let proxyUrl: string;
       let mapFunction: (item: any, index: number) => SupplierRecord;
 
+      // Get form values
+      const formValues = form.getFieldsValue();
+      const supplierNumber = formValues.supplierNumber?.trim();
+      const supplierName = formValues.supplier?.trim();
+
       if (dataSource === 'fusion') {
         // Fusion API
         const fusionPath = 'fscmRestApi/resources/11.13.18.05/suppliers';
-        proxyUrl = `${PROXY_CONFIG.baseUrl}/fusion/${fusionPath}?limit=25&onlyData=true`;
+        let queryParams = 'limit=25&onlyData=true';
+
+        // Build query filters
+        const filters: string[] = [];
+        if (supplierNumber) {
+          filters.push(`SupplierNumber=${supplierNumber}`);
+        }
+        if (supplierName) {
+          filters.push(`Supplier LIKE *${supplierName}*`);
+        }
+
+        // Add q parameter if filters exist
+        if (filters.length > 0) {
+          queryParams += `&q=${encodeURIComponent(filters.join(';'))}`;
+        }
+
+        proxyUrl = `${PROXY_CONFIG.baseUrl}/fusion/${fusionPath}?${queryParams}`;
         mapFunction = mapFusionToSupplierRecord;
       } else {
         // APEX API
-        proxyUrl = `${PROXY_CONFIG.baseUrl}/apex/suppliers`;
+        let queryParams = '';
+        if (supplierNumber) {
+          queryParams = `?supplier_number=${encodeURIComponent(supplierNumber)}`;
+        } else if (supplierName) {
+          queryParams = `?supplier=${encodeURIComponent(supplierName)}`;
+        }
+        proxyUrl = `${PROXY_CONFIG.baseUrl}/apex/suppliers${queryParams}`;
         mapFunction = mapApexToSupplierRecord;
       }
 
@@ -835,6 +862,11 @@ const ManageSuppliers: React.FC = () => {
             <Form form={form} layout="horizontal" labelCol={{ span: 10 }} wrapperCol={{ span: 14 }} size="small">
               <Row gutter={16}>
                 <Col span={8}>
+                  <Form.Item label="Supplier Number" name="supplierNumber" style={{ marginBottom: 8 }}>
+                    <Input placeholder="e.g. A022" size="small" />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
                   <Form.Item label="Supplier" name="supplier" style={{ marginBottom: 8 }}>
                     <Input placeholder="" size="small" />
                   </Form.Item>
@@ -847,11 +879,6 @@ const ManageSuppliers: React.FC = () => {
                       <Option value="Contractor">Contractor</Option>
                     </Select>
                   </Form.Item>
-                </Col>
-                <Col span={8}>
-                  <div style={{ textAlign: 'right', paddingTop: 4 }}>
-                    <Text type="secondary" style={{ fontSize: 11 }}>** At least one is required</Text>
-                  </div>
                 </Col>
               </Row>
               <Row gutter={16}>
@@ -870,7 +897,11 @@ const ManageSuppliers: React.FC = () => {
                     </Select>
                   </Form.Item>
                 </Col>
-                <Col span={8} />
+                <Col span={8}>
+                  <div style={{ textAlign: 'right', paddingTop: 4 }}>
+                    <Text type="secondary" style={{ fontSize: 11 }}>** At least one is required</Text>
+                  </div>
+                </Col>
               </Row>
               <Row gutter={16}>
                 <Col span={8}>
