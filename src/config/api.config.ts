@@ -385,10 +385,11 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
         required: false,
       },
       {
-        key: 'PayeeNumber',
-        label: 'Payee Number',
+        key: 'SupplierNumber',
+        label: 'Supplier Number',
         type: 'text',
         required: false,
+        placeholder: 'e.g. A0055',
       },
       {
         key: 'PaymentStatus',
