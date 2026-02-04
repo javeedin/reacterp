@@ -20,8 +20,6 @@ import {
   DatePicker,
   InputNumber,
   Tabs,
-  Modal,
-  Switch,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -47,10 +45,6 @@ import {
   SettingOutlined,
   CopyOutlined,
   ScissorOutlined,
-  ApiOutlined,
-  CheckOutlined,
-  CloudOutlined,
-  DatabaseOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -158,51 +152,6 @@ const ManageInvoices: React.FC = () => {
   // Tab management state
   const [activeTab, setActiveTab] = useState('search');
   const [openTabs, setOpenTabs] = useState<InvoiceTab[]>([]);
-
-  // API Info Modal state
-  const [apiModalVisible, setApiModalVisible] = useState(false);
-  const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
-  const [dataSource, setDataSource] = useState<'fusion' | 'apex'>('apex');
-
-  // API Configuration for this page
-  const PAGE_APIS = {
-    fusion: [
-      {
-        name: 'Search Invoices',
-        method: 'GET',
-        proxyUrl: `${PROXY_CONFIG.baseUrl}/fusion/fscmRestApi/resources/11.13.18.05/invoices`,
-        actualUrl: 'https://iaaobn.fa.ocs.oraclecloud.com:443/fscmRestApi/resources/11.13.18.05/invoices',
-        params: 'limit=25&onlyData=true',
-        description: 'Fetches list of invoices from Oracle Fusion',
-      },
-      {
-        name: 'Get Invoice Detail',
-        method: 'GET',
-        proxyUrl: `${PROXY_CONFIG.baseUrl}/fusion/fscmRestApi/resources/11.13.18.05/invoices/{invoiceId}`,
-        actualUrl: 'https://iaaobn.fa.ocs.oraclecloud.com:443/fscmRestApi/resources/11.13.18.05/invoices/{invoiceId}',
-        params: '',
-        description: 'Fetches complete invoice details by ID',
-      },
-    ],
-    apex: [
-      {
-        name: 'Search Invoices',
-        method: 'GET',
-        proxyUrl: `${PROXY_CONFIG.baseUrl}/apex/ap/createinvoice`,
-        actualUrl: 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/ap/createinvoice',
-        params: '',
-        description: 'Fetches invoices from APEX database (RR_AP_INVOICES_ALL)',
-      },
-    ],
-  };
-
-  // Copy URL to clipboard
-  const copyToClipboard = (url: string) => {
-    navigator.clipboard.writeText(url);
-    setCopiedUrl(url);
-    message.success('URL copied to clipboard');
-    setTimeout(() => setCopiedUrl(null), 2000);
-  };
 
   // Open invoice in new tab
   const openInvoiceTab = (record: InvoiceRecord) => {
@@ -799,21 +748,9 @@ const ManageInvoices: React.FC = () => {
               { title: 'Manage Invoices' },
             ]}
           />
-          <Space>
-            <Tooltip title="View API Endpoints">
-              <Button
-                type="text"
-                icon={<ApiOutlined />}
-                onClick={() => setApiModalVisible(true)}
-                style={{ color: REDWOOD.info }}
-              >
-                API
-              </Button>
-            </Tooltip>
-            <Button type="primary" style={{ background: REDWOOD.primary }}>
-              Done
-            </Button>
-          </Space>
+          <Button type="primary" style={{ background: REDWOOD.primary }}>
+            Done
+          </Button>
         </div>
 
         {/* Page Title and Tabs */}
@@ -881,217 +818,6 @@ const ManageInvoices: React.FC = () => {
             background: ${REDWOOD.neutral100};
           }
         `}</style>
-
-        {/* API Info Modal */}
-        <Modal
-          title={
-            <Space>
-              <ApiOutlined style={{ color: REDWOOD.info }} />
-              <span>API Endpoints - Manage Invoices</span>
-            </Space>
-          }
-          open={apiModalVisible}
-          onCancel={() => setApiModalVisible(false)}
-          footer={[
-            <Button key="close" onClick={() => setApiModalVisible(false)}>
-              Close
-            </Button>,
-          ]}
-          width={900}
-        >
-          <div style={{ marginBottom: 16 }}>
-            <Tag color="blue" style={{ marginRight: 8 }}>
-              Current Mode: {dataSource === 'fusion' ? 'Fusion' : 'APEX'}
-            </Tag>
-            <Text type="secondary">
-              Data Source Toggle:
-            </Text>
-            <Space style={{ marginLeft: 8 }}>
-              <CloudOutlined style={{ color: dataSource === 'fusion' ? REDWOOD.info : REDWOOD.neutral600 }} />
-              <Text style={{ color: dataSource === 'fusion' ? REDWOOD.info : REDWOOD.neutral600 }}>Fusion</Text>
-              <Switch
-                checked={dataSource === 'apex'}
-                onChange={(checked) => setDataSource(checked ? 'apex' : 'fusion')}
-                style={{ margin: '0 8px' }}
-              />
-              <DatabaseOutlined style={{ color: dataSource === 'apex' ? REDWOOD.success : REDWOOD.neutral600 }} />
-              <Text style={{ color: dataSource === 'apex' ? REDWOOD.success : REDWOOD.neutral600 }}>APEX</Text>
-            </Space>
-          </div>
-
-          {/* Fusion APIs */}
-          <Card
-            size="small"
-            title={
-              <Space>
-                <CloudOutlined style={{ color: REDWOOD.info }} />
-                <Text strong>Fusion APIs</Text>
-                <Tag color={dataSource === 'fusion' ? 'green' : 'default'}>
-                  {dataSource === 'fusion' ? 'Active' : 'Inactive'}
-                </Tag>
-              </Space>
-            }
-            style={{ marginBottom: 16 }}
-          >
-            {PAGE_APIS.fusion.map((api, index) => (
-              <div
-                key={index}
-                style={{
-                  padding: '12px',
-                  background: REDWOOD.neutral100,
-                  borderRadius: 6,
-                  marginBottom: index < PAGE_APIS.fusion.length - 1 ? 12 : 0,
-                }}
-              >
-                <Row justify="space-between" align="middle" style={{ marginBottom: 8 }}>
-                  <Col>
-                    <Space>
-                      <Tag color="blue">{api.method}</Tag>
-                      <Text strong>{api.name}</Text>
-                    </Space>
-                  </Col>
-                </Row>
-                <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
-                  {api.description}
-                </Text>
-                <div style={{ marginBottom: 8 }}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>Proxy URL:</Text>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <code
-                      style={{
-                        background: '#f5f5f5',
-                        padding: '4px 8px',
-                        borderRadius: 4,
-                        fontSize: 12,
-                        flex: 1,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                      }}
-                    >
-                      {api.proxyUrl}{api.params ? `?${api.params}` : ''}
-                    </code>
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={copiedUrl === api.proxyUrl ? <CheckOutlined /> : <CopyOutlined />}
-                      onClick={() => copyToClipboard(api.proxyUrl + (api.params ? `?${api.params}` : ''))}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <Text type="secondary" style={{ fontSize: 12 }}>Actual URL:</Text>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <code
-                      style={{
-                        background: '#e6f7ff',
-                        padding: '4px 8px',
-                        borderRadius: 4,
-                        fontSize: 12,
-                        flex: 1,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                      }}
-                    >
-                      {api.actualUrl}{api.params ? `?${api.params}` : ''}
-                    </code>
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={copiedUrl === api.actualUrl ? <CheckOutlined /> : <CopyOutlined />}
-                      onClick={() => copyToClipboard(api.actualUrl + (api.params ? `?${api.params}` : ''))}
-                    />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </Card>
-
-          {/* APEX APIs */}
-          <Card
-            size="small"
-            title={
-              <Space>
-                <DatabaseOutlined style={{ color: REDWOOD.success }} />
-                <Text strong>APEX APIs</Text>
-                <Tag color={dataSource === 'apex' ? 'green' : 'default'}>
-                  {dataSource === 'apex' ? 'Active' : 'Inactive'}
-                </Tag>
-              </Space>
-            }
-          >
-            {PAGE_APIS.apex.map((api, index) => (
-              <div
-                key={index}
-                style={{
-                  padding: '12px',
-                  background: REDWOOD.neutral100,
-                  borderRadius: 6,
-                  marginBottom: index < PAGE_APIS.apex.length - 1 ? 12 : 0,
-                }}
-              >
-                <Row justify="space-between" align="middle" style={{ marginBottom: 8 }}>
-                  <Col>
-                    <Space>
-                      <Tag color="green">{api.method}</Tag>
-                      <Text strong>{api.name}</Text>
-                    </Space>
-                  </Col>
-                </Row>
-                <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
-                  {api.description}
-                </Text>
-                <div style={{ marginBottom: 8 }}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>Proxy URL:</Text>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <code
-                      style={{
-                        background: '#f5f5f5',
-                        padding: '4px 8px',
-                        borderRadius: 4,
-                        fontSize: 12,
-                        flex: 1,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                      }}
-                    >
-                      {api.proxyUrl}
-                    </code>
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={copiedUrl === api.proxyUrl ? <CheckOutlined /> : <CopyOutlined />}
-                      onClick={() => copyToClipboard(api.proxyUrl)}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <Text type="secondary" style={{ fontSize: 12 }}>Actual URL:</Text>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <code
-                      style={{
-                        background: '#f6ffed',
-                        padding: '4px 8px',
-                        borderRadius: 4,
-                        fontSize: 12,
-                        flex: 1,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                      }}
-                    >
-                      {api.actualUrl}
-                    </code>
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={copiedUrl === api.actualUrl ? <CheckOutlined /> : <CopyOutlined />}
-                      onClick={() => copyToClipboard(api.actualUrl)}
-                    />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </Card>
-        </Modal>
       </Content>
     </Layout>
   );
