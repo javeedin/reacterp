@@ -26,6 +26,7 @@ import ManagePayments from './pages/ap/ManagePayments';
 import Banks from './pages/ap/Banks';
 import InvoiceHolds from './pages/ap/InvoiceHolds';
 import ManageSuppliers from './pages/suppliers/ManageSuppliers';
+import SupplierBalance from './pages/suppliers/SupplierBalance';
 import SyncData from './pages/sync/SyncData';
 
 // Placeholder component for modules under development
@@ -95,6 +96,8 @@ function App() {
               <Route path="ar/*" element={<ComingSoon moduleName="Accounts Receivable" />} />
               <Route path="inventory/*" element={<ComingSoon moduleName="Inventory" />} />
               <Route path="procurement/suppliers" element={<ManageSuppliers />} />
+              <Route path="suppliers/manage" element={<ManageSuppliers />} />
+              <Route path="suppliers/balance/:supplierNumber" element={<SupplierBalance />} />
               <Route path="procurement/*" element={<ComingSoon moduleName="Procurement" />} />
               <Route path="hr/*" element={<ComingSoon moduleName="Human Resources" />} />
               <Route path="projects/*" element={<ComingSoon moduleName="Projects" />} />

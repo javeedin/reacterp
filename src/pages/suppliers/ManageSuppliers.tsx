@@ -45,8 +45,9 @@ import {
   ApiOutlined,
   CopyOutlined,
   CheckOutlined,
+  DollarOutlined,
 } from '@ant-design/icons';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 
 const { Content } = Layout;
@@ -236,6 +237,7 @@ const mapFusionToSupplierDetail = (item: any): SupplierDetail => ({
 
 const ManageSuppliers: React.FC = () => {
   const [form] = Form.useForm();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
@@ -492,6 +494,26 @@ const ManageSuppliers: React.FC = () => {
       key: 'dunsNumber',
       width: 120,
     },
+    {
+      title: 'Actions',
+      key: 'actions',
+      width: 130,
+      fixed: 'right' as const,
+      render: (_: any, record: SupplierRecord) => (
+        <Button
+          type="primary"
+          size="small"
+          icon={<DollarOutlined />}
+          onClick={(e) => {
+            e.stopPropagation();
+            navigate(`/suppliers/balance/${record.supplierNumber}`);
+          }}
+          style={{ background: REDWOOD.success }}
+        >
+          Balance
+        </Button>
+      ),
+    },
   ];
 
   // Row selection config
@@ -679,7 +701,7 @@ const ManageSuppliers: React.FC = () => {
           dataSource={suppliers}
           rowSelection={rowSelection}
           loading={loading}
-          scroll={{ x: 1400 }}
+          scroll={{ x: 1550 }}
           pagination={{
             pageSize: 25,
             showSizeChanger: true,
