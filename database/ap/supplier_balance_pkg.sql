@@ -382,94 +382,127 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
     ) RETURN CLOB IS
         l_result        CLOB;
         l_invoices      CLOB := '[';
-        l_total_count   NUMBER;
+        l_total_count   NUMBER := 0;
         l_row_count     NUMBER := 0;
         l_first         BOOLEAN := TRUE;
-    BEGIN
-        -- Get total count
-        SELECT COUNT(*)
-        INTO l_total_count
-        FROM RR_AP_INVOICES_ALL
-        WHERE SUPPLIER_NUMBER = p_supplier_number
-        AND NVL(CANCELED_FLAG, 'N') != 'Y'
-        AND (p_status = 'All'
-             OR (p_status = 'Paid' AND PAID_STATUS = 'Paid')
-             OR (p_status = 'Unpaid' AND NVL(PAID_STATUS, 'Unpaid') != 'Paid'));
+        l_inv_id        NUMBER;
+        l_inv_num       VARCHAR2(100);
+        l_inv_date      DATE;
+        l_inv_amt       NUMBER;
+        l_amt_paid      NUMBER;
+        l_balance       NUMBER;
+        l_currency      VARCHAR2(15);
+        l_inv_type      VARCHAR2(50);
+        l_desc          VARCHAR2(240);
+        l_val_status    VARCHAR2(50);
+        l_appr_status   VARCHAR2(50);
+        l_paid_status   VARCHAR2(50);
+        l_acct_status   VARCHAR2(50);
+        l_pay_terms     VARCHAR2(50);
+        l_acct_date     DATE;
+        l_bu            VARCHAR2(240);
+        l_rn            NUMBER;
 
-        -- Build invoices array using cursor and string concatenation
-        FOR rec IN (
+        CURSOR c_invoices IS
             SELECT * FROM (
                 SELECT
-                    INVOICE_ID,
-                    INVOICE_NUMBER,
-                    INVOICE_DATE,
-                    INVOICE_AMOUNT,
-                    NVL(AMOUNT_PAID, 0) AS AMOUNT_PAID,
-                    (INVOICE_AMOUNT - NVL(AMOUNT_PAID, 0)) AS BALANCE_DUE,
-                    INVOICE_CURRENCY,
-                    INVOICE_TYPE,
-                    DESCRIPTION,
-                    VALIDATION_STATUS,
-                    APPROVAL_STATUS,
-                    PAID_STATUS,
-                    ACCOUNTING_STATUS,
-                    PAYMENT_TERMS,
-                    ACCOUNTING_DATE,
-                    BUSINESS_UNIT,
-                    ROWNUM AS RN
-                FROM RR_AP_INVOICES_ALL
-                WHERE SUPPLIER_NUMBER = p_supplier_number
-                AND NVL(CANCELED_FLAG, 'N') != 'Y'
+                    i.INVOICE_ID,
+                    i.INVOICE_NUMBER,
+                    i.INVOICE_DATE,
+                    NVL(i.INVOICE_AMOUNT, 0) AS INVOICE_AMOUNT,
+                    NVL(i.AMOUNT_PAID, 0) AS AMOUNT_PAID,
+                    NVL(i.INVOICE_AMOUNT, 0) - NVL(i.AMOUNT_PAID, 0) AS BALANCE_DUE,
+                    i.INVOICE_CURRENCY,
+                    i.INVOICE_TYPE,
+                    SUBSTR(i.DESCRIPTION, 1, 240) AS DESCRIPTION,
+                    i.VALIDATION_STATUS,
+                    i.APPROVAL_STATUS,
+                    i.PAID_STATUS,
+                    i.ACCOUNTING_STATUS,
+                    i.PAYMENT_TERMS,
+                    i.ACCOUNTING_DATE,
+                    i.BUSINESS_UNIT,
+                    ROW_NUMBER() OVER (ORDER BY i.INVOICE_ID DESC) AS RN
+                FROM RR_AP_INVOICES_ALL i
+                WHERE i.SUPPLIER_NUMBER = p_supplier_number
+                AND NVL(i.CANCELED_FLAG, 'N') != 'Y'
                 AND (p_status = 'All'
-                     OR (p_status = 'Paid' AND PAID_STATUS = 'Paid')
-                     OR (p_status = 'Unpaid' AND NVL(PAID_STATUS, 'Unpaid') != 'Paid'))
-                ORDER BY INVOICE_ID DESC
+                     OR (p_status = 'Paid' AND i.PAID_STATUS = 'Paid')
+                     OR (p_status = 'Unpaid' AND NVL(i.PAID_STATUS, 'Unpaid') != 'Paid'))
             )
-            WHERE RN > p_offset AND RN <= (p_offset + p_limit)
-        ) LOOP
+            WHERE RN > p_offset AND RN <= (p_offset + p_limit);
+    BEGIN
+        -- Get total count
+        BEGIN
+            SELECT COUNT(*)
+            INTO l_total_count
+            FROM RR_AP_INVOICES_ALL
+            WHERE SUPPLIER_NUMBER = p_supplier_number
+            AND NVL(CANCELED_FLAG, 'N') != 'Y'
+            AND (p_status = 'All'
+                 OR (p_status = 'Paid' AND PAID_STATUS = 'Paid')
+                 OR (p_status = 'Unpaid' AND NVL(PAID_STATUS, 'Unpaid') != 'Paid'));
+        EXCEPTION
+            WHEN OTHERS THEN
+                l_total_count := 0;
+        END;
+
+        -- Build invoices array using explicit cursor
+        OPEN c_invoices;
+        LOOP
+            FETCH c_invoices INTO l_inv_id, l_inv_num, l_inv_date, l_inv_amt, l_amt_paid,
+                                  l_balance, l_currency, l_inv_type, l_desc, l_val_status,
+                                  l_appr_status, l_paid_status, l_acct_status, l_pay_terms,
+                                  l_acct_date, l_bu, l_rn;
+            EXIT WHEN c_invoices%NOTFOUND;
+
             IF NOT l_first THEN
                 l_invoices := l_invoices || ',';
             END IF;
             l_first := FALSE;
 
-            l_invoices := l_invoices || JSON_OBJECT(
-                'invoice_id'         VALUE rec.INVOICE_ID,
-                'invoice_number'     VALUE rec.INVOICE_NUMBER,
-                'invoice_date'       VALUE rec.INVOICE_DATE,
-                'invoice_amount'     VALUE rec.INVOICE_AMOUNT,
-                'amount_paid'        VALUE rec.AMOUNT_PAID,
-                'amount_remaining'   VALUE rec.BALANCE_DUE,
-                'currency'           VALUE rec.INVOICE_CURRENCY,
-                'invoice_type'       VALUE rec.INVOICE_TYPE,
-                'description'        VALUE rec.DESCRIPTION,
-                'validation_status'  VALUE rec.VALIDATION_STATUS,
-                'approval_status'    VALUE rec.APPROVAL_STATUS,
-                'invoice_status'     VALUE rec.PAID_STATUS,
-                'accounting_status'  VALUE rec.ACCOUNTING_STATUS,
-                'payment_terms'      VALUE rec.PAYMENT_TERMS,
-                'accounting_date'    VALUE rec.ACCOUNTING_DATE,
-                'business_unit'      VALUE rec.BUSINESS_UNIT
-                ABSENT ON NULL
-            );
+            -- Build JSON manually to avoid JSON_OBJECT issues
+            l_invoices := l_invoices || '{' ||
+                '"invoice_id": ' || NVL(TO_CHAR(l_inv_id), 'null') || ',' ||
+                '"invoice_number": ' || CASE WHEN l_inv_num IS NULL THEN 'null' ELSE '"' || REPLACE(l_inv_num, '"', '\"') || '"' END || ',' ||
+                '"invoice_date": ' || CASE WHEN l_inv_date IS NULL THEN 'null' ELSE '"' || TO_CHAR(l_inv_date, 'YYYY-MM-DD') || '"' END || ',' ||
+                '"invoice_amount": ' || NVL(TO_CHAR(l_inv_amt), '0') || ',' ||
+                '"amount_paid": ' || NVL(TO_CHAR(l_amt_paid), '0') || ',' ||
+                '"amount_remaining": ' || NVL(TO_CHAR(l_balance), '0') || ',' ||
+                '"currency": ' || CASE WHEN l_currency IS NULL THEN 'null' ELSE '"' || l_currency || '"' END || ',' ||
+                '"invoice_type": ' || CASE WHEN l_inv_type IS NULL THEN 'null' ELSE '"' || l_inv_type || '"' END || ',' ||
+                '"description": ' || CASE WHEN l_desc IS NULL THEN 'null' ELSE '"' || REPLACE(REPLACE(l_desc, '\', '\\'), '"', '\"') || '"' END || ',' ||
+                '"validation_status": ' || CASE WHEN l_val_status IS NULL THEN 'null' ELSE '"' || l_val_status || '"' END || ',' ||
+                '"approval_status": ' || CASE WHEN l_appr_status IS NULL THEN 'null' ELSE '"' || l_appr_status || '"' END || ',' ||
+                '"invoice_status": ' || CASE WHEN l_paid_status IS NULL THEN 'null' ELSE '"' || l_paid_status || '"' END || ',' ||
+                '"accounting_status": ' || CASE WHEN l_acct_status IS NULL THEN 'null' ELSE '"' || l_acct_status || '"' END || ',' ||
+                '"payment_terms": ' || CASE WHEN l_pay_terms IS NULL THEN 'null' ELSE '"' || l_pay_terms || '"' END || ',' ||
+                '"accounting_date": ' || CASE WHEN l_acct_date IS NULL THEN 'null' ELSE '"' || TO_CHAR(l_acct_date, 'YYYY-MM-DD') || '"' END || ',' ||
+                '"business_unit": ' || CASE WHEN l_bu IS NULL THEN 'null' ELSE '"' || REPLACE(l_bu, '"', '\"') || '"' END ||
+            '}';
 
             l_row_count := l_row_count + 1;
         END LOOP;
+        CLOSE c_invoices;
 
         l_invoices := l_invoices || ']';
 
         -- Build response
         l_result := '{"success": "true", "supplier_number": "' || p_supplier_number ||
-                    '", "total_count": ' || l_total_count ||
-                    ', "limit": ' || p_limit ||
-                    ', "offset": ' || p_offset ||
-                    ', "has_more": ' || CASE WHEN (p_offset + p_limit) < l_total_count THEN 'true' ELSE 'false' END ||
+                    '", "total_count": ' || NVL(l_total_count, 0) ||
+                    ', "limit": ' || NVL(p_limit, 100) ||
+                    ', "offset": ' || NVL(p_offset, 0) ||
+                    ', "has_more": ' || CASE WHEN (NVL(p_offset, 0) + NVL(p_limit, 100)) < NVL(l_total_count, 0) THEN 'true' ELSE 'false' END ||
                     ', "invoices": ' || l_invoices || '}';
 
         RETURN l_result;
 
     EXCEPTION
         WHEN OTHERS THEN
-            RETURN '{"success": "false", "error": "' || REPLACE(SQLERRM, '"', '\"') || '"}';
+            IF c_invoices%ISOPEN THEN
+                CLOSE c_invoices;
+            END IF;
+            RETURN '{"success": "false", "error": "' || REPLACE(SQLERRM, '"', '\"') || '", "error_line": "' || DBMS_UTILITY.FORMAT_ERROR_BACKTRACE || '"}';
     END get_supplier_invoices;
 
     -- ========================================================================
@@ -483,87 +516,121 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
     ) RETURN CLOB IS
         l_result        CLOB;
         l_payments      CLOB := '[';
-        l_total_count   NUMBER;
+        l_total_count   NUMBER := 0;
         l_first         BOOLEAN := TRUE;
-    BEGIN
-        -- Get total count
-        SELECT COUNT(*)
-        INTO l_total_count
-        FROM RR_AP_PAYMENTS_ALL
-        WHERE SUPPLIER_NUMBER = p_supplier_number
-        AND (p_status = 'All' OR PAYMENT_STATUS = p_status);
+        l_check_id      NUMBER;
+        l_pay_id        NUMBER;
+        l_pay_num       VARCHAR2(100);
+        l_pay_date      DATE;
+        l_pay_amt       NUMBER;
+        l_currency      VARCHAR2(15);
+        l_pay_status    VARCHAR2(50);
+        l_pay_type      VARCHAR2(50);
+        l_pay_method    VARCHAR2(50);
+        l_desc          VARCHAR2(240);
+        l_clear_date    DATE;
+        l_clear_amt     NUMBER;
+        l_void_date     DATE;
+        l_bu            VARCHAR2(240);
+        l_bank_acct     VARCHAR2(240);
+        l_acct_status   VARCHAR2(50);
+        l_reconciled    VARCHAR2(1);
+        l_rn            NUMBER;
 
-        -- Build payments array
-        FOR rec IN (
+        CURSOR c_payments IS
             SELECT * FROM (
                 SELECT
-                    CHECK_ID,
-                    PAYMENT_ID,
-                    PAYMENT_NUMBER,
-                    PAYMENT_DATE,
-                    PAYMENT_AMOUNT,
-                    PAYMENT_CURRENCY,
-                    PAYMENT_STATUS,
-                    PAYMENT_TYPE,
-                    PAYMENT_METHOD,
-                    PAYMENT_DESCRIPTION,
-                    CLEARING_DATE,
-                    CLEARING_AMOUNT,
-                    VOID_DATE,
-                    BUSINESS_UNIT,
-                    DISBURSEMENT_BANK_ACCOUNT_NAME,
-                    ACCOUNTING_STATUS,
-                    RECONCILED_FLAG,
-                    ROWNUM AS RN
-                FROM RR_AP_PAYMENTS_ALL
-                WHERE SUPPLIER_NUMBER = p_supplier_number
-                AND (p_status = 'All' OR PAYMENT_STATUS = p_status)
-                ORDER BY CHECK_ID DESC
+                    p.CHECK_ID,
+                    p.PAYMENT_ID,
+                    p.PAYMENT_NUMBER,
+                    p.PAYMENT_DATE,
+                    NVL(p.PAYMENT_AMOUNT, 0) AS PAYMENT_AMOUNT,
+                    p.PAYMENT_CURRENCY,
+                    p.PAYMENT_STATUS,
+                    p.PAYMENT_TYPE,
+                    p.PAYMENT_METHOD,
+                    SUBSTR(p.PAYMENT_DESCRIPTION, 1, 240) AS PAYMENT_DESCRIPTION,
+                    p.CLEARING_DATE,
+                    p.CLEARING_AMOUNT,
+                    p.VOID_DATE,
+                    p.BUSINESS_UNIT,
+                    p.DISBURSEMENT_BANK_ACCOUNT_NAME,
+                    p.ACCOUNTING_STATUS,
+                    p.RECONCILED_FLAG,
+                    ROW_NUMBER() OVER (ORDER BY p.CHECK_ID DESC) AS RN
+                FROM RR_AP_PAYMENTS_ALL p
+                WHERE p.SUPPLIER_NUMBER = p_supplier_number
+                AND (p_status = 'All' OR p.PAYMENT_STATUS = p_status)
             )
-            WHERE RN > p_offset AND RN <= (p_offset + p_limit)
-        ) LOOP
+            WHERE RN > p_offset AND RN <= (p_offset + p_limit);
+    BEGIN
+        -- Get total count
+        BEGIN
+            SELECT COUNT(*)
+            INTO l_total_count
+            FROM RR_AP_PAYMENTS_ALL
+            WHERE SUPPLIER_NUMBER = p_supplier_number
+            AND (p_status = 'All' OR PAYMENT_STATUS = p_status);
+        EXCEPTION
+            WHEN OTHERS THEN
+                l_total_count := 0;
+        END;
+
+        -- Build payments array using explicit cursor
+        OPEN c_payments;
+        LOOP
+            FETCH c_payments INTO l_check_id, l_pay_id, l_pay_num, l_pay_date, l_pay_amt,
+                                  l_currency, l_pay_status, l_pay_type, l_pay_method, l_desc,
+                                  l_clear_date, l_clear_amt, l_void_date, l_bu, l_bank_acct,
+                                  l_acct_status, l_reconciled, l_rn;
+            EXIT WHEN c_payments%NOTFOUND;
+
             IF NOT l_first THEN
                 l_payments := l_payments || ',';
             END IF;
             l_first := FALSE;
 
-            l_payments := l_payments || JSON_OBJECT(
-                'payment_id'         VALUE rec.PAYMENT_ID,
-                'check_id'           VALUE rec.CHECK_ID,
-                'payment_number'     VALUE rec.PAYMENT_NUMBER,
-                'payment_date'       VALUE rec.PAYMENT_DATE,
-                'payment_amount'     VALUE rec.PAYMENT_AMOUNT,
-                'currency'           VALUE rec.PAYMENT_CURRENCY,
-                'payment_status'     VALUE rec.PAYMENT_STATUS,
-                'payment_type'       VALUE rec.PAYMENT_TYPE,
-                'payment_method'     VALUE rec.PAYMENT_METHOD,
-                'description'        VALUE rec.PAYMENT_DESCRIPTION,
-                'clearing_date'      VALUE rec.CLEARING_DATE,
-                'clearing_amount'    VALUE rec.CLEARING_AMOUNT,
-                'void_date'          VALUE rec.VOID_DATE,
-                'business_unit'      VALUE rec.BUSINESS_UNIT,
-                'bank_account_name'  VALUE rec.DISBURSEMENT_BANK_ACCOUNT_NAME,
-                'accounting_status'  VALUE rec.ACCOUNTING_STATUS,
-                'reconciled_flag'    VALUE rec.RECONCILED_FLAG
-                ABSENT ON NULL
-            );
+            -- Build JSON manually to avoid JSON_OBJECT issues
+            l_payments := l_payments || '{' ||
+                '"payment_id": ' || NVL(TO_CHAR(l_pay_id), 'null') || ',' ||
+                '"check_id": ' || NVL(TO_CHAR(l_check_id), 'null') || ',' ||
+                '"payment_number": ' || CASE WHEN l_pay_num IS NULL THEN 'null' ELSE '"' || REPLACE(l_pay_num, '"', '\"') || '"' END || ',' ||
+                '"payment_date": ' || CASE WHEN l_pay_date IS NULL THEN 'null' ELSE '"' || TO_CHAR(l_pay_date, 'YYYY-MM-DD') || '"' END || ',' ||
+                '"payment_amount": ' || NVL(TO_CHAR(l_pay_amt), '0') || ',' ||
+                '"currency": ' || CASE WHEN l_currency IS NULL THEN 'null' ELSE '"' || l_currency || '"' END || ',' ||
+                '"payment_status": ' || CASE WHEN l_pay_status IS NULL THEN 'null' ELSE '"' || l_pay_status || '"' END || ',' ||
+                '"payment_type": ' || CASE WHEN l_pay_type IS NULL THEN 'null' ELSE '"' || l_pay_type || '"' END || ',' ||
+                '"payment_method": ' || CASE WHEN l_pay_method IS NULL THEN 'null' ELSE '"' || l_pay_method || '"' END || ',' ||
+                '"description": ' || CASE WHEN l_desc IS NULL THEN 'null' ELSE '"' || REPLACE(REPLACE(l_desc, '\', '\\'), '"', '\"') || '"' END || ',' ||
+                '"clearing_date": ' || CASE WHEN l_clear_date IS NULL THEN 'null' ELSE '"' || TO_CHAR(l_clear_date, 'YYYY-MM-DD') || '"' END || ',' ||
+                '"clearing_amount": ' || CASE WHEN l_clear_amt IS NULL THEN 'null' ELSE TO_CHAR(l_clear_amt) END || ',' ||
+                '"void_date": ' || CASE WHEN l_void_date IS NULL THEN 'null' ELSE '"' || TO_CHAR(l_void_date, 'YYYY-MM-DD') || '"' END || ',' ||
+                '"business_unit": ' || CASE WHEN l_bu IS NULL THEN 'null' ELSE '"' || REPLACE(l_bu, '"', '\"') || '"' END || ',' ||
+                '"bank_account_name": ' || CASE WHEN l_bank_acct IS NULL THEN 'null' ELSE '"' || REPLACE(l_bank_acct, '"', '\"') || '"' END || ',' ||
+                '"accounting_status": ' || CASE WHEN l_acct_status IS NULL THEN 'null' ELSE '"' || l_acct_status || '"' END || ',' ||
+                '"reconciled_flag": ' || CASE WHEN l_reconciled IS NULL THEN 'null' ELSE '"' || l_reconciled || '"' END ||
+            '}';
         END LOOP;
+        CLOSE c_payments;
 
         l_payments := l_payments || ']';
 
         -- Build response
         l_result := '{"success": "true", "supplier_number": "' || p_supplier_number ||
-                    '", "total_count": ' || l_total_count ||
-                    ', "limit": ' || p_limit ||
-                    ', "offset": ' || p_offset ||
-                    ', "has_more": ' || CASE WHEN (p_offset + p_limit) < l_total_count THEN 'true' ELSE 'false' END ||
+                    '", "total_count": ' || NVL(l_total_count, 0) ||
+                    ', "limit": ' || NVL(p_limit, 100) ||
+                    ', "offset": ' || NVL(p_offset, 0) ||
+                    ', "has_more": ' || CASE WHEN (NVL(p_offset, 0) + NVL(p_limit, 100)) < NVL(l_total_count, 0) THEN 'true' ELSE 'false' END ||
                     ', "payments": ' || l_payments || '}';
 
         RETURN l_result;
 
     EXCEPTION
         WHEN OTHERS THEN
-            RETURN '{"success": "false", "error": "' || REPLACE(SQLERRM, '"', '\"') || '"}';
+            IF c_payments%ISOPEN THEN
+                CLOSE c_payments;
+            END IF;
+            RETURN '{"success": "false", "error": "' || REPLACE(SQLERRM, '"', '\"') || '", "error_line": "' || DBMS_UTILITY.FORMAT_ERROR_BACKTRACE || '"}';
     END get_supplier_payments;
 
     -- ========================================================================
