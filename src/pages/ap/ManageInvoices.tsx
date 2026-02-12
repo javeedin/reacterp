@@ -129,6 +129,14 @@ interface SupplierRecord {
 const APEX_INVOICE_URL = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice`;
 const APEX_SUPPLIERS_URL = `${APEX_DB_CONFIG.baseUrl}/suppliers`;
 
+// Helper function to format amount in UAE format (000,000.00)
+const formatAmount = (value: number): string => {
+  return new Intl.NumberFormat('en-AE', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+};
+
 // Helper function to format date
 const formatDate = (dateStr: string | null): string => {
   if (!dateStr) return '';
@@ -651,7 +659,7 @@ const ManageInvoices: React.FC = () => {
       align: 'right',
       render: (value: number, record: InvoiceRecord) => (
         <span style={{ color: value === 0 ? REDWOOD.neutral600 : REDWOOD.neutral900 }}>
-          {value.toFixed(2)} {record.invoiceCurrency}
+          {formatAmount(value)} {record.invoiceCurrency}
         </span>
       ),
     },
@@ -663,7 +671,7 @@ const ManageInvoices: React.FC = () => {
       align: 'right',
       render: (value: number, record: InvoiceRecord) => (
         <span style={{ color: value < 0 ? REDWOOD.error : REDWOOD.info, fontWeight: 500 }}>
-          {value.toFixed(2)} {record.invoiceCurrency}
+          {formatAmount(value)} {record.invoiceCurrency}
         </span>
       ),
       sorter: (a, b) => a.invoiceAmount - b.invoiceAmount,
@@ -675,7 +683,7 @@ const ManageInvoices: React.FC = () => {
       width: 140,
       align: 'right',
       render: (value: number, record: InvoiceRecord) => (
-        <span>{value.toFixed(2)} {record.invoiceCurrency}</span>
+        <span>{formatAmount(value)} {record.invoiceCurrency}</span>
       ),
     },
     {
@@ -1023,7 +1031,7 @@ const ManageInvoices: React.FC = () => {
                           fontSize: 12,
                           color: totals.unpaidAmount === 0 ? REDWOOD.neutral600 : REDWOOD.neutral900,
                         }}>
-                          {totals.unpaidAmount.toFixed(2)}
+                          {formatAmount(totals.unpaidAmount)}
                         </Text>
                       </Table.Summary.Cell>
                       {/* Invoice Amount */}
@@ -1032,13 +1040,13 @@ const ManageInvoices: React.FC = () => {
                           fontSize: 12,
                           color: totals.invoiceAmount < 0 ? REDWOOD.error : REDWOOD.info,
                         }}>
-                          {totals.invoiceAmount.toFixed(2)}
+                          {formatAmount(totals.invoiceAmount)}
                         </Text>
                       </Table.Summary.Cell>
                       {/* Applied Prepayments */}
                       <Table.Summary.Cell index={8} align="right">
                         <Text strong style={{ fontSize: 12 }}>
-                          {totals.appliedPrepayments.toFixed(2)}
+                          {formatAmount(totals.appliedPrepayments)}
                         </Text>
                       </Table.Summary.Cell>
                       {/* Remaining empty cells */}
