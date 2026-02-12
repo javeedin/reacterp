@@ -170,7 +170,7 @@ const ManageInvoices: React.FC = () => {
         method: 'GET',
         proxyUrl: APEX_INVOICE_URL,
         actualUrl: APEX_INVOICE_URL,
-        params: 'q=SUPPLIER_NUMBER={supplierNumber}',
+        params: 'supplier_number={supplierNumber}',
         description: 'Fetches invoices from APEX database with optional filters',
       },
       {
@@ -240,17 +240,15 @@ const ManageInvoices: React.FC = () => {
   const handleSearch = async (values: any) => {
     setLoading(true);
     try {
-      // Build query string for filtering
-      const filters: string[] = [];
-      if (values.supplierNumber) filters.push(`SUPPLIER_NUMBER=${values.supplierNumber}`);
-      if (values.businessUnit) filters.push(`BUSINESS_UNIT=${values.businessUnit}`);
-      if (values.invoiceNumber) filters.push(`INVOICE_NUMBER=${values.invoiceNumber}`);
+      // Build query parameters
+      const params = new URLSearchParams();
+      if (values.supplierNumber) params.append('supplier_number', values.supplierNumber);
+      if (values.businessUnit) params.append('business_unit', values.businessUnit);
+      if (values.invoiceNumber) params.append('invoice_number', values.invoiceNumber);
 
       // Build URL - call APEX endpoint directly
-      let apiUrl = APEX_INVOICE_URL;
-      if (filters.length > 0) {
-        apiUrl += `?q=${encodeURIComponent(filters.join(';'))}`;
-      }
+      const queryString = params.toString();
+      const apiUrl = queryString ? `${APEX_INVOICE_URL}?${queryString}` : APEX_INVOICE_URL;
 
       console.log('Fetching invoices from:', apiUrl);
 
