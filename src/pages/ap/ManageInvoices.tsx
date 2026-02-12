@@ -112,8 +112,22 @@ interface InvoiceTab {
   invoice: InvoiceRecord;
 }
 
+// Supplier record from API
+interface SupplierRecord {
+  key: string;
+  supplierId: number;
+  supplier: string;
+  supplierNumber: string;
+  alternativeName: string;
+  status: string;
+  supplierType: string;
+  creationDate: string;
+  taxpayerId: string;
+}
+
 // APEX endpoint for invoices
 const APEX_INVOICE_URL = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice`;
+const APEX_SUPPLIERS_URL = `${APEX_DB_CONFIG.baseUrl}/suppliers`;
 
 // Helper function to format date
 const formatDate = (dateStr: string | null): string => {
@@ -165,6 +179,12 @@ const ManageInvoices: React.FC = () => {
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [lastCalledUrl, setLastCalledUrl] = useState<string | null>(null);
   const [lastApiResponse, setLastApiResponse] = useState<string | null>(null);
+
+  // Supplier lookup modal state
+  const [supplierModalVisible, setSupplierModalVisible] = useState(false);
+  const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
+  const [supplierLoading, setSupplierLoading] = useState(false);
+  const [supplierSearchText, setSupplierSearchText] = useState('');
 
   // Compute totals for amount columns
   const totals = useMemo(() => {
@@ -239,6 +259,136 @@ const ManageInvoices: React.FC = () => {
     saveAs(blob, `Invoices_${new Date().toISOString().slice(0, 10)}.xlsx`);
     message.success('Exported to Excel successfully');
   };
+
+  // Fetch suppliers from API
+  const fetchSuppliers = async () => {
+    setSupplierLoading(true);
+    try {
+      const response = await fetch(APEX_SUPPLIERS_URL, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const items = data.items || data || [];
+
+      if (Array.isArray(items)) {
+        const mapped: SupplierRecord[] = items.map((item: any, index: number) => ({
+          key: item.supplier_id?.toString() || index.toString(),
+          supplierId: item.supplier_id,
+          supplier: item.supplier || '',
+          supplierNumber: item.supplier_number || '',
+          alternativeName: item.alternate_name || '',
+          status: item.status || '',
+          supplierType: item.supplier_type || '',
+          creationDate: formatDate(item.creation_date),
+          taxpayerId: item.taxpayer_id || '',
+        }));
+        setSuppliers(mapped);
+      }
+    } catch (error) {
+      console.error('Supplier fetch error:', error);
+      message.error(`Failed to fetch suppliers: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setSupplierLoading(false);
+    }
+  };
+
+  // Open supplier lookup modal
+  const openSupplierModal = () => {
+    setSupplierModalVisible(true);
+    setSupplierSearchText('');
+    if (suppliers.length === 0) {
+      fetchSuppliers();
+    }
+  };
+
+  // Handle supplier selection
+  const handleSupplierSelect = (record: SupplierRecord) => {
+    form.setFieldsValue({
+      supplierOrParty: record.supplier,
+      supplierNumber: record.supplierNumber,
+    });
+    setSupplierModalVisible(false);
+    message.success(`Selected supplier: ${record.supplier}`);
+  };
+
+  // Filtered suppliers based on search text
+  const filteredSuppliers = useMemo(() => {
+    if (!supplierSearchText) return suppliers;
+    const search = supplierSearchText.toLowerCase();
+    return suppliers.filter(
+      (s) =>
+        s.supplier.toLowerCase().includes(search) ||
+        s.supplierNumber.toLowerCase().includes(search) ||
+        (s.alternativeName && s.alternativeName.toLowerCase().includes(search))
+    );
+  }, [suppliers, supplierSearchText]);
+
+  // Supplier table columns
+  const supplierColumns: ColumnsType<SupplierRecord> = [
+    {
+      title: 'Supplier Number',
+      dataIndex: 'supplierNumber',
+      key: 'supplierNumber',
+      width: 130,
+      sorter: (a, b) => a.supplierNumber.localeCompare(b.supplierNumber),
+    },
+    {
+      title: 'Supplier Name',
+      dataIndex: 'supplier',
+      key: 'supplier',
+      width: 280,
+      ellipsis: true,
+      sorter: (a, b) => a.supplier.localeCompare(b.supplier),
+    },
+    {
+      title: 'Alternative Name',
+      dataIndex: 'alternativeName',
+      key: 'alternativeName',
+      width: 200,
+      ellipsis: true,
+    },
+    {
+      title: 'Status',
+      dataIndex: 'status',
+      key: 'status',
+      width: 100,
+      render: (status: string) => (
+        <Tag color={status === 'ACTIVE' ? 'green' : 'red'}>{status}</Tag>
+      ),
+      filters: [
+        { text: 'ACTIVE', value: 'ACTIVE' },
+        { text: 'INACTIVE', value: 'INACTIVE' },
+      ],
+      onFilter: (value, record) => record.status === value,
+    },
+    {
+      title: 'Taxpayer ID',
+      dataIndex: 'taxpayerId',
+      key: 'taxpayerId',
+      width: 120,
+    },
+    {
+      title: 'Action',
+      key: 'action',
+      width: 80,
+      render: (_: any, record: SupplierRecord) => (
+        <Button
+          type="link"
+          size="small"
+          onClick={() => handleSupplierSelect(record)}
+          style={{ color: REDWOOD.info }}
+        >
+          Select
+        </Button>
+      ),
+    },
+  ];
 
   // API Configuration for this page
   const PAGE_APIS = {
@@ -695,7 +845,15 @@ const ManageInvoices: React.FC = () => {
                           >
                             <Input
                               placeholder="Search supplier"
-                              suffix={<SearchOutlined style={{ color: REDWOOD.neutral300 }} />}
+                              readOnly
+                              suffix={
+                                <SearchOutlined
+                                  style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 14 }}
+                                  onClick={openSupplierModal}
+                                />
+                              }
+                              onClick={openSupplierModal}
+                              style={{ cursor: 'pointer' }}
                             />
                           </Form.Item>
                         </Col>
@@ -1012,6 +1170,63 @@ const ManageInvoices: React.FC = () => {
             background: ${REDWOOD.neutral100};
           }
         `}</style>
+
+        {/* Supplier Search Modal */}
+        <Modal
+          title={
+            <Space>
+              <SearchOutlined style={{ color: REDWOOD.info }} />
+              <span>Search Suppliers</span>
+            </Space>
+          }
+          open={supplierModalVisible}
+          onCancel={() => setSupplierModalVisible(false)}
+          footer={null}
+          width={900}
+          styles={{ body: { padding: '12px 24px' } }}
+        >
+          <div style={{ marginBottom: 12 }}>
+            <Input
+              placeholder="Search by supplier name, number, or alternate name..."
+              prefix={<SearchOutlined style={{ color: REDWOOD.neutral300 }} />}
+              value={supplierSearchText}
+              onChange={(e) => setSupplierSearchText(e.target.value)}
+              allowClear
+              size="middle"
+              style={{ marginBottom: 8 }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {filteredSuppliers.length} supplier{filteredSuppliers.length !== 1 ? 's' : ''} found
+              </Text>
+              <Button
+                size="small"
+                icon={<ReloadOutlined />}
+                onClick={fetchSuppliers}
+                loading={supplierLoading}
+              >
+                Refresh
+              </Button>
+            </div>
+          </div>
+          <Table
+            columns={supplierColumns}
+            dataSource={filteredSuppliers}
+            loading={supplierLoading}
+            size="small"
+            pagination={{
+              pageSize: 10,
+              showSizeChanger: true,
+              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total}`,
+            }}
+            scroll={{ y: 400 }}
+            onRow={(record) => ({
+              onDoubleClick: () => handleSupplierSelect(record),
+              style: { cursor: 'pointer' },
+            })}
+            rowClassName={(_record, index) => index % 2 === 0 ? '' : 'table-row-light'}
+          />
+        </Modal>
 
         {/* API Viewer Modal */}
         <Modal
