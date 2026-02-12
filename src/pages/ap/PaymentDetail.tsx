@@ -92,13 +92,20 @@ interface PaymentRecord {
 // Related invoice interface
 interface RelatedInvoice {
   key: string;
+  invoicePaymentId: number;
+  checkId: number;
+  invoiceId: number;
+  invoiceBusinessUnit: string;
   invoiceNumber: string;
-  invoiceType: string;
-  dueDate: string;
-  discount: number;
-  amount: number;
-  paymentReason: string;
-  paymentReasonComments: string;
+  installmentNumber: number;
+  amountPaidPaymentCurrency: number;
+  amountPaidInvoiceCurrency: number;
+  invoicePaymentAmount: number;
+  invoiceAmount: number;
+  discountLost: number;
+  discountTaken: number;
+  invoiceCurrency: string;
+  invoicePaymentStatus: string;
 }
 
 interface PaymentDetailProps {
@@ -117,13 +124,16 @@ const formatDate = (dateStr: string | null): string => {
   }
 };
 
-import { ORACLE_FUSION_CONFIG } from '../../config/api.config';
+import { ORACLE_FUSION_CONFIG, APEX_DB_CONFIG } from '../../config/api.config';
 
 // Fusion API config - direct URL
 const FUSION_CONFIG = {
   baseUrl: ORACLE_FUSION_CONFIG.baseUrl,
   auth: btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`),
 };
+
+// APEX endpoint for related invoices
+const APEX_RELATED_INVOICES_URL = `${APEX_DB_CONFIG.baseUrl}/ap/payments`;
 
 const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
   const [activeTab, setActiveTab] = useState('paymentDetails');
@@ -138,22 +148,16 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
     { key: 'stop', label: 'Stop Payment', icon: <StopOutlined />, danger: true },
   ];
 
-  // Fetch related invoices
+  // Fetch related invoices from APEX
   const fetchRelatedInvoices = async () => {
     setLoadingInvoices(true);
     try {
-      // Construct the URL for related invoices using CheckId
-      // Format: /fscmRestApi/resources/11.13.18.05/payablesPayments/{CheckId}/child/relatedInvoices
-      const relatedInvoicesUrl = `${FUSION_CONFIG.baseUrl}/payablesPayments/${payment.checkId}/child/relatedInvoices`;
-
+      const relatedInvoicesUrl = `${APEX_RELATED_INVOICES_URL}/${payment.checkId}/related-invoices`;
       console.log('Fetching related invoices from:', relatedInvoicesUrl);
 
       const response = await fetch(relatedInvoicesUrl, {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Basic ${FUSION_CONFIG.auth}`,
-        },
+        headers: { 'Accept': 'application/json' },
       });
 
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
@@ -163,25 +167,25 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
       const items = data.items || [];
 
       setRelatedInvoices(items.map((item: any, index: number) => ({
-        key: index.toString(),
+        key: item.InvoicePaymentId?.toString() || index.toString(),
+        invoicePaymentId: item.InvoicePaymentId || 0,
+        checkId: item.CheckId || 0,
+        invoiceId: item.InvoiceId || 0,
+        invoiceBusinessUnit: item.InvoiceBusinessUnit || '',
         invoiceNumber: item.InvoiceNumber || '',
-        invoiceType: 'Standard', // Not provided in API, default to Standard
-        dueDate: formatDate(item.DueDate) || '',
-        discount: item.DiscountTaken || 0,
-        amount: item.AmountPaidPaymentCurrency || item.InvoicePaymentAmount || 0,
-        paymentReason: item.PaymentReason || '',
-        paymentReasonComments: item.PaymentReasonComments || '',
+        installmentNumber: item.InstallmentNumber || 0,
+        amountPaidPaymentCurrency: item.AmountPaidPaymentCurrency || 0,
+        amountPaidInvoiceCurrency: item.AmountPaidInvoiceCurrency || 0,
+        invoicePaymentAmount: item.InvoicePaymentAmount || 0,
+        invoiceAmount: item.InvoiceAmount || 0,
+        discountLost: item.DiscountLost || 0,
+        discountTaken: item.DiscountTaken || 0,
+        invoiceCurrency: item.InvoiceCurrency || '',
+        invoicePaymentStatus: item.InvoicePaymentStatus || '',
       })));
     } catch (error) {
       console.error('Error fetching related invoices:', error);
-      // Use sample data on error
-      setRelatedInvoices([
-        { key: '1', invoiceNumber: '47331', invoiceType: 'Standard', dueDate: '3-Dec-2023', discount: 0, amount: 693.00, paymentReason: '', paymentReasonComments: '' },
-        { key: '2', invoiceNumber: '47677', invoiceType: 'Standard', dueDate: '6-Sep-2023', discount: 0, amount: 147.00, paymentReason: '', paymentReasonComments: '' },
-        { key: '3', invoiceNumber: '47756', invoiceType: 'Standard', dueDate: '16-Sep-2023', discount: 0, amount: 47.25, paymentReason: '', paymentReasonComments: '' },
-        { key: '4', invoiceNumber: '47785', invoiceType: 'Standard', dueDate: '22-Sep-2023', discount: 0, amount: 433.65, paymentReason: '', paymentReasonComments: '' },
-        { key: '5', invoiceNumber: '48362', invoiceType: 'Standard', dueDate: '16-Nov-2023', discount: 0, amount: 1002.75, paymentReason: '', paymentReasonComments: '' },
-      ]);
+      setRelatedInvoices([]);
     } finally {
       setLoadingInvoices(false);
     }
@@ -202,76 +206,102 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
     return <Tag color={colors[status] || 'default'}>{status}</Tag>;
   };
 
+  // Helper to format amount in UAE format
+  const formatAmount = (value: number): string => {
+    return new Intl.NumberFormat('en-AE', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value);
+  };
+
   // Invoice columns for Paid Invoices tab
   const invoiceColumns: ColumnsType<RelatedInvoice> = [
     {
-      title: 'Invoice',
-      children: [
-        {
-          title: 'Number',
-          dataIndex: 'invoiceNumber',
-          key: 'invoiceNumber',
-          width: 100,
-          render: (text: string) => (
-            <a style={{ color: REDWOOD.info }}>{text}</a>
-          ),
-        },
-        {
-          title: 'Type',
-          dataIndex: 'invoiceType',
-          key: 'invoiceType',
-          width: 100,
-        },
-        {
-          title: 'Due Date',
-          dataIndex: 'dueDate',
-          key: 'dueDate',
-          width: 120,
-        },
-      ],
-    },
-    {
-      title: `Payment (${payment.paymentCurrency})`,
-      children: [
-        {
-          title: 'Discount',
-          dataIndex: 'discount',
-          key: 'discount',
-          width: 100,
-          align: 'right',
-          render: (value: number) => value.toFixed(2),
-        },
-        {
-          title: 'Amount',
-          dataIndex: 'amount',
-          key: 'amount',
-          width: 120,
-          align: 'right',
-          render: (value: number) => value.toLocaleString('en-US', { minimumFractionDigits: 2 }),
-        },
-      ],
-    },
-    {
-      title: 'Payment Reason',
-      dataIndex: 'paymentReason',
-      key: 'paymentReason',
-      width: 150,
-    },
-    {
-      title: 'Payment Reason Comments',
-      dataIndex: 'paymentReasonComments',
-      key: 'paymentReasonComments',
+      title: 'Invoice Number',
+      dataIndex: 'invoiceNumber',
+      key: 'invoiceNumber',
       width: 200,
+      ellipsis: true,
+      render: (text: string) => (
+        <a style={{ color: REDWOOD.info }}>{text}</a>
+      ),
+    },
+    {
+      title: 'Business Unit',
+      dataIndex: 'invoiceBusinessUnit',
+      key: 'invoiceBusinessUnit',
+      width: 220,
+      ellipsis: true,
+    },
+    {
+      title: 'Installment',
+      dataIndex: 'installmentNumber',
+      key: 'installmentNumber',
+      width: 90,
+      align: 'center',
+    },
+    {
+      title: 'Invoice Amount',
+      dataIndex: 'invoiceAmount',
+      key: 'invoiceAmount',
+      width: 140,
+      align: 'right',
+      render: (value: number) => formatAmount(value),
+    },
+    {
+      title: `Paid (${payment.paymentCurrency || 'AED'})`,
+      dataIndex: 'amountPaidPaymentCurrency',
+      key: 'amountPaidPaymentCurrency',
+      width: 140,
+      align: 'right',
+      render: (value: number) => formatAmount(value),
+    },
+    {
+      title: 'Paid (Inv Currency)',
+      dataIndex: 'amountPaidInvoiceCurrency',
+      key: 'amountPaidInvoiceCurrency',
+      width: 140,
+      align: 'right',
+      render: (value: number) => formatAmount(value),
+    },
+    {
+      title: 'Discount Taken',
+      dataIndex: 'discountTaken',
+      key: 'discountTaken',
+      width: 120,
+      align: 'right',
+      render: (value: number) => formatAmount(value),
+    },
+    {
+      title: 'Currency',
+      dataIndex: 'invoiceCurrency',
+      key: 'invoiceCurrency',
+      width: 80,
+      align: 'center',
+    },
+    {
+      title: 'Status',
+      dataIndex: 'invoicePaymentStatus',
+      key: 'invoicePaymentStatus',
+      width: 130,
+      render: (status: string) => {
+        const color = status === 'Fully paid' ? REDWOOD.success
+          : status === 'Partially paid' ? REDWOOD.warning
+          : 'default';
+        return <Tag color={color}>{status}</Tag>;
+      },
     },
   ];
 
   // Calculate totals for invoices
   const invoiceTotals = relatedInvoices.reduce(
     (acc, inv) => ({
-      discount: acc.discount + inv.discount,
-      amount: acc.amount + inv.amount,
+      invoiceAmount: acc.invoiceAmount + inv.invoiceAmount,
+      amountPaid: acc.amountPaid + inv.amountPaidPaymentCurrency,
+      amountPaidInv: acc.amountPaidInv + inv.amountPaidInvoiceCurrency,
+      discountTaken: acc.discountTaken + inv.discountTaken,
     }),
-    { discount: 0, amount: 0 }
+    { invoiceAmount: 0, amountPaid: 0, amountPaidInv: 0, discountTaken: 0 }
   );
 
   // Payment Details Tab Content
@@ -411,14 +441,22 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
           summary={() => (
             <Table.Summary fixed>
               <Table.Summary.Row style={{ background: REDWOOD.neutral100, fontWeight: 600 }}>
-                <Table.Summary.Cell index={0} colSpan={3}></Table.Summary.Cell>
+                <Table.Summary.Cell index={0} colSpan={3}>
+                  <Text strong>Totals ({relatedInvoices.length} invoice{relatedInvoices.length !== 1 ? 's' : ''})</Text>
+                </Table.Summary.Cell>
                 <Table.Summary.Cell index={1} align="right">
-                  {invoiceTotals.discount.toFixed(2)}
+                  {formatAmount(invoiceTotals.invoiceAmount)}
                 </Table.Summary.Cell>
                 <Table.Summary.Cell index={2} align="right">
-                  {invoiceTotals.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  {formatAmount(invoiceTotals.amountPaid)}
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={3} colSpan={2}></Table.Summary.Cell>
+                <Table.Summary.Cell index={3} align="right">
+                  {formatAmount(invoiceTotals.amountPaidInv)}
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={4} align="right">
+                  {formatAmount(invoiceTotals.discountTaken)}
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={5} colSpan={2}></Table.Summary.Cell>
               </Table.Summary.Row>
             </Table.Summary>
           )}
