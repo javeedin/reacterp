@@ -14,24 +14,20 @@
     <div id="root"></div>
     <script type="module" src="./src/main.tsx"></script>
     <script>
-      // Register Service Worker for PWA (only in production, not dev or Electron)
-      if ('serviceWorker' in navigator && !window.electronAPI) {
-        if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-          window.addEventListener('load', () => {
-            navigator.serviceWorker.register('./sw.js')
-              .then((registration) => {
-                console.log('SW registered:', registration.scope);
-              })
-              .catch((error) => {
-                console.log('SW registration failed:', error);
-              });
+      // ALWAYS unregister service workers to prevent stale cache issues
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function(registrations) {
+          registrations.forEach(function(registration) {
+            registration.unregister();
+            console.log('SW unregistered:', registration.scope);
           });
-        } else {
-          // In dev mode, unregister any existing service worker to prevent stale cache
-          navigator.serviceWorker.getRegistrations().then((registrations) => {
-            registrations.forEach((registration) => {
-              registration.unregister();
-              console.log('SW unregistered for dev mode');
+        });
+        // Also clear all caches
+        if ('caches' in window) {
+          caches.keys().then(function(names) {
+            names.forEach(function(name) {
+              caches.delete(name);
+              console.log('Cache cleared:', name);
             });
           });
         }

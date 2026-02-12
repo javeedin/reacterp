@@ -1,33 +1,24 @@
-// ReactERP Service Worker - v3 (self-clearing for dev mode)
-const CACHE_NAME = 'reacterp-cache-v3';
+// ReactERP Service Worker - v4 (force clear all caches and unregister)
+// This version exists only to replace any previously cached SW and clear everything
 
-// Immediately clear ALL caches and unregister on install
 self.addEventListener('install', (event) => {
+  console.log('[SW v4] Installing - clearing all caches');
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((name) => {
-          console.log('[SW] Clearing cache:', name);
-          return caches.delete(name);
-        })
-      );
-    })
+    caches.keys().then((names) => Promise.all(names.map((n) => caches.delete(n))))
   );
   self.skipWaiting();
 });
 
-// On activate, unregister self and reload all clients
 self.addEventListener('activate', (event) => {
+  console.log('[SW v4] Activating - unregistering self');
   event.waitUntil(
-    self.registration.unregister().then(() => {
-      return self.clients.matchAll().then((clients) => {
-        clients.forEach((client) => {
-          console.log('[SW] Reloading client to clear stale cache');
-          client.navigate(client.url);
-        });
-      });
-    })
+    caches.keys().then((names) => Promise.all(names.map((n) => caches.delete(n))))
+      .then(() => self.registration.unregister())
+      .then(() => self.clients.matchAll())
+      .then((clients) => {
+        clients.forEach((client) => client.navigate(client.url));
+      })
   );
 });
 
-// No fetch interception - let everything go to network
+// No fetch interception - everything goes to network
