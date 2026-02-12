@@ -28,6 +28,8 @@ export const APEX_DB_CONFIG = {
     apInvoices: 'ap/invoices',
     apInvoicesBulk: 'ap/invoices/bulk',
     apInvoicesStats: 'ap/invoices/stats',
+    apPayments: 'ap/payments',
+    apPaymentByCheckId: 'ap/payments',  // append /:check_id
   },
 };
 

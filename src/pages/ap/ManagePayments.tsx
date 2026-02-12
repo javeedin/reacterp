@@ -46,6 +46,8 @@ import {
   CloudOutlined,
   DatabaseOutlined,
   SwapOutlined,
+  BugOutlined,
+  ClearOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -271,15 +273,45 @@ const ManagePayments: React.FC = () => {
   const [lastCalledUrl, setLastCalledUrl] = useState<string | null>(null);
   const [lastApiResponse, setLastApiResponse] = useState<string | null>(null);
 
+  // Debug log state
+  const [debugLogs, setDebugLogs] = useState<Array<{ time: string; type: string; message: string }>>([]);
+
+  // Debug logger helper
+  const debugLog = (type: 'REQUEST' | 'RESPONSE' | 'INFO' | 'ERROR' | 'MAPPED', msg: string) => {
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('en-GB', { hour12: false }) + '.' + now.getMilliseconds().toString().padStart(3, '0');
+    const entry = { time: timeStr, type, message: msg };
+    setDebugLogs(prev => [...prev.slice(-50), entry]); // keep last 50 entries
+    if (type === 'ERROR') {
+      console.error(`[${timeStr}] [${type}]`, msg);
+    } else {
+      console.log(`[${timeStr}] [${type}]`, msg);
+    }
+  };
+
   // API Configuration for this page
   const PAGE_APIS = {
     apex: [
       {
-        name: 'Search Payments',
+        name: 'Search Payments (List)',
         method: 'GET',
         url: APEX_PAYMENTS_URL,
-        params: 'supplier_number={supplierNumber}',
-        description: 'Fetches payments from APEX database',
+        params: 'payment_number=&payment_status=&payee=&supplier_number=&business_unit=&date_from=&date_to=&limit=100&offset=0',
+        description: 'Fetches paginated payments from ORDS/APEX database with optional filters. Returns JSON with count, limit, offset, items[].',
+      },
+      {
+        name: 'Get Payment by Check ID',
+        method: 'GET',
+        url: `${APEX_PAYMENTS_URL}/{check_id}`,
+        params: '',
+        description: 'Fetches a single payment by Check ID. Example: /ap/payments/300000085294470',
+      },
+      {
+        name: 'Save Payments (Bulk)',
+        method: 'POST',
+        url: APEX_PAYMENTS_URL,
+        params: 'Body: { "items": [...] }',
+        description: 'Saves payments to APEX database. Accepts single object, array, or { items: [...] } format.',
       },
     ],
     fusion: [
@@ -287,8 +319,8 @@ const ManagePayments: React.FC = () => {
         name: 'Search Payments',
         method: 'GET',
         url: `${FUSION_CONFIG.baseUrl}${FUSION_CONFIG.paymentsEndpoint}`,
-        params: 'q=PaymentNumber={number}',
-        description: 'Fetches payments from Oracle Fusion REST API (may have CORS issues)',
+        params: 'q=PaymentNumber={number};Payee LIKE *name*;PaymentStatus=Cleared;BusinessUnit=BU_NAME',
+        description: 'Fetches payments from Oracle Fusion REST API (may have CORS issues from browser)',
       },
     ],
   };
@@ -347,28 +379,40 @@ const ManagePayments: React.FC = () => {
   // Search payments from API
   const handleSearch = async (values: any) => {
     setLoading(true);
+    const source = useApex ? 'APEX/ORDS' : 'Fusion';
+    debugLog('INFO', `══════════════════════════════════════════════════`);
+    debugLog('INFO', `Starting payment search [Source: ${source}]`);
+    debugLog('INFO', `Search filters: ${JSON.stringify(values, null, 2)}`);
+
     try {
       let apiUrl: string;
       let response: Response;
 
       if (useApex) {
-        // Build APEX query parameters
+        // Build APEX/ORDS query parameters
         const params = new URLSearchParams();
         if (values.supplierOrParty) params.append('payee', values.supplierOrParty);
         if (values.paymentNumber) params.append('payment_number', values.paymentNumber);
         if (values.paymentStatus) params.append('payment_status', values.paymentStatus);
         if (values.businessUnit) params.append('business_unit', values.businessUnit);
+        if (values.supplierNumber) params.append('supplier_number', values.supplierNumber);
 
         const queryString = params.toString();
         apiUrl = queryString ? `${APEX_PAYMENTS_URL}?${queryString}` : APEX_PAYMENTS_URL;
 
-        console.log('Fetching payments from APEX:', apiUrl);
+        debugLog('REQUEST', `GET ${apiUrl}`);
+        debugLog('REQUEST', `Headers: { Accept: application/json }`);
         setLastCalledUrl(apiUrl);
 
+        const startTime = performance.now();
         response = await fetch(apiUrl, {
           method: 'GET',
           headers: { 'Accept': 'application/json' },
         });
+        const elapsed = Math.round(performance.now() - startTime);
+
+        debugLog('RESPONSE', `HTTP ${response.status} ${response.statusText} (${elapsed}ms)`);
+        debugLog('RESPONSE', `Content-Type: ${response.headers.get('content-type')}`);
       } else {
         // Build Fusion query string
         const filters: string[] = [];
@@ -382,9 +426,11 @@ const ManagePayments: React.FC = () => {
           apiUrl += `?q=${encodeURIComponent(filters.join(';'))}`;
         }
 
-        console.log('Fetching payments from Fusion:', apiUrl);
+        debugLog('REQUEST', `GET ${apiUrl}`);
+        debugLog('REQUEST', `Headers: { Authorization: Basic ***, Content-Type: application/json }`);
         setLastCalledUrl(apiUrl);
 
+        const startTime = performance.now();
         response = await fetch(apiUrl, {
           method: 'GET',
           headers: {
@@ -392,39 +438,57 @@ const ManagePayments: React.FC = () => {
             'Authorization': `Basic ${FUSION_CONFIG.auth}`,
           },
         });
+        const elapsed = Math.round(performance.now() - startTime);
+
+        debugLog('RESPONSE', `HTTP ${response.status} ${response.statusText} (${elapsed}ms)`);
       }
 
       if (!response.ok) {
+        const errorBody = await response.text();
+        debugLog('ERROR', `HTTP ${response.status}: ${errorBody.substring(0, 500)}`);
         setLastApiResponse(`Error: HTTP ${response.status} ${response.statusText}`);
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       const data = await response.json();
-      console.log(`${useApex ? 'APEX' : 'Fusion'} API Response:`, data);
+      debugLog('RESPONSE', `JSON payload received`);
 
-      // Handle response
+      // Handle response - ORDS returns { count, limit, offset, items: [...] }
       const items = data.items || data || [];
+      const totalCount = data.count || (Array.isArray(items) ? items.length : 0);
+
+      debugLog('RESPONSE', `Total count: ${totalCount}, Items in page: ${Array.isArray(items) ? items.length : 0}`);
 
       if (Array.isArray(items) && items.length > 0) {
+        // Log first item fields for debugging
+        const firstItem = items[0];
+        const fieldNames = Object.keys(firstItem);
+        debugLog('RESPONSE', `Fields per record (${fieldNames.length}): ${fieldNames.join(', ')}`);
+        debugLog('RESPONSE', `Sample record: CheckId=${firstItem.CheckId}, PaymentNumber=${firstItem.PaymentNumber}, Payee=${firstItem.Payee}, Amount=${firstItem.PaymentAmount}, Status=${firstItem.PaymentStatus}`);
+
         const mapper = useApex ? mapApexToPaymentRecord : mapFusionToPaymentRecord;
         const mappedPayments = items.map(mapper);
         setPayments(mappedPayments);
-        setLastApiResponse(`Success: ${mappedPayments.length} payments returned`);
-        message.success(`Found ${mappedPayments.length} payments`);
+        debugLog('MAPPED', `Mapped ${mappedPayments.length} payment records to UI model`);
+        setLastApiResponse(`Success: ${mappedPayments.length} of ${totalCount} payments returned`);
+        message.success(`Found ${mappedPayments.length} payments (total: ${totalCount})`);
       } else {
         setPayments([]);
+        debugLog('INFO', `No payments found for the given filters`);
         setLastApiResponse(`Success: 0 payments returned (empty result)`);
         message.info('No payments found');
       }
     } catch (error) {
-      console.error('Search error:', error);
       const errMsg = error instanceof Error ? error.message : 'Unknown error';
+      debugLog('ERROR', `Search failed: ${errMsg}`);
       if (!lastApiResponse?.startsWith('Error:')) {
         setLastApiResponse(`Error: ${errMsg}`);
       }
       message.error(`Failed to search payments: ${errMsg}`);
     } finally {
       setLoading(false);
+      debugLog('INFO', `Search completed`);
+      debugLog('INFO', `══════════════════════════════════════════════════`);
     }
   };
 
@@ -1011,6 +1075,66 @@ const ManagePayments: React.FC = () => {
                   </div>
                 </div>
               )}
+            </Card>
+          )}
+
+          {/* Debug Log Panel */}
+          {debugLogs.length > 0 && (
+            <Card
+              size="small"
+              style={{ marginBottom: 16, border: `1px solid ${REDWOOD.neutral200}` }}
+              title={
+                <Space>
+                  <BugOutlined style={{ color: REDWOOD.warning }} />
+                  <Text strong>Debug Log</Text>
+                  <Tag color="orange">{debugLogs.length} entries</Tag>
+                </Space>
+              }
+              extra={
+                <Button
+                  size="small"
+                  icon={<ClearOutlined />}
+                  onClick={() => setDebugLogs([])}
+                >
+                  Clear
+                </Button>
+              }
+            >
+              <div
+                style={{
+                  maxHeight: 250,
+                  overflowY: 'auto',
+                  fontFamily: 'monospace',
+                  fontSize: 11,
+                  background: '#1e1e1e',
+                  color: '#d4d4d4',
+                  padding: 10,
+                  borderRadius: 4,
+                }}
+              >
+                {debugLogs.map((log, idx) => {
+                  const typeColors: Record<string, string> = {
+                    REQUEST: '#569cd6',
+                    RESPONSE: '#4ec9b0',
+                    INFO: '#9cdcfe',
+                    ERROR: '#f44747',
+                    MAPPED: '#dcdcaa',
+                  };
+                  return (
+                    <div key={idx} style={{ marginBottom: 2, lineHeight: '16px' }}>
+                      <span style={{ color: '#858585' }}>{log.time}</span>
+                      {' '}
+                      <span style={{ color: typeColors[log.type] || '#d4d4d4', fontWeight: 600 }}>
+                        [{log.type}]
+                      </span>
+                      {' '}
+                      <span style={{ color: log.type === 'ERROR' ? '#f44747' : '#d4d4d4' }}>
+                        {log.message}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             </Card>
           )}
 
