@@ -33,6 +33,18 @@ CREATE OR REPLACE PACKAGE XXAP_PAYMENT_REL_INVOICES_PKG AS
         p_invoice_payment_id IN NUMBER
     ) RETURN CLOB;
 
+    -- Get related invoices with optional filters and pagination
+    FUNCTION get_related_invoices(
+        p_check_id              IN NUMBER DEFAULT NULL,
+        p_invoice_number        IN VARCHAR2 DEFAULT NULL,
+        p_invoice_id            IN NUMBER DEFAULT NULL,
+        p_invoice_business_unit IN VARCHAR2 DEFAULT NULL,
+        p_invoice_payment_status IN VARCHAR2 DEFAULT NULL,
+        p_invoice_currency      IN VARCHAR2 DEFAULT NULL,
+        p_limit                 IN NUMBER DEFAULT 100,
+        p_offset                IN NUMBER DEFAULT 0
+    ) RETURN CLOB;
+
 END XXAP_PAYMENT_REL_INVOICES_PKG;
 /
 
@@ -352,6 +364,91 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENT_REL_INVOICES_PKG AS
         WHEN OTHERS THEN
             RETURN '{"status":"error","message":"' || REPLACE(SQLERRM, '"', '\"') || '"}';
     END get_by_invoice_payment_id;
+
+    -- Get related invoices with optional filters and pagination
+    FUNCTION get_related_invoices(
+        p_check_id              IN NUMBER DEFAULT NULL,
+        p_invoice_number        IN VARCHAR2 DEFAULT NULL,
+        p_invoice_id            IN NUMBER DEFAULT NULL,
+        p_invoice_business_unit IN VARCHAR2 DEFAULT NULL,
+        p_invoice_payment_status IN VARCHAR2 DEFAULT NULL,
+        p_invoice_currency      IN VARCHAR2 DEFAULT NULL,
+        p_limit                 IN NUMBER DEFAULT 100,
+        p_offset                IN NUMBER DEFAULT 0
+    ) RETURN CLOB IS
+        v_result CLOB;
+        v_count NUMBER;
+    BEGIN
+        -- Get total count with filters
+        SELECT COUNT(*)
+        INTO v_count
+        FROM RR_AP_PAYMENTS_RELATED_INVOICES
+        WHERE (p_check_id IS NULL OR CHECK_ID = p_check_id)
+          AND (p_invoice_number IS NULL OR UPPER(INVOICE_NUMBER) LIKE '%' || UPPER(p_invoice_number) || '%')
+          AND (p_invoice_id IS NULL OR INVOICE_ID = p_invoice_id)
+          AND (p_invoice_business_unit IS NULL OR INVOICE_BUSINESS_UNIT = p_invoice_business_unit)
+          AND (p_invoice_payment_status IS NULL OR INVOICE_PAYMENT_STATUS = p_invoice_payment_status)
+          AND (p_invoice_currency IS NULL OR INVOICE_CURRENCY = p_invoice_currency);
+
+        -- Get paginated results with full JSON
+        SELECT JSON_OBJECT(
+            'count' VALUE v_count,
+            'limit' VALUE p_limit,
+            'offset' VALUE p_offset,
+            'items' VALUE (
+                SELECT JSON_ARRAYAGG(
+                    JSON_OBJECT(
+                        'InvoicePaymentId' VALUE INVOICE_PAYMENT_ID,
+                        'CheckId' VALUE CHECK_ID,
+                        'InvoiceId' VALUE INVOICE_ID,
+                        'InvoiceBusinessUnit' VALUE INVOICE_BUSINESS_UNIT,
+                        'InvoiceNumber' VALUE INVOICE_NUMBER,
+                        'InstallmentNumber' VALUE INSTALLMENT_NUMBER,
+                        'AmountPaidPaymentCurrency' VALUE AMOUNT_PAID_PAYMENT_CURRENCY,
+                        'AmountPaidInvoiceCurrency' VALUE AMOUNT_PAID_INVOICE_CURRENCY,
+                        'InvoicePaymentAmount' VALUE INVOICE_PAYMENT_AMOUNT,
+                        'InvoiceAmount' VALUE INVOICE_AMOUNT,
+                        'InvoiceBaseAmount' VALUE INVOICE_BASE_AMOUNT,
+                        'PaymentBaseAmount' VALUE PAYMENT_BASE_AMOUNT,
+                        'DiscountLost' VALUE DISCOUNT_LOST,
+                        'DiscountTaken' VALUE DISCOUNT_TAKEN,
+                        'InvoiceCurrency' VALUE INVOICE_CURRENCY,
+                        'CrossCurrencyRate' VALUE CROSS_CURRENCY_RATE,
+                        'InvoicePaymentStatus' VALUE INVOICE_PAYMENT_STATUS,
+                        'CreatedBy' VALUE CREATED_BY,
+                        'CreationDate' VALUE TO_CHAR(CREATION_DATE, 'YYYY-MM-DD"T"HH24:MI:SS.FF3TZH:TZM'),
+                        'LastUpdatedBy' VALUE LAST_UPDATED_BY,
+                        'LastUpdateDate' VALUE TO_CHAR(LAST_UPDATE_DATE, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
+                        'LastUpdateLogin' VALUE LAST_UPDATE_LOGIN,
+                        'SyncStatus' VALUE SYNC_STATUS
+                        ABSENT ON NULL
+                    ) ORDER BY INVOICE_NUMBER
+                    RETURNING CLOB
+                )
+                FROM (
+                    SELECT *
+                    FROM RR_AP_PAYMENTS_RELATED_INVOICES
+                    WHERE (p_check_id IS NULL OR CHECK_ID = p_check_id)
+                      AND (p_invoice_number IS NULL OR UPPER(INVOICE_NUMBER) LIKE '%' || UPPER(p_invoice_number) || '%')
+                      AND (p_invoice_id IS NULL OR INVOICE_ID = p_invoice_id)
+                      AND (p_invoice_business_unit IS NULL OR INVOICE_BUSINESS_UNIT = p_invoice_business_unit)
+                      AND (p_invoice_payment_status IS NULL OR INVOICE_PAYMENT_STATUS = p_invoice_payment_status)
+                      AND (p_invoice_currency IS NULL OR INVOICE_CURRENCY = p_invoice_currency)
+                    ORDER BY INVOICE_NUMBER
+                    OFFSET p_offset ROWS FETCH NEXT p_limit ROWS ONLY
+                )
+            )
+            RETURNING CLOB
+        )
+        INTO v_result
+        FROM DUAL;
+
+        RETURN v_result;
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            RETURN '{"status":"error","message":"' || REPLACE(SQLERRM, '"', '\"') || '"}';
+    END get_related_invoices;
 
 END XXAP_PAYMENT_REL_INVOICES_PKG;
 /
