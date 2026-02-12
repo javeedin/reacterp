@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Layout,
   Card,
@@ -131,6 +131,19 @@ interface PaymentTab {
   payment: PaymentRecord;
 }
 
+// Supplier record from API
+interface SupplierRecord {
+  key: string;
+  supplierId: number;
+  supplier: string;
+  supplierNumber: string;
+  alternativeName: string;
+  status: string;
+  supplierType: string;
+  creationDate: string;
+  taxpayerId: string;
+}
+
 // Fusion API config
 const FUSION_CONFIG = {
   baseUrl: ORACLE_FUSION_CONFIG.baseUrl,
@@ -140,6 +153,7 @@ const FUSION_CONFIG = {
 
 // APEX API config
 const APEX_PAYMENTS_URL = `${APEX_DB_CONFIG.baseUrl}/ap/payments`;
+const APEX_SUPPLIERS_URL = `${APEX_DB_CONFIG.baseUrl}/suppliers`;
 
 // Helper function to format amount in UAE format (000,000.00)
 const formatAmount = (value: number): string => {
@@ -288,6 +302,145 @@ const ManagePayments: React.FC = () => {
       console.log(`[${timeStr}] [${type}]`, msg);
     }
   };
+
+  // Supplier lookup modal state
+  const [supplierModalVisible, setSupplierModalVisible] = useState(false);
+  const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
+  const [supplierLoading, setSupplierLoading] = useState(false);
+  const [supplierSearchText, setSupplierSearchText] = useState('');
+
+  // Fetch suppliers from API
+  const fetchSuppliers = async () => {
+    setSupplierLoading(true);
+    debugLog('INFO', `Fetching suppliers from: ${APEX_SUPPLIERS_URL}`);
+    try {
+      const response = await fetch(APEX_SUPPLIERS_URL, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const items = data.items || data || [];
+
+      if (Array.isArray(items)) {
+        const mapped: SupplierRecord[] = items.map((item: any, index: number) => ({
+          key: item.supplier_id?.toString() || index.toString(),
+          supplierId: item.supplier_id,
+          supplier: item.supplier || '',
+          supplierNumber: item.supplier_number || '',
+          alternativeName: item.alternate_name || '',
+          status: item.status || '',
+          supplierType: item.supplier_type || '',
+          creationDate: item.creation_date || '',
+          taxpayerId: item.taxpayer_id || '',
+        }));
+        setSuppliers(mapped);
+        debugLog('RESPONSE', `Fetched ${mapped.length} suppliers`);
+      }
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : 'Unknown error';
+      debugLog('ERROR', `Supplier fetch failed: ${errMsg}`);
+      message.error(`Failed to fetch suppliers: ${errMsg}`);
+    } finally {
+      setSupplierLoading(false);
+    }
+  };
+
+  // Open supplier lookup modal
+  const openSupplierModal = () => {
+    setSupplierModalVisible(true);
+    setSupplierSearchText('');
+    if (suppliers.length === 0) {
+      fetchSuppliers();
+    }
+  };
+
+  // Handle supplier selection
+  const handleSupplierSelect = (record: SupplierRecord) => {
+    form.setFieldsValue({
+      supplierOrParty: record.supplier,
+      supplierNumber: record.supplierNumber,
+    });
+    setSupplierModalVisible(false);
+    message.success(`Selected supplier: ${record.supplier}`);
+  };
+
+  // Filtered suppliers based on search text
+  const filteredSuppliers = useMemo(() => {
+    if (!supplierSearchText) return suppliers;
+    const search = supplierSearchText.toLowerCase();
+    return suppliers.filter(
+      (s) =>
+        s.supplier.toLowerCase().includes(search) ||
+        s.supplierNumber.toLowerCase().includes(search) ||
+        (s.alternativeName && s.alternativeName.toLowerCase().includes(search))
+    );
+  }, [suppliers, supplierSearchText]);
+
+  // Supplier table columns
+  const supplierColumns: ColumnsType<SupplierRecord> = [
+    {
+      title: 'Supplier Number',
+      dataIndex: 'supplierNumber',
+      key: 'supplierNumber',
+      width: 130,
+      sorter: (a, b) => a.supplierNumber.localeCompare(b.supplierNumber),
+    },
+    {
+      title: 'Supplier Name',
+      dataIndex: 'supplier',
+      key: 'supplier',
+      width: 280,
+      ellipsis: true,
+      sorter: (a, b) => a.supplier.localeCompare(b.supplier),
+    },
+    {
+      title: 'Alternative Name',
+      dataIndex: 'alternativeName',
+      key: 'alternativeName',
+      width: 200,
+      ellipsis: true,
+    },
+    {
+      title: 'Status',
+      dataIndex: 'status',
+      key: 'status',
+      width: 100,
+      render: (status: string) => (
+        <Tag color={status === 'ACTIVE' ? 'green' : 'red'}>{status}</Tag>
+      ),
+      filters: [
+        { text: 'ACTIVE', value: 'ACTIVE' },
+        { text: 'INACTIVE', value: 'INACTIVE' },
+      ],
+      onFilter: (value, record) => record.status === value,
+    },
+    {
+      title: 'Taxpayer ID',
+      dataIndex: 'taxpayerId',
+      key: 'taxpayerId',
+      width: 120,
+    },
+    {
+      title: 'Action',
+      key: 'action',
+      width: 80,
+      render: (_: any, record: SupplierRecord) => (
+        <Button
+          type="link"
+          size="small"
+          onClick={() => handleSupplierSelect(record)}
+          style={{ color: REDWOOD.info }}
+        >
+          Select
+        </Button>
+      ),
+    },
+  ];
 
   // API Configuration for this page
   const PAGE_APIS = {
@@ -701,11 +854,21 @@ const ManagePayments: React.FC = () => {
                             label={<><span style={{ color: REDWOOD.primary }}>**</span> Supplier or Party</>}
                             name="supplierOrParty"
                           >
-                            <Select
-                              placeholder="Select Supplier"
-                              allowClear
-                              showSearch
+                            <Input
+                              placeholder="Search supplier"
+                              readOnly
+                              suffix={
+                                <SearchOutlined
+                                  style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 14 }}
+                                  onClick={openSupplierModal}
+                                />
+                              }
+                              onClick={openSupplierModal}
+                              style={{ cursor: 'pointer' }}
                             />
+                          </Form.Item>
+                          <Form.Item name="supplierNumber" hidden>
+                            <Input />
                           </Form.Item>
                           <Form.Item
                             label={<><span style={{ color: REDWOOD.primary }}>**</span> Payment Date</>}
@@ -990,6 +1153,63 @@ const ManagePayments: React.FC = () => {
             background: ${REDWOOD.neutral100};
           }
         `}</style>
+
+        {/* Supplier Search Modal */}
+        <Modal
+          title={
+            <Space>
+              <SearchOutlined style={{ color: REDWOOD.info }} />
+              <span>Search Suppliers</span>
+            </Space>
+          }
+          open={supplierModalVisible}
+          onCancel={() => setSupplierModalVisible(false)}
+          footer={null}
+          width={900}
+          styles={{ body: { padding: '12px 24px' } }}
+        >
+          <div style={{ marginBottom: 12 }}>
+            <Input
+              placeholder="Search by supplier name, number, or alternate name..."
+              prefix={<SearchOutlined style={{ color: REDWOOD.neutral300 }} />}
+              value={supplierSearchText}
+              onChange={(e) => setSupplierSearchText(e.target.value)}
+              allowClear
+              size="middle"
+              style={{ marginBottom: 8 }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {filteredSuppliers.length} supplier{filteredSuppliers.length !== 1 ? 's' : ''} found
+              </Text>
+              <Button
+                size="small"
+                icon={<ReloadOutlined />}
+                onClick={fetchSuppliers}
+                loading={supplierLoading}
+              >
+                Refresh
+              </Button>
+            </div>
+          </div>
+          <Table
+            columns={supplierColumns}
+            dataSource={filteredSuppliers}
+            loading={supplierLoading}
+            size="small"
+            pagination={{
+              pageSize: 10,
+              showSizeChanger: true,
+              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total}`,
+            }}
+            scroll={{ y: 400 }}
+            onRow={(record) => ({
+              onDoubleClick: () => handleSupplierSelect(record),
+              style: { cursor: 'pointer' },
+            })}
+            rowClassName={(_record, index) => index % 2 === 0 ? '' : 'table-row-light'}
+          />
+        </Modal>
 
         {/* API Viewer Modal */}
         <Modal
