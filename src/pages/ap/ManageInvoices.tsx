@@ -812,7 +812,7 @@ const ManageInvoices: React.FC = () => {
         <div style={{ background: REDWOOD.surface, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
           <div style={{ padding: '8px 16px 0 16px' }}>
             <Title level={4} style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <BankOutlined /> Manage Invoices..
+              <BankOutlined /> Manage Invoices (Search)
             </Title>
           </div>
 
