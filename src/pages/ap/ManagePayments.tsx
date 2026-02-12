@@ -19,6 +19,8 @@ import {
   message,
   DatePicker,
   Tabs,
+  Modal,
+  Switch,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -38,10 +40,17 @@ import {
   SettingOutlined,
   ScissorOutlined,
   PlusOutlined,
+  ApiOutlined,
+  CopyOutlined,
+  CheckOutlined,
+  CloudOutlined,
+  DatabaseOutlined,
+  SwapOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 import PaymentDetail from './PaymentDetail';
+import { ORACLE_FUSION_CONFIG, APEX_DB_CONFIG } from '../../config/api.config';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -120,13 +129,22 @@ interface PaymentTab {
   payment: PaymentRecord;
 }
 
-import { ORACLE_FUSION_CONFIG } from '../../config/api.config';
-
-// Fusion API config - direct URL
+// Fusion API config
 const FUSION_CONFIG = {
   baseUrl: ORACLE_FUSION_CONFIG.baseUrl,
   paymentsEndpoint: '/payablesPayments',
   auth: btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`),
+};
+
+// APEX API config
+const APEX_PAYMENTS_URL = `${APEX_DB_CONFIG.baseUrl}/ap/payments`;
+
+// Helper function to format amount in UAE format (000,000.00)
+const formatAmount = (value: number): string => {
+  return new Intl.NumberFormat('en-AE', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
 };
 
 // Helper function to format date
@@ -140,8 +158,8 @@ const formatDate = (dateStr: string | null): string => {
   }
 };
 
-// Map API response to PaymentRecord
-const mapApiToPaymentRecord = (item: any, index: number): PaymentRecord => ({
+// Map Fusion API response to PaymentRecord (PascalCase fields)
+const mapFusionToPaymentRecord = (item: any, index: number): PaymentRecord => ({
   key: item.CheckId?.toString() || index.toString(),
   checkId: item.CheckId,
   paymentId: item.PaymentId,
@@ -186,6 +204,52 @@ const mapApiToPaymentRecord = (item: any, index: number): PaymentRecord => ({
   relatedInvoicesHref: item.links?.find((l: any) => l.name === 'relatedInvoices')?.href || '',
 });
 
+// Map APEX API response to PaymentRecord (snake_case fields)
+const mapApexToPaymentRecord = (item: any, index: number): PaymentRecord => ({
+  key: item.check_id?.toString() || item.payment_id?.toString() || index.toString(),
+  checkId: item.check_id || item.payment_id,
+  paymentId: item.payment_id,
+  paymentNumber: item.payment_number || item.paper_document_number,
+  paymentDocument: item.payment_document || '',
+  paymentStatus: item.payment_status || '',
+  reconciled: item.reconciled_flag === true || item.reconciled_flag === 'Y',
+  payee: item.payee || '',
+  paymentDate: formatDate(item.payment_date),
+  paymentAmount: item.payment_amount || 0,
+  paymentCurrency: item.payment_currency || 'AED',
+  remitToAddress: [item.address_line1, item.city, item.country].filter(Boolean).join(', '),
+  remitToAccountNumber: item.remit_to_account_number || '',
+  businessUnit: item.business_unit || '',
+  legalEntity: item.legal_entity || '',
+  paymentMethod: item.payment_method || '',
+  accountingStatus: item.accounting_status || '',
+  paymentType: item.payment_type || '',
+  supplierNumber: item.supplier_number || '',
+  payeeSite: item.payee_site || '',
+  disbursementBankAccount: item.disbursement_bank_account_name || '',
+  paymentProcessProfile: item.payment_process_profile || '',
+  voucherNumber: item.voucher_number || 0,
+  documentCategory: item.document_category || '',
+  documentSequence: item.document_sequence || '',
+  withheldAmount: item.withheld_amount,
+  paymentReference: item.payment_reference || 0,
+  paymentFileReference: item.payment_file_reference || 0,
+  paymentProcessRequest: item.payment_process_request || '',
+  clearingDate: item.clearing_date,
+  clearingAmount: item.clearing_amount,
+  clearingLedgerAmount: item.clearing_ledger_amount,
+  clearingValueDate: item.clearing_value_date,
+  clearingConversionRate: item.clearing_conversion_rate,
+  clearingConversionDate: item.clearing_conversion_date,
+  clearingConversionRateType: item.clearing_conversion_rate_type,
+  addressLine1: item.address_line1 || '',
+  addressLine2: item.address_line2 || '',
+  addressLine3: item.address_line3 || '',
+  city: item.city || '',
+  country: item.country || '',
+  relatedInvoicesHref: '',
+});
+
 const ManagePayments: React.FC = () => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
@@ -196,6 +260,45 @@ const ManagePayments: React.FC = () => {
   // Tab management state
   const [activeTab, setActiveTab] = useState('search');
   const [openTabs, setOpenTabs] = useState<PaymentTab[]>([]);
+
+  // Data source toggle: true = APEX, false = Fusion
+  const [useApex, setUseApex] = useState(true);
+
+  // API viewer modal state
+  const [apiModalVisible, setApiModalVisible] = useState(false);
+  const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
+  const [lastCalledUrl, setLastCalledUrl] = useState<string | null>(null);
+  const [lastApiResponse, setLastApiResponse] = useState<string | null>(null);
+
+  // API Configuration for this page
+  const PAGE_APIS = {
+    apex: [
+      {
+        name: 'Search Payments',
+        method: 'GET',
+        url: APEX_PAYMENTS_URL,
+        params: 'supplier_number={supplierNumber}',
+        description: 'Fetches payments from APEX database',
+      },
+    ],
+    fusion: [
+      {
+        name: 'Search Payments',
+        method: 'GET',
+        url: `${FUSION_CONFIG.baseUrl}${FUSION_CONFIG.paymentsEndpoint}`,
+        params: 'q=PaymentNumber={number}',
+        description: 'Fetches payments from Oracle Fusion REST API (may have CORS issues)',
+      },
+    ],
+  };
+
+  // Copy URL to clipboard
+  const copyToClipboard = (url: string) => {
+    navigator.clipboard.writeText(url);
+    setCopiedUrl(url);
+    message.success('URL copied to clipboard');
+    setTimeout(() => setCopiedUrl(null), 2000);
+  };
 
   // Open payment in new tab
   const openPaymentTab = (record: PaymentRecord) => {
@@ -240,54 +343,85 @@ const ManagePayments: React.FC = () => {
     }
   };
 
-  // Search payments from Fusion API
+  // Search payments from API
   const handleSearch = async (values: any) => {
     setLoading(true);
     try {
-      // Build query string for filtering
-      const filters: string[] = [];
-      if (values.paymentNumber) filters.push(`PaymentNumber=${values.paymentNumber}`);
-      if (values.supplierOrParty) filters.push(`Payee LIKE '*${values.supplierOrParty}*'`);
-      if (values.paymentStatus) filters.push(`PaymentStatus='${values.paymentStatus}'`);
-      if (values.businessUnit) filters.push(`BusinessUnit='${values.businessUnit}'`);
+      let apiUrl: string;
+      let response: Response;
 
-      // Build Fusion API URL via proxy
-      let apiUrl = `${FUSION_CONFIG.baseUrl}${FUSION_CONFIG.paymentsEndpoint}`;
-      if (filters.length > 0) {
-        apiUrl += `?q=${encodeURIComponent(filters.join(';'))}`;
+      if (useApex) {
+        // Build APEX query parameters
+        const params = new URLSearchParams();
+        if (values.supplierOrParty) params.append('payee', values.supplierOrParty);
+        if (values.paymentNumber) params.append('payment_number', values.paymentNumber);
+        if (values.paymentStatus) params.append('payment_status', values.paymentStatus);
+        if (values.businessUnit) params.append('business_unit', values.businessUnit);
+
+        const queryString = params.toString();
+        apiUrl = queryString ? `${APEX_PAYMENTS_URL}?${queryString}` : APEX_PAYMENTS_URL;
+
+        console.log('Fetching payments from APEX:', apiUrl);
+        setLastCalledUrl(apiUrl);
+
+        response = await fetch(apiUrl, {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' },
+        });
+      } else {
+        // Build Fusion query string
+        const filters: string[] = [];
+        if (values.paymentNumber) filters.push(`PaymentNumber=${values.paymentNumber}`);
+        if (values.supplierOrParty) filters.push(`Payee LIKE '*${values.supplierOrParty}*'`);
+        if (values.paymentStatus) filters.push(`PaymentStatus='${values.paymentStatus}'`);
+        if (values.businessUnit) filters.push(`BusinessUnit='${values.businessUnit}'`);
+
+        apiUrl = `${FUSION_CONFIG.baseUrl}${FUSION_CONFIG.paymentsEndpoint}`;
+        if (filters.length > 0) {
+          apiUrl += `?q=${encodeURIComponent(filters.join(';'))}`;
+        }
+
+        console.log('Fetching payments from Fusion:', apiUrl);
+        setLastCalledUrl(apiUrl);
+
+        response = await fetch(apiUrl, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Basic ${FUSION_CONFIG.auth}`,
+          },
+        });
       }
 
-      console.log('Fetching payments from:', apiUrl);
-
-      const response = await fetch(apiUrl, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Basic ${FUSION_CONFIG.auth}`,
-        },
-      });
-
       if (!response.ok) {
+        setLastApiResponse(`Error: HTTP ${response.status} ${response.statusText}`);
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       const data = await response.json();
-      console.log('Fusion API Response:', data);
+      console.log(`${useApex ? 'APEX' : 'Fusion'} API Response:`, data);
 
       // Handle response
       const items = data.items || data || [];
 
       if (Array.isArray(items) && items.length > 0) {
-        const mappedPayments = items.map(mapApiToPaymentRecord);
+        const mapper = useApex ? mapApexToPaymentRecord : mapFusionToPaymentRecord;
+        const mappedPayments = items.map(mapper);
         setPayments(mappedPayments);
+        setLastApiResponse(`Success: ${mappedPayments.length} payments returned`);
         message.success(`Found ${mappedPayments.length} payments`);
       } else {
         setPayments([]);
+        setLastApiResponse(`Success: 0 payments returned (empty result)`);
         message.info('No payments found');
       }
     } catch (error) {
       console.error('Search error:', error);
-      message.error(`Failed to search payments: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      const errMsg = error instanceof Error ? error.message : 'Unknown error';
+      if (!lastApiResponse?.startsWith('Error:')) {
+        setLastApiResponse(`Error: ${errMsg}`);
+      }
+      message.error(`Failed to search payments: ${errMsg}`);
     } finally {
       setLoading(false);
     }
@@ -403,7 +537,7 @@ const ManagePayments: React.FC = () => {
       align: 'right',
       render: (value: number, record: PaymentRecord) => (
         <span style={{ color: REDWOOD.info, fontWeight: 500 }}>
-          {value.toLocaleString('en-US', { minimumFractionDigits: 2 })} {record.paymentCurrency}
+          {formatAmount(value)} {record.paymentCurrency}
         </span>
       ),
       sorter: (a, b) => a.paymentAmount - b.paymentAmount,
@@ -687,9 +821,43 @@ const ManagePayments: React.FC = () => {
               { title: 'Manage Payments' },
             ]}
           />
-          <Button type="primary" style={{ background: REDWOOD.primary }}>
-            Done
-          </Button>
+          <Space>
+            {/* Data Source Toggle */}
+            <Space size="small" style={{
+              background: REDWOOD.neutral100,
+              padding: '4px 12px',
+              borderRadius: 6,
+              border: `1px solid ${REDWOOD.neutral200}`,
+            }}>
+              <SwapOutlined style={{ color: REDWOOD.info, fontSize: 14 }} />
+              <Text style={{ fontSize: 12 }}>Fusion</Text>
+              <Switch
+                checked={useApex}
+                onChange={(checked) => {
+                  setUseApex(checked);
+                  setPayments([]);
+                  message.info(`Switched to ${checked ? 'APEX' : 'Fusion'} data source`);
+                }}
+                checkedChildren="APEX"
+                unCheckedChildren="Fusion"
+                style={{ background: useApex ? REDWOOD.success : REDWOOD.info }}
+              />
+              <Text style={{ fontSize: 12 }}>APEX</Text>
+              <Tag color={useApex ? 'green' : 'blue'} style={{ margin: 0, fontSize: 10 }}>
+                {useApex ? 'Active' : 'Active'}
+              </Tag>
+            </Space>
+            <Tooltip title="View Page APIs">
+              <Button
+                icon={<ApiOutlined />}
+                onClick={() => setApiModalVisible(true)}
+                style={{ color: REDWOOD.info }}
+              />
+            </Tooltip>
+            <Button type="primary" style={{ background: REDWOOD.primary }}>
+              Done
+            </Button>
+          </Space>
         </div>
 
         {/* Page Title and Tabs */}
@@ -757,6 +925,213 @@ const ManagePayments: React.FC = () => {
             background: ${REDWOOD.neutral100};
           }
         `}</style>
+
+        {/* API Viewer Modal */}
+        <Modal
+          title={
+            <Space>
+              <ApiOutlined style={{ color: REDWOOD.info }} />
+              <span>Page APIs - Manage Payments</span>
+            </Space>
+          }
+          open={apiModalVisible}
+          onCancel={() => setApiModalVisible(false)}
+          footer={[
+            <Button key="close" onClick={() => setApiModalVisible(false)}>
+              Close
+            </Button>,
+          ]}
+          width={900}
+        >
+          <div style={{ marginBottom: 16 }}>
+            <Tag color={useApex ? 'green' : 'blue'}>
+              Data Source: {useApex ? 'APEX' : 'Fusion'}
+            </Tag>
+            <Text type="secondary" style={{ marginLeft: 8 }}>
+              Toggle the switch in the header to change data source
+            </Text>
+          </div>
+
+          {/* Last Called URL */}
+          {lastCalledUrl && (
+            <Card
+              size="small"
+              style={{ marginBottom: 16, border: `1px solid ${lastApiResponse?.startsWith('Error') ? '#ff4d4f' : '#52c41a'}` }}
+              title={
+                <Space>
+                  <CloudOutlined style={{ color: lastApiResponse?.startsWith('Error') ? '#ff4d4f' : '#52c41a' }} />
+                  <Text strong>Last Called URL</Text>
+                  <Tag color={lastApiResponse?.startsWith('Error') ? 'red' : 'green'}>
+                    {lastApiResponse?.startsWith('Error') ? 'Failed' : 'Success'}
+                  </Tag>
+                </Space>
+              }
+            >
+              <div style={{ marginBottom: 8 }}>
+                <Text type="secondary" style={{ fontSize: 12 }}>URL:</Text>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <code
+                    style={{
+                      background: '#fff7e6',
+                      padding: '6px 10px',
+                      borderRadius: 4,
+                      fontSize: 12,
+                      flex: 1,
+                      wordBreak: 'break-all',
+                      border: '1px solid #ffd591',
+                    }}
+                  >
+                    {lastCalledUrl}
+                  </code>
+                  <Button
+                    size="small"
+                    icon={copiedUrl === lastCalledUrl ? <CheckOutlined /> : <CopyOutlined />}
+                    onClick={() => copyToClipboard(lastCalledUrl)}
+                  />
+                </div>
+              </div>
+              {lastApiResponse && (
+                <div>
+                  <Text type="secondary" style={{ fontSize: 12 }}>Response:</Text>
+                  <div>
+                    <code
+                      style={{
+                        background: lastApiResponse.startsWith('Error') ? '#fff2f0' : '#f6ffed',
+                        padding: '6px 10px',
+                        borderRadius: 4,
+                        fontSize: 12,
+                        display: 'block',
+                        wordBreak: 'break-all',
+                        border: `1px solid ${lastApiResponse.startsWith('Error') ? '#ffccc7' : '#b7eb8f'}`,
+                      }}
+                    >
+                      {lastApiResponse}
+                    </code>
+                  </div>
+                </div>
+              )}
+            </Card>
+          )}
+
+          {/* APEX APIs */}
+          <Card
+            size="small"
+            style={{ marginBottom: 16 }}
+            title={
+              <Space>
+                <DatabaseOutlined style={{ color: REDWOOD.success }} />
+                <Text strong>APEX APIs</Text>
+                <Tag color={useApex ? 'green' : 'default'}>{useApex ? 'Active' : 'Inactive'}</Tag>
+              </Space>
+            }
+          >
+            {PAGE_APIS.apex.map((api, index) => (
+              <div
+                key={index}
+                style={{
+                  padding: '12px',
+                  background: REDWOOD.neutral100,
+                  borderRadius: 6,
+                  marginBottom: index < PAGE_APIS.apex.length - 1 ? 12 : 0,
+                }}
+              >
+                <Row justify="space-between" align="middle" style={{ marginBottom: 8 }}>
+                  <Col>
+                    <Space>
+                      <Tag color={api.method === 'GET' ? 'blue' : 'orange'}>{api.method}</Tag>
+                      <Text strong>{api.name}</Text>
+                    </Space>
+                  </Col>
+                </Row>
+                <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
+                  {api.description}
+                </Text>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 12 }}>URL:</Text>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <code
+                      style={{
+                        background: '#e8f5e9',
+                        padding: '4px 8px',
+                        borderRadius: 4,
+                        fontSize: 12,
+                        flex: 1,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                    >
+                      {api.url}{api.params ? `?${api.params}` : ''}
+                    </code>
+                    <Button
+                      size="small"
+                      icon={copiedUrl === api.url ? <CheckOutlined /> : <CopyOutlined />}
+                      onClick={() => copyToClipboard(api.url)}
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </Card>
+
+          {/* Fusion APIs */}
+          <Card
+            size="small"
+            title={
+              <Space>
+                <CloudOutlined style={{ color: REDWOOD.info }} />
+                <Text strong>Fusion APIs</Text>
+                <Tag color={!useApex ? 'blue' : 'default'}>{!useApex ? 'Active' : 'Inactive'}</Tag>
+              </Space>
+            }
+          >
+            {PAGE_APIS.fusion.map((api, index) => (
+              <div
+                key={index}
+                style={{
+                  padding: '12px',
+                  background: REDWOOD.neutral100,
+                  borderRadius: 6,
+                  marginBottom: index < PAGE_APIS.fusion.length - 1 ? 12 : 0,
+                }}
+              >
+                <Row justify="space-between" align="middle" style={{ marginBottom: 8 }}>
+                  <Col>
+                    <Space>
+                      <Tag color={api.method === 'GET' ? 'blue' : 'orange'}>{api.method}</Tag>
+                      <Text strong>{api.name}</Text>
+                    </Space>
+                  </Col>
+                </Row>
+                <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
+                  {api.description}
+                </Text>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 12 }}>URL:</Text>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <code
+                      style={{
+                        background: '#e3f2fd',
+                        padding: '4px 8px',
+                        borderRadius: 4,
+                        fontSize: 12,
+                        flex: 1,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                    >
+                      {api.url}{api.params ? `?${api.params}` : ''}
+                    </code>
+                    <Button
+                      size="small"
+                      icon={copiedUrl === api.url ? <CheckOutlined /> : <CopyOutlined />}
+                      onClick={() => copyToClipboard(api.url)}
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </Card>
+        </Modal>
       </Content>
     </Layout>
   );
