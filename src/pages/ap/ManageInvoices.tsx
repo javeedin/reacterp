@@ -22,6 +22,7 @@ import {
   Tabs,
   Modal,
   Switch,
+  Checkbox,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -194,9 +195,18 @@ const ManageInvoices: React.FC = () => {
   const [supplierLoading, setSupplierLoading] = useState(false);
   const [supplierSearchText, setSupplierSearchText] = useState('');
 
-  // Compute totals for amount columns
+  // Show/hide fully paid invoices
+  const [showFullyPaid, setShowFullyPaid] = useState(true);
+
+  // Filtered invoices based on fully paid toggle
+  const displayedInvoices = useMemo(() => {
+    if (showFullyPaid) return invoices;
+    return invoices.filter((inv) => inv.unpaidAmount !== 0);
+  }, [invoices, showFullyPaid]);
+
+  // Compute totals for amount columns (based on displayed invoices)
   const totals = useMemo(() => {
-    return invoices.reduce(
+    return displayedInvoices.reduce(
       (acc, inv) => ({
         unpaidAmount: acc.unpaidAmount + (inv.unpaidAmount || 0),
         invoiceAmount: acc.invoiceAmount + (inv.invoiceAmount || 0),
@@ -204,7 +214,7 @@ const ManageInvoices: React.FC = () => {
       }),
       { unpaidAmount: 0, invoiceAmount: 0, appliedPrepayments: 0 }
     );
-  }, [invoices]);
+  }, [displayedInvoices]);
 
   // Export invoices to Excel
   const exportToExcel = () => {
@@ -981,15 +991,24 @@ const ManageInvoices: React.FC = () => {
                   </Button>
                 </Dropdown>
               </Space>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                {invoices.length} items | {selectedRowKeys.length} selected
-              </Text>
+              <Space size="middle">
+                <Checkbox
+                  checked={showFullyPaid}
+                  onChange={(e) => setShowFullyPaid(e.target.checked)}
+                  style={{ fontSize: 12 }}
+                >
+                  <Text style={{ fontSize: 12 }}>Show Fully Paid</Text>
+                </Checkbox>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {displayedInvoices.length} of {invoices.length} items | {selectedRowKeys.length} selected
+                </Text>
+              </Space>
             </div>
 
             {/* Data Table */}
             <Table
               columns={columns}
-              dataSource={invoices}
+              dataSource={displayedInvoices}
               rowSelection={rowSelection}
               loading={loading}
               pagination={{
