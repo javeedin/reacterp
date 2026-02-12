@@ -1,7 +1,7 @@
-// Proxy Server Configuration (for bypassing CORS)
+// Proxy Server Configuration (DEPRECATED - use direct APEX/Fusion URLs instead)
 export const PROXY_CONFIG = {
   baseUrl: 'http://localhost:3001/api',
-  enabled: true,
+  enabled: false,
 };
 
 // Oracle Fusion API Configuration

@@ -120,10 +120,13 @@ interface PaymentTab {
   payment: PaymentRecord;
 }
 
-// Fusion API config
+import { ORACLE_FUSION_CONFIG } from '../../config/api.config';
+
+// Fusion API config - direct URL
 const FUSION_CONFIG = {
-  baseUrl: 'http://localhost:3001/api/fusion',
-  paymentsEndpoint: '/fscmRestApi/resources/11.13.18.05/payablesPayments',
+  baseUrl: ORACLE_FUSION_CONFIG.baseUrl,
+  paymentsEndpoint: '/payablesPayments',
+  auth: btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`),
 };
 
 // Helper function to format date
@@ -260,6 +263,7 @@ const ManagePayments: React.FC = () => {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Basic ${FUSION_CONFIG.auth}`,
         },
       });
 

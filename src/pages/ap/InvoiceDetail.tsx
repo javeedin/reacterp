@@ -54,10 +54,7 @@ const REDWOOD = {
   surface: '#FFFFFF',
 };
 
-// Proxy config
-const PROXY_CONFIG = {
-  baseUrl: 'http://localhost:3001/api',
-};
+import { APEX_DB_CONFIG } from '../../config/api.config';
 
 // Invoice Line interface
 interface InvoiceLine {
@@ -238,7 +235,7 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
   const fetchInvoiceLines = async () => {
     setLoading(true);
     try {
-      const url = `${PROXY_CONFIG.baseUrl}/apex/ap/createinvoiceslines?P_INVOICE_ID=${invoice.invoiceId}`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoiceslines?P_INVOICE_ID=${invoice.invoiceId}`;
       console.log('Fetching invoice lines from:', url);
 
       const response = await fetch(url, {

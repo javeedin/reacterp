@@ -117,9 +117,12 @@ const formatDate = (dateStr: string | null): string => {
   }
 };
 
-// Fusion API config
+import { ORACLE_FUSION_CONFIG } from '../../config/api.config';
+
+// Fusion API config - direct URL
 const FUSION_CONFIG = {
-  baseUrl: 'http://localhost:3001/api/fusion',
+  baseUrl: ORACLE_FUSION_CONFIG.baseUrl,
+  auth: btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`),
 };
 
 const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
@@ -141,13 +144,16 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
     try {
       // Construct the URL for related invoices using CheckId
       // Format: /fscmRestApi/resources/11.13.18.05/payablesPayments/{CheckId}/child/relatedInvoices
-      const relatedInvoicesUrl = `${FUSION_CONFIG.baseUrl}/fscmRestApi/resources/11.13.18.05/payablesPayments/${payment.checkId}/child/relatedInvoices`;
+      const relatedInvoicesUrl = `${FUSION_CONFIG.baseUrl}/payablesPayments/${payment.checkId}/child/relatedInvoices`;
 
       console.log('Fetching related invoices from:', relatedInvoicesUrl);
 
       const response = await fetch(relatedInvoicesUrl, {
         method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Basic ${FUSION_CONFIG.auth}`,
+        },
       });
 
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);

@@ -80,10 +80,9 @@ const REDWOOD = {
   taskBlue: '#0572CE',
 };
 
-// Proxy config
-const PROXY_CONFIG = {
-  baseUrl: 'http://localhost:3001/api',
-};
+import { APEX_DB_CONFIG, ORACLE_FUSION_CONFIG } from '../../config/api.config';
+
+const FUSION_AUTH = btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
 
 // Supplier record interface
 interface SupplierRecord {
@@ -354,16 +353,16 @@ const ManageSuppliers: React.FC = () => {
       {
         name: 'Search Suppliers',
         method: 'GET',
-        proxyUrl: `${PROXY_CONFIG.baseUrl}/fusion/fscmRestApi/resources/11.13.18.05/suppliers`,
-        actualUrl: 'https://iaaobn.fa.ocs.oraclecloud.com:443/fscmRestApi/resources/11.13.18.05/suppliers',
+        proxyUrl: `${ORACLE_FUSION_CONFIG.baseUrl}/suppliers`,
+        actualUrl: `${ORACLE_FUSION_CONFIG.baseUrl}/suppliers`,
         params: 'limit=25&onlyData=true',
         description: 'Fetches list of suppliers with pagination',
       },
       {
         name: 'Get Supplier Detail',
         method: 'GET',
-        proxyUrl: `${PROXY_CONFIG.baseUrl}/fusion/fscmRestApi/resources/11.13.18.05/suppliers/{supplierId}`,
-        actualUrl: 'https://iaaobn.fa.ocs.oraclecloud.com:443/fscmRestApi/resources/11.13.18.05/suppliers/{supplierId}',
+        proxyUrl: `${ORACLE_FUSION_CONFIG.baseUrl}/suppliers/{supplierId}`,
+        actualUrl: `${ORACLE_FUSION_CONFIG.baseUrl}/suppliers/{supplierId}`,
         params: '',
         description: 'Fetches complete supplier details by ID',
       },
@@ -372,40 +371,40 @@ const ManageSuppliers: React.FC = () => {
       {
         name: 'Search Suppliers',
         method: 'GET',
-        proxyUrl: `${PROXY_CONFIG.baseUrl}/apex/suppliers`,
-        actualUrl: 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/suppliers',
+        proxyUrl: `${APEX_DB_CONFIG.baseUrl}/suppliers`,
+        actualUrl: `${APEX_DB_CONFIG.baseUrl}/suppliers`,
         params: '',
         description: 'Fetches suppliers from APEX database',
       },
       {
         name: 'Supplier Balance Dashboard',
         method: 'GET',
-        proxyUrl: `${PROXY_CONFIG.baseUrl}/apex/suppliers/balance/dashboard/{supplierNumber}`,
-        actualUrl: 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/suppliers/balance/dashboard/{supplierNumber}',
+        proxyUrl: `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/dashboard/{supplierNumber}`,
+        actualUrl: `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/dashboard/{supplierNumber}`,
         params: '',
         description: 'Fetches supplier balance summary, aging report, and supplier details',
       },
       {
         name: 'Supplier Balance Invoices',
         method: 'GET',
-        proxyUrl: `${PROXY_CONFIG.baseUrl}/apex/suppliers/balance/invoices/{supplierNumber}`,
-        actualUrl: 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/suppliers/balance/invoices/{supplierNumber}',
+        proxyUrl: `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/{supplierNumber}`,
+        actualUrl: `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/{supplierNumber}`,
         params: '',
         description: 'Fetches all invoices for a supplier with amounts and status',
       },
       {
         name: 'Supplier Balance Payments',
         method: 'GET',
-        proxyUrl: `${PROXY_CONFIG.baseUrl}/apex/suppliers/balance/payments/{supplierNumber}`,
-        actualUrl: 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/suppliers/balance/payments/{supplierNumber}',
+        proxyUrl: `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/payments/{supplierNumber}`,
+        actualUrl: `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/payments/{supplierNumber}`,
         params: '',
         description: 'Fetches all payments made to a supplier',
       },
       {
         name: 'Payment Drilldown (Related Invoices)',
         method: 'GET',
-        proxyUrl: `${PROXY_CONFIG.baseUrl}/apex/suppliers/balance/payment-invoices/{checkId}`,
-        actualUrl: 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/suppliers/balance/payment-invoices/{checkId}',
+        proxyUrl: `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/payment-invoices/{checkId}`,
+        actualUrl: `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/payment-invoices/{checkId}`,
         params: '',
         description: 'Fetches invoices related to a specific payment check',
       },
@@ -423,10 +422,11 @@ const ManageSuppliers: React.FC = () => {
   // Fetch supplier detail from Fusion
   const fetchSupplierDetail = async (supplierId: number): Promise<SupplierDetail | null> => {
     try {
-      const fusionPath = `fscmRestApi/resources/11.13.18.05/suppliers/${supplierId}`;
-      const proxyUrl = `${PROXY_CONFIG.baseUrl}/fusion/${fusionPath}`;
+      const directUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/suppliers/${supplierId}`;
 
-      const response = await fetch(proxyUrl);
+      const response = await fetch(directUrl, {
+        headers: { 'Authorization': `Basic ${FUSION_AUTH}` },
+      });
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -443,7 +443,7 @@ const ManageSuppliers: React.FC = () => {
   // Fetch balance dashboard data
   const fetchBalanceDashboard = async (supplierNumber: string): Promise<BalanceData | null> => {
     try {
-      const url = `${PROXY_CONFIG.baseUrl}/apex/suppliers/balance/dashboard/${supplierNumber}`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/dashboard/${supplierNumber}`;
       console.log('Fetching balance dashboard:', url);
 
       const response = await fetch(url);
@@ -502,7 +502,7 @@ const ManageSuppliers: React.FC = () => {
   const fetchBalanceInvoices = async (supplierNumber: string, tabKey: string) => {
     setInvoicesLoadingMap(prev => ({ ...prev, [tabKey]: true }));
     try {
-      const url = `${PROXY_CONFIG.baseUrl}/apex/suppliers/balance/invoices/${supplierNumber}`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/${supplierNumber}`;
       const response = await fetch(url);
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
@@ -535,7 +535,7 @@ const ManageSuppliers: React.FC = () => {
   const fetchBalancePayments = async (supplierNumber: string, tabKey: string) => {
     setPaymentsLoadingMap(prev => ({ ...prev, [tabKey]: true }));
     try {
-      const url = `${PROXY_CONFIG.baseUrl}/apex/suppliers/balance/payments/${supplierNumber}`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/payments/${supplierNumber}`;
       const response = await fetch(url);
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
@@ -571,7 +571,7 @@ const ManageSuppliers: React.FC = () => {
     setDrilldownLoading(true);
 
     try {
-      const url = `${PROXY_CONFIG.baseUrl}/apex/suppliers/balance/payment-invoices/${payment.checkId}`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/payment-invoices/${payment.checkId}`;
       const response = await fetch(url);
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
@@ -693,9 +693,10 @@ const ManageSuppliers: React.FC = () => {
       const supplierNumber = formValues.supplierNumber?.trim();
       const supplierName = formValues.supplier?.trim();
 
+      let headers: Record<string, string> = { 'Content-Type': 'application/json' };
+
       if (dataSource === 'fusion') {
-        // Fusion API
-        const fusionPath = 'fscmRestApi/resources/11.13.18.05/suppliers';
+        // Fusion API - direct URL
         let queryParams = 'limit=25&onlyData=true';
 
         // Build query filters
@@ -712,17 +713,18 @@ const ManageSuppliers: React.FC = () => {
           queryParams += `&q=${encodeURIComponent(filters.join(';'))}`;
         }
 
-        proxyUrl = `${PROXY_CONFIG.baseUrl}/fusion/${fusionPath}?${queryParams}`;
+        proxyUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/suppliers?${queryParams}`;
+        headers['Authorization'] = `Basic ${FUSION_AUTH}`;
         mapFunction = mapFusionToSupplierRecord;
       } else {
-        // APEX API
+        // APEX API - direct URL
         let queryParams = '';
         if (supplierNumber) {
           queryParams = `?supplier_number=${encodeURIComponent(supplierNumber)}`;
         } else if (supplierName) {
           queryParams = `?supplier=${encodeURIComponent(supplierName)}`;
         }
-        proxyUrl = `${PROXY_CONFIG.baseUrl}/apex/suppliers${queryParams}`;
+        proxyUrl = `${APEX_DB_CONFIG.baseUrl}/suppliers${queryParams}`;
         mapFunction = mapApexToSupplierRecord;
       }
 
@@ -730,9 +732,7 @@ const ManageSuppliers: React.FC = () => {
 
       const response = await fetch(proxyUrl, {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
       });
 
       if (!response.ok) {

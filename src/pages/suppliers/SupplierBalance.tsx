@@ -58,10 +58,7 @@ const REDWOOD = {
   taskBlue: '#0572CE',
 };
 
-// Proxy config
-const PROXY_CONFIG = {
-  baseUrl: 'http://localhost:3001/api',
-};
+import { APEX_DB_CONFIG } from '../../config/api.config';
 
 // Interfaces
 interface SupplierDetails {
@@ -201,7 +198,7 @@ const SupplierBalance: React.FC = () => {
     setLoading(true);
     try {
       // Fetch full dashboard in one call
-      const dashboardUrl = `${PROXY_CONFIG.baseUrl}/apex/suppliers/balance/dashboard/${supplierNumber}`;
+      const dashboardUrl = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/dashboard/${supplierNumber}`;
       console.log('Fetching supplier dashboard:', dashboardUrl);
 
       const response = await fetch(dashboardUrl);
@@ -270,7 +267,7 @@ const SupplierBalance: React.FC = () => {
 
     setInvoicesLoading(true);
     try {
-      const url = `${PROXY_CONFIG.baseUrl}/apex/suppliers/balance/invoices/${supplierNumber}`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/${supplierNumber}`;
       console.log('Fetching invoices:', url);
 
       const response = await fetch(url);
@@ -309,7 +306,7 @@ const SupplierBalance: React.FC = () => {
 
     setPaymentsLoading(true);
     try {
-      const url = `${PROXY_CONFIG.baseUrl}/apex/suppliers/balance/payments/${supplierNumber}`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/payments/${supplierNumber}`;
       console.log('Fetching payments:', url);
 
       const response = await fetch(url);
@@ -347,7 +344,7 @@ const SupplierBalance: React.FC = () => {
     setDrilldownLoading(true);
 
     try {
-      const url = `${PROXY_CONFIG.baseUrl}/apex/suppliers/balance/payment-invoices/${payment.paymentNumber}`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/payment-invoices/${payment.paymentNumber}`;
       console.log('Fetching payment drilldown:', url);
 
       const response = await fetch(url);
