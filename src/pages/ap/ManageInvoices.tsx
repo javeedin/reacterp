@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Layout,
   Card,
@@ -56,6 +56,8 @@ import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 import InvoiceDetail from './InvoiceDetail';
 import { APEX_DB_CONFIG } from '../../config/api.config';
+import * as XLSX from 'xlsx';
+import { saveAs } from 'file-saver';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -163,6 +165,80 @@ const ManageInvoices: React.FC = () => {
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [lastCalledUrl, setLastCalledUrl] = useState<string | null>(null);
   const [lastApiResponse, setLastApiResponse] = useState<string | null>(null);
+
+  // Compute totals for amount columns
+  const totals = useMemo(() => {
+    return invoices.reduce(
+      (acc, inv) => ({
+        unpaidAmount: acc.unpaidAmount + (inv.unpaidAmount || 0),
+        invoiceAmount: acc.invoiceAmount + (inv.invoiceAmount || 0),
+        appliedPrepayments: acc.appliedPrepayments + (inv.appliedPrepayments || 0),
+      }),
+      { unpaidAmount: 0, invoiceAmount: 0, appliedPrepayments: 0 }
+    );
+  }, [invoices]);
+
+  // Export invoices to Excel
+  const exportToExcel = () => {
+    if (invoices.length === 0) {
+      message.warning('No data to export');
+      return;
+    }
+
+    const exportData = invoices.map((inv) => ({
+      'Invoice Number': inv.invoiceNumber,
+      'Invoice Date': inv.invoiceDate,
+      'Creation Date': inv.creationDate,
+      'Supplier or Party': inv.supplierOrParty,
+      'Supplier Site': inv.supplierSite,
+      'Unpaid Amount': inv.unpaidAmount,
+      'Invoice Amount': inv.invoiceAmount,
+      'Applied Prepayments': inv.appliedPrepayments,
+      'Invoice Currency': inv.invoiceCurrency,
+      'Invoice Type': inv.invoiceType,
+      'Notes': inv.notes,
+      'Validation Status': inv.validationStatus,
+      'Approval Status': inv.approvalStatus,
+      'Hold Paid Status': inv.holdPaidStatus,
+      'Business Unit': inv.businessUnit,
+    }));
+
+    // Add totals row
+    exportData.push({
+      'Invoice Number': 'TOTALS',
+      'Invoice Date': '',
+      'Creation Date': '',
+      'Supplier or Party': '',
+      'Supplier Site': '',
+      'Unpaid Amount': totals.unpaidAmount,
+      'Invoice Amount': totals.invoiceAmount,
+      'Applied Prepayments': totals.appliedPrepayments,
+      'Invoice Currency': '',
+      'Invoice Type': '',
+      'Notes': '',
+      'Validation Status': '',
+      'Approval Status': '',
+      'Hold Paid Status': '',
+      'Business Unit': '',
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+
+    // Set column widths
+    worksheet['!cols'] = [
+      { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 30 }, { wch: 14 },
+      { wch: 16 }, { wch: 16 }, { wch: 20 }, { wch: 12 }, { wch: 14 },
+      { wch: 30 }, { wch: 18 }, { wch: 18 }, { wch: 16 }, { wch: 28 },
+    ];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Invoices');
+
+    const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    saveAs(blob, `Invoices_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    message.success('Exported to Excel successfully');
+  };
 
   // API Configuration for this page
   const PAGE_APIS = {
@@ -336,6 +412,13 @@ const ManageInvoices: React.FC = () => {
     { key: 'delete', label: 'Delete', icon: <DeleteOutlined />, danger: true },
     { key: 'cancel', label: 'Cancel Invoice', icon: <StopOutlined />, danger: true },
   ];
+
+  // View menu handler
+  const handleViewMenuClick: MenuProps['onClick'] = ({ key }) => {
+    if (key === 'export') {
+      exportToExcel();
+    }
+  };
 
   // View menu items
   const viewMenuItems: MenuProps['items'] = [
@@ -688,7 +771,7 @@ const ManageInvoices: React.FC = () => {
                     Actions <DownOutlined />
                   </Button>
                 </Dropdown>
-                <Dropdown menu={{ items: viewMenuItems }} trigger={['click']}>
+                <Dropdown menu={{ items: viewMenuItems, onClick: handleViewMenuClick }} trigger={['click']}>
                   <Button size="small">
                     View <DownOutlined />
                   </Button>
@@ -699,8 +782,8 @@ const ManageInvoices: React.FC = () => {
                 <Tooltip title="Add Attachment">
                   <Button size="small" icon={<PaperClipOutlined />} />
                 </Tooltip>
-                <Tooltip title="Export">
-                  <Button size="small" icon={<ExportOutlined />} />
+                <Tooltip title="Export to Excel">
+                  <Button size="small" icon={<DownloadOutlined />} onClick={exportToExcel} />
                 </Tooltip>
                 <Button size="small" icon={<ScissorOutlined />}>
                   Detach
@@ -756,6 +839,62 @@ const ManageInvoices: React.FC = () => {
                 onDoubleClick: () => openInvoiceTab(record),
                 style: { cursor: 'pointer' },
               })}
+              summary={() =>
+                invoices.length > 0 ? (
+                  <Table.Summary fixed>
+                    <Table.Summary.Row
+                      style={{ background: REDWOOD.neutral100 }}
+                    >
+                      {/* Checkbox column */}
+                      <Table.Summary.Cell index={0} />
+                      {/* Invoice Number */}
+                      <Table.Summary.Cell index={1}>
+                        <Text strong style={{ fontSize: 12 }}>Totals</Text>
+                      </Table.Summary.Cell>
+                      {/* Invoice Date */}
+                      <Table.Summary.Cell index={2} />
+                      {/* Creation Date */}
+                      <Table.Summary.Cell index={3} />
+                      {/* Supplier or Party */}
+                      <Table.Summary.Cell index={4} />
+                      {/* Supplier Site */}
+                      <Table.Summary.Cell index={5} />
+                      {/* Unpaid Amount */}
+                      <Table.Summary.Cell index={6} align="right">
+                        <Text strong style={{
+                          fontSize: 12,
+                          color: totals.unpaidAmount === 0 ? REDWOOD.neutral600 : REDWOOD.neutral900,
+                        }}>
+                          {totals.unpaidAmount.toFixed(2)}
+                        </Text>
+                      </Table.Summary.Cell>
+                      {/* Invoice Amount */}
+                      <Table.Summary.Cell index={7} align="right">
+                        <Text strong style={{
+                          fontSize: 12,
+                          color: totals.invoiceAmount < 0 ? REDWOOD.error : REDWOOD.info,
+                        }}>
+                          {totals.invoiceAmount.toFixed(2)}
+                        </Text>
+                      </Table.Summary.Cell>
+                      {/* Applied Prepayments */}
+                      <Table.Summary.Cell index={8} align="right">
+                        <Text strong style={{ fontSize: 12 }}>
+                          {totals.appliedPrepayments.toFixed(2)}
+                        </Text>
+                      </Table.Summary.Cell>
+                      {/* Remaining empty cells */}
+                      <Table.Summary.Cell index={9} />
+                      <Table.Summary.Cell index={10} />
+                      <Table.Summary.Cell index={11} />
+                      <Table.Summary.Cell index={12} />
+                      <Table.Summary.Cell index={13} />
+                      <Table.Summary.Cell index={14} />
+                      <Table.Summary.Cell index={15} />
+                    </Table.Summary.Row>
+                  </Table.Summary>
+                ) : null
+              }
             />
           </Card>
         </div>
