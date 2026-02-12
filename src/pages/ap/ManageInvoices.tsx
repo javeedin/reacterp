@@ -55,6 +55,7 @@ import {
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 import InvoiceDetail from './InvoiceDetail';
+import { APEX_DB_CONFIG } from '../../config/api.config';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -109,10 +110,8 @@ interface InvoiceTab {
   invoice: InvoiceRecord;
 }
 
-// Proxy config
-const PROXY_CONFIG = {
-  baseUrl: 'http://localhost:3001/api',
-};
+// APEX endpoint for invoices
+const APEX_INVOICE_URL = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice`;
 
 // Helper function to format date
 const formatDate = (dateStr: string | null): string => {
@@ -169,16 +168,16 @@ const ManageInvoices: React.FC = () => {
       {
         name: 'Search Invoices',
         method: 'GET',
-        proxyUrl: `${PROXY_CONFIG.baseUrl}/apex/ap/createinvoice`,
-        actualUrl: 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/ap/createinvoice',
+        proxyUrl: APEX_INVOICE_URL,
+        actualUrl: APEX_INVOICE_URL,
         params: 'q=SUPPLIER_NUMBER={supplierNumber}',
         description: 'Fetches invoices from APEX database with optional filters',
       },
       {
         name: 'Create Invoice',
         method: 'POST',
-        proxyUrl: `${PROXY_CONFIG.baseUrl}/apex/ap/createinvoice`,
-        actualUrl: 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/ap/createinvoice',
+        proxyUrl: APEX_INVOICE_URL,
+        actualUrl: APEX_INVOICE_URL,
         params: '',
         description: 'Creates a new invoice in APEX database',
       },
@@ -247,18 +246,18 @@ const ManageInvoices: React.FC = () => {
       if (values.businessUnit) filters.push(`BUSINESS_UNIT=${values.businessUnit}`);
       if (values.invoiceNumber) filters.push(`INVOICE_NUMBER=${values.invoiceNumber}`);
 
-      // Build proxy URL - call via proxy to avoid CORS
-      let proxyUrl = `${PROXY_CONFIG.baseUrl}/apex/ap/createinvoice`;
+      // Build URL - call APEX endpoint directly
+      let apiUrl = APEX_INVOICE_URL;
       if (filters.length > 0) {
-        proxyUrl += `?q=${encodeURIComponent(filters.join(';'))}`;
+        apiUrl += `?q=${encodeURIComponent(filters.join(';'))}`;
       }
 
-      console.log('Fetching invoices from:', proxyUrl);
+      console.log('Fetching invoices from:', apiUrl);
 
-      const response = await fetch(proxyUrl, {
+      const response = await fetch(apiUrl, {
         method: 'GET',
         headers: {
-          'Content-Type': 'application/json',
+          'Accept': 'application/json',
         },
       });
 
