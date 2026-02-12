@@ -161,6 +161,8 @@ const ManageInvoices: React.FC = () => {
   // API viewer modal state
   const [apiModalVisible, setApiModalVisible] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
+  const [lastCalledUrl, setLastCalledUrl] = useState<string | null>(null);
+  const [lastApiResponse, setLastApiResponse] = useState<string | null>(null);
 
   // API Configuration for this page
   const PAGE_APIS = {
@@ -251,6 +253,7 @@ const ManageInvoices: React.FC = () => {
       const apiUrl = queryString ? `${APEX_INVOICE_URL}?${queryString}` : APEX_INVOICE_URL;
 
       console.log('Fetching invoices from:', apiUrl);
+      setLastCalledUrl(apiUrl);
 
       const response = await fetch(apiUrl, {
         method: 'GET',
@@ -260,6 +263,7 @@ const ManageInvoices: React.FC = () => {
       });
 
       if (!response.ok) {
+        setLastApiResponse(`Error: HTTP ${response.status} ${response.statusText}`);
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
@@ -272,13 +276,18 @@ const ManageInvoices: React.FC = () => {
       if (Array.isArray(items) && items.length > 0) {
         const mappedInvoices = items.map(mapApiToInvoiceRecord);
         setInvoices(mappedInvoices);
+        setLastApiResponse(`Success: ${mappedInvoices.length} invoices returned`);
         message.success(`Found ${mappedInvoices.length} invoices`);
       } else {
         setInvoices([]);
+        setLastApiResponse(`Success: 0 invoices returned (empty result). Response keys: ${JSON.stringify(Object.keys(data))}`);
         message.info('No invoices found');
       }
     } catch (error) {
       console.error('Search error:', error);
+      if (!lastApiResponse?.startsWith('Error:')) {
+        setLastApiResponse(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
       message.error(`Failed to search invoices: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setLoading(false);
@@ -888,6 +897,67 @@ const ManageInvoices: React.FC = () => {
               This page uses APEX database for invoice operations
             </Text>
           </div>
+
+          {/* Last Called URL */}
+          {lastCalledUrl && (
+            <Card
+              size="small"
+              style={{ marginBottom: 16, border: `1px solid ${lastApiResponse?.startsWith('Error') ? '#ff4d4f' : '#52c41a'}` }}
+              title={
+                <Space>
+                  <CloudOutlined style={{ color: lastApiResponse?.startsWith('Error') ? '#ff4d4f' : '#52c41a' }} />
+                  <Text strong>Last Called URL</Text>
+                  <Tag color={lastApiResponse?.startsWith('Error') ? 'red' : 'green'}>
+                    {lastApiResponse?.startsWith('Error') ? 'Failed' : 'Success'}
+                  </Tag>
+                </Space>
+              }
+            >
+              <div style={{ marginBottom: 8 }}>
+                <Text type="secondary" style={{ fontSize: 12 }}>URL:</Text>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <code
+                    style={{
+                      background: '#fff7e6',
+                      padding: '6px 10px',
+                      borderRadius: 4,
+                      fontSize: 12,
+                      flex: 1,
+                      wordBreak: 'break-all',
+                      border: '1px solid #ffd591',
+                    }}
+                  >
+                    {lastCalledUrl}
+                  </code>
+                  <Button
+                    size="small"
+                    icon={copiedUrl === lastCalledUrl ? <CheckOutlined /> : <CopyOutlined />}
+                    onClick={() => copyToClipboard(lastCalledUrl)}
+                  />
+                </div>
+              </div>
+              {lastApiResponse && (
+                <div>
+                  <Text type="secondary" style={{ fontSize: 12 }}>Response:</Text>
+                  <div>
+                    <code
+                      style={{
+                        background: lastApiResponse.startsWith('Error') ? '#fff2f0' : '#f6ffed',
+                        padding: '6px 10px',
+                        borderRadius: 4,
+                        fontSize: 12,
+                        display: 'block',
+                        wordBreak: 'break-all',
+                        border: `1px solid ${lastApiResponse.startsWith('Error') ? '#ffccc7' : '#b7eb8f'}`,
+                      }}
+                    >
+                      {lastApiResponse}
+                    </code>
+                  </div>
+                </div>
+              )}
+            </Card>
+          )}
 
           {/* APEX APIs */}
           <Card
