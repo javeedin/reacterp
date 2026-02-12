@@ -80,6 +80,7 @@ END;
 -- GET Handler - List payments with optional filters
 -- Query params: payment_number, payment_status, payee, supplier_number,
 --               business_unit, date_from, date_to, limit, offset
+-- Note: Uses chunked CLOB output to avoid ORA-06502 (HTP.P 32K limit)
 BEGIN
     ORDS.DEFINE_HANDLER(
         p_module_name => 'ap',
@@ -91,6 +92,9 @@ DECLARE
     v_result CLOB;
     v_date_from DATE := NULL;
     v_date_to DATE := NULL;
+    v_offset NUMBER := 1;
+    v_chunk_size NUMBER := 30000;
+    v_length NUMBER;
 BEGIN
     -- Parse date parameters if provided
     IF :date_from IS NOT NULL THEN
@@ -122,7 +126,13 @@ BEGIN
     );
 
     OWA_UTIL.MIME_HEADER(''application/json'', FALSE);
-    HTP.P(v_result);
+
+    -- Write CLOB in chunks to avoid ORA-06502 (VARCHAR2 32K limit)
+    v_length := NVL(DBMS_LOB.GETLENGTH(v_result), 0);
+    WHILE v_offset <= v_length LOOP
+        HTP.PRN(DBMS_LOB.SUBSTR(v_result, v_chunk_size, v_offset));
+        v_offset := v_offset + v_chunk_size;
+    END LOOP;
 END;
 ',
         p_items_per_page => 0,
@@ -203,6 +213,7 @@ END;
 /
 
 -- GET Handler - Get single payment by Check ID
+-- Note: Uses chunked CLOB output to avoid ORA-06502 (HTP.P 32K limit)
 BEGIN
     ORDS.DEFINE_HANDLER(
         p_module_name => 'ap',
@@ -213,16 +224,25 @@ BEGIN
 DECLARE
     v_result CLOB;
     v_check_id NUMBER;
+    v_offset NUMBER := 1;
+    v_chunk_size NUMBER := 30000;
+    v_length NUMBER;
 BEGIN
     v_check_id := TO_NUMBER(:check_id);
     v_result := XXAP_PAYMENTS_PKG.get_payment_by_check_id(v_check_id);
 
     OWA_UTIL.MIME_HEADER(''application/json'', FALSE);
-    HTP.P(v_result);
+
+    -- Write CLOB in chunks to avoid ORA-06502 (VARCHAR2 32K limit)
+    v_length := NVL(DBMS_LOB.GETLENGTH(v_result), 0);
+    WHILE v_offset <= v_length LOOP
+        HTP.PRN(DBMS_LOB.SUBSTR(v_result, v_chunk_size, v_offset));
+        v_offset := v_offset + v_chunk_size;
+    END LOOP;
 EXCEPTION
     WHEN OTHERS THEN
         OWA_UTIL.MIME_HEADER(''application/json'', FALSE);
-        HTP.P(''{"status": "error", "message": "'' || REPLACE(SQLERRM, ''"'', ''\"'') || ''"}'');
+        HTP.PRN(''{"status": "error", "message": "'' || REPLACE(SQLERRM, ''"'', ''\"'') || ''"}'');
 END;
 ',
         p_items_per_page => 0,
