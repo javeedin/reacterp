@@ -96,6 +96,7 @@ function App() {
               <Route path="ar/*" element={<ComingSoon moduleName="Accounts Receivable" />} />
               <Route path="inventory/*" element={<ComingSoon moduleName="Inventory" />} />
               <Route path="procurement/suppliers" element={<ManageSuppliers />} />
+              <Route path="ap/suppliers" element={<ManageSuppliers />} />
               <Route path="suppliers/manage" element={<ManageSuppliers />} />
               <Route path="suppliers/balance/:supplierNumber" element={<SupplierBalance />} />
               <Route path="procurement/*" element={<ComingSoon moduleName="Procurement" />} />
