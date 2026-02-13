@@ -1139,25 +1139,6 @@ const ManageInvoices: React.FC = () => {
             ]}
           />
           <Space>
-            <Tooltip title="View Page APIs">
-              <Button
-                icon={<ApiOutlined />}
-                onClick={() => setApiModalVisible(true)}
-                style={{ color: REDWOOD.info }}
-              />
-            </Tooltip>
-            <Button type="primary" style={{ background: REDWOOD.primary }}>
-              Done
-            </Button>
-          </Space>
-        </div>
-
-        {/* Page Title and Tabs */}
-        <div style={{ background: REDWOOD.surface, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
-          <div style={{ padding: '8px 16px 0 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Title level={4} style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <BankOutlined /> Manage Invoices (Search)
-            </Title>
             <Tooltip title="Create Invoice">
               <Button
                 type="primary"
@@ -1173,6 +1154,25 @@ const ManageInvoices: React.FC = () => {
                 + Create Invoice
               </Button>
             </Tooltip>
+            <Tooltip title="View Page APIs">
+              <Button
+                icon={<ApiOutlined />}
+                onClick={() => setApiModalVisible(true)}
+                style={{ color: REDWOOD.info }}
+              />
+            </Tooltip>
+            <Button type="primary" style={{ background: REDWOOD.primary }}>
+              Done
+            </Button>
+          </Space>
+        </div>
+
+        {/* Page Title and Tabs */}
+        <div style={{ background: REDWOOD.surface, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
+          <div style={{ padding: '8px 16px 0 16px' }}>
+            <Title level={4} style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <BankOutlined /> Manage Invoices (Search)
+            </Title>
           </div>
 
           {/* Tab Navigation */}
