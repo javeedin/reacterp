@@ -19,7 +19,9 @@ import {
   Modal,
   Divider,
   Descriptions,
+  Dropdown,
 } from 'antd';
+import type { MenuProps } from 'antd';
 import {
   SaveOutlined,
   CloseOutlined,
@@ -31,6 +33,16 @@ import {
   ShoppingCartOutlined,
   CheckCircleOutlined,
   UndoOutlined,
+  DownOutlined,
+  CheckSquareOutlined,
+  StopOutlined,
+  CalculatorOutlined,
+  DollarOutlined,
+  LockOutlined,
+  UnlockOutlined,
+  SendOutlined,
+  RollbackOutlined,
+  CopyOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { APEX_DB_CONFIG } from '../../config/api.config';
@@ -324,6 +336,114 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
   const linesTotal = useMemo(() => {
     return lines.reduce((sum, l) => sum + (l.amount || 0), 0);
   }, [lines]);
+
+  // Invoice Actions dropdown menu items
+  const invoiceActionItems: MenuProps['items'] = [
+    {
+      key: 'validate',
+      icon: <CheckSquareOutlined />,
+      label: 'Validate',
+    },
+    {
+      key: 'calculateTax',
+      icon: <CalculatorOutlined />,
+      label: 'Calculate Tax',
+    },
+    { type: 'divider' },
+    {
+      key: 'applyPrepayment',
+      icon: <DollarOutlined />,
+      label: 'Apply Prepayment',
+    },
+    {
+      key: 'placeHold',
+      icon: <LockOutlined />,
+      label: 'Place Hold',
+    },
+    {
+      key: 'releaseHold',
+      icon: <UnlockOutlined />,
+      label: 'Release Hold',
+    },
+    { type: 'divider' },
+    {
+      key: 'initiateApproval',
+      icon: <SendOutlined />,
+      label: 'Initiate Approval',
+    },
+    {
+      key: 'cancelInvoice',
+      icon: <StopOutlined />,
+      label: 'Cancel Invoice',
+    },
+    {
+      key: 'reverseInvoice',
+      icon: <RollbackOutlined />,
+      label: 'Reverse Invoice',
+    },
+    { type: 'divider' },
+    {
+      key: 'duplicate',
+      icon: <CopyOutlined />,
+      label: 'Duplicate Invoice',
+    },
+  ];
+
+  // Handle invoice action menu clicks
+  const handleInvoiceAction = ({ key }: { key: string }) => {
+    switch (key) {
+      case 'validate':
+        message.info('Validating invoice...');
+        break;
+      case 'calculateTax':
+        message.info('Calculating tax...');
+        break;
+      case 'applyPrepayment':
+        message.info('Apply prepayment...');
+        break;
+      case 'placeHold':
+        message.info('Placing hold on invoice...');
+        break;
+      case 'releaseHold':
+        message.info('Releasing hold...');
+        break;
+      case 'initiateApproval':
+        message.info('Initiating approval...');
+        break;
+      case 'cancelInvoice':
+        message.warning('Cancel invoice...');
+        break;
+      case 'reverseInvoice':
+        message.warning('Reverse invoice...');
+        break;
+      case 'duplicate':
+        message.info('Duplicating invoice...');
+        break;
+      default:
+        break;
+    }
+  };
+
+  // Save and create next handler
+  const handleSaveAndCreateNext = () => {
+    form.validateFields().then((values) => {
+      const invoiceData = {
+        ...values,
+        invoiceDate: values.invoiceDate?.format('YYYY-MM-DD'),
+        lines,
+        totalAmount: linesTotal,
+      };
+      console.log('Invoice saved:', invoiceData);
+      if (onSave) onSave(invoiceData);
+      message.success('Invoice saved. Creating next...');
+      // Reset form and lines for next invoice
+      form.resetFields();
+      setLines([createBlankLine(1)]);
+      setSelectedLineKeys([]);
+    }).catch(() => {
+      message.error('Please fill in required fields');
+    });
+  };
 
   // Save handler
   const handleSave = () => {
@@ -631,10 +751,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
 
   return (
     <div style={{ background: REDWOOD.neutral100, minHeight: 'calc(100vh - 200px)' }}>
-      {/* Action Bar */}
+      {/* Action Bar - matching Fusion Payables layout */}
       <div
         style={{
-          padding: '10px 24px',
+          padding: '8px 24px',
           background: REDWOOD.surface,
           borderBottom: `1px solid ${REDWOOD.neutral200}`,
           display: 'flex',
@@ -645,41 +765,45 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
           zIndex: 10,
         }}
       >
-        <Space>
+        <Space size={12}>
           <Title level={5} style={{ margin: 0 }}>
             <FileTextOutlined style={{ marginRight: 8, color: REDWOOD.primary }} />
             Create Invoice
           </Title>
-          <Tag color="blue">New</Tag>
+
+          {/* Invoice Actions Dropdown */}
+          <Dropdown
+            menu={{
+              items: invoiceActionItems,
+              onClick: handleInvoiceAction,
+            }}
+            trigger={['click']}
+          >
+            <Button style={{ fontWeight: 500 }}>
+              Invoice Actions <DownOutlined style={{ fontSize: 10 }} />
+            </Button>
+          </Dropdown>
         </Space>
-        <Space>
-          <Tooltip title="Save Invoice">
-            <Button
-              type="primary"
-              icon={<SaveOutlined />}
-              onClick={handleSave}
-              style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
-            >
-              Save
-            </Button>
-          </Tooltip>
-          <Tooltip title="Save and Close">
-            <Button
-              type="primary"
-              icon={<CheckCircleOutlined />}
-              onClick={() => {
-                handleSave();
-                onClose();
-              }}
-              style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
-            >
-              Save and Close
-            </Button>
-          </Tooltip>
-          <Button icon={<UndoOutlined />} onClick={() => form.resetFields()}>
-            Reset
+
+        <Space size={8}>
+          <Button onClick={handleSaveAndCreateNext}>
+            Save and Create Next
           </Button>
-          <Button icon={<CloseOutlined />} onClick={onClose}>
+          <Button
+            type="primary"
+            onClick={handleSave}
+            style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+          >
+            Save
+          </Button>
+          <Button
+            type="primary"
+            onClick={() => { handleSave(); onClose(); }}
+            style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+          >
+            Save and Close
+          </Button>
+          <Button onClick={onClose}>
             Cancel
           </Button>
         </Space>
