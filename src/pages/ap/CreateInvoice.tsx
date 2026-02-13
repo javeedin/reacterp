@@ -770,7 +770,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
             <FileTextOutlined style={{ marginRight: 8, color: REDWOOD.primary }} />
             Create Invoice
           </Title>
+        </Space>
 
+        <Space size={8}>
           {/* Invoice Actions Dropdown */}
           <Dropdown
             menu={{
@@ -783,9 +785,6 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
               Invoice Actions <DownOutlined style={{ fontSize: 10 }} />
             </Button>
           </Dropdown>
-        </Space>
-
-        <Space size={8}>
           <Button onClick={handleSaveAndCreateNext}>
             Save and Create Next
           </Button>
