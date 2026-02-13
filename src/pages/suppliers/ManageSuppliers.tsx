@@ -1688,7 +1688,7 @@ const ManageSuppliers: React.FC = () => {
               </Link>
             </Breadcrumb.Item>
             <Breadcrumb.Item>
-              <Link to="/procurement">Procurement</Link>
+              <Link to="/ap">Payables</Link>
             </Breadcrumb.Item>
             <Breadcrumb.Item>Suppliers</Breadcrumb.Item>
           </Breadcrumb>
