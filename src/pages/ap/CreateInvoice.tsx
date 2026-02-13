@@ -20,6 +20,7 @@ import {
   Divider,
   Descriptions,
   Dropdown,
+  Alert,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -43,6 +44,8 @@ import {
   SendOutlined,
   RollbackOutlined,
   CopyOutlined,
+  WarningOutlined,
+  ExclamationCircleOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { APEX_DB_CONFIG } from '../../config/api.config';
@@ -225,6 +228,22 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
   const [supplierLoading, setSupplierLoading] = useState(false);
   const [supplierSearchText, setSupplierSearchText] = useState('');
 
+  // Header completion tracking
+  const [headerValues, setHeaderValues] = useState<Record<string, any>>({
+    invoiceType: 'Standard',
+    invoiceCurrency: 'AED',
+  });
+  const [taxRate, setTaxRate] = useState<number>(5);
+
+  // Check if all required header fields are filled
+  const isHeaderComplete = useMemo(() => {
+    const requiredFields = ['businessUnit', 'invoiceNumber', 'invoiceCurrency', 'invoiceAmount', 'invoiceDate', 'supplier', 'invoiceType'];
+    return requiredFields.every((field) => {
+      const val = headerValues[field];
+      return val !== undefined && val !== null && val !== '';
+    });
+  }, [headerValues]);
+
   // Line selection
   const [selectedLineKeys, setSelectedLineKeys] = useState<React.Key[]>([]);
 
@@ -337,6 +356,18 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
     return lines.reduce((sum, l) => sum + (l.amount || 0), 0);
   }, [lines]);
 
+  // Tax total based on dynamic tax rate
+  const taxTotal = useMemo(() => linesTotal * (taxRate / 100), [linesTotal, taxRate]);
+
+  // Tally validation: header amount must equal lines total + tax
+  const headerInvoiceAmount = headerValues.invoiceAmount || 0;
+  const computedTotal = linesTotal + taxTotal;
+  const isTallyMismatch = useMemo(() => {
+    if (!isHeaderComplete) return false;
+    if (linesTotal === 0) return false;
+    return Math.abs(headerInvoiceAmount - computedTotal) > 0.01;
+  }, [isHeaderComplete, headerInvoiceAmount, computedTotal, linesTotal]);
+
   // Invoice Actions dropdown menu items
   const invoiceActionItems: MenuProps['items'] = [
     {
@@ -424,14 +455,28 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
     }
   };
 
+  // Tally check before save
+  const validateTally = (): boolean => {
+    if (linesTotal > 0 && Math.abs(headerInvoiceAmount - computedTotal) > 0.01) {
+      message.error(
+        `Invoice amount (${formatAmount(headerInvoiceAmount)}) does not match Lines + Tax total (${formatAmount(computedTotal)}). Please correct before saving.`
+      );
+      return false;
+    }
+    return true;
+  };
+
   // Save and create next handler
   const handleSaveAndCreateNext = () => {
     form.validateFields().then((values) => {
+      if (!validateTally()) return;
       const invoiceData = {
         ...values,
         invoiceDate: values.invoiceDate?.format('YYYY-MM-DD'),
         lines,
-        totalAmount: linesTotal,
+        linesTotal,
+        taxTotal,
+        totalAmount: computedTotal,
       };
       console.log('Invoice saved:', invoiceData);
       if (onSave) onSave(invoiceData);
@@ -440,6 +485,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
       form.resetFields();
       setLines([createBlankLine(1)]);
       setSelectedLineKeys([]);
+      setHeaderValues({ invoiceType: 'Standard', invoiceCurrency: 'AED' });
+      setTaxRate(5);
     }).catch(() => {
       message.error('Please fill in required fields');
     });
@@ -448,11 +495,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
   // Save handler
   const handleSave = () => {
     form.validateFields().then((values) => {
+      if (!validateTally()) return;
       const invoiceData = {
         ...values,
         invoiceDate: values.invoiceDate?.format('YYYY-MM-DD'),
         lines,
-        totalAmount: linesTotal,
+        linesTotal,
+        taxTotal,
+        totalAmount: computedTotal,
       };
       console.log('Invoice data:', invoiceData);
       if (onSave) onSave(invoiceData);
@@ -836,6 +886,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
               payAlone: 'No',
               calculateTax: 'Yes',
             }}
+            onValuesChange={(_, allValues) => setHeaderValues(allValues)}
           >
             <Row gutter={32}>
               {/* Column 1 */}
@@ -1051,14 +1102,49 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
           style={{
             marginBottom: 16,
             borderRadius: 8,
-            border: `1px solid ${REDWOOD.neutral200}`,
+            border: `1px solid ${!isHeaderComplete ? REDWOOD.neutral300 : REDWOOD.neutral200}`,
             boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+            position: 'relative',
           }}
         >
+          {/* Lock overlay when header is incomplete */}
+          {!isHeaderComplete && (
+            <div
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                background: 'rgba(255, 255, 255, 0.85)',
+                zIndex: 5,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: 8,
+                cursor: 'not-allowed',
+              }}
+            >
+              <LockOutlined style={{ fontSize: 32, color: REDWOOD.neutral300, marginBottom: 12 }} />
+              <Text style={{ fontSize: 14, color: REDWOOD.neutral600, fontWeight: 500 }}>
+                Complete the Invoice Header to enter lines
+              </Text>
+              <Text type="secondary" style={{ fontSize: 12, marginTop: 4 }}>
+                Fill in Business Unit, Invoice Number, Currency, Amount, Date, Supplier, and Type
+              </Text>
+            </div>
+          )}
+
           <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text strong style={{ fontSize: 14, color: REDWOOD.neutral900 }}>
               Invoice Lines
               <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>({lines.length} line{lines.length !== 1 ? 's' : ''})</Text>
+              {isHeaderComplete && (
+                <Tag color="green" style={{ marginLeft: 8, fontSize: 10 }}>
+                  <CheckCircleOutlined /> Header Complete
+                </Tag>
+              )}
             </Text>
             <Space>
               <Button
@@ -1066,7 +1152,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
                 type="primary"
                 icon={<PlusOutlined />}
                 onClick={addLine}
-                style={{ background: REDWOOD.info, borderColor: REDWOOD.info, fontSize: 12 }}
+                disabled={!isHeaderComplete}
+                style={{ background: isHeaderComplete ? REDWOOD.info : undefined, borderColor: isHeaderComplete ? REDWOOD.info : undefined, fontSize: 12 }}
               >
                 Add Line
               </Button>
@@ -1075,7 +1162,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
                 icon={<DeleteOutlined />}
                 danger
                 onClick={removeLines}
-                disabled={selectedLineKeys.length === 0}
+                disabled={!isHeaderComplete || selectedLineKeys.length === 0}
                 style={{ fontSize: 12 }}
               >
                 Delete {selectedLineKeys.length > 0 ? `(${selectedLineKeys.length})` : ''}
@@ -1191,10 +1278,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
                   </Select>
                 </Descriptions.Item>
                 <Descriptions.Item label="Tax Rate">
-                  <InputNumber size="small" style={{ width: 100 }} defaultValue={5} min={0} max={100} precision={2} addonAfter="%" />
+                  <InputNumber size="small" style={{ width: 100 }} value={taxRate} onChange={(v) => setTaxRate(v || 0)} min={0} max={100} precision={2} addonAfter="%" />
                 </Descriptions.Item>
                 <Descriptions.Item label="Tax Amount">
-                  <Text style={{ fontSize: 13 }}>{formatAmount(linesTotal * 0.05)}</Text>
+                  <Text style={{ fontSize: 13 }}>{formatAmount(taxTotal)}</Text>
                 </Descriptions.Item>
                 <Descriptions.Item label="Withholding Tax Group">
                   <Select size="small" style={{ width: 200 }} placeholder="Select" allowClear>
@@ -1226,19 +1313,43 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
                 <Text strong style={{ fontSize: 14, color: REDWOOD.neutral900 }}>Totals</Text>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {/* Tally mismatch warning */}
+                {isTallyMismatch && (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    icon={<WarningOutlined />}
+                    message={
+                      <span style={{ fontSize: 12 }}>
+                        Header amount (<strong>{formatAmount(headerInvoiceAmount)}</strong>) does not match
+                        Lines + Tax total (<strong>{formatAmount(computedTotal)}</strong>).
+                        Difference: <strong style={{ color: REDWOOD.error }}>{formatAmount(Math.abs(headerInvoiceAmount - computedTotal))}</strong>
+                      </span>
+                    }
+                    style={{ marginBottom: 4, borderRadius: 6 }}
+                  />
+                )}
+                <Row justify="space-between" align="middle">
+                  <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Header Invoice Amount</Text>
+                  <Text style={{ fontSize: 14, fontWeight: 500, color: isTallyMismatch ? REDWOOD.error : undefined }}>
+                    {formatAmount(headerInvoiceAmount)}
+                  </Text>
+                </Row>
+                <Divider style={{ margin: '4px 0' }} />
                 <Row justify="space-between" align="middle">
                   <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Lines Total</Text>
                   <Text style={{ fontSize: 14, fontWeight: 500 }}>{formatAmount(linesTotal)}</Text>
                 </Row>
                 <Row justify="space-between" align="middle">
-                  <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Tax Total</Text>
-                  <Text style={{ fontSize: 14, fontWeight: 500 }}>{formatAmount(linesTotal * 0.05)}</Text>
+                  <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Tax Total ({taxRate}%)</Text>
+                  <Text style={{ fontSize: 14, fontWeight: 500 }}>{formatAmount(taxTotal)}</Text>
                 </Row>
                 <Divider style={{ margin: '4px 0' }} />
                 <Row justify="space-between" align="middle">
-                  <Text strong style={{ fontSize: 13 }}>Invoice Amount</Text>
-                  <Text strong style={{ fontSize: 18, color: REDWOOD.primary }}>
-                    {formatAmount(linesTotal + linesTotal * 0.05)}
+                  <Text strong style={{ fontSize: 13 }}>Computed Total (Lines + Tax)</Text>
+                  <Text strong style={{ fontSize: 18, color: isTallyMismatch ? REDWOOD.error : REDWOOD.primary }}>
+                    {formatAmount(computedTotal)}
+                    {isTallyMismatch && <ExclamationCircleOutlined style={{ marginLeft: 6, fontSize: 14 }} />}
                   </Text>
                 </Row>
                 <Divider style={{ margin: '4px 0' }} />
@@ -1260,14 +1371,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
                   align="middle"
                   style={{
                     padding: '8px 12px',
-                    background: REDWOOD.neutral100,
+                    background: isTallyMismatch ? '#fff7e6' : REDWOOD.neutral100,
                     borderRadius: 6,
-                    border: `1px solid ${REDWOOD.neutral200}`,
+                    border: `1px solid ${isTallyMismatch ? '#ffd591' : REDWOOD.neutral200}`,
                   }}
                 >
                   <Text strong style={{ fontSize: 14 }}>Amount Due</Text>
-                  <Text strong style={{ fontSize: 20, color: REDWOOD.success }}>
-                    {formatAmount(linesTotal + linesTotal * 0.05)}
+                  <Text strong style={{ fontSize: 20, color: isTallyMismatch ? REDWOOD.warning : REDWOOD.success }}>
+                    {formatAmount(computedTotal)}
                   </Text>
                 </Row>
               </div>
