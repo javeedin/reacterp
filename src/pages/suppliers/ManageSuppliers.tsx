@@ -54,6 +54,7 @@ import {
   CalendarOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
+import FloatingMenu from '../../components/FloatingMenu';
 import type { ColumnsType } from 'antd/es/table';
 
 const { Content } = Layout;
@@ -1985,6 +1986,7 @@ const ManageSuppliers: React.FC = () => {
             />
           </Card>
         </Modal>
+        <FloatingMenu />
       </Content>
     </Layout>
   );
