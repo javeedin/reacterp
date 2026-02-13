@@ -55,6 +55,7 @@ import {
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
+import FloatingMenu from '../../components/FloatingMenu';
 import InvoiceDetail from './InvoiceDetail';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import * as XLSX from 'xlsx';
@@ -1423,6 +1424,7 @@ const ManageInvoices: React.FC = () => {
           </Card>
         </Modal>
       </Content>
+      <FloatingMenu />
     </Layout>
   );
 };

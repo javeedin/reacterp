@@ -26,6 +26,7 @@ import {
 import { Link } from 'react-router-dom';
 import { PROXY_CONFIG } from '../../config/api.config';
 import Autopilot from '../../components/Autopilot';
+import FloatingMenu from '../../components/FloatingMenu';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -423,6 +424,7 @@ const InvoiceHolds: React.FC = () => {
 
       {/* Autopilot Assistant */}
       <Autopilot />
+      <FloatingMenu />
     </Layout>
   );
 };

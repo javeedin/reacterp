@@ -1,0 +1,524 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { Typography, Tooltip, Space, Button, Form, Input, Select, DatePicker } from 'antd';
+import {
+  CheckSquareOutlined,
+  BarChartOutlined,
+  SearchOutlined,
+  ReconciliationOutlined,
+  CloseOutlined,
+  FileTextOutlined,
+  FileAddOutlined,
+  FolderOutlined,
+  ScheduleOutlined,
+  SwapOutlined,
+  CheckCircleOutlined,
+  AuditOutlined,
+  ImportOutlined,
+  ExceptionOutlined,
+  WarningOutlined,
+  BookOutlined,
+  FileSearchOutlined,
+  PieChartOutlined,
+  CalendarOutlined,
+  DollarOutlined,
+  CreditCardOutlined,
+  FileDoneOutlined,
+  PrinterOutlined,
+  SafetyOutlined,
+  SendOutlined,
+  SettingOutlined,
+  StopOutlined,
+  BankOutlined,
+} from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
+
+const { Text, Title } = Typography;
+const { Option } = Select;
+
+// Oracle Redwood Color Palette
+const REDWOOD = {
+  primary: '#C74634',
+  success: '#1D7B4D',
+  warning: '#D4A800',
+  info: '#0572CE',
+  neutral100: '#F7F7F7',
+  neutral200: '#E5E5E5',
+  neutral300: '#C7C7C7',
+  neutral600: '#6B6B6B',
+  neutral900: '#1A1A1A',
+  surface: '#FFFFFF',
+  taskBlue: '#0572CE',
+  reportGreen: '#1D7B4D',
+  searchPurple: '#6B4C9A',
+  matchOrange: '#D4A800',
+};
+
+// Menu item type
+interface MenuItemType {
+  key: string;
+  icon: React.ReactNode;
+  label: string;
+  description?: string;
+  color?: string;
+  path?: string;
+}
+
+// Task items
+const invoiceTaskItems: MenuItemType[] = [
+  { key: 'create-invoice', icon: <FileAddOutlined />, label: 'Create Invoice', description: 'Create new supplier invoice', color: REDWOOD.taskBlue, path: '/ap/create-invoice' },
+  { key: 'create-invoice-spreadsheet', icon: <ImportOutlined />, label: 'Create Invoice from Spreadsheet', description: 'Import invoices from file', color: REDWOOD.info },
+  { key: 'create-recurring', icon: <ScheduleOutlined />, label: 'Create Recurring Invoices', description: 'Set up recurring invoices', color: REDWOOD.success },
+  { key: 'manage-invoices', icon: <FileTextOutlined />, label: 'Manage Invoices', description: 'Search and manage invoices', color: REDWOOD.primary, path: '/ap/manage-invoices' },
+  { key: 'apply-conversion-rates', icon: <SwapOutlined />, label: 'Apply Missing Conversion Rates', description: 'Update currency rates', color: REDWOOD.warning },
+  { key: 'validate-invoices', icon: <CheckCircleOutlined />, label: 'Validate Invoices', description: 'Validate invoice entries', color: REDWOOD.success },
+  { key: 'initiate-approval', icon: <AuditOutlined />, label: 'Initiate Approval Workflow', description: 'Start approval process', color: REDWOOD.info },
+  { key: 'import-invoices', icon: <ImportOutlined />, label: 'Import Invoices', description: 'Batch import invoices', color: REDWOOD.taskBlue },
+  { key: 'correct-import-errors', icon: <ExceptionOutlined />, label: 'Correct Import Errors', description: 'Fix import issues', color: REDWOOD.primary },
+  { key: 'payables-exceptions', icon: <WarningOutlined />, label: 'Run Payables Exceptions Listing', description: 'Review exceptions', color: REDWOOD.warning },
+];
+
+const accountingTaskItems: MenuItemType[] = [
+  { key: 'create-accounting', icon: <BookOutlined />, label: 'Create Accounting', description: 'Generate accounting entries', color: REDWOOD.taskBlue },
+  { key: 'create-adjustment', icon: <ReconciliationOutlined />, label: 'Create Adjustment Journal', description: 'Create adjustments', color: REDWOOD.info },
+  { key: 'review-journal-entries', icon: <FileSearchOutlined />, label: 'Review Journal Entries', description: 'Review posted journals', color: REDWOOD.success },
+  { key: 'payables-reconciliation', icon: <ReconciliationOutlined />, label: 'Payables to Ledger Reconciliation', description: 'Reconcile with GL', color: REDWOOD.warning },
+];
+
+const assetsTaskItems: MenuItemType[] = [
+  { key: 'create-mass-additions', icon: <PieChartOutlined />, label: 'Create Mass Additions', description: 'Add assets in bulk', color: REDWOOD.primary },
+];
+
+const periodsTaskItems: MenuItemType[] = [
+  { key: 'manage-periods', icon: <CalendarOutlined />, label: 'Manage Accounting Periods', description: 'Open/close periods', color: REDWOOD.info },
+];
+
+const paymentTaskItems: MenuItemType[] = [
+  { key: 'manage-payments', icon: <DollarOutlined />, label: 'Manage Payments', description: 'Search and manage payments', color: REDWOOD.taskBlue, path: '/ap/manage-payments' },
+  { key: 'submit-payment-request', icon: <SendOutlined />, label: 'Submit Payment Process Request', description: 'Initiate payment run', color: REDWOOD.info, path: '/ap/submit-payment' },
+  { key: 'manage-payment-templates', icon: <SettingOutlined />, label: 'Manage Payment Process Request Templates', description: 'Configure templates', color: REDWOOD.success },
+  { key: 'create-payment', icon: <CreditCardOutlined />, label: 'Create Payment', description: 'Create single payment', color: REDWOOD.primary, path: '/ap/create-payment' },
+  { key: 'create-electronic-files', icon: <FileDoneOutlined />, label: 'Create Electronic Payment Files', description: 'Generate EFT files', color: REDWOOD.taskBlue },
+  { key: 'create-printed-files', icon: <PrinterOutlined />, label: 'Create Printed Payment Files', description: 'Generate check files', color: REDWOOD.info },
+  { key: 'manage-payment-files', icon: <FolderOutlined />, label: 'Manage Payment Files', description: 'View payment files', color: REDWOOD.success },
+  { key: 'apply-payment-rates', icon: <SwapOutlined />, label: 'Apply Missing Conversion Rates', description: 'Update currency rates', color: REDWOOD.warning },
+  { key: 'create-positive-pay', icon: <SafetyOutlined />, label: 'Create Positive Pay File', description: 'Generate positive pay', color: REDWOOD.primary },
+  { key: 'send-remittance', icon: <SendOutlined />, label: 'Send Separate Remittance Advice', description: 'Email remittance', color: REDWOOD.taskBlue },
+  { key: 'regulatory-reporting', icon: <AuditOutlined />, label: 'Create Regulatory Reporting', description: 'Generate reports', color: REDWOOD.info },
+  { key: 'payment-letter', icon: <FileTextOutlined />, label: 'Payment File Accompanying Letter', description: 'Create cover letters', color: REDWOOD.success },
+  { key: 'retrieve-acknowledgments', icon: <CheckCircleOutlined />, label: 'Retrieve Disbursement Acknowledgments', description: 'Get bank responses', color: REDWOOD.warning },
+];
+
+const setupItems: MenuItemType[] = [
+  { key: 'banks', icon: <BankOutlined />, label: 'Banks', description: 'Manage banks, branches & accounts', color: REDWOOD.info, path: '/ap/banks' },
+  { key: 'suppliers', icon: <FileTextOutlined />, label: 'Suppliers', description: 'Manage supplier master data', color: REDWOOD.success, path: '/procurement/suppliers' },
+  { key: 'payment-terms', icon: <CalendarOutlined />, label: 'Payment Terms', description: 'Configure payment terms', color: REDWOOD.warning },
+  { key: 'payment-methods', icon: <CreditCardOutlined />, label: 'Payment Methods', description: 'Setup payment methods', color: REDWOOD.primary },
+  { key: 'invoice-holds', icon: <StopOutlined />, label: 'Manage Invoice Holds', description: 'View and manage invoice hold codes', color: REDWOOD.primary, path: '/ap/invoice-holds' },
+];
+
+const taskSections = [
+  { key: 'invoices', label: 'Invoices', items: invoiceTaskItems },
+  { key: 'accounting', label: 'Accounting', items: accountingTaskItems },
+  { key: 'assets', label: 'Assets', items: assetsTaskItems },
+  { key: 'periods', label: 'Payables Periods', items: periodsTaskItems },
+  { key: 'payments', label: 'Payments', items: paymentTaskItems },
+  { key: 'setup', label: 'Setup & Maintenance', items: setupItems },
+];
+
+// FloatingIcon sub-component
+const FloatingIcon = ({
+  icon,
+  label,
+  color,
+  isActive,
+  onClick,
+  position,
+  panelOpen,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  color: string;
+  isActive: boolean;
+  onClick: () => void;
+  position: 'first' | 'middle' | 'last';
+  panelOpen: boolean;
+}) => {
+  const getBorderRadius = () => {
+    if (panelOpen) {
+      if (position === 'first') return '8px 0 0 0';
+      if (position === 'last') return '0 0 0 8px';
+      return '0';
+    } else {
+      if (position === 'first') return '8px 8px 0 0';
+      if (position === 'last') return '0 0 8px 8px';
+      return '0';
+    }
+  };
+
+  return (
+    <Tooltip title={!isActive ? label : ''} placement="left">
+      <div
+        onClick={onClick}
+        style={{
+          width: 40,
+          height: 40,
+          borderRadius: getBorderRadius(),
+          background: isActive ? color : REDWOOD.surface,
+          border: `2px solid ${panelOpen ? REDWOOD.neutral200 : color}`,
+          borderBottom: position !== 'last' ? 'none' : `2px solid ${panelOpen ? REDWOOD.neutral200 : color}`,
+          borderTop: position !== 'first' ? 'none' : `2px solid ${panelOpen ? REDWOOD.neutral200 : color}`,
+          borderRight: panelOpen ? 'none' : `2px solid ${color}`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+          transition: 'all 0.3s ease',
+          boxShadow: isActive ? `0 4px 12px ${color}40` : (panelOpen ? 'none' : '0 2px 8px rgba(0,0,0,0.1)'),
+          color: isActive ? '#fff' : color,
+          fontSize: 18,
+        }}
+      >
+        {icon}
+      </div>
+    </Tooltip>
+  );
+};
+
+const FloatingMenu: React.FC = () => {
+  const navigate = useNavigate();
+  const [activePanel, setActivePanel] = useState<'none' | 'tasks' | 'search' | 'reports' | 'match'>('none');
+  const [isClosing, setIsClosing] = useState(false);
+  const [selectedTaskSection, setSelectedTaskSection] = useState<string>('invoices');
+  const panelRef = useRef<HTMLDivElement>(null);
+  const floatingIconsRef = useRef<HTMLDivElement>(null);
+  const [searchForm] = Form.useForm();
+  const [matchForm] = Form.useForm();
+
+  const getPanelWidth = () => {
+    if (activePanel === 'match') return 360;
+    if (activePanel === 'tasks') return 320;
+    if (activePanel === 'search') return 320;
+    if (activePanel === 'reports') return 320;
+    return 0;
+  };
+
+  const getCurrentSectionItems = () => {
+    const section = taskSections.find(s => s.key === selectedTaskSection);
+    return section?.items || [];
+  };
+
+  // Click outside handler
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      const isOutsidePanel = panelRef.current && !panelRef.current.contains(target);
+      const isOutsideFloatingIcons = floatingIconsRef.current && !floatingIconsRef.current.contains(target);
+      const isDropdownClick = target.closest('.ant-select-dropdown') ||
+                              target.closest('.ant-picker-dropdown') ||
+                              target.closest('.ant-dropdown');
+
+      if (isOutsidePanel && isOutsideFloatingIcons && !isDropdownClick) {
+        closePanel();
+      }
+    };
+
+    if (activePanel !== 'none') {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [activePanel]);
+
+  const closePanel = () => {
+    setIsClosing(true);
+    setTimeout(() => {
+      setActivePanel('none');
+      setIsClosing(false);
+    }, 250);
+  };
+
+  const handleMenuItemClick = (key: string, path?: string) => {
+    closePanel();
+    if (path) {
+      navigate(path);
+    }
+  };
+
+  const togglePanel = (panel: 'tasks' | 'search' | 'reports' | 'match') => {
+    if (activePanel === panel) {
+      closePanel();
+    } else {
+      setIsClosing(false);
+      setActivePanel(panel);
+    }
+  };
+
+  // Task Menu Item
+  const TaskMenuItem = ({ item }: { item: MenuItemType }) => (
+    <div
+      onClick={() => handleMenuItemClick(item.key, item.path)}
+      style={{
+        padding: '6px 10px',
+        borderRadius: 6,
+        cursor: 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        transition: 'all 0.2s ease',
+        marginBottom: 4,
+        background: REDWOOD.surface,
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = REDWOOD.neutral100; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = REDWOOD.surface; }}
+    >
+      <div style={{ color: REDWOOD.taskBlue, fontSize: 12 }}>{item.icon}</div>
+      <Text style={{ fontSize: 12, color: REDWOOD.neutral900 }}>{item.label}</Text>
+    </div>
+  );
+
+  const panelBaseStyle: React.CSSProperties = {
+    position: 'fixed',
+    right: 0,
+    top: 64,
+    bottom: 0,
+    background: REDWOOD.surface,
+    boxShadow: '-4px 0 24px rgba(0,0,0,0.15)',
+    overflow: 'hidden',
+    animation: isClosing ? 'slideOut 0.25s ease-in forwards' : 'slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+    zIndex: 1001,
+    display: 'flex',
+    flexDirection: 'column',
+  };
+
+  // Tasks Slide Panel
+  const TasksSlidePanel = () => (
+    <div style={{ ...panelBaseStyle, width: 320 }}>
+      <div style={{ padding: '10px 14px', background: REDWOOD.taskBlue, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+        <Text strong style={{ color: '#fff', fontSize: 14 }}>Tasks</Text>
+        <CloseOutlined style={{ color: '#fff', cursor: 'pointer', fontSize: 14, padding: 4 }} onClick={closePanel} />
+      </div>
+      <div style={{ padding: '12px 14px', borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
+        <Select value={selectedTaskSection} onChange={setSelectedTaskSection} style={{ width: '100%' }} size="middle">
+          {taskSections.map(section => (
+            <Option key={section.key} value={section.key}>{section.label}</Option>
+          ))}
+        </Select>
+      </div>
+      <div style={{ padding: 10, flex: 1, overflowY: 'auto' }}>
+        {getCurrentSectionItems().map((item) => (
+          <TaskMenuItem key={item.key} item={item} />
+        ))}
+      </div>
+    </div>
+  );
+
+  // Search Slide Panel
+  const SearchSlidePanel = () => (
+    <div style={{ ...panelBaseStyle, width: 320 }}>
+      <div style={{ padding: '10px 14px', background: REDWOOD.searchPurple, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+        <Text strong style={{ color: '#fff', fontSize: 14 }}>Search</Text>
+        <CloseOutlined style={{ color: '#fff', cursor: 'pointer', fontSize: 14, padding: 4 }} onClick={closePanel} />
+      </div>
+      <div style={{ padding: 16, flex: 1, overflowY: 'auto' }}>
+        <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 16 }}>** At least one is required</Text>
+        <Form form={searchForm} layout="vertical" size="small">
+          <Form.Item label={<Text style={{ fontSize: 12 }}><span style={{ color: REDWOOD.primary }}>**</span> Invoice Number</Text>} name="invoiceNumber">
+            <Input placeholder="Enter invoice number" />
+          </Form.Item>
+          <Form.Item label={<Text style={{ fontSize: 12 }}><span style={{ color: REDWOOD.primary }}>**</span> Supplier or Party</Text>} name="supplier">
+            <Input placeholder="Search supplier" suffix={<SearchOutlined style={{ color: REDWOOD.neutral300 }} />} />
+          </Form.Item>
+          <Form.Item label={<Text style={{ fontSize: 12 }}>Supplier Site</Text>} name="supplierSite">
+            <Select placeholder="Select site" allowClear>
+              <Option value="site1">Site 1</Option>
+              <Option value="site2">Site 2</Option>
+              <Option value="site3">Site 3</Option>
+            </Select>
+          </Form.Item>
+          <Form.Item style={{ marginTop: 24, marginBottom: 0 }}>
+            <Space>
+              <Button type="primary" style={{ background: REDWOOD.neutral600 }}>Search</Button>
+              <Button onClick={() => searchForm.resetFields()}>Reset</Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </div>
+    </div>
+  );
+
+  // Reports Slide Panel
+  const ReportsSlidePanel = () => (
+    <div style={{ ...panelBaseStyle, width: 320 }}>
+      <div style={{ padding: '10px 14px', background: REDWOOD.reportGreen, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+        <Space>
+          <Button size="small" icon={<FileAddOutlined />} style={{ fontSize: 11 }}>Create</Button>
+        </Space>
+        <CloseOutlined style={{ color: '#fff', cursor: 'pointer', fontSize: 14, padding: 4 }} onClick={closePanel} />
+      </div>
+      <div style={{ padding: 16, flex: 1, overflowY: 'auto' }}>
+        <div style={{ marginBottom: 8 }}>
+          <Space>
+            <FolderOutlined style={{ color: REDWOOD.matchOrange }} />
+            <Text style={{ fontSize: 13, color: REDWOOD.info, cursor: 'pointer' }}>My Folders</Text>
+          </Space>
+        </div>
+        <div>
+          <Space>
+            <FolderOutlined style={{ color: REDWOOD.matchOrange }} />
+            <Text style={{ fontSize: 13, color: REDWOOD.info, cursor: 'pointer' }}>Shared Reports and Analytics</Text>
+          </Space>
+        </div>
+      </div>
+    </div>
+  );
+
+  // Match in Full Slide Panel
+  const MatchSlidePanel = () => (
+    <div style={{ ...panelBaseStyle, width: 360 }}>
+      <div style={{ padding: '10px 14px', background: REDWOOD.matchOrange, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+        <Text strong style={{ color: '#fff', fontSize: 14 }}>Match in Full</Text>
+        <CloseOutlined style={{ color: '#fff', cursor: 'pointer', fontSize: 14, padding: 4 }} onClick={closePanel} />
+      </div>
+      <div style={{ padding: 16, flex: 1, overflowY: 'auto' }}>
+        <Title level={5} style={{ marginBottom: 16, textAlign: 'center' }}>Match in Full</Title>
+        <Form form={matchForm} layout="horizontal" size="small" labelCol={{ span: 10 }} wrapperCol={{ span: 14 }}>
+          <Form.Item label={<Text style={{ fontSize: 12 }}><span style={{ color: REDWOOD.primary }}>*</span> Purchase Order</Text>} name="purchaseOrder" required>
+            <Input suffix={<SearchOutlined style={{ color: REDWOOD.neutral300 }} />} />
+          </Form.Item>
+          <Form.Item label={<Text style={{ fontSize: 12 }}>Business Unit</Text>} name="businessUnit">
+            <Input disabled style={{ background: REDWOOD.neutral100 }} />
+          </Form.Item>
+          <Form.Item label={<Text style={{ fontSize: 12 }}>Supplier</Text>} name="supplier">
+            <Input disabled style={{ background: REDWOOD.neutral100 }} />
+          </Form.Item>
+          <Form.Item label={<Text style={{ fontSize: 12 }}>Site</Text>} name="site">
+            <Select placeholder="Select site" allowClear>
+              <Option value="site1">Site 1</Option>
+              <Option value="site2">Site 2</Option>
+            </Select>
+          </Form.Item>
+          <Form.Item label={<Text style={{ fontSize: 12 }}>Invoice Number</Text>} name="invoiceNumber">
+            <Input />
+          </Form.Item>
+          <Form.Item label={<Text style={{ fontSize: 12 }}>Date</Text>} name="date">
+            <DatePicker format="DD-MMM-YYYY" style={{ width: '100%' }} placeholder="dd-mmm-yyyy" />
+          </Form.Item>
+          <Form.Item label={<Text style={{ fontSize: 12 }}>Total</Text>} name="total">
+            <Input disabled style={{ background: REDWOOD.neutral100 }} />
+          </Form.Item>
+          <Form.Item style={{ marginTop: 24, marginBottom: 0 }} wrapperCol={{ offset: 10, span: 14 }}>
+            <Space>
+              <Button type="primary" style={{ background: REDWOOD.primary }}>Create Invoice</Button>
+              <Button onClick={() => matchForm.resetFields()}>Reset</Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      {/* Floating Connected Icons */}
+      <div
+        ref={floatingIconsRef}
+        style={{
+          position: 'fixed',
+          right: activePanel !== 'none' && !isClosing ? getPanelWidth() : 24,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          zIndex: 1002,
+          display: 'flex',
+          flexDirection: 'column',
+          transition: 'right 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+        }}
+      >
+        <FloatingIcon
+          icon={<CheckSquareOutlined />}
+          label="Tasks"
+          color={REDWOOD.taskBlue}
+          isActive={activePanel === 'tasks'}
+          onClick={() => togglePanel('tasks')}
+          position="first"
+          panelOpen={activePanel !== 'none' && !isClosing}
+        />
+        <FloatingIcon
+          icon={<SearchOutlined />}
+          label="Search"
+          color={REDWOOD.searchPurple}
+          isActive={activePanel === 'search'}
+          onClick={() => togglePanel('search')}
+          position="middle"
+          panelOpen={activePanel !== 'none' && !isClosing}
+        />
+        <FloatingIcon
+          icon={<BarChartOutlined />}
+          label="Reports"
+          color={REDWOOD.reportGreen}
+          isActive={activePanel === 'reports'}
+          onClick={() => togglePanel('reports')}
+          position="middle"
+          panelOpen={activePanel !== 'none' && !isClosing}
+        />
+        <FloatingIcon
+          icon={<ReconciliationOutlined />}
+          label="Match in Full"
+          color={REDWOOD.matchOrange}
+          isActive={activePanel === 'match'}
+          onClick={() => togglePanel('match')}
+          position="last"
+          panelOpen={activePanel !== 'none' && !isClosing}
+        />
+      </div>
+
+      {/* Backdrop Overlay */}
+      {activePanel !== 'none' && (
+        <div
+          onClick={closePanel}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.3)',
+            zIndex: 1000,
+            animation: isClosing ? 'fadeOut 0.25s ease forwards' : 'fadeIn 0.3s ease forwards',
+          }}
+        />
+      )}
+
+      {/* Slide-out Panels */}
+      <div ref={panelRef}>
+        {activePanel === 'tasks' && <TasksSlidePanel />}
+        {activePanel === 'search' && <SearchSlidePanel />}
+        {activePanel === 'reports' && <ReportsSlidePanel />}
+        {activePanel === 'match' && <MatchSlidePanel />}
+      </div>
+
+      {/* CSS Animations */}
+      <style>{`
+        @keyframes slideIn {
+          from { transform: translateX(100%); }
+          to { transform: translateX(0); }
+        }
+        @keyframes slideOut {
+          from { transform: translateX(0); }
+          to { transform: translateX(100%); }
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes fadeOut {
+          from { opacity: 1; }
+          to { opacity: 0; }
+        }
+      `}</style>
+    </>
+  );
+};
+
+export default FloatingMenu;

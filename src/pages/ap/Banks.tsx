@@ -44,6 +44,7 @@ import {
 import { Link } from 'react-router-dom';
 import { PROXY_CONFIG, ORACLE_FUSION_CONFIG } from '../../config/api.config';
 import Autopilot from '../../components/Autopilot';
+import FloatingMenu from '../../components/FloatingMenu';
 import AccountSelector from '../../components/AccountSelector';
 
 const { Content } = Layout;
@@ -1609,6 +1610,7 @@ const Banks: React.FC = () => {
 
       {/* Autopilot Assistant */}
       <Autopilot />
+      <FloatingMenu />
     </Layout>
   );
 };
