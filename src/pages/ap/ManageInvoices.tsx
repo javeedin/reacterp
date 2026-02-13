@@ -57,6 +57,7 @@ import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 import FloatingMenu from '../../components/FloatingMenu';
 import InvoiceDetail from './InvoiceDetail';
+import CreateInvoice from './CreateInvoice';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
@@ -112,6 +113,7 @@ interface InvoiceTab {
   key: string;
   label: string;
   invoice: InvoiceRecord;
+  tabType?: 'detail' | 'create';
 }
 
 // Supplier record from API
@@ -455,6 +457,19 @@ const ManageInvoices: React.FC = () => {
       key: tabKey,
       label: record.invoiceNumber,
       invoice: record,
+    };
+    setOpenTabs([...openTabs, newTab]);
+    setActiveTab(tabKey);
+  };
+
+  // Open create invoice tab
+  const openCreateInvoiceTab = () => {
+    const tabKey = `create-invoice-${Date.now()}`;
+    const newTab: InvoiceTab = {
+      key: tabKey,
+      label: 'New Invoice',
+      invoice: {} as InvoiceRecord,
+      tabType: 'create',
     };
     setOpenTabs([...openTabs, newTab]);
     setActiveTab(tabKey);
@@ -1089,9 +1104,13 @@ const ManageInvoices: React.FC = () => {
     // Add open invoice tabs
     ...openTabs.map((tab) => ({
       key: tab.key,
-      label: tab.label,
+      label: tab.tabType === 'create' ? '+ New Invoice' : tab.label,
       closable: true,
-      children: (
+      children: tab.tabType === 'create' ? (
+        <CreateInvoice
+          onClose={() => closeInvoiceTab(tab.key)}
+        />
+      ) : (
         <InvoiceDetail
           invoice={tab.invoice}
           onClose={() => closeInvoiceTab(tab.key)}
@@ -1135,10 +1154,25 @@ const ManageInvoices: React.FC = () => {
 
         {/* Page Title and Tabs */}
         <div style={{ background: REDWOOD.surface, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
-          <div style={{ padding: '8px 16px 0 16px' }}>
+          <div style={{ padding: '8px 16px 0 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Title level={4} style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
               <BankOutlined /> Manage Invoices (Search)
             </Title>
+            <Tooltip title="Create Invoice">
+              <Button
+                type="primary"
+                icon={<FileTextOutlined />}
+                onClick={openCreateInvoiceTab}
+                style={{
+                  background: REDWOOD.primary,
+                  borderColor: REDWOOD.primary,
+                  borderRadius: 6,
+                  fontWeight: 500,
+                }}
+              >
+                + Create Invoice
+              </Button>
+            </Tooltip>
           </div>
 
           {/* Tab Navigation */}
