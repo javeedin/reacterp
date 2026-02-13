@@ -75,14 +75,20 @@ interface SupplierRecord {
 interface InvoiceLine {
   key: string;
   lineNumber: number;
-  // Distribution columns
+  // Distribution columns (matching Fusion Payables)
   type: string;
   amount: number;
+  distributionSet: string;
+  distributionCombination: string;
+  accountingDate: string;
+  prorateAcrossAllItemLines: string;
+  description: string;
+  taxClassification: string;
+  shipToLocation: string;
+  // Additional distribution fields
   quantity: number;
   unitPrice: number;
   uomName: string;
-  description: string;
-  distributionCombination: string;
   project: string;
   task: string;
   // Purchase Order columns
@@ -165,11 +171,16 @@ const createBlankLine = (lineNumber: number): InvoiceLine => ({
   lineNumber,
   type: 'Item',
   amount: 0,
+  distributionSet: '',
+  distributionCombination: '',
+  accountingDate: '',
+  prorateAcrossAllItemLines: 'No',
+  description: '',
+  taxClassification: '',
+  shipToLocation: '',
   quantity: 1,
   unitPrice: 0,
   uomName: '',
-  description: '',
-  distributionCombination: '',
   project: '',
   task: '',
   poNumber: '',
@@ -332,21 +343,21 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
     });
   };
 
-  // ========== Distribution Tab Columns ==========
+  // ========== Distribution Tab Columns (matching Fusion Payables) ==========
   const distributionColumns: ColumnsType<InvoiceLine> = [
     {
-      title: 'Line',
+      title: 'Number',
       dataIndex: 'lineNumber',
       key: 'lineNumber',
-      width: 50,
+      width: 65,
       align: 'center',
-      render: (val: number) => <Text type="secondary" style={{ fontSize: 12 }}>{val}</Text>,
+      render: (val: number) => <Text style={{ fontSize: 12 }}>{val}</Text>,
     },
     {
       title: 'Type',
       dataIndex: 'type',
       key: 'type',
-      width: 110,
+      width: 120,
       render: (val: string, record: InvoiceLine) => (
         <Select
           size="small"
@@ -382,63 +393,26 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
       ),
     },
     {
-      title: 'Quantity',
-      dataIndex: 'quantity',
-      key: 'quantity',
-      width: 80,
-      align: 'right',
-      render: (val: number, record: InvoiceLine) => (
-        <InputNumber
+      title: 'Distribution Set',
+      dataIndex: 'distributionSet',
+      key: 'distributionSet',
+      width: 160,
+      render: (val: string, record: InvoiceLine) => (
+        <Input
           size="small"
           value={val}
-          onChange={(v) => updateLine(record.key, 'quantity', v || 0)}
-          min={0}
-          style={{ width: '100%' }}
+          onChange={(e) => updateLine(record.key, 'distributionSet', e.target.value)}
           variant="borderless"
+          placeholder=""
+          suffix={<SearchOutlined style={{ color: REDWOOD.neutral300, fontSize: 11 }} />}
         />
-      ),
-    },
-    {
-      title: 'Unit Price',
-      dataIndex: 'unitPrice',
-      key: 'unitPrice',
-      width: 110,
-      align: 'right',
-      render: (val: number, record: InvoiceLine) => (
-        <InputNumber
-          size="small"
-          value={val}
-          onChange={(v) => updateLine(record.key, 'unitPrice', v || 0)}
-          min={0}
-          precision={2}
-          style={{ width: '100%' }}
-          variant="borderless"
-        />
-      ),
-    },
-    {
-      title: 'UOM',
-      dataIndex: 'uomName',
-      key: 'uomName',
-      width: 80,
-      render: (val: string, record: InvoiceLine) => (
-        <Input size="small" value={val} onChange={(e) => updateLine(record.key, 'uomName', e.target.value)} variant="borderless" placeholder="" />
-      ),
-    },
-    {
-      title: 'Description',
-      dataIndex: 'description',
-      key: 'description',
-      width: 200,
-      render: (val: string, record: InvoiceLine) => (
-        <Input size="small" value={val} onChange={(e) => updateLine(record.key, 'description', e.target.value)} placeholder="Enter description" variant="borderless" />
       ),
     },
     {
       title: 'Distribution Combination',
       dataIndex: 'distributionCombination',
       key: 'distributionCombination',
-      width: 200,
+      width: 210,
       render: (val: string, record: InvoiceLine) => (
         <Input
           size="small"
@@ -451,21 +425,90 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
       ),
     },
     {
-      title: 'Project',
-      dataIndex: 'project',
-      key: 'project',
-      width: 120,
+      title: 'Accounting Date',
+      dataIndex: 'accountingDate',
+      key: 'accountingDate',
+      width: 140,
       render: (val: string, record: InvoiceLine) => (
-        <Input size="small" value={val} onChange={(e) => updateLine(record.key, 'project', e.target.value)} variant="borderless" />
+        <Input
+          size="small"
+          value={val}
+          onChange={(e) => updateLine(record.key, 'accountingDate', e.target.value)}
+          variant="borderless"
+          placeholder="dd-mmm-yyyy"
+        />
       ),
     },
     {
-      title: 'Task',
-      dataIndex: 'task',
-      key: 'task',
-      width: 120,
+      title: 'Prorate Across All Item Lines',
+      dataIndex: 'prorateAcrossAllItemLines',
+      key: 'prorateAcrossAllItemLines',
+      width: 200,
       render: (val: string, record: InvoiceLine) => (
-        <Input size="small" value={val} onChange={(e) => updateLine(record.key, 'task', e.target.value)} variant="borderless" />
+        <Select
+          size="small"
+          value={val || 'No'}
+          onChange={(v) => updateLine(record.key, 'prorateAcrossAllItemLines', v)}
+          style={{ width: '100%' }}
+          variant="borderless"
+        >
+          <Option value="Yes">Yes</Option>
+          <Option value="No">No</Option>
+        </Select>
+      ),
+    },
+    {
+      title: 'Description',
+      dataIndex: 'description',
+      key: 'description',
+      width: 220,
+      render: (val: string, record: InvoiceLine) => (
+        <Input
+          size="small"
+          value={val}
+          onChange={(e) => updateLine(record.key, 'description', e.target.value)}
+          placeholder=""
+          variant="borderless"
+        />
+      ),
+    },
+    {
+      title: 'Tax Classification',
+      dataIndex: 'taxClassification',
+      key: 'taxClassification',
+      width: 160,
+      render: (val: string, record: InvoiceLine) => (
+        <Select
+          size="small"
+          value={val || undefined}
+          onChange={(v) => updateLine(record.key, 'taxClassification', v)}
+          style={{ width: '100%' }}
+          variant="borderless"
+          placeholder=""
+          allowClear
+        >
+          <Option value="VAT 5%">VAT 5%</Option>
+          <Option value="Zero Rated">Zero Rated</Option>
+          <Option value="Exempt">Exempt</Option>
+          <Option value="Reverse Charge">Reverse Charge</Option>
+          <Option value="Out of Scope">Out of Scope</Option>
+        </Select>
+      ),
+    },
+    {
+      title: 'Ship-to Location',
+      dataIndex: 'shipToLocation',
+      key: 'shipToLocation',
+      width: 160,
+      render: (val: string, record: InvoiceLine) => (
+        <Input
+          size="small"
+          value={val}
+          onChange={(e) => updateLine(record.key, 'shipToLocation', e.target.value)}
+          variant="borderless"
+          placeholder=""
+          suffix={<SearchOutlined style={{ color: REDWOOD.neutral300, fontSize: 11 }} />}
+        />
       ),
     },
   ];
@@ -935,7 +978,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
                     dataSource={lines}
                     size="small"
                     pagination={false}
-                    scroll={{ x: 1350 }}
+                    scroll={{ x: 1600 }}
                     rowSelection={rowSelection}
                     summary={() => (
                       <Table.Summary fixed>
@@ -948,7 +991,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
                               {formatAmount(linesTotal)}
                             </Text>
                           </Table.Summary.Cell>
-                          <Table.Summary.Cell index={3} colSpan={7} />
+                          <Table.Summary.Cell index={3} colSpan={8} />
                         </Table.Summary.Row>
                       </Table.Summary>
                     )}
