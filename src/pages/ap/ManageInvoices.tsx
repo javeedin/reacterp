@@ -842,13 +842,20 @@ const ManageInvoices: React.FC = () => {
                   children: (
                     <Form
                       form={form}
-                      layout="vertical"
+                      layout="horizontal"
                       onFinish={handleSearch}
                       size="small"
+                      labelCol={{ span: 8 }}
+                      wrapperCol={{ span: 16 }}
+                      labelAlign="right"
                     >
-                      <Row gutter={24}>
-                        <Col span={8}>
-                          <Form.Item label="Business Unit" name="businessUnit">
+                      <Row gutter={32}>
+                        <Col span={12}>
+                          <Form.Item
+                            label={<Text style={{ fontSize: 12 }}>Business Unit</Text>}
+                            name="businessUnit"
+                            style={{ marginBottom: 8 }}
+                          >
                             <Select
                               placeholder="Select Business Unit"
                               allowClear
@@ -859,23 +866,32 @@ const ManageInvoices: React.FC = () => {
                             </Select>
                           </Form.Item>
                           <Form.Item
-                            label={<><span style={{ color: REDWOOD.primary }}>**</span> Invoice Number</>}
+                            label={<Text style={{ fontSize: 12 }}><span style={{ color: REDWOOD.primary }}>**</span> Invoice Number</Text>}
                             name="invoiceNumber"
+                            style={{ marginBottom: 8 }}
                           >
                             <Input placeholder="Enter invoice number" />
                           </Form.Item>
-                          <Form.Item label="Invoice Amount" name="invoiceAmount">
+                          <Form.Item
+                            label={<Text style={{ fontSize: 12 }}>Invoice Amount</Text>}
+                            name="invoiceAmount"
+                            style={{ marginBottom: 8 }}
+                          >
                             <InputNumber style={{ width: '100%' }} placeholder="0.00" />
                           </Form.Item>
                           <Form.Item
-                            label={<><span style={{ color: REDWOOD.primary }}>**</span> Invoice Date</>}
+                            label={<Text style={{ fontSize: 12 }}><span style={{ color: REDWOOD.primary }}>**</span> Invoice Date</Text>}
                             name="invoiceDate"
+                            style={{ marginBottom: 8 }}
                           >
                             <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
                           </Form.Item>
+                        </Col>
+                        <Col span={12}>
                           <Form.Item
-                            label={<><span style={{ color: REDWOOD.primary }}>**</span> Supplier or Party</>}
+                            label={<Text style={{ fontSize: 12 }}><span style={{ color: REDWOOD.primary }}>**</span> Supplier or Party</Text>}
                             name="supplierOrParty"
+                            style={{ marginBottom: 8 }}
                           >
                             <Input
                               placeholder="Search supplier"
@@ -890,48 +906,51 @@ const ManageInvoices: React.FC = () => {
                               style={{ cursor: 'pointer' }}
                             />
                           </Form.Item>
-                        </Col>
-                        <Col span={8}>
                           <Form.Item
-                            label={<><span style={{ color: REDWOOD.primary }}>**</span> Supplier Number</>}
+                            label={<Text style={{ fontSize: 12 }}><span style={{ color: REDWOOD.primary }}>**</span> Supplier Number</Text>}
                             name="supplierNumber"
+                            style={{ marginBottom: 8 }}
                           >
                             <Input placeholder="e.g. H014" />
                           </Form.Item>
-                          <Form.Item label="Supplier Site" name="supplierSite">
+                          <Form.Item
+                            label={<Text style={{ fontSize: 12 }}>Supplier Site</Text>}
+                            name="supplierSite"
+                            style={{ marginBottom: 8 }}
+                          >
                             <Select placeholder="Select site" allowClear>
                               <Option value="SHARJAH">SHARJAH</Option>
                               <Option value="DUBAI">DUBAI</Option>
                             </Select>
                           </Form.Item>
-                          <Form.Item label="Taxpayer ID" name="taxpayerId">
-                            <Input placeholder="Enter taxpayer ID" />
-                          </Form.Item>
                           <Form.Item
-                            label={<><span style={{ color: REDWOOD.primary }}>**</span> Invoice Group</>}
+                            label={<Text style={{ fontSize: 12 }}><span style={{ color: REDWOOD.primary }}>**</span> Invoice Group</Text>}
                             name="invoiceGroup"
+                            style={{ marginBottom: 8 }}
                           >
                             <Input placeholder="Enter invoice group" />
                           </Form.Item>
                         </Col>
-                        <Col span={8}>
-                          <Text type="secondary" style={{ fontSize: 11 }}>
-                            ** At least one is required
-                          </Text>
-                        </Col>
                       </Row>
-                      <Row justify="end" style={{ marginTop: 8 }}>
-                        <Space>
-                          <Button icon={<SearchOutlined />} type="primary" htmlType="submit" loading={loading}>
-                            Search
-                          </Button>
-                          <Button icon={<ReloadOutlined />} onClick={handleReset}>
-                            Reset
-                          </Button>
-                          <Button icon={<SaveOutlined />}>
-                            Save...
-                          </Button>
-                        </Space>
+                      <Row>
+                        <Col span={24}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                            <Text type="secondary" style={{ fontSize: 11 }}>
+                              <span style={{ color: REDWOOD.primary }}>**</span> At least one is required
+                            </Text>
+                            <Space>
+                              <Button icon={<SearchOutlined />} type="primary" htmlType="submit" loading={loading}>
+                                Search
+                              </Button>
+                              <Button icon={<ReloadOutlined />} onClick={handleReset}>
+                                Reset
+                              </Button>
+                              <Button icon={<SaveOutlined />}>
+                                Save...
+                              </Button>
+                            </Space>
+                          </div>
+                        </Col>
                       </Row>
                     </Form>
                   ),
