@@ -145,6 +145,12 @@ const apKpiData = {
 const APModule: React.FC = () => {
   const navigate = useNavigate();
 
+  const handleMenuItemClick = (_key: string, path?: string) => {
+    if (path) {
+      navigate(path);
+    }
+  };
+
   // KPI Card Component
   const KpiCard = ({
     title,
