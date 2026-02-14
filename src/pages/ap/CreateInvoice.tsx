@@ -805,7 +805,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // Build the combined invoice payload (header + lines)
   const buildInvoicePayload = (values: any) => {
     const invoiceDate = values.invoiceDate?.format('YYYY-MM-DD') || '';
-    const validLines = lines.filter(l => l.amount !== 0 || l.description);
+
+    // Keep every line the user has in the grid (only drop truly blank rows)
+    const validLines = lines.filter(l =>
+      l.amount !== 0 || l.description || l.distributionCombination ||
+      l.distributionSet || l.poNumber || l.taxClassification ||
+      l.unitPrice !== 0 || l.quantity !== 1
+    );
 
     // Helper: remove empty string, null, undefined keys to keep JSON compact
     const clean = (obj: Record<string, any>) => {
@@ -816,7 +822,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       return result;
     };
 
-    return clean({
+    const payload = clean({
       InvoiceNumber: values.invoiceNumber || null,
       InvoiceCurrency: values.invoiceCurrency || 'AED',
       PaymentCurrency: values.paymentCurrency || values.invoiceCurrency || 'AED',
@@ -838,25 +844,30 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       PayGroup: values.payGroup || null,
       PaymentMethod: values.paymentMethod || null,
       PayAlone: values.payAlone || 'N',
-      lines: validLines.map(line => clean({
-        LineNumber: line.lineNumber,
-        LineType: line.type || 'Item',
-        LineAmount: line.amount || 0,
-        Description: line.description || null,
-        AccountingDate: line.accountingDate || invoiceDate || null,
-        DistributionCombination: line.distributionCombination || null,
-        DistributionSet: line.distributionSet || null,
-        TaxClassification: line.taxClassification || null,
-        Quantity: line.quantity || null,
-        UnitPrice: line.unitPrice || null,
-        UOM: line.uomName || null,
-        PONumber: line.poNumber || null,
-        POLineNumber: line.poLine || null,
-        ReceiptNumber: line.receiptNumber || null,
-        ReceiptLineNumber: line.receiptLine || null,
-        ShipToLocation: line.shipToLocation || null,
-      })),
     });
+
+    // Always include lines array (even if empty) so PL/SQL JSON_TABLE can parse it
+    payload.lines = validLines.map(line => clean({
+      LineNumber: line.lineNumber,
+      LineType: line.type || 'Item',
+      LineAmount: line.amount ?? 0,
+      Description: line.description || null,
+      AccountingDate: line.accountingDate || invoiceDate || null,
+      DistributionCombination: line.distributionCombination || null,
+      DistributionSet: line.distributionSet || null,
+      TaxClassification: line.taxClassification || null,
+      Quantity: line.quantity || null,
+      UnitPrice: line.unitPrice || null,
+      UOM: line.uomName || null,
+      PONumber: line.poNumber || null,
+      POLineNumber: line.poLine || null,
+      ReceiptNumber: line.receiptNumber || null,
+      ReceiptLineNumber: line.receiptLine || null,
+      ShipToLocation: line.shipToLocation || null,
+    }));
+
+    console.log('Invoice payload lines:', lines.length, 'total,', validLines.length, 'valid, payload:', JSON.stringify(payload).length, 'chars');
+    return payload;
   };
 
   // POST combined invoice (header + lines) to APEX
