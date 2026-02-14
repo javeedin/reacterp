@@ -52,6 +52,7 @@ import {
   WalletOutlined,
   CreditCardOutlined,
   LoadingOutlined,
+  ApiOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { APEX_DB_CONFIG } from '../../config/api.config';
@@ -362,6 +363,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   // Saving state
   const [saving, setSaving] = useState(false);
+
+  // API Preview modal
+  const [apiPreviewVisible, setApiPreviewVisible] = useState(false);
+  const [apiPreviewData, setApiPreviewData] = useState<{ headerUrl: string; headerBody: string; linesUrl: string; linesBody: string } | null>(null);
 
   // Pre-fill from initialData (Quick Create task)
   useEffect(() => {
@@ -963,6 +968,66 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     }
   };
 
+  // Show API preview (URLs + JSON bodies for Postman testing)
+  const handleApiPreview = () => {
+    const values = form.getFieldsValue();
+    const invoiceDate = values.invoiceDate?.format?.('YYYY-MM-DD') || '';
+
+    const headerUrl = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice`;
+    const headerPayload = {
+      items: [{
+        InvoiceNumber: values.invoiceNumber || '',
+        InvoiceCurrency: values.invoiceCurrency || 'AED',
+        PaymentCurrency: values.paymentCurrency || values.invoiceCurrency || 'AED',
+        InvoiceAmount: values.invoiceAmount || 0,
+        InvoiceDate: invoiceDate,
+        BusinessUnit: values.businessUnit || '',
+        Supplier: values.supplier || '',
+        SupplierNumber: values.supplierNumber || '',
+        SupplierSite: values.supplierSite || '',
+        InvoiceType: values.invoiceType || 'Standard',
+        Description: values.description || '',
+        LegalEntity: values.legalEntity || '',
+        InvoiceGroup: values.invoiceGroup || '',
+        PaymentTerms: values.paymentTerms || '',
+        TermsDate: values.termsDate?.format?.('YYYY-MM-DD') || '',
+        GoodsReceivedDate: values.goodsReceivedDate?.format?.('YYYY-MM-DD') || '',
+        PayGroup: values.payGroup || '',
+        PayAlone: values.payAlone || 'N',
+      }],
+    };
+
+    const linesUrl = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoiceslines`;
+    const validLines = lines.filter(l => l.amount !== 0 || l.description);
+    const linesPayload = {
+      items: validLines.map(line => ({
+        InvoiceId: '<<from header response>>',
+        InvoiceNumber: values.invoiceNumber || '',
+        LineNumber: line.lineNumber,
+        LineAmount: line.amount || 0,
+        LineType: line.type || 'Item',
+        Description: line.description || '',
+        AccountingDate: line.accountingDate || '',
+        DistributionCombination: line.distributionCombination || '',
+        TaxClassification: line.taxClassification || '',
+        Quantity: line.quantity || 0,
+        UnitPrice: line.unitPrice || 0,
+        PONumber: line.poNumber || '',
+        POLineNumber: line.poLine || '',
+        ReceiptNumber: line.receiptNumber || '',
+        ReceiptLineNumber: line.receiptLine || '',
+      })),
+    };
+
+    setApiPreviewData({
+      headerUrl,
+      headerBody: JSON.stringify(headerPayload, null, 2),
+      linesUrl,
+      linesBody: JSON.stringify(linesPayload, null, 2),
+    });
+    setApiPreviewVisible(true);
+  };
+
   // ========== Distribution Tab Columns (matching Fusion Payables) ==========
   const distributionColumns: ColumnsType<InvoiceLine> = [
     {
@@ -1279,6 +1344,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         </Space>
 
         <Space size={8}>
+          <Tooltip title="API Preview (Postman)">
+            <Button
+              icon={<ApiOutlined />}
+              onClick={handleApiPreview}
+              style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
+            />
+          </Tooltip>
           {/* Invoice Actions Dropdown */}
           <Dropdown
             menu={{
@@ -1935,6 +2007,185 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         }}
         initialValue={accountSelectorInitialValue ?? (editingLineKey ? lines.find((l) => l.key === editingLineKey)?.distributionCombination : undefined)}
       />
+
+      {/* API Preview Modal */}
+      <Modal
+        title={
+          <Space>
+            <ApiOutlined style={{ color: REDWOOD.info }} />
+            <span>API Preview — Postman</span>
+          </Space>
+        }
+        open={apiPreviewVisible}
+        onCancel={() => setApiPreviewVisible(false)}
+        footer={<Button onClick={() => setApiPreviewVisible(false)}>Close</Button>}
+        width={800}
+        styles={{ body: { padding: '16px 24px', maxHeight: '75vh', overflowY: 'auto' } }}
+        destroyOnClose
+      >
+        {apiPreviewData && (
+          <>
+            {/* Invoice Header API */}
+            <Card
+              size="small"
+              title={
+                <Row justify="space-between" align="middle">
+                  <Space>
+                    <Tag color="green">POST</Tag>
+                    <Text strong>Invoice Header</Text>
+                  </Space>
+                  <Button
+                    size="small"
+                    icon={<CopyOutlined />}
+                    onClick={() => {
+                      navigator.clipboard.writeText(apiPreviewData.headerUrl);
+                      message.success('Header URL copied');
+                    }}
+                  >
+                    Copy URL
+                  </Button>
+                </Row>
+              }
+              style={{ marginBottom: 16 }}
+            >
+              <div style={{ marginBottom: 8 }}>
+                <Text type="secondary" style={{ fontSize: 11 }}>URL</Text>
+                <div
+                  style={{
+                    background: '#1e1e1e',
+                    color: '#d4d4d4',
+                    padding: '8px 12px',
+                    borderRadius: 4,
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                    wordBreak: 'break-all',
+                  }}
+                >
+                  {apiPreviewData.headerUrl}
+                </div>
+              </div>
+              <div>
+                <Row justify="space-between" align="middle" style={{ marginBottom: 4 }}>
+                  <Text type="secondary" style={{ fontSize: 11 }}>JSON Body</Text>
+                  <Button
+                    size="small"
+                    icon={<CopyOutlined />}
+                    onClick={() => {
+                      navigator.clipboard.writeText(apiPreviewData.headerBody);
+                      message.success('Header JSON copied');
+                    }}
+                  >
+                    Copy JSON
+                  </Button>
+                </Row>
+                <pre
+                  style={{
+                    background: '#1e1e1e',
+                    color: '#d4d4d4',
+                    padding: '10px 14px',
+                    borderRadius: 4,
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    maxHeight: 250,
+                    overflow: 'auto',
+                    margin: 0,
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                  }}
+                >
+                  {apiPreviewData.headerBody}
+                </pre>
+              </div>
+            </Card>
+
+            {/* Invoice Lines API */}
+            <Card
+              size="small"
+              title={
+                <Row justify="space-between" align="middle">
+                  <Space>
+                    <Tag color="green">POST</Tag>
+                    <Text strong>Invoice Lines</Text>
+                  </Space>
+                  <Button
+                    size="small"
+                    icon={<CopyOutlined />}
+                    onClick={() => {
+                      navigator.clipboard.writeText(apiPreviewData.linesUrl);
+                      message.success('Lines URL copied');
+                    }}
+                  >
+                    Copy URL
+                  </Button>
+                </Row>
+              }
+            >
+              <div style={{ marginBottom: 8 }}>
+                <Text type="secondary" style={{ fontSize: 11 }}>URL</Text>
+                <div
+                  style={{
+                    background: '#1e1e1e',
+                    color: '#d4d4d4',
+                    padding: '8px 12px',
+                    borderRadius: 4,
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                    wordBreak: 'break-all',
+                  }}
+                >
+                  {apiPreviewData.linesUrl}
+                </div>
+              </div>
+              <div>
+                <Row justify="space-between" align="middle" style={{ marginBottom: 4 }}>
+                  <Text type="secondary" style={{ fontSize: 11 }}>JSON Body</Text>
+                  <Button
+                    size="small"
+                    icon={<CopyOutlined />}
+                    onClick={() => {
+                      navigator.clipboard.writeText(apiPreviewData.linesBody);
+                      message.success('Lines JSON copied');
+                    }}
+                  >
+                    Copy JSON
+                  </Button>
+                </Row>
+                <pre
+                  style={{
+                    background: '#1e1e1e',
+                    color: '#d4d4d4',
+                    padding: '10px 14px',
+                    borderRadius: 4,
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    maxHeight: 250,
+                    overflow: 'auto',
+                    margin: 0,
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                  }}
+                >
+                  {apiPreviewData.linesBody}
+                </pre>
+              </div>
+            </Card>
+
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginTop: 12 }}
+              message="Postman Setup"
+              description={
+                <ul style={{ margin: '4px 0', paddingLeft: 20, fontSize: 12 }}>
+                  <li>Method: <Tag color="green" style={{ fontSize: 11 }}>POST</Tag></li>
+                  <li>Header: <code>Content-Type: application/json</code></li>
+                  <li>First POST the header, then use the returned InvoiceId in the lines payload</li>
+                </ul>
+              }
+            />
+          </>
+        )}
+      </Modal>
 
       {/* Supplier Balance Popup Modal */}
       <Modal
