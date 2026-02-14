@@ -5,7 +5,7 @@
 -- Business Rules:
 --   - Edit allowed only if PAID_STATUS != 'Paid' AND ACCOUNTING_STATUS != 'Accounted'
 --   - Payment allowed only if VALIDATION_STATUS = 'Validated' AND ACCOUNTING_STATUS = 'Accounted'
--- Target Tables: RR_AP_INVOICES_ALL (header), XXAP_INVOICE_LINES_STG (lines)
+-- Target Tables: RR_AP_INVOICES_ALL (header), RR_AP_INVOICE_LINES_ALL (lines)
 -- =====================================================
 
 -- =====================================================
@@ -246,7 +246,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_MANAGE_INVOICE_PKG AS
             ) jt
         ) LOOP
             BEGIN
-                INSERT INTO XXAP_INVOICE_LINES_STG (
+                INSERT INTO RR_AP_INVOICE_LINES_ALL (
                     INVOICE_ID, INVOICE_NUMBER, LINE_NUMBER, LINE_TYPE, LINE_AMOUNT,
                     DESCRIPTION, ACCOUNTING_DATE, DISTRIBUTION_COMBINATION,
                     DISTRIBUTION_SET, TAX_CLASSIFICATION, QUANTITY, UNIT_PRICE, UOM,
@@ -341,7 +341,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_MANAGE_INVOICE_PKG AS
             ) jt
         ) LOOP
             BEGIN
-                UPDATE XXAP_INVOICE_LINES_STG
+                UPDATE RR_AP_INVOICE_LINES_ALL
                 SET    line_type                = NVL(rec.line_type, line_type),
                        line_amount              = NVL(rec.line_amount, line_amount),
                        description              = NVL(rec.description, description),
@@ -427,7 +427,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_MANAGE_INVOICE_PKG AS
                 )
             ) jt
         ) LOOP
-            DELETE FROM XXAP_INVOICE_LINES_STG
+            DELETE FROM RR_AP_INVOICE_LINES_ALL
             WHERE  invoice_id  = l_invoice_id
             AND    line_number = rec.line_number;
 

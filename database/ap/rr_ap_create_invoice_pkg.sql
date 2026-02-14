@@ -2,7 +2,7 @@
 -- RR_AP_CREATE_INVOICE_PKG
 -- =====================================================
 -- Purpose: Create new AP Invoice (Header + Lines) from UI
--- Target Tables: RR_AP_INVOICES_ALL (header), invoice lines table (lines)
+-- Target Tables: RR_AP_INVOICES_ALL (header), RR_AP_INVOICE_LINES_ALL (lines)
 -- Single JSON POST with header + lines array
 -- InvoiceId generated from sequence
 -- =====================================================
@@ -241,7 +241,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CREATE_INVOICE_PKG AS
             l_line_count := l_line_count + 1;
 
             BEGIN
-                INSERT INTO XXAP_INVOICE_LINES_STG (
+                INSERT INTO RR_AP_INVOICE_LINES_ALL (
                     INVOICE_ID,
                     INVOICE_NUMBER,
                     LINE_NUMBER,
