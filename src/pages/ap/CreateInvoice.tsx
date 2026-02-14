@@ -21,6 +21,9 @@ import {
   Descriptions,
   Dropdown,
   Alert,
+  Statistic,
+  Progress,
+  Spin,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -46,6 +49,9 @@ import {
   CopyOutlined,
   WarningOutlined,
   ExclamationCircleOutlined,
+  WalletOutlined,
+  CreditCardOutlined,
+  LoadingOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { APEX_DB_CONFIG } from '../../config/api.config';
@@ -86,6 +92,81 @@ interface SupplierRecord {
   creationDate: string;
   taxpayerId: string;
 }
+
+// Supplier balance interfaces
+interface BalanceSummary {
+  totalInvoices: number;
+  totalInvoiceAmount: number;
+  totalPayments: number;
+  totalPaymentAmount: number;
+  balance: number;
+  currency: string;
+}
+
+interface AgingBucket {
+  bucket: string;
+  amount: number;
+  invoiceCount: number;
+  percentage: number;
+}
+
+interface BalanceInvoiceRecord {
+  key: string;
+  invoiceId: number;
+  invoiceNumber: string;
+  invoiceDate: string;
+  invoiceAmount: number;
+  amountPaid: number;
+  amountRemaining: number;
+  invoiceStatus: string;
+  currency: string;
+  description: string;
+}
+
+interface BalancePaymentRecord {
+  key: string;
+  paymentId: number;
+  paymentNumber: string;
+  paymentDate: string;
+  paymentAmount: number;
+  paymentStatus: string;
+  paymentMethod: string;
+  currency: string;
+  bankAccountName: string;
+}
+
+// Format currency
+const formatCurrency = (amount: number, currency: string = 'AED'): string => {
+  return new Intl.NumberFormat('en-AE', {
+    style: 'currency',
+    currency: currency,
+    minimumFractionDigits: 2,
+  }).format(amount);
+};
+
+// Format date
+const formatDateStr = (dateStr: string | null): string => {
+  if (!dateStr) return '';
+  try {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  } catch {
+    return dateStr;
+  }
+};
+
+// Aging color helper
+const getAgingColor = (bucket: string): string => {
+  switch (bucket) {
+    case 'Current': return '#1D7B4D';
+    case '1-30 Days': return '#0572CE';
+    case '31-60 Days': return '#D4A800';
+    case '61-90 Days': return '#FF8C00';
+    case '91-120 Days': return '#C74634';
+    case '120+ Days': return '#D93025';
+    default: return '#6B6B6B';
+  }
+};
 
 // Unified Invoice Line - same data, different column views per tab
 interface InvoiceLine {
@@ -266,6 +347,19 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [editingLineKey, setEditingLineKey] = useState<string | null>(null);
   const [accountSelectorInitialValue, setAccountSelectorInitialValue] = useState<string | undefined>(undefined);
 
+  // Supplier balance popup state
+  const [balanceModalVisible, setBalanceModalVisible] = useState(false);
+  const [balanceSupplierName, setBalanceSupplierName] = useState('');
+  const [balanceSupplierNumber, setBalanceSupplierNumber] = useState('');
+  const [balanceLoading, setBalanceLoading] = useState(false);
+  const [balanceSummary, setBalanceSummary] = useState<BalanceSummary | null>(null);
+  const [agingReport, setAgingReport] = useState<AgingBucket[]>([]);
+  const [balanceInvoices, setBalanceInvoices] = useState<BalanceInvoiceRecord[]>([]);
+  const [balancePayments, setBalancePayments] = useState<BalancePaymentRecord[]>([]);
+  const [balanceInvoicesLoading, setBalanceInvoicesLoading] = useState(false);
+  const [balancePaymentsLoading, setBalancePaymentsLoading] = useState(false);
+  const [balanceActiveTab, setBalanceActiveTab] = useState('invoices');
+
   // Pre-fill from initialData (Quick Create task)
   useEffect(() => {
     if (initialData) {
@@ -368,6 +462,129 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         (s.alternativeName && s.alternativeName.toLowerCase().includes(search))
     );
   }, [suppliers, supplierSearchText]);
+
+  // Fetch supplier balance dashboard (summary + aging)
+  const fetchBalanceDashboard = async (supplierNum: string) => {
+    setBalanceLoading(true);
+    setBalanceSummary(null);
+    setAgingReport([]);
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/dashboard/${supplierNum}`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      const data = await response.json();
+      if (data.success === 'false') throw new Error(data.error || 'Failed to load balance data');
+
+      setBalanceSummary({
+        totalInvoices: data.balance_summary?.total_invoices || 0,
+        totalInvoiceAmount: data.balance_summary?.total_invoice_amount || 0,
+        totalPayments: data.balance_summary?.total_payments || 0,
+        totalPaymentAmount: data.balance_summary?.total_payment_amount || 0,
+        balance: data.balance_summary?.balance || 0,
+        currency: data.balance_summary?.currency || 'AED',
+      });
+      setAgingReport(
+        (data.aging_report || []).map((item: any) => ({
+          bucket: item.bucket || '',
+          amount: item.amount || 0,
+          invoiceCount: item.invoice_count || 0,
+          percentage: item.percentage || 0,
+        }))
+      );
+    } catch (error) {
+      console.error('Error fetching balance dashboard:', error);
+      message.error(`Failed to load balance: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setBalanceLoading(false);
+    }
+  };
+
+  // Fetch supplier balance invoices
+  const fetchBalanceInvoices = async (supplierNum: string) => {
+    setBalanceInvoicesLoading(true);
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/${supplierNum}`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      const data = await response.json();
+      const items = data.invoices || [];
+      setBalanceInvoices(
+        items.map((item: any, index: number) => ({
+          key: item.invoice_id?.toString() || index.toString(),
+          invoiceId: item.invoice_id,
+          invoiceNumber: item.invoice_number || '',
+          invoiceDate: item.invoice_date || '',
+          invoiceAmount: item.invoice_amount || 0,
+          amountPaid: item.amount_paid || 0,
+          amountRemaining: item.amount_remaining || 0,
+          invoiceStatus: item.invoice_status || '',
+          currency: item.currency || 'AED',
+          description: item.description || '',
+        }))
+      );
+    } catch (error) {
+      console.error('Error fetching balance invoices:', error);
+      message.error('Failed to load invoices');
+    } finally {
+      setBalanceInvoicesLoading(false);
+    }
+  };
+
+  // Fetch supplier balance payments
+  const fetchBalancePayments = async (supplierNum: string) => {
+    setBalancePaymentsLoading(true);
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/payments/${supplierNum}`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      const data = await response.json();
+      const items = data.payments || [];
+      setBalancePayments(
+        items.map((item: any, index: number) => ({
+          key: item.payment_id?.toString() || index.toString(),
+          paymentId: item.payment_id,
+          paymentNumber: item.payment_number || '',
+          paymentDate: item.payment_date || '',
+          paymentAmount: item.payment_amount || 0,
+          paymentStatus: item.payment_status || '',
+          paymentMethod: item.payment_method || '',
+          currency: item.currency || 'AED',
+          bankAccountName: item.bank_account_name || '',
+        }))
+      );
+    } catch (error) {
+      console.error('Error fetching balance payments:', error);
+      message.error('Failed to load payments');
+    } finally {
+      setBalancePaymentsLoading(false);
+    }
+  };
+
+  // Open supplier balance popup
+  const handleCheckBalance = () => {
+    const supplierName = form.getFieldValue('supplier');
+    const supplierNum = form.getFieldValue('supplierNumber');
+    if (!supplierNum) {
+      message.warning('Please select a supplier first');
+      return;
+    }
+    setBalanceSupplierName(supplierName);
+    setBalanceSupplierNumber(supplierNum);
+    setBalanceModalVisible(true);
+    setBalanceActiveTab('invoices');
+    setBalanceInvoices([]);
+    setBalancePayments([]);
+    fetchBalanceDashboard(supplierNum);
+    fetchBalanceInvoices(supplierNum);
+  };
+
+  // Handle balance tab change (lazy-load payments)
+  const handleBalanceTabChange = (key: string) => {
+    setBalanceActiveTab(key);
+    if (key === 'payments' && balancePayments.length === 0 && !balancePaymentsLoading) {
+      fetchBalancePayments(balanceSupplierNumber);
+    }
+  };
 
   const supplierColumns: ColumnsType<SupplierRecord> = [
     { title: 'Supplier Number', dataIndex: 'supplierNumber', key: 'supplierNumber', width: 130, sorter: (a, b) => a.supplierNumber.localeCompare(b.supplierNumber) },
@@ -1085,22 +1302,32 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               <Col span={8}>
                 <Form.Item
                   label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Supplier</Text>}
-                  name="supplier"
-                  rules={[{ required: true, message: 'Required' }]}
+                  required
                   style={{ marginBottom: 10 }}
                 >
-                  <Input
-                    placeholder="Search supplier..."
-                    readOnly
-                    suffix={
-                      <SearchOutlined
-                        style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 14 }}
+                  <Space.Compact style={{ width: '100%' }}>
+                    <Form.Item name="supplier" noStyle rules={[{ required: true, message: 'Required' }]}>
+                      <Input
+                        placeholder="Search supplier..."
+                        readOnly
+                        suffix={
+                          <SearchOutlined
+                            style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 14 }}
+                            onClick={openSupplierModal}
+                          />
+                        }
                         onClick={openSupplierModal}
+                        style={{ cursor: 'pointer', flex: 1 }}
                       />
-                    }
-                    onClick={openSupplierModal}
-                    style={{ cursor: 'pointer' }}
-                  />
+                    </Form.Item>
+                    <Tooltip title="Check Balance">
+                      <Button
+                        icon={<WalletOutlined />}
+                        onClick={handleCheckBalance}
+                        style={{ borderColor: REDWOOD.info, color: REDWOOD.info }}
+                      />
+                    </Tooltip>
+                  </Space.Compact>
                 </Form.Item>
                 <Form.Item name="supplierNumber" hidden>
                   <Input />
@@ -1579,6 +1806,152 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         }}
         initialValue={accountSelectorInitialValue ?? (editingLineKey ? lines.find((l) => l.key === editingLineKey)?.distributionCombination : undefined)}
       />
+
+      {/* Supplier Balance Popup Modal */}
+      <Modal
+        title={
+          <Space>
+            <WalletOutlined style={{ color: REDWOOD.info }} />
+            <span>Supplier Balance — {balanceSupplierName}</span>
+            <Tag color="blue">{balanceSupplierNumber}</Tag>
+          </Space>
+        }
+        open={balanceModalVisible}
+        onCancel={() => setBalanceModalVisible(false)}
+        footer={<Button onClick={() => setBalanceModalVisible(false)}>Close</Button>}
+        width={950}
+        styles={{ body: { padding: '16px 24px', maxHeight: '70vh', overflowY: 'auto' } }}
+        destroyOnClose
+      >
+        {balanceLoading ? (
+          <div style={{ textAlign: 'center', padding: 60 }}>
+            <Spin indicator={<LoadingOutlined style={{ fontSize: 32 }} spin />} />
+            <div style={{ marginTop: 12, color: REDWOOD.neutral600 }}>Loading balance data...</div>
+          </div>
+        ) : balanceSummary ? (
+          <>
+            {/* Outstanding Balance Header */}
+            <Card
+              size="small"
+              style={{
+                marginBottom: 16,
+                background: balanceSummary.balance > 0 ? '#FFF1F0' : '#F6FFED',
+                border: `1px solid ${balanceSummary.balance > 0 ? '#FFA39E' : '#B7EB8F'}`,
+              }}
+            >
+              <Row justify="space-between" align="middle">
+                <Col>
+                  <Text type="secondary">Outstanding Balance</Text>
+                  <div>
+                    <Text strong style={{ fontSize: 24, color: balanceSummary.balance > 0 ? REDWOOD.error : REDWOOD.success }}>
+                      {formatCurrency(balanceSummary.balance, balanceSummary.currency)}
+                    </Text>
+                  </div>
+                </Col>
+                <Col>
+                  <Row gutter={24}>
+                    <Col>
+                      <Statistic title="Total Invoices" value={balanceSummary.totalInvoices} prefix={<FileTextOutlined style={{ color: REDWOOD.info }} />} valueStyle={{ fontSize: 16 }} />
+                    </Col>
+                    <Col>
+                      <Statistic title="Invoice Amount" value={balanceSummary.totalInvoiceAmount} precision={2} suffix={balanceSummary.currency} valueStyle={{ fontSize: 14 }} />
+                    </Col>
+                    <Col>
+                      <Statistic title="Payments" value={balanceSummary.totalPayments} prefix={<CreditCardOutlined style={{ color: REDWOOD.success }} />} valueStyle={{ fontSize: 16 }} />
+                    </Col>
+                    <Col>
+                      <Statistic title="Paid Amount" value={balanceSummary.totalPaymentAmount} precision={2} suffix={balanceSummary.currency} valueStyle={{ color: REDWOOD.success, fontSize: 14 }} />
+                    </Col>
+                  </Row>
+                </Col>
+              </Row>
+            </Card>
+
+            {/* Aging Report */}
+            {agingReport.length > 0 && (
+              <Card
+                title={<Space><ExclamationCircleOutlined style={{ color: REDWOOD.warning }} /><Text strong style={{ fontSize: 13 }}>Aging Report</Text></Space>}
+                size="small"
+                style={{ marginBottom: 16 }}
+              >
+                <Row gutter={8}>
+                  {agingReport.map((bucket, index) => (
+                    <Col span={4} key={index}>
+                      <Card size="small" style={{ borderTop: `3px solid ${getAgingColor(bucket.bucket)}`, textAlign: 'center' }}>
+                        <Text type="secondary" style={{ fontSize: 10 }}>{bucket.bucket}</Text>
+                        <div style={{ margin: '6px 0' }}>
+                          <Text strong style={{ fontSize: 14, color: getAgingColor(bucket.bucket) }}>{formatCurrency(bucket.amount)}</Text>
+                        </div>
+                        <Tag style={{ fontSize: 10 }}>{bucket.invoiceCount} inv</Tag>
+                        <Progress percent={bucket.percentage} size="small" strokeColor={getAgingColor(bucket.bucket)} showInfo={false} style={{ marginTop: 6 }} />
+                        <Text type="secondary" style={{ fontSize: 10 }}>{bucket.percentage.toFixed(1)}%</Text>
+                      </Card>
+                    </Col>
+                  ))}
+                </Row>
+              </Card>
+            )}
+
+            {/* Invoices & Payments Tabs */}
+            <Tabs
+              activeKey={balanceActiveTab}
+              onChange={handleBalanceTabChange}
+              size="small"
+              items={[
+                {
+                  key: 'invoices',
+                  label: <span><FileTextOutlined /> Invoices ({balanceInvoices.length})</span>,
+                  children: (
+                    <Table
+                      dataSource={balanceInvoices}
+                      columns={[
+                        { title: 'Invoice Number', dataIndex: 'invoiceNumber', key: 'invoiceNumber', width: 130 },
+                        { title: 'Invoice Date', dataIndex: 'invoiceDate', key: 'invoiceDate', width: 100, render: (d: string) => formatDateStr(d) },
+                        { title: 'Amount', dataIndex: 'invoiceAmount', key: 'invoiceAmount', width: 120, align: 'right' as const, render: (amt: number) => <Text strong>{formatCurrency(amt)}</Text> },
+                        { title: 'Paid', dataIndex: 'amountPaid', key: 'amountPaid', width: 120, align: 'right' as const, render: (amt: number) => <Text style={{ color: REDWOOD.success }}>{formatCurrency(amt)}</Text> },
+                        { title: 'Balance', dataIndex: 'amountRemaining', key: 'amountRemaining', width: 120, align: 'right' as const, render: (amt: number) => <Text style={{ color: amt > 0 ? REDWOOD.error : REDWOOD.success }}>{formatCurrency(amt)}</Text> },
+                        { title: 'Status', dataIndex: 'invoiceStatus', key: 'invoiceStatus', width: 90, render: (s: string) => <Tag>{s || '-'}</Tag> },
+                        { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
+                      ]}
+                      rowKey="key"
+                      size="small"
+                      loading={balanceInvoicesLoading}
+                      pagination={{ pageSize: 8, size: 'small' }}
+                      scroll={{ y: 300 }}
+                    />
+                  ),
+                },
+                {
+                  key: 'payments',
+                  label: <span><CreditCardOutlined /> Payments ({balancePayments.length})</span>,
+                  children: (
+                    <Table
+                      dataSource={balancePayments}
+                      columns={[
+                        { title: 'Payment Number', dataIndex: 'paymentNumber', key: 'paymentNumber', width: 140 },
+                        { title: 'Payment Date', dataIndex: 'paymentDate', key: 'paymentDate', width: 100, render: (d: string) => formatDateStr(d) },
+                        { title: 'Amount', dataIndex: 'paymentAmount', key: 'paymentAmount', width: 130, align: 'right' as const, render: (amt: number) => <Text strong style={{ color: REDWOOD.success }}>{formatCurrency(amt)}</Text> },
+                        { title: 'Status', dataIndex: 'paymentStatus', key: 'paymentStatus', width: 100, render: (s: string) => <Tag color={s === 'NEGOTIABLE' ? 'green' : 'default'}>{s}</Tag> },
+                        { title: 'Method', dataIndex: 'paymentMethod', key: 'paymentMethod', width: 100 },
+                        { title: 'Bank Account', dataIndex: 'bankAccountName', key: 'bankAccountName', ellipsis: true },
+                      ]}
+                      rowKey="key"
+                      size="small"
+                      loading={balancePaymentsLoading}
+                      pagination={{ pageSize: 8, size: 'small' }}
+                      scroll={{ y: 300 }}
+                    />
+                  ),
+                },
+              ]}
+            />
+          </>
+        ) : (
+          <div style={{ textAlign: 'center', padding: 40, color: REDWOOD.neutral600 }}>
+            No balance data available for this supplier.
+          </div>
+        )}
+      </Modal>
 
       <style>{`
         .ant-table-thead > tr > th {
