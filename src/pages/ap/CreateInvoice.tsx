@@ -366,7 +366,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   // API Preview modal
   const [apiPreviewVisible, setApiPreviewVisible] = useState(false);
-  const [apiPreviewData, setApiPreviewData] = useState<{ headerUrl: string; headerBody: string; linesUrl: string; linesBody: string } | null>(null);
+  const [apiPreviewData, setApiPreviewData] = useState<{ url: string; body: string } | null>(null);
 
   // Pre-fill from initialData (Quick Create task)
   useEffect(() => {
@@ -799,121 +799,79 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     return true;
   };
 
-  // POST invoice header to APEX
-  const postInvoiceHeader = async (values: any): Promise<{ success: boolean; invoiceId?: number; error?: string }> => {
+  // Build the combined invoice payload (header + lines)
+  const buildInvoicePayload = (values: any) => {
     const invoiceDate = values.invoiceDate?.format('YYYY-MM-DD') || '';
-    const headerPayload = {
-      items: [{
-        InvoiceNumber: values.invoiceNumber || '',
-        InvoiceCurrency: values.invoiceCurrency || 'AED',
-        PaymentCurrency: values.paymentCurrency || values.invoiceCurrency || 'AED',
-        InvoiceAmount: values.invoiceAmount || 0,
-        InvoiceDate: invoiceDate,
-        BusinessUnit: values.businessUnit || '',
-        Supplier: values.supplier || '',
-        SupplierNumber: values.supplierNumber || '',
-        SupplierSite: values.supplierSite || '',
-        InvoiceType: values.invoiceType || 'Standard',
-        Description: values.description || '',
-        LegalEntity: values.legalEntity || '',
-        InvoiceGroup: values.invoiceGroup || '',
-        PaymentTerms: values.paymentTerms || '',
-        TermsDate: values.termsDate?.format?.('YYYY-MM-DD') || '',
-        GoodsReceivedDate: values.goodsReceivedDate?.format?.('YYYY-MM-DD') || '',
-        PayGroup: values.payGroup || '',
-        PayAlone: values.payAlone || 'N',
-      }],
-    };
-
-    const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice`;
-    console.log('POST Invoice Header:', url, headerPayload);
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(headerPayload),
-    });
-
-    const data = await response.json();
-    console.log('Invoice Header Response:', data);
-
-    const isSuccess = data.status === 'SUCCESS' && (data.successCount > 0 || data.success === true);
-    if (!isSuccess) {
-      return { success: false, error: data.message || data.error || 'Failed to create invoice header' };
-    }
-    // Extract the created invoice ID from the response
-    const invoiceId = data.invoiceId || data.invoice_id || data.items?.[0]?.InvoiceId || data.items?.[0]?.invoice_id || 0;
-    return { success: true, invoiceId };
-  };
-
-  // POST invoice lines to APEX
-  const postInvoiceLines = async (invoiceId: number, invoiceNumber: string): Promise<{ success: boolean; error?: string }> => {
-    // Filter out empty lines (no amount and no description)
     const validLines = lines.filter(l => l.amount !== 0 || l.description);
-    if (validLines.length === 0) {
-      return { success: true }; // No lines to post
-    }
 
-    const linesPayload = {
-      items: validLines.map(line => ({
-        InvoiceId: invoiceId,
-        InvoiceNumber: invoiceNumber,
+    return {
+      InvoiceNumber: values.invoiceNumber || '',
+      InvoiceCurrency: values.invoiceCurrency || 'AED',
+      PaymentCurrency: values.paymentCurrency || values.invoiceCurrency || 'AED',
+      InvoiceAmount: values.invoiceAmount || 0,
+      InvoiceDate: invoiceDate,
+      BusinessUnit: values.businessUnit || '',
+      Supplier: values.supplier || '',
+      SupplierNumber: values.supplierNumber || '',
+      SupplierSite: values.supplierSite || '',
+      InvoiceType: values.invoiceType || 'Standard',
+      Description: values.description || '',
+      LegalEntity: values.legalEntity || '',
+      InvoiceGroup: values.invoiceGroup || '',
+      InvoiceSource: 'MANUAL',
+      PaymentTerms: values.paymentTerms || '',
+      AccountingDate: invoiceDate,
+      TermsDate: values.termsDate?.format?.('YYYY-MM-DD') || '',
+      GoodsReceivedDate: values.goodsReceivedDate?.format?.('YYYY-MM-DD') || '',
+      PayGroup: values.payGroup || '',
+      PaymentMethod: values.paymentMethod || '',
+      PayAlone: values.payAlone || 'N',
+      lines: validLines.map(line => ({
         LineNumber: line.lineNumber,
-        LineAmount: line.amount || 0,
         LineType: line.type || 'Item',
+        LineAmount: line.amount || 0,
         Description: line.description || '',
-        AccountingDate: line.accountingDate || '',
+        AccountingDate: line.accountingDate || invoiceDate,
         DistributionCombination: line.distributionCombination || '',
+        DistributionSet: line.distributionSet || '',
         TaxClassification: line.taxClassification || '',
         Quantity: line.quantity || 0,
         UnitPrice: line.unitPrice || 0,
+        UOM: line.uomName || '',
         PONumber: line.poNumber || '',
         POLineNumber: line.poLine || '',
         ReceiptNumber: line.receiptNumber || '',
         ReceiptLineNumber: line.receiptLine || '',
+        ShipToLocation: line.shipToLocation || '',
       })),
     };
-
-    const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoiceslines`;
-    console.log('POST Invoice Lines:', url, linesPayload);
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(linesPayload),
-    });
-
-    const data = await response.json();
-    console.log('Invoice Lines Response:', data);
-
-    const isSuccess = data.status === 'SUCCESS' && (data.successCount > 0 || data.success === true);
-    if (!isSuccess) {
-      return { success: false, error: data.message || data.error || 'Failed to create invoice lines' };
-    }
-    return { success: true };
   };
 
-  // Core save logic: POST header + lines
+  // POST combined invoice (header + lines) to APEX
   const saveInvoice = async (values: any): Promise<boolean> => {
     setSaving(true);
     try {
-      // Step 1: POST invoice header
-      const headerResult = await postInvoiceHeader(values);
-      if (!headerResult.success) {
-        message.error(`Invoice header failed: ${headerResult.error}`);
+      const payload = buildInvoicePayload(values);
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoicefull`;
+
+      console.log('POST Invoice (Full):', url, payload);
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json();
+      console.log('Invoice Response:', data);
+
+      if (data.status !== 'SUCCESS' || !data.success) {
+        message.error(`Failed: ${data.message || 'Unknown error'}`);
         return false;
       }
 
-      const invoiceId = headerResult.invoiceId || 0;
-      const invoiceNumber = values.invoiceNumber || '';
-      message.success(`Invoice header created: ${invoiceNumber}`);
-
-      // Step 2: POST invoice lines
-      const linesResult = await postInvoiceLines(invoiceId, invoiceNumber);
-      if (!linesResult.success) {
-        message.warning(`Invoice header saved but lines failed: ${linesResult.error}`);
-        return false;
-      }
+      const invoiceId = data.invoiceId || 0;
+      message.success(data.message || `Invoice created (ID: ${invoiceId})`);
 
       // Notify parent
       if (onSave) onSave({ ...values, invoiceId });
@@ -968,62 +926,15 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     }
   };
 
-  // Show API preview (URLs + JSON bodies for Postman testing)
+  // Show API preview (URL + JSON body for Postman testing)
   const handleApiPreview = () => {
     const values = form.getFieldsValue();
-    const invoiceDate = values.invoiceDate?.format?.('YYYY-MM-DD') || '';
-
-    const headerUrl = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice`;
-    const headerPayload = {
-      items: [{
-        InvoiceNumber: values.invoiceNumber || '',
-        InvoiceCurrency: values.invoiceCurrency || 'AED',
-        PaymentCurrency: values.paymentCurrency || values.invoiceCurrency || 'AED',
-        InvoiceAmount: values.invoiceAmount || 0,
-        InvoiceDate: invoiceDate,
-        BusinessUnit: values.businessUnit || '',
-        Supplier: values.supplier || '',
-        SupplierNumber: values.supplierNumber || '',
-        SupplierSite: values.supplierSite || '',
-        InvoiceType: values.invoiceType || 'Standard',
-        Description: values.description || '',
-        LegalEntity: values.legalEntity || '',
-        InvoiceGroup: values.invoiceGroup || '',
-        PaymentTerms: values.paymentTerms || '',
-        TermsDate: values.termsDate?.format?.('YYYY-MM-DD') || '',
-        GoodsReceivedDate: values.goodsReceivedDate?.format?.('YYYY-MM-DD') || '',
-        PayGroup: values.payGroup || '',
-        PayAlone: values.payAlone || 'N',
-      }],
-    };
-
-    const linesUrl = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoiceslines`;
-    const validLines = lines.filter(l => l.amount !== 0 || l.description);
-    const linesPayload = {
-      items: validLines.map(line => ({
-        InvoiceId: '<<from header response>>',
-        InvoiceNumber: values.invoiceNumber || '',
-        LineNumber: line.lineNumber,
-        LineAmount: line.amount || 0,
-        LineType: line.type || 'Item',
-        Description: line.description || '',
-        AccountingDate: line.accountingDate || '',
-        DistributionCombination: line.distributionCombination || '',
-        TaxClassification: line.taxClassification || '',
-        Quantity: line.quantity || 0,
-        UnitPrice: line.unitPrice || 0,
-        PONumber: line.poNumber || '',
-        POLineNumber: line.poLine || '',
-        ReceiptNumber: line.receiptNumber || '',
-        ReceiptLineNumber: line.receiptLine || '',
-      })),
-    };
+    const payload = buildInvoicePayload(values);
+    const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoicefull`;
 
     setApiPreviewData({
-      headerUrl,
-      headerBody: JSON.stringify(headerPayload, null, 2),
-      linesUrl,
-      linesBody: JSON.stringify(linesPayload, null, 2),
+      url,
+      body: JSON.stringify(payload, null, 2),
     });
     setApiPreviewVisible(true);
   };
@@ -2025,94 +1936,20 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       >
         {apiPreviewData && (
           <>
-            {/* Invoice Header API */}
             <Card
               size="small"
               title={
                 <Row justify="space-between" align="middle">
                   <Space>
                     <Tag color="green">POST</Tag>
-                    <Text strong>Invoice Header</Text>
+                    <Text strong>Create Invoice (Header + Lines)</Text>
                   </Space>
                   <Button
                     size="small"
                     icon={<CopyOutlined />}
                     onClick={() => {
-                      navigator.clipboard.writeText(apiPreviewData.headerUrl);
-                      message.success('Header URL copied');
-                    }}
-                  >
-                    Copy URL
-                  </Button>
-                </Row>
-              }
-              style={{ marginBottom: 16 }}
-            >
-              <div style={{ marginBottom: 8 }}>
-                <Text type="secondary" style={{ fontSize: 11 }}>URL</Text>
-                <div
-                  style={{
-                    background: '#1e1e1e',
-                    color: '#d4d4d4',
-                    padding: '8px 12px',
-                    borderRadius: 4,
-                    fontSize: 12,
-                    fontFamily: 'monospace',
-                    wordBreak: 'break-all',
-                  }}
-                >
-                  {apiPreviewData.headerUrl}
-                </div>
-              </div>
-              <div>
-                <Row justify="space-between" align="middle" style={{ marginBottom: 4 }}>
-                  <Text type="secondary" style={{ fontSize: 11 }}>JSON Body</Text>
-                  <Button
-                    size="small"
-                    icon={<CopyOutlined />}
-                    onClick={() => {
-                      navigator.clipboard.writeText(apiPreviewData.headerBody);
-                      message.success('Header JSON copied');
-                    }}
-                  >
-                    Copy JSON
-                  </Button>
-                </Row>
-                <pre
-                  style={{
-                    background: '#1e1e1e',
-                    color: '#d4d4d4',
-                    padding: '10px 14px',
-                    borderRadius: 4,
-                    fontSize: 11,
-                    fontFamily: 'monospace',
-                    maxHeight: 250,
-                    overflow: 'auto',
-                    margin: 0,
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                  }}
-                >
-                  {apiPreviewData.headerBody}
-                </pre>
-              </div>
-            </Card>
-
-            {/* Invoice Lines API */}
-            <Card
-              size="small"
-              title={
-                <Row justify="space-between" align="middle">
-                  <Space>
-                    <Tag color="green">POST</Tag>
-                    <Text strong>Invoice Lines</Text>
-                  </Space>
-                  <Button
-                    size="small"
-                    icon={<CopyOutlined />}
-                    onClick={() => {
-                      navigator.clipboard.writeText(apiPreviewData.linesUrl);
-                      message.success('Lines URL copied');
+                      navigator.clipboard.writeText(apiPreviewData.url);
+                      message.success('URL copied');
                     }}
                   >
                     Copy URL
@@ -2133,18 +1970,18 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     wordBreak: 'break-all',
                   }}
                 >
-                  {apiPreviewData.linesUrl}
+                  {apiPreviewData.url}
                 </div>
               </div>
               <div>
                 <Row justify="space-between" align="middle" style={{ marginBottom: 4 }}>
-                  <Text type="secondary" style={{ fontSize: 11 }}>JSON Body</Text>
+                  <Text type="secondary" style={{ fontSize: 11 }}>JSON Body (Header + Lines combined)</Text>
                   <Button
                     size="small"
                     icon={<CopyOutlined />}
                     onClick={() => {
-                      navigator.clipboard.writeText(apiPreviewData.linesBody);
-                      message.success('Lines JSON copied');
+                      navigator.clipboard.writeText(apiPreviewData.body);
+                      message.success('JSON copied');
                     }}
                   >
                     Copy JSON
@@ -2158,14 +1995,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     borderRadius: 4,
                     fontSize: 11,
                     fontFamily: 'monospace',
-                    maxHeight: 250,
+                    maxHeight: 450,
                     overflow: 'auto',
                     margin: 0,
                     whiteSpace: 'pre-wrap',
                     wordBreak: 'break-word',
                   }}
                 >
-                  {apiPreviewData.linesBody}
+                  {apiPreviewData.body}
                 </pre>
               </div>
             </Card>
@@ -2179,8 +2016,27 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 <ul style={{ margin: '4px 0', paddingLeft: 20, fontSize: 12 }}>
                   <li>Method: <Tag color="green" style={{ fontSize: 11 }}>POST</Tag></li>
                   <li>Header: <code>Content-Type: application/json</code></li>
-                  <li>First POST the header, then use the returned InvoiceId in the lines payload</li>
+                  <li>Single POST — header + lines in one JSON, InvoiceId auto-generated by sequence</li>
+                  <li>PL/SQL Package: <code>RR_AP_CREATE_INVOICE_PKG.create_invoice</code></li>
+                  <li>Tables: <code>RR_AP_INVOICES_ALL</code> (header) + <code>XXAP_INVOICE_LINES_STG</code> (lines)</li>
                 </ul>
+              }
+            />
+
+            <Alert
+              type="success"
+              showIcon
+              style={{ marginTop: 8 }}
+              message="Expected Response"
+              description={
+                <pre style={{ margin: 0, fontSize: 11, fontFamily: 'monospace' }}>
+{`{
+  "status": "SUCCESS",
+  "message": "Invoice INV-001 created (ID: 900001) with 2 lines",
+  "invoiceId": 900001,
+  "success": true
+}`}
+                </pre>
               }
             />
           </>
