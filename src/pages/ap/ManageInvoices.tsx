@@ -455,6 +455,8 @@ const ManageInvoices: React.FC = () => {
         invoiceAmount: values.invoiceAmount,
         invoiceDate: values.invoiceDate,
         description: values.description,
+        taxCode: values.taxCode,
+        includingTax: values.includingTax || false,
       };
       setQuickCreateVisible(false);
       quickCreateForm.resetFields();
@@ -1613,6 +1615,24 @@ const ManageInvoices: React.FC = () => {
               <Col span={12}>
                 <Form.Item name="description" label="Description" style={{ marginBottom: 12 }}>
                   <Input placeholder="Invoice description" />
+                </Form.Item>
+              </Col>
+            </Row>
+            <Row gutter={12}>
+              <Col span={12}>
+                <Form.Item name="taxCode" label="Tax Code" rules={[{ required: true, message: 'Required' }]} style={{ marginBottom: 12 }}>
+                  <Select placeholder="Select tax code">
+                    <Option value="VAT 5%">VAT 5%</Option>
+                    <Option value="Zero Rated">Zero Rated</Option>
+                    <Option value="Exempt">Exempt</Option>
+                    <Option value="Reverse Charge">Reverse Charge</Option>
+                    <Option value="Out of Scope">Out of Scope</Option>
+                  </Select>
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="includingTax" label=" " valuePropName="checked" style={{ marginBottom: 12 }}>
+                  <Checkbox>Amount Including Tax</Checkbox>
                 </Form.Item>
               </Col>
             </Row>

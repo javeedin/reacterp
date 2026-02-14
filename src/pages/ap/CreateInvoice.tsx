@@ -220,6 +220,8 @@ export interface InvoiceInitialData {
   invoiceCurrency?: string;
   businessUnit?: string;
   invoiceType?: string;
+  taxCode?: string;
+  includingTax?: boolean;
 }
 
 interface CreateInvoiceProps {
@@ -280,9 +282,25 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       form.setFieldsValue(formValues);
       setHeaderValues((prev) => ({ ...prev, ...formValues }));
 
+      // Set tax rate based on tax code
+      if (initialData.taxCode) {
+        if (initialData.taxCode === 'VAT 5%') setTaxRate(5);
+        else if (initialData.taxCode === 'Zero Rated' || initialData.taxCode === 'Exempt' || initialData.taxCode === 'Out of Scope') setTaxRate(0);
+        else setTaxRate(5);
+      }
+
       // Pre-fill the first line with amount and description
       const firstLine = createBlankLine(1);
-      if (initialData.invoiceAmount) firstLine.amount = initialData.invoiceAmount;
+      if (initialData.invoiceAmount) {
+        if (initialData.includingTax && initialData.taxCode === 'VAT 5%') {
+          // Amount includes tax: back-calculate line amount
+          const rate = 5;
+          firstLine.amount = Math.round((initialData.invoiceAmount / (1 + rate / 100)) * 100) / 100;
+        } else {
+          firstLine.amount = initialData.invoiceAmount;
+        }
+      }
+      if (initialData.taxCode) firstLine.taxClassification = initialData.taxCode;
       if (initialData.description) firstLine.description = initialData.description;
       if (initialData.invoiceDate && initialData.invoiceDate.format) {
         firstLine.accountingDate = initialData.invoiceDate.format('DD-MMM-YYYY');

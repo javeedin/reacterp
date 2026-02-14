@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Typography, Tooltip, Space, Button, Form, Input, Select, DatePicker, Modal, InputNumber, message, Table, Tag } from 'antd';
+import { Typography, Tooltip, Space, Button, Form, Input, Select, DatePicker, Modal, InputNumber, message, Table, Tag, Checkbox } from 'antd';
 import {
   CheckSquareOutlined,
   BarChartOutlined,
@@ -294,6 +294,8 @@ const FloatingMenu: React.FC = () => {
             invoiceAmount: values.amount,
             invoiceDate: values.invoiceDate,
             description: values.description,
+            taxCode: values.taxCode,
+            includingTax: values.includingTax || false,
           },
         },
       });
@@ -696,9 +698,31 @@ const FloatingMenu: React.FC = () => {
             <Form.Item
               label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Description</Text>}
               name="description"
-              style={{ marginBottom: 0 }}
+              style={{ marginBottom: 12 }}
             >
               <Input.TextArea rows={2} placeholder="Enter description" />
+            </Form.Item>
+            <Form.Item
+              label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Tax Code</Text>}
+              name="taxCode"
+              rules={[{ required: true, message: 'Select tax code' }]}
+              style={{ marginBottom: 12 }}
+            >
+              <Select placeholder="Select tax code" size="small">
+                <Option value="VAT 5%">VAT 5%</Option>
+                <Option value="Zero Rated">Zero Rated</Option>
+                <Option value="Exempt">Exempt</Option>
+                <Option value="Reverse Charge">Reverse Charge</Option>
+                <Option value="Out of Scope">Out of Scope</Option>
+              </Select>
+            </Form.Item>
+            <Form.Item
+              label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}> </Text>}
+              name="includingTax"
+              valuePropName="checked"
+              style={{ marginBottom: 0 }}
+            >
+              <Checkbox>Amount Including Tax</Checkbox>
             </Form.Item>
           </Form>
         </div>
