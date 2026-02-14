@@ -1407,14 +1407,15 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         {/* ========== INVOICE HEADER ========== */}
         <Card
           style={{
-            marginBottom: 16,
+            marginBottom: 12,
             borderRadius: 8,
             border: `1px solid ${REDWOOD.neutral200}`,
             boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
           }}
+          bodyStyle={{ padding: '8px 16px 4px' }}
         >
-          <div style={{ marginBottom: 12 }}>
-            <Text strong style={{ fontSize: 14, color: REDWOOD.neutral900 }}>Invoice Header</Text>
+          <div style={{ marginBottom: 4 }}>
+            <Text strong style={{ fontSize: 13, color: REDWOOD.neutral900 }}>Invoice Header</Text>
           </div>
           <Form
             form={form}
@@ -1447,7 +1448,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             <Tabs
               defaultActiveKey="general"
               size="small"
-              style={{ marginBottom: 8 }}
+              tabBarStyle={{ marginBottom: 6 }}
               items={[
                 {
                   key: 'general',
@@ -1465,7 +1466,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Business Unit</Text>}
                           name="businessUnit"
                           rules={[{ required: true, message: 'Required' }]}
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
                           <Select placeholder="Select Business Unit" showSearch allowClear>
                             <Option value="BUIMERC CORP FZE_JAFZA">BUIMERC CORP FZE_JAFZA</Option>
@@ -1476,7 +1477,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Invoice Number</Text>}
                           name="invoiceNumber"
                           rules={[{ required: true, message: 'Required' }]}
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
                           <Input placeholder="Enter invoice number" />
                         </Form.Item>
@@ -1484,7 +1485,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Invoice Currency</Text>}
                           name="invoiceCurrency"
                           rules={[{ required: true, message: 'Required' }]}
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
                           <Select showSearch optionFilterProp="children" placeholder="Select currency">
                             {CURRENCIES.map((c) => (
@@ -1496,7 +1497,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Amount</Text>}
                           name="invoiceAmount"
                           rules={[{ required: true, message: 'Required' }]}
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
                           <InputNumber
                             style={{ width: '100%' }}
@@ -1510,14 +1511,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Invoice Date</Text>}
                           name="invoiceDate"
                           rules={[{ required: true, message: 'Required' }]}
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
                           <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
                         </Form.Item>
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Legal Entity</Text>}
                           name="legalEntity"
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
                           <Select placeholder="Select entity" allowClear showSearch>
                             <Option value="BUIMERC CORP FZE">BUIMERC CORP FZE</Option>
@@ -1531,7 +1532,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Supplier</Text>}
                           required
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
                           <Space.Compact style={{ width: '100%' }}>
                             <Form.Item name="supplier" noStyle rules={[{ required: true, message: 'Required' }]}>
@@ -1563,7 +1564,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Supplier Site</Text>}
                           name="supplierSite"
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
                           <Select placeholder="Select site" allowClear>
                             <Option value="SHARJAH">SHARJAH</Option>
@@ -1575,7 +1576,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Type</Text>}
                           name="invoiceType"
                           rules={[{ required: true, message: 'Required' }]}
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
                           <Select>
                             <Option value="Standard">Standard</Option>
@@ -1587,7 +1588,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Payment Currency</Text>}
                           name="paymentCurrency"
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
                           <Select showSearch optionFilterProp="children">
                             {CURRENCIES.map((c) => (
@@ -1598,7 +1599,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Pay Group</Text>}
                           name="payGroup"
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
                           <Select placeholder="Select pay group" allowClear>
                             <Option value="Standard">Standard</Option>
@@ -1609,7 +1610,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Pay Alone</Text>}
                           name="payAlone"
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
                           <Select>
                             <Option value="No">No</Option>
@@ -1623,14 +1624,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Description</Text>}
                           name="description"
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
-                          <TextArea rows={2} placeholder="Enter description" />
+                          <TextArea rows={1} placeholder="Enter description" />
                         </Form.Item>
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Invoice Group</Text>}
                           name="invoiceGroup"
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
                           <Input placeholder="Enter group" />
                         </Form.Item>
@@ -1638,7 +1639,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Payment Terms</Text>}
                           name="paymentTerms"
                           rules={[{ required: true, message: 'Required' }]}
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
                           <Select placeholder="Select terms" allowClear showSearch>
                             <Option value="Immediate">Immediate</Option>
@@ -1652,21 +1653,21 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Terms Date</Text>}
                           name="termsDate"
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
                           <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
                         </Form.Item>
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Goods Received Date</Text>}
                           name="goodsReceivedDate"
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
                           <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
                         </Form.Item>
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Calculate Tax</Text>}
                           name="calculateTax"
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
                           <Select>
                             <Option value="Yes">Yes</Option>
@@ -1692,21 +1693,21 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Accounting Date</Text>}
                           name="accountingDate"
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
                           <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
                         </Form.Item>
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Liability Distribution</Text>}
                           name="liabilityDistribution"
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
                           <Input placeholder="e.g. 01-000-2100-0000-000" />
                         </Form.Item>
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Document Category</Text>}
                           name="documentCategory"
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
                           <Select placeholder="Select category" allowClear showSearch>
                             <Option value="Standard Invoices">Standard Invoices</Option>
@@ -1717,7 +1718,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Voucher Number</Text>}
                           name="voucherNumber"
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
                           <Input placeholder="Enter voucher number" />
                         </Form.Item>
@@ -1728,7 +1729,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Conversion Rate Type</Text>}
                           name="conversionRateType"
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
                           <Select placeholder="Select rate type" allowClear>
                             <Option value="User">User</Option>
@@ -1739,20 +1740,20 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Conversion Date</Text>}
                           name="conversionDate"
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
                           <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
                         </Form.Item>
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Conversion Rate</Text>}
                           name="conversionRate"
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
                           <InputNumber style={{ width: '100%' }} placeholder="0.000000" precision={6} min={0} />
                         </Form.Item>
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Inverse Rate</Text>}
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
                           <InputNumber
                             style={{ width: '100%' }}
@@ -1769,14 +1770,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>First-Party Tax Reg No.</Text>}
                           name="firstPartyTaxRegistrationNumber"
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
                           <Input placeholder="Enter registration number" />
                         </Form.Item>
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Supplier Tax Reg No.</Text>}
                           name="supplierTaxRegistrationNumber"
-                          style={{ marginBottom: 10 }}
+                          style={{ marginBottom: 4 }}
                         >
                           <Input placeholder="Enter registration number" />
                         </Form.Item>
