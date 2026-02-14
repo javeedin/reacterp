@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Layout,
   Card,
@@ -53,11 +53,11 @@ import {
   CloudOutlined,
   DatabaseOutlined,
 } from '@ant-design/icons';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 import FloatingMenu from '../../components/FloatingMenu';
 import InvoiceDetail from './InvoiceDetail';
-import CreateInvoice from './CreateInvoice';
+import CreateInvoice, { InvoiceInitialData } from './CreateInvoice';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
@@ -114,6 +114,7 @@ interface InvoiceTab {
   label: string;
   invoice: InvoiceRecord;
   tabType?: 'detail' | 'create';
+  initialData?: InvoiceInitialData;
 }
 
 // Supplier record from API
@@ -177,6 +178,8 @@ const mapApiToInvoiceRecord = (item: any, index: number): InvoiceRecord => ({
 
 const ManageInvoices: React.FC = () => {
   const [form] = Form.useForm();
+  const location = useLocation();
+  const quickCreateHandled = useRef(false);
   const [loading, setLoading] = useState(false);
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
@@ -462,18 +465,33 @@ const ManageInvoices: React.FC = () => {
     setActiveTab(tabKey);
   };
 
-  // Open create invoice tab
-  const openCreateInvoiceTab = () => {
+  // Open create invoice tab (optionally with pre-filled data)
+  const openCreateInvoiceTab = (data?: InvoiceInitialData) => {
     const tabKey = `create-invoice-${Date.now()}`;
     const newTab: InvoiceTab = {
       key: tabKey,
       label: 'New Invoice',
       invoice: {} as InvoiceRecord,
       tabType: 'create',
+      initialData: data,
     };
-    setOpenTabs([...openTabs, newTab]);
+    setOpenTabs((prev) => [...prev, newTab]);
     setActiveTab(tabKey);
   };
+
+  // Handle quick-create from FloatingMenu navigation state
+  useEffect(() => {
+    const state = location.state as any;
+    if (state?.quickCreate && state?.quickCreateData && !quickCreateHandled.current) {
+      quickCreateHandled.current = true;
+      // Small delay to ensure component is fully mounted
+      setTimeout(() => {
+        openCreateInvoiceTab(state.quickCreateData as InvoiceInitialData);
+      }, 100);
+      // Clear the navigation state to prevent re-triggering
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Close invoice tab
   const closeInvoiceTab = (tabKey: string) => {
@@ -1128,6 +1146,7 @@ const ManageInvoices: React.FC = () => {
       children: tab.tabType === 'create' ? (
         <CreateInvoice
           onClose={() => closeInvoiceTab(tab.key)}
+          initialData={tab.initialData}
         />
       ) : (
         <InvoiceDetail

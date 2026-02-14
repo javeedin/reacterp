@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   Card,
   Form,
@@ -212,12 +212,25 @@ const createBlankLine = (lineNumber: number): InvoiceLine => ({
   accrualAccount: '',
 });
 
+export interface InvoiceInitialData {
+  supplier?: string;
+  supplierNumber?: string;
+  invoiceNumber?: string;
+  invoiceAmount?: number;
+  invoiceDate?: any;
+  description?: string;
+  invoiceCurrency?: string;
+  businessUnit?: string;
+  invoiceType?: string;
+}
+
 interface CreateInvoiceProps {
   onClose: () => void;
   onSave?: (values: any) => void;
+  initialData?: InvoiceInitialData;
 }
 
-const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
+const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialData }) => {
   const [form] = Form.useForm();
 
   // Unified invoice lines - shared across both tabs
@@ -252,6 +265,33 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
   const [accountSelectorVisible, setAccountSelectorVisible] = useState(false);
   const [editingLineKey, setEditingLineKey] = useState<string | null>(null);
   const [accountSelectorInitialValue, setAccountSelectorInitialValue] = useState<string | undefined>(undefined);
+
+  // Pre-fill from initialData (Quick Create task)
+  useEffect(() => {
+    if (initialData) {
+      const formValues: Record<string, any> = {};
+      if (initialData.supplier) formValues.supplier = initialData.supplier;
+      if (initialData.supplierNumber) formValues.supplierNumber = initialData.supplierNumber;
+      if (initialData.invoiceNumber) formValues.invoiceNumber = initialData.invoiceNumber;
+      if (initialData.invoiceAmount) formValues.invoiceAmount = initialData.invoiceAmount;
+      if (initialData.invoiceDate) formValues.invoiceDate = initialData.invoiceDate;
+      if (initialData.description) formValues.description = initialData.description;
+      if (initialData.invoiceCurrency) formValues.invoiceCurrency = initialData.invoiceCurrency;
+      if (initialData.businessUnit) formValues.businessUnit = initialData.businessUnit;
+      if (initialData.invoiceType) formValues.invoiceType = initialData.invoiceType;
+      form.setFieldsValue(formValues);
+      setHeaderValues((prev) => ({ ...prev, ...formValues }));
+
+      // Pre-fill the first line with amount and description
+      const firstLine = createBlankLine(1);
+      if (initialData.invoiceAmount) firstLine.amount = initialData.invoiceAmount;
+      if (initialData.description) firstLine.description = initialData.description;
+      if (initialData.invoiceDate && initialData.invoiceDate.format) {
+        firstLine.accountingDate = initialData.invoiceDate.format('DD-MMM-YYYY');
+      }
+      setLines([firstLine]);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch suppliers
   const fetchSuppliers = async () => {
@@ -944,7 +984,18 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
               payAlone: 'No',
               calculateTax: 'Yes',
             }}
-            onValuesChange={(_, allValues) => setHeaderValues(allValues)}
+            onValuesChange={(changedValues, allValues) => {
+              setHeaderValues(allValues);
+              // Copy invoice date to all lines' accounting date
+              if (changedValues.invoiceDate) {
+                const formattedDate = changedValues.invoiceDate.format('DD-MMM-YYYY');
+                setLines((prev) => prev.map((line) => ({ ...line, accountingDate: formattedDate })));
+              }
+              // Copy header description to all lines' description
+              if ('description' in changedValues) {
+                setLines((prev) => prev.map((line) => ({ ...line, description: changedValues.description || '' })));
+              }
+            }}
           >
             <Row gutter={32}>
               {/* Column 1 */}
@@ -1115,6 +1166,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
                 <Form.Item
                   label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Payment Terms</Text>}
                   name="paymentTerms"
+                  rules={[{ required: true, message: 'Required' }]}
                   style={{ marginBottom: 10 }}
                 >
                   <Select placeholder="Select terms" allowClear showSearch>

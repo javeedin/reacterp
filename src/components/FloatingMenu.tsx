@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Typography, Tooltip, Space, Button, Form, Input, Select, DatePicker } from 'antd';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { Typography, Tooltip, Space, Button, Form, Input, Select, DatePicker, Modal, InputNumber, message, Table, Tag } from 'antd';
 import {
   CheckSquareOutlined,
   BarChartOutlined,
@@ -29,8 +29,11 @@ import {
   SettingOutlined,
   StopOutlined,
   BankOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
+import type { ColumnsType } from 'antd/es/table';
+import { APEX_DB_CONFIG } from '../config/api.config';
 
 const { Text, Title } = Typography;
 const { Option } = Select;
@@ -53,6 +56,18 @@ const REDWOOD = {
   matchOrange: '#D4A800',
 };
 
+const APEX_SUPPLIERS_URL = `${APEX_DB_CONFIG.baseUrl}/suppliers`;
+
+// Supplier record for quick-create dialog
+interface QuickCreateSupplier {
+  key: string;
+  supplierId: number;
+  supplier: string;
+  supplierNumber: string;
+  alternativeName: string;
+  status: string;
+}
+
 // Menu item type
 interface MenuItemType {
   key: string;
@@ -65,7 +80,7 @@ interface MenuItemType {
 
 // Task items
 const invoiceTaskItems: MenuItemType[] = [
-  { key: 'create-invoice', icon: <FileAddOutlined />, label: 'Create Invoice', description: 'Create new supplier invoice', color: REDWOOD.taskBlue, path: '/ap/create-invoice' },
+  { key: 'create-invoice', icon: <FileAddOutlined />, label: 'Create Payable Invoice', description: 'Create new supplier invoice', color: REDWOOD.taskBlue },
   { key: 'create-invoice-spreadsheet', icon: <ImportOutlined />, label: 'Create Invoice from Spreadsheet', description: 'Import invoices from file', color: REDWOOD.info },
   { key: 'create-recurring', icon: <ScheduleOutlined />, label: 'Create Recurring Invoices', description: 'Set up recurring invoices', color: REDWOOD.success },
   { key: 'manage-invoices', icon: <FileTextOutlined />, label: 'Manage Invoices', description: 'Search and manage invoices', color: REDWOOD.primary, path: '/ap/manage-invoices' },
@@ -193,6 +208,99 @@ const FloatingMenu: React.FC = () => {
   const floatingIconsRef = useRef<HTMLDivElement>(null);
   const [searchForm] = Form.useForm();
   const [matchForm] = Form.useForm();
+  const [quickCreateForm] = Form.useForm();
+
+  // Quick Create Invoice dialog state
+  const [quickCreateVisible, setQuickCreateVisible] = useState(false);
+  const [supplierModalVisible, setSupplierModalVisible] = useState(false);
+  const [qcSuppliers, setQcSuppliers] = useState<QuickCreateSupplier[]>([]);
+  const [qcSupplierLoading, setQcSupplierLoading] = useState(false);
+  const [qcSupplierSearch, setQcSupplierSearch] = useState('');
+
+  // Fetch suppliers for quick-create
+  const fetchQcSuppliers = async () => {
+    setQcSupplierLoading(true);
+    try {
+      const response = await fetch(APEX_SUPPLIERS_URL, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      const data = await response.json();
+      const items = data.items || data || [];
+      if (Array.isArray(items)) {
+        setQcSuppliers(
+          items.map((item: any, index: number) => ({
+            key: item.supplier_id?.toString() || index.toString(),
+            supplierId: item.supplier_id,
+            supplier: item.supplier || '',
+            supplierNumber: item.supplier_number || '',
+            alternativeName: item.alternate_name || '',
+            status: item.status || '',
+          }))
+        );
+      }
+    } catch (error) {
+      console.error('Supplier fetch error:', error);
+      message.error('Failed to fetch suppliers');
+    } finally {
+      setQcSupplierLoading(false);
+    }
+  };
+
+  const filteredQcSuppliers = useMemo(() => {
+    if (!qcSupplierSearch) return qcSuppliers;
+    const search = qcSupplierSearch.toLowerCase();
+    return qcSuppliers.filter(
+      (s) =>
+        s.supplier.toLowerCase().includes(search) ||
+        s.supplierNumber.toLowerCase().includes(search) ||
+        (s.alternativeName && s.alternativeName.toLowerCase().includes(search))
+    );
+  }, [qcSuppliers, qcSupplierSearch]);
+
+  const qcSupplierColumns: ColumnsType<QuickCreateSupplier> = [
+    { title: 'Number', dataIndex: 'supplierNumber', key: 'supplierNumber', width: 100, sorter: (a, b) => a.supplierNumber.localeCompare(b.supplierNumber) },
+    { title: 'Supplier Name', dataIndex: 'supplier', key: 'supplier', width: 250, ellipsis: true, sorter: (a, b) => a.supplier.localeCompare(b.supplier) },
+    { title: 'Status', dataIndex: 'status', key: 'status', width: 80, render: (status: string) => <Tag color={status === 'ACTIVE' ? 'green' : 'red'}>{status}</Tag> },
+    {
+      title: 'Action', key: 'action', width: 70,
+      render: (_: any, record: QuickCreateSupplier) => (
+        <Button type="link" size="small" style={{ color: REDWOOD.info }} onClick={() => {
+          quickCreateForm.setFieldsValue({ supplier: record.supplier, supplierNumber: record.supplierNumber });
+          setSupplierModalVisible(false);
+        }}>Select</Button>
+      ),
+    },
+  ];
+
+  const openQuickCreate = () => {
+    closePanel();
+    setQuickCreateVisible(true);
+    quickCreateForm.resetFields();
+  };
+
+  const handleQuickCreateSubmit = () => {
+    quickCreateForm.validateFields().then((values) => {
+      setQuickCreateVisible(false);
+      // Navigate to ManageInvoices with quick-create data
+      navigate('/ap/manage-invoices', {
+        state: {
+          quickCreate: true,
+          quickCreateData: {
+            supplier: values.supplier,
+            supplierNumber: values.supplierNumber,
+            invoiceNumber: values.invoiceNumber,
+            invoiceAmount: values.amount,
+            invoiceDate: values.invoiceDate,
+            description: values.description,
+          },
+        },
+      });
+    }).catch(() => {
+      message.error('Please fill in all required fields');
+    });
+  };
 
   const getPanelWidth = () => {
     if (activePanel === 'match') return 360;
@@ -215,7 +323,8 @@ const FloatingMenu: React.FC = () => {
       const isOutsideFloatingIcons = floatingIconsRef.current && !floatingIconsRef.current.contains(target);
       const isDropdownClick = target.closest('.ant-select-dropdown') ||
                               target.closest('.ant-picker-dropdown') ||
-                              target.closest('.ant-dropdown');
+                              target.closest('.ant-dropdown') ||
+                              target.closest('.ant-modal-root');
 
       if (isOutsidePanel && isOutsideFloatingIcons && !isDropdownClick) {
         closePanel();
@@ -240,6 +349,10 @@ const FloatingMenu: React.FC = () => {
   };
 
   const handleMenuItemClick = (key: string, path?: string) => {
+    if (key === 'create-invoice') {
+      openQuickCreate();
+      return;
+    }
     closePanel();
     if (path) {
       navigate(path);
@@ -497,6 +610,150 @@ const FloatingMenu: React.FC = () => {
         {activePanel === 'reports' && <ReportsSlidePanel />}
         {activePanel === 'match' && <MatchSlidePanel />}
       </div>
+
+      {/* ========== QUICK CREATE INVOICE MODAL ========== */}
+      <Modal
+        title={
+          <Space>
+            <FileAddOutlined style={{ color: REDWOOD.taskBlue }} />
+            <span>Create Payable Invoice</span>
+          </Space>
+        }
+        open={quickCreateVisible}
+        onCancel={() => setQuickCreateVisible(false)}
+        width={520}
+        zIndex={2000}
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Button onClick={() => setQuickCreateVisible(false)}>Cancel</Button>
+            <Button type="primary" onClick={handleQuickCreateSubmit} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
+              Create Invoice
+            </Button>
+          </div>
+        }
+      >
+        <div style={{ padding: '8px 0' }}>
+          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 16 }}>
+            Fill in basic details to quickly create a payable invoice.
+          </Text>
+          <Form
+            form={quickCreateForm}
+            layout="horizontal"
+            labelCol={{ span: 8 }}
+            wrapperCol={{ span: 16 }}
+            size="small"
+          >
+            <Form.Item
+              label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Supplier</Text>}
+              name="supplier"
+              rules={[{ required: true, message: 'Select a supplier' }]}
+              style={{ marginBottom: 12 }}
+            >
+              <Input
+                placeholder="Search and select supplier..."
+                readOnly
+                style={{ cursor: 'pointer' }}
+                onClick={() => {
+                  setSupplierModalVisible(true);
+                  setQcSupplierSearch('');
+                  if (qcSuppliers.length === 0) fetchQcSuppliers();
+                }}
+                suffix={<SearchOutlined style={{ color: REDWOOD.info, cursor: 'pointer' }} />}
+              />
+            </Form.Item>
+            <Form.Item name="supplierNumber" hidden><Input /></Form.Item>
+            <Form.Item
+              label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Invoice Number</Text>}
+              name="invoiceNumber"
+              rules={[{ required: true, message: 'Enter invoice number' }]}
+              style={{ marginBottom: 12 }}
+            >
+              <Input placeholder="Enter invoice number" />
+            </Form.Item>
+            <Form.Item
+              label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Amount</Text>}
+              name="amount"
+              rules={[{ required: true, message: 'Enter amount' }]}
+              style={{ marginBottom: 12 }}
+            >
+              <InputNumber
+                style={{ width: '100%' }}
+                placeholder="0.00"
+                precision={2}
+                min={0}
+                formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                parser={(value) => value!.replace(/,/g, '') as any}
+              />
+            </Form.Item>
+            <Form.Item
+              label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Invoice Date</Text>}
+              name="invoiceDate"
+              rules={[{ required: true, message: 'Select date' }]}
+              style={{ marginBottom: 12 }}
+            >
+              <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
+            </Form.Item>
+            <Form.Item
+              label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Description</Text>}
+              name="description"
+              style={{ marginBottom: 0 }}
+            >
+              <Input.TextArea rows={2} placeholder="Enter description" />
+            </Form.Item>
+          </Form>
+        </div>
+      </Modal>
+
+      {/* ========== SUPPLIER SEARCH MODAL (for Quick Create) ========== */}
+      <Modal
+        title={
+          <Space>
+            <SearchOutlined style={{ color: REDWOOD.info }} />
+            <span>Search Suppliers</span>
+          </Space>
+        }
+        open={supplierModalVisible}
+        onCancel={() => setSupplierModalVisible(false)}
+        footer={null}
+        width={700}
+        zIndex={2100}
+        styles={{ body: { padding: '12px 24px' } }}
+      >
+        <div style={{ marginBottom: 12 }}>
+          <Input
+            placeholder="Search by name, number, or alternate name..."
+            prefix={<SearchOutlined style={{ color: REDWOOD.neutral300 }} />}
+            value={qcSupplierSearch}
+            onChange={(e) => setQcSupplierSearch(e.target.value)}
+            allowClear
+            size="middle"
+            style={{ marginBottom: 8 }}
+          />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {filteredQcSuppliers.length} supplier{filteredQcSuppliers.length !== 1 ? 's' : ''} found
+            </Text>
+            <Button size="small" icon={<ReloadOutlined />} onClick={fetchQcSuppliers} loading={qcSupplierLoading}>
+              Refresh
+            </Button>
+          </div>
+        </div>
+        <Table
+          columns={qcSupplierColumns}
+          dataSource={filteredQcSuppliers}
+          loading={qcSupplierLoading}
+          size="small"
+          pagination={{ pageSize: 8, showSizeChanger: false, showTotal: (total, range) => `${range[0]}-${range[1]} of ${total}` }}
+          scroll={{ y: 300 }}
+          onRow={(record) => ({
+            onDoubleClick: () => {
+              quickCreateForm.setFieldsValue({ supplier: record.supplier, supplierNumber: record.supplierNumber });
+              setSupplierModalVisible(false);
+            },
+            style: { cursor: 'pointer' },
+          })}
+        />
+      </Modal>
 
       {/* CSS Animations */}
       <style>{`
