@@ -450,6 +450,7 @@ const ManageInvoices: React.FC = () => {
       const initialData: InvoiceInitialData = {
         supplier: values.supplier,
         supplierNumber: values.supplierNumber,
+        businessUnit: values.businessUnit,
         invoiceNumber: values.invoiceNumber,
         invoiceAmount: values.invoiceAmount,
         invoiceDate: values.invoiceDate,
@@ -1585,6 +1586,12 @@ const ManageInvoices: React.FC = () => {
               </Space.Compact>
             </Form.Item>
             <Form.Item name="supplierNumber" hidden><Input /></Form.Item>
+            <Form.Item name="businessUnit" label="Business Unit" rules={[{ required: true, message: 'Required' }]} style={{ marginBottom: 12 }}>
+              <Select placeholder="Select Business Unit" allowClear showSearch>
+                <Option value="BUIMERC CORP FZE_JAFZA">BUIMERC CORP FZE_JAFZA</Option>
+                <Option value="BUIMERC CORP_DIFC_INVST">BUIMERC CORP_DIFC_INVST</Option>
+              </Select>
+            </Form.Item>
             <Row gutter={12}>
               <Col span={12}>
                 <Form.Item name="invoiceNumber" label="Invoice Number" rules={[{ required: true, message: 'Required' }]} style={{ marginBottom: 12 }}>

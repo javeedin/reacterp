@@ -115,6 +115,16 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
 
   const handleOpen = () => {
     setIsClosing(false);
+    // Reset conversation on reopen so suggestions show and it feels fresh
+    setMessages([
+      {
+        id: Date.now().toString(),
+        type: 'assistant',
+        content: welcomeMessage,
+        timestamp: new Date(),
+      },
+    ]);
+    setInputValue('');
     setIsOpen(true);
   };
 
@@ -317,8 +327,10 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
             style={{
               flex: 1,
               overflowY: 'auto',
+              overflowX: 'hidden',
               padding: 16,
               background: REDWOOD.neutral100,
+              minHeight: 0,
             }}
           >
             {messages.map((message) => (
@@ -367,44 +379,42 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Suggestions */}
-          {messages.length <= 2 && (
-            <div style={{ padding: '12px 16px', borderTop: `1px solid ${REDWOOD.neutral200}` }}>
-              <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                Suggestions
-              </Text>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
-                {suggestions.map((suggestion, index) => (
-                  <div
-                    key={index}
-                    onClick={() => handleSuggestionClick(suggestion.command)}
-                    style={{
-                      padding: '6px 12px',
-                      borderRadius: 20,
-                      background: `${REDWOOD.autopilotPurple}10`,
-                      border: `1px solid ${REDWOOD.autopilotPurple}30`,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      transition: 'all 0.2s',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = `${REDWOOD.autopilotPurple}20`;
-                      e.currentTarget.style.borderColor = REDWOOD.autopilotPurple;
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = `${REDWOOD.autopilotPurple}10`;
-                      e.currentTarget.style.borderColor = `${REDWOOD.autopilotPurple}30`;
-                    }}
-                  >
-                    <span style={{ color: REDWOOD.autopilotPurple, fontSize: 12 }}>{suggestion.icon}</span>
-                    <Text style={{ fontSize: 12, color: REDWOOD.neutral900 }}>{suggestion.label}</Text>
-                  </div>
-                ))}
-              </div>
+          {/* Suggestions - always visible for quick actions */}
+          <div style={{ padding: '12px 16px', borderTop: `1px solid ${REDWOOD.neutral200}`, flexShrink: 0 }}>
+            <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              Quick Actions
+            </Text>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+              {suggestions.map((suggestion, index) => (
+                <div
+                  key={index}
+                  onClick={() => handleSuggestionClick(suggestion.command)}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: 20,
+                    background: `${REDWOOD.autopilotPurple}10`,
+                    border: `1px solid ${REDWOOD.autopilotPurple}30`,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    transition: 'all 0.2s',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = `${REDWOOD.autopilotPurple}20`;
+                    e.currentTarget.style.borderColor = REDWOOD.autopilotPurple;
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = `${REDWOOD.autopilotPurple}10`;
+                    e.currentTarget.style.borderColor = `${REDWOOD.autopilotPurple}30`;
+                  }}
+                >
+                  <span style={{ color: REDWOOD.autopilotPurple, fontSize: 12 }}>{suggestion.icon}</span>
+                  <Text style={{ fontSize: 12, color: REDWOOD.neutral900 }}>{suggestion.label}</Text>
+                </div>
+              ))}
             </div>
-          )}
+          </div>
 
           {/* Input */}
           <div
