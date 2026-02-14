@@ -52,6 +52,7 @@ import {
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 import FloatingMenu from '../../components/FloatingMenu';
+import Autopilot from '../../components/Autopilot';
 import PaymentDetail from './PaymentDetail';
 import { ORACLE_FUSION_CONFIG, APEX_DB_CONFIG } from '../../config/api.config';
 
@@ -1479,6 +1480,7 @@ const ManagePayments: React.FC = () => {
           </Card>
         </Modal>
       </Content>
+      <Autopilot module="ap" />
       <FloatingMenu />
     </Layout>
   );

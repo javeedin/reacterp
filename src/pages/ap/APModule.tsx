@@ -480,7 +480,7 @@ const APModule: React.FC = () => {
       </Content>
 
       {/* Autopilot Assistant */}
-      <Autopilot />
+      <Autopilot module="ap" />
       <FloatingMenu />
     </Layout>
   );

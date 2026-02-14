@@ -8,6 +8,7 @@ import {
   ThunderboltOutlined,
   LoadingOutlined,
 } from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -42,21 +43,38 @@ interface SuggestionItem {
   command: string;
 }
 
-const suggestions: SuggestionItem[] = [
+const glSuggestions: SuggestionItem[] = [
   { icon: <ThunderboltOutlined />, label: 'Sync journal batches', command: 'Sync all journal batches from Oracle Fusion' },
   { icon: <BulbOutlined />, label: 'Create journal entry', command: 'Help me create a new journal entry' },
   { icon: <ThunderboltOutlined />, label: 'Run trial balance', command: 'Generate trial balance report for current period' },
   { icon: <BulbOutlined />, label: 'Check period status', command: 'What is the current period status?' },
 ];
 
-const Autopilot: React.FC = () => {
+const apSuggestions: SuggestionItem[] = [
+  { icon: <ThunderboltOutlined />, label: 'Create Payable Invoice', command: 'Create Payable Invoice' },
+  { icon: <BulbOutlined />, label: 'Manage Invoices', command: 'Open Manage Invoices' },
+  { icon: <ThunderboltOutlined />, label: 'Manage Payments', command: 'Open Manage Payments' },
+  { icon: <BulbOutlined />, label: 'Manage Suppliers', command: 'Open Manage Suppliers' },
+];
+
+interface AutopilotProps {
+  module?: 'gl' | 'ap';
+}
+
+const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
+  const navigate = useNavigate();
+  const suggestions = module === 'ap' ? apSuggestions : glSuggestions;
+  const welcomeMessage = module === 'ap'
+    ? 'Hello! I\'m your Payables Autopilot assistant. I can help you create invoices, manage payments, look up suppliers, and more. What would you like to do?'
+    : 'Hello! I\'m your ERP Autopilot assistant. I can help you with tasks like syncing data, creating journal entries, running reports, and more. What would you like to do?';
+
   const [isOpen, setIsOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
       type: 'assistant',
-      content: 'Hello! I\'m your ERP Autopilot assistant. I can help you with tasks like syncing data, creating journal entries, running reports, and more. What would you like to do?',
+      content: welcomeMessage,
       timestamp: new Date(),
     },
   ]);
@@ -131,6 +149,37 @@ const Autopilot: React.FC = () => {
   const generateResponse = (input: string): string => {
     const lowerInput = input.toLowerCase();
 
+    // AP module responses
+    if (lowerInput.includes('create') && (lowerInput.includes('payable') || lowerInput.includes('invoice'))) {
+      // Navigate to ManageInvoices with quick-create dialog
+      setTimeout(() => {
+        handleClose();
+        navigate('/ap/manage-invoices', {
+          state: { quickCreate: true, showQuickCreateDialog: true },
+        });
+      }, 1200);
+      return 'Opening the Create Payable Invoice form for you. You\'ll be able to select a supplier, enter the amount, date, and description to quickly create an invoice.';
+    }
+    if (lowerInput.includes('manage') && lowerInput.includes('invoice')) {
+      setTimeout(() => { handleClose(); navigate('/ap/manage-invoices'); }, 1200);
+      return 'Taking you to Manage Invoices where you can search, view, and manage all payable invoices.';
+    }
+    if (lowerInput.includes('manage') && lowerInput.includes('payment')) {
+      setTimeout(() => { handleClose(); navigate('/ap/manage-payments'); }, 1200);
+      return 'Opening Manage Payments. You can search and manage payment batches and individual payments.';
+    }
+    if (lowerInput.includes('manage') && lowerInput.includes('supplier')) {
+      setTimeout(() => { handleClose(); navigate('/ap/suppliers'); }, 1200);
+      return 'Taking you to Manage Suppliers where you can search and manage supplier master data.';
+    }
+    if (lowerInput.includes('validate') && lowerInput.includes('invoice')) {
+      return 'To validate invoices:\n1. Go to Manage Invoices\n2. Search for the invoice\n3. Open it and click "Invoice Actions → Validate"\n4. The system will check accounting, tax, and matching rules\n\nWould you like me to open Manage Invoices?';
+    }
+    if (lowerInput.includes('payment') && lowerInput.includes('term')) {
+      return 'Payment Terms available:\n• Immediate\n• Net 15\n• Net 30\n• Net 45\n• Net 60\n• Net 90\n\nPayment terms can be set at the supplier level or overridden on individual invoices.';
+    }
+
+    // GL module responses
     if (lowerInput.includes('sync') && lowerInput.includes('journal')) {
       return 'I\'ll help you sync journal batches. Navigate to Sync Data page and I\'ll guide you through the process. Would you like me to take you there?';
     }
@@ -144,6 +193,9 @@ const Autopilot: React.FC = () => {
       return 'Current Period Status:\n• GL Period: Dec-2024 (Open)\n• AP Period: Dec-2024 (Open)\n• AR Period: Dec-2024 (Open)\n\nPeriod close progress: 67% complete.';
     }
     if (lowerInput.includes('help')) {
+      if (module === 'ap') {
+        return 'I can assist you with:\n• Creating payable invoices\n• Managing and validating invoices\n• Processing payments\n• Managing suppliers\n• Invoice holds and approvals\n• Payment terms and schedules\n\nJust tell me what you\'d like to do!';
+      }
       return 'I can assist you with:\n• Data synchronization from Oracle Fusion\n• Creating and posting journal entries\n• Running financial reports\n• Managing periods\n• Navigating modules\n\nJust tell me what you\'d like to do!';
     }
 

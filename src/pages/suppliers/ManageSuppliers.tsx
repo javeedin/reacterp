@@ -55,6 +55,7 @@ import {
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import FloatingMenu from '../../components/FloatingMenu';
+import Autopilot from '../../components/Autopilot';
 import type { ColumnsType } from 'antd/es/table';
 
 const { Content } = Layout;
@@ -1987,6 +1988,7 @@ const ManageSuppliers: React.FC = () => {
           </Card>
         </Modal>
         <FloatingMenu />
+        <Autopilot module="ap" />
       </Content>
     </Layout>
   );

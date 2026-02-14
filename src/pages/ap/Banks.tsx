@@ -1609,7 +1609,7 @@ const Banks: React.FC = () => {
       />
 
       {/* Autopilot Assistant */}
-      <Autopilot />
+      <Autopilot module="ap" />
       <FloatingMenu />
     </Layout>
   );
