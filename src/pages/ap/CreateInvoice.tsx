@@ -360,6 +360,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [balancePaymentsLoading, setBalancePaymentsLoading] = useState(false);
   const [balanceActiveTab, setBalanceActiveTab] = useState('invoices');
 
+  // Saving state
+  const [saving, setSaving] = useState(false);
+
   // Pre-fill from initialData (Quick Create task)
   useEffect(() => {
     if (initialData) {
@@ -791,51 +794,173 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     return true;
   };
 
-  // Save and create next handler
-  const handleSaveAndCreateNext = () => {
-    form.validateFields().then((values) => {
-      if (!validateTally()) return;
-      const invoiceData = {
-        ...values,
-        invoiceDate: values.invoiceDate?.format('YYYY-MM-DD'),
-        lines,
-        linesTotal,
-        taxTotal,
-        totalAmount: computedTotal,
-      };
-      console.log('Invoice saved:', invoiceData);
-      if (onSave) onSave(invoiceData);
-      message.success('Invoice saved. Creating next...');
-      // Reset form and lines for next invoice
-      form.resetFields();
-      setLines([createBlankLine(1)]);
-      setSelectedLineKeys([]);
-      setHeaderValues({ invoiceType: 'Standard', invoiceCurrency: 'AED' });
-      setTaxRate(5);
-    }).catch(() => {
-      message.error('Please fill in required fields');
+  // POST invoice header to APEX
+  const postInvoiceHeader = async (values: any): Promise<{ success: boolean; invoiceId?: number; error?: string }> => {
+    const invoiceDate = values.invoiceDate?.format('YYYY-MM-DD') || '';
+    const headerPayload = {
+      items: [{
+        InvoiceNumber: values.invoiceNumber || '',
+        InvoiceCurrency: values.invoiceCurrency || 'AED',
+        PaymentCurrency: values.paymentCurrency || values.invoiceCurrency || 'AED',
+        InvoiceAmount: values.invoiceAmount || 0,
+        InvoiceDate: invoiceDate,
+        BusinessUnit: values.businessUnit || '',
+        Supplier: values.supplier || '',
+        SupplierNumber: values.supplierNumber || '',
+        SupplierSite: values.supplierSite || '',
+        InvoiceType: values.invoiceType || 'Standard',
+        Description: values.description || '',
+        LegalEntity: values.legalEntity || '',
+        InvoiceGroup: values.invoiceGroup || '',
+        PaymentTerms: values.paymentTerms || '',
+        TermsDate: values.termsDate?.format?.('YYYY-MM-DD') || '',
+        GoodsReceivedDate: values.goodsReceivedDate?.format?.('YYYY-MM-DD') || '',
+        PayGroup: values.payGroup || '',
+        PayAlone: values.payAlone || 'N',
+      }],
+    };
+
+    const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice`;
+    console.log('POST Invoice Header:', url, headerPayload);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(headerPayload),
     });
+
+    const data = await response.json();
+    console.log('Invoice Header Response:', data);
+
+    const isSuccess = data.status === 'SUCCESS' && (data.successCount > 0 || data.success === true);
+    if (!isSuccess) {
+      return { success: false, error: data.message || data.error || 'Failed to create invoice header' };
+    }
+    // Extract the created invoice ID from the response
+    const invoiceId = data.invoiceId || data.invoice_id || data.items?.[0]?.InvoiceId || data.items?.[0]?.invoice_id || 0;
+    return { success: true, invoiceId };
+  };
+
+  // POST invoice lines to APEX
+  const postInvoiceLines = async (invoiceId: number, invoiceNumber: string): Promise<{ success: boolean; error?: string }> => {
+    // Filter out empty lines (no amount and no description)
+    const validLines = lines.filter(l => l.amount !== 0 || l.description);
+    if (validLines.length === 0) {
+      return { success: true }; // No lines to post
+    }
+
+    const linesPayload = {
+      items: validLines.map(line => ({
+        InvoiceId: invoiceId,
+        InvoiceNumber: invoiceNumber,
+        LineNumber: line.lineNumber,
+        LineAmount: line.amount || 0,
+        LineType: line.type || 'Item',
+        Description: line.description || '',
+        AccountingDate: line.accountingDate || '',
+        DistributionCombination: line.distributionCombination || '',
+        TaxClassification: line.taxClassification || '',
+        Quantity: line.quantity || 0,
+        UnitPrice: line.unitPrice || 0,
+        PONumber: line.poNumber || '',
+        POLineNumber: line.poLine || '',
+        ReceiptNumber: line.receiptNumber || '',
+        ReceiptLineNumber: line.receiptLine || '',
+      })),
+    };
+
+    const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoiceslines`;
+    console.log('POST Invoice Lines:', url, linesPayload);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(linesPayload),
+    });
+
+    const data = await response.json();
+    console.log('Invoice Lines Response:', data);
+
+    const isSuccess = data.status === 'SUCCESS' && (data.successCount > 0 || data.success === true);
+    if (!isSuccess) {
+      return { success: false, error: data.message || data.error || 'Failed to create invoice lines' };
+    }
+    return { success: true };
+  };
+
+  // Core save logic: POST header + lines
+  const saveInvoice = async (values: any): Promise<boolean> => {
+    setSaving(true);
+    try {
+      // Step 1: POST invoice header
+      const headerResult = await postInvoiceHeader(values);
+      if (!headerResult.success) {
+        message.error(`Invoice header failed: ${headerResult.error}`);
+        return false;
+      }
+
+      const invoiceId = headerResult.invoiceId || 0;
+      const invoiceNumber = values.invoiceNumber || '';
+      message.success(`Invoice header created: ${invoiceNumber}`);
+
+      // Step 2: POST invoice lines
+      const linesResult = await postInvoiceLines(invoiceId, invoiceNumber);
+      if (!linesResult.success) {
+        message.warning(`Invoice header saved but lines failed: ${linesResult.error}`);
+        return false;
+      }
+
+      // Notify parent
+      if (onSave) onSave({ ...values, invoiceId });
+
+      return true;
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Save invoice error:', error);
+      message.error(`Failed to save invoice: ${errorMsg}`);
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Save and create next handler
+  const handleSaveAndCreateNext = async () => {
+    try {
+      const values = await form.validateFields();
+      if (!validateTally()) return;
+
+      const success = await saveInvoice(values);
+      if (success) {
+        message.success('Invoice saved. Creating next...');
+        // Reset form and lines for next invoice
+        form.resetFields();
+        setLines([createBlankLine(1)]);
+        setSelectedLineKeys([]);
+        setHeaderValues({ invoiceType: 'Standard', invoiceCurrency: 'AED' });
+        setTaxRate(5);
+      }
+    } catch {
+      message.error('Please fill in required fields');
+    }
   };
 
   // Save handler
-  const handleSave = () => {
-    form.validateFields().then((values) => {
-      if (!validateTally()) return;
-      const invoiceData = {
-        ...values,
-        invoiceDate: values.invoiceDate?.format('YYYY-MM-DD'),
-        lines,
-        linesTotal,
-        taxTotal,
-        totalAmount: computedTotal,
-      };
-      console.log('Invoice data:', invoiceData);
-      if (onSave) onSave(invoiceData);
-      message.success('Invoice saved successfully');
-    }).catch((err) => {
+  const handleSave = async (): Promise<boolean> => {
+    try {
+      const values = await form.validateFields();
+      if (!validateTally()) return false;
+
+      const success = await saveInvoice(values);
+      if (success) {
+        message.success('Invoice saved successfully');
+      }
+      return success;
+    } catch (err) {
       console.log('Validation failed:', err);
       message.error('Please fill in required fields');
-    });
+      return false;
+    }
   };
 
   // ========== Distribution Tab Columns (matching Fusion Payables) ==========
@@ -1166,19 +1291,23 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               Invoice Actions <DownOutlined style={{ fontSize: 10 }} />
             </Button>
           </Dropdown>
-          <Button onClick={handleSaveAndCreateNext}>
+          <Button onClick={handleSaveAndCreateNext} loading={saving} disabled={saving}>
             Save and Create Next
           </Button>
           <Button
             type="primary"
             onClick={handleSave}
+            loading={saving}
+            disabled={saving}
             style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
           >
             Save
           </Button>
           <Button
             type="primary"
-            onClick={() => { handleSave(); onClose(); }}
+            onClick={async () => { const success = await handleSave(); if (success !== false) onClose(); }}
+            loading={saving}
+            disabled={saving}
             style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
           >
             Save and Close

@@ -1466,6 +1466,12 @@ const ManageInvoices: React.FC = () => {
         <CreateInvoice
           onClose={() => closeInvoiceTab(tab.key)}
           initialData={tab.initialData}
+          onSave={() => {
+            // Refresh invoice list after save if search was previously executed
+            if (invoices.length > 0) {
+              form.submit();
+            }
+          }}
         />
       ) : (
         <InvoiceDetail
