@@ -345,12 +345,13 @@ BEGIN
         p_comments       => 'Create AP Invoice (header + lines) from single JSON',
         p_source         => q'[
 DECLARE
+    l_clob          CLOB := :body_text;
     l_invoice_id    NUMBER;
     l_status        VARCHAR2(20);
     l_message       VARCHAR2(4000);
 BEGIN
     RR_AP_CREATE_INVOICE_PKG.create_invoice(
-        p_json       => :body_text,
+        p_json       => l_clob,
         p_invoice_id => l_invoice_id,
         p_status     => l_status,
         p_message    => l_message
@@ -358,12 +359,11 @@ BEGIN
 
     :status_code := CASE WHEN l_status = 'SUCCESS' THEN 201 ELSE 400 END;
 
-    HTP.P('{');
-    HTP.P('"status": "' || l_status || '",');
-    HTP.P('"message": "' || l_message || '",');
-    HTP.P('"invoiceId": ' || NVL(TO_CHAR(l_invoice_id), 'null') || ',');
-    HTP.P('"success": ' || CASE WHEN l_status = 'SUCCESS' THEN 'true' ELSE 'false' END);
-    HTP.P('}');
+    HTP.P('{"status": "' || l_status || '",'
+       || '"message": "' || l_message || '",'
+       || '"invoiceId": ' || NVL(TO_CHAR(l_invoice_id), 'null') || ','
+       || '"success": ' || CASE WHEN l_status = 'SUCCESS' THEN 'true' ELSE 'false' END
+       || '}');
 END;
 ]'
     );
