@@ -807,47 +807,56 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     const invoiceDate = values.invoiceDate?.format('YYYY-MM-DD') || '';
     const validLines = lines.filter(l => l.amount !== 0 || l.description);
 
-    return {
-      InvoiceNumber: values.invoiceNumber || '',
+    // Helper: remove empty string, null, undefined keys to keep JSON compact
+    const clean = (obj: Record<string, any>) => {
+      const result: Record<string, any> = {};
+      for (const [k, v] of Object.entries(obj)) {
+        if (v !== '' && v !== null && v !== undefined) result[k] = v;
+      }
+      return result;
+    };
+
+    return clean({
+      InvoiceNumber: values.invoiceNumber || null,
       InvoiceCurrency: values.invoiceCurrency || 'AED',
       PaymentCurrency: values.paymentCurrency || values.invoiceCurrency || 'AED',
       InvoiceAmount: values.invoiceAmount || 0,
-      InvoiceDate: invoiceDate,
-      BusinessUnit: values.businessUnit || '',
-      Supplier: values.supplier || '',
-      SupplierNumber: values.supplierNumber || '',
-      SupplierSite: values.supplierSite || '',
+      InvoiceDate: invoiceDate || null,
+      BusinessUnit: values.businessUnit || null,
+      Supplier: values.supplier || null,
+      SupplierNumber: values.supplierNumber || null,
+      SupplierSite: values.supplierSite || null,
       InvoiceType: values.invoiceType || 'Standard',
-      Description: values.description || '',
-      LegalEntity: values.legalEntity || '',
-      InvoiceGroup: values.invoiceGroup || '',
+      Description: values.description || null,
+      LegalEntity: values.legalEntity || null,
+      InvoiceGroup: values.invoiceGroup || null,
       InvoiceSource: 'MANUAL',
-      PaymentTerms: values.paymentTerms || '',
-      AccountingDate: invoiceDate,
-      TermsDate: values.termsDate?.format?.('YYYY-MM-DD') || '',
-      GoodsReceivedDate: values.goodsReceivedDate?.format?.('YYYY-MM-DD') || '',
-      PayGroup: values.payGroup || '',
-      PaymentMethod: values.paymentMethod || '',
+      PaymentTerms: values.paymentTerms || null,
+      AccountingDate: invoiceDate || null,
+      TermsDate: values.termsDate?.format?.('YYYY-MM-DD') || null,
+      GoodsReceivedDate: values.goodsReceivedDate?.format?.('YYYY-MM-DD') || null,
+      PayGroup: values.payGroup || null,
+      PaymentMethod: values.paymentMethod || null,
       PayAlone: values.payAlone || 'N',
-      lines: validLines.map(line => ({
+      lines: validLines.map(line => clean({
         LineNumber: line.lineNumber,
         LineType: line.type || 'Item',
         LineAmount: line.amount || 0,
-        Description: line.description || '',
-        AccountingDate: line.accountingDate || invoiceDate,
-        DistributionCombination: line.distributionCombination || '',
-        DistributionSet: line.distributionSet || '',
-        TaxClassification: line.taxClassification || '',
-        Quantity: line.quantity || 0,
-        UnitPrice: line.unitPrice || 0,
-        UOM: line.uomName || '',
-        PONumber: line.poNumber || '',
-        POLineNumber: line.poLine || '',
-        ReceiptNumber: line.receiptNumber || '',
-        ReceiptLineNumber: line.receiptLine || '',
-        ShipToLocation: line.shipToLocation || '',
+        Description: line.description || null,
+        AccountingDate: line.accountingDate || invoiceDate || null,
+        DistributionCombination: line.distributionCombination || null,
+        DistributionSet: line.distributionSet || null,
+        TaxClassification: line.taxClassification || null,
+        Quantity: line.quantity || null,
+        UnitPrice: line.unitPrice || null,
+        UOM: line.uomName || null,
+        PONumber: line.poNumber || null,
+        POLineNumber: line.poLine || null,
+        ReceiptNumber: line.receiptNumber || null,
+        ReceiptLineNumber: line.receiptLine || null,
+        ShipToLocation: line.shipToLocation || null,
       })),
-    };
+    });
   };
 
   // POST combined invoice (header + lines) to APEX
