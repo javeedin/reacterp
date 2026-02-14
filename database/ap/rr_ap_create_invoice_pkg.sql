@@ -103,15 +103,24 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CREATE_INVOICE_PKG AS
         l_payment_terms             VARCHAR2(50);
         l_payment_method            VARCHAR2(80);
         l_pay_alone_flag            VARCHAR2(1);
+        -- Accounting fields
+        l_liability_distribution    VARCHAR2(250);
+        l_conversion_rate_type      VARCHAR2(30);
+        l_conversion_date           DATE;
+        l_conversion_rate           NUMBER;
+        l_document_category         VARCHAR2(80);
+        l_voucher_number            VARCHAR2(50);
+        l_first_party_tax_reg_num   VARCHAR2(50);
+        l_supplier_tax_reg_num      VARCHAR2(50);
+        -- Validation
+        l_dup_count                 NUMBER;
+        l_dist_missing              VARCHAR2(4000);
         -- Lines
         l_line_count                NUMBER := 0;
         l_line_success              NUMBER := 0;
         l_line_error                NUMBER := 0;
         l_line_acct_date            DATE;
     BEGIN
-        -- Generate InvoiceId from sequence
-        SELECT RR_AP_INVOICES_ALL_SEQ.NEXTVAL INTO l_invoice_id FROM DUAL;
-
         -- Parse header fields from JSON
         l_invoice_number    := JSON_VALUE(p_json, '$.InvoiceNumber');
         l_invoice_currency  := NVL(JSON_VALUE(p_json, '$.InvoiceCurrency'), 'AED');
@@ -134,6 +143,15 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CREATE_INVOICE_PKG AS
             ELSE 'N'
         END;
 
+        -- Parse accounting fields
+        l_liability_distribution  := JSON_VALUE(p_json, '$.LiabilityDistribution');
+        l_conversion_rate_type    := JSON_VALUE(p_json, '$.ConversionRateType');
+        l_conversion_rate         := JSON_VALUE(p_json, '$.ConversionRate' RETURNING NUMBER);
+        l_document_category       := JSON_VALUE(p_json, '$.DocumentCategory');
+        l_voucher_number          := JSON_VALUE(p_json, '$.VoucherNumber');
+        l_first_party_tax_reg_num := JSON_VALUE(p_json, '$.FirstPartyTaxRegistrationNumber');
+        l_supplier_tax_reg_num    := JSON_VALUE(p_json, '$.SupplierTaxRegistrationNumber');
+
         -- Parse dates
         BEGIN
             l_invoice_date := TO_DATE(JSON_VALUE(p_json, '$.InvoiceDate'), 'YYYY-MM-DD');
@@ -154,6 +172,57 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CREATE_INVOICE_PKG AS
             l_goods_received_date := TO_DATE(JSON_VALUE(p_json, '$.GoodsReceivedDate'), 'YYYY-MM-DD');
         EXCEPTION WHEN OTHERS THEN l_goods_received_date := NULL;
         END;
+
+        BEGIN
+            l_conversion_date := TO_DATE(JSON_VALUE(p_json, '$.ConversionDate'), 'YYYY-MM-DD');
+        EXCEPTION WHEN OTHERS THEN l_conversion_date := NULL;
+        END;
+
+        -- ========== VALIDATIONS ==========
+
+        -- 1. Invoice number must be unique
+        IF l_invoice_number IS NOT NULL THEN
+            SELECT COUNT(*) INTO l_dup_count
+            FROM RR_AP_INVOICES_ALL
+            WHERE INVOICE_NUMBER = l_invoice_number
+              AND SUPPLIER_NUMBER = l_supplier_number;
+
+            IF l_dup_count > 0 THEN
+                p_invoice_id := NULL;
+                p_status := 'ERROR';
+                p_message := 'Invoice number "' || l_invoice_number || '" already exists for this supplier. Please use a unique invoice number.';
+                RETURN;
+            END IF;
+        END IF;
+
+        -- 2. Every Item line must have a distribution combination
+        FOR rec IN (
+            SELECT jt.*
+            FROM JSON_TABLE(p_json, '$.lines[*]'
+                COLUMNS (
+                    line_number             NUMBER          PATH '$.LineNumber',
+                    line_type               VARCHAR2(50)    PATH '$.LineType',
+                    distribution_combination VARCHAR2(500)  PATH '$.DistributionCombination',
+                    distribution_set        VARCHAR2(240)   PATH '$.DistributionSet'
+                )
+            ) jt
+        ) LOOP
+            IF NVL(rec.line_type, 'Item') = 'Item'
+               AND rec.distribution_combination IS NULL
+               AND rec.distribution_set IS NULL THEN
+                l_dist_missing := l_dist_missing || rec.line_number || ', ';
+            END IF;
+        END LOOP;
+
+        IF l_dist_missing IS NOT NULL THEN
+            p_invoice_id := NULL;
+            p_status := 'ERROR';
+            p_message := 'Distribution is required for Item line(s): ' || RTRIM(l_dist_missing, ', ');
+            RETURN;
+        END IF;
+
+        -- Generate InvoiceId from sequence
+        SELECT RR_AP_INVOICES_ALL_SEQ.NEXTVAL INTO l_invoice_id FROM DUAL;
 
         -- ========== INSERT HEADER ==========
         INSERT INTO RR_AP_INVOICES_ALL (
@@ -179,6 +248,14 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CREATE_INVOICE_PKG AS
             PAYMENT_TERMS,
             PAYMENT_METHOD,
             PAY_ALONE_FLAG,
+            LIABILITY_DISTRIBUTION,
+            CONVERSION_RATE_TYPE,
+            CONVERSION_DATE,
+            CONVERSION_RATE,
+            DOCUMENT_CATEGORY,
+            VOUCHER_NUMBER,
+            FIRST_PARTY_TAX_REGISTRATION_NUM,
+            SUPPLIER_TAX_REGISTRATION_NUMBER,
             VALIDATION_STATUS,
             APPROVAL_STATUS,
             PAID_STATUS,
@@ -209,6 +286,14 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CREATE_INVOICE_PKG AS
             l_payment_terms,
             l_payment_method,
             l_pay_alone_flag,
+            l_liability_distribution,
+            l_conversion_rate_type,
+            l_conversion_date,
+            l_conversion_rate,
+            l_document_category,
+            l_voucher_number,
+            l_first_party_tax_reg_num,
+            l_supplier_tax_reg_num,
             'Needs Revalidation',
             'Required',
             'Unpaid',
@@ -451,6 +536,14 @@ Content-Type: application/json
     "PaymentTerms": "Immediate",
     "PayGroup": "Standard",
     "PayAlone": "N",
+    "LiabilityDistribution": "01-000-2100-0000-000",
+    "ConversionRateType": "Corporate",
+    "ConversionDate": "2026-02-14",
+    "ConversionRate": 1.0,
+    "DocumentCategory": "Standard Invoices",
+    "VoucherNumber": "V-001",
+    "FirstPartyTaxRegistrationNumber": "100123456700003",
+    "SupplierTaxRegistrationNumber": "300987654321234",
     "lines": [
         {
             "LineNumber": 1,
@@ -473,11 +566,27 @@ Content-Type: application/json
     ]
 }
 
-Expected Response:
+Expected Response (success):
 {
     "status": "SUCCESS",
-    "message": "Invoice TEST-INV-001 created (ID: 900001) with 2 lines",
+    "message": "Invoice TEST-INV-001 created (ID: 900001) with 2 lines [json=... bytes, parsed=2 lines]",
     "invoiceId": 900001,
     "success": true
+}
+
+Expected Response (duplicate invoice number):
+{
+    "status": "ERROR",
+    "message": "Invoice number \"TEST-INV-001\" already exists for this supplier. Please use a unique invoice number.",
+    "invoiceId": null,
+    "success": false
+}
+
+Expected Response (missing distribution on lines):
+{
+    "status": "ERROR",
+    "message": "Distribution is required for Item line(s): 1",
+    "invoiceId": null,
+    "success": false
 }
 */

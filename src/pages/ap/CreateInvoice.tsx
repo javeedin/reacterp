@@ -53,6 +53,8 @@ import {
   CreditCardOutlined,
   LoadingOutlined,
   ApiOutlined,
+  AccountBookOutlined,
+  AppstoreOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { APEX_DB_CONFIG } from '../../config/api.config';
@@ -839,6 +841,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       return result;
     };
 
+    const accountingDate = values.accountingDate?.format?.('YYYY-MM-DD') || invoiceDate || null;
+
     const payload = clean({
       InvoiceNumber: values.invoiceNumber || null,
       InvoiceCurrency: values.invoiceCurrency || 'AED',
@@ -855,12 +859,21 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       InvoiceGroup: values.invoiceGroup || null,
       InvoiceSource: 'MANUAL',
       PaymentTerms: values.paymentTerms || null,
-      AccountingDate: invoiceDate || null,
+      AccountingDate: accountingDate,
       TermsDate: values.termsDate?.format?.('YYYY-MM-DD') || null,
       GoodsReceivedDate: values.goodsReceivedDate?.format?.('YYYY-MM-DD') || null,
       PayGroup: values.payGroup || null,
       PaymentMethod: values.paymentMethod || null,
       PayAlone: (values.payAlone === 'Yes' || values.payAlone === 'Y') ? 'Y' : 'N',
+      // Accounting tab fields
+      LiabilityDistribution: values.liabilityDistribution || null,
+      ConversionRateType: values.conversionRateType || null,
+      ConversionDate: values.conversionDate?.format?.('YYYY-MM-DD') || null,
+      ConversionRate: values.conversionRate || null,
+      DocumentCategory: values.documentCategory || null,
+      VoucherNumber: values.voucherNumber || null,
+      FirstPartyTaxRegistrationNumber: values.firstPartyTaxRegistrationNumber || null,
+      SupplierTaxRegistrationNumber: values.supplierTaxRegistrationNumber || null,
     });
 
     // Always include lines array (even if empty) so PL/SQL JSON_TABLE can parse it
@@ -1431,223 +1444,348 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               }
             }}
           >
-            <Row gutter={32}>
-              {/* Column 1 */}
-              <Col span={8}>
-                <Form.Item
-                  label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Business Unit</Text>}
-                  name="businessUnit"
-                  rules={[{ required: true, message: 'Required' }]}
-                  style={{ marginBottom: 10 }}
-                >
-                  <Select placeholder="Select Business Unit" showSearch allowClear>
-                    <Option value="BUIMERC CORP FZE_JAFZA">BUIMERC CORP FZE_JAFZA</Option>
-                    <Option value="BUIMERC CORP_DIFC_INVST">BUIMERC CORP_DIFC_INVST</Option>
-                  </Select>
-                </Form.Item>
-                <Form.Item
-                  label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Invoice Number</Text>}
-                  name="invoiceNumber"
-                  rules={[{ required: true, message: 'Required' }]}
-                  style={{ marginBottom: 10 }}
-                >
-                  <Input placeholder="Enter invoice number" />
-                </Form.Item>
-                <Form.Item
-                  label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Invoice Currency</Text>}
-                  name="invoiceCurrency"
-                  rules={[{ required: true, message: 'Required' }]}
-                  style={{ marginBottom: 10 }}
-                >
-                  <Select showSearch optionFilterProp="children" placeholder="Select currency">
-                    {CURRENCIES.map((c) => (
-                      <Option key={c.code} value={c.code}>{c.code} - {c.name}</Option>
-                    ))}
-                  </Select>
-                </Form.Item>
-                <Form.Item
-                  label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Amount</Text>}
-                  name="invoiceAmount"
-                  rules={[{ required: true, message: 'Required' }]}
-                  style={{ marginBottom: 10 }}
-                >
-                  <InputNumber
-                    style={{ width: '100%' }}
-                    placeholder="0.00"
-                    precision={2}
-                    formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-                    parser={(value) => value!.replace(/,/g, '') as any}
-                  />
-                </Form.Item>
-                <Form.Item
-                  label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Invoice Date</Text>}
-                  name="invoiceDate"
-                  rules={[{ required: true, message: 'Required' }]}
-                  style={{ marginBottom: 10 }}
-                >
-                  <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
-                </Form.Item>
-                <Form.Item
-                  label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Legal Entity</Text>}
-                  name="legalEntity"
-                  style={{ marginBottom: 10 }}
-                >
-                  <Select placeholder="Select entity" allowClear showSearch>
-                    <Option value="BUIMERC CORP FZE">BUIMERC CORP FZE</Option>
-                    <Option value="BUIMERC CORP DIFC">BUIMERC CORP DIFC</Option>
-                  </Select>
-                </Form.Item>
-              </Col>
-
-              {/* Column 2 */}
-              <Col span={8}>
-                <Form.Item
-                  label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Supplier</Text>}
-                  required
-                  style={{ marginBottom: 10 }}
-                >
-                  <Space.Compact style={{ width: '100%' }}>
-                    <Form.Item name="supplier" noStyle rules={[{ required: true, message: 'Required' }]}>
-                      <Input
-                        placeholder="Search supplier..."
-                        readOnly
-                        suffix={
-                          <SearchOutlined
-                            style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 14 }}
-                            onClick={openSupplierModal}
+            <Tabs
+              defaultActiveKey="general"
+              size="small"
+              style={{ marginBottom: 8 }}
+              items={[
+                {
+                  key: 'general',
+                  label: (
+                    <Space size={4}>
+                      <AppstoreOutlined />
+                      <span>General</span>
+                    </Space>
+                  ),
+                  children: (
+                    <Row gutter={32}>
+                      {/* Column 1 */}
+                      <Col span={8}>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Business Unit</Text>}
+                          name="businessUnit"
+                          rules={[{ required: true, message: 'Required' }]}
+                          style={{ marginBottom: 10 }}
+                        >
+                          <Select placeholder="Select Business Unit" showSearch allowClear>
+                            <Option value="BUIMERC CORP FZE_JAFZA">BUIMERC CORP FZE_JAFZA</Option>
+                            <Option value="BUIMERC CORP_DIFC_INVST">BUIMERC CORP_DIFC_INVST</Option>
+                          </Select>
+                        </Form.Item>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Invoice Number</Text>}
+                          name="invoiceNumber"
+                          rules={[{ required: true, message: 'Required' }]}
+                          style={{ marginBottom: 10 }}
+                        >
+                          <Input placeholder="Enter invoice number" />
+                        </Form.Item>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Invoice Currency</Text>}
+                          name="invoiceCurrency"
+                          rules={[{ required: true, message: 'Required' }]}
+                          style={{ marginBottom: 10 }}
+                        >
+                          <Select showSearch optionFilterProp="children" placeholder="Select currency">
+                            {CURRENCIES.map((c) => (
+                              <Option key={c.code} value={c.code}>{c.code} - {c.name}</Option>
+                            ))}
+                          </Select>
+                        </Form.Item>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Amount</Text>}
+                          name="invoiceAmount"
+                          rules={[{ required: true, message: 'Required' }]}
+                          style={{ marginBottom: 10 }}
+                        >
+                          <InputNumber
+                            style={{ width: '100%' }}
+                            placeholder="0.00"
+                            precision={2}
+                            formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                            parser={(value) => value!.replace(/,/g, '') as any}
                           />
-                        }
-                        onClick={openSupplierModal}
-                        style={{ cursor: 'pointer', flex: 1 }}
-                      />
-                    </Form.Item>
-                    <Tooltip title="Check Balance">
-                      <Button
-                        icon={<WalletOutlined />}
-                        onClick={handleCheckBalance}
-                        style={{ borderColor: REDWOOD.info, color: REDWOOD.info }}
-                      />
-                    </Tooltip>
-                  </Space.Compact>
-                </Form.Item>
-                <Form.Item name="supplierNumber" hidden>
-                  <Input />
-                </Form.Item>
-                <Form.Item
-                  label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Supplier Site</Text>}
-                  name="supplierSite"
-                  style={{ marginBottom: 10 }}
-                >
-                  <Select placeholder="Select site" allowClear>
-                    <Option value="SHARJAH">SHARJAH</Option>
-                    <Option value="DUBAI">DUBAI</Option>
-                    <Option value="ABU DHABI">ABU DHABI</Option>
-                  </Select>
-                </Form.Item>
-                <Form.Item
-                  label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Type</Text>}
-                  name="invoiceType"
-                  rules={[{ required: true, message: 'Required' }]}
-                  style={{ marginBottom: 10 }}
-                >
-                  <Select>
-                    <Option value="Standard">Standard</Option>
-                    <Option value="Prepayment">Prepayment</Option>
-                    <Option value="Debit Memo">Debit Memo</Option>
-                    <Option value="Credit Memo">Credit Memo</Option>
-                  </Select>
-                </Form.Item>
-                <Form.Item
-                  label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Payment Currency</Text>}
-                  name="paymentCurrency"
-                  style={{ marginBottom: 10 }}
-                >
-                  <Select showSearch optionFilterProp="children">
-                    {CURRENCIES.map((c) => (
-                      <Option key={c.code} value={c.code}>{c.code} - {c.name}</Option>
-                    ))}
-                  </Select>
-                </Form.Item>
-                <Form.Item
-                  label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Pay Group</Text>}
-                  name="payGroup"
-                  style={{ marginBottom: 10 }}
-                >
-                  <Select placeholder="Select pay group" allowClear>
-                    <Option value="Standard">Standard</Option>
-                    <Option value="Urgent">Urgent</Option>
-                    <Option value="Manual">Manual</Option>
-                  </Select>
-                </Form.Item>
-                <Form.Item
-                  label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Pay Alone</Text>}
-                  name="payAlone"
-                  style={{ marginBottom: 10 }}
-                >
-                  <Select>
-                    <Option value="No">No</Option>
-                    <Option value="Yes">Yes</Option>
-                  </Select>
-                </Form.Item>
-              </Col>
+                        </Form.Item>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Invoice Date</Text>}
+                          name="invoiceDate"
+                          rules={[{ required: true, message: 'Required' }]}
+                          style={{ marginBottom: 10 }}
+                        >
+                          <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
+                        </Form.Item>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Legal Entity</Text>}
+                          name="legalEntity"
+                          style={{ marginBottom: 10 }}
+                        >
+                          <Select placeholder="Select entity" allowClear showSearch>
+                            <Option value="BUIMERC CORP FZE">BUIMERC CORP FZE</Option>
+                            <Option value="BUIMERC CORP DIFC">BUIMERC CORP DIFC</Option>
+                          </Select>
+                        </Form.Item>
+                      </Col>
 
-              {/* Column 3 */}
-              <Col span={8}>
-                <Form.Item
-                  label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Description</Text>}
-                  name="description"
-                  style={{ marginBottom: 10 }}
-                >
-                  <TextArea rows={2} placeholder="Enter description" />
-                </Form.Item>
-                <Form.Item
-                  label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Invoice Group</Text>}
-                  name="invoiceGroup"
-                  style={{ marginBottom: 10 }}
-                >
-                  <Input placeholder="Enter group" />
-                </Form.Item>
-                <Form.Item
-                  label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Payment Terms</Text>}
-                  name="paymentTerms"
-                  rules={[{ required: true, message: 'Required' }]}
-                  style={{ marginBottom: 10 }}
-                >
-                  <Select placeholder="Select terms" allowClear showSearch>
-                    <Option value="Immediate">Immediate</Option>
-                    <Option value="Net 15">Net 15</Option>
-                    <Option value="Net 30">Net 30</Option>
-                    <Option value="Net 45">Net 45</Option>
-                    <Option value="Net 60">Net 60</Option>
-                    <Option value="Net 90">Net 90</Option>
-                  </Select>
-                </Form.Item>
-                <Form.Item
-                  label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Terms Date</Text>}
-                  name="termsDate"
-                  style={{ marginBottom: 10 }}
-                >
-                  <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
-                </Form.Item>
-                <Form.Item
-                  label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Goods Received Date</Text>}
-                  name="goodsReceivedDate"
-                  style={{ marginBottom: 10 }}
-                >
-                  <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
-                </Form.Item>
-                <Form.Item
-                  label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Calculate Tax</Text>}
-                  name="calculateTax"
-                  style={{ marginBottom: 10 }}
-                >
-                  <Select>
-                    <Option value="Yes">Yes</Option>
-                    <Option value="No">No</Option>
-                  </Select>
-                </Form.Item>
-              </Col>
-            </Row>
+                      {/* Column 2 */}
+                      <Col span={8}>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Supplier</Text>}
+                          required
+                          style={{ marginBottom: 10 }}
+                        >
+                          <Space.Compact style={{ width: '100%' }}>
+                            <Form.Item name="supplier" noStyle rules={[{ required: true, message: 'Required' }]}>
+                              <Input
+                                placeholder="Search supplier..."
+                                readOnly
+                                suffix={
+                                  <SearchOutlined
+                                    style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 14 }}
+                                    onClick={openSupplierModal}
+                                  />
+                                }
+                                onClick={openSupplierModal}
+                                style={{ cursor: 'pointer', flex: 1 }}
+                              />
+                            </Form.Item>
+                            <Tooltip title="Check Balance">
+                              <Button
+                                icon={<WalletOutlined />}
+                                onClick={handleCheckBalance}
+                                style={{ borderColor: REDWOOD.info, color: REDWOOD.info }}
+                              />
+                            </Tooltip>
+                          </Space.Compact>
+                        </Form.Item>
+                        <Form.Item name="supplierNumber" hidden>
+                          <Input />
+                        </Form.Item>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Supplier Site</Text>}
+                          name="supplierSite"
+                          style={{ marginBottom: 10 }}
+                        >
+                          <Select placeholder="Select site" allowClear>
+                            <Option value="SHARJAH">SHARJAH</Option>
+                            <Option value="DUBAI">DUBAI</Option>
+                            <Option value="ABU DHABI">ABU DHABI</Option>
+                          </Select>
+                        </Form.Item>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Type</Text>}
+                          name="invoiceType"
+                          rules={[{ required: true, message: 'Required' }]}
+                          style={{ marginBottom: 10 }}
+                        >
+                          <Select>
+                            <Option value="Standard">Standard</Option>
+                            <Option value="Prepayment">Prepayment</Option>
+                            <Option value="Debit Memo">Debit Memo</Option>
+                            <Option value="Credit Memo">Credit Memo</Option>
+                          </Select>
+                        </Form.Item>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Payment Currency</Text>}
+                          name="paymentCurrency"
+                          style={{ marginBottom: 10 }}
+                        >
+                          <Select showSearch optionFilterProp="children">
+                            {CURRENCIES.map((c) => (
+                              <Option key={c.code} value={c.code}>{c.code} - {c.name}</Option>
+                            ))}
+                          </Select>
+                        </Form.Item>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Pay Group</Text>}
+                          name="payGroup"
+                          style={{ marginBottom: 10 }}
+                        >
+                          <Select placeholder="Select pay group" allowClear>
+                            <Option value="Standard">Standard</Option>
+                            <Option value="Urgent">Urgent</Option>
+                            <Option value="Manual">Manual</Option>
+                          </Select>
+                        </Form.Item>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Pay Alone</Text>}
+                          name="payAlone"
+                          style={{ marginBottom: 10 }}
+                        >
+                          <Select>
+                            <Option value="No">No</Option>
+                            <Option value="Yes">Yes</Option>
+                          </Select>
+                        </Form.Item>
+                      </Col>
+
+                      {/* Column 3 */}
+                      <Col span={8}>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Description</Text>}
+                          name="description"
+                          style={{ marginBottom: 10 }}
+                        >
+                          <TextArea rows={2} placeholder="Enter description" />
+                        </Form.Item>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Invoice Group</Text>}
+                          name="invoiceGroup"
+                          style={{ marginBottom: 10 }}
+                        >
+                          <Input placeholder="Enter group" />
+                        </Form.Item>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Payment Terms</Text>}
+                          name="paymentTerms"
+                          rules={[{ required: true, message: 'Required' }]}
+                          style={{ marginBottom: 10 }}
+                        >
+                          <Select placeholder="Select terms" allowClear showSearch>
+                            <Option value="Immediate">Immediate</Option>
+                            <Option value="Net 15">Net 15</Option>
+                            <Option value="Net 30">Net 30</Option>
+                            <Option value="Net 45">Net 45</Option>
+                            <Option value="Net 60">Net 60</Option>
+                            <Option value="Net 90">Net 90</Option>
+                          </Select>
+                        </Form.Item>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Terms Date</Text>}
+                          name="termsDate"
+                          style={{ marginBottom: 10 }}
+                        >
+                          <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
+                        </Form.Item>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Goods Received Date</Text>}
+                          name="goodsReceivedDate"
+                          style={{ marginBottom: 10 }}
+                        >
+                          <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
+                        </Form.Item>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Calculate Tax</Text>}
+                          name="calculateTax"
+                          style={{ marginBottom: 10 }}
+                        >
+                          <Select>
+                            <Option value="Yes">Yes</Option>
+                            <Option value="No">No</Option>
+                          </Select>
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                  ),
+                },
+                {
+                  key: 'accounting',
+                  label: (
+                    <Space size={4}>
+                      <AccountBookOutlined />
+                      <span>Accounting</span>
+                    </Space>
+                  ),
+                  children: (
+                    <Row gutter={32}>
+                      {/* Column 1 */}
+                      <Col span={8}>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Accounting Date</Text>}
+                          name="accountingDate"
+                          style={{ marginBottom: 10 }}
+                        >
+                          <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
+                        </Form.Item>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Liability Distribution</Text>}
+                          name="liabilityDistribution"
+                          style={{ marginBottom: 10 }}
+                        >
+                          <Input placeholder="e.g. 01-000-2100-0000-000" />
+                        </Form.Item>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Document Category</Text>}
+                          name="documentCategory"
+                          style={{ marginBottom: 10 }}
+                        >
+                          <Select placeholder="Select category" allowClear showSearch>
+                            <Option value="Standard Invoices">Standard Invoices</Option>
+                            <Option value="Credit Memos">Credit Memos</Option>
+                            <Option value="Prepayments">Prepayments</Option>
+                          </Select>
+                        </Form.Item>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Voucher Number</Text>}
+                          name="voucherNumber"
+                          style={{ marginBottom: 10 }}
+                        >
+                          <Input placeholder="Enter voucher number" />
+                        </Form.Item>
+                      </Col>
+
+                      {/* Column 2 */}
+                      <Col span={8}>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Conversion Rate Type</Text>}
+                          name="conversionRateType"
+                          style={{ marginBottom: 10 }}
+                        >
+                          <Select placeholder="Select rate type" allowClear>
+                            <Option value="User">User</Option>
+                            <Option value="Corporate">Corporate</Option>
+                            <Option value="Spot">Spot</Option>
+                          </Select>
+                        </Form.Item>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Conversion Date</Text>}
+                          name="conversionDate"
+                          style={{ marginBottom: 10 }}
+                        >
+                          <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
+                        </Form.Item>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Conversion Rate</Text>}
+                          name="conversionRate"
+                          style={{ marginBottom: 10 }}
+                        >
+                          <InputNumber style={{ width: '100%' }} placeholder="0.000000" precision={6} min={0} />
+                        </Form.Item>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Inverse Rate</Text>}
+                          style={{ marginBottom: 10 }}
+                        >
+                          <InputNumber
+                            style={{ width: '100%' }}
+                            placeholder="Auto-calculated"
+                            precision={6}
+                            disabled
+                            value={headerValues?.conversionRate ? (1 / headerValues.conversionRate) : undefined}
+                          />
+                        </Form.Item>
+                      </Col>
+
+                      {/* Column 3 */}
+                      <Col span={8}>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>First-Party Tax Reg No.</Text>}
+                          name="firstPartyTaxRegistrationNumber"
+                          style={{ marginBottom: 10 }}
+                        >
+                          <Input placeholder="Enter registration number" />
+                        </Form.Item>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Supplier Tax Reg No.</Text>}
+                          name="supplierTaxRegistrationNumber"
+                          style={{ marginBottom: 10 }}
+                        >
+                          <Input placeholder="Enter registration number" />
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                  ),
+                },
+              ]}
+            />
           </Form>
         </Card>
 
