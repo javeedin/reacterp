@@ -806,6 +806,23 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const buildInvoicePayload = (values: any) => {
     const invoiceDate = values.invoiceDate?.format('YYYY-MM-DD') || '';
 
+    // Convert DD-MMM-YYYY (display format) to YYYY-MM-DD (API format)
+    const toISODate = (dateStr: string): string | null => {
+      if (!dateStr) return null;
+      // Already in YYYY-MM-DD format
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+      // Convert DD-MMM-YYYY → YYYY-MM-DD
+      const months: Record<string, string> = {
+        Jan: '01', Feb: '02', Mar: '03', Apr: '04', May: '05', Jun: '06',
+        Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12',
+      };
+      const parts = dateStr.split('-');
+      if (parts.length === 3 && months[parts[1]]) {
+        return `${parts[2]}-${months[parts[1]]}-${parts[0].padStart(2, '0')}`;
+      }
+      return dateStr;
+    };
+
     // Keep every line the user has in the grid (only drop truly blank rows)
     const validLines = lines.filter(l =>
       l.amount !== 0 || l.description || l.distributionCombination ||
@@ -852,7 +869,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       LineType: line.type || 'Item',
       LineAmount: line.amount ?? 0,
       Description: line.description || null,
-      AccountingDate: line.accountingDate || invoiceDate || null,
+      AccountingDate: toISODate(line.accountingDate) || invoiceDate || null,
       DistributionCombination: line.distributionCombination || null,
       DistributionSet: line.distributionSet || null,
       TaxClassification: line.taxClassification || null,

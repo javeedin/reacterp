@@ -107,6 +107,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CREATE_INVOICE_PKG AS
         l_line_count                NUMBER := 0;
         l_line_success              NUMBER := 0;
         l_line_error                NUMBER := 0;
+        l_line_acct_date            DATE;
     BEGIN
         -- Generate InvoiceId from sequence
         SELECT RR_AP_INVOICES_ALL_SEQ.NEXTVAL INTO l_invoice_id FROM DUAL;
@@ -240,6 +241,17 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CREATE_INVOICE_PKG AS
         ) LOOP
             l_line_count := l_line_count + 1;
 
+            -- Parse line accounting date (try multiple formats)
+            BEGIN
+                l_line_acct_date := TO_DATE(rec.accounting_date, 'YYYY-MM-DD');
+            EXCEPTION WHEN OTHERS THEN
+                BEGIN
+                    l_line_acct_date := TO_DATE(rec.accounting_date, 'DD-Mon-YYYY');
+                EXCEPTION WHEN OTHERS THEN
+                    l_line_acct_date := l_invoice_date;
+                END;
+            END;
+
             BEGIN
                 INSERT INTO RR_AP_INVOICE_LINES_ALL (
                     INVOICE_ID,
@@ -270,7 +282,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CREATE_INVOICE_PKG AS
                     NVL(rec.line_type, 'Item'),
                     rec.line_amount,
                     rec.description,
-                    NVL(TO_DATE(rec.accounting_date, 'YYYY-MM-DD'), l_invoice_date),
+                    NVL(l_line_acct_date, l_invoice_date),
                     rec.distribution_combination,
                     rec.distribution_set,
                     rec.tax_classification,
@@ -298,12 +310,14 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CREATE_INVOICE_PKG AS
             COMMIT;
             p_invoice_id := l_invoice_id;
             p_status := 'SUCCESS';
-            p_message := 'Invoice ' || l_invoice_number || ' created (ID: ' || l_invoice_id || ') with ' || l_line_success || ' lines';
+            p_message := 'Invoice ' || l_invoice_number || ' created (ID: ' || l_invoice_id || ') with ' || l_line_success || ' lines'
+                      || ' [json=' || NVL(DBMS_LOB.GETLENGTH(p_json), 0) || ' bytes, parsed=' || l_line_count || ' lines]';
         ELSE
             ROLLBACK;
             p_invoice_id := NULL;
             p_status := 'ERROR';
-            p_message := 'Invoice creation rolled back. ' || l_line_error || ' of ' || l_line_count || ' lines failed';
+            p_message := 'Invoice creation rolled back. ' || l_line_error || ' of ' || l_line_count || ' lines failed'
+                      || ' [json=' || NVL(DBMS_LOB.GETLENGTH(p_json), 0) || ' bytes]';
         END IF;
 
     EXCEPTION
@@ -345,11 +359,34 @@ BEGIN
         p_comments       => 'Create AP Invoice (header + lines) from single JSON',
         p_source         => q'[
 DECLARE
-    l_clob          CLOB := :body_text;
+    l_blob          BLOB := :body;
+    l_clob          CLOB;
+    l_dest_offset   INTEGER := 1;
+    l_src_offset    INTEGER := 1;
+    l_lang_context  INTEGER := DBMS_LOB.DEFAULT_LANG_CTX;
+    l_warning       INTEGER;
     l_invoice_id    NUMBER;
     l_status        VARCHAR2(20);
     l_message       VARCHAR2(4000);
 BEGIN
+    -- Convert BLOB to CLOB (avoids :body_text VARCHAR2 truncation)
+    IF l_blob IS NOT NULL AND DBMS_LOB.GETLENGTH(l_blob) > 0 THEN
+        DBMS_LOB.CREATETEMPORARY(l_clob, TRUE);
+        DBMS_LOB.CONVERTTOCLOB(
+            dest_lob     => l_clob,
+            src_blob     => l_blob,
+            amount       => DBMS_LOB.LOBMAXSIZE,
+            dest_offset  => l_dest_offset,
+            src_offset   => l_src_offset,
+            blob_csid    => DBMS_LOB.DEFAULT_CSID,
+            lang_context => l_lang_context,
+            warning      => l_warning
+        );
+    ELSE
+        -- Fallback to :body_text if :body is empty
+        l_clob := :body_text;
+    END IF;
+
     RR_AP_CREATE_INVOICE_PKG.create_invoice(
         p_json       => l_clob,
         p_invoice_id => l_invoice_id,
@@ -364,6 +401,11 @@ BEGIN
        || '"invoiceId": ' || NVL(TO_CHAR(l_invoice_id), 'null') || ','
        || '"success": ' || CASE WHEN l_status = 'SUCCESS' THEN 'true' ELSE 'false' END
        || '}');
+
+    -- Free temporary CLOB
+    IF DBMS_LOB.ISTEMPORARY(l_clob) = 1 THEN
+        DBMS_LOB.FREETEMPORARY(l_clob);
+    END IF;
 END;
 ]'
     );
