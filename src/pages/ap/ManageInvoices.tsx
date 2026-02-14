@@ -52,6 +52,7 @@ import {
   CheckOutlined,
   CloudOutlined,
   DatabaseOutlined,
+  ExclamationCircleOutlined,
 } from '@ant-design/icons';
 import { Link, useLocation } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -458,6 +459,44 @@ const ManageInvoices: React.FC = () => {
         taxCode: values.taxCode,
         includingTax: values.includingTax || false,
       };
+
+      // If tax code is VAT 5% and "Including Tax" is not checked, suggest the correct amount
+      if (values.taxCode === 'VAT 5%' && !values.includingTax && values.invoiceAmount > 0) {
+        const taxRate = 5;
+        const taxAmount = Math.round(values.invoiceAmount * (taxRate / 100) * 100) / 100;
+        const correctedAmount = Math.round((values.invoiceAmount + taxAmount) * 100) / 100;
+
+        Modal.confirm({
+          title: 'Invoice Amount Does Not Include Tax',
+          icon: <ExclamationCircleOutlined style={{ color: '#faad14' }} />,
+          content: (
+            <div style={{ marginTop: 12 }}>
+              <p>The entered amount <strong>{values.invoiceAmount.toFixed(2)}</strong> does not include VAT 5%.</p>
+              <p>Correct amount with tax: <strong style={{ color: '#c74634', fontSize: 16 }}>{correctedAmount.toFixed(2)}</strong></p>
+              <p style={{ fontSize: 12, color: '#666' }}>
+                (Amount: {values.invoiceAmount.toFixed(2)} + VAT 5%: {taxAmount.toFixed(2)} = {correctedAmount.toFixed(2)})
+              </p>
+              <p>Would you like to use the corrected amount?</p>
+            </div>
+          ),
+          okText: 'Yes, use corrected amount',
+          cancelText: 'No, keep original',
+          onOk: () => {
+            initialData.invoiceAmount = correctedAmount;
+            initialData.includingTax = true;
+            setQuickCreateVisible(false);
+            quickCreateForm.resetFields();
+            openCreateInvoiceTab(initialData);
+          },
+          onCancel: () => {
+            setQuickCreateVisible(false);
+            quickCreateForm.resetFields();
+            openCreateInvoiceTab(initialData);
+          },
+        });
+        return;
+      }
+
       setQuickCreateVisible(false);
       quickCreateForm.resetFields();
       openCreateInvoiceTab(initialData);
@@ -520,9 +559,20 @@ const ManageInvoices: React.FC = () => {
   // Open create invoice tab (optionally with pre-filled data)
   const openCreateInvoiceTab = (data?: InvoiceInitialData) => {
     const tabKey = `create-invoice-${Date.now()}`;
+    // Build tab label: InvoiceNo + first 4 letters of supplier
+    let tabLabel = 'New Invoice';
+    if (data) {
+      const invNo = data.invoiceNumber || '';
+      const supplierShort = (data.supplier || '').substring(0, 4).toUpperCase();
+      if (invNo && supplierShort) {
+        tabLabel = `${invNo} - ${supplierShort}`;
+      } else if (invNo) {
+        tabLabel = invNo;
+      }
+    }
     const newTab: InvoiceTab = {
       key: tabKey,
-      label: 'New Invoice',
+      label: tabLabel,
       invoice: {} as InvoiceRecord,
       tabType: 'create',
       initialData: data,
@@ -1203,7 +1253,7 @@ const ManageInvoices: React.FC = () => {
     // Add open invoice tabs
     ...openTabs.map((tab) => ({
       key: tab.key,
-      label: tab.tabType === 'create' ? '+ New Invoice' : tab.label,
+      label: tab.label,
       closable: true,
       children: tab.tabType === 'create' ? (
         <CreateInvoice
