@@ -181,7 +181,7 @@ const mapApiToInvoiceRecord = (item: any, index: number): InvoiceRecord => ({
 const ManageInvoices: React.FC = () => {
   const [form] = Form.useForm();
   const location = useLocation();
-  const quickCreateHandled = useRef(false);
+  const quickCreateHandled = useRef<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
@@ -534,8 +534,10 @@ const ManageInvoices: React.FC = () => {
   // Handle quick-create from FloatingMenu or Autopilot navigation state
   useEffect(() => {
     const state = location.state as any;
-    if (!state?.quickCreate || quickCreateHandled.current) return;
-    quickCreateHandled.current = true;
+    if (!state?.quickCreate) return;
+    // Use location.key to allow repeated navigations (each navigate() gets a new key)
+    if (quickCreateHandled.current === location.key) return;
+    quickCreateHandled.current = location.key;
 
     if (state.quickCreateData) {
       // FloatingMenu flow: data already collected, open tab directly
@@ -551,7 +553,7 @@ const ManageInvoices: React.FC = () => {
     }
 
     window.history.replaceState({}, document.title);
-  }, [location.state]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [location.state, location.key]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Close invoice tab
   const closeInvoiceTab = (tabKey: string) => {
