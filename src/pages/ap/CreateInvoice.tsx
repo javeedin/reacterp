@@ -368,6 +368,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [apiPreviewVisible, setApiPreviewVisible] = useState(false);
   const [apiPreviewData, setApiPreviewData] = useState<{ url: string; body: string } | null>(null);
 
+  // API Log (last request/response)
+  const [apiLog, setApiLog] = useState<{ url: string; method: string; requestBody: string; responseBody: string; status: string; httpStatus: number; timestamp: string } | null>(null);
+
   // Pre-fill from initialData (Quick Create task)
   useEffect(() => {
     if (initialData) {
@@ -850,10 +853,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // POST combined invoice (header + lines) to APEX
   const saveInvoice = async (values: any): Promise<boolean> => {
     setSaving(true);
-    try {
-      const payload = buildInvoicePayload(values);
-      const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoicefull`;
+    const payload = buildInvoicePayload(values);
+    const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoicefull`;
+    const requestBody = JSON.stringify(payload, null, 2);
+    const timestamp = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
+    try {
       console.log('POST Invoice (Full):', url, payload);
 
       const response = await fetch(url, {
@@ -863,7 +868,19 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       });
 
       const data = await response.json();
+      const responseBody = JSON.stringify(data, null, 2);
       console.log('Invoice Response:', data);
+
+      // Update API log
+      setApiLog({
+        url,
+        method: 'POST',
+        requestBody,
+        responseBody,
+        status: data.status || 'UNKNOWN',
+        httpStatus: response.status,
+        timestamp,
+      });
 
       if (data.status !== 'SUCCESS' || !data.success) {
         message.error(`Failed: ${data.message || 'Unknown error'}`);
@@ -880,6 +897,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       console.error('Save invoice error:', error);
+      // Log the error
+      setApiLog({
+        url,
+        method: 'POST',
+        requestBody,
+        responseBody: JSON.stringify({ error: errorMsg }, null, 2),
+        status: 'NETWORK_ERROR',
+        httpStatus: 0,
+        timestamp,
+      });
       message.error(`Failed to save invoice: ${errorMsg}`);
       return false;
     } finally {
@@ -1851,6 +1878,101 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           </Col>
         </Row>
       </div>
+
+      {/* ========== API LOG PANEL ========== */}
+      {apiLog && (
+        <div style={{ padding: '0 24px 16px' }}>
+          <Card
+            size="small"
+            title={
+              <Row justify="space-between" align="middle">
+                <Space>
+                  <ApiOutlined style={{ color: apiLog.status === 'SUCCESS' ? REDWOOD.success : REDWOOD.error }} />
+                  <Text strong style={{ fontSize: 13 }}>API Log</Text>
+                  <Tag color={apiLog.status === 'SUCCESS' ? 'green' : 'red'}>{apiLog.httpStatus} {apiLog.status}</Tag>
+                  <Text type="secondary" style={{ fontSize: 11 }}>{apiLog.timestamp}</Text>
+                </Space>
+                <Space>
+                  <Button
+                    size="small"
+                    icon={<CopyOutlined />}
+                    onClick={() => {
+                      const curlCmd = `curl -X POST '${apiLog.url}' \\\n  -H 'Content-Type: application/json' \\\n  -d '${apiLog.requestBody.replace(/'/g, "'\\''")}'`;
+                      navigator.clipboard.writeText(curlCmd);
+                      message.success('cURL command copied');
+                    }}
+                  >
+                    Copy cURL
+                  </Button>
+                  <Button size="small" onClick={() => setApiLog(null)}>
+                    <CloseOutlined />
+                  </Button>
+                </Space>
+              </Row>
+            }
+            style={{ border: `1px solid ${apiLog.status === 'SUCCESS' ? '#b7eb8f' : '#ffa39e'}` }}
+          >
+            <Row gutter={12}>
+              {/* Request */}
+              <Col span={12}>
+                <Row justify="space-between" align="middle" style={{ marginBottom: 4 }}>
+                  <Text type="secondary" style={{ fontSize: 11 }}>
+                    <Tag color="blue" style={{ fontSize: 10 }}>POST</Tag> Request Body
+                  </Text>
+                  <Button
+                    size="small"
+                    type="link"
+                    icon={<CopyOutlined />}
+                    onClick={() => { navigator.clipboard.writeText(apiLog.requestBody); message.success('Request JSON copied'); }}
+                    style={{ fontSize: 11, padding: 0 }}
+                  >
+                    Copy
+                  </Button>
+                </Row>
+                <div style={{ marginBottom: 4 }}>
+                  <Text style={{ fontSize: 10, fontFamily: 'monospace', color: REDWOOD.info, wordBreak: 'break-all' }}>{apiLog.url}</Text>
+                </div>
+                <pre style={{
+                  background: '#1e1e1e', color: '#d4d4d4', padding: '8px 10px', borderRadius: 4,
+                  fontSize: 10, fontFamily: 'monospace', maxHeight: 200, overflow: 'auto', margin: 0,
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                }}>
+                  {apiLog.requestBody}
+                </pre>
+              </Col>
+              {/* Response */}
+              <Col span={12}>
+                <Row justify="space-between" align="middle" style={{ marginBottom: 4 }}>
+                  <Text type="secondary" style={{ fontSize: 11 }}>
+                    <Tag color={apiLog.status === 'SUCCESS' ? 'green' : 'red'} style={{ fontSize: 10 }}>{apiLog.httpStatus}</Tag> Response
+                  </Text>
+                  <Button
+                    size="small"
+                    type="link"
+                    icon={<CopyOutlined />}
+                    onClick={() => { navigator.clipboard.writeText(apiLog.responseBody); message.success('Response JSON copied'); }}
+                    style={{ fontSize: 11, padding: 0 }}
+                  >
+                    Copy
+                  </Button>
+                </Row>
+                <div style={{ marginBottom: 4 }}>
+                  <Text style={{ fontSize: 10, fontFamily: 'monospace', color: apiLog.status === 'SUCCESS' ? REDWOOD.success : REDWOOD.error }}>
+                    {apiLog.status === 'SUCCESS' ? 'Invoice created successfully' : 'Request failed'}
+                  </Text>
+                </div>
+                <pre style={{
+                  background: '#1e1e1e', color: apiLog.status === 'SUCCESS' ? '#4ec9b0' : '#f48771', padding: '8px 10px', borderRadius: 4,
+                  fontSize: 10, fontFamily: 'monospace', maxHeight: 200, overflow: 'auto', margin: 0,
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                }}>
+                  {apiLog.responseBody}
+                </pre>
+              </Col>
+            </Row>
+          </Card>
+        </div>
+      )}
 
       {/* ========== SUPPLIER SEARCH MODAL ========== */}
       <Modal
