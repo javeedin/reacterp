@@ -115,7 +115,6 @@ interface InvoiceLine {
   receiptLine: string;
   consumptionAdviceNumber: string;
   consumptionAdviceLine: string;
-  shipToLocation: string;
   startDate: string;
   endDate: string;
   accrualAccount: string;
@@ -206,7 +205,6 @@ const createBlankLine = (lineNumber: number): InvoiceLine => ({
   receiptLine: '',
   consumptionAdviceNumber: '',
   consumptionAdviceLine: '',
-  shipToLocation: '',
   startDate: '',
   endDate: '',
   accrualAccount: '',
