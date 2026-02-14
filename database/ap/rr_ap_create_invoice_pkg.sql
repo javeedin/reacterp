@@ -129,7 +129,10 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CREATE_INVOICE_PKG AS
         l_pay_group         := JSON_VALUE(p_json, '$.PayGroup');
         l_payment_terms     := JSON_VALUE(p_json, '$.PaymentTerms');
         l_payment_method    := JSON_VALUE(p_json, '$.PaymentMethod');
-        l_pay_alone_flag    := NVL(JSON_VALUE(p_json, '$.PayAlone'), 'N');
+        l_pay_alone_flag    := CASE
+            WHEN UPPER(JSON_VALUE(p_json, '$.PayAlone')) IN ('Y', 'YES') THEN 'Y'
+            ELSE 'N'
+        END;
 
         -- Parse dates
         BEGIN

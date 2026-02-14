@@ -860,7 +860,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       GoodsReceivedDate: values.goodsReceivedDate?.format?.('YYYY-MM-DD') || null,
       PayGroup: values.payGroup || null,
       PaymentMethod: values.paymentMethod || null,
-      PayAlone: values.payAlone || 'N',
+      PayAlone: (values.payAlone === 'Yes' || values.payAlone === 'Y') ? 'Y' : 'N',
     });
 
     // Always include lines array (even if empty) so PL/SQL JSON_TABLE can parse it
