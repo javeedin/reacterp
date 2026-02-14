@@ -49,6 +49,7 @@ import {
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { APEX_DB_CONFIG } from '../../config/api.config';
+import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
 
 const { Text, Title } = Typography;
 const { Option } = Select;
@@ -247,6 +248,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
   // Line selection
   const [selectedLineKeys, setSelectedLineKeys] = useState<React.Key[]>([]);
 
+  // Account Selector (Distribution Combination popup)
+  const [accountSelectorVisible, setAccountSelectorVisible] = useState(false);
+  const [editingLineKey, setEditingLineKey] = useState<string | null>(null);
+  const [accountSelectorInitialValue, setAccountSelectorInitialValue] = useState<string | undefined>(undefined);
+
   // Fetch suppliers
   const fetchSuppliers = async () => {
     setSupplierLoading(true);
@@ -350,6 +356,52 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
       })
     );
   }, []);
+
+  // Open account selector for a line
+  const openAccountSelector = (lineKey: string, initialValue?: string) => {
+    setEditingLineKey(lineKey);
+    setAccountSelectorInitialValue(initialValue);
+    setAccountSelectorVisible(true);
+  };
+
+  // Handle account code validation on blur
+  const handleAccountBlur = async (lineKey: string, accountCode: string) => {
+    if (!accountCode || accountCode.trim() === '' || !accountCode.includes('-')) return;
+
+    try {
+      const result = await validateAccountCode(accountCode);
+      if (!result.segmentsLoaded) {
+        message.info('Could not load segment data for validation.');
+        return;
+      }
+      if (!result.isValid) {
+        message.warning(`Invalid segment value(s): ${result.invalidSegments.join(', ')}. Please correct using the account selector.`);
+        setLines((prev) =>
+          prev.map((line) =>
+            line.key === lineKey ? { ...line, distributionCombination: result.validatedCode } : line
+          )
+        );
+        openAccountSelector(lineKey, result.validatedCode);
+      } else {
+        message.success('Account code validated successfully');
+      }
+    } catch (error) {
+      console.error('Error validating account code:', error);
+    }
+  };
+
+  // Handle account selection from popup
+  const handleAccountSelect = (accountCode: string, segments: Record<string, { value: string; description: string }>) => {
+    if (editingLineKey) {
+      setLines((prev) =>
+        prev.map((line) =>
+          line.key === editingLineKey ? { ...line, distributionCombination: accountCode } : line
+        )
+      );
+    }
+    setAccountSelectorVisible(false);
+    setEditingLineKey(null);
+  };
 
   // Totals
   const linesTotal = useMemo(() => {
@@ -582,15 +634,21 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
       title: 'Distribution Combination',
       dataIndex: 'distributionCombination',
       key: 'distributionCombination',
-      width: 210,
+      width: 250,
       render: (val: string, record: InvoiceLine) => (
         <Input
           size="small"
           value={val}
           onChange={(e) => updateLine(record.key, 'distributionCombination', e.target.value)}
+          onBlur={(e) => handleAccountBlur(record.key, e.target.value)}
           placeholder="e.g. 01-000-2100-0000-000"
           variant="borderless"
-          suffix={<SearchOutlined style={{ color: REDWOOD.neutral300, fontSize: 11 }} />}
+          suffix={
+            <SearchOutlined
+              style={{ color: REDWOOD.info, fontSize: 12, cursor: 'pointer' }}
+              onClick={() => openAccountSelector(record.key, val)}
+            />
+          }
         />
       ),
     },
@@ -1438,6 +1496,21 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave }) => {
           })}
         />
       </Modal>
+
+      {/* ========== ACCOUNT SELECTOR MODAL (Distribution Combination) ========== */}
+      <AccountSelector
+        visible={accountSelectorVisible}
+        onCancel={() => {
+          setAccountSelectorVisible(false);
+          setEditingLineKey(null);
+          setAccountSelectorInitialValue(undefined);
+        }}
+        onSelect={(accountCode, segments) => {
+          handleAccountSelect(accountCode, segments);
+          setAccountSelectorInitialValue(undefined);
+        }}
+        initialValue={accountSelectorInitialValue ?? (editingLineKey ? lines.find((l) => l.key === editingLineKey)?.distributionCombination : undefined)}
+      />
 
       <style>{`
         .ant-table-thead > tr > th {
