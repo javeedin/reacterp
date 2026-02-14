@@ -867,9 +867,34 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         body: JSON.stringify(payload),
       });
 
-      const data = await response.json();
-      const responseBody = JSON.stringify(data, null, 2);
-      console.log('Invoice Response:', data);
+      // Read response as text first (ORDS may return HTML error pages, not JSON)
+      const responseText = await response.text();
+      let data: any = null;
+      let responseBody = responseText;
+
+      try {
+        data = JSON.parse(responseText);
+        responseBody = JSON.stringify(data, null, 2);
+      } catch {
+        // Response is not JSON (e.g. ORDS PL/SQL error page)
+        data = null;
+      }
+      console.log('Invoice Response:', response.status, data || responseText);
+
+      // If response is not JSON or not OK, show the raw server error
+      if (!data) {
+        setApiLog({
+          url,
+          method: 'POST',
+          requestBody,
+          responseBody: responseText || '(empty response)',
+          status: 'SERVER_ERROR',
+          httpStatus: response.status,
+          timestamp,
+        });
+        message.error(`Server error (HTTP ${response.status}): Check API Log for details`);
+        return false;
+      }
 
       // Update API log
       setApiLog({
@@ -877,7 +902,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         method: 'POST',
         requestBody,
         responseBody,
-        status: data.status || 'UNKNOWN',
+        status: data.status || (response.ok ? 'SUCCESS' : 'ERROR'),
         httpStatus: response.status,
         timestamp,
       });
