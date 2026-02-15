@@ -368,7 +368,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   // Validation state
   const [isValidated, setIsValidated] = useState(false);
-  const [validationResults, setValidationResults] = useState<{ label: string; passed: boolean; detail?: string; action?: { label: string; onClick: () => void } }[]>([]);
+  const [validationResults, setValidationResults] = useState<{ label: string; passed: boolean; detail?: string; action?: { label: string; onClick: () => void }; subItems?: { label: string; detail?: string; action?: { label: string; onClick: () => void } }[] }[]>([]);
   const [validationModalVisible, setValidationModalVisible] = useState(false);
 
   // View Accounting modal
@@ -789,19 +789,31 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       detail: !liabilityDist ? 'Liability distribution is required' : undefined,
     });
 
-    // 3. Line distributions
-    const linesWithoutDist = lines.filter(
-      (l) => (l.type || 'Item') === 'Item' && !l.distributionCombination && !l.distributionSet
+    // 3. Line distributions — check every line that has data
+    const activeLines = lines.filter((l) => l.amount !== 0 || l.description);
+    const linesWithoutDist = activeLines.filter(
+      (l) => !l.distributionCombination && !l.distributionSet
     );
-    const hasLineData = lines.some((l) => l.amount !== 0 || l.description);
+    const hasLineData = activeLines.length > 0;
     results.push({
       label: 'Line distributions',
       passed: linesWithoutDist.length === 0 && hasLineData,
       detail: !hasLineData
         ? 'At least one line is required'
         : linesWithoutDist.length > 0
-        ? `Missing distribution on line(s): ${linesWithoutDist.map((l) => l.lineNumber).join(', ')}`
+        ? `${linesWithoutDist.length} line(s) missing distribution`
         : undefined,
+      subItems: linesWithoutDist.map((l) => ({
+        label: `Line ${l.lineNumber}`,
+        detail: `${l.description || l.type || 'Item'} — ${formatAmount(l.amount)}`,
+        action: {
+          label: 'Select Distribution',
+          onClick: () => {
+            setValidationModalVisible(false);
+            setTimeout(() => openAccountSelector(l.key, ''), 150);
+          },
+        },
+      })),
     });
 
     // 4. Invoice amount vs lines + tax tally
@@ -2427,6 +2439,41 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   >
                     {item.action.label}
                   </Button>
+                )}
+                {/* Sub-items: list each line missing distribution with individual fix actions */}
+                {item.subItems && item.subItems.length > 0 && (
+                  <div style={{ marginTop: 6, borderTop: '1px dashed #ffccc7', paddingTop: 6 }}>
+                    {item.subItems.map((sub, sIdx) => (
+                      <div
+                        key={sIdx}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '4px 0',
+                          borderBottom: sIdx < item.subItems!.length - 1 ? '1px solid #fff0ee' : 'none',
+                        }}
+                      >
+                        <div>
+                          <Text style={{ fontSize: 12, fontWeight: 600 }}>{sub.label}</Text>
+                          {sub.detail && (
+                            <Text style={{ fontSize: 11, color: REDWOOD.neutral600, marginLeft: 8 }}>{sub.detail}</Text>
+                          )}
+                        </div>
+                        {sub.action && (
+                          <Button
+                            size="small"
+                            type="primary"
+                            ghost
+                            style={{ fontSize: 11, height: 24, borderRadius: 4 }}
+                            onClick={sub.action.onClick}
+                          >
+                            {sub.action.label}
+                          </Button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
               <Tag color={item.passed ? 'success' : 'error'} style={{ marginLeft: 8 }}>
