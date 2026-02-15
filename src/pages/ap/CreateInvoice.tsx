@@ -366,6 +366,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // Saving state
   const [saving, setSaving] = useState(false);
 
+  // Validation state
+  const [isValidated, setIsValidated] = useState(false);
+  const [validationResults, setValidationResults] = useState<{ label: string; passed: boolean; detail?: string }[]>([]);
+  const [validationModalVisible, setValidationModalVisible] = useState(false);
+
   // API Preview modal
   const [apiPreviewVisible, setApiPreviewVisible] = useState(false);
   const [apiPreviewData, setApiPreviewData] = useState<{ url: string; body: string } | null>(null);
@@ -641,6 +646,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         return updated;
       })
     );
+    setIsValidated(false);
   }, []);
 
   // Open account selector for a line
@@ -678,7 +684,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   // Handle account selection from popup
   const handleAccountSelect = (accountCode: string, segments: Record<string, { value: string; description: string }>) => {
-    if (editingLineKey) {
+    if (editingLineKey === '__liability__') {
+      // Liability distribution (header)
+      form.setFieldValue('liabilityDistribution', accountCode);
+      setHeaderValues((prev) => ({ ...prev, liabilityDistribution: accountCode }));
+    } else if (editingLineKey) {
       setLines((prev) =>
         prev.map((line) =>
           line.key === editingLineKey ? { ...line, distributionCombination: accountCode } : line
@@ -759,10 +769,83 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   ];
 
   // Handle invoice action menu clicks
+  // Run all validations and show checklist
+  const runValidation = () => {
+    const values = form.getFieldsValue();
+    const results: { label: string; passed: boolean; detail?: string }[] = [];
+
+    // 1. Required header fields
+    const requiredFields = ['businessUnit', 'invoiceNumber', 'invoiceCurrency', 'invoiceAmount', 'invoiceDate', 'supplier', 'invoiceType', 'paymentTerms'];
+    const missingHeader = requiredFields.filter((f) => !values[f]);
+    results.push({
+      label: 'Required header fields',
+      passed: missingHeader.length === 0,
+      detail: missingHeader.length > 0 ? `Missing: ${missingHeader.join(', ')}` : undefined,
+    });
+
+    // 2. Liability Distribution
+    const liabilityDist = values.liabilityDistribution;
+    results.push({
+      label: 'Liability Distribution',
+      passed: !!liabilityDist && liabilityDist.trim() !== '',
+      detail: !liabilityDist ? 'Liability distribution is required' : undefined,
+    });
+
+    // 3. Line distributions
+    const linesWithoutDist = lines.filter(
+      (l) => (l.type || 'Item') === 'Item' && !l.distributionCombination && !l.distributionSet
+    );
+    const hasLineData = lines.some((l) => l.amount !== 0 || l.description);
+    results.push({
+      label: 'Line distributions',
+      passed: linesWithoutDist.length === 0 && hasLineData,
+      detail: !hasLineData
+        ? 'At least one line is required'
+        : linesWithoutDist.length > 0
+        ? `Missing distribution on line(s): ${linesWithoutDist.map((l) => l.lineNumber).join(', ')}`
+        : undefined,
+    });
+
+    // 4. Invoice amount vs lines tally
+    const hdrAmt = values.invoiceAmount || 0;
+    const tallyOk = linesTotal === 0 || Math.abs(hdrAmt - linesTotal) <= 0.01;
+    results.push({
+      label: 'Amount tally (Header vs Lines)',
+      passed: tallyOk,
+      detail: !tallyOk ? `Header: ${hdrAmt}, Lines: ${linesTotal}` : undefined,
+    });
+
+    // 5. Conversion rate for non-AED currency
+    const currency = values.invoiceCurrency || 'AED';
+    const convRate = values.conversionRate;
+    const needsRate = currency !== 'AED';
+    results.push({
+      label: 'Conversion rate (non-AED)',
+      passed: !needsRate || (!!convRate && convRate > 0),
+      detail: needsRate && !convRate ? `Currency is ${currency} — conversion rate is required` : undefined,
+    });
+
+    // 6. At least one line
+    results.push({
+      label: 'Invoice lines exist',
+      passed: lines.some((l) => l.amount !== 0 || l.description),
+      detail: !lines.some((l) => l.amount !== 0 || l.description) ? 'Add at least one invoice line' : undefined,
+    });
+
+    const allPassed = results.every((r) => r.passed);
+    setValidationResults(results);
+    setIsValidated(allPassed);
+    setValidationModalVisible(true);
+
+    if (allPassed) {
+      message.success('Validation passed — invoice is ready to save');
+    }
+  };
+
   const handleInvoiceAction = ({ key }: { key: string }) => {
     switch (key) {
       case 'validate':
-        message.info('Validating invoice...');
+        runValidation();
         break;
       case 'calculateTax':
         message.info('Calculating tax...');
@@ -1004,6 +1087,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         setSelectedLineKeys([]);
         setHeaderValues({ invoiceType: 'Standard', invoiceCurrency: 'AED' });
         setTaxRate(5);
+        setIsValidated(false);
       }
     } catch {
       message.error('Please fill in required fields');
@@ -1376,15 +1460,15 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               Invoice Actions <DownOutlined style={{ fontSize: 10 }} />
             </Button>
           </Dropdown>
-          <Button onClick={handleSaveAndCreateNext} loading={saving} disabled={saving}>
+          <Button onClick={handleSaveAndCreateNext} loading={saving} disabled={saving || !isValidated}>
             Save and Create Next
           </Button>
           <Button
             type="primary"
             onClick={handleSave}
             loading={saving}
-            disabled={saving}
-            style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+            disabled={saving || !isValidated}
+            style={{ background: isValidated ? REDWOOD.primary : undefined, borderColor: isValidated ? REDWOOD.primary : undefined }}
           >
             Save
           </Button>
@@ -1392,8 +1476,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             type="primary"
             onClick={async () => { const success = await handleSave(); if (success !== false) onClose(); }}
             loading={saving}
-            disabled={saving}
-            style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+            disabled={saving || !isValidated}
+            style={{ background: isValidated ? REDWOOD.primary : undefined, borderColor: isValidated ? REDWOOD.primary : undefined }}
           >
             Save and Close
           </Button>
@@ -1431,9 +1515,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               payGroup: '',
               payAlone: 'No',
               calculateTax: 'Yes',
+              liabilityDistribution: '02-00-00-2313101-0000-000-00-000-000',
             }}
             onValuesChange={(changedValues, allValues) => {
               setHeaderValues(allValues);
+              setIsValidated(false);
               // Copy invoice date to all lines' accounting date
               if (changedValues.invoiceDate) {
                 const formattedDate = changedValues.invoiceDate.format('DD-MMM-YYYY');
@@ -1699,10 +1785,26 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                         </Form.Item>
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Liability Distribution</Text>}
-                          name="liabilityDistribution"
+                          required
                           style={{ marginBottom: 4 }}
                         >
-                          <Input placeholder="e.g. 01-000-2100-0000-000" />
+                          <Space.Compact style={{ width: '100%' }}>
+                            <Form.Item name="liabilityDistribution" noStyle rules={[{ required: true, message: 'Required' }]}>
+                              <Input
+                                placeholder="e.g. 02-00-00-2313101-0000-000-00-000-000"
+                                readOnly
+                                style={{ cursor: 'pointer' }}
+                                onClick={() => openAccountSelector('__liability__', form.getFieldValue('liabilityDistribution'))}
+                              />
+                            </Form.Item>
+                            <Tooltip title="Select Account">
+                              <Button
+                                icon={<SearchOutlined />}
+                                onClick={() => openAccountSelector('__liability__', form.getFieldValue('liabilityDistribution'))}
+                                style={{ borderColor: REDWOOD.info, color: REDWOOD.info }}
+                              />
+                            </Tooltip>
+                          </Space.Compact>
                         </Form.Item>
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Document Category</Text>}
@@ -2239,8 +2341,72 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           handleAccountSelect(accountCode, segments);
           setAccountSelectorInitialValue(undefined);
         }}
-        initialValue={accountSelectorInitialValue ?? (editingLineKey ? lines.find((l) => l.key === editingLineKey)?.distributionCombination : undefined)}
+        initialValue={
+          accountSelectorInitialValue
+          ?? (editingLineKey === '__liability__'
+            ? form.getFieldValue('liabilityDistribution')
+            : editingLineKey
+            ? lines.find((l) => l.key === editingLineKey)?.distributionCombination
+            : undefined)
+        }
       />
+
+      {/* ========== VALIDATION CHECKLIST MODAL ========== */}
+      <Modal
+        title={
+          <Space>
+            <CheckSquareOutlined style={{ color: isValidated ? REDWOOD.success : REDWOOD.primary }} />
+            <span>Invoice Validation</span>
+          </Space>
+        }
+        open={validationModalVisible}
+        onCancel={() => setValidationModalVisible(false)}
+        footer={
+          <Button type="primary" onClick={() => setValidationModalVisible(false)}>
+            Close
+          </Button>
+        }
+        width={520}
+      >
+        <div style={{ padding: '8px 0' }}>
+          {validationResults.map((item, idx) => (
+            <div
+              key={idx}
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                padding: '8px 12px',
+                marginBottom: 4,
+                borderRadius: 6,
+                background: item.passed ? '#f6ffed' : '#fff2f0',
+                border: `1px solid ${item.passed ? '#b7eb8f' : '#ffccc7'}`,
+              }}
+            >
+              <span style={{ fontSize: 16, marginRight: 10, marginTop: 1 }}>
+                {item.passed
+                  ? <CheckCircleOutlined style={{ color: REDWOOD.success }} />
+                  : <ExclamationCircleOutlined style={{ color: REDWOOD.primary }} />}
+              </span>
+              <div style={{ flex: 1 }}>
+                <Text strong style={{ fontSize: 13 }}>{item.label}</Text>
+                {item.detail && (
+                  <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginTop: 2 }}>{item.detail}</div>
+                )}
+              </div>
+              <Tag color={item.passed ? 'success' : 'error'} style={{ marginLeft: 8 }}>
+                {item.passed ? 'PASS' : 'FAIL'}
+              </Tag>
+            </div>
+          ))}
+          <div style={{ marginTop: 12, textAlign: 'center' }}>
+            {isValidated ? (
+              <Tag color="success" style={{ fontSize: 13, padding: '4px 16px' }}>All validations passed</Tag>
+            ) : (
+              <Tag color="error" style={{ fontSize: 13, padding: '4px 16px' }}>Fix issues above before saving</Tag>
+            )}
+          </div>
+        </div>
+      </Modal>
 
       {/* API Preview Modal */}
       <Modal
