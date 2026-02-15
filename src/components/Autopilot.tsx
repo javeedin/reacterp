@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Typography, Input, Tooltip, Badge } from 'antd';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { Typography, Input, Tooltip, Badge, Spin } from 'antd';
 import dayjs from 'dayjs';
 import {
   RobotOutlined,
@@ -9,6 +9,8 @@ import {
   ThunderboltOutlined,
   LoadingOutlined,
   FileAddOutlined,
+  SearchOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../config/api.config';
@@ -94,9 +96,13 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
   const [qeStep, setQeStep] = useState<QuickEntryStep>('idle');
   const [qeData, setQeData] = useState<QuickEntryData>({ supplierInput: '', supplierName: '', supplierNumber: '', amount: 0, description: '' });
   const [supplierCache, setSupplierCache] = useState<SupplierMatch[]>([]);
+  const [suppliersFetching, setSuppliersFetching] = useState(false);
+  // Live supplier suggestions (filtered as user types)
+  const [supplierSuggestions, setSupplierSuggestions] = useState<SupplierMatch[]>([]);
 
   const fetchSuppliersForMatch = async (): Promise<SupplierMatch[]> => {
     if (supplierCache.length > 0) return supplierCache;
+    setSuppliersFetching(true);
     try {
       const response = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers`, { headers: { Accept: 'application/json' } });
       if (!response.ok) return [];
@@ -111,6 +117,8 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
       return mapped;
     } catch {
       return [];
+    } finally {
+      setSuppliersFetching(false);
     }
   };
 
@@ -131,10 +139,24 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
     return partial || null;
   };
 
+  // Filter suppliers as user types (for live suggestions)
+  const filterSuppliers = useCallback((text: string) => {
+    if (!text.trim() || text.trim().length < 1) {
+      setSupplierSuggestions([]);
+      return;
+    }
+    const search = text.toLowerCase().trim();
+    const filtered = supplierCache.filter(
+      (s) =>
+        s.supplier.toLowerCase().includes(search) ||
+        s.supplierNumber.toLowerCase().includes(search) ||
+        (s.alternativeName && s.alternativeName.toLowerCase().includes(search))
+    );
+    setSupplierSuggestions(filtered.slice(0, 8));
+  }, [supplierCache]);
+
   // Try to parse a one-shot command like "create invoice Acme 5000 office supplies"
   const tryParseOneShotEntry = (input: string): { supplier: string; amount: number; description: string } | null => {
-    // Pattern: any text with a number in it
-    // Try to find an amount (number, possibly with commas)
     const amountMatch = input.match(/[\s,](\d[\d,]*\.?\d*)\s/);
     if (!amountMatch) return null;
 
@@ -145,7 +167,6 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
     const beforeAmount = input.substring(0, amountIdx).trim();
     const afterAmount = input.substring(amountIdx + amountMatch[0].length).trim();
 
-    // Strip common prefixes
     const supplierText = beforeAmount
       .replace(/^(create|new|add|make|quick)\s+(entry\s+)?(invoice\s+)?(for\s+)?/i, '')
       .trim();
@@ -214,12 +235,14 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
       },
     ]);
     setInputValue('');
+    setQeStep('idle');
+    setSupplierSuggestions([]);
     setIsOpen(true);
   };
 
   const addAssistantMessage = (content: string) => {
     setMessages((prev) => [...prev, {
-      id: (Date.now() + 1).toString(),
+      id: (Date.now() + Math.random()).toString(),
       type: 'assistant',
       content,
       timestamp: new Date(),
@@ -230,8 +253,14 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
     const today = dayjs();
     const invoiceNum = `QE-${today.format('YYYYMMDD')}-${Math.floor(Math.random() * 9000 + 1000)}`;
 
+    // Close first, then navigate after animation completes
+    setIsClosing(true);
     setTimeout(() => {
-      handleClose();
+      setIsOpen(false);
+      setIsClosing(false);
+      setQeStep('idle');
+      setSupplierSuggestions([]);
+
       navigate('/ap/manage-invoices', {
         state: {
           quickCreate: true,
@@ -244,10 +273,33 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
             invoiceDate: today,
             description: data.description,
             invoiceCurrency: 'AED',
+            invoiceType: 'Standard',
           },
         },
       });
-    }, 1200);
+    }, 300);
+  };
+
+  // Handle clicking a supplier suggestion chip
+  const handleSupplierSelect = (supplier: SupplierMatch) => {
+    setSupplierSuggestions([]);
+    setInputValue('');
+    // Add user message showing the selected supplier
+    setMessages((prev) => [...prev, {
+      id: Date.now().toString(),
+      type: 'user',
+      content: supplier.supplier,
+      timestamp: new Date(),
+    }]);
+    // Set data and advance to amount step
+    setQeData((prev) => ({
+      ...prev,
+      supplierInput: supplier.supplier,
+      supplierName: supplier.supplier,
+      supplierNumber: supplier.supplierNumber,
+    }));
+    setQeStep('awaiting_amount');
+    addAssistantMessage(`Selected: ${supplier.supplier} (${supplier.supplierNumber})\n\nEnter the invoice amount:`);
   };
 
   const handleSend = async () => {
@@ -263,6 +315,7 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
     setMessages((prev) => [...prev, userMessage]);
     const userInput = inputValue.trim();
     setInputValue('');
+    setSupplierSuggestions([]);
     setIsProcessing(true);
 
     // Handle Quick Entry conversational flow
@@ -275,10 +328,9 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
     // Check if this is a one-shot quick entry (e.g. "invoice Acme 5000 office supplies")
     const lowerInput = userInput.toLowerCase();
     if (lowerInput.includes('quick entry') || lowerInput.includes('quick invoice')) {
-      setIsProcessing(true);
       await fetchSuppliersForMatch(); // pre-fetch
       setQeStep('awaiting_supplier');
-      addAssistantMessage('Let\'s create an invoice quickly!\n\nEnter the supplier name or number:');
+      addAssistantMessage('Let\'s create an invoice quickly!\n\nStart typing the supplier name or number:');
       setIsProcessing(false);
       return;
     }
@@ -286,7 +338,6 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
     // Try one-shot parse: "invoice Acme 5000 office supplies"
     const oneShot = tryParseOneShotEntry(userInput);
     if (oneShot && oneShot.supplier && oneShot.amount > 0) {
-      setIsProcessing(true);
       const suppliers = await fetchSuppliersForMatch();
       const match = findSupplierMatch(oneShot.supplier, suppliers);
       if (match) {
@@ -300,15 +351,14 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
         setQeData(data);
         addAssistantMessage(
           `Got it! Creating invoice:\n\n` +
-          `• Supplier: ${match.supplier} (${match.supplierNumber})\n` +
-          `• Amount: ${oneShot.amount.toFixed(2)} AED\n` +
-          `• Description: ${oneShot.description || 'Invoice'}\n` +
-          `• Date: ${dayjs().format('DD-MMM-YYYY')} (today)\n` +
-          `• Tax: None\n\n` +
+          `Supplier: ${match.supplier} (${match.supplierNumber})\n` +
+          `Amount: ${oneShot.amount.toFixed(2)} AED\n` +
+          `Description: ${oneShot.description || 'Invoice'}\n` +
+          `Date: ${dayjs().format('DD-MMM-YYYY')} (today)\n` +
+          `Tax: None\n\n` +
           `Opening invoice form now...`
         );
         createInvoiceFromQuickEntry(data);
-        setQeStep('idle');
         setIsProcessing(false);
         return;
       } else {
@@ -317,7 +367,7 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
         setQeStep('awaiting_supplier');
         addAssistantMessage(
           `I couldn't find supplier "${oneShot.supplier}". ` +
-          `Please enter the exact supplier name or number:`
+          `Start typing the supplier name or number:`
         );
         setIsProcessing(false);
         return;
@@ -339,6 +389,7 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
     if (lower === 'cancel' || lower === 'exit' || lower === 'quit') {
       setQeStep('idle');
       setQeData({ supplierInput: '', supplierName: '', supplierNumber: '', amount: 0, description: '' });
+      setSupplierSuggestions([]);
       addAssistantMessage('Quick entry cancelled. How else can I help?');
       return;
     }
@@ -349,22 +400,23 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
       if (match) {
         setQeData((prev) => ({ ...prev, supplierInput: input, supplierName: match.supplier, supplierNumber: match.supplierNumber }));
         setQeStep('awaiting_amount');
-        addAssistantMessage(`Found: ${match.supplier} (${match.supplierNumber})\n\nEnter the invoice amount:`);
+        addAssistantMessage(`Selected: ${match.supplier} (${match.supplierNumber})\n\nEnter the invoice amount:`);
       } else {
-        // Show top 3 closest matches
+        // Show top closest matches
         const search = input.toLowerCase();
         const closest = suppliers
           .filter((s) =>
             s.supplier.toLowerCase().includes(search.substring(0, 3)) ||
+            s.supplierNumber.toLowerCase().includes(search.substring(0, 3)) ||
             (s.alternativeName && s.alternativeName.toLowerCase().includes(search.substring(0, 3)))
           )
           .slice(0, 5);
 
         if (closest.length > 0) {
-          const list = closest.map((s) => `• ${s.supplier} (${s.supplierNumber})`).join('\n');
-          addAssistantMessage(`Supplier "${input}" not found. Did you mean:\n\n${list}\n\nPlease enter the exact name or number:`);
+          const list = closest.map((s) => `  ${s.supplier} (${s.supplierNumber})`).join('\n');
+          addAssistantMessage(`Supplier "${input}" not found. Did you mean:\n\n${list}\n\nType the exact name or click a suggestion below:`);
         } else {
-          addAssistantMessage(`Supplier "${input}" not found. Please enter the exact supplier name or number:\n\n(Type "cancel" to exit)`);
+          addAssistantMessage(`Supplier "${input}" not found. Try typing a few letters — suggestions will appear below.\n\n(Type "cancel" to exit)`);
         }
       }
       return;
@@ -389,11 +441,11 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
       setQeStep('confirming');
       addAssistantMessage(
         `Here's your invoice:\n\n` +
-        `• Supplier: ${finalData.supplierName} (${finalData.supplierNumber})\n` +
-        `• Amount: ${finalData.amount.toFixed(2)} AED\n` +
-        `• Description: ${description}\n` +
-        `• Date: ${dayjs().format('DD-MMM-YYYY')} (today)\n` +
-        `• Tax: None\n\n` +
+        `Supplier: ${finalData.supplierName} (${finalData.supplierNumber})\n` +
+        `Amount: ${finalData.amount.toFixed(2)} AED\n` +
+        `Description: ${description}\n` +
+        `Date: ${dayjs().format('DD-MMM-YYYY')} (today)\n` +
+        `Tax: None\n\n` +
         `Type "yes" to create, or "cancel" to abort.`
       );
       return;
@@ -403,7 +455,6 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
       if (lower === 'yes' || lower === 'y' || lower === 'ok' || lower === 'confirm' || lower === 'create') {
         addAssistantMessage('Creating invoice now...');
         createInvoiceFromQuickEntry(qeData);
-        setQeStep('idle');
         setQeData({ supplierInput: '', supplierName: '', supplierNumber: '', amount: 0, description: '' });
       } else {
         setQeStep('idle');
@@ -411,6 +462,17 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
         addAssistantMessage('Invoice creation cancelled. How else can I help?');
       }
       return;
+    }
+  };
+
+  // Handle input changes — trigger live supplier filtering when awaiting_supplier
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setInputValue(val);
+    if (qeStep === 'awaiting_supplier') {
+      filterSuppliers(val);
+    } else {
+      if (supplierSuggestions.length > 0) setSupplierSuggestions([]);
     }
   };
 
@@ -480,6 +542,13 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
       handleSend();
     }
   };
+
+  // Step indicator label
+  const stepLabel = qeStep === 'awaiting_supplier' ? 'Step 1/4 — Supplier'
+    : qeStep === 'awaiting_amount' ? 'Step 2/4 — Amount'
+    : qeStep === 'awaiting_description' ? 'Step 3/4 — Description'
+    : qeStep === 'confirming' ? 'Step 4/4 — Confirm'
+    : '';
 
   return (
     <>
@@ -570,7 +639,7 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
                   Autopilot
                 </Text>
                 <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12 }}>
-                  AI-powered assistant
+                  {qeStep !== 'idle' ? stepLabel : 'AI-powered assistant'}
                 </Text>
               </div>
             </div>
@@ -637,42 +706,125 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Suggestions - always visible for quick actions */}
-          <div style={{ padding: '12px 16px', borderTop: `1px solid ${REDWOOD.neutral200}`, flexShrink: 0 }}>
-            <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-              Quick Actions
-            </Text>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
-              {suggestions.map((suggestion, index) => (
+          {/* Supplier suggestions dropdown (visible during awaiting_supplier step) */}
+          {qeStep === 'awaiting_supplier' && supplierSuggestions.length > 0 && (
+            <div
+              style={{
+                maxHeight: 180,
+                overflowY: 'auto',
+                borderTop: `1px solid ${REDWOOD.neutral200}`,
+                background: REDWOOD.surface,
+                flexShrink: 0,
+              }}
+            >
+              <div style={{ padding: '6px 12px 2px 12px' }}>
+                <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                  <SearchOutlined /> Matching Suppliers ({supplierSuggestions.length})
+                </Text>
+              </div>
+              {supplierSuggestions.map((s, idx) => (
                 <div
-                  key={index}
-                  onClick={() => handleSuggestionClick(suggestion.command)}
+                  key={idx}
+                  onClick={() => handleSupplierSelect(s)}
                   style={{
-                    padding: '6px 12px',
-                    borderRadius: 20,
-                    background: `${REDWOOD.autopilotPurple}10`,
-                    border: `1px solid ${REDWOOD.autopilotPurple}30`,
+                    padding: '8px 16px',
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 6,
-                    transition: 'all 0.2s',
+                    gap: 10,
+                    borderBottom: `1px solid ${REDWOOD.neutral100}`,
+                    transition: 'background 0.15s',
                   }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = `${REDWOOD.autopilotPurple}20`;
-                    e.currentTarget.style.borderColor = REDWOOD.autopilotPurple;
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = `${REDWOOD.autopilotPurple}10`;
-                    e.currentTarget.style.borderColor = `${REDWOOD.autopilotPurple}30`;
-                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = `${REDWOOD.autopilotPurple}08`; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
                 >
-                  <span style={{ color: REDWOOD.autopilotPurple, fontSize: 12 }}>{suggestion.icon}</span>
-                  <Text style={{ fontSize: 12, color: REDWOOD.neutral900 }}>{suggestion.label}</Text>
+                  <UserOutlined style={{ color: REDWOOD.autopilotPurple, fontSize: 14 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <Text strong style={{ fontSize: 13, display: 'block' }}>{s.supplier}</Text>
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      {s.supplierNumber}{s.alternativeName ? ` — ${s.alternativeName}` : ''}
+                    </Text>
+                  </div>
+                  <div
+                    style={{
+                      padding: '2px 8px',
+                      borderRadius: 10,
+                      background: `${REDWOOD.success}15`,
+                      color: REDWOOD.success,
+                      fontSize: 10,
+                      fontWeight: 600,
+                    }}
+                  >
+                    Select
+                  </div>
                 </div>
               ))}
             </div>
-          </div>
+          )}
+
+          {/* Supplier loading indicator */}
+          {qeStep === 'awaiting_supplier' && suppliersFetching && (
+            <div style={{ padding: '8px 16px', borderTop: `1px solid ${REDWOOD.neutral200}`, textAlign: 'center' }}>
+              <Spin size="small" /> <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>Loading suppliers...</Text>
+            </div>
+          )}
+
+          {/* Suggestions - visible when idle (quick actions) */}
+          {qeStep === 'idle' && (
+            <div style={{ padding: '12px 16px', borderTop: `1px solid ${REDWOOD.neutral200}`, flexShrink: 0 }}>
+              <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                Quick Actions
+              </Text>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                {suggestions.map((suggestion, index) => (
+                  <div
+                    key={index}
+                    onClick={() => handleSuggestionClick(suggestion.command)}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: 20,
+                      background: `${REDWOOD.autopilotPurple}10`,
+                      border: `1px solid ${REDWOOD.autopilotPurple}30`,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      transition: 'all 0.2s',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = `${REDWOOD.autopilotPurple}20`;
+                      e.currentTarget.style.borderColor = REDWOOD.autopilotPurple;
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = `${REDWOOD.autopilotPurple}10`;
+                      e.currentTarget.style.borderColor = `${REDWOOD.autopilotPurple}30`;
+                    }}
+                  >
+                    <span style={{ color: REDWOOD.autopilotPurple, fontSize: 12 }}>{suggestion.icon}</span>
+                    <Text style={{ fontSize: 12, color: REDWOOD.neutral900 }}>{suggestion.label}</Text>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Quick Entry step indicator */}
+          {qeStep !== 'idle' && supplierSuggestions.length === 0 && !suppliersFetching && (
+            <div style={{ padding: '6px 16px', borderTop: `1px solid ${REDWOOD.neutral200}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+              <Text type="secondary" style={{ fontSize: 11 }}>{stepLabel}</Text>
+              <div
+                onClick={() => {
+                  setQeStep('idle');
+                  setQeData({ supplierInput: '', supplierName: '', supplierNumber: '', amount: 0, description: '' });
+                  setSupplierSuggestions([]);
+                  addAssistantMessage('Quick entry cancelled. How else can I help?');
+                }}
+                style={{ fontSize: 11, color: REDWOOD.primary, cursor: 'pointer' }}
+              >
+                Cancel
+              </div>
+            </div>
+          )}
 
           {/* Input */}
           <div
@@ -685,9 +837,15 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
             <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end' }}>
               <TextArea
                 value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
+                onChange={handleInputChange}
                 onKeyPress={handleKeyPress}
-                placeholder="Ask me anything..."
+                placeholder={
+                  qeStep === 'awaiting_supplier' ? 'Type supplier name...'
+                    : qeStep === 'awaiting_amount' ? 'Enter amount...'
+                    : qeStep === 'awaiting_description' ? 'Enter description...'
+                    : qeStep === 'confirming' ? 'Type yes or cancel...'
+                    : 'Ask me anything...'
+                }
                 autoSize={{ minRows: 1, maxRows: 4 }}
                 style={{
                   flex: 1,
