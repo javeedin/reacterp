@@ -1,4 +1,6 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import dayjs from 'dayjs';
+import customParseFormat from 'dayjs/plugin/customParseFormat';
 import {
   Card,
   Form,
@@ -55,7 +57,10 @@ import {
   ApiOutlined,
   AccountBookOutlined,
   AppstoreOutlined,
+  CalendarOutlined,
 } from '@ant-design/icons';
+
+dayjs.extend(customParseFormat);
 import type { ColumnsType } from 'antd/es/table';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
@@ -1262,14 +1267,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       title: 'Accounting Date',
       dataIndex: 'accountingDate',
       key: 'accountingDate',
-      width: 140,
+      width: 150,
       render: (val: string, record: InvoiceLine) => (
-        <Input
+        <DatePicker
           size="small"
-          value={val}
-          onChange={(e) => updateLine(record.key, 'accountingDate', e.target.value)}
+          value={val ? dayjs(val, 'DD-MMM-YYYY') : null}
+          onChange={(d) => updateLine(record.key, 'accountingDate', d ? d.format('DD-MMM-YYYY') : '')}
+          format="DD-MMM-YYYY"
           variant="borderless"
           placeholder="dd-mmm-yyyy"
+          style={{ width: '100%' }}
         />
       ),
     },
@@ -1457,18 +1464,133 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       title: 'Start Date',
       dataIndex: 'startDate',
       key: 'startDate',
-      width: 120,
+      width: 140,
       render: (val: string, record: InvoiceLine) => (
-        <Input size="small" value={val} onChange={(e) => updateLine(record.key, 'startDate', e.target.value)} variant="borderless" placeholder="dd-mmm-yyyy" />
+        <DatePicker
+          size="small"
+          value={val ? dayjs(val, 'DD-MMM-YYYY') : null}
+          onChange={(d) => updateLine(record.key, 'startDate', d ? d.format('DD-MMM-YYYY') : '')}
+          format="DD-MMM-YYYY"
+          variant="borderless"
+          placeholder="dd-mmm-yyyy"
+          style={{ width: '100%' }}
+        />
       ),
     },
     {
       title: 'End Date',
       dataIndex: 'endDate',
       key: 'endDate',
-      width: 120,
+      width: 140,
       render: (val: string, record: InvoiceLine) => (
-        <Input size="small" value={val} onChange={(e) => updateLine(record.key, 'endDate', e.target.value)} variant="borderless" placeholder="dd-mmm-yyyy" />
+        <DatePicker
+          size="small"
+          value={val ? dayjs(val, 'DD-MMM-YYYY') : null}
+          onChange={(d) => updateLine(record.key, 'endDate', d ? d.format('DD-MMM-YYYY') : '')}
+          format="DD-MMM-YYYY"
+          variant="borderless"
+          placeholder="dd-mmm-yyyy"
+          style={{ width: '100%' }}
+        />
+      ),
+    },
+  ];
+
+  // ========== Multiperiod Accounting Tab Columns ==========
+  const multiperiodColumns: ColumnsType<InvoiceLine> = [
+    {
+      title: 'Line',
+      dataIndex: 'lineNumber',
+      key: 'lineNumber',
+      width: 50,
+      align: 'center',
+      render: (val: number) => <Text style={{ fontSize: 12 }}>{val}</Text>,
+    },
+    {
+      title: 'Description',
+      dataIndex: 'description',
+      key: 'description',
+      width: 200,
+      render: (val: string) => <Text style={{ fontSize: 12 }}>{val || '—'}</Text>,
+    },
+    {
+      title: 'Amount',
+      dataIndex: 'amount',
+      key: 'amount',
+      width: 120,
+      align: 'right',
+      render: (val: number) => <Text strong style={{ fontSize: 12 }}>{formatAmount(val)}</Text>,
+    },
+    {
+      title: 'Accounting Date',
+      dataIndex: 'accountingDate',
+      key: 'accountingDate',
+      width: 150,
+      render: (val: string, record: InvoiceLine) => (
+        <DatePicker
+          size="small"
+          value={val ? dayjs(val, 'DD-MMM-YYYY') : null}
+          onChange={(d) => updateLine(record.key, 'accountingDate', d ? d.format('DD-MMM-YYYY') : '')}
+          format="DD-MMM-YYYY"
+          variant="borderless"
+          placeholder="dd-mmm-yyyy"
+          style={{ width: '100%' }}
+        />
+      ),
+    },
+    {
+      title: 'Start Date',
+      dataIndex: 'startDate',
+      key: 'startDate',
+      width: 150,
+      render: (val: string, record: InvoiceLine) => (
+        <DatePicker
+          size="small"
+          value={val ? dayjs(val, 'DD-MMM-YYYY') : null}
+          onChange={(d) => updateLine(record.key, 'startDate', d ? d.format('DD-MMM-YYYY') : '')}
+          format="DD-MMM-YYYY"
+          variant="borderless"
+          placeholder="dd-mmm-yyyy"
+          style={{ width: '100%' }}
+        />
+      ),
+    },
+    {
+      title: 'End Date',
+      dataIndex: 'endDate',
+      key: 'endDate',
+      width: 150,
+      render: (val: string, record: InvoiceLine) => (
+        <DatePicker
+          size="small"
+          value={val ? dayjs(val, 'DD-MMM-YYYY') : null}
+          onChange={(d) => updateLine(record.key, 'endDate', d ? d.format('DD-MMM-YYYY') : '')}
+          format="DD-MMM-YYYY"
+          variant="borderless"
+          placeholder="dd-mmm-yyyy"
+          style={{ width: '100%' }}
+        />
+      ),
+    },
+    {
+      title: 'Accrual Account',
+      dataIndex: 'accrualAccount',
+      key: 'accrualAccount',
+      width: 250,
+      render: (val: string, record: InvoiceLine) => (
+        <Input
+          size="small"
+          value={val}
+          onChange={(e) => updateLine(record.key, 'accrualAccount', e.target.value)}
+          variant="borderless"
+          placeholder="e.g. 01-000-2200-0000-000"
+          suffix={
+            <SearchOutlined
+              style={{ color: REDWOOD.info, fontSize: 12, cursor: 'pointer' }}
+              onClick={() => openAccountSelector(record.key, val)}
+            />
+          }
+        />
       ),
     },
   ];
@@ -2084,6 +2206,40 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 ),
               },
               {
+                key: 'multiperiod',
+                label: (
+                  <Space size={4}>
+                    <CalendarOutlined />
+                    <span>Multiperiod Accounting</span>
+                  </Space>
+                ),
+                children: (
+                  <Table
+                    columns={multiperiodColumns}
+                    dataSource={lines}
+                    size="small"
+                    pagination={false}
+                    scroll={{ x: 1100 }}
+                    rowSelection={rowSelection}
+                    summary={() => (
+                      <Table.Summary fixed>
+                        <Table.Summary.Row>
+                          <Table.Summary.Cell index={0} colSpan={2}>
+                            <Text strong style={{ fontSize: 12, paddingLeft: 8 }}>Total</Text>
+                          </Table.Summary.Cell>
+                          <Table.Summary.Cell index={2} align="right">
+                            <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>
+                              {formatAmount(linesTotal)}
+                            </Text>
+                          </Table.Summary.Cell>
+                          <Table.Summary.Cell index={3} colSpan={5} />
+                        </Table.Summary.Row>
+                      </Table.Summary>
+                    )}
+                  />
+                ),
+              },
+              {
                 key: 'purchaseOrders',
                 label: (
                   <Space size={4}>
@@ -2552,7 +2708,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           const defaultAcctDate = invoiceDate?.format?.('DD-MMM-YYYY') || 'N/A';
 
           // Build entries grouped by accounting period (date)
-          type AcctEntry = { key: number; period: string; line: string; account: string; description: string; debit: number; credit: number; isGroupHeader?: boolean };
+          type AcctEntry = { key: number; period: string; line: string; account: string; description: string; debit: number; credit: number; isGroupHeader?: boolean; isPeriodSubtotal?: boolean; subtotalDebit?: number; subtotalCredit?: number };
           const allEntries: AcctEntry[] = [];
           let keyIdx = 0;
 
@@ -2579,6 +2735,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
           sortedPeriods.forEach((period) => {
             const periodLines = periodMap.get(period)!;
+            let periodDebit = 0;
+            let periodCredit = 0;
 
             // Period header row
             allEntries.push({
@@ -2594,16 +2752,17 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
             // Debit: each expense line
             periodLines.forEach((l) => {
+              const amt = l.amount || 0;
               allEntries.push({
                 key: keyIdx++,
                 period,
                 line: `Line ${l.lineNumber}`,
                 account: l.distributionCombination || l.distributionSet || '—',
                 description: l.description || (l.type || 'Item'),
-                debit: l.amount || 0,
+                debit: amt,
                 credit: 0,
               });
-              grandTotalDebit += l.amount || 0;
+              periodDebit += amt;
             });
 
             // Debit: tax recoverable for this period's lines
@@ -2621,11 +2780,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 debit: periodLineTax,
                 credit: 0,
               });
-              grandTotalDebit += periodLineTax;
+              periodDebit += periodLineTax;
             }
 
             // Credit: liability for each expense line
             periodLines.forEach((l) => {
+              const amt = l.amount || 0;
               allEntries.push({
                 key: keyIdx++,
                 period,
@@ -2633,9 +2793,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 account: liabilityDist,
                 description: `AP — ${l.description || l.type || 'Item'}`,
                 debit: 0,
-                credit: l.amount || 0,
+                credit: amt,
               });
-              grandTotalCredit += l.amount || 0;
+              periodCredit += amt;
             });
 
             // Credit: liability for tax
@@ -2649,8 +2809,25 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 debit: 0,
                 credit: periodLineTax,
               });
-              grandTotalCredit += periodLineTax;
+              periodCredit += periodLineTax;
             }
+
+            // Period subtotal row
+            allEntries.push({
+              key: keyIdx++,
+              period,
+              line: '',
+              account: '',
+              description: '',
+              debit: 0,
+              credit: 0,
+              isPeriodSubtotal: true,
+              subtotalDebit: periodDebit,
+              subtotalCredit: periodCredit,
+            });
+
+            grandTotalDebit += periodDebit;
+            grandTotalCredit += periodCredit;
           });
 
           return (
@@ -2660,7 +2837,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 pagination={false}
                 size="small"
                 bordered
-                rowClassName={(record) => record.isGroupHeader ? 'acct-period-header' : ''}
+                rowClassName={(record) => record.isGroupHeader ? 'acct-period-header' : record.isPeriodSubtotal ? 'acct-period-subtotal' : ''}
                 columns={[
                   {
                     title: 'Accounting Date',
@@ -2668,9 +2845,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     key: 'period',
                     width: 120,
                     onCell: (record: AcctEntry) => ({
-                      colSpan: record.isGroupHeader ? 6 : 1,
+                      colSpan: record.isGroupHeader ? 6 : record.isPeriodSubtotal ? 4 : 1,
                       style: record.isGroupHeader
                         ? { background: '#e6f4ff', fontWeight: 700, fontSize: 12 }
+                        : record.isPeriodSubtotal
+                        ? { background: '#f0f5ff', borderTop: '1px solid #d6e4ff' }
                         : undefined,
                     }),
                     render: (v: string, record: AcctEntry) => {
@@ -2687,6 +2866,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           </span>
                         );
                       }
+                      if (record.isPeriodSubtotal) {
+                        return <Text strong style={{ fontSize: 12 }}>Period Subtotal — {v}</Text>;
+                      }
                       return <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{v}</Text>;
                     },
                   },
@@ -2695,7 +2877,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     dataIndex: 'line',
                     key: 'line',
                     width: 70,
-                    onCell: (record: AcctEntry) => ({ colSpan: record.isGroupHeader ? 0 : 1 }),
+                    onCell: (record: AcctEntry) => ({ colSpan: record.isGroupHeader || record.isPeriodSubtotal ? 0 : 1 }),
                     render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text>,
                   },
                   {
@@ -2703,14 +2885,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     dataIndex: 'account',
                     key: 'account',
                     width: 240,
-                    onCell: (record: AcctEntry) => ({ colSpan: record.isGroupHeader ? 0 : 1 }),
+                    onCell: (record: AcctEntry) => ({ colSpan: record.isGroupHeader || record.isPeriodSubtotal ? 0 : 1 }),
                     render: (v: string) => <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{v}</Text>,
                   },
                   {
                     title: 'Description',
                     dataIndex: 'description',
                     key: 'description',
-                    onCell: (record: AcctEntry) => ({ colSpan: record.isGroupHeader ? 0 : 1 }),
+                    onCell: (record: AcctEntry) => ({ colSpan: record.isGroupHeader || record.isPeriodSubtotal ? 0 : 1 }),
                     render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text>,
                   },
                   {
@@ -2719,8 +2901,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     key: 'debit',
                     width: 110,
                     align: 'right' as const,
-                    onCell: (record: AcctEntry) => ({ colSpan: record.isGroupHeader ? 0 : 1 }),
-                    render: (v: number) => v > 0 ? <Text style={{ fontSize: 12, fontWeight: 600, color: '#389e0d' }}>{formatAmount(v)}</Text> : null,
+                    onCell: (record: AcctEntry) => ({
+                      colSpan: record.isGroupHeader ? 0 : 1,
+                      style: record.isPeriodSubtotal ? { background: '#f0f5ff', borderTop: '1px solid #d6e4ff' } : undefined,
+                    }),
+                    render: (v: number, record: AcctEntry) => {
+                      if (record.isPeriodSubtotal) {
+                        return <Text strong style={{ fontSize: 12, color: '#389e0d' }}>{formatAmount(record.subtotalDebit || 0)}</Text>;
+                      }
+                      return v > 0 ? <Text style={{ fontSize: 12, fontWeight: 600, color: '#389e0d' }}>{formatAmount(v)}</Text> : null;
+                    },
                   },
                   {
                     title: 'Credit',
@@ -2728,8 +2918,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     key: 'credit',
                     width: 110,
                     align: 'right' as const,
-                    onCell: (record: AcctEntry) => ({ colSpan: record.isGroupHeader ? 0 : 1 }),
-                    render: (v: number) => v > 0 ? <Text style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.primary }}>{formatAmount(v)}</Text> : null,
+                    onCell: (record: AcctEntry) => ({
+                      colSpan: record.isGroupHeader ? 0 : 1,
+                      style: record.isPeriodSubtotal ? { background: '#f0f5ff', borderTop: '1px solid #d6e4ff' } : undefined,
+                    }),
+                    render: (v: number, record: AcctEntry) => {
+                      if (record.isPeriodSubtotal) {
+                        return <Text strong style={{ fontSize: 12, color: REDWOOD.primary }}>{formatAmount(record.subtotalCredit || 0)}</Text>;
+                      }
+                      return v > 0 ? <Text style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.primary }}>{formatAmount(v)}</Text> : null;
+                    },
                   },
                 ]}
                 summary={() => (
