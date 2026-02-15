@@ -26,6 +26,7 @@ import {
   Statistic,
   Progress,
   Spin,
+  Upload,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -58,9 +59,14 @@ import {
   AccountBookOutlined,
   AppstoreOutlined,
   CalendarOutlined,
+  UploadOutlined,
+  DownloadOutlined,
+  FileExcelOutlined,
+  InboxOutlined,
 } from '@ant-design/icons';
 
 dayjs.extend(customParseFormat);
+import * as XLSX from 'xlsx';
 import type { ColumnsType } from 'antd/es/table';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
@@ -400,6 +406,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // View Accounting modal
   const [accountingModalVisible, setAccountingModalVisible] = useState(false);
 
+  // Import Lines modal
+  const [importModalVisible, setImportModalVisible] = useState(false);
+  const [importPreviewData, setImportPreviewData] = useState<{ type: string; amount: number; description: string }[]>([]);
+  const [pasteText, setPasteText] = useState('');
+
   // API Preview modal
   const [apiPreviewVisible, setApiPreviewVisible] = useState(false);
   const [apiPreviewData, setApiPreviewData] = useState<{ url: string; body: string } | null>(null);
@@ -677,6 +688,161 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     const renumbered = filtered.map((l, idx) => ({ ...l, lineNumber: idx + 1 }));
     setLines(renumbered);
     setSelectedLineKeys([]);
+  };
+
+  // ========== Import Lines Logic ==========
+  const VALID_TYPES = ['Item', 'Freight', 'Miscellaneous', 'Tax', 'Prepay'];
+
+  const normalizeType = (raw: string): string => {
+    if (!raw) return 'Item';
+    const lower = raw.trim().toLowerCase();
+    const match = VALID_TYPES.find((t) => t.toLowerCase() === lower);
+    return match || 'Item';
+  };
+
+  const parseImportRows = (rows: Record<string, any>[]): { type: string; amount: number; description: string }[] => {
+    return rows
+      .map((row) => {
+        // Flexible column matching (case-insensitive)
+        const keys = Object.keys(row);
+        const findCol = (names: string[]) => keys.find((k) => names.includes(k.trim().toLowerCase()));
+        const typeKey = findCol(['type', 'line type', 'linetype']);
+        const amountKey = findCol(['amount', 'line amount', 'lineamount', 'amt']);
+        const descKey = findCol(['description', 'desc', 'line description', 'linedescription', 'memo']);
+
+        const rawAmt = amountKey ? row[amountKey] : 0;
+        const amount = typeof rawAmt === 'number' ? rawAmt : parseFloat(String(rawAmt).replace(/,/g, '')) || 0;
+
+        return {
+          type: normalizeType(typeKey ? String(row[typeKey]) : ''),
+          amount,
+          description: descKey ? String(row[descKey] || '') : '',
+        };
+      })
+      .filter((r) => r.amount !== 0 || r.description.trim() !== '');
+  };
+
+  const handleFileUpload = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+        const jsonRows = XLSX.utils.sheet_to_json(firstSheet);
+        const parsed = parseImportRows(jsonRows as Record<string, any>[]);
+        if (parsed.length === 0) {
+          message.warning('No valid rows found in file. Ensure columns: Type, Amount, Description');
+          return;
+        }
+        setImportPreviewData(parsed);
+        message.success(`${parsed.length} line(s) parsed from file`);
+      } catch {
+        message.error('Failed to parse file. Please use the template format.');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    return false; // prevent antd auto upload
+  };
+
+  const handlePasteImport = () => {
+    if (!pasteText.trim()) {
+      message.warning('Paste data first');
+      return;
+    }
+    // Parse tab/comma separated text
+    const rawLines = pasteText.trim().split('\n');
+    const parsed: { type: string; amount: number; description: string }[] = [];
+
+    for (const rawLine of rawLines) {
+      // Try tab-separated first, then comma
+      const cols = rawLine.includes('\t') ? rawLine.split('\t') : rawLine.split(',');
+      if (cols.length >= 2) {
+        const firstCol = cols[0].trim();
+        // Detect if first col is a type or an amount
+        const isType = VALID_TYPES.some((t) => t.toLowerCase() === firstCol.toLowerCase());
+        if (isType) {
+          parsed.push({
+            type: normalizeType(firstCol),
+            amount: parseFloat(String(cols[1]).replace(/,/g, '')) || 0,
+            description: (cols.slice(2).join(',') || '').trim(),
+          });
+        } else {
+          // Assume: amount, description (default type Item)
+          const amt = parseFloat(String(cols[0]).replace(/,/g, ''));
+          if (!isNaN(amt)) {
+            parsed.push({
+              type: 'Item',
+              amount: amt,
+              description: (cols.slice(1).join(',') || '').trim(),
+            });
+          }
+        }
+      }
+    }
+
+    if (parsed.length === 0) {
+      message.warning('No valid rows detected. Use format: Type, Amount, Description (or just Amount, Description)');
+      return;
+    }
+    setImportPreviewData(parsed);
+    message.success(`${parsed.length} line(s) parsed from pasted data`);
+  };
+
+  const handleDownloadTemplate = () => {
+    const ws = XLSX.utils.aoa_to_sheet([
+      ['Type', 'Amount', 'Description'],
+      ['Item', 1000, 'Office Supplies'],
+      ['Item', 2500, 'IT Equipment'],
+      ['Freight', 150, 'Shipping Charges'],
+    ]);
+    ws['!cols'] = [{ wch: 15 }, { wch: 15 }, { wch: 30 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Invoice Lines');
+    XLSX.writeFile(wb, 'invoice_lines_template.xlsx');
+    message.success('Template downloaded');
+  };
+
+  const handleConfirmImport = () => {
+    if (importPreviewData.length === 0) {
+      message.warning('No lines to import');
+      return;
+    }
+    const invoiceDate = form.getFieldValue('invoiceDate');
+    const defaultAcctDate = invoiceDate?.format?.('DD-MMM-YYYY') || '';
+    const existingTax = lines.find((l) => l.taxClassification)?.taxClassification || '';
+    const defaultAccrual = form.getFieldValue('liabilityDistribution') || '';
+
+    // Filter out empty placeholder lines
+    const existingNonEmpty = lines.filter((l) => l.amount !== 0 || l.description.trim() !== '' || l.distributionCombination);
+    const startNum = existingNonEmpty.length + 1;
+
+    const newLines = importPreviewData.map((row, idx) => {
+      const line = createBlankLine(startNum + idx, { accountingDate: defaultAcctDate, taxClassification: existingTax, accrualAccount: defaultAccrual });
+      line.type = row.type;
+      line.amount = row.amount;
+      line.description = row.description;
+      // Compute tax
+      const lineRate = getTaxRateForClassification(existingTax);
+      line.taxAmount = Math.round(row.amount * (lineRate / 100) * 100) / 100;
+      return line;
+    });
+
+    // If first line is empty placeholder, replace it
+    const firstLineEmpty = lines.length === 1 && lines[0].amount === 0 && !lines[0].description && !lines[0].distributionCombination;
+    if (firstLineEmpty) {
+      // Renumber imported lines from 1
+      newLines.forEach((l, i) => { l.lineNumber = i + 1; });
+      setLines(newLines);
+    } else {
+      setLines([...existingNonEmpty, ...newLines]);
+    }
+
+    setImportModalVisible(false);
+    setImportPreviewData([]);
+    setPasteText('');
+    setIsValidated(false);
+    message.success(`${newLines.length} line(s) imported`);
   };
 
   const updateLine = useCallback((key: string, field: string, value: any) => {
@@ -2185,6 +2351,15 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             <Space>
               <Button
                 size="small"
+                icon={<UploadOutlined />}
+                onClick={() => { setImportPreviewData([]); setPasteText(''); setImportModalVisible(true); }}
+                disabled={!isHeaderComplete}
+                style={{ fontSize: 12, borderColor: REDWOOD.info, color: REDWOOD.info }}
+              >
+                Import Lines
+              </Button>
+              <Button
+                size="small"
                 type="primary"
                 icon={<PlusOutlined />}
                 onClick={addLine}
@@ -2726,6 +2901,186 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             )}
           </div>
         </div>
+      </Modal>
+
+      {/* ========== IMPORT LINES MODAL ========== */}
+      <Modal
+        title={
+          <Space>
+            <FileExcelOutlined style={{ color: '#217346' }} />
+            <span>Import Invoice Lines</span>
+          </Space>
+        }
+        open={importModalVisible}
+        onCancel={() => { setImportModalVisible(false); setImportPreviewData([]); setPasteText(''); }}
+        width={720}
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <Button onClick={() => { setImportModalVisible(false); setImportPreviewData([]); setPasteText(''); }}>
+              Cancel
+            </Button>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              disabled={importPreviewData.length === 0}
+              onClick={handleConfirmImport}
+              style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+            >
+              Import {importPreviewData.length > 0 ? `(${importPreviewData.length} lines)` : ''}
+            </Button>
+          </div>
+        }
+      >
+        {/* Step 1: Template download */}
+        <div style={{ marginBottom: 16, padding: '12px 16px', background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <Text strong style={{ fontSize: 13 }}>Step 1: Download Template</Text>
+              <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginTop: 2 }}>
+                Excel file with columns: <Text code>Type</Text>, <Text code>Amount</Text>, <Text code>Description</Text>
+              </div>
+            </div>
+            <Button
+              icon={<DownloadOutlined />}
+              onClick={handleDownloadTemplate}
+              style={{ borderColor: '#217346', color: '#217346' }}
+            >
+              Download Template
+            </Button>
+          </div>
+        </div>
+
+        {/* Step 2: Upload or Paste */}
+        <div style={{ marginBottom: 16 }}>
+          <Text strong style={{ fontSize: 13 }}>Step 2: Upload File or Paste Data</Text>
+          <Tabs
+            size="small"
+            style={{ marginTop: 4 }}
+            items={[
+              {
+                key: 'upload',
+                label: (
+                  <Space size={4}>
+                    <UploadOutlined />
+                    <span>Upload File</span>
+                  </Space>
+                ),
+                children: (
+                  <Upload.Dragger
+                    accept=".xlsx,.xls,.csv"
+                    beforeUpload={handleFileUpload}
+                    showUploadList={false}
+                    style={{ padding: '16px 0' }}
+                  >
+                    <p style={{ marginBottom: 8 }}>
+                      <InboxOutlined style={{ fontSize: 32, color: REDWOOD.info }} />
+                    </p>
+                    <p style={{ fontSize: 13, color: REDWOOD.neutral900 }}>
+                      Click or drag an Excel/CSV file here
+                    </p>
+                    <p style={{ fontSize: 11, color: REDWOOD.neutral600 }}>
+                      Supports .xlsx, .xls, .csv
+                    </p>
+                  </Upload.Dragger>
+                ),
+              },
+              {
+                key: 'paste',
+                label: (
+                  <Space size={4}>
+                    <CopyOutlined />
+                    <span>Paste Data</span>
+                  </Space>
+                ),
+                children: (
+                  <div>
+                    <Input.TextArea
+                      rows={5}
+                      value={pasteText}
+                      onChange={(e) => setPasteText(e.target.value)}
+                      placeholder={`Paste tab or comma separated data:\nItem, 1000, Office Supplies\nItem, 2500, IT Equipment\nFreight, 150, Shipping\n\nOr just amount and description:\n1000, Office Supplies\n2500, IT Equipment`}
+                      style={{ fontFamily: 'monospace', fontSize: 12 }}
+                    />
+                    <Button
+                      size="small"
+                      type="primary"
+                      onClick={handlePasteImport}
+                      style={{ marginTop: 8, background: REDWOOD.info, borderColor: REDWOOD.info }}
+                      disabled={!pasteText.trim()}
+                    >
+                      Parse Pasted Data
+                    </Button>
+                  </div>
+                ),
+              },
+            ]}
+          />
+        </div>
+
+        {/* Step 3: Preview */}
+        {importPreviewData.length > 0 && (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <Text strong style={{ fontSize: 13 }}>Step 3: Preview ({importPreviewData.length} lines)</Text>
+              <Button size="small" type="link" danger onClick={() => setImportPreviewData([])}>
+                Clear
+              </Button>
+            </div>
+            <Table
+              dataSource={importPreviewData.map((r, i) => ({ ...r, key: i, lineNumber: i + 1 }))}
+              pagination={false}
+              size="small"
+              bordered
+              scroll={{ y: 200 }}
+              columns={[
+                {
+                  title: '#',
+                  dataIndex: 'lineNumber',
+                  key: 'lineNumber',
+                  width: 40,
+                  align: 'center',
+                  render: (v: number) => <Text style={{ fontSize: 11 }}>{v}</Text>,
+                },
+                {
+                  title: 'Type',
+                  dataIndex: 'type',
+                  key: 'type',
+                  width: 100,
+                  render: (v: string) => <Tag color={v === 'Item' ? 'blue' : v === 'Freight' ? 'orange' : 'default'}>{v}</Tag>,
+                },
+                {
+                  title: 'Amount',
+                  dataIndex: 'amount',
+                  key: 'amount',
+                  width: 120,
+                  align: 'right',
+                  render: (v: number) => <Text strong style={{ fontSize: 12 }}>{formatAmount(v)}</Text>,
+                },
+                {
+                  title: 'Description',
+                  dataIndex: 'description',
+                  key: 'description',
+                  render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text>,
+                },
+              ]}
+              summary={() => (
+                <Table.Summary fixed>
+                  <Table.Summary.Row>
+                    <Table.Summary.Cell index={0} colSpan={2}>
+                      <Text strong style={{ fontSize: 12 }}>Total</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={2} align="right">
+                      <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>
+                        {formatAmount(importPreviewData.reduce((s, r) => s + r.amount, 0))}
+                      </Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={3} />
+                  </Table.Summary.Row>
+                </Table.Summary>
+              )}
+            />
+          </div>
+        )}
       </Modal>
 
       {/* ========== VIEW ACCOUNTING MODAL ========== */}
