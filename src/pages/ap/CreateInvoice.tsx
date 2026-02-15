@@ -278,36 +278,47 @@ const getTaxRateForClassification = (taxClassification: string): number => {
   return 0;
 };
 
+// Helper: compute end of month from a DD-MMM-YYYY date string
+const getEndOfMonth = (dateStr: string): string => {
+  if (!dateStr) return '';
+  const parsed = dayjs(dateStr, 'DD-MMM-YYYY');
+  if (!parsed.isValid()) return '';
+  return parsed.endOf('month').format('DD-MMM-YYYY');
+};
+
 // Create a blank line — accepts optional defaults to inherit from header
-const createBlankLine = (lineNumber: number, defaults?: { accountingDate?: string; taxClassification?: string }): InvoiceLine => ({
-  key: Date.now().toString() + '-' + lineNumber,
-  lineNumber,
-  type: 'Item',
-  amount: 0,
-  distributionSet: '',
-  distributionCombination: '',
-  accountingDate: defaults?.accountingDate || '',
-  prorateAcrossAllItemLines: 'No',
-  description: '',
-  taxClassification: defaults?.taxClassification || '',
-  shipToLocation: '',
-  quantity: 1,
-  unitPrice: 0,
-  uomName: '',
-  project: '',
-  task: '',
-  poNumber: '',
-  poLine: '',
-  poSchedule: '',
-  receiptNumber: '',
-  receiptLine: '',
-  consumptionAdviceNumber: '',
-  consumptionAdviceLine: '',
-  startDate: '',
-  endDate: '',
-  accrualAccount: '',
-  taxAmount: 0,
-});
+const createBlankLine = (lineNumber: number, defaults?: { accountingDate?: string; taxClassification?: string; accrualAccount?: string }): InvoiceLine => {
+  const acctDate = defaults?.accountingDate || '';
+  return {
+    key: Date.now().toString() + '-' + lineNumber,
+    lineNumber,
+    type: 'Item',
+    amount: 0,
+    distributionSet: '',
+    distributionCombination: '',
+    accountingDate: acctDate,
+    prorateAcrossAllItemLines: 'No',
+    description: '',
+    taxClassification: defaults?.taxClassification || '',
+    shipToLocation: '',
+    quantity: 1,
+    unitPrice: 0,
+    uomName: '',
+    project: '',
+    task: '',
+    poNumber: '',
+    poLine: '',
+    poSchedule: '',
+    receiptNumber: '',
+    receiptLine: '',
+    consumptionAdviceNumber: '',
+    consumptionAdviceLine: '',
+    startDate: acctDate,
+    endDate: getEndOfMonth(acctDate),
+    accrualAccount: defaults?.accrualAccount || '',
+    taxAmount: 0,
+  };
+};
 
 export interface InvoiceInitialData {
   supplier?: string;
@@ -438,8 +449,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       }
       if (initialData.description) firstLine.description = initialData.description;
       if (initialData.invoiceDate && initialData.invoiceDate.format) {
-        firstLine.accountingDate = initialData.invoiceDate.format('DD-MMM-YYYY');
+        const formattedDate = initialData.invoiceDate.format('DD-MMM-YYYY');
+        firstLine.accountingDate = formattedDate;
+        firstLine.startDate = formattedDate;
+        firstLine.endDate = getEndOfMonth(formattedDate);
       }
+      // Default accrual account from liability distribution
+      firstLine.accrualAccount = '02-00-00-2313101-0000-000-00-000-000';
       setLines([firstLine]);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -644,12 +660,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // Line management
   const addLine = () => {
     const nextLine = lines.length + 1;
-    // Inherit accounting date from header invoice date, and global tax classification
+    // Inherit accounting date from header invoice date, tax classification, and accrual account
     const invoiceDate = form.getFieldValue('invoiceDate');
     const defaultAcctDate = invoiceDate?.format?.('DD-MMM-YYYY') || '';
-    // Determine the most common tax classification from existing lines as default
     const existingTax = lines.find((l) => l.taxClassification)?.taxClassification || '';
-    setLines([...lines, createBlankLine(nextLine, { accountingDate: defaultAcctDate, taxClassification: existingTax })]);
+    const defaultAccrual = form.getFieldValue('liabilityDistribution') || '';
+    setLines([...lines, createBlankLine(nextLine, { accountingDate: defaultAcctDate, taxClassification: existingTax, accrualAccount: defaultAccrual })]);
   };
 
   const removeLines = () => {
@@ -676,6 +692,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           const lineAmount = updated.amount || 0;
           const lineRate = getTaxRateForClassification(updated.taxClassification);
           updated.taxAmount = Math.round(lineAmount * (lineRate / 100) * 100) / 100;
+        }
+        // Auto-derive multiperiod dates when accounting date changes
+        if (field === 'accountingDate' && value) {
+          updated.startDate = value;
+          updated.endDate = getEndOfMonth(value);
         }
         return updated;
       })
@@ -1655,13 +1676,20 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           >
             {isValidated ? 'Validated' : 'Validate'}
           </Button>
-          <Button
-            icon={<AccountBookOutlined />}
-            onClick={() => setAccountingModalVisible(true)}
-            style={{ fontWeight: 500 }}
-          >
-            View Accounting
-          </Button>
+          <Tooltip title={!isValidated ? 'Run validation first' : ''}>
+            <Button
+              icon={<AccountBookOutlined />}
+              onClick={() => setAccountingModalVisible(true)}
+              disabled={!isValidated}
+              style={{
+                fontWeight: 500,
+                borderColor: isValidated ? REDWOOD.info : undefined,
+                color: isValidated ? REDWOOD.info : undefined,
+              }}
+            >
+              View Accounting
+            </Button>
+          </Tooltip>
           <Button onClick={handleSaveAndCreateNext} loading={saving} disabled={saving || !isValidated}>
             Save and Create Next
           </Button>
@@ -1722,14 +1750,25 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             onValuesChange={(changedValues, allValues) => {
               setHeaderValues(allValues);
               setIsValidated(false);
-              // Copy invoice date to all lines' accounting date
+              // Copy invoice date to all lines' accounting date + derive multiperiod dates
               if (changedValues.invoiceDate) {
                 const formattedDate = changedValues.invoiceDate.format('DD-MMM-YYYY');
-                setLines((prev) => prev.map((line) => ({ ...line, accountingDate: formattedDate })));
+                const endDate = getEndOfMonth(formattedDate);
+                setLines((prev) => prev.map((line) => ({
+                  ...line,
+                  accountingDate: formattedDate,
+                  startDate: formattedDate,
+                  endDate,
+                })));
               }
               // Copy header description to all lines' description
               if ('description' in changedValues) {
                 setLines((prev) => prev.map((line) => ({ ...line, description: changedValues.description || '' })));
+              }
+              // Copy liability distribution to all lines' accrual account
+              if ('liabilityDistribution' in changedValues) {
+                const accrual = changedValues.liabilityDistribution || '';
+                setLines((prev) => prev.map((line) => ({ ...line, accrualAccount: accrual })));
               }
             }}
           >
