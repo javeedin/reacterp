@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Typography, Input, Tooltip, Badge } from 'antd';
+import dayjs from 'dayjs';
 import {
   RobotOutlined,
   SendOutlined,
@@ -7,8 +8,10 @@ import {
   BulbOutlined,
   ThunderboltOutlined,
   LoadingOutlined,
+  FileAddOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
+import { APEX_DB_CONFIG } from '../config/api.config';
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -51,11 +54,30 @@ const glSuggestions: SuggestionItem[] = [
 ];
 
 const apSuggestions: SuggestionItem[] = [
+  { icon: <FileAddOutlined />, label: 'Quick Entry Invoice', command: 'Quick Entry Invoice' },
   { icon: <ThunderboltOutlined />, label: 'Create Payable Invoice', command: 'Create Payable Invoice' },
   { icon: <BulbOutlined />, label: 'Manage Invoices', command: 'Open Manage Invoices' },
   { icon: <ThunderboltOutlined />, label: 'Manage Payments', command: 'Open Manage Payments' },
   { icon: <BulbOutlined />, label: 'Manage Suppliers', command: 'Open Manage Suppliers' },
 ];
+
+// Quick Entry flow steps
+type QuickEntryStep = 'idle' | 'awaiting_supplier' | 'awaiting_amount' | 'awaiting_description' | 'confirming';
+
+interface QuickEntryData {
+  supplierInput: string;
+  supplierName: string;
+  supplierNumber: string;
+  amount: number;
+  description: string;
+}
+
+// Supplier record shape (minimal for matching)
+interface SupplierMatch {
+  supplier: string;
+  supplierNumber: string;
+  alternativeName?: string;
+}
 
 interface AutopilotProps {
   module?: 'gl' | 'ap';
@@ -67,6 +89,73 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
   const welcomeMessage = module === 'ap'
     ? 'Hello! I\'m your Payables Autopilot assistant. I can help you create invoices, manage payments, look up suppliers, and more. What would you like to do?'
     : 'Hello! I\'m your ERP Autopilot assistant. I can help you with tasks like syncing data, creating journal entries, running reports, and more. What would you like to do?';
+
+  // Quick Entry state
+  const [qeStep, setQeStep] = useState<QuickEntryStep>('idle');
+  const [qeData, setQeData] = useState<QuickEntryData>({ supplierInput: '', supplierName: '', supplierNumber: '', amount: 0, description: '' });
+  const [supplierCache, setSupplierCache] = useState<SupplierMatch[]>([]);
+
+  const fetchSuppliersForMatch = async (): Promise<SupplierMatch[]> => {
+    if (supplierCache.length > 0) return supplierCache;
+    try {
+      const response = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers`, { headers: { Accept: 'application/json' } });
+      if (!response.ok) return [];
+      const data = await response.json();
+      const items = data.items || data || [];
+      const mapped: SupplierMatch[] = (items as any[]).map((item: any) => ({
+        supplier: item.supplier || '',
+        supplierNumber: item.supplier_number || '',
+        alternativeName: item.alternate_name || '',
+      }));
+      setSupplierCache(mapped);
+      return mapped;
+    } catch {
+      return [];
+    }
+  };
+
+  const findSupplierMatch = (input: string, suppliers: SupplierMatch[]): SupplierMatch | null => {
+    const search = input.toLowerCase().trim();
+    // Exact match first
+    const exact = suppliers.find(
+      (s) => s.supplier.toLowerCase() === search || s.supplierNumber.toLowerCase() === search
+    );
+    if (exact) return exact;
+    // Partial match
+    const partial = suppliers.find(
+      (s) =>
+        s.supplier.toLowerCase().includes(search) ||
+        s.supplierNumber.toLowerCase().includes(search) ||
+        (s.alternativeName && s.alternativeName.toLowerCase().includes(search))
+    );
+    return partial || null;
+  };
+
+  // Try to parse a one-shot command like "create invoice Acme 5000 office supplies"
+  const tryParseOneShotEntry = (input: string): { supplier: string; amount: number; description: string } | null => {
+    // Pattern: any text with a number in it
+    // Try to find an amount (number, possibly with commas)
+    const amountMatch = input.match(/[\s,](\d[\d,]*\.?\d*)\s/);
+    if (!amountMatch) return null;
+
+    const amount = parseFloat(amountMatch[1].replace(/,/g, ''));
+    if (isNaN(amount) || amount <= 0) return null;
+
+    const amountIdx = input.indexOf(amountMatch[0]);
+    const beforeAmount = input.substring(0, amountIdx).trim();
+    const afterAmount = input.substring(amountIdx + amountMatch[0].length).trim();
+
+    // Strip common prefixes
+    const supplierText = beforeAmount
+      .replace(/^(create|new|add|make|quick)\s+(entry\s+)?(invoice\s+)?(for\s+)?/i, '')
+      .trim();
+
+    return {
+      supplier: supplierText || '',
+      amount,
+      description: afterAmount || '',
+    };
+  };
 
   const [isOpen, setIsOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
@@ -128,6 +217,39 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
     setIsOpen(true);
   };
 
+  const addAssistantMessage = (content: string) => {
+    setMessages((prev) => [...prev, {
+      id: (Date.now() + 1).toString(),
+      type: 'assistant',
+      content,
+      timestamp: new Date(),
+    }]);
+  };
+
+  const createInvoiceFromQuickEntry = (data: QuickEntryData) => {
+    const today = dayjs();
+    const invoiceNum = `QE-${today.format('YYYYMMDD')}-${Math.floor(Math.random() * 9000 + 1000)}`;
+
+    setTimeout(() => {
+      handleClose();
+      navigate('/ap/manage-invoices', {
+        state: {
+          quickCreate: true,
+          quickCreateData: {
+            supplier: data.supplierName,
+            supplierNumber: data.supplierNumber,
+            businessUnit: 'BUIMERC CORP FZE_JAFZA',
+            invoiceNumber: invoiceNum,
+            invoiceAmount: data.amount,
+            invoiceDate: today,
+            description: data.description,
+            invoiceCurrency: 'AED',
+          },
+        },
+      });
+    }, 1200);
+  };
+
   const handleSend = async () => {
     if (!inputValue.trim() || isProcessing) return;
 
@@ -139,28 +261,164 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
     };
 
     setMessages((prev) => [...prev, userMessage]);
+    const userInput = inputValue.trim();
     setInputValue('');
     setIsProcessing(true);
 
-    // Simulate AI response (replace with actual API call)
-    setTimeout(() => {
-      const response = generateResponse(userMessage.content);
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        type: 'assistant',
-        content: response,
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, assistantMessage]);
+    // Handle Quick Entry conversational flow
+    if (qeStep !== 'idle') {
+      await handleQuickEntryStep(userInput);
       setIsProcessing(false);
-    }, 1500);
+      return;
+    }
+
+    // Check if this is a one-shot quick entry (e.g. "invoice Acme 5000 office supplies")
+    const lowerInput = userInput.toLowerCase();
+    if (lowerInput.includes('quick entry') || lowerInput.includes('quick invoice')) {
+      setIsProcessing(true);
+      await fetchSuppliersForMatch(); // pre-fetch
+      setQeStep('awaiting_supplier');
+      addAssistantMessage('Let\'s create an invoice quickly!\n\nEnter the supplier name or number:');
+      setIsProcessing(false);
+      return;
+    }
+
+    // Try one-shot parse: "invoice Acme 5000 office supplies"
+    const oneShot = tryParseOneShotEntry(userInput);
+    if (oneShot && oneShot.supplier && oneShot.amount > 0) {
+      setIsProcessing(true);
+      const suppliers = await fetchSuppliersForMatch();
+      const match = findSupplierMatch(oneShot.supplier, suppliers);
+      if (match) {
+        const data: QuickEntryData = {
+          supplierInput: oneShot.supplier,
+          supplierName: match.supplier,
+          supplierNumber: match.supplierNumber,
+          amount: oneShot.amount,
+          description: oneShot.description || 'Invoice',
+        };
+        setQeData(data);
+        addAssistantMessage(
+          `Got it! Creating invoice:\n\n` +
+          `• Supplier: ${match.supplier} (${match.supplierNumber})\n` +
+          `• Amount: ${oneShot.amount.toFixed(2)} AED\n` +
+          `• Description: ${oneShot.description || 'Invoice'}\n` +
+          `• Date: ${dayjs().format('DD-MMM-YYYY')} (today)\n` +
+          `• Tax: None\n\n` +
+          `Opening invoice form now...`
+        );
+        createInvoiceFromQuickEntry(data);
+        setQeStep('idle');
+        setIsProcessing(false);
+        return;
+      } else {
+        // Supplier not found, start conversational flow
+        setQeData((prev) => ({ ...prev, amount: oneShot.amount, description: oneShot.description }));
+        setQeStep('awaiting_supplier');
+        addAssistantMessage(
+          `I couldn't find supplier "${oneShot.supplier}". ` +
+          `Please enter the exact supplier name or number:`
+        );
+        setIsProcessing(false);
+        return;
+      }
+    }
+
+    // Normal responses
+    setTimeout(() => {
+      const response = generateResponse(userInput);
+      addAssistantMessage(response);
+      setIsProcessing(false);
+    }, 1000);
+  };
+
+  const handleQuickEntryStep = async (input: string) => {
+    const lower = input.toLowerCase();
+
+    // Allow cancel at any step
+    if (lower === 'cancel' || lower === 'exit' || lower === 'quit') {
+      setQeStep('idle');
+      setQeData({ supplierInput: '', supplierName: '', supplierNumber: '', amount: 0, description: '' });
+      addAssistantMessage('Quick entry cancelled. How else can I help?');
+      return;
+    }
+
+    if (qeStep === 'awaiting_supplier') {
+      const suppliers = await fetchSuppliersForMatch();
+      const match = findSupplierMatch(input, suppliers);
+      if (match) {
+        setQeData((prev) => ({ ...prev, supplierInput: input, supplierName: match.supplier, supplierNumber: match.supplierNumber }));
+        setQeStep('awaiting_amount');
+        addAssistantMessage(`Found: ${match.supplier} (${match.supplierNumber})\n\nEnter the invoice amount:`);
+      } else {
+        // Show top 3 closest matches
+        const search = input.toLowerCase();
+        const closest = suppliers
+          .filter((s) =>
+            s.supplier.toLowerCase().includes(search.substring(0, 3)) ||
+            (s.alternativeName && s.alternativeName.toLowerCase().includes(search.substring(0, 3)))
+          )
+          .slice(0, 5);
+
+        if (closest.length > 0) {
+          const list = closest.map((s) => `• ${s.supplier} (${s.supplierNumber})`).join('\n');
+          addAssistantMessage(`Supplier "${input}" not found. Did you mean:\n\n${list}\n\nPlease enter the exact name or number:`);
+        } else {
+          addAssistantMessage(`Supplier "${input}" not found. Please enter the exact supplier name or number:\n\n(Type "cancel" to exit)`);
+        }
+      }
+      return;
+    }
+
+    if (qeStep === 'awaiting_amount') {
+      const amount = parseFloat(input.replace(/,/g, ''));
+      if (isNaN(amount) || amount <= 0) {
+        addAssistantMessage('Please enter a valid amount (e.g. 5000 or 5,000.50):');
+        return;
+      }
+      setQeData((prev) => ({ ...prev, amount }));
+      setQeStep('awaiting_description');
+      addAssistantMessage(`Amount: ${amount.toFixed(2)} AED\n\nEnter invoice description:`);
+      return;
+    }
+
+    if (qeStep === 'awaiting_description') {
+      const description = input.trim() || 'Invoice';
+      const finalData = { ...qeData, description };
+      setQeData(finalData);
+      setQeStep('confirming');
+      addAssistantMessage(
+        `Here's your invoice:\n\n` +
+        `• Supplier: ${finalData.supplierName} (${finalData.supplierNumber})\n` +
+        `• Amount: ${finalData.amount.toFixed(2)} AED\n` +
+        `• Description: ${description}\n` +
+        `• Date: ${dayjs().format('DD-MMM-YYYY')} (today)\n` +
+        `• Tax: None\n\n` +
+        `Type "yes" to create, or "cancel" to abort.`
+      );
+      return;
+    }
+
+    if (qeStep === 'confirming') {
+      if (lower === 'yes' || lower === 'y' || lower === 'ok' || lower === 'confirm' || lower === 'create') {
+        addAssistantMessage('Creating invoice now...');
+        createInvoiceFromQuickEntry(qeData);
+        setQeStep('idle');
+        setQeData({ supplierInput: '', supplierName: '', supplierNumber: '', amount: 0, description: '' });
+      } else {
+        setQeStep('idle');
+        setQeData({ supplierInput: '', supplierName: '', supplierNumber: '', amount: 0, description: '' });
+        addAssistantMessage('Invoice creation cancelled. How else can I help?');
+      }
+      return;
+    }
   };
 
   const generateResponse = (input: string): string => {
     const lowerInput = input.toLowerCase();
 
     // AP module responses
-    if (lowerInput.includes('create') && (lowerInput.includes('payable') || lowerInput.includes('invoice'))) {
+    if (lowerInput.includes('create') && lowerInput.includes('payable')) {
       // Navigate to ManageInvoices with quick-create dialog
       setTimeout(() => {
         handleClose();
@@ -204,7 +462,7 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
     }
     if (lowerInput.includes('help')) {
       if (module === 'ap') {
-        return 'I can assist you with:\n• Creating payable invoices\n• Managing and validating invoices\n• Processing payments\n• Managing suppliers\n• Invoice holds and approvals\n• Payment terms and schedules\n\nJust tell me what you\'d like to do!';
+        return 'I can assist you with:\n• Quick Entry Invoice — just say supplier, amount & description\n• Creating payable invoices (full form)\n• Managing and validating invoices\n• Processing payments\n• Managing suppliers\n\nTry: "Quick Entry Invoice" or "invoice Acme 5000 office supplies"';
       }
       return 'I can assist you with:\n• Data synchronization from Oracle Fusion\n• Creating and posting journal entries\n• Running financial reports\n• Managing periods\n• Navigating modules\n\nJust tell me what you\'d like to do!';
     }
