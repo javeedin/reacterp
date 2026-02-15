@@ -270,7 +270,7 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl' }) => {
             businessUnit: 'BUIMERC CORP FZE_JAFZA',
             invoiceNumber: invoiceNum,
             invoiceAmount: data.amount,
-            invoiceDate: today,
+            invoiceDate: today.toISOString(),
             description: data.description,
             invoiceCurrency: 'AED',
             invoiceType: 'Standard',

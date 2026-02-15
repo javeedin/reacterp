@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import dayjs from 'dayjs';
 import {
   Layout,
   Card,
@@ -797,9 +798,14 @@ const ManageInvoices: React.FC = () => {
     quickCreateHandled.current = location.key;
 
     if (state.quickCreateData) {
-      // FloatingMenu flow: data already collected, open tab directly
+      // FloatingMenu / Autopilot flow: data already collected, open tab directly
+      const qcData = { ...state.quickCreateData } as InvoiceInitialData;
+      // Convert serialised date string back to dayjs (structured clone strips prototype)
+      if (qcData.invoiceDate && typeof qcData.invoiceDate === 'string') {
+        qcData.invoiceDate = dayjs(qcData.invoiceDate);
+      }
       setTimeout(() => {
-        openCreateInvoiceTab(state.quickCreateData as InvoiceInitialData);
+        openCreateInvoiceTab(qcData);
       }, 100);
     } else if (state.showQuickCreateDialog) {
       // Autopilot flow: show dialog to collect data
