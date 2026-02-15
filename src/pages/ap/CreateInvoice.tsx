@@ -417,6 +417,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   // API Log (last request/response)
   const [apiLog, setApiLog] = useState<{ url: string; method: string; requestBody: string; responseBody: string; status: string; httpStatus: number; timestamp: string } | null>(null);
+  // API Log history (all requests during session)
+  const [apiLogHistory, setApiLogHistory] = useState<{ action: string; url: string; method: string; requestBody: string; responseBody: string; status: string; httpStatus: number; timestamp: string }[]>([]);
+  const [apiLogHistoryVisible, setApiLogHistoryVisible] = useState(false);
+
+  // Saved invoice state — tracks whether we're in create or update mode
+  const [savedInvoiceId, setSavedInvoiceId] = useState<number | null>(null);
 
   // Pre-fill from initialData (Quick Create task)
   useEffect(() => {
@@ -1252,19 +1258,36 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     return payload;
   };
 
+  // Helper to log an API call to both current log and history
+  const logApiCall = (action: string, entry: { url: string; method: string; requestBody: string; responseBody: string; status: string; httpStatus: number; timestamp: string }) => {
+    setApiLog(entry);
+    setApiLogHistory((prev) => [{ action, ...entry }, ...prev]);
+  };
+
   // POST combined invoice (header + lines) to APEX
   const saveInvoice = async (values: any): Promise<boolean> => {
     setSaving(true);
     const payload = buildInvoicePayload(values);
-    const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoicefull`;
+    const isUpdate = savedInvoiceId !== null;
+    const httpMethod = isUpdate ? 'PUT' : 'POST';
+    const actionLabel = isUpdate ? 'Update Invoice' : 'Create Invoice';
+    const url = isUpdate
+      ? `${APEX_DB_CONFIG.baseUrl}/ap/createinvoicefull/${savedInvoiceId}`
+      : `${APEX_DB_CONFIG.baseUrl}/ap/createinvoicefull`;
+
+    // Include InvoiceId in payload for updates
+    if (isUpdate) {
+      payload.InvoiceId = savedInvoiceId;
+    }
+
     const requestBody = JSON.stringify(payload, null, 2);
     const timestamp = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
     try {
-      console.log('POST Invoice (Full):', url, payload);
+      console.log(`${httpMethod} Invoice (${actionLabel}):`, url, payload);
 
       const response = await fetch(url, {
-        method: 'POST',
+        method: httpMethod,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
@@ -1285,9 +1308,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
       // If response is not JSON or not OK, show the raw server error
       if (!data) {
-        setApiLog({
+        logApiCall(actionLabel, {
           url,
-          method: 'POST',
+          method: httpMethod,
           requestBody,
           responseBody: responseText || '(empty response)',
           status: 'SERVER_ERROR',
@@ -1299,9 +1322,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       }
 
       // Update API log
-      setApiLog({
+      logApiCall(actionLabel, {
         url,
-        method: 'POST',
+        method: httpMethod,
         requestBody,
         responseBody,
         status: data.status || (response.ok ? 'SUCCESS' : 'ERROR'),
@@ -1314,8 +1337,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         return false;
       }
 
-      const invoiceId = data.invoiceId || 0;
-      message.success(data.message || `Invoice created (ID: ${invoiceId})`);
+      const invoiceId = data.invoiceId || savedInvoiceId || 0;
+
+      // Store invoice ID — switch to update mode
+      if (!isUpdate && invoiceId) {
+        setSavedInvoiceId(invoiceId);
+      }
+
+      message.success(data.message || `Invoice ${isUpdate ? 'updated' : 'created'} (ID: ${invoiceId})`);
 
       // Notify parent
       if (onSave) onSave({ ...values, invoiceId });
@@ -1324,17 +1353,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       console.error('Save invoice error:', error);
-      // Log the error
-      setApiLog({
+      logApiCall(actionLabel, {
         url,
-        method: 'POST',
+        method: httpMethod,
         requestBody,
         responseBody: JSON.stringify({ error: errorMsg }, null, 2),
         status: 'NETWORK_ERROR',
         httpStatus: 0,
         timestamp,
       });
-      message.error(`Failed to save invoice: ${errorMsg}`);
+      message.error(`Failed to ${isUpdate ? 'update' : 'save'} invoice: ${errorMsg}`);
       return false;
     } finally {
       setSaving(false);
@@ -1357,6 +1385,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         setHeaderValues({ invoiceType: 'Standard', invoiceCurrency: 'AED' });
         setTaxRate(5);
         setIsValidated(false);
+        setSavedInvoiceId(null); // Reset to create mode
       }
     } catch {
       message.error('Please fill in required fields');
@@ -1385,10 +1414,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const handleApiPreview = () => {
     const values = form.getFieldsValue();
     const payload = buildInvoicePayload(values);
-    const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoicefull`;
+    const isUpdate = savedInvoiceId !== null;
+    const url = isUpdate
+      ? `${APEX_DB_CONFIG.baseUrl}/ap/createinvoicefull/${savedInvoiceId}`
+      : `${APEX_DB_CONFIG.baseUrl}/ap/createinvoicefull`;
+    if (isUpdate) payload.InvoiceId = savedInvoiceId;
 
     setApiPreviewData({
-      url,
+      url: `${isUpdate ? 'PUT' : 'POST'} ${url}`,
       body: JSON.stringify(payload, null, 2),
     });
     setApiPreviewVisible(true);
@@ -1917,17 +1950,25 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               View Accounting
             </Button>
           </Tooltip>
-          <Button onClick={handleSaveAndCreateNext} loading={saving} disabled={saving || !isValidated}>
-            Save and Create Next
-          </Button>
+          {savedInvoiceId && (
+            <Tag color="green" style={{ fontSize: 12, padding: '2px 10px', fontWeight: 600 }}>
+              <CheckCircleOutlined /> Invoice ID: {savedInvoiceId}
+            </Tag>
+          )}
+          {!savedInvoiceId && (
+            <Button onClick={handleSaveAndCreateNext} loading={saving} disabled={saving || !isValidated}>
+              Save and Create Next
+            </Button>
+          )}
           <Button
             type="primary"
             onClick={handleSave}
             loading={saving}
             disabled={saving || !isValidated}
+            icon={savedInvoiceId ? <SaveOutlined /> : undefined}
             style={{ background: isValidated ? REDWOOD.primary : undefined, borderColor: isValidated ? REDWOOD.primary : undefined }}
           >
-            Save
+            {savedInvoiceId ? 'Update Invoice' : 'Save'}
           </Button>
           <Button
             type="primary"
@@ -1936,7 +1977,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             disabled={saving || !isValidated}
             style={{ background: isValidated ? REDWOOD.primary : undefined, borderColor: isValidated ? REDWOOD.primary : undefined }}
           >
-            Save and Close
+            {savedInvoiceId ? 'Update and Close' : 'Save and Close'}
           </Button>
           <Button onClick={onClose}>
             Cancel
@@ -2703,15 +2744,25 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 <Space>
                   <ApiOutlined style={{ color: apiLog.status === 'SUCCESS' ? REDWOOD.success : REDWOOD.error }} />
                   <Text strong style={{ fontSize: 13 }}>API Log</Text>
+                  <Tag color={apiLog.method === 'PUT' ? 'orange' : 'blue'} style={{ fontSize: 10 }}>{apiLog.method}</Tag>
                   <Tag color={apiLog.status === 'SUCCESS' ? 'green' : 'red'}>{apiLog.httpStatus} {apiLog.status}</Tag>
                   <Text type="secondary" style={{ fontSize: 11 }}>{apiLog.timestamp}</Text>
                 </Space>
                 <Space>
+                  {apiLogHistory.length > 1 && (
+                    <Button
+                      size="small"
+                      icon={<FileTextOutlined />}
+                      onClick={() => setApiLogHistoryVisible(true)}
+                    >
+                      History ({apiLogHistory.length})
+                    </Button>
+                  )}
                   <Button
                     size="small"
                     icon={<CopyOutlined />}
                     onClick={() => {
-                      const curlCmd = `curl -X POST '${apiLog.url}' \\\n  -H 'Content-Type: application/json' \\\n  -d '${apiLog.requestBody.replace(/'/g, "'\\''")}'`;
+                      const curlCmd = `curl -X ${apiLog.method} '${apiLog.url}' \\\n  -H 'Content-Type: application/json' \\\n  -d '${apiLog.requestBody.replace(/'/g, "'\\''")}'`;
                       navigator.clipboard.writeText(curlCmd);
                       message.success('cURL command copied');
                     }}
@@ -2731,7 +2782,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               <Col span={12}>
                 <Row justify="space-between" align="middle" style={{ marginBottom: 4 }}>
                   <Text type="secondary" style={{ fontSize: 11 }}>
-                    <Tag color="blue" style={{ fontSize: 10 }}>POST</Tag> Request Body
+                    <Tag color={apiLog.method === 'PUT' ? 'orange' : 'blue'} style={{ fontSize: 10 }}>{apiLog.method}</Tag> Request Body
                   </Text>
                   <Button
                     size="small"
@@ -2772,7 +2823,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 </Row>
                 <div style={{ marginBottom: 4 }}>
                   <Text style={{ fontSize: 10, fontFamily: 'monospace', color: apiLog.status === 'SUCCESS' ? REDWOOD.success : REDWOOD.error }}>
-                    {apiLog.status === 'SUCCESS' ? 'Invoice created successfully' : 'Request failed'}
+                    {apiLog.status === 'SUCCESS'
+                      ? (apiLog.method === 'PUT' ? 'Invoice updated successfully' : 'Invoice created successfully')
+                      : 'Request failed'}
                   </Text>
                 </div>
                 <pre style={{
@@ -2837,6 +2890,131 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             onDoubleClick: () => handleSupplierSelect(record),
             style: { cursor: 'pointer' },
           })}
+        />
+      </Modal>
+
+      {/* ========== API LOG HISTORY MODAL ========== */}
+      <Modal
+        title={
+          <Space>
+            <ApiOutlined style={{ color: REDWOOD.info }} />
+            <span>API Log History ({apiLogHistory.length} calls)</span>
+          </Space>
+        }
+        open={apiLogHistoryVisible}
+        onCancel={() => setApiLogHistoryVisible(false)}
+        footer={
+          <Space>
+            <Button
+              danger
+              onClick={() => { setApiLogHistory([]); setApiLogHistoryVisible(false); message.success('History cleared'); }}
+              disabled={apiLogHistory.length === 0}
+            >
+              Clear History
+            </Button>
+            <Button type="primary" onClick={() => setApiLogHistoryVisible(false)}>Close</Button>
+          </Space>
+        }
+        width={850}
+      >
+        <Table
+          dataSource={apiLogHistory.map((entry, i) => ({ ...entry, key: i }))}
+          pagination={false}
+          size="small"
+          scroll={{ y: 400 }}
+          columns={[
+            {
+              title: '#',
+              key: 'idx',
+              width: 35,
+              align: 'center',
+              render: (_: any, __: any, idx: number) => <Text style={{ fontSize: 11 }}>{idx + 1}</Text>,
+            },
+            {
+              title: 'Action',
+              dataIndex: 'action',
+              key: 'action',
+              width: 130,
+              render: (v: string) => <Text strong style={{ fontSize: 11 }}>{v}</Text>,
+            },
+            {
+              title: 'Method',
+              dataIndex: 'method',
+              key: 'method',
+              width: 60,
+              render: (v: string) => <Tag color={v === 'PUT' ? 'orange' : v === 'DELETE' ? 'red' : 'blue'} style={{ fontSize: 10 }}>{v}</Tag>,
+            },
+            {
+              title: 'Status',
+              dataIndex: 'status',
+              key: 'status',
+              width: 100,
+              render: (v: string, record: any) => (
+                <Tag color={v === 'SUCCESS' ? 'green' : 'red'} style={{ fontSize: 10 }}>{record.httpStatus} {v}</Tag>
+              ),
+            },
+            {
+              title: 'URL',
+              dataIndex: 'url',
+              key: 'url',
+              ellipsis: true,
+              render: (v: string) => <Text style={{ fontSize: 10, fontFamily: 'monospace' }}>{v.replace(APEX_DB_CONFIG.baseUrl, '...')}</Text>,
+            },
+            {
+              title: 'Time',
+              dataIndex: 'timestamp',
+              key: 'timestamp',
+              width: 140,
+              render: (v: string) => <Text type="secondary" style={{ fontSize: 10 }}>{v}</Text>,
+            },
+            {
+              title: '',
+              key: 'actions',
+              width: 60,
+              render: (_: any, record: any) => (
+                <Button
+                  size="small"
+                  type="link"
+                  icon={<CopyOutlined />}
+                  onClick={() => {
+                    const curlCmd = `curl -X ${record.method} '${record.url}' \\\n  -H 'Content-Type: application/json' \\\n  -d '${record.requestBody.replace(/'/g, "'\\''")}'`;
+                    navigator.clipboard.writeText(curlCmd);
+                    message.success('cURL copied');
+                  }}
+                  style={{ fontSize: 10 }}
+                >
+                  cURL
+                </Button>
+              ),
+            },
+          ]}
+          expandable={{
+            expandedRowRender: (record: any) => (
+              <Row gutter={12}>
+                <Col span={12}>
+                  <Text type="secondary" style={{ fontSize: 10 }}>Request</Text>
+                  <pre style={{
+                    background: '#1e1e1e', color: '#d4d4d4', padding: '6px 8px', borderRadius: 4,
+                    fontSize: 9, fontFamily: 'monospace', maxHeight: 150, overflow: 'auto', margin: '4px 0 0',
+                    whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                  }}>
+                    {record.requestBody}
+                  </pre>
+                </Col>
+                <Col span={12}>
+                  <Text type="secondary" style={{ fontSize: 10 }}>Response</Text>
+                  <pre style={{
+                    background: '#1e1e1e', color: record.status === 'SUCCESS' ? '#4ec9b0' : '#f48771',
+                    padding: '6px 8px', borderRadius: 4, fontSize: 9, fontFamily: 'monospace',
+                    maxHeight: 150, overflow: 'auto', margin: '4px 0 0',
+                    whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                  }}>
+                    {record.responseBody}
+                  </pre>
+                </Col>
+              </Row>
+            ),
+          }}
         />
       </Modal>
 
