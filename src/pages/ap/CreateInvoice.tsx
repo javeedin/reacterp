@@ -719,11 +719,6 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // Invoice Actions dropdown menu items
   const invoiceActionItems: MenuProps['items'] = [
     {
-      key: 'validate',
-      icon: <CheckSquareOutlined />,
-      label: 'Validate',
-    },
-    {
       key: 'calculateTax',
       icon: <CalculatorOutlined />,
       label: 'Calculate Tax',
@@ -806,13 +801,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         : undefined,
     });
 
-    // 4. Invoice amount vs lines tally
+    // 4. Invoice amount vs lines + tax tally
     const hdrAmt = values.invoiceAmount || 0;
-    const tallyOk = linesTotal === 0 || Math.abs(hdrAmt - linesTotal) <= 0.01;
+    const tallyOk = linesTotal === 0 || Math.abs(hdrAmt - computedTotal) <= 0.01;
     results.push({
-      label: 'Amount tally (Header vs Lines)',
+      label: 'Amount tally (Header vs Lines + Tax)',
       passed: tallyOk,
-      detail: !tallyOk ? `Header: ${hdrAmt}, Lines: ${linesTotal}` : undefined,
+      detail: !tallyOk ? `Header: ${formatAmount(hdrAmt)}, Lines + Tax: ${formatAmount(computedTotal)}` : undefined,
     });
 
     // 5. Conversion rate for non-AED currency
@@ -1460,6 +1455,17 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               Invoice Actions <DownOutlined style={{ fontSize: 10 }} />
             </Button>
           </Dropdown>
+          <Button
+            icon={<CheckSquareOutlined />}
+            onClick={runValidation}
+            style={{
+              fontWeight: 500,
+              borderColor: isValidated ? REDWOOD.success : REDWOOD.primary,
+              color: isValidated ? REDWOOD.success : REDWOOD.primary,
+            }}
+          >
+            {isValidated ? 'Validated' : 'Validate'}
+          </Button>
           <Button onClick={handleSaveAndCreateNext} loading={saving} disabled={saving || !isValidated}>
             Save and Create Next
           </Button>
