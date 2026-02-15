@@ -1459,7 +1459,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     </Space>
                   ),
                   children: (
-                    <Row gutter={32}>
+                    <Row gutter={32} style={{ paddingTop: 8 }}>
                       {/* Column 1 */}
                       <Col span={8}>
                         <Form.Item
@@ -1687,7 +1687,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     </Space>
                   ),
                   children: (
-                    <Row gutter={32}>
+                    <Row gutter={32} style={{ paddingTop: 8 }}>
                       {/* Column 1 */}
                       <Col span={8}>
                         <Form.Item
