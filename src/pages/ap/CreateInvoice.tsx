@@ -371,6 +371,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [validationResults, setValidationResults] = useState<{ label: string; passed: boolean; detail?: string; action?: { label: string; onClick: () => void } }[]>([]);
   const [validationModalVisible, setValidationModalVisible] = useState(false);
 
+  // View Accounting modal
+  const [accountingModalVisible, setAccountingModalVisible] = useState(false);
+
   // API Preview modal
   const [apiPreviewVisible, setApiPreviewVisible] = useState(false);
   const [apiPreviewData, setApiPreviewData] = useState<{ url: string; body: string } | null>(null);
@@ -1476,6 +1479,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           >
             {isValidated ? 'Validated' : 'Validate'}
           </Button>
+          <Button
+            icon={<AccountBookOutlined />}
+            onClick={() => setAccountingModalVisible(true)}
+            style={{ fontWeight: 500 }}
+          >
+            View Accounting
+          </Button>
           <Button onClick={handleSaveAndCreateNext} loading={saving} disabled={saving || !isValidated}>
             Save and Create Next
           </Button>
@@ -2432,6 +2442,134 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             )}
           </div>
         </div>
+      </Modal>
+
+      {/* ========== VIEW ACCOUNTING MODAL ========== */}
+      <Modal
+        title={
+          <Space>
+            <AccountBookOutlined style={{ color: REDWOOD.info }} />
+            <span>Accounting Entries</span>
+          </Space>
+        }
+        open={accountingModalVisible}
+        onCancel={() => setAccountingModalVisible(false)}
+        footer={<Button type="primary" onClick={() => setAccountingModalVisible(false)}>Close</Button>}
+        width={780}
+      >
+        {(() => {
+          const liabilityDist = form.getFieldValue('liabilityDistribution') || '—';
+          const entries: { line: string; account: string; description: string; debit: number; credit: number }[] = [];
+
+          // Debit entries: each line's distribution
+          lines.forEach((l) => {
+            if (l.amount > 0 || l.description) {
+              entries.push({
+                line: `Line ${l.lineNumber}`,
+                account: l.distributionCombination || l.distributionSet || '—',
+                description: l.description || (l.type || 'Item'),
+                debit: l.amount || 0,
+                credit: 0,
+              });
+            }
+          });
+
+          // Debit entry for tax
+          if (taxTotal > 0) {
+            entries.push({
+              line: 'Tax',
+              account: 'Tax Recoverable',
+              description: `VAT ${taxRate}%`,
+              debit: taxTotal,
+              credit: 0,
+            });
+          }
+
+          // Credit entry: liability account
+          const totalDebit = entries.reduce((s, e) => s + e.debit, 0);
+          if (totalDebit > 0) {
+            entries.push({
+              line: 'Liability',
+              account: liabilityDist,
+              description: 'Accounts Payable',
+              debit: 0,
+              credit: totalDebit,
+            });
+          }
+
+          const totalCredit = entries.reduce((s, e) => s + e.credit, 0);
+
+          return (
+            <Table
+              dataSource={entries.map((e, i) => ({ ...e, key: i }))}
+              pagination={false}
+              size="small"
+              bordered
+              columns={[
+                {
+                  title: 'Line',
+                  dataIndex: 'line',
+                  key: 'line',
+                  width: 80,
+                  render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text>,
+                },
+                {
+                  title: 'Account',
+                  dataIndex: 'account',
+                  key: 'account',
+                  width: 250,
+                  render: (v: string) => <Text style={{ fontSize: 12, fontFamily: 'monospace' }}>{v}</Text>,
+                },
+                {
+                  title: 'Description',
+                  dataIndex: 'description',
+                  key: 'description',
+                  render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text>,
+                },
+                {
+                  title: 'Debit',
+                  dataIndex: 'debit',
+                  key: 'debit',
+                  width: 110,
+                  align: 'right' as const,
+                  render: (v: number) => v > 0 ? <Text style={{ fontSize: 12, fontWeight: 600 }}>{formatAmount(v)}</Text> : null,
+                },
+                {
+                  title: 'Credit',
+                  dataIndex: 'credit',
+                  key: 'credit',
+                  width: 110,
+                  align: 'right' as const,
+                  render: (v: number) => v > 0 ? <Text style={{ fontSize: 12, fontWeight: 600 }}>{formatAmount(v)}</Text> : null,
+                },
+              ]}
+              summary={() => (
+                <Table.Summary fixed>
+                  <Table.Summary.Row>
+                    <Table.Summary.Cell index={0} colSpan={3}>
+                      <Text strong style={{ fontSize: 12 }}>Total</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={3} align="right">
+                      <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>{formatAmount(totalDebit)}</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={4} align="right">
+                      <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>{formatAmount(totalCredit)}</Text>
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                  {Math.abs(totalDebit - totalCredit) > 0.01 && (
+                    <Table.Summary.Row>
+                      <Table.Summary.Cell index={0} colSpan={5}>
+                        <Text type="danger" style={{ fontSize: 12 }}>
+                          Debit/Credit out of balance by {formatAmount(Math.abs(totalDebit - totalCredit))}
+                        </Text>
+                      </Table.Summary.Cell>
+                    </Table.Summary.Row>
+                  )}
+                </Table.Summary>
+              )}
+            />
+          );
+        })()}
       </Modal>
 
       {/* API Preview Modal */}
