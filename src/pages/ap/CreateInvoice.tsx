@@ -202,6 +202,7 @@ interface InvoiceLine {
   startDate: string;
   endDate: string;
   accrualAccount: string;
+  taxAmount: number;
 }
 
 // Currency list
@@ -264,18 +265,26 @@ const formatAmount = (value: number): string => {
   }).format(value);
 };
 
-// Create a blank line
-const createBlankLine = (lineNumber: number): InvoiceLine => ({
+// Helper: derive tax rate from tax classification code
+const getTaxRateForClassification = (taxClassification: string): number => {
+  if (!taxClassification) return 0;
+  if (taxClassification === 'VAT 5%') return 5;
+  // Zero Rated, Exempt, Out of Scope, Reverse Charge => 0
+  return 0;
+};
+
+// Create a blank line — accepts optional defaults to inherit from header
+const createBlankLine = (lineNumber: number, defaults?: { accountingDate?: string; taxClassification?: string }): InvoiceLine => ({
   key: Date.now().toString() + '-' + lineNumber,
   lineNumber,
   type: 'Item',
   amount: 0,
   distributionSet: '',
   distributionCombination: '',
-  accountingDate: '',
+  accountingDate: defaults?.accountingDate || '',
   prorateAcrossAllItemLines: 'No',
   description: '',
-  taxClassification: '',
+  taxClassification: defaults?.taxClassification || '',
   shipToLocation: '',
   quantity: 1,
   unitPrice: 0,
@@ -292,6 +301,7 @@ const createBlankLine = (lineNumber: number): InvoiceLine => ({
   startDate: '',
   endDate: '',
   accrualAccount: '',
+  taxAmount: 0,
 });
 
 export interface InvoiceInitialData {
@@ -415,7 +425,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           firstLine.amount = initialData.invoiceAmount;
         }
       }
-      if (initialData.taxCode) firstLine.taxClassification = initialData.taxCode;
+      if (initialData.taxCode) {
+        firstLine.taxClassification = initialData.taxCode;
+        // Compute line-level tax
+        const lineRate = getTaxRateForClassification(initialData.taxCode);
+        firstLine.taxAmount = Math.round(firstLine.amount * (lineRate / 100) * 100) / 100;
+      }
       if (initialData.description) firstLine.description = initialData.description;
       if (initialData.invoiceDate && initialData.invoiceDate.format) {
         firstLine.accountingDate = initialData.invoiceDate.format('DD-MMM-YYYY');
@@ -624,7 +639,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // Line management
   const addLine = () => {
     const nextLine = lines.length + 1;
-    setLines([...lines, createBlankLine(nextLine)]);
+    // Inherit accounting date from header invoice date, and global tax classification
+    const invoiceDate = form.getFieldValue('invoiceDate');
+    const defaultAcctDate = invoiceDate?.format?.('DD-MMM-YYYY') || '';
+    // Determine the most common tax classification from existing lines as default
+    const existingTax = lines.find((l) => l.taxClassification)?.taxClassification || '';
+    setLines([...lines, createBlankLine(nextLine, { accountingDate: defaultAcctDate, taxClassification: existingTax })]);
   };
 
   const removeLines = () => {
@@ -645,6 +665,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         const updated = { ...line, [field]: value };
         if (field === 'quantity' || field === 'unitPrice') {
           updated.amount = (field === 'quantity' ? value : updated.quantity) * (field === 'unitPrice' ? value : updated.unitPrice);
+        }
+        // Recalculate line-level tax when amount or taxClassification changes
+        if (field === 'amount' || field === 'quantity' || field === 'unitPrice' || field === 'taxClassification') {
+          const lineAmount = updated.amount || 0;
+          const lineRate = getTaxRateForClassification(updated.taxClassification);
+          updated.taxAmount = Math.round(lineAmount * (lineRate / 100) * 100) / 100;
         }
         return updated;
       })
@@ -1302,6 +1328,22 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           <Option value="Out of Scope">Out of Scope</Option>
         </Select>
       ),
+    },
+    {
+      title: 'Tax Amount',
+      dataIndex: 'taxAmount',
+      key: 'taxAmount',
+      width: 110,
+      align: 'right',
+      render: (val: number, record: InvoiceLine) => {
+        const rate = getTaxRateForClassification(record.taxClassification);
+        const computed = Math.round((record.amount || 0) * (rate / 100) * 100) / 100;
+        return (
+          <Text style={{ fontSize: 12, fontWeight: 600, color: computed > 0 ? REDWOOD.info : REDWOOD.neutral600 }}>
+            {computed > 0 ? formatAmount(computed) : '0.00'}
+          </Text>
+        );
+      },
     },
     {
       title: 'Ship-to Location',
@@ -2496,125 +2538,240 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         title={
           <Space>
             <AccountBookOutlined style={{ color: REDWOOD.info }} />
-            <span>Accounting Entries</span>
+            <span>Accounting Entries — Multi-Period</span>
           </Space>
         }
         open={accountingModalVisible}
         onCancel={() => setAccountingModalVisible(false)}
         footer={<Button type="primary" onClick={() => setAccountingModalVisible(false)}>Close</Button>}
-        width={780}
+        width={900}
       >
         {(() => {
           const liabilityDist = form.getFieldValue('liabilityDistribution') || '—';
-          const entries: { line: string; account: string; description: string; debit: number; credit: number }[] = [];
+          const invoiceDate = form.getFieldValue('invoiceDate');
+          const defaultAcctDate = invoiceDate?.format?.('DD-MMM-YYYY') || 'N/A';
 
-          // Debit entries: each line's distribution
-          lines.forEach((l) => {
-            if (l.amount > 0 || l.description) {
-              entries.push({
+          // Build entries grouped by accounting period (date)
+          type AcctEntry = { key: number; period: string; line: string; account: string; description: string; debit: number; credit: number; isGroupHeader?: boolean };
+          const allEntries: AcctEntry[] = [];
+          let keyIdx = 0;
+
+          // Active lines with data
+          const activeLines = lines.filter((l) => l.amount > 0 || l.description);
+
+          // Group lines by their accounting date (period)
+          const periodMap = new Map<string, typeof activeLines>();
+          activeLines.forEach((l) => {
+            const period = l.accountingDate || defaultAcctDate;
+            if (!periodMap.has(period)) periodMap.set(period, []);
+            periodMap.get(period)!.push(l);
+          });
+
+          // Sort periods chronologically
+          const sortedPeriods = Array.from(periodMap.keys()).sort((a, b) => {
+            const da = new Date(a);
+            const db = new Date(b);
+            return da.getTime() - db.getTime();
+          });
+
+          let grandTotalDebit = 0;
+          let grandTotalCredit = 0;
+
+          sortedPeriods.forEach((period) => {
+            const periodLines = periodMap.get(period)!;
+
+            // Period header row
+            allEntries.push({
+              key: keyIdx++,
+              period,
+              line: '',
+              account: '',
+              description: '',
+              debit: 0,
+              credit: 0,
+              isGroupHeader: true,
+            });
+
+            // Debit: each expense line
+            periodLines.forEach((l) => {
+              allEntries.push({
+                key: keyIdx++,
+                period,
                 line: `Line ${l.lineNumber}`,
                 account: l.distributionCombination || l.distributionSet || '—',
                 description: l.description || (l.type || 'Item'),
                 debit: l.amount || 0,
                 credit: 0,
               });
+              grandTotalDebit += l.amount || 0;
+            });
+
+            // Debit: tax recoverable for this period's lines
+            const periodLineTax = periodLines.reduce((sum, l) => {
+              const rate = getTaxRateForClassification(l.taxClassification);
+              return sum + Math.round((l.amount || 0) * (rate / 100) * 100) / 100;
+            }, 0);
+            if (periodLineTax > 0) {
+              allEntries.push({
+                key: keyIdx++,
+                period,
+                line: 'Tax',
+                account: 'Tax Recoverable',
+                description: 'Input VAT',
+                debit: periodLineTax,
+                credit: 0,
+              });
+              grandTotalDebit += periodLineTax;
+            }
+
+            // Credit: liability for each expense line
+            periodLines.forEach((l) => {
+              allEntries.push({
+                key: keyIdx++,
+                period,
+                line: `Line ${l.lineNumber}`,
+                account: liabilityDist,
+                description: `AP — ${l.description || l.type || 'Item'}`,
+                debit: 0,
+                credit: l.amount || 0,
+              });
+              grandTotalCredit += l.amount || 0;
+            });
+
+            // Credit: liability for tax
+            if (periodLineTax > 0) {
+              allEntries.push({
+                key: keyIdx++,
+                period,
+                line: 'Tax',
+                account: liabilityDist,
+                description: 'AP — Input VAT',
+                debit: 0,
+                credit: periodLineTax,
+              });
+              grandTotalCredit += periodLineTax;
             }
           });
 
-          // Debit entry for tax
-          if (taxTotal > 0) {
-            entries.push({
-              line: 'Tax',
-              account: 'Tax Recoverable',
-              description: `VAT ${taxRate}%`,
-              debit: taxTotal,
-              credit: 0,
-            });
-          }
-
-          // Credit entry: liability account
-          const totalDebit = entries.reduce((s, e) => s + e.debit, 0);
-          if (totalDebit > 0) {
-            entries.push({
-              line: 'Liability',
-              account: liabilityDist,
-              description: 'Accounts Payable',
-              debit: 0,
-              credit: totalDebit,
-            });
-          }
-
-          const totalCredit = entries.reduce((s, e) => s + e.credit, 0);
-
           return (
-            <Table
-              dataSource={entries.map((e, i) => ({ ...e, key: i }))}
-              pagination={false}
-              size="small"
-              bordered
-              columns={[
-                {
-                  title: 'Line',
-                  dataIndex: 'line',
-                  key: 'line',
-                  width: 80,
-                  render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text>,
-                },
-                {
-                  title: 'Account',
-                  dataIndex: 'account',
-                  key: 'account',
-                  width: 250,
-                  render: (v: string) => <Text style={{ fontSize: 12, fontFamily: 'monospace' }}>{v}</Text>,
-                },
-                {
-                  title: 'Description',
-                  dataIndex: 'description',
-                  key: 'description',
-                  render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text>,
-                },
-                {
-                  title: 'Debit',
-                  dataIndex: 'debit',
-                  key: 'debit',
-                  width: 110,
-                  align: 'right' as const,
-                  render: (v: number) => v > 0 ? <Text style={{ fontSize: 12, fontWeight: 600 }}>{formatAmount(v)}</Text> : null,
-                },
-                {
-                  title: 'Credit',
-                  dataIndex: 'credit',
-                  key: 'credit',
-                  width: 110,
-                  align: 'right' as const,
-                  render: (v: number) => v > 0 ? <Text style={{ fontSize: 12, fontWeight: 600 }}>{formatAmount(v)}</Text> : null,
-                },
-              ]}
-              summary={() => (
-                <Table.Summary fixed>
-                  <Table.Summary.Row>
-                    <Table.Summary.Cell index={0} colSpan={3}>
-                      <Text strong style={{ fontSize: 12 }}>Total</Text>
-                    </Table.Summary.Cell>
-                    <Table.Summary.Cell index={3} align="right">
-                      <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>{formatAmount(totalDebit)}</Text>
-                    </Table.Summary.Cell>
-                    <Table.Summary.Cell index={4} align="right">
-                      <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>{formatAmount(totalCredit)}</Text>
-                    </Table.Summary.Cell>
-                  </Table.Summary.Row>
-                  {Math.abs(totalDebit - totalCredit) > 0.01 && (
+            <>
+              <Table
+                dataSource={allEntries}
+                pagination={false}
+                size="small"
+                bordered
+                rowClassName={(record) => record.isGroupHeader ? 'acct-period-header' : ''}
+                columns={[
+                  {
+                    title: 'Accounting Date',
+                    dataIndex: 'period',
+                    key: 'period',
+                    width: 120,
+                    onCell: (record: AcctEntry) => ({
+                      colSpan: record.isGroupHeader ? 6 : 1,
+                      style: record.isGroupHeader
+                        ? { background: '#e6f4ff', fontWeight: 700, fontSize: 12 }
+                        : undefined,
+                    }),
+                    render: (v: string, record: AcctEntry) => {
+                      if (record.isGroupHeader) {
+                        const periodLines = periodMap.get(v)!;
+                        const periodTotal = periodLines.reduce((s, l) => s + (l.amount || 0), 0);
+                        const periodTax = periodLines.reduce((s, l) => s + Math.round((l.amount || 0) * (getTaxRateForClassification(l.taxClassification) / 100) * 100) / 100, 0);
+                        return (
+                          <span>
+                            Period: <strong>{v}</strong>
+                            <span style={{ marginLeft: 16, color: REDWOOD.neutral600, fontWeight: 400 }}>
+                              Lines: {formatAmount(periodTotal)} | Tax: {formatAmount(periodTax)} | Total: {formatAmount(periodTotal + periodTax)}
+                            </span>
+                          </span>
+                        );
+                      }
+                      return <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{v}</Text>;
+                    },
+                  },
+                  {
+                    title: 'Line',
+                    dataIndex: 'line',
+                    key: 'line',
+                    width: 70,
+                    onCell: (record: AcctEntry) => ({ colSpan: record.isGroupHeader ? 0 : 1 }),
+                    render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text>,
+                  },
+                  {
+                    title: 'Account',
+                    dataIndex: 'account',
+                    key: 'account',
+                    width: 240,
+                    onCell: (record: AcctEntry) => ({ colSpan: record.isGroupHeader ? 0 : 1 }),
+                    render: (v: string) => <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{v}</Text>,
+                  },
+                  {
+                    title: 'Description',
+                    dataIndex: 'description',
+                    key: 'description',
+                    onCell: (record: AcctEntry) => ({ colSpan: record.isGroupHeader ? 0 : 1 }),
+                    render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text>,
+                  },
+                  {
+                    title: 'Debit',
+                    dataIndex: 'debit',
+                    key: 'debit',
+                    width: 110,
+                    align: 'right' as const,
+                    onCell: (record: AcctEntry) => ({ colSpan: record.isGroupHeader ? 0 : 1 }),
+                    render: (v: number) => v > 0 ? <Text style={{ fontSize: 12, fontWeight: 600, color: '#389e0d' }}>{formatAmount(v)}</Text> : null,
+                  },
+                  {
+                    title: 'Credit',
+                    dataIndex: 'credit',
+                    key: 'credit',
+                    width: 110,
+                    align: 'right' as const,
+                    onCell: (record: AcctEntry) => ({ colSpan: record.isGroupHeader ? 0 : 1 }),
+                    render: (v: number) => v > 0 ? <Text style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.primary }}>{formatAmount(v)}</Text> : null,
+                  },
+                ]}
+                summary={() => (
+                  <Table.Summary fixed>
                     <Table.Summary.Row>
-                      <Table.Summary.Cell index={0} colSpan={5}>
-                        <Text type="danger" style={{ fontSize: 12 }}>
-                          Debit/Credit out of balance by {formatAmount(Math.abs(totalDebit - totalCredit))}
-                        </Text>
+                      <Table.Summary.Cell index={0} colSpan={4}>
+                        <Text strong style={{ fontSize: 13 }}>Grand Total</Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={4} align="right">
+                        <Text strong style={{ fontSize: 13, color: '#389e0d' }}>{formatAmount(grandTotalDebit)}</Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={5} align="right">
+                        <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>{formatAmount(grandTotalCredit)}</Text>
                       </Table.Summary.Cell>
                     </Table.Summary.Row>
-                  )}
-                </Table.Summary>
+                    {Math.abs(grandTotalDebit - grandTotalCredit) > 0.01 && (
+                      <Table.Summary.Row>
+                        <Table.Summary.Cell index={0} colSpan={6}>
+                          <Text type="danger" style={{ fontSize: 12 }}>
+                            Debit/Credit out of balance by {formatAmount(Math.abs(grandTotalDebit - grandTotalCredit))}
+                          </Text>
+                        </Table.Summary.Cell>
+                      </Table.Summary.Row>
+                    )}
+                    {Math.abs(grandTotalDebit - grandTotalCredit) <= 0.01 && (
+                      <Table.Summary.Row>
+                        <Table.Summary.Cell index={0} colSpan={6}>
+                          <Text style={{ fontSize: 12, color: '#389e0d' }}>
+                            Balanced — Debit equals Credit
+                          </Text>
+                        </Table.Summary.Cell>
+                      </Table.Summary.Row>
+                    )}
+                  </Table.Summary>
+                )}
+              />
+              {sortedPeriods.length > 1 && (
+                <div style={{ marginTop: 8, fontSize: 11, color: REDWOOD.neutral600 }}>
+                  Multi-period invoice across {sortedPeriods.length} accounting periods
+                </div>
               )}
-            />
+            </>
           );
         })()}
       </Modal>
