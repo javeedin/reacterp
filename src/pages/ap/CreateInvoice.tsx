@@ -368,7 +368,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   // Validation state
   const [isValidated, setIsValidated] = useState(false);
-  const [validationResults, setValidationResults] = useState<{ label: string; passed: boolean; detail?: string }[]>([]);
+  const [validationResults, setValidationResults] = useState<{ label: string; passed: boolean; detail?: string; action?: { label: string; onClick: () => void } }[]>([]);
   const [validationModalVisible, setValidationModalVisible] = useState(false);
 
   // API Preview modal
@@ -808,6 +808,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       label: 'Amount tally (Header vs Lines + Tax)',
       passed: tallyOk,
       detail: !tallyOk ? `Header: ${formatAmount(hdrAmt)}, Lines + Tax: ${formatAmount(computedTotal)}` : undefined,
+      action: !tallyOk && computedTotal > 0 ? {
+        label: `Update header to ${formatAmount(computedTotal)}`,
+        onClick: () => {
+          form.setFieldValue('invoiceAmount', computedTotal);
+          setHeaderValues((prev) => ({ ...prev, invoiceAmount: computedTotal }));
+          message.success(`Header amount updated to ${formatAmount(computedTotal)}`);
+          setValidationModalVisible(false);
+          setTimeout(() => runValidation(), 100);
+        },
+      } : undefined,
     });
 
     // 5. Conversion rate for non-AED currency
@@ -2397,6 +2407,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 <Text strong style={{ fontSize: 13 }}>{item.label}</Text>
                 {item.detail && (
                   <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginTop: 2 }}>{item.detail}</div>
+                )}
+                {item.action && (
+                  <Button
+                    size="small"
+                    type="link"
+                    style={{ padding: 0, fontSize: 12, marginTop: 2, color: REDWOOD.info }}
+                    onClick={item.action.onClick}
+                  >
+                    {item.action.label}
+                  </Button>
                 )}
               </div>
               <Tag color={item.passed ? 'success' : 'error'} style={{ marginLeft: 8 }}>
