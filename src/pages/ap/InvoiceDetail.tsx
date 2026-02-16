@@ -149,6 +149,8 @@ interface InvoiceDetailProps {
     invoiceCurrency: string;
     businessUnit: string;
     validationStatus: string;
+    approvalStatus?: string;
+    holdPaidStatus?: string;
     notes?: string;
   };
   onClose: () => void;
@@ -171,66 +173,20 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
   const [lines, setLines] = useState<InvoiceLine[]>([]);
   const [taxLines, setTaxLines] = useState<TaxLine[]>([]);
   const [activeTab, setActiveTab] = useState('lines');
-  const [selectedInstallment, setSelectedInstallment] = useState<number | null>(1);
+  const [selectedInstallment, setSelectedInstallment] = useState<number | null>(null);
 
-  // Sample approval history data
-  const [approvalHistory] = useState<ApprovalHistory[]>([
-    {
-      key: '1',
-      workflowType: 'Invoice approval',
-      line: '',
-      action: 'Initiated',
-      actionDate: '25-Jul-2025 8:58...',
-      approver: 'SAN KURIAN',
-      reviewedAmount: `-34,155.00 ${invoice.invoiceCurrency}`,
-      comments: '',
-      holdReason: '',
-    },
-    {
-      key: '2',
-      workflowType: 'Invoice approval',
-      line: '',
-      action: 'Manually ap...',
-      actionDate: '3-Sep-2025 8:04...',
-      approver: 'SAN KURIAN',
-      reviewedAmount: `-34,155.00 ${invoice.invoiceCurrency}`,
-      comments: '',
-      holdReason: '',
-    },
-  ]);
+  // Real data states - fetched from API
+  const [approvalHistory, setApprovalHistory] = useState<ApprovalHistory[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [paymentsLoading, setPaymentsLoading] = useState(false);
+  const [installments, setInstallments] = useState<Installment[]>([]);
+  const [installmentsLoading, setInstallmentsLoading] = useState(false);
 
-  // Sample payments data
-  const [payments] = useState<Payment[]>([
-    {
-      key: '1',
-      number: '1901',
-      paymentDocument: 'BOB BCL C...',
-      status: 'Cleared',
-      reconciled: 'Yes',
-      currentPayeeName: 'UNIVERSAL TRAVELS &...',
-      paymentDate: '3-Sep-2025',
-      paidAmount: `-34,155.00 A...`,
-      address: 'POST BOX, DUBAI, DUBAI, United Arab Emirates',
-    },
-  ]);
-
-  // Sample installments data
-  const [installments] = useState<Installment[]>([
-    {
-      key: '1',
-      installmentNumber: 1,
-      dueDate: '23-Aug-2025',
-      grossAmount: -34155.00,
-      unpaidAmount: 0.00,
-      paymentPriority: 99,
-      paymentMethod: 'Check',
-      bankAccount: '',
-    },
-  ]);
-
-  // Fetch invoice lines on mount
+  // Fetch all data on mount
   useEffect(() => {
     fetchInvoiceLines();
+    fetchPayments();
+    fetchInstallments();
   }, [invoice.invoiceId]);
 
   // Fetch invoice lines from API
@@ -310,6 +266,91 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
       message.error(`Failed to load invoice lines: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Fetch payments related to this invoice
+  const fetchPayments = async () => {
+    setPaymentsLoading(true);
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/related-invoices?invoice_id=${invoice.invoiceId}`;
+      console.log('Fetching payments from:', url);
+      const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      const items = data.items || data || [];
+      if (Array.isArray(items) && items.length > 0) {
+        // Get related payment details by joining with payments
+        const mappedPayments: Payment[] = [];
+        for (const rel of items) {
+          // Try to fetch parent payment details
+          let paymentDetails: any = {};
+          if (rel.check_id || rel.CHECK_ID) {
+            try {
+              const checkId = rel.check_id || rel.CHECK_ID;
+              const payUrl = `${APEX_DB_CONFIG.baseUrl}/ap/payments/${checkId}`;
+              const payResp = await fetch(payUrl, { headers: { 'Accept': 'application/json' } });
+              if (payResp.ok) {
+                const payData = await payResp.json();
+                paymentDetails = payData.items?.[0] || payData || {};
+              }
+            } catch { /* use what we have */ }
+          }
+          mappedPayments.push({
+            key: (rel.invoice_payment_id || rel.INVOICE_PAYMENT_ID || mappedPayments.length + 1).toString(),
+            number: (paymentDetails.payment_number || paymentDetails.PAYMENT_NUMBER || rel.check_id || rel.CHECK_ID || '').toString(),
+            paymentDocument: paymentDetails.payment_process_request || paymentDetails.PAYMENT_PROCESS_REQUEST || '',
+            status: paymentDetails.payment_status || paymentDetails.PAYMENT_STATUS || rel.invoice_payment_status || rel.INVOICE_PAYMENT_STATUS || '',
+            reconciled: (paymentDetails.payment_status || paymentDetails.PAYMENT_STATUS || '') === 'Cleared' ? 'Yes' : 'No',
+            currentPayeeName: paymentDetails.payee_name || paymentDetails.PAYEE_NAME || invoice.supplierOrParty || '',
+            paymentDate: formatDate(paymentDetails.payment_date || paymentDetails.PAYMENT_DATE || ''),
+            paidAmount: `${(rel.amount_paid_payment_currency || rel.AMOUNT_PAID_PAYMENT_CURRENCY || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })} ${rel.invoice_currency || rel.INVOICE_CURRENCY || invoice.invoiceCurrency}`,
+            address: paymentDetails.payee_address || paymentDetails.PAYEE_ADDRESS || '',
+          });
+        }
+        setPayments(mappedPayments);
+      } else {
+        setPayments([]);
+      }
+    } catch (error) {
+      console.error('Error fetching payments:', error);
+      setPayments([]);
+    } finally {
+      setPaymentsLoading(false);
+    }
+  };
+
+  // Fetch installments for this invoice
+  const fetchInstallments = async () => {
+    setInstallmentsLoading(true);
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/installments/${invoice.invoiceId}`;
+      console.log('Fetching installments from:', url);
+      const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      const items = data.items || data || [];
+      if (Array.isArray(items) && items.length > 0) {
+        const mapped = items.map((item: any, index: number) => ({
+          key: (item.installment_id || item.INSTALLMENT_ID || index + 1).toString(),
+          installmentNumber: item.InstallmentNumber || item.installment_number || item.INSTALLMENT_NUMBER || index + 1,
+          dueDate: formatDate(item.DueDate || item.due_date || item.DUE_DATE || ''),
+          grossAmount: item.GrossAmount || item.gross_amount || item.GROSS_AMOUNT || 0,
+          unpaidAmount: item.UnpaidAmount || item.unpaid_amount || item.UNPAID_AMOUNT || 0,
+          paymentPriority: item.PaymentPriority || item.payment_priority || item.PAYMENT_PRIORITY || 99,
+          paymentMethod: item.PaymentMethod || item.payment_method || item.PAYMENT_METHOD || '',
+          bankAccount: item.BankAccount || item.bank_account || item.BANK_ACCOUNT || '',
+        }));
+        setInstallments(mapped);
+        if (mapped.length > 0) setSelectedInstallment(mapped[0].installmentNumber);
+      } else {
+        setInstallments([]);
+      }
+    } catch (error) {
+      console.error('Error fetching installments:', error);
+      setInstallments([]);
+    } finally {
+      setInstallmentsLoading(false);
     }
   };
 
@@ -643,7 +684,7 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
                 <span style={{ color: REDWOOD.info }}>{invoice.supplierSite}</span>
               </Descriptions.Item>
               <Descriptions.Item label="Address">
-                <span style={{ color: REDWOOD.info }}>POST BOX, DUBAI, -</span>
+                <span style={{ color: REDWOOD.info }}>{invoice.supplierSite || '-'}</span>
               </Descriptions.Item>
             </Descriptions>
           </Col>
@@ -662,7 +703,12 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
               <Descriptions.Item label="Unpaid Amount">
                 {invoice.unpaidAmount.toFixed(2)} {invoice.invoiceCurrency}
               </Descriptions.Item>
-              <Descriptions.Item label="Holds">0</Descriptions.Item>
+              <Descriptions.Item label="Approval Status">
+                <Tag color={invoice.approvalStatus === 'Approved' ? 'success' : invoice.approvalStatus === 'Rejected' ? 'error' : 'default'}>
+                  {invoice.approvalStatus || 'Not required'}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="Paid Status">{invoice.holdPaidStatus || 'Unpaid'}</Descriptions.Item>
               <Descriptions.Item label="Notes">
                 <Tooltip title={invoice.notes || 'No notes'}>
                   <FileTextOutlined style={{ cursor: 'pointer' }} />
@@ -676,7 +722,7 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
             <Descriptions column={1} size="small" labelStyle={{ width: 180 }}>
               <Descriptions.Item label="Business Unit">{invoice.businessUnit}</Descriptions.Item>
               <Descriptions.Item label="Payment Business Unit">{invoice.businessUnit}</Descriptions.Item>
-              <Descriptions.Item label="Payment Terms">Net 30</Descriptions.Item>
+              <Descriptions.Item label="Payment Terms">{(invoice as any).paymentTerms || '-'}</Descriptions.Item>
               <Descriptions.Item label="Payment Currency">{invoice.invoiceCurrency}</Descriptions.Item>
               <Descriptions.Item label="Attachments">
                 <span style={{ color: REDWOOD.info }}>{invoice.invoiceNumber}</span>
@@ -808,6 +854,7 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
                     pagination={false}
                     size="small"
                     bordered
+                    locale={{ emptyText: 'No approval history available.' }}
                   />
                 </Card>
 
@@ -841,23 +888,27 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
           },
           {
             key: 'payments',
-            label: 'Payments',
+            label: `Payments (${payments.length})`,
             children: (
-              <Card title="Payments" size="small">
-                <Table
-                  columns={paymentsColumns}
-                  dataSource={payments}
-                  pagination={false}
-                  size="small"
-                  bordered
-                />
-              </Card>
+              <Spin spinning={paymentsLoading}>
+                <Card title="Payments" size="small">
+                  <Table
+                    columns={paymentsColumns}
+                    dataSource={payments}
+                    pagination={false}
+                    size="small"
+                    bordered
+                    locale={{ emptyText: 'No payments recorded for this invoice.' }}
+                  />
+                </Card>
+              </Spin>
             ),
           },
           {
             key: 'installments',
-            label: 'Installments',
+            label: `Installments (${installments.length})`,
             children: (
+              <Spin spinning={installmentsLoading}>
               <div>
                 {/* Installment Header Info */}
                 <Row gutter={48} style={{ marginBottom: 16, padding: '0 16px' }}>
@@ -904,7 +955,8 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
                     pagination={false}
                     size="small"
                     bordered
-                    summary={() => (
+                    locale={{ emptyText: 'No installments for this invoice.' }}
+                    summary={() => installments.length === 0 ? undefined : (
                       <Table.Summary fixed>
                         <Table.Summary.Row>
                           <Table.Summary.Cell index={0} />
@@ -990,6 +1042,7 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
                   />
                 )}
               </div>
+              </Spin>
             ),
           },
         ]}
