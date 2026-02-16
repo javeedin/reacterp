@@ -743,7 +743,7 @@ const ManageInvoices: React.FC = () => {
     setTimeout(() => setCopiedUrl(null), 2000);
   };
 
-  // Open invoice in new tab
+  // Open invoice in new tab — redirects to CreateInvoice for edit/view
   const openInvoiceTab = (record: InvoiceRecord) => {
     const tabKey = `invoice-${record.invoiceId}`;
 
@@ -754,11 +754,32 @@ const ManageInvoices: React.FC = () => {
       return;
     }
 
-    // Add new tab
+    // Build initial data for CreateInvoice (edit mode)
+    const editData: InvoiceInitialData = {
+      invoiceId: record.invoiceId,
+      supplier: record.supplierOrParty,
+      supplierNumber: record.supplierNumber,
+      invoiceNumber: record.invoiceNumber,
+      invoiceAmount: record.invoiceAmount,
+      invoiceDate: record.invoiceDate ? dayjs(record.invoiceDate, 'DD MMM YYYY') : undefined,
+      description: record.notes || '',
+      invoiceCurrency: record.invoiceCurrency,
+      businessUnit: record.businessUnit,
+      invoiceType: record.invoiceType,
+      supplierSite: record.supplierSite,
+      unpaidAmount: record.unpaidAmount,
+      validationStatus: record.validationStatus,
+      approvalStatus: record.approvalStatus,
+      holdPaidStatus: record.holdPaidStatus,
+    };
+
+    // Add new tab — use 'create' tabType so it renders CreateInvoice
     const newTab: InvoiceTab = {
       key: tabKey,
       label: record.invoiceNumber,
       invoice: record,
+      tabType: 'create',
+      initialData: editData,
     };
     setOpenTabs([...openTabs, newTab]);
     setActiveTab(tabKey);

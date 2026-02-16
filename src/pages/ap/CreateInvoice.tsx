@@ -338,6 +338,13 @@ export interface InvoiceInitialData {
   invoiceType?: string;
   taxCode?: string;
   includingTax?: boolean;
+  // Edit mode fields
+  invoiceId?: number;
+  supplierSite?: string;
+  unpaidAmount?: number;
+  validationStatus?: string;
+  approvalStatus?: string;
+  holdPaidStatus?: string;
 }
 
 interface CreateInvoiceProps {
@@ -422,9 +429,171 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [apiLogHistoryVisible, setApiLogHistoryVisible] = useState(false);
 
   // Saved invoice state — tracks whether we're in create or update mode
-  const [savedInvoiceId, setSavedInvoiceId] = useState<number | null>(null);
+  const [savedInvoiceId, setSavedInvoiceId] = useState<number | null>(initialData?.invoiceId || null);
 
-  // Pre-fill from initialData (Quick Create task)
+  // Edit mode: determine if invoice is editable or read-only
+  const isEditMode = Boolean(initialData?.invoiceId);
+  const isReadOnly = useMemo(() => {
+    if (!initialData) return false;
+    const status = initialData.holdPaidStatus || '';
+    const isPosted = initialData.validationStatus === 'Validated';
+    const isPaid = status === 'Fully paid' || status === 'Paid';
+    return isPosted || isPaid;
+  }, [initialData]);
+
+  // Payments tab state (for edit mode)
+  const [invoicePayments, setInvoicePayments] = useState<{ key: string; number: string; paymentDocument: string; status: string; reconciled: string; currentPayeeName: string; paymentDate: string; paidAmount: string; address: string }[]>([]);
+  const [invoicePaymentsLoading, setInvoicePaymentsLoading] = useState(false);
+
+  // Holds tab state (for edit mode)
+  const [invoiceHolds, setInvoiceHolds] = useState<{ key: string; holdName: string; holdReason: string; holdDate: string; heldBy: string; releaseDate: string; releasedBy: string }[]>([]);
+  const [invoiceHoldsLoading, setInvoiceHoldsLoading] = useState(false);
+
+  // Installments tab state (for edit mode)
+  const [invoiceInstallments, setInvoiceInstallments] = useState<{ key: string; installmentNumber: number; dueDate: string; grossAmount: number; unpaidAmount: number; paymentPriority: number; paymentMethod: string; bankAccount: string }[]>([]);
+  const [invoiceInstallmentsLoading, setInvoiceInstallmentsLoading] = useState(false);
+
+  // Fetch invoice payments (edit mode)
+  const fetchInvoicePayments = useCallback(async (invoiceId: number) => {
+    setInvoicePaymentsLoading(true);
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/related-invoices?invoice_id=${invoiceId}`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      const data = await response.json();
+      const items = data.items || data || [];
+      setInvoicePayments(
+        items.map((item: any, index: number) => ({
+          key: item.payment_id?.toString() || index.toString(),
+          number: item.payment_number || item.check_number || '',
+          paymentDocument: item.payment_document_name || '',
+          status: item.status || item.payment_status || '',
+          reconciled: item.reconciled_flag === 'Y' ? 'Yes' : 'No',
+          currentPayeeName: item.payee_name || item.supplier || '',
+          paymentDate: formatDateStr(item.payment_date || item.check_date),
+          paidAmount: item.payment_amount?.toString() || item.amount?.toString() || '0',
+          address: item.address || '',
+        }))
+      );
+    } catch (error) {
+      console.error('Error fetching invoice payments:', error);
+    } finally {
+      setInvoicePaymentsLoading(false);
+    }
+  }, []);
+
+  // Fetch invoice holds (edit mode)
+  const fetchInvoiceHolds = useCallback(async (invoiceId: number) => {
+    setInvoiceHoldsLoading(true);
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoice-holds?invoice_id=${invoiceId}`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      const data = await response.json();
+      const items = data.items || data || [];
+      setInvoiceHolds(
+        items.map((item: any, index: number) => ({
+          key: item.hold_id?.toString() || index.toString(),
+          holdName: item.hold_lookup_code || item.hold_name || '',
+          holdReason: item.hold_reason || item.description || '',
+          holdDate: formatDateStr(item.hold_date || item.creation_date),
+          heldBy: item.held_by || item.created_by || '',
+          releaseDate: formatDateStr(item.release_date),
+          releasedBy: item.released_by || '',
+        }))
+      );
+    } catch (error) {
+      console.error('Error fetching invoice holds:', error);
+    } finally {
+      setInvoiceHoldsLoading(false);
+    }
+  }, []);
+
+  // Fetch invoice installments (edit mode)
+  const fetchInvoiceInstallments = useCallback(async (invoiceId: number) => {
+    setInvoiceInstallmentsLoading(true);
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/installments/${invoiceId}`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      const data = await response.json();
+      const items = data.items || data.installments || data || [];
+      setInvoiceInstallments(
+        items.map((item: any, index: number) => ({
+          key: item.installment_id?.toString() || index.toString(),
+          installmentNumber: item.installment_number || index + 1,
+          dueDate: formatDateStr(item.due_date),
+          grossAmount: item.gross_amount || 0,
+          unpaidAmount: item.amount_remaining || item.unpaid_amount || 0,
+          paymentPriority: item.payment_priority || 0,
+          paymentMethod: item.payment_method || '',
+          bankAccount: item.bank_account || item.bank_account_name || '',
+        }))
+      );
+    } catch (error) {
+      console.error('Error fetching installments:', error);
+    } finally {
+      setInvoiceInstallmentsLoading(false);
+    }
+  }, []);
+
+  // Fetch existing invoice lines (edit mode)
+  const fetchExistingLines = useCallback(async (invoiceId: number) => {
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoiceslines?P_INVOICE_ID=${invoiceId}`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      const data = await response.json();
+      const items = data.items || data || [];
+
+      if (Array.isArray(items) && items.length > 0) {
+        const itemLines = items.filter((item: any) => item.line_type === 'Item' || !item.line_type);
+        if (itemLines.length > 0) {
+          const mappedLines: InvoiceLine[] = itemLines.map((item: any, index: number) => ({
+            key: item.line_id?.toString() || `${Date.now()}-${index}`,
+            lineNumber: item.line_number || index + 1,
+            type: item.line_type || 'Item',
+            amount: item.line_amount || 0,
+            distributionSet: item.distribution_set || '',
+            distributionCombination: item.distribution_combination || item.dist_code_combination || '',
+            accountingDate: formatDateStr(item.accounting_date) || '',
+            prorateAcrossAllItemLines: item.prorate_across_all_items || 'No',
+            description: item.description || '',
+            taxClassification: item.tax_classification_code || item.tax_classification || '',
+            shipToLocation: item.ship_to_location || '',
+            quantity: item.quantity || 1,
+            unitPrice: item.unit_price || 0,
+            uomName: item.uom || '',
+            project: item.project || '',
+            task: item.task || '',
+            poNumber: item.purchase_order_number || item.po_number || '',
+            poLine: item.purchase_order_line_number?.toString() || item.po_line_number?.toString() || '',
+            poSchedule: item.purchase_order_schedule_line_number?.toString() || '',
+            receiptNumber: item.receipt_number || '',
+            receiptLine: item.receipt_line_number?.toString() || '',
+            consumptionAdviceNumber: item.consumption_advice_number || '',
+            consumptionAdviceLine: item.consumption_advice_line_number?.toString() || '',
+            startDate: formatDateStr(item.multiperiod_start_date) || '',
+            endDate: formatDateStr(item.multiperiod_end_date) || '',
+            accrualAccount: item.multiperiod_accrual_account || item.accrual_account || '',
+            taxAmount: item.tax_amount || 0,
+          }));
+          setLines(mappedLines);
+
+          // Set tax rate from first line if available
+          if (mappedLines[0]?.taxClassification) {
+            const lineRate = getTaxRateForClassification(mappedLines[0].taxClassification);
+            setTaxRate(lineRate);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching existing invoice lines:', error);
+      message.warning('Could not load existing invoice lines');
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Pre-fill from initialData (Quick Create or Edit mode)
   useEffect(() => {
     if (initialData) {
       const formValues: Record<string, any> = {};
@@ -437,8 +606,22 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       if (initialData.invoiceCurrency) formValues.invoiceCurrency = initialData.invoiceCurrency;
       if (initialData.businessUnit) formValues.businessUnit = initialData.businessUnit;
       if (initialData.invoiceType) formValues.invoiceType = initialData.invoiceType;
+      if (initialData.supplierSite) formValues.supplierSite = initialData.supplierSite;
       form.setFieldsValue(formValues);
       setHeaderValues((prev) => ({ ...prev, ...formValues }));
+
+      // Edit mode: fetch existing lines, payments, holds, installments
+      if (initialData.invoiceId) {
+        fetchExistingLines(initialData.invoiceId);
+        fetchInvoicePayments(initialData.invoiceId);
+        fetchInvoiceHolds(initialData.invoiceId);
+        fetchInvoiceInstallments(initialData.invoiceId);
+        // Mark as validated if it was already validated
+        if (initialData.validationStatus === 'Validated') {
+          setIsValidated(true);
+        }
+        return; // Skip blank line creation for edit mode
+      }
 
       // Set tax rate based on tax code
       if (initialData.taxCode) {
@@ -1901,8 +2084,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         <Space size={12}>
           <Title level={5} style={{ margin: 0 }}>
             <FileTextOutlined style={{ marginRight: 8, color: REDWOOD.primary }} />
-            Create Invoice
+            {isEditMode ? (isReadOnly ? 'View Invoice' : 'Edit Invoice') : 'Create Invoice'}
           </Title>
+          {isEditMode && initialData?.unpaidAmount !== undefined && (
+            <Tag color={initialData.unpaidAmount === 0 ? 'green' : 'blue'} style={{ marginLeft: 8, fontSize: 12 }}>
+              Unpaid: {formatAmount(initialData.unpaidAmount)} {initialData.invoiceCurrency || 'AED'}
+            </Tag>
+          )}
         </Space>
 
         <Space size={8}>
@@ -1914,28 +2102,32 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             />
           </Tooltip>
           {/* Invoice Actions Dropdown */}
-          <Dropdown
-            menu={{
-              items: invoiceActionItems,
-              onClick: handleInvoiceAction,
-            }}
-            trigger={['click']}
-          >
-            <Button style={{ fontWeight: 500 }}>
-              Invoice Actions <DownOutlined style={{ fontSize: 10 }} />
+          {!isReadOnly && (
+            <Dropdown
+              menu={{
+                items: invoiceActionItems,
+                onClick: handleInvoiceAction,
+              }}
+              trigger={['click']}
+            >
+              <Button style={{ fontWeight: 500 }}>
+                Invoice Actions <DownOutlined style={{ fontSize: 10 }} />
+              </Button>
+            </Dropdown>
+          )}
+          {!isReadOnly && (
+            <Button
+              icon={<CheckSquareOutlined />}
+              onClick={runValidation}
+              style={{
+                fontWeight: 500,
+                borderColor: isValidated ? REDWOOD.success : REDWOOD.primary,
+                color: isValidated ? REDWOOD.success : REDWOOD.primary,
+              }}
+            >
+              {isValidated ? 'Validated' : 'Validate'}
             </Button>
-          </Dropdown>
-          <Button
-            icon={<CheckSquareOutlined />}
-            onClick={runValidation}
-            style={{
-              fontWeight: 500,
-              borderColor: isValidated ? REDWOOD.success : REDWOOD.primary,
-              color: isValidated ? REDWOOD.success : REDWOOD.primary,
-            }}
-          >
-            {isValidated ? 'Validated' : 'Validate'}
-          </Button>
+          )}
           <Tooltip title={!isValidated ? 'Run validation first' : ''}>
             <Button
               icon={<AccountBookOutlined />}
@@ -1955,37 +2147,66 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               <CheckCircleOutlined /> Invoice ID: {savedInvoiceId}
             </Tag>
           )}
-          {!savedInvoiceId && (
+          {!savedInvoiceId && !isReadOnly && (
             <Button onClick={handleSaveAndCreateNext} loading={saving} disabled={saving || !isValidated}>
               Save and Create Next
             </Button>
           )}
-          <Button
-            type="primary"
-            onClick={handleSave}
-            loading={saving}
-            disabled={saving || !isValidated}
-            icon={savedInvoiceId ? <SaveOutlined /> : undefined}
-            style={{ background: isValidated ? REDWOOD.primary : undefined, borderColor: isValidated ? REDWOOD.primary : undefined }}
-          >
-            {savedInvoiceId ? 'Update Invoice' : 'Save'}
-          </Button>
-          <Button
-            type="primary"
-            onClick={async () => { const success = await handleSave(); if (success !== false) onClose(); }}
-            loading={saving}
-            disabled={saving || !isValidated}
-            style={{ background: isValidated ? REDWOOD.primary : undefined, borderColor: isValidated ? REDWOOD.primary : undefined }}
-          >
-            {savedInvoiceId ? 'Update and Close' : 'Save and Close'}
-          </Button>
+          {!isReadOnly && (
+            <Button
+              type="primary"
+              onClick={handleSave}
+              loading={saving}
+              disabled={saving || !isValidated}
+              icon={savedInvoiceId ? <SaveOutlined /> : undefined}
+              style={{ background: isValidated ? REDWOOD.primary : undefined, borderColor: isValidated ? REDWOOD.primary : undefined }}
+            >
+              {savedInvoiceId ? 'Update Invoice' : 'Save'}
+            </Button>
+          )}
+          {!isReadOnly && (
+            <Button
+              type="primary"
+              onClick={async () => { const success = await handleSave(); if (success !== false) onClose(); }}
+              loading={saving}
+              disabled={saving || !isValidated}
+              style={{ background: isValidated ? REDWOOD.primary : undefined, borderColor: isValidated ? REDWOOD.primary : undefined }}
+            >
+              {savedInvoiceId ? 'Update and Close' : 'Save and Close'}
+            </Button>
+          )}
           <Button onClick={onClose}>
-            Cancel
+            {isReadOnly ? 'Close' : 'Cancel'}
           </Button>
         </Space>
       </div>
 
       <div style={{ padding: '16px 24px' }}>
+        {/* Edit mode banner */}
+        {isEditMode && (
+          <Alert
+            type={isReadOnly ? 'warning' : 'info'}
+            showIcon
+            style={{ marginBottom: 12, borderRadius: 8 }}
+            message={
+              isReadOnly ? (
+                <span>
+                  <strong>Read-Only</strong> — This invoice is {initialData?.holdPaidStatus === 'Fully paid' || initialData?.holdPaidStatus === 'Paid' ? 'paid' : 'posted/validated'} and cannot be edited.
+                  {initialData?.validationStatus && <Tag color="green" style={{ marginLeft: 8 }}>{initialData.validationStatus}</Tag>}
+                  {initialData?.holdPaidStatus && <Tag color={initialData.holdPaidStatus === 'Fully paid' || initialData.holdPaidStatus === 'Paid' ? 'blue' : 'default'} style={{ marginLeft: 4 }}>{initialData.holdPaidStatus}</Tag>}
+                </span>
+              ) : (
+                <span>
+                  <strong>Edit Mode</strong> — Invoice #{initialData?.invoiceNumber} (ID: {initialData?.invoiceId})
+                  {initialData?.validationStatus && <Tag style={{ marginLeft: 8 }}>{initialData.validationStatus}</Tag>}
+                  {initialData?.approvalStatus && <Tag style={{ marginLeft: 4 }}>{initialData.approvalStatus}</Tag>}
+                  {initialData?.holdPaidStatus && <Tag style={{ marginLeft: 4 }}>{initialData.holdPaidStatus}</Tag>}
+                </span>
+              )
+            }
+          />
+        )}
+
         {/* ========== INVOICE HEADER ========== */}
         <Card
           style={{
@@ -2589,6 +2810,117 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   />
                 ),
               },
+              // Payments tab (edit mode only, shown when payments exist)
+              ...(isEditMode ? [{
+                key: 'payments',
+                label: (
+                  <Space size={4}>
+                    <CreditCardOutlined />
+                    <span>Payments ({invoicePayments.length})</span>
+                  </Space>
+                ),
+                children: invoicePaymentsLoading ? (
+                  <div style={{ textAlign: 'center', padding: 40 }}>
+                    <Spin indicator={<LoadingOutlined style={{ fontSize: 24 }} spin />} />
+                    <div style={{ marginTop: 8, color: REDWOOD.neutral600, fontSize: 12 }}>Loading payments...</div>
+                  </div>
+                ) : invoicePayments.length > 0 ? (
+                  <Table
+                    dataSource={invoicePayments}
+                    columns={[
+                      { title: 'Payment Number', dataIndex: 'number', key: 'number', width: 140 },
+                      { title: 'Payment Date', dataIndex: 'paymentDate', key: 'paymentDate', width: 110 },
+                      { title: 'Paid Amount', dataIndex: 'paidAmount', key: 'paidAmount', width: 130, align: 'right' as const, render: (v: string) => <Text strong style={{ color: REDWOOD.success }}>{v}</Text> },
+                      { title: 'Status', dataIndex: 'status', key: 'status', width: 100, render: (s: string) => <Tag color={s === 'NEGOTIABLE' || s === 'Cleared' ? 'green' : 'default'}>{s}</Tag> },
+                      { title: 'Reconciled', dataIndex: 'reconciled', key: 'reconciled', width: 90 },
+                      { title: 'Payee Name', dataIndex: 'currentPayeeName', key: 'currentPayeeName', ellipsis: true },
+                      { title: 'Document', dataIndex: 'paymentDocument', key: 'paymentDocument', width: 140, ellipsis: true },
+                    ]}
+                    rowKey="key"
+                    size="small"
+                    pagination={false}
+                    scroll={{ y: 300 }}
+                  />
+                ) : (
+                  <div style={{ textAlign: 'center', padding: 30, color: REDWOOD.neutral600, fontSize: 12 }}>
+                    No payments found for this invoice.
+                  </div>
+                ),
+              }] : []),
+              // Holds tab (edit mode only, shown when holds exist)
+              ...(isEditMode ? [{
+                key: 'holds',
+                label: (
+                  <Space size={4}>
+                    <StopOutlined />
+                    <span>Holds ({invoiceHolds.length})</span>
+                    {invoiceHolds.length > 0 && <Tag color="red" style={{ fontSize: 10, marginLeft: 2, padding: '0 4px', lineHeight: '16px' }}>{invoiceHolds.length}</Tag>}
+                  </Space>
+                ),
+                children: invoiceHoldsLoading ? (
+                  <div style={{ textAlign: 'center', padding: 40 }}>
+                    <Spin indicator={<LoadingOutlined style={{ fontSize: 24 }} spin />} />
+                    <div style={{ marginTop: 8, color: REDWOOD.neutral600, fontSize: 12 }}>Loading holds...</div>
+                  </div>
+                ) : invoiceHolds.length > 0 ? (
+                  <Table
+                    dataSource={invoiceHolds}
+                    columns={[
+                      { title: 'Hold Name', dataIndex: 'holdName', key: 'holdName', width: 180, render: (v: string) => <Text strong style={{ color: REDWOOD.error }}>{v}</Text> },
+                      { title: 'Hold Reason', dataIndex: 'holdReason', key: 'holdReason', ellipsis: true },
+                      { title: 'Hold Date', dataIndex: 'holdDate', key: 'holdDate', width: 110 },
+                      { title: 'Held By', dataIndex: 'heldBy', key: 'heldBy', width: 140 },
+                      { title: 'Release Date', dataIndex: 'releaseDate', key: 'releaseDate', width: 110, render: (v: string) => v ? <Text style={{ color: REDWOOD.success }}>{v}</Text> : <Tag color="red">Active</Tag> },
+                      { title: 'Released By', dataIndex: 'releasedBy', key: 'releasedBy', width: 140 },
+                    ]}
+                    rowKey="key"
+                    size="small"
+                    pagination={false}
+                    scroll={{ y: 300 }}
+                  />
+                ) : (
+                  <div style={{ textAlign: 'center', padding: 30, color: REDWOOD.neutral600, fontSize: 12 }}>
+                    No holds on this invoice.
+                  </div>
+                ),
+              }] : []),
+              // Installments tab (edit mode only)
+              ...(isEditMode ? [{
+                key: 'installments',
+                label: (
+                  <Space size={4}>
+                    <DollarOutlined />
+                    <span>Installments ({invoiceInstallments.length})</span>
+                  </Space>
+                ),
+                children: invoiceInstallmentsLoading ? (
+                  <div style={{ textAlign: 'center', padding: 40 }}>
+                    <Spin indicator={<LoadingOutlined style={{ fontSize: 24 }} spin />} />
+                    <div style={{ marginTop: 8, color: REDWOOD.neutral600, fontSize: 12 }}>Loading installments...</div>
+                  </div>
+                ) : invoiceInstallments.length > 0 ? (
+                  <Table
+                    dataSource={invoiceInstallments}
+                    columns={[
+                      { title: '#', dataIndex: 'installmentNumber', key: 'installmentNumber', width: 60, align: 'center' as const },
+                      { title: 'Due Date', dataIndex: 'dueDate', key: 'dueDate', width: 110 },
+                      { title: 'Gross Amount', dataIndex: 'grossAmount', key: 'grossAmount', width: 130, align: 'right' as const, render: (v: number) => <Text strong>{formatAmount(v)}</Text> },
+                      { title: 'Unpaid Amount', dataIndex: 'unpaidAmount', key: 'unpaidAmount', width: 130, align: 'right' as const, render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.error : REDWOOD.success }}>{formatAmount(v)}</Text> },
+                      { title: 'Priority', dataIndex: 'paymentPriority', key: 'paymentPriority', width: 80, align: 'center' as const },
+                      { title: 'Payment Method', dataIndex: 'paymentMethod', key: 'paymentMethod', width: 140 },
+                      { title: 'Bank Account', dataIndex: 'bankAccount', key: 'bankAccount', ellipsis: true },
+                    ]}
+                    rowKey="key"
+                    size="small"
+                    pagination={false}
+                    scroll={{ y: 300 }}
+                  />
+                ) : (
+                  <div style={{ textAlign: 'center', padding: 30, color: REDWOOD.neutral600, fontSize: 12 }}>
+                    No installments found for this invoice.
+                  </div>
+                ),
+              }] : []),
             ]}
           />
         </Card>
