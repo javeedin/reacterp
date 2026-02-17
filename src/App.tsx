@@ -28,7 +28,11 @@ import InvoiceHolds from './pages/ap/InvoiceHolds';
 import ManageSuppliers from './pages/suppliers/ManageSuppliers';
 import SupplierBalance from './pages/suppliers/SupplierBalance';
 import SyncData from './pages/sync/SyncData';
-import { PMSModule } from './pages/pms';
+import {
+  PMSModule, FundManagement, OrderManagement, TransactionsPage,
+  ClientManagement, RiskAnalytics, CompliancePage, ReportsPage,
+  ModelPortfolioPage, FeeManagementPage, BenchmarkComparison,
+} from './pages/pms';
 import PMSWatchlist from './pages/pms/Watchlist';
 import PMSPortfolio from './pages/pms/Portfolio';
 
@@ -107,6 +111,16 @@ function App() {
               <Route path="pms" element={<PMSModule />} />
               <Route path="pms/watchlist" element={<PMSWatchlist />} />
               <Route path="pms/portfolio" element={<PMSPortfolio />} />
+              <Route path="pms/funds" element={<FundManagement />} />
+              <Route path="pms/orders" element={<OrderManagement />} />
+              <Route path="pms/transactions" element={<TransactionsPage />} />
+              <Route path="pms/investors" element={<ClientManagement />} />
+              <Route path="pms/risk" element={<RiskAnalytics />} />
+              <Route path="pms/compliance" element={<CompliancePage />} />
+              <Route path="pms/reports" element={<ReportsPage />} />
+              <Route path="pms/model-portfolio" element={<ModelPortfolioPage />} />
+              <Route path="pms/fees" element={<FeeManagementPage />} />
+              <Route path="pms/benchmark" element={<BenchmarkComparison />} />
               <Route path="pms/*" element={<PMSModule />} />
               <Route path="projects/*" element={<ComingSoon moduleName="Projects" />} />
               <Route path="manufacturing/*" element={<ComingSoon moduleName="Manufacturing" />} />
