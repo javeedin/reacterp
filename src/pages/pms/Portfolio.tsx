@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   Layout,
   Card,
@@ -24,6 +24,9 @@ import {
   DatePicker,
   Progress,
   Divider,
+  Upload,
+  Alert,
+  Tabs,
 } from 'antd';
 import {
   HomeOutlined,
@@ -42,10 +45,25 @@ import {
   RiseOutlined,
   FallOutlined,
   SaveOutlined,
+  UploadOutlined,
+  FileExcelOutlined,
+  CopyOutlined,
+  InboxOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { Link } from 'react-router-dom';
 import dayjs from 'dayjs';
+import * as XLSX from 'xlsx';
+import {
+  searchStocks,
+  fetchQuote,
+  getStockInfo,
+  NSE_BSE_STOCKS,
+  formatCurrency,
+  formatNumber,
+  formatPercent,
+  type StockSearchResult,
+} from './stockData';
 
 const { Text, Title } = Typography;
 const { Content } = Layout;
@@ -91,14 +109,6 @@ interface PortfolioHolding {
   sector: string;
 }
 
-interface StockSearchResult {
-  symbol: string;
-  name: string;
-  type: string;
-  exchange: string;
-  currency: string;
-}
-
 // ============ LOCAL STORAGE ============
 
 const STORAGE_KEY = 'pms_portfolio';
@@ -116,70 +126,6 @@ const savePortfolio = (holdings: PortfolioHolding[]) => {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(holdings));
 };
 
-// ============ API ============
-
-const AV_API_KEY = 'demo';
-
-const searchStocks = async (query: string): Promise<StockSearchResult[]> => {
-  if (!query || query.length < 1) return [];
-  try {
-    const url = `https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords=${encodeURIComponent(query)}&apikey=${AV_API_KEY}`;
-    const response = await fetch(url);
-    const data = await response.json();
-    const matches = data.bestMatches || [];
-    return matches.map((m: any) => ({
-      symbol: m['1. symbol'],
-      name: m['2. name'],
-      type: m['3. type'],
-      exchange: m['4. region'],
-      currency: m['8. currency'],
-    }));
-  } catch (error) {
-    console.error('Stock search error:', error);
-    return [];
-  }
-};
-
-const fetchQuote = async (symbol: string): Promise<{
-  price: number; previousClose: number; change: number; changePercent: number; volume: number;
-} | null> => {
-  try {
-    const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${encodeURIComponent(symbol)}&apikey=${AV_API_KEY}`;
-    const response = await fetch(url);
-    const data = await response.json();
-    const q = data['Global Quote'];
-    if (!q || !q['05. price']) return null;
-    return {
-      price: parseFloat(q['05. price']) || 0,
-      previousClose: parseFloat(q['08. previous close']) || 0,
-      change: parseFloat(q['09. change']) || 0,
-      changePercent: parseFloat((q['10. change percent'] || '0').replace('%', '')) || 0,
-      volume: parseInt(q['06. volume']) || 0,
-    };
-  } catch (error) {
-    console.error('Quote fetch error:', error);
-    return null;
-  }
-};
-
-// ============ FORMAT HELPERS ============
-
-const formatCurrency = (val: number, currency: string = 'USD'): string => {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency,
-    minimumFractionDigits: 2,
-  }).format(val);
-};
-
-const formatNumber = (val: number): string => {
-  return new Intl.NumberFormat('en-US').format(val);
-};
-
-const formatPercent = (val: number): string => {
-  return `${val >= 0 ? '+' : ''}${val.toFixed(2)}%`;
-};
-
 // ============ COMPONENT ============
 
 const Portfolio: React.FC = () => {
@@ -195,6 +141,11 @@ const Portfolio: React.FC = () => {
   const [selectedStock, setSelectedStock] = useState<StockSearchResult | null>(null);
   const [form] = Form.useForm();
   const [editForm] = Form.useForm();
+  const [importModalVisible, setImportModalVisible] = useState(false);
+  const [importMode, setImportMode] = useState<'paste' | 'excel'>('paste');
+  const [pasteText, setPasteText] = useState('');
+  const [importPreview, setImportPreview] = useState<{ symbol: string; name: string; exchange: string; qty: number; avgCost: number; status: string }[]>([]);
+  const [importLoading, setImportLoading] = useState(false);
 
   // Persist
   useEffect(() => {
@@ -261,6 +212,7 @@ const Portfolio: React.FC = () => {
 
       message.loading({ content: `Fetching current price for ${selectedStock.symbol}...`, key: 'addHolding' });
 
+      const stockInfo = getStockInfo(selectedStock.symbol);
       const quote = await fetchQuote(selectedStock.symbol);
       const currentPrice = quote?.price || values.avgCostPrice;
       const investedValue = values.quantity * values.avgCostPrice;
@@ -272,7 +224,7 @@ const Portfolio: React.FC = () => {
       const newHolding: PortfolioHolding = {
         key: `${selectedStock.symbol}-${Date.now()}`,
         symbol: selectedStock.symbol,
-        name: selectedStock.name,
+        name: stockInfo?.name || selectedStock.name,
         quantity: values.quantity,
         avgCostPrice: values.avgCostPrice,
         currentPrice,
@@ -286,9 +238,9 @@ const Portfolio: React.FC = () => {
         dayChangePercent: quote?.changePercent || 0,
         dayPnL,
         weightPercent: 0,
-        exchange: selectedStock.exchange,
-        currency: selectedStock.currency || 'USD',
-        sector: values.sector || '',
+        exchange: stockInfo?.exchange || selectedStock.exchange,
+        currency: stockInfo?.currency || selectedStock.currency || 'INR',
+        sector: values.sector || stockInfo?.sector || '',
       };
 
       setHoldings((prev) => [...prev, newHolding]);
@@ -396,6 +348,125 @@ const Portfolio: React.FC = () => {
     } finally {
       setRefreshing(false);
     }
+  };
+
+  // ---- Parse paste/excel data for portfolio import ----
+  const parsePasteDataPortfolio = (text: string): { symbol: string; name: string; exchange: string; qty: number; avgCost: number; status: string }[] => {
+    if (!text.trim()) return [];
+    const lines = text.trim().split('\n').filter((l) => l.trim());
+    const results: { symbol: string; name: string; exchange: string; qty: number; avgCost: number; status: string }[] = [];
+    for (const line of lines) {
+      // Support: "SYMBOL,QTY,AVGCOST" or "SYMBOL\tQTY\tAVGCOST" or just "SYMBOL"
+      const parts = line.split(/[,\t]+/).map((p) => p.trim());
+      const symbol = parts[0]?.toUpperCase().replace(/[^A-Z0-9&-]/g, '');
+      if (!symbol) continue;
+      const qty = parseFloat(parts[1]) || 0;
+      const avgCost = parseFloat(parts[2]) || 0;
+      const stockInfo = getStockInfo(symbol);
+      const existing = holdings.some((s) => s.symbol === symbol);
+      results.push({
+        symbol,
+        name: stockInfo?.name || parts[3] || '',
+        exchange: stockInfo?.exchange || 'NSE/BSE',
+        qty,
+        avgCost,
+        status: existing ? 'Exists' : stockInfo ? 'Found' : 'Unknown',
+      });
+    }
+    return results;
+  };
+
+  const handlePastePreviewPortfolio = () => {
+    const preview = parsePasteDataPortfolio(pasteText);
+    setImportPreview(preview);
+  };
+
+  const handleExcelUploadPortfolio = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows: any[] = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+
+        const lines: string[] = [];
+        for (let i = 0; i < rows.length; i++) {
+          const row = rows[i] as any[];
+          if (!row || row.length === 0) continue;
+          // Skip header
+          if (i === 0 && typeof row[0] === 'string' && row[0].toLowerCase().includes('symbol')) continue;
+          const sym = String(row[0] || '').toUpperCase().replace(/[^A-Z0-9&-]/g, '');
+          if (!sym || sym.length < 1 || sym.length > 20) continue;
+          const qty = row[1] || '';
+          const cost = row[2] || '';
+          lines.push(`${sym},${qty},${cost}`);
+        }
+        const text = lines.join('\n');
+        setPasteText(text);
+        const preview = parsePasteDataPortfolio(text);
+        setImportPreview(preview);
+        message.success(`Parsed ${lines.length} holdings from Excel`);
+      } catch (err) {
+        message.error('Failed to parse Excel file');
+        console.error(err);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleBulkImportPortfolio = async () => {
+    if (importPreview.length === 0) return;
+    const toAdd = importPreview.filter((p) => p.qty > 0 && p.avgCost > 0);
+    if (toAdd.length === 0) {
+      message.warning('No valid holdings to import (need Quantity and Avg Cost)');
+      return;
+    }
+
+    setImportLoading(true);
+    message.loading({ content: `Adding ${toAdd.length} holdings...`, key: 'bulkImport' });
+    const now = dayjs().format('DD MMM YYYY');
+
+    const newHoldings: PortfolioHolding[] = [];
+    for (const item of toAdd) {
+      const stockInfo = getStockInfo(item.symbol);
+      const quote = await fetchQuote(item.symbol);
+      const currentPrice = quote?.price || item.avgCost;
+      const investedValue = item.qty * item.avgCost;
+      const currentValue = item.qty * currentPrice;
+      const profitLoss = currentValue - investedValue;
+      const profitLossPercent = investedValue > 0 ? (profitLoss / investedValue) * 100 : 0;
+      const dayPnL = (quote?.change || 0) * item.qty;
+
+      newHoldings.push({
+        key: `${item.symbol}-${Date.now()}-${Math.random()}`,
+        symbol: item.symbol,
+        name: item.name || stockInfo?.name || item.symbol,
+        quantity: item.qty,
+        avgCostPrice: item.avgCost,
+        currentPrice,
+        previousClose: quote?.previousClose || currentPrice,
+        purchaseDate: now,
+        investedValue,
+        currentValue,
+        profitLoss,
+        profitLossPercent,
+        dayChange: quote?.change || 0,
+        dayChangePercent: quote?.changePercent || 0,
+        dayPnL,
+        weightPercent: 0,
+        exchange: stockInfo?.exchange || item.exchange || 'NSE/BSE',
+        currency: stockInfo?.currency || 'INR',
+        sector: stockInfo?.sector || '',
+      });
+    }
+
+    setHoldings((prev) => [...prev, ...newHoldings]);
+    setImportModalVisible(false);
+    setImportPreview([]);
+    setPasteText('');
+    setImportLoading(false);
+    message.success({ content: `${newHoldings.length} holdings added to portfolio`, key: 'bulkImport' });
   };
 
   // ---- Table Columns ----
@@ -587,6 +658,13 @@ const Portfolio: React.FC = () => {
                 loading={refreshing}
               >
                 Refresh Prices
+              </Button>
+              <Button
+                icon={<UploadOutlined />}
+                onClick={() => { setPasteText(''); setImportPreview([]); setImportModalVisible(true); }}
+                style={{ borderColor: REDWOOD.warning, color: REDWOOD.warning }}
+              >
+                Import / Paste
               </Button>
               <Button
                 icon={<PlusOutlined />}
@@ -836,7 +914,7 @@ const Portfolio: React.FC = () => {
           <div style={{ marginBottom: 16 }}>
             <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>Search Stock</Text>
             <Input.Search
-              placeholder="Search by symbol or company name"
+              placeholder="Search NSE/BSE stocks (e.g. RELIANCE, TCS, INFY)"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onSearch={handleSearch}
@@ -990,6 +1068,128 @@ const Portfolio: React.FC = () => {
               </Select>
             </Form.Item>
           </Form>
+        </Modal>
+
+        {/* ============ IMPORT / PASTE MODAL ============ */}
+        <Modal
+          title={<Space><UploadOutlined /> Import Holdings to Portfolio</Space>}
+          open={importModalVisible}
+          onCancel={() => { setImportModalVisible(false); setImportPreview([]); setPasteText(''); }}
+          footer={
+            <Space>
+              <Button onClick={() => { setImportModalVisible(false); setImportPreview([]); setPasteText(''); }}>Cancel</Button>
+              <Button
+                type="primary"
+                onClick={handleBulkImportPortfolio}
+                loading={importLoading}
+                disabled={importPreview.filter((p) => p.qty > 0 && p.avgCost > 0).length === 0}
+                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+              >
+                Import {importPreview.filter((p) => p.qty > 0 && p.avgCost > 0).length} Holding(s)
+              </Button>
+            </Space>
+          }
+          width={750}
+        >
+          <Tabs
+            activeKey={importMode}
+            onChange={(k) => { setImportMode(k as 'paste' | 'excel'); setImportPreview([]); setPasteText(''); }}
+            items={[
+              {
+                key: 'paste',
+                label: <Space size={4}><CopyOutlined /><span>Paste Data</span></Space>,
+                children: (
+                  <div>
+                    <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+                      Paste holdings data: <strong>SYMBOL, QUANTITY, AVG_COST</strong> (one per line, comma or tab separated)
+                    </Text>
+                    <Input.TextArea
+                      value={pasteText}
+                      onChange={(e) => setPasteText(e.target.value)}
+                      placeholder={'RELIANCE,50,2450.75\nTCS,25,3500.00\nINFY,100,1450.50\nHDFCBANK,30,1650.25\nICICIBANK,75,950.80'}
+                      rows={6}
+                      style={{ fontFamily: 'monospace', fontSize: 13 }}
+                    />
+                    <Button
+                      icon={<SearchOutlined />}
+                      onClick={handlePastePreviewPortfolio}
+                      style={{ marginTop: 8 }}
+                      disabled={!pasteText.trim()}
+                    >
+                      Preview & Validate
+                    </Button>
+                  </div>
+                ),
+              },
+              {
+                key: 'excel',
+                label: <Space size={4}><FileExcelOutlined /><span>Upload Excel</span></Space>,
+                children: (
+                  <div>
+                    <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+                      Upload an Excel (.xlsx / .xls) or CSV file. Columns: <strong>Symbol | Quantity | Avg Cost</strong>
+                    </Text>
+                    <Upload.Dragger
+                      accept=".xlsx,.xls,.csv"
+                      showUploadList={false}
+                      beforeUpload={(file) => {
+                        handleExcelUploadPortfolio(file);
+                        return false;
+                      }}
+                      style={{ padding: '20px 0' }}
+                    >
+                      <p className="ant-upload-drag-icon">
+                        <InboxOutlined style={{ color: REDWOOD.info, fontSize: 40 }} />
+                      </p>
+                      <p style={{ fontSize: 14, fontWeight: 500 }}>Click or drag file to this area</p>
+                      <p style={{ fontSize: 12, color: REDWOOD.neutral600 }}>
+                        Excel or CSV with Symbol, Quantity, Avg Cost in columns A, B, C
+                      </p>
+                    </Upload.Dragger>
+                    <Alert
+                      type="info"
+                      showIcon
+                      style={{ marginTop: 12, fontSize: 12 }}
+                      message="Column A: Symbol (e.g. RELIANCE), Column B: Quantity, Column C: Average Cost Price. Header row auto-skipped."
+                    />
+                  </div>
+                ),
+              },
+            ]}
+          />
+
+          {/* Preview Table */}
+          {importPreview.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <Divider style={{ margin: '8px 0' }} />
+              <Text strong style={{ fontSize: 13 }}>
+                Preview ({importPreview.length} rows — {importPreview.filter((p) => p.qty > 0 && p.avgCost > 0).length} valid)
+              </Text>
+              <Table
+                dataSource={importPreview}
+                columns={[
+                  { title: 'Symbol', dataIndex: 'symbol', key: 'symbol', width: 100, render: (v: string) => <Text strong style={{ color: REDWOOD.info }}>{v}</Text> },
+                  { title: 'Name', dataIndex: 'name', key: 'name', ellipsis: true },
+                  { title: 'Quantity', dataIndex: 'qty', key: 'qty', width: 90, align: 'right' as const, render: (v: number) => v > 0 ? <Text strong>{formatNumber(v)}</Text> : <Tag color="red">Missing</Tag> },
+                  { title: 'Avg Cost', dataIndex: 'avgCost', key: 'avgCost', width: 110, align: 'right' as const, render: (v: number) => v > 0 ? formatCurrency(v, 'INR') : <Tag color="red">Missing</Tag> },
+                  { title: 'Exchange', dataIndex: 'exchange', key: 'exchange', width: 90, render: (v: string) => <Tag style={{ fontSize: 10 }}>{v}</Tag> },
+                  {
+                    title: 'Status', dataIndex: 'status', key: 'status', width: 90,
+                    render: (v: string) => (
+                      <Tag color={v === 'Found' ? 'green' : v === 'Exists' ? 'orange' : 'default'} style={{ fontSize: 10 }}>
+                        {v}
+                      </Tag>
+                    ),
+                  },
+                ]}
+                rowKey="symbol"
+                size="small"
+                pagination={false}
+                scroll={{ y: 200 }}
+                style={{ marginTop: 8 }}
+              />
+            </div>
+          )}
         </Modal>
 
         <style>{`
