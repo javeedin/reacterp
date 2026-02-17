@@ -12,6 +12,7 @@ import {
   TruckOutlined,
   ToolOutlined,
   SyncOutlined,
+  StockOutlined,
   ArrowUpOutlined,
   ArrowDownOutlined,
   ClockCircleOutlined,
@@ -100,6 +101,14 @@ const modules: Module[] = [
     icon: <TeamOutlined style={{ fontSize: 32 }} />,
     path: '/hr',
     color: '#eb2f96',
+  },
+  {
+    id: 'pms',
+    name: 'Portfolio Management',
+    description: 'Watchlists, Portfolio Tracking, Stock Monitoring',
+    icon: <StockOutlined style={{ fontSize: 32 }} />,
+    path: '/pms',
+    color: '#6B4C9A',
   },
   {
     id: 'projects',

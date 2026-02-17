@@ -28,6 +28,9 @@ import InvoiceHolds from './pages/ap/InvoiceHolds';
 import ManageSuppliers from './pages/suppliers/ManageSuppliers';
 import SupplierBalance from './pages/suppliers/SupplierBalance';
 import SyncData from './pages/sync/SyncData';
+import { PMSModule } from './pages/pms';
+import PMSWatchlist from './pages/pms/Watchlist';
+import PMSPortfolio from './pages/pms/Portfolio';
 
 // Placeholder component for modules under development
 const ComingSoon = ({ moduleName }: { moduleName: string }) => (
@@ -101,6 +104,10 @@ function App() {
               <Route path="suppliers/balance/:supplierNumber" element={<SupplierBalance />} />
               <Route path="procurement/*" element={<ComingSoon moduleName="Procurement" />} />
               <Route path="hr/*" element={<ComingSoon moduleName="Human Resources" />} />
+              <Route path="pms" element={<PMSModule />} />
+              <Route path="pms/watchlist" element={<PMSWatchlist />} />
+              <Route path="pms/portfolio" element={<PMSPortfolio />} />
+              <Route path="pms/*" element={<PMSModule />} />
               <Route path="projects/*" element={<ComingSoon moduleName="Projects" />} />
               <Route path="manufacturing/*" element={<ComingSoon moduleName="Manufacturing" />} />
               <Route path="reports/*" element={<ComingSoon moduleName="Reports & Analytics" />} />
