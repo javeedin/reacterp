@@ -53,6 +53,7 @@ import { syncBanks, testBanksConnection, type BanksSyncProgress, type BanksPaylo
 import { syncBankBranches, testBankBranchesConnection, type BankBranchesSyncProgress, type BankBranchesPayloadCallback } from '../../services/bank-branches-sync.service';
 import { syncBankAccounts, testBankAccountsConnection, type BankAccountsSyncProgress, type BankAccountsPayloadCallback } from '../../services/bank-accounts-sync.service';
 import { syncLegalEntities, testLegalEntitiesConnection, type LegalEntitiesSyncProgress, type LegalEntitiesPayloadCallback } from '../../services/legal-entities-sync.service';
+import { syncBusinessUnits, testBusinessUnitsConnection, type BusinessUnitsSyncProgress } from '../../services/business-units-sync.service';
 import { syncUserAccounts, testUserAccountsConnection, type UserAccountsSyncProgress, type UserAccountsPayloadCallback } from '../../services/user-accounts-sync.service';
 import { syncUserAccountRoles, testUserAccountRolesConnection, type UserAccountRolesSyncProgress, type UserAccountRolesPayloadCallback } from '../../services/user-account-roles-sync.service';
 import { syncRoles, testRolesConnection, type RolesSyncProgress, type RolesPayloadCallback } from '../../services/roles-sync.service';
@@ -370,6 +371,20 @@ const SyncData: React.FC = () => {
     endTime: null,
   });
 
+  // Business Units Progress State
+  const [businessUnitsProgress, setBusinessUnitsProgress] = useState<BusinessUnitsSyncProgress>({
+    status: 'idle',
+    totalRecords: 0,
+    processedRecords: 0,
+    insertedRecords: 0,
+    currentPage: 0,
+    totalPages: 0,
+    errors: 0,
+    lastError: '',
+    startTime: null,
+    endTime: null,
+  });
+
   // Legal Entities payload state (for debug)
   const [legalEntitiesPayloads, setLegalEntitiesPayloads] = useState<Array<{
     legalEntityId: number;
@@ -631,6 +646,7 @@ const SyncData: React.FC = () => {
   const isBankBranches = selectedObject?.id === 'bank-branches';
   const isBankAccounts = selectedObject?.id === 'bank-accounts';
   const isLegalEntities = selectedObject?.id === 'legal-entities';
+  const isBusinessUnits = selectedObject?.id === 'business-units';
   const isUserAccounts = selectedObject?.id === 'user-accounts';
   const isUserAccountRoles = selectedObject?.id === 'user-account-roles';
   const isRoles = selectedObject?.id === 'roles';
@@ -1514,6 +1530,9 @@ const SyncData: React.FC = () => {
     } else if (isLegalEntities) {
       addLog('info', 'Testing Legal Entities endpoint...');
       success = await testLegalEntitiesConnection(addLog);
+    } else if (isBusinessUnits) {
+      addLog('info', 'Testing Business Units endpoint...');
+      success = await testBusinessUnitsConnection(addLog);
     } else if (isUserAccounts) {
       addLog('info', 'Testing User Accounts endpoint...');
       success = await testUserAccountsConnection(addLog);
@@ -1875,6 +1894,33 @@ const SyncData: React.FC = () => {
         handleLegalEntitiesPayload
       );
       syncResult = { inserted: result.insertedRecords, errors: result.errors, type: 'legal entities' };
+    } else if (isBusinessUnits) {
+      // Business Units Sync
+      setBusinessUnitsProgress({
+        status: 'fetching',
+        totalRecords: 0,
+        processedRecords: 0,
+        insertedRecords: 0,
+        currentPage: 0,
+        totalPages: 0,
+        errors: 0,
+        lastError: '',
+        startTime: new Date(),
+        endTime: null,
+      });
+      const result = await syncBusinessUnits(
+        parameters,
+        testMode,
+        addLog,
+        (newProgress) => {
+          setBusinessUnitsProgress((prev) => ({ ...prev, ...newProgress }));
+          if (newProgress.processedRecords !== undefined && newProgress.totalRecords) {
+            notifySyncProgress(`${newProgress.processedRecords}/${newProgress.totalRecords} business units`);
+          }
+        },
+        abortControllerRef.current.signal
+      );
+      syncResult = { inserted: result.insertedRecords, errors: result.errors, type: 'business units' };
     } else if (isUserAccounts) {
       // User Accounts Sync
       setUserAccountsProgress({
@@ -2483,6 +2529,8 @@ const SyncData: React.FC = () => {
     ? bankAccountsProgress.status
     : isLegalEntities
     ? legalEntitiesProgress.status
+    : isBusinessUnits
+    ? businessUnitsProgress.status
     : isUserAccounts
     ? userAccountsProgress.status
     : isUserAccountRoles
@@ -3912,6 +3960,79 @@ const SyncData: React.FC = () => {
                     </Card>
                   </Col>
                 </Row>
+              ) : isBusinessUnits ? (
+                /* Business Units KPI Cards */
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{ borderRadius: 12, border: `1px solid ${REDWOOD.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <BankOutlined style={{ fontSize: 20, color: REDWOOD.primary, marginRight: 8 }} />
+                        <Text strong>Business Units</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {businessUnitsProgress.insertedRecords} / {businessUnitsProgress.totalRecords}
+                      </div>
+                      <Progress
+                        percent={businessUnitsProgress.totalRecords > 0 ? Math.round((businessUnitsProgress.insertedRecords / businessUnitsProgress.totalRecords) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.primary}
+                        style={{ marginTop: 8 }}
+                      />
+                      {businessUnitsProgress.currentPage > 0 && (
+                        <Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 4 }}>
+                          Page {businessUnitsProgress.currentPage}/{businessUnitsProgress.totalPages}
+                        </Text>
+                      )}
+                    </Card>
+                  </Col>
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{ borderRadius: 12, border: `1px solid ${REDWOOD.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <FileTextOutlined style={{ fontSize: 20, color: REDWOOD.success, marginRight: 8 }} />
+                        <Text strong>Processed</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {businessUnitsProgress.processedRecords}
+                        <Text type="secondary" style={{ fontSize: 14, marginLeft: 8 }}>
+                          / {businessUnitsProgress.totalRecords}
+                        </Text>
+                      </div>
+                      <Progress
+                        percent={businessUnitsProgress.totalRecords > 0 ? Math.round((businessUnitsProgress.processedRecords / businessUnitsProgress.totalRecords) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.success}
+                        style={{ marginTop: 8 }}
+                      />
+                    </Card>
+                  </Col>
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{ borderRadius: 12, border: `1px solid ${REDWOOD.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <WarningOutlined style={{ fontSize: 20, color: businessUnitsProgress.errors > 0 ? REDWOOD.error : REDWOOD.textSecondary, marginRight: 8 }} />
+                        <Text strong>Errors</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: businessUnitsProgress.errors > 0 ? REDWOOD.error : REDWOOD.textPrimary }}>
+                        {businessUnitsProgress.errors}
+                      </div>
+                      {businessUnitsProgress.lastError && (
+                        <Tooltip title={businessUnitsProgress.lastError}>
+                          <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 8 }} ellipsis>
+                            {businessUnitsProgress.lastError}
+                          </Text>
+                        </Tooltip>
+                      )}
+                    </Card>
+                  </Col>
+                </Row>
               ) : isUserAccounts ? (
                 /* User Accounts KPI Cards */
                 <Row gutter={16} style={{ marginBottom: 16 }}>
@@ -4816,6 +4937,8 @@ const SyncData: React.FC = () => {
                           ? `${bankAccountsProgress.insertedRecords} bank accounts inserted`
                           : isLegalEntities
                           ? `${legalEntitiesProgress.insertedRecords} legal entities inserted`
+                          : isBusinessUnits
+                          ? `${businessUnitsProgress.insertedRecords} business units inserted`
                           : isUserAccounts
                           ? `${userAccountsProgress.insertedRecords} user accounts inserted`
                           : isUserAccountRoles
