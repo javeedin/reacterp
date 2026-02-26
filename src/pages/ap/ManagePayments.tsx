@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Layout,
   Card,
@@ -158,6 +158,18 @@ interface PaymentTab {
   payment: PaymentRecord;
 }
 
+// Bank account record from APEX
+interface BankAccountRecord {
+  bankAccountId: number;
+  bankAccountName: string;
+  maskedAccountNumber: string;
+  currencyCode: string;
+  bankName: string;
+  bankBranchName: string;
+  ibanNumber: string;
+  apUseAllowedFlag: string;
+}
+
 // Supplier record from API
 interface SupplierRecord {
   key: string;
@@ -181,6 +193,7 @@ const FUSION_CONFIG = {
 // APEX API config
 const APEX_PAYMENTS_URL = `${APEX_DB_CONFIG.baseUrl}/ap/payments`;
 const APEX_SUPPLIERS_URL = `${APEX_DB_CONFIG.baseUrl}/suppliers`;
+const APEX_BANK_ACCOUNTS_URL = `${APEX_DB_CONFIG.baseUrl}/banks/bankaccounts`;
 
 // Helper function to format amount in UAE format (000,000.00)
 const formatAmount = (value: number): string => {
@@ -369,6 +382,48 @@ const ManagePayments: React.FC = () => {
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
   const [supplierLoading, setSupplierLoading] = useState(false);
   const [supplierSearchText, setSupplierSearchText] = useState('');
+
+  // Bank accounts state (for Disbursement Bank Account LOV)
+  const [bankAccounts, setBankAccounts] = useState<BankAccountRecord[]>([]);
+  const [bankAccountsLoading, setBankAccountsLoading] = useState(false);
+
+  // Fetch bank accounts from APEX (filtered to AP-allowed accounts)
+  const fetchBankAccounts = async () => {
+    setBankAccountsLoading(true);
+    try {
+      const response = await fetch(APEX_BANK_ACCOUNTS_URL, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      const items: BankAccountRecord[] = (data.items || [])
+        .filter((item: any) => item.ap_use_allowed_flag === 'Y')
+        .map((item: any) => ({
+          bankAccountId: item.bank_account_id,
+          bankAccountName: item.bank_account_name || '',
+          maskedAccountNumber: item.masked_account_number || item.bank_account_number || '',
+          currencyCode: item.currency_code || '',
+          bankName: item.bank_name || '',
+          bankBranchName: item.bank_branch_name || '',
+          ibanNumber: item.iban_number || '',
+          apUseAllowedFlag: item.ap_use_allowed_flag || '',
+        }));
+      setBankAccounts(items);
+    } catch (err) {
+      console.error('Failed to fetch bank accounts:', err);
+      message.error('Failed to load bank accounts');
+    } finally {
+      setBankAccountsLoading(false);
+    }
+  };
+
+  // Load bank accounts when Create Payment tab opens
+  useEffect(() => {
+    if (createPaymentTabOpen && bankAccounts.length === 0) {
+      fetchBankAccounts();
+    }
+  }, [createPaymentTabOpen]);
 
   // Fetch suppliers from API
   const fetchSuppliers = async () => {
@@ -1364,37 +1419,31 @@ const ManagePayments: React.FC = () => {
                               name="disbursementBankAccount"
                               rules={[{ required: true, message: 'Required' }]}
                             >
-                              <Select placeholder="Select Bank Account" allowClear showSearch optionFilterProp="label">
-                                <Option value="ENBD_AED_001" label="Emirates NBD – AED ****4521">
-                                  <div style={{ lineHeight: '1.4' }}>
-                                    <div style={{ fontWeight: 500 }}>Emirates NBD – AED</div>
-                                    <div style={{ fontSize: 12, color: '#888' }}>A/C: ****4521 | ENBD | Dubai Main</div>
-                                  </div>
-                                </Option>
-                                <Option value="FAB_USD_002" label="First Abu Dhabi Bank – USD ****8830">
-                                  <div style={{ lineHeight: '1.4' }}>
-                                    <div style={{ fontWeight: 500 }}>First Abu Dhabi Bank – USD</div>
-                                    <div style={{ fontSize: 12, color: '#888' }}>A/C: ****8830 | FAB | Abu Dhabi</div>
-                                  </div>
-                                </Option>
-                                <Option value="DIB_AED_003" label="Dubai Islamic Bank – AED ****1190">
-                                  <div style={{ lineHeight: '1.4' }}>
-                                    <div style={{ fontWeight: 500 }}>Dubai Islamic Bank – AED</div>
-                                    <div style={{ fontSize: 12, color: '#888' }}>A/C: ****1190 | DIB | Sharjah</div>
-                                  </div>
-                                </Option>
-                                <Option value="ADCB_SAR_004" label="ADCB – SAR ****6672">
-                                  <div style={{ lineHeight: '1.4' }}>
-                                    <div style={{ fontWeight: 500 }}>ADCB – SAR</div>
-                                    <div style={{ fontSize: 12, color: '#888' }}>A/C: ****6672 | ADCB | Abu Dhabi</div>
-                                  </div>
-                                </Option>
-                                <Option value="RAK_USD_005" label="RAK Bank – USD ****3345">
-                                  <div style={{ lineHeight: '1.4' }}>
-                                    <div style={{ fontWeight: 500 }}>RAK Bank – USD</div>
-                                    <div style={{ fontSize: 12, color: '#888' }}>A/C: ****3345 | RAKBANK | RAK</div>
-                                  </div>
-                                </Option>
+                              <Select
+                                placeholder="Select Bank Account"
+                                allowClear
+                                showSearch
+                                loading={bankAccountsLoading}
+                                optionFilterProp="label"
+                                notFoundContent={bankAccountsLoading ? 'Loading…' : 'No bank accounts found'}
+                              >
+                                {bankAccounts.map(acct => (
+                                  <Option
+                                    key={acct.bankAccountId}
+                                    value={acct.bankAccountId}
+                                    label={`${acct.bankAccountName} ${acct.maskedAccountNumber}`}
+                                  >
+                                    <div style={{ lineHeight: '1.4' }}>
+                                      <div style={{ fontWeight: 500 }}>
+                                        {acct.bankAccountName}
+                                        {acct.currencyCode && <span style={{ marginLeft: 6, color: REDWOOD.info, fontSize: 12 }}>{acct.currencyCode}</span>}
+                                      </div>
+                                      <div style={{ fontSize: 12, color: '#888' }}>
+                                        {[acct.maskedAccountNumber && `A/C: ${acct.maskedAccountNumber}`, acct.bankName, acct.bankBranchName].filter(Boolean).join(' | ')}
+                                      </div>
+                                    </div>
+                                  </Option>
+                                ))}
                               </Select>
                             </Form.Item>
                             <Form.Item
