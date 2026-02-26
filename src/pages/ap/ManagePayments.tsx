@@ -1255,8 +1255,8 @@ const ManagePayments: React.FC = () => {
             </Space>
             <Space>
               <Button size="small" onClick={() => { setCreatePaymentTabOpen(false); setActiveTab('search'); }}>Cancel</Button>
-              <Button size="small" style={{ background: REDWOOD.info, color: '#fff', borderColor: REDWOOD.info }}>Save</Button>
-              <Button size="small" type="primary" style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>Submit</Button>
+              <Button size="small">Save and Create Another</Button>
+              <Button size="small" type="primary" style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Save and Close</Button>
             </Space>
           </div>
 
@@ -1297,7 +1297,7 @@ const ManagePayments: React.FC = () => {
                               </Select>
                             </Form.Item>
                             <Form.Item
-                              label={<><span style={{ color: REDWOOD.primary }}>*</span> Payee</>}
+                              label={<><span style={{ color: REDWOOD.primary }}>*</span> Supplier or Party</>}
                               name="payee"
                               rules={[{ required: true, message: 'Required' }]}
                             >
@@ -1315,14 +1315,23 @@ const ManagePayments: React.FC = () => {
                               />
                             </Form.Item>
                             <Form.Item name="supplierNumber" hidden><Input /></Form.Item>
-                            <Form.Item label="Payee Site" name="payeeSite">
-                              <Select placeholder="Select Payee Site" allowClear>
+                            <Form.Item
+                              label={<><span style={{ color: REDWOOD.primary }}>*</span> Supplier Site</>}
+                              name="payeeSite"
+                              rules={[{ required: true, message: 'Required' }]}
+                            >
+                              <Select placeholder="Select Supplier Site" allowClear>
                                 <Option value="MAIN">Main</Option>
                                 <Option value="HQ">Headquarters</Option>
                               </Select>
                             </Form.Item>
-                            <Form.Item label="Remit-to Bank Account" name="remitToBankAccount">
-                              <Select placeholder="Select Bank Account" allowClear />
+                            <Form.Item label="Address" name="supplierAddress">
+                              <Input.TextArea
+                                rows={2}
+                                readOnly
+                                placeholder=""
+                                style={{ background: '#f5f5f5', resize: 'none', color: '#555' }}
+                              />
                             </Form.Item>
                             <Form.Item
                               label={<><span style={{ color: REDWOOD.primary }}>*</span> Payment Date</>}
@@ -1331,29 +1340,38 @@ const ManagePayments: React.FC = () => {
                             >
                               <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
                             </Form.Item>
+                            <Form.Item
+                              label={<><span style={{ color: REDWOOD.primary }}>*</span> Type</>}
+                              name="paymentType"
+                              initialValue="QUICK"
+                              rules={[{ required: true, message: 'Required' }]}
+                            >
+                              <Select style={{ width: 130 }}>
+                                <Option value="QUICK">Quick</Option>
+                                <Option value="STANDARD">Standard</Option>
+                                <Option value="REFUND">Refund</Option>
+                              </Select>
+                            </Form.Item>
+                            <Form.Item label="Description" name="paymentDescription">
+                              <Input.TextArea rows={3} style={{ resize: 'none' }} />
+                            </Form.Item>
                           </Col>
                           <Col span={12}>
                             <Form.Item
-                              label={<><span style={{ color: REDWOOD.primary }}>*</span> Payment Amount</>}
-                              name="paymentAmount"
+                              label={<><span style={{ color: REDWOOD.primary }}>*</span> Disbursement Bank Account</>}
+                              name="disbursementBankAccount"
                               rules={[{ required: true, message: 'Required' }]}
                             >
-                              <Input type="number" placeholder="0.00" style={{ textAlign: 'right' }} />
+                              <Select placeholder="Select Bank Account" allowClear />
                             </Form.Item>
-                            <Form.Item
-                              label={<><span style={{ color: REDWOOD.primary }}>*</span> Currency</>}
-                              name="paymentCurrency"
-                              initialValue="AED"
-                              rules={[{ required: true, message: 'Required' }]}
-                            >
-                              <Select placeholder="Select Currency">
-                                <Option value="AED">AED - UAE Dirham</Option>
-                                <Option value="USD">USD - US Dollar</Option>
-                                <Option value="EUR">EUR - Euro</Option>
-                                <Option value="GBP">GBP - British Pound</Option>
-                                <Option value="SAR">SAR - Saudi Riyal</Option>
-                              </Select>
+                            <Form.Item label="Payment Currency" name="paymentCurrencyDisplay">
+                              <Input
+                                readOnly
+                                style={{ background: '#f5f5f5', color: '#333' }}
+                                placeholder="—"
+                              />
                             </Form.Item>
+                            <Form.Item name="paymentCurrency" hidden initialValue="AED"><Input /></Form.Item>
                             <Form.Item
                               label={<><span style={{ color: REDWOOD.primary }}>*</span> Payment Method</>}
                               name="paymentMethod"
@@ -1366,11 +1384,34 @@ const ManagePayments: React.FC = () => {
                                 <Option value="CASH">Cash</Option>
                               </Select>
                             </Form.Item>
-                            <Form.Item label="Disbursement Bank Account" name="disbursementBankAccount">
-                              <Select placeholder="Select Bank Account" allowClear />
-                            </Form.Item>
                             <Form.Item label="Payment Process Profile" name="paymentProcessProfile">
                               <Select placeholder="Select Profile" allowClear />
+                            </Form.Item>
+                            <Form.Item label="Remit-to Account" name="remitToAccount">
+                              <Select placeholder="Select Remit-to Account" allowClear />
+                            </Form.Item>
+                            <Form.Item label="Remit-to Bank Name" name="remitToBankName">
+                              <Input readOnly style={{ background: '#f5f5f5', color: '#555' }} placeholder="—" />
+                            </Form.Item>
+                            <Form.Item label="Remit-to Branch Name" name="remitToBranchName">
+                              <Input readOnly style={{ background: '#f5f5f5', color: '#555' }} placeholder="—" />
+                            </Form.Item>
+                            <Form.Item label="Payment Document" name="paymentDocument">
+                              <Select placeholder="Select Payment Document" allowClear />
+                            </Form.Item>
+                            <Form.Item label="Paper Document Number" name="paperDocumentNumber">
+                              <Input style={{ background: '#f5f5f5' }} />
+                            </Form.Item>
+                            <Form.Item label="Attachments">
+                              <Space size={4}>
+                                <Text style={{ color: '#666', fontSize: 13 }}>None</Text>
+                                <Button
+                                  size="small"
+                                  type="text"
+                                  icon={<PlusOutlined />}
+                                  style={{ color: REDWOOD.info, padding: '0 4px', height: 22 }}
+                                />
+                              </Space>
                             </Form.Item>
                           </Col>
                         </Row>
@@ -1384,21 +1425,21 @@ const ManagePayments: React.FC = () => {
                       <div style={{ padding: '12px 0' }}>
                         <Row gutter={32}>
                           <Col span={12}>
-                            <Form.Item label="Payment Type" name="paymentType">
-                              <Select placeholder="Select Payment Type" allowClear>
-                                <Option value="STANDARD">Standard</Option>
-                                <Option value="QUICK">Quick</Option>
-                                <Option value="REFUND">Refund</Option>
-                              </Select>
-                            </Form.Item>
-                            <Form.Item label="Payment Document" name="paymentDocument">
-                              <Select placeholder="Select Payment Document" allowClear />
+                            <Form.Item
+                              label={<><span style={{ color: REDWOOD.primary }}>*</span> Payment Amount</>}
+                              name="paymentAmount"
+                              rules={[{ required: true, message: 'Required' }]}
+                            >
+                              <Input type="number" placeholder="0.00" style={{ textAlign: 'right' }} />
                             </Form.Item>
                             <Form.Item label="Legal Entity" name="legalEntity">
                               <Select placeholder="Select Legal Entity" allowClear>
                                 <Option value="LE_UAE">UAE Legal Entity</Option>
                                 <Option value="LE_KSA">KSA Legal Entity</Option>
                               </Select>
+                            </Form.Item>
+                            <Form.Item label="Document Category" name="documentCategory">
+                              <Input placeholder="Enter document category" />
                             </Form.Item>
                           </Col>
                           <Col span={12}>
@@ -1407,9 +1448,6 @@ const ManagePayments: React.FC = () => {
                             </Form.Item>
                             <Form.Item label="Voucher Number" name="voucherNumber">
                               <Input placeholder="Auto-generated" readOnly style={{ background: '#fafafa' }} />
-                            </Form.Item>
-                            <Form.Item label="Document Category" name="documentCategory">
-                              <Input placeholder="Enter document category" />
                             </Form.Item>
                           </Col>
                         </Row>
