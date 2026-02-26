@@ -1403,6 +1403,7 @@ const ManagePayments: React.FC = () => {
                               <Select style={{ width: 130 }}>
                                 <Option value="QUICK">Quick</Option>
                                 <Option value="STANDARD">Standard</Option>
+                                <Option value="MANUAL">Manual</Option>
                                 <Option value="REFUND">Refund</Option>
                               </Select>
                             </Form.Item>

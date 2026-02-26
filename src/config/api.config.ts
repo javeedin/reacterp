@@ -310,6 +310,14 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
     parameters: [],
   },
   {
+    id: 'business-units',
+    name: 'Business Units',
+    description: 'Sync Business Units from Oracle Fusion (finBusinessUnitsLOV)',
+    oracleEndpoint: 'finBusinessUnitsLOV',
+    apexEndpoint: 'gl/businessunits',
+    parameters: [],
+  },
+  {
     id: 'user-accounts',
     name: 'User Accounts',
     description: 'Sync User Accounts from Oracle Fusion',
