@@ -193,6 +193,7 @@ const FUSION_CONFIG = {
 const APEX_PAYMENTS_URL = `${APEX_DB_CONFIG.baseUrl}/ap/payments`;
 const APEX_SUPPLIERS_URL = `${APEX_DB_CONFIG.baseUrl}/suppliers`;
 const APEX_BANK_ACCOUNTS_URL = `${APEX_DB_CONFIG.baseUrl}/banks/bankaccounts`;
+const APEX_BUSINESS_UNITS_URL = `${APEX_DB_CONFIG.baseUrl}/gl/businessunits`;
 
 // Helper function to format amount in UAE format (000,000.00)
 const formatAmount = (value: number): string => {
@@ -382,6 +383,32 @@ const ManagePayments: React.FC = () => {
   const [supplierLoading, setSupplierLoading] = useState(false);
   const [supplierSearchText, setSupplierSearchText] = useState('');
 
+  // Business Units state (for Business Unit LOV)
+  const [businessUnitsList, setBusinessUnitsList] = useState<{ id: number; name: string }[]>([]);
+  const [businessUnitsListLoading, setBusinessUnitsListLoading] = useState(false);
+
+  const fetchBusinessUnits = async () => {
+    setBusinessUnitsListLoading(true);
+    try {
+      const response = await fetch(APEX_BUSINESS_UNITS_URL, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      const items = (data.items || []).map((item: any) => ({
+        id: item.business_unit_id,
+        name: item.business_unit_name || '',
+      }));
+      setBusinessUnitsList(items);
+    } catch (err) {
+      console.error('Failed to fetch business units:', err);
+      message.error('Failed to load business units');
+    } finally {
+      setBusinessUnitsListLoading(false);
+    }
+  };
+
   // Bank accounts state (for Disbursement Bank Account LOV)
   const [bankAccounts, setBankAccounts] = useState<BankAccountRecord[]>([]);
   const [bankAccountsLoading, setBankAccountsLoading] = useState(false);
@@ -415,7 +442,12 @@ const ManagePayments: React.FC = () => {
     }
   };
 
-  // Load bank accounts when Create Payment tab opens
+  // Pre-load Business Units on mount (needed for Search form too)
+  useEffect(() => {
+    fetchBusinessUnits();
+  }, []);
+
+  // Load remaining LOV data when Create Payment tab opens
   useEffect(() => {
     if (createPaymentTabOpen && bankAccounts.length === 0) {
       fetchBankAccounts();
@@ -1182,9 +1214,16 @@ const ManagePayments: React.FC = () => {
                             </Select>
                           </Form.Item>
                           <Form.Item label="Business Unit" name="businessUnit">
-                            <Select placeholder="Select Business Unit" allowClear>
-                              <Option value="BUMGA_DXB_TRADING">BUMGA_DXB_TRADING</Option>
-                              <Option value="BUIMERC CORP FZE_JAFZA">BUIMERC CORP FZE_JAFZA</Option>
+                            <Select
+                              placeholder="Select Business Unit"
+                              allowClear
+                              showSearch
+                              optionFilterProp="children"
+                              loading={businessUnitsListLoading}
+                            >
+                              {businessUnitsList.map(bu => (
+                                <Option key={bu.id} value={bu.name}>{bu.name}</Option>
+                              ))}
                             </Select>
                           </Form.Item>
                         </Col>
@@ -1344,10 +1383,17 @@ const ManagePayments: React.FC = () => {
                               name="businessUnit"
                               rules={[{ required: true, message: 'Required' }]}
                             >
-                              <Select placeholder="Select Business Unit" allowClear>
-                                <Option value="BU_UAE">UAE Business Unit</Option>
-                                <Option value="BU_KSA">KSA Business Unit</Option>
-                                <Option value="BU_EGY">Egypt Business Unit</Option>
+                              <Select
+                                placeholder="Select Business Unit"
+                                allowClear
+                                showSearch
+                                loading={businessUnitsListLoading}
+                                optionFilterProp="children"
+                                notFoundContent={businessUnitsListLoading ? 'Loading…' : 'No business units found'}
+                              >
+                                {businessUnitsList.map(bu => (
+                                  <Option key={bu.id} value={bu.name}>{bu.name}</Option>
+                                ))}
                               </Select>
                             </Form.Item>
                             <Form.Item
