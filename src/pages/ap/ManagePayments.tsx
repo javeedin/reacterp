@@ -271,6 +271,7 @@ const mapApexToPaymentRecord = (item: any, index: number): PaymentRecord => ({
 
 const ManagePayments: React.FC = () => {
   const [form] = Form.useForm();
+  const [createPaymentForm] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
@@ -305,8 +306,13 @@ const ManagePayments: React.FC = () => {
     }
   };
 
+  // Create Payment modal state
+  const [createPaymentModalVisible, setCreatePaymentModalVisible] = useState(false);
+  const [createPaymentActiveTab, setCreatePaymentActiveTab] = useState('paymentDetails');
+
   // Supplier lookup modal state
   const [supplierModalVisible, setSupplierModalVisible] = useState(false);
+  const [supplierModalContext, setSupplierModalContext] = useState<'search' | 'create'>('search');
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
   const [supplierLoading, setSupplierLoading] = useState(false);
   const [supplierSearchText, setSupplierSearchText] = useState('');
@@ -353,7 +359,8 @@ const ManagePayments: React.FC = () => {
   };
 
   // Open supplier lookup modal
-  const openSupplierModal = () => {
+  const openSupplierModal = (context: 'search' | 'create' = 'search') => {
+    setSupplierModalContext(context);
     setSupplierModalVisible(true);
     setSupplierSearchText('');
     if (suppliers.length === 0) {
@@ -363,10 +370,18 @@ const ManagePayments: React.FC = () => {
 
   // Handle supplier selection
   const handleSupplierSelect = (record: SupplierRecord) => {
-    form.setFieldsValue({
-      supplierOrParty: record.supplier,
-      supplierNumber: record.supplierNumber,
-    });
+    if (supplierModalContext === 'create') {
+      createPaymentForm.setFieldsValue({
+        payee: record.supplier,
+        supplierNumber: record.supplierNumber,
+        payeeSite: undefined,
+      });
+    } else {
+      form.setFieldsValue({
+        supplierOrParty: record.supplier,
+        supplierNumber: record.supplierNumber,
+      });
+    }
     setSupplierModalVisible(false);
     message.success(`Selected supplier: ${record.supplier}`);
   };
@@ -1086,6 +1101,18 @@ const ManagePayments: React.FC = () => {
                 style={{ color: REDWOOD.info }}
               />
             </Tooltip>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              style={{ background: REDWOOD.success }}
+              onClick={() => {
+                setCreatePaymentModalVisible(true);
+                setCreatePaymentActiveTab('paymentDetails');
+                createPaymentForm.resetFields();
+              }}
+            >
+              Create Payment
+            </Button>
             <Button type="primary" style={{ background: REDWOOD.primary }}>
               Done
             </Button>
@@ -1157,6 +1184,214 @@ const ManagePayments: React.FC = () => {
             background: ${REDWOOD.neutral100};
           }
         `}</style>
+
+        {/* Create Payment Modal */}
+        <Modal
+          title={
+            <Space>
+              <PlusOutlined style={{ color: REDWOOD.success }} />
+              <span style={{ fontWeight: 600 }}>Create Payment</span>
+            </Space>
+          }
+          open={createPaymentModalVisible}
+          onCancel={() => setCreatePaymentModalVisible(false)}
+          width={900}
+          footer={[
+            <Button key="cancel" onClick={() => setCreatePaymentModalVisible(false)}>Cancel</Button>,
+            <Button key="save" style={{ background: REDWOOD.info, color: '#fff', borderColor: REDWOOD.info }}>Save</Button>,
+            <Button key="submit" type="primary" style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>Submit</Button>,
+          ]}
+          styles={{ body: { padding: '0 0 12px 0' } }}
+        >
+          <Form
+            form={createPaymentForm}
+            layout="horizontal"
+            labelCol={{ span: 8 }}
+            wrapperCol={{ span: 16 }}
+            size="small"
+          >
+            <Tabs
+              activeKey={createPaymentActiveTab}
+              onChange={setCreatePaymentActiveTab}
+              style={{ padding: '0 24px' }}
+              items={[
+                {
+                  key: 'paymentDetails',
+                  label: 'Payment Details',
+                  children: (
+                    <div style={{ paddingTop: 16 }}>
+                      <Row gutter={24}>
+                        <Col span={12}>
+                          <Form.Item
+                            label={<><span style={{ color: REDWOOD.primary }}>*</span> Business Unit</>}
+                            name="businessUnit"
+                            rules={[{ required: true, message: 'Required' }]}
+                          >
+                            <Select placeholder="Select Business Unit" allowClear>
+                              <Option value="BU_UAE">UAE Business Unit</Option>
+                              <Option value="BU_KSA">KSA Business Unit</Option>
+                              <Option value="BU_EGY">Egypt Business Unit</Option>
+                            </Select>
+                          </Form.Item>
+                          <Form.Item
+                            label={<><span style={{ color: REDWOOD.primary }}>*</span> Payee</>}
+                            name="payee"
+                            rules={[{ required: true, message: 'Required' }]}
+                          >
+                            <Input
+                              placeholder="Search and select supplier"
+                              readOnly
+                              suffix={
+                                <SearchOutlined
+                                  style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 14 }}
+                                  onClick={() => openSupplierModal('create')}
+                                />
+                              }
+                              onClick={() => openSupplierModal('create')}
+                              style={{ cursor: 'pointer' }}
+                            />
+                          </Form.Item>
+                          <Form.Item name="supplierNumber" hidden><Input /></Form.Item>
+                          <Form.Item
+                            label="Payee Site"
+                            name="payeeSite"
+                          >
+                            <Select placeholder="Select Payee Site" allowClear>
+                              <Option value="MAIN">Main</Option>
+                              <Option value="HQ">Headquarters</Option>
+                            </Select>
+                          </Form.Item>
+                          <Form.Item
+                            label="Remit-to Bank Account"
+                            name="remitToBankAccount"
+                          >
+                            <Select placeholder="Select Bank Account" allowClear />
+                          </Form.Item>
+                          <Form.Item
+                            label={<><span style={{ color: REDWOOD.primary }}>*</span> Payment Date</>}
+                            name="paymentDate"
+                            rules={[{ required: true, message: 'Required' }]}
+                          >
+                            <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
+                          </Form.Item>
+                        </Col>
+                        <Col span={12}>
+                          <Form.Item
+                            label={<><span style={{ color: REDWOOD.primary }}>*</span> Payment Amount</>}
+                            name="paymentAmount"
+                            rules={[{ required: true, message: 'Required' }]}
+                          >
+                            <Input type="number" placeholder="0.00" style={{ textAlign: 'right' }} />
+                          </Form.Item>
+                          <Form.Item
+                            label={<><span style={{ color: REDWOOD.primary }}>*</span> Payment Currency</>}
+                            name="paymentCurrency"
+                            initialValue="AED"
+                            rules={[{ required: true, message: 'Required' }]}
+                          >
+                            <Select placeholder="Select Currency">
+                              <Option value="AED">AED - UAE Dirham</Option>
+                              <Option value="USD">USD - US Dollar</Option>
+                              <Option value="EUR">EUR - Euro</Option>
+                              <Option value="GBP">GBP - British Pound</Option>
+                              <Option value="SAR">SAR - Saudi Riyal</Option>
+                            </Select>
+                          </Form.Item>
+                          <Form.Item
+                            label={<><span style={{ color: REDWOOD.primary }}>*</span> Payment Method</>}
+                            name="paymentMethod"
+                            rules={[{ required: true, message: 'Required' }]}
+                          >
+                            <Select placeholder="Select Payment Method">
+                              <Option value="CHECK">Check</Option>
+                              <Option value="EFT">Electronic Funds Transfer</Option>
+                              <Option value="WIRE">Wire Transfer</Option>
+                              <Option value="CASH">Cash</Option>
+                            </Select>
+                          </Form.Item>
+                          <Form.Item
+                            label="Disbursement Bank Account"
+                            name="disbursementBankAccount"
+                          >
+                            <Select placeholder="Select Bank Account" allowClear />
+                          </Form.Item>
+                          <Form.Item
+                            label="Payment Process Profile"
+                            name="paymentProcessProfile"
+                          >
+                            <Select placeholder="Select Profile" allowClear />
+                          </Form.Item>
+                        </Col>
+                      </Row>
+                    </div>
+                  ),
+                },
+                {
+                  key: 'advanced',
+                  label: 'Advanced',
+                  children: (
+                    <div style={{ paddingTop: 16 }}>
+                      <Row gutter={24}>
+                        <Col span={12}>
+                          <Form.Item label="Payment Type" name="paymentType">
+                            <Select placeholder="Select Payment Type" allowClear>
+                              <Option value="STANDARD">Standard</Option>
+                              <Option value="QUICK">Quick</Option>
+                              <Option value="REFUND">Refund</Option>
+                            </Select>
+                          </Form.Item>
+                          <Form.Item label="Payment Document" name="paymentDocument">
+                            <Select placeholder="Select Payment Document" allowClear />
+                          </Form.Item>
+                          <Form.Item label="Legal Entity" name="legalEntity">
+                            <Select placeholder="Select Legal Entity" allowClear>
+                              <Option value="LE_UAE">UAE Legal Entity</Option>
+                              <Option value="LE_KSA">KSA Legal Entity</Option>
+                            </Select>
+                          </Form.Item>
+                        </Col>
+                        <Col span={12}>
+                          <Form.Item label="Payment Reference" name="paymentReference">
+                            <Input placeholder="Enter payment reference" />
+                          </Form.Item>
+                          <Form.Item label="Voucher Number" name="voucherNumber">
+                            <Input placeholder="Auto-generated" readOnly style={{ background: '#fafafa' }} />
+                          </Form.Item>
+                          <Form.Item label="Document Category" name="documentCategory">
+                            <Input placeholder="Enter document category" />
+                          </Form.Item>
+                        </Col>
+                      </Row>
+                    </div>
+                  ),
+                },
+                {
+                  key: 'additionalInfo',
+                  label: 'Additional Information',
+                  children: (
+                    <div style={{ paddingTop: 16 }}>
+                      <Row gutter={24}>
+                        <Col span={12}>
+                          <Form.Item label="Payment Purpose" name="paymentPurpose">
+                            <Input placeholder="Enter payment purpose" />
+                          </Form.Item>
+                          <Form.Item label="Reference Info" name="referenceInfo">
+                            <Input placeholder="Enter reference information" />
+                          </Form.Item>
+                        </Col>
+                        <Col span={12}>
+                          <Form.Item label="Notes" name="notes">
+                            <Input.TextArea rows={4} placeholder="Enter any additional notes..." />
+                          </Form.Item>
+                        </Col>
+                      </Row>
+                    </div>
+                  ),
+                },
+              ]}
+            />
+          </Form>
+        </Modal>
 
         {/* Supplier Search Modal */}
         <Modal
