@@ -158,16 +158,15 @@ interface PaymentTab {
   payment: PaymentRecord;
 }
 
-// Bank account record from APEX
+// Bank account record from APEX (matches /banks/bankaccounts response)
 interface BankAccountRecord {
-  bankAccountId: number;
   bankAccountName: string;
-  maskedAccountNumber: string;
+  bankAccountNumber: string;
   currencyCode: string;
-  bankName: string;
-  bankBranchName: string;
-  ibanNumber: string;
-  apUseAllowedFlag: string;
+  bankNumber: string;
+  branchNumber: string;
+  cashAccountCombination: string;
+  cashClearingAccountCombination: string;
 }
 
 // Supplier record from API
@@ -386,8 +385,9 @@ const ManagePayments: React.FC = () => {
   // Bank accounts state (for Disbursement Bank Account LOV)
   const [bankAccounts, setBankAccounts] = useState<BankAccountRecord[]>([]);
   const [bankAccountsLoading, setBankAccountsLoading] = useState(false);
+  const [selectedBankAccount, setSelectedBankAccount] = useState<BankAccountRecord | null>(null);
 
-  // Fetch bank accounts from APEX (filtered to AP-allowed accounts)
+  // Fetch bank accounts from APEX
   const fetchBankAccounts = async () => {
     setBankAccountsLoading(true);
     try {
@@ -397,18 +397,15 @@ const ManagePayments: React.FC = () => {
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
-      const items: BankAccountRecord[] = (data.items || [])
-        .filter((item: any) => item.ap_use_allowed_flag === 'Y')
-        .map((item: any) => ({
-          bankAccountId: item.bank_account_id,
-          bankAccountName: item.bank_account_name || '',
-          maskedAccountNumber: item.masked_account_number || item.bank_account_number || '',
-          currencyCode: item.currency_code || '',
-          bankName: item.bank_name || '',
-          bankBranchName: item.bank_branch_name || '',
-          ibanNumber: item.iban_number || '',
-          apUseAllowedFlag: item.ap_use_allowed_flag || '',
-        }));
+      const items: BankAccountRecord[] = (data.items || []).map((item: any) => ({
+        bankAccountName: item.bank_account_name || '',
+        bankAccountNumber: item.bank_account_number || '',
+        currencyCode: item.currency_code || '',
+        bankNumber: item.bank_number || '',
+        branchNumber: item.branch_number || '',
+        cashAccountCombination: item.cash_account_combination || '',
+        cashClearingAccountCombination: item.cash_clearing_account_combination || '',
+      }));
       setBankAccounts(items);
     } catch (err) {
       console.error('Failed to fetch bank accounts:', err);
@@ -1424,24 +1421,17 @@ const ManagePayments: React.FC = () => {
                                 allowClear
                                 showSearch
                                 loading={bankAccountsLoading}
-                                optionFilterProp="label"
+                                optionFilterProp="children"
                                 notFoundContent={bankAccountsLoading ? 'Loading…' : 'No bank accounts found'}
+                                onChange={(value) => {
+                                  const acct = bankAccounts.find(a => a.bankAccountName === value) || null;
+                                  setSelectedBankAccount(acct);
+                                }}
+                                onClear={() => setSelectedBankAccount(null)}
                               >
-                                {bankAccounts.map(acct => (
-                                  <Option
-                                    key={acct.bankAccountId}
-                                    value={acct.bankAccountId}
-                                    label={`${acct.bankAccountName} ${acct.maskedAccountNumber}`}
-                                  >
-                                    <div style={{ lineHeight: '1.4' }}>
-                                      <div style={{ fontWeight: 500 }}>
-                                        {acct.bankAccountName}
-                                        {acct.currencyCode && <span style={{ marginLeft: 6, color: REDWOOD.info, fontSize: 12 }}>{acct.currencyCode}</span>}
-                                      </div>
-                                      <div style={{ fontSize: 12, color: '#888' }}>
-                                        {[acct.maskedAccountNumber && `A/C: ${acct.maskedAccountNumber}`, acct.bankName, acct.bankBranchName].filter(Boolean).join(' | ')}
-                                      </div>
-                                    </div>
+                                {bankAccounts.map((acct, idx) => (
+                                  <Option key={idx} value={acct.bankAccountName}>
+                                    {acct.bankAccountName}
                                   </Option>
                                 ))}
                               </Select>
@@ -1518,6 +1508,47 @@ const ManagePayments: React.FC = () => {
                             </Form.Item>
                           </Col>
                         </Row>
+                      </div>
+                    ),
+                  },
+                  {
+                    key: 'bankDetails',
+                    label: 'Bank Details',
+                    children: (
+                      <div style={{ padding: '12px 0' }}>
+                        {selectedBankAccount ? (
+                          <Row gutter={32}>
+                            <Col span={12}>
+                              <Form.Item label="Bank Account Name">
+                                <Input readOnly value={selectedBankAccount.bankAccountName} style={{ background: '#f5f5f5', color: '#333' }} />
+                              </Form.Item>
+                              <Form.Item label="Bank Account Number">
+                                <Input readOnly value={selectedBankAccount.bankAccountNumber} style={{ background: '#f5f5f5', color: '#333' }} />
+                              </Form.Item>
+                              <Form.Item label="Currency">
+                                <Input readOnly value={selectedBankAccount.currencyCode} style={{ background: '#f5f5f5', color: '#333' }} />
+                              </Form.Item>
+                              <Form.Item label="Bank Number">
+                                <Input readOnly value={selectedBankAccount.bankNumber} style={{ background: '#f5f5f5', color: '#333' }} />
+                              </Form.Item>
+                              <Form.Item label="Branch Number">
+                                <Input readOnly value={selectedBankAccount.branchNumber} style={{ background: '#f5f5f5', color: '#333' }} />
+                              </Form.Item>
+                            </Col>
+                            <Col span={12}>
+                              <Form.Item label="Cash Account Combination">
+                                <Input readOnly value={selectedBankAccount.cashAccountCombination} style={{ background: '#f5f5f5', color: '#333' }} />
+                              </Form.Item>
+                              <Form.Item label="Cash Clearing Account Combination">
+                                <Input readOnly value={selectedBankAccount.cashClearingAccountCombination} style={{ background: '#f5f5f5', color: '#333' }} />
+                              </Form.Item>
+                            </Col>
+                          </Row>
+                        ) : (
+                          <div style={{ textAlign: 'center', padding: '40px 0', color: '#aaa' }}>
+                            Select a Disbursement Bank Account in Payment Details to view bank information here.
+                          </div>
+                        )}
                       </div>
                     ),
                   },
