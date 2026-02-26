@@ -112,6 +112,28 @@ interface PaymentRecord {
   paymentReference: number;
   paymentFileReference: number;
   paymentProcessRequest: string;
+  // Accounting
+  accountingDate: string;
+  paymentDescription: string;
+  // Currency conversion
+  conversionRate: number | null;
+  conversionDate: string;
+  conversionRateType: string;
+  // Maturity
+  maturityDate: string;
+  anticipatedValueDate: string;
+  // Void
+  voidDate: string;
+  voidAccountingDate: string;
+  // Stop payment
+  stopDate: string;
+  stopReason: string;
+  stopReference: string;
+  // Third party
+  thirdPartySupplier: string;
+  // Last update
+  lastUpdateDate: string;
+  // Clearing
   clearingDate: string | null;
   clearingAmount: number | null;
   clearingLedgerAmount: number | null;
@@ -208,6 +230,20 @@ const mapFusionToPaymentRecord = (item: any, index: number): PaymentRecord => ({
   paymentReference: item.PaymentReference || 0,
   paymentFileReference: item.PaymentFileReference || 0,
   paymentProcessRequest: item.PaymentProcessRequest || '',
+  accountingDate: formatDate(item.AccountingDate),
+  paymentDescription: item.PaymentDescription || '',
+  conversionRate: item.ConversionRate ?? null,
+  conversionDate: formatDate(item.ConversionDate),
+  conversionRateType: item.ConversionRateType || '',
+  maturityDate: formatDate(item.MaturityDate),
+  anticipatedValueDate: formatDate(item.AnticipatedValueDate),
+  voidDate: formatDate(item.VoidDate),
+  voidAccountingDate: formatDate(item.VoidAccountingDate),
+  stopDate: formatDate(item.StopDate),
+  stopReason: item.StopReason || '',
+  stopReference: item.StopReference || '',
+  thirdPartySupplier: item.ThirdPartySupplier || '',
+  lastUpdateDate: formatDate(item.LastUpdateDate),
   clearingDate: item.ClearingDate,
   clearingAmount: item.ClearingAmount,
   clearingLedgerAmount: item.ClearingLedgerAmount,
@@ -255,6 +291,20 @@ const mapApexToPaymentRecord = (item: any, index: number): PaymentRecord => ({
   paymentReference: item.PaymentReference || 0,
   paymentFileReference: item.PaymentFileReference || 0,
   paymentProcessRequest: item.PaymentProcessRequest || '',
+  accountingDate: formatDate(item.AccountingDate),
+  paymentDescription: item.PaymentDescription || '',
+  conversionRate: item.ConversionRate ?? null,
+  conversionDate: formatDate(item.ConversionDate),
+  conversionRateType: item.ConversionRateType || '',
+  maturityDate: formatDate(item.MaturityDate),
+  anticipatedValueDate: formatDate(item.AnticipatedValueDate),
+  voidDate: formatDate(item.VoidDate),
+  voidAccountingDate: formatDate(item.VoidAccountingDate),
+  stopDate: formatDate(item.StopDate),
+  stopReason: item.StopReason || '',
+  stopReference: item.StopReference || '',
+  thirdPartySupplier: item.ThirdPartySupplier || '',
+  lastUpdateDate: formatDate(item.LastUpdateDate),
   clearingDate: item.ClearingDate,
   clearingAmount: item.ClearingAmount,
   clearingLedgerAmount: item.ClearingLedgerAmount,
@@ -784,6 +834,145 @@ const ManagePayments: React.FC = () => {
       sorter: (a, b) => a.paymentAmount - b.paymentAmount,
     },
     {
+      title: 'Business Unit',
+      dataIndex: 'businessUnit',
+      key: 'businessUnit',
+      width: 160,
+      ellipsis: true,
+    },
+    {
+      title: 'Supplier Number',
+      dataIndex: 'supplierNumber',
+      key: 'supplierNumber',
+      width: 130,
+    },
+    {
+      title: 'Payee Site',
+      dataIndex: 'payeeSite',
+      key: 'payeeSite',
+      width: 130,
+      ellipsis: true,
+    },
+    {
+      title: 'Payment Method',
+      dataIndex: 'paymentMethod',
+      key: 'paymentMethod',
+      width: 130,
+    },
+    {
+      title: 'Payment Type',
+      dataIndex: 'paymentType',
+      key: 'paymentType',
+      width: 130,
+    },
+    {
+      title: 'Accounting Date',
+      dataIndex: 'accountingDate',
+      key: 'accountingDate',
+      width: 130,
+      sorter: true,
+    },
+    {
+      title: 'Accounting Status',
+      dataIndex: 'accountingStatus',
+      key: 'accountingStatus',
+      width: 140,
+      render: (status: string) => {
+        if (!status) return null;
+        const color = status === 'Accounted' ? REDWOOD.success : status === 'Not Accounted' ? REDWOOD.warning : REDWOOD.neutral600;
+        return <Tag style={{ color, borderColor: color, background: 'transparent' }}>{status}</Tag>;
+      },
+    },
+    {
+      title: 'Void Date',
+      dataIndex: 'voidDate',
+      key: 'voidDate',
+      width: 110,
+      render: (val: string) => val ? <span style={{ color: REDWOOD.error }}>{val}</span> : null,
+    },
+    {
+      title: 'Legal Entity',
+      dataIndex: 'legalEntity',
+      key: 'legalEntity',
+      width: 160,
+      ellipsis: true,
+    },
+    {
+      title: 'Disbursement Bank Account',
+      dataIndex: 'disbursementBankAccount',
+      key: 'disbursementBankAccount',
+      width: 200,
+      ellipsis: true,
+    },
+    {
+      title: 'Voucher Number',
+      dataIndex: 'voucherNumber',
+      key: 'voucherNumber',
+      width: 130,
+      render: (val: number) => val || null,
+    },
+    {
+      title: 'Description',
+      dataIndex: 'paymentDescription',
+      key: 'paymentDescription',
+      width: 180,
+      ellipsis: true,
+    },
+    {
+      title: 'Conv. Rate',
+      dataIndex: 'conversionRate',
+      key: 'conversionRate',
+      width: 100,
+      align: 'right' as const,
+      render: (val: number | null) => val != null ? val : null,
+    },
+    {
+      title: 'Conv. Rate Type',
+      dataIndex: 'conversionRateType',
+      key: 'conversionRateType',
+      width: 130,
+    },
+    {
+      title: 'Maturity Date',
+      dataIndex: 'maturityDate',
+      key: 'maturityDate',
+      width: 120,
+    },
+    {
+      title: 'Anticipated Value Date',
+      dataIndex: 'anticipatedValueDate',
+      key: 'anticipatedValueDate',
+      width: 160,
+    },
+    {
+      title: 'Stop Date',
+      dataIndex: 'stopDate',
+      key: 'stopDate',
+      width: 110,
+      render: (val: string) => val ? <span style={{ color: REDWOOD.warning }}>{val}</span> : null,
+    },
+    {
+      title: 'Stop Reason',
+      dataIndex: 'stopReason',
+      key: 'stopReason',
+      width: 160,
+      ellipsis: true,
+    },
+    {
+      title: 'Third Party Supplier',
+      dataIndex: 'thirdPartySupplier',
+      key: 'thirdPartySupplier',
+      width: 180,
+      ellipsis: true,
+    },
+    {
+      title: 'Last Updated',
+      dataIndex: 'lastUpdateDate',
+      key: 'lastUpdateDate',
+      width: 130,
+      sorter: true,
+    },
+    {
       title: 'Remit-to Address',
       dataIndex: 'remitToAddress',
       key: 'remitToAddress',
@@ -1029,7 +1218,7 @@ const ManagePayments: React.FC = () => {
                 showQuickJumper: true,
                 showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
               }}
-              scroll={{ x: 1600 }}
+              scroll={{ x: 4200 }}
               size="small"
               rowClassName={(_, index) => index % 2 === 0 ? '' : 'table-row-light'}
               onRow={(record) => ({
