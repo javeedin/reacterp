@@ -846,7 +846,9 @@ const ManagePayments: React.FC = () => {
                   children: (
                     <Form
                       form={form}
-                      layout="vertical"
+                      layout="horizontal"
+                      labelCol={{ span: 10 }}
+                      wrapperCol={{ span: 14 }}
                       onFinish={handleSearch}
                       size="small"
                     >
