@@ -21,6 +21,8 @@ import {
   Tabs,
   Modal,
   Switch,
+  Checkbox,
+  Divider,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -1362,16 +1364,68 @@ const ManagePayments: React.FC = () => {
                               name="disbursementBankAccount"
                               rules={[{ required: true, message: 'Required' }]}
                             >
-                              <Select placeholder="Select Bank Account" allowClear />
+                              <Select placeholder="Select Bank Account" allowClear showSearch optionFilterProp="label">
+                                <Option value="ENBD_AED_001" label="Emirates NBD – AED ****4521">
+                                  <div style={{ lineHeight: '1.4' }}>
+                                    <div style={{ fontWeight: 500 }}>Emirates NBD – AED</div>
+                                    <div style={{ fontSize: 12, color: '#888' }}>A/C: ****4521 | ENBD | Dubai Main</div>
+                                  </div>
+                                </Option>
+                                <Option value="FAB_USD_002" label="First Abu Dhabi Bank – USD ****8830">
+                                  <div style={{ lineHeight: '1.4' }}>
+                                    <div style={{ fontWeight: 500 }}>First Abu Dhabi Bank – USD</div>
+                                    <div style={{ fontSize: 12, color: '#888' }}>A/C: ****8830 | FAB | Abu Dhabi</div>
+                                  </div>
+                                </Option>
+                                <Option value="DIB_AED_003" label="Dubai Islamic Bank – AED ****1190">
+                                  <div style={{ lineHeight: '1.4' }}>
+                                    <div style={{ fontWeight: 500 }}>Dubai Islamic Bank – AED</div>
+                                    <div style={{ fontSize: 12, color: '#888' }}>A/C: ****1190 | DIB | Sharjah</div>
+                                  </div>
+                                </Option>
+                                <Option value="ADCB_SAR_004" label="ADCB – SAR ****6672">
+                                  <div style={{ lineHeight: '1.4' }}>
+                                    <div style={{ fontWeight: 500 }}>ADCB – SAR</div>
+                                    <div style={{ fontSize: 12, color: '#888' }}>A/C: ****6672 | ADCB | Abu Dhabi</div>
+                                  </div>
+                                </Option>
+                                <Option value="RAK_USD_005" label="RAK Bank – USD ****3345">
+                                  <div style={{ lineHeight: '1.4' }}>
+                                    <div style={{ fontWeight: 500 }}>RAK Bank – USD</div>
+                                    <div style={{ fontSize: 12, color: '#888' }}>A/C: ****3345 | RAKBANK | RAK</div>
+                                  </div>
+                                </Option>
+                              </Select>
                             </Form.Item>
-                            <Form.Item label="Payment Currency" name="paymentCurrencyDisplay">
-                              <Input
-                                readOnly
-                                style={{ background: '#f5f5f5', color: '#333' }}
-                                placeholder="—"
-                              />
+                            <Form.Item
+                              label={<><span style={{ color: REDWOOD.primary }}>*</span> Payment Currency</>}
+                              name="paymentCurrency"
+                              initialValue="AED"
+                              rules={[{ required: true, message: 'Required' }]}
+                            >
+                              <Select showSearch optionFilterProp="label" placeholder="Select Currency">
+                                <Option value="AED" label="AED - UAE Dirham">AED – UAE Dirham</Option>
+                                <Option value="USD" label="USD - US Dollar">USD – US Dollar</Option>
+                                <Option value="EUR" label="EUR - Euro">EUR – Euro</Option>
+                                <Option value="GBP" label="GBP - British Pound">GBP – British Pound</Option>
+                                <Option value="SAR" label="SAR - Saudi Riyal">SAR – Saudi Riyal</Option>
+                                <Option value="KWD" label="KWD - Kuwaiti Dinar">KWD – Kuwaiti Dinar</Option>
+                                <Option value="BHD" label="BHD - Bahraini Dinar">BHD – Bahraini Dinar</Option>
+                                <Option value="QAR" label="QAR - Qatari Riyal">QAR – Qatari Riyal</Option>
+                                <Option value="OMR" label="OMR - Omani Rial">OMR – Omani Rial</Option>
+                                <Option value="EGP" label="EGP - Egyptian Pound">EGP – Egyptian Pound</Option>
+                                <Option value="INR" label="INR - Indian Rupee">INR – Indian Rupee</Option>
+                                <Option value="PKR" label="PKR - Pakistani Rupee">PKR – Pakistani Rupee</Option>
+                                <Option value="JPY" label="JPY - Japanese Yen">JPY – Japanese Yen</Option>
+                                <Option value="CNY" label="CNY - Chinese Yuan">CNY – Chinese Yuan</Option>
+                                <Option value="CAD" label="CAD - Canadian Dollar">CAD – Canadian Dollar</Option>
+                                <Option value="AUD" label="AUD - Australian Dollar">AUD – Australian Dollar</Option>
+                                <Option value="CHF" label="CHF - Swiss Franc">CHF – Swiss Franc</Option>
+                                <Option value="SGD" label="SGD - Singapore Dollar">SGD – Singapore Dollar</Option>
+                                <Option value="HKD" label="HKD - Hong Kong Dollar">HKD – Hong Kong Dollar</Option>
+                                <Option value="TRY" label="TRY - Turkish Lira">TRY – Turkish Lira</Option>
+                              </Select>
                             </Form.Item>
-                            <Form.Item name="paymentCurrency" hidden initialValue="AED"><Input /></Form.Item>
                             <Form.Item
                               label={<><span style={{ color: REDWOOD.primary }}>*</span> Payment Method</>}
                               name="paymentMethod"
@@ -1423,34 +1477,111 @@ const ManagePayments: React.FC = () => {
                     label: 'Advanced',
                     children: (
                       <div style={{ padding: '12px 0' }}>
+
+                        {/* ── Options ── */}
+                        <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, color: '#666', marginTop: 0 }}>Options</Divider>
                         <Row gutter={32}>
                           <Col span={12}>
-                            <Form.Item
-                              label={<><span style={{ color: REDWOOD.primary }}>*</span> Payment Amount</>}
-                              name="paymentAmount"
-                              rules={[{ required: true, message: 'Required' }]}
-                            >
-                              <Input type="number" placeholder="0.00" style={{ textAlign: 'right' }} />
+                            <Form.Item name="accrueToLedger" valuePropName="checked">
+                              <Checkbox>Account and post to ledger</Checkbox>
                             </Form.Item>
-                            <Form.Item label="Legal Entity" name="legalEntity">
-                              <Select placeholder="Select Legal Entity" allowClear>
-                                <Option value="LE_UAE">UAE Legal Entity</Option>
-                                <Option value="LE_KSA">KSA Legal Entity</Option>
+                            <Form.Item name="printNow" valuePropName="checked">
+                              <Checkbox>Print now</Checkbox>
+                            </Form.Item>
+                            <Form.Item label="Printer" name="printer">
+                              <Select placeholder="Select Printer" allowClear disabled>
+                                <Option value="PDF_PRINTER">PDF Printer</Option>
+                                <Option value="NETWORK_PRINTER">Network Printer</Option>
                               </Select>
-                            </Form.Item>
-                            <Form.Item label="Document Category" name="documentCategory">
-                              <Input placeholder="Enter document category" />
                             </Form.Item>
                           </Col>
                           <Col span={12}>
-                            <Form.Item label="Payment Reference" name="paymentReference">
-                              <Input placeholder="Enter payment reference" />
+                            <Form.Item label="Document Category" name="documentCategory">
+                              <Select placeholder="Select Document Category" allowClear>
+                                <Option value="ELECTRONIC">Electronic Payments</Option>
+                                <Option value="MANUAL">Manual Payments</Option>
+                                <Option value="WIRE">Wire Transfers</Option>
+                              </Select>
+                            </Form.Item>
+                            <Form.Item label="Document Sequence" name="documentSequence">
+                              <Input readOnly style={{ background: '#f5f5f5', color: '#555' }} placeholder="—" />
                             </Form.Item>
                             <Form.Item label="Voucher Number" name="voucherNumber">
-                              <Input placeholder="Auto-generated" readOnly style={{ background: '#fafafa' }} />
+                              <Input readOnly style={{ background: '#f5f5f5', color: '#555' }} placeholder="—" />
                             </Form.Item>
                           </Col>
                         </Row>
+
+                        {/* ── Conversion ── */}
+                        <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, color: '#666' }}>Conversion</Divider>
+                        <Row gutter={32}>
+                          <Col span={12}>
+                            <Form.Item
+                              label={<><span style={{ color: REDWOOD.primary }}>*</span> Conversion Rate Type</>}
+                              name="conversionRateType"
+                              initialValue="CORPORATE"
+                              rules={[{ required: true, message: 'Required' }]}
+                            >
+                              <Select>
+                                <Option value="CORPORATE">Corporate</Option>
+                                <Option value="SPOT">Spot</Option>
+                                <Option value="USER">User</Option>
+                                <Option value="FIXED">Fixed</Option>
+                              </Select>
+                            </Form.Item>
+                            <Form.Item label="Conversion Date" name="conversionDate">
+                              <Input readOnly style={{ background: '#f5f5f5', color: '#555' }} placeholder="—" />
+                            </Form.Item>
+                            <Form.Item label="Conversion Rate" name="conversionRate">
+                              <Input readOnly style={{ background: '#f5f5f5', color: '#555', textAlign: 'right' }} placeholder="—" />
+                            </Form.Item>
+                            <Form.Item label="Accounted Amount" name="accountedAmount">
+                              <Input readOnly style={{ background: '#f5f5f5', color: '#555', textAlign: 'right' }} placeholder="—" />
+                            </Form.Item>
+                          </Col>
+                          <Col span={12}>
+                            <Form.Item label="Cross-Currency Rate Type" name="crossCurrencyRateType" initialValue="CORPORATE">
+                              <Select allowClear>
+                                <Option value="CORPORATE">Corporate</Option>
+                                <Option value="SPOT">Spot</Option>
+                                <Option value="USER">User</Option>
+                                <Option value="FIXED">Fixed</Option>
+                              </Select>
+                            </Form.Item>
+                          </Col>
+                        </Row>
+
+                        {/* ── Bills Payable ── */}
+                        <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, color: '#666' }}>Bills Payable</Divider>
+                        <Row gutter={32}>
+                          <Col span={12}>
+                            <Form.Item label="Bills Payable" name="billsPayable">
+                              <Input readOnly style={{ background: '#f5f5f5', color: '#555' }} defaultValue="No" placeholder="No" />
+                            </Form.Item>
+                            <Form.Item label="Maturity Conversion Rate Type" name="maturityConversionRateType">
+                              <Select placeholder="Select Rate Type" allowClear disabled>
+                                <Option value="CORPORATE">Corporate</Option>
+                                <Option value="SPOT">Spot</Option>
+                                <Option value="USER">User</Option>
+                              </Select>
+                            </Form.Item>
+                            <Form.Item label="Maturity Conversion Date" name="maturityConversionDate">
+                              <Input readOnly style={{ background: '#f5f5f5', color: '#555' }} placeholder="—" />
+                            </Form.Item>
+                          </Col>
+                          <Col span={12}>
+                            <Form.Item label="Maturity Date" name="maturityDate">
+                              <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
+                            </Form.Item>
+                            <Form.Item label="Maturity Conversion Rate" name="maturityConversionRate">
+                              <Input readOnly style={{ background: '#f5f5f5', color: '#555', textAlign: 'right' }} placeholder="—" />
+                            </Form.Item>
+                            <Form.Item label="Matured Amount" name="maturedAmount">
+                              <Input readOnly style={{ background: '#f5f5f5', color: '#555', textAlign: 'right' }} placeholder="—" />
+                            </Form.Item>
+                          </Col>
+                        </Row>
+
                       </div>
                     ),
                   },
