@@ -67,7 +67,7 @@ import Autopilot from '../../components/Autopilot';
 import { useElectron, useElectronBackgroundSync } from '../../hooks/useElectron';
 
 // Icon imports for AP
-import { FileSearchOutlined, BranchesOutlined } from '@ant-design/icons';
+import { FileSearchOutlined, BranchesOutlined, ScheduleOutlined } from '@ant-design/icons';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -212,6 +212,8 @@ const SyncData: React.FC = () => {
     processedLines: 0,
     totalDistributions: 0,
     processedDistributions: 0,
+    totalInstallments: 0,
+    processedInstallments: 0,
     currentPage: 0,
     totalPages: 0,
     errors: 0,
@@ -1698,6 +1700,8 @@ const SyncData: React.FC = () => {
         processedLines: 0,
         totalDistributions: 0,
         processedDistributions: 0,
+        totalInstallments: 0,
+        processedInstallments: 0,
         currentPage: 0,
         totalPages: 0,
         errors: 0,
@@ -3015,9 +3019,10 @@ const SyncData: React.FC = () => {
                 </Row>
               ) : isAPInvoices ? (
                 /* AP Invoices KPI Cards */
+                {/* Row 1: Invoices · Headers · Lines */}
                 <Row gutter={16} style={{ marginBottom: 16 }}>
                   {/* Invoices Card */}
-                  <Col xs={24} sm={6}>
+                  <Col xs={24} sm={8}>
                     <Card
                       style={{
                         borderRadius: 12,
@@ -3059,7 +3064,7 @@ const SyncData: React.FC = () => {
                   </Col>
 
                   {/* Headers Card */}
-                  <Col xs={24} sm={6}>
+                  <Col xs={24} sm={8}>
                     <Card
                       style={{
                         borderRadius: 12,
@@ -3088,7 +3093,7 @@ const SyncData: React.FC = () => {
                   </Col>
 
                   {/* Lines Card */}
-                  <Col xs={24} sm={6}>
+                  <Col xs={24} sm={8}>
                     <Card
                       style={{
                         borderRadius: 12,
@@ -3115,9 +3120,12 @@ const SyncData: React.FC = () => {
                       />
                     </Card>
                   </Col>
+                </Row>
 
+                {/* Row 2: Distributions · Installments */}
+                <Row gutter={16} style={{ marginBottom: 16 }}>
                   {/* Distributions Card */}
-                  <Col xs={24} sm={6}>
+                  <Col xs={24} sm={12}>
                     <Card
                       style={{
                         borderRadius: 12,
@@ -3147,6 +3155,35 @@ const SyncData: React.FC = () => {
                           {apProgress.errors} errors
                         </Text>
                       )}
+                    </Card>
+                  </Col>
+
+                  {/* Installments Card */}
+                  <Col xs={24} sm={12}>
+                    <Card
+                      style={{
+                        borderRadius: 12,
+                        border: `1px solid ${REDWOOD.border}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                      }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <ScheduleOutlined style={{ fontSize: 20, color: '#722ed1', marginRight: 8 }} />
+                        <Text strong>Installments</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {apProgress.processedInstallments}
+                        <Text type="secondary" style={{ fontSize: 14, marginLeft: 8 }}>
+                          / {apProgress.totalInstallments}
+                        </Text>
+                      </div>
+                      <Progress
+                        percent={apProgress.totalInstallments > 0 ? Math.round((apProgress.processedInstallments / apProgress.totalInstallments) * 100) : 0}
+                        showInfo={false}
+                        strokeColor="#722ed1"
+                        style={{ marginTop: 8 }}
+                      />
                     </Card>
                   </Col>
                 </Row>
