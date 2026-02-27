@@ -449,6 +449,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // Payments tab state (for edit mode)
   const [invoicePayments, setInvoicePayments] = useState<{ key: string; number: string; paymentDocument: string; status: string; reconciled: string; currentPayeeName: string; paymentDate: string; paidAmount: string; address: string }[]>([]);
   const [invoicePaymentsLoading, setInvoicePaymentsLoading] = useState(false);
+  const [invoicePaymentsUrl, setInvoicePaymentsUrl] = useState('');
 
   // Holds tab state (for edit mode)
   const [invoiceHolds, setInvoiceHolds] = useState<{ key: string; holdName: string; holdReason: string; holdDate: string; heldBy: string; releaseDate: string; releasedBy: string }[]>([]);
@@ -461,28 +462,35 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   // Fetch invoice payments (edit mode)
   const fetchInvoicePayments = useCallback(async (invoiceId: number) => {
+    const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/payments?P_INVOICE_ID=${invoiceId}`;
+    setInvoicePaymentsUrl(url);
     setInvoicePaymentsLoading(true);
+    console.log('[Payments Tab] Fetching:', url);
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/related-invoices?invoice_id=${invoiceId}`;
-      const response = await fetch(url);
+      const response = await fetch(url, { headers: { Accept: 'application/json' } });
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
       const data = await response.json();
-      const items = data.items || data || [];
+      console.log('[Payments Tab] Raw response:', data);
+      const items = data.items || (Array.isArray(data) ? data : []);
       setInvoicePayments(
-        items.map((item: any, index: number) => ({
-          key: item.payment_id?.toString() || index.toString(),
-          number: item.payment_number || item.check_number || '',
-          paymentDocument: item.payment_document_name || '',
-          status: item.status || item.payment_status || '',
-          reconciled: item.reconciled_flag === 'Y' ? 'Yes' : 'No',
-          currentPayeeName: item.payee_name || item.supplier || '',
-          paymentDate: formatDateStr(item.payment_date || item.check_date),
-          paidAmount: item.payment_amount?.toString() || item.amount?.toString() || '0',
-          address: item.address || '',
-        }))
+        items.map((item: any, index: number) => {
+          const v = (a: string, b?: string) => item[a] ?? item[a.toUpperCase()] ?? (b ? (item[b] ?? item[b.toUpperCase()]) : undefined);
+          const reconciledFlag = v('reconciled_flag', 'reconcile_flag');
+          return {
+            key: (v('payment_id') ?? index).toString(),
+            number: v('payment_number', 'check_number') ?? '',
+            paymentDocument: v('payment_document_name', 'document_name') ?? '',
+            status: v('payment_status', 'status') ?? '',
+            reconciled: reconciledFlag === 'Y' ? 'Yes' : reconciledFlag === 'N' ? 'No' : (reconciledFlag ?? ''),
+            currentPayeeName: v('payee_name', 'vendor_name') ?? '',
+            paymentDate: formatDateStr(v('payment_date', 'check_date') ?? ''),
+            paidAmount: (v('payment_amount', 'amount') ?? 0).toString(),
+            address: v('address', 'payee_address') ?? '',
+          };
+        })
       );
     } catch (error) {
-      console.error('Error fetching invoice payments:', error);
+      console.error('[Payments Tab] Error:', error);
     } finally {
       setInvoicePaymentsLoading(false);
     }
@@ -2866,6 +2874,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   <Space size={4}>
                     <CreditCardOutlined />
                     <span>Payments ({invoicePayments.length})</span>
+                    <Tooltip
+                      title={
+                        <span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>
+                          {invoicePaymentsUrl}
+                        </span>
+                      }
+                      placement="bottom"
+                    >
+                      <ApiOutlined style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 12 }} />
+                    </Tooltip>
                   </Space>
                 ),
                 children: invoicePaymentsLoading ? (
