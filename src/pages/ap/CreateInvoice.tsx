@@ -370,7 +370,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     invoiceType: 'Standard',
     invoiceCurrency: 'AED',
   });
-  const [taxRate, setTaxRate] = useState<number>(5);
+  const [taxRate, setTaxRate] = useState<number>(0);
 
   // Check if all required header fields are filled
   const isHeaderComplete = useMemo(() => {
@@ -549,41 +549,48 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       if (Array.isArray(items) && items.length > 0) {
         const itemLines = items.filter((item: any) => item.line_type === 'Item' || !item.line_type);
         if (itemLines.length > 0) {
-          const mappedLines: InvoiceLine[] = itemLines.map((item: any, index: number) => ({
-            key: item.line_id?.toString() || `${Date.now()}-${index}`,
-            lineNumber: item.line_number || index + 1,
-            type: item.line_type || 'Item',
-            amount: item.line_amount || 0,
-            distributionSet: item.distribution_set || '',
-            distributionCombination: item.distribution_combination || item.dist_code_combination || '',
-            accountingDate: formatDateStr(item.accounting_date) || '',
-            prorateAcrossAllItemLines: item.prorate_across_all_items || 'No',
-            description: item.description || '',
-            taxClassification: item.tax_classification_code || item.tax_classification || '',
-            shipToLocation: item.ship_to_location || '',
-            quantity: item.quantity || 1,
-            unitPrice: item.unit_price || 0,
-            uomName: item.uom || '',
-            project: item.project || '',
-            task: item.task || '',
-            poNumber: item.purchase_order_number || item.po_number || '',
-            poLine: item.purchase_order_line_number?.toString() || item.po_line_number?.toString() || '',
-            poSchedule: item.purchase_order_schedule_line_number?.toString() || '',
-            receiptNumber: item.receipt_number || '',
-            receiptLine: item.receipt_line_number?.toString() || '',
-            consumptionAdviceNumber: item.consumption_advice_number || '',
-            consumptionAdviceLine: item.consumption_advice_line_number?.toString() || '',
-            startDate: formatDateStr(item.multiperiod_start_date) || '',
-            endDate: formatDateStr(item.multiperiod_end_date) || '',
-            accrualAccount: item.multiperiod_accrual_account || item.accrual_account || '',
-            taxAmount: item.tax_amount || 0,
-          }));
+          const mappedLines: InvoiceLine[] = itemLines.map((item: any, index: number) => {
+            const taxClass = item.tax_classification_code || item.tax_classification || '';
+            return {
+              key: item.line_id?.toString() || `${Date.now()}-${index}`,
+              lineNumber: item.line_number || index + 1,
+              type: item.line_type || 'Item',
+              amount: item.line_amount || 0,
+              distributionSet: item.distribution_set || '',
+              distributionCombination: item.distribution_combination || item.dist_code_combination || '',
+              accountingDate: formatDateStr(item.accounting_date) || '',
+              prorateAcrossAllItemLines: item.prorate_across_all_items || 'No',
+              description: item.description || '',
+              taxClassification: taxClass,
+              shipToLocation: item.ship_to_location || '',
+              quantity: item.quantity || 1,
+              unitPrice: item.unit_price || 0,
+              uomName: item.uom || '',
+              project: item.project || '',
+              task: item.task || '',
+              poNumber: item.purchase_order_number || item.po_number || '',
+              poLine: item.purchase_order_line_number?.toString() || item.po_line_number?.toString() || '',
+              poSchedule: item.purchase_order_schedule_line_number?.toString() || '',
+              receiptNumber: item.receipt_number || '',
+              receiptLine: item.receipt_line_number?.toString() || '',
+              consumptionAdviceNumber: item.consumption_advice_number || '',
+              consumptionAdviceLine: item.consumption_advice_line_number?.toString() || '',
+              startDate: formatDateStr(item.multiperiod_start_date) || '',
+              endDate: formatDateStr(item.multiperiod_end_date) || '',
+              accrualAccount: item.multiperiod_accrual_account || item.accrual_account || '',
+              // Only carry taxAmount if the line actually has a tax classification
+              taxAmount: taxClass ? (item.tax_amount || 0) : 0,
+            };
+          });
           setLines(mappedLines);
 
-          // Set tax rate from first line if available
-          if (mappedLines[0]?.taxClassification) {
-            const lineRate = getTaxRateForClassification(mappedLines[0].taxClassification);
-            setTaxRate(lineRate);
+          // Set tax rate from the first line that has a tax classification;
+          // if no line has one, default to 0 (no tax)
+          const firstTaxedLine = mappedLines.find(l => l.taxClassification);
+          if (firstTaxedLine) {
+            setTaxRate(getTaxRateForClassification(firstTaxedLine.taxClassification));
+          } else {
+            setTaxRate(0);
           }
         }
       }
@@ -2102,19 +2109,17 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             />
           </Tooltip>
           {/* Invoice Actions Dropdown */}
-          {!isReadOnly && (
-            <Dropdown
-              menu={{
-                items: invoiceActionItems,
-                onClick: handleInvoiceAction,
-              }}
-              trigger={['click']}
-            >
-              <Button style={{ fontWeight: 500 }}>
-                Invoice Actions <DownOutlined style={{ fontSize: 10 }} />
-              </Button>
-            </Dropdown>
-          )}
+          <Dropdown
+            menu={{
+              items: invoiceActionItems,
+              onClick: handleInvoiceAction,
+            }}
+            trigger={['click']}
+          >
+            <Button style={{ fontWeight: 500 }}>
+              Invoice Actions <DownOutlined style={{ fontSize: 10 }} />
+            </Button>
+          </Dropdown>
           {!isReadOnly && (
             <Button
               icon={<CheckSquareOutlined />}
