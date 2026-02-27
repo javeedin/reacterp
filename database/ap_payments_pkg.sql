@@ -194,9 +194,17 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
         v_is_local VARCHAR2(1) := 'N'; -- 'Y' when CHECK_ID was auto-generated (not from Fusion)
 
     BEGIN
-        -- Extract all values from JSON
+        -- Step 1: Read CheckId from JSON (Fusion sync provides it; local payments send null)
+        v_check_id := JSON_VALUE(p_json_data, '$.CheckId' RETURNING NUMBER);
+
+        -- Step 2: No CheckId in JSON → auto-assign via sequence (negative = local, never collides with Fusion)
+        IF v_check_id IS NULL THEN
+            SELECT -RR_AP_PAYMENTS_SEQ.NEXTVAL INTO v_check_id FROM DUAL;
+            v_is_local := 'Y';
+        END IF;
+
+        -- Step 3: Extract all other fields (CheckId already resolved above)
         SELECT
-            JSON_VALUE(p_json_data, '$.CheckId' RETURNING NUMBER),
             JSON_VALUE(p_json_data, '$.PaymentId' RETURNING NUMBER),
             JSON_VALUE(p_json_data, '$.PaymentReference' RETURNING NUMBER),
             JSON_VALUE(p_json_data, '$.PaperDocumentNumber' RETURNING NUMBER),
@@ -267,7 +275,7 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
             JSON_VALUE(p_json_data, '$.LastUpdatedBy'),
             JSON_VALUE(p_json_data, '$.LastUpdateLogin')
         INTO
-            v_check_id, v_payment_id, v_payment_reference, v_paper_document_number,
+            v_payment_id, v_payment_reference, v_paper_document_number,
             v_payment_number, v_payment_file_reference, v_payment_process_request, v_voucher_number,
             v_payment_amount, v_payment_base_amount, v_withheld_amount, v_bank_charge_amount,
             v_payment_description, v_payment_status, v_payment_type, v_payment_mode, v_payment_function,
@@ -411,13 +419,6 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
             EXCEPTION WHEN OTHERS THEN v_last_update_date := NULL;
             END;
         END;
-
-        -- Auto-generate CHECK_ID for locally created payments (not synced from Fusion).
-        -- Fusion IDs are positive 18-digit numbers; local IDs are negative → zero collision risk.
-        IF v_check_id IS NULL THEN
-            SELECT -RR_AP_PAYMENTS_SEQ.NEXTVAL INTO v_check_id FROM DUAL;
-            v_is_local := 'Y';
-        END IF;
 
         -- Merge (upsert) payment data
         MERGE INTO RR_AP_PAYMENTS_ALL tgt
