@@ -64,6 +64,7 @@ import {
   FileExcelOutlined,
   InboxOutlined,
   ScheduleOutlined,
+  BankOutlined,
 } from '@ant-design/icons';
 
 dayjs.extend(customParseFormat);
@@ -356,6 +357,7 @@ interface CreateInvoiceProps {
 
 const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialData }) => {
   const [form] = Form.useForm();
+  const [payInFullForm] = Form.useForm();
 
   // Unified invoice lines - shared across both tabs
   const [lines, setLines] = useState<InvoiceLine[]>([createBlankLine(1)]);
@@ -416,6 +418,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   // Import Lines modal
   const [importModalVisible, setImportModalVisible] = useState(false);
+  // Pay in Full modal state
+  const [payInFullOpen, setPayInFullOpen] = useState(false);
+  const [payInFullBankAccounts, setPayInFullBankAccounts] = useState<{ bankAccountName: string; currencyCode: string; legalEntityName: string }[]>([]);
+  const [payInFullBankLoading, setPayInFullBankLoading] = useState(false);
+  const [payInFullSubmitting, setPayInFullSubmitting] = useState(false);
+
   const [installmentsModalOpen, setInstallmentsModalOpen] = useState(false);
   const [installmentsModalData, setInstallmentsModalData] = useState<any[]>([]);
   const [installmentsModalLoading, setInstallmentsModalLoading] = useState(false);
@@ -1187,6 +1195,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     },
     { type: 'divider' },
     {
+      key: 'payInFull',
+      icon: <CreditCardOutlined />,
+      label: 'Pay in Full',
+    },
+    {
       key: 'applyPrepayment',
       icon: <DollarOutlined />,
       label: 'Apply Prepayment',
@@ -1349,6 +1362,50 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     }
   };
 
+  // ── Pay in Full helpers ─────────────────────────────────────────────────
+  const fetchPayInFullBankAccounts = async (buName: string) => {
+    setPayInFullBankLoading(true);
+    try {
+      const response = await fetch(`${APEX_DB_CONFIG.baseUrl}/banks/bankaccounts`, {
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      const all = (data.items || []).map((item: any) => ({
+        bankAccountName: item.bank_account_name || '',
+        currencyCode:    item.currency_code    || '',
+        legalEntityName: item.legal_entity_name || '',
+      }));
+      // filter to this invoice's business unit
+      const filtered = buName ? all.filter((a: any) => a.legalEntityName === buName) : all;
+      setPayInFullBankAccounts(filtered);
+      if (filtered.length === 0) message.warning(`No bank accounts found for "${buName}"`);
+    } catch {
+      message.error('Failed to load bank accounts');
+    } finally {
+      setPayInFullBankLoading(false);
+    }
+  };
+
+  const openPayInFullModal = () => {
+    const bu = form.getFieldValue('businessUnit') || headerValues.businessUnit || '';
+    const invoiceBalance = computedTotal - invoicePayments
+      .filter(p => p.status !== 'Voided')
+      .reduce((sum, p) => sum + p.paidAmount, 0);
+    payInFullForm.resetFields();
+    payInFullForm.setFieldsValue({
+      businessUnit:  bu,
+      supplier:      form.getFieldValue('supplier') || '',
+      invoiceNumber: form.getFieldValue('invoiceNumber') || '',
+      payAmount:     invoiceBalance,
+      currency:      headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED',
+      paymentDate:   dayjs(),
+    });
+    setPayInFullOpen(true);
+    fetchPayInFullBankAccounts(bu);
+  };
+  // ────────────────────────────────────────────────────────────────────────
+
   const handleInvoiceAction = ({ key }: { key: string }) => {
     switch (key) {
       case 'validate':
@@ -1356,6 +1413,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         break;
       case 'calculateTax':
         message.info('Calculating tax...');
+        break;
+      case 'payInFull':
+        if (!isEditMode) { message.warning('Save the invoice first before making a payment.'); return; }
+        openPayInFullModal();
         break;
       case 'applyPrepayment':
         message.info('Apply prepayment...');
@@ -4435,6 +4496,181 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           />
         </Spin>
       </Modal>
+
+      {/* ═══════════════════ PAY IN FULL MODAL ═══════════════════ */}
+      <Modal
+        title={
+          <Space>
+            <CreditCardOutlined style={{ color: REDWOOD.success }} />
+            <span>Pay Invoice in Full</span>
+          </Space>
+        }
+        open={payInFullOpen}
+        onCancel={() => { setPayInFullOpen(false); payInFullForm.resetFields(); }}
+        width={620}
+        destroyOnClose
+        footer={[
+          <Button key="cancel" onClick={() => { setPayInFullOpen(false); payInFullForm.resetFields(); }}>
+            Cancel
+          </Button>,
+          <Button
+            key="submit"
+            type="primary"
+            loading={payInFullSubmitting}
+            icon={<CreditCardOutlined />}
+            style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+            onClick={() => payInFullForm.submit()}
+          >
+            Confirm Payment
+          </Button>,
+        ]}
+      >
+        <Form
+          form={payInFullForm}
+          layout="vertical"
+          size="small"
+          onFinish={async (values) => {
+            setPayInFullSubmitting(true);
+            try {
+              // TODO: wire up payment submission API
+              console.log('[Pay in Full] Payload:', values);
+              message.success('Payment submitted successfully');
+              setPayInFullOpen(false);
+              payInFullForm.resetFields();
+            } catch {
+              message.error('Payment submission failed');
+            } finally {
+              setPayInFullSubmitting(false);
+            }
+          }}
+        >
+          {/* ── Read-only invoice summary ── */}
+          <div style={{
+            background: REDWOOD.neutral100,
+            border: `1px solid ${REDWOOD.neutral200}`,
+            borderRadius: 8,
+            padding: '10px 14px',
+            marginBottom: 16,
+          }}>
+            <Row gutter={16}>
+              <Col span={12}>
+                <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Business Unit</div>
+                <div style={{ fontSize: 13, fontWeight: 500 }}>
+                  {form.getFieldValue('businessUnit') || headerValues.businessUnit || '—'}
+                </div>
+              </Col>
+              <Col span={12}>
+                <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Supplier</div>
+                <div style={{ fontSize: 13, fontWeight: 500 }}>
+                  {form.getFieldValue('supplier') || '—'}
+                </div>
+              </Col>
+            </Row>
+            <Row gutter={16} style={{ marginTop: 8 }}>
+              <Col span={12}>
+                <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Invoice Number</div>
+                <div style={{ fontSize: 13, fontWeight: 500 }}>
+                  {form.getFieldValue('invoiceNumber') || '—'}
+                </div>
+              </Col>
+              <Col span={12}>
+                <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Pay Amount</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: REDWOOD.success }}>
+                  {formatAmount(
+                    computedTotal - invoicePayments.filter(p => p.status !== 'Voided').reduce((s, p) => s + p.paidAmount, 0)
+                  )}{' '}
+                  <span style={{ fontSize: 13 }}>
+                    {headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED'}
+                  </span>
+                </div>
+              </Col>
+            </Row>
+          </div>
+
+          <Divider style={{ margin: '0 0 14px' }} />
+
+          {/* ── Payment fields ── */}
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                label="Payment Date"
+                name="paymentDate"
+                rules={[{ required: true, message: 'Payment date is required' }]}
+              >
+                <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                label="Payment Method"
+                name="paymentMethod"
+                rules={[{ required: true, message: 'Payment method is required' }]}
+              >
+                <Select placeholder="Select method">
+                  <Select.Option value="Electronic">Electronic</Select.Option>
+                  <Select.Option value="Check">Check</Select.Option>
+                  <Select.Option value="Wire">Wire</Select.Option>
+                  <Select.Option value="EFT">EFT</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Form.Item
+            label={
+              <Space>
+                <span>Disbursement Bank Account</span>
+                {payInFullBankLoading && <LoadingOutlined style={{ fontSize: 12, color: REDWOOD.info }} />}
+                {!payInFullBankLoading && payInFullBankAccounts.length === 0 && (
+                  <span style={{ color: REDWOOD.warning, fontSize: 11 }}>
+                    No accounts found for this Business Unit
+                  </span>
+                )}
+              </Space>
+            }
+            name="disbursementBankAccount"
+            rules={[{ required: true, message: 'Bank account is required' }]}
+          >
+            <Select
+              placeholder={payInFullBankLoading ? 'Loading...' : 'Select bank account'}
+              loading={payInFullBankLoading}
+              showSearch
+              optionFilterProp="label"
+            >
+              {payInFullBankAccounts.map((acct, i) => (
+                <Select.Option key={i} value={acct.bankAccountName} label={acct.bankAccountName}>
+                  <Space>
+                    <BankOutlined style={{ color: REDWOOD.info }} />
+                    <span>{acct.bankAccountName}</span>
+                    {acct.currencyCode && <Tag style={{ fontSize: 10 }}>{acct.currencyCode}</Tag>}
+                  </Space>
+                </Select.Option>
+              ))}
+            </Select>
+          </Form.Item>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item label="Payment Document" name="paymentDocument">
+                <Select placeholder="Select document" allowClear>
+                  <Select.Option value="Check">Check</Select.Option>
+                  <Select.Option value="Manual">Manual</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Paper Document Number" name="paperDocumentNumber">
+                <Input placeholder="Auto-assigned if blank" />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Form.Item label="Description" name="description">
+            <Input.TextArea rows={2} placeholder="Optional payment description" />
+          </Form.Item>
+        </Form>
+      </Modal>
+      {/* ═══════════════════════════════════════════════════════════ */}
 
       <style>{`
         .ant-table-thead > tr > th {
