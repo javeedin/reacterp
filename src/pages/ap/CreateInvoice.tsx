@@ -419,6 +419,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [installmentsModalOpen, setInstallmentsModalOpen] = useState(false);
   const [installmentsModalData, setInstallmentsModalData] = useState<any[]>([]);
   const [installmentsModalLoading, setInstallmentsModalLoading] = useState(false);
+  const [installmentsModalUrl, setInstallmentsModalUrl] = useState('');
   const [importPreviewData, setImportPreviewData] = useState<{ type: string; amount: number; description: string }[]>([]);
   const [pasteText, setPasteText] = useState('');
 
@@ -1318,11 +1319,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   };
 
   const fetchInstallmentsForModal = async () => {
-    const invoiceId = savedInvoiceId || initialData?.invoiceId;
+    const invoiceId = savedInvoiceId ?? initialData?.invoiceId ?? null;
+    const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments?invoice_id=${invoiceId ?? ''}`;
+    setInstallmentsModalUrl(url);
     if (!invoiceId) { message.warning('Invoice ID not available'); return; }
     setInstallmentsModalLoading(true);
+    console.log('[Installments] Fetching:', url);
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments?invoice_id=${invoiceId}`;
       const response = await fetch(url, { headers: { Accept: 'application/json' } });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
@@ -4258,6 +4261,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           <Space>
             <ScheduleOutlined style={{ color: '#722ed1' }} />
             <span>Installments</span>
+            <Tooltip
+              title={
+                <span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>
+                  {installmentsModalUrl}
+                </span>
+              }
+              placement="bottom"
+            >
+              <ApiOutlined style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 14 }} />
+            </Tooltip>
           </Space>
         }
         open={installmentsModalOpen}
