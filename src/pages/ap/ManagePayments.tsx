@@ -1518,9 +1518,6 @@ const ManagePayments: React.FC = () => {
                                 <Option value="REFUND">Refund</Option>
                               </Select>
                             </Form.Item>
-                            <Form.Item label="Description" name="paymentDescription">
-                              <Input.TextArea disabled={!selectedBuLegalEntityName} rows={3} style={{ resize: 'none' }} />
-                            </Form.Item>
                           </Col>
                           <Col span={12}>
                             <Form.Item
@@ -1599,17 +1596,31 @@ const ManagePayments: React.FC = () => {
                             <Form.Item label="Paper Document Number" name="paperDocumentNumber">
                               <Input disabled={!selectedBuLegalEntityName} style={{ background: '#f5f5f5' }} />
                             </Form.Item>
-                            <Form.Item label="Attachments">
-                              <Space size={4}>
-                                <Text style={{ color: '#666', fontSize: 13 }}>None</Text>
-                                <Button
-                                  size="small"
-                                  type="text"
-                                  icon={<PlusOutlined />}
-                                  disabled={!selectedBuLegalEntityName}
-                                  style={{ color: selectedBuLegalEntityName ? REDWOOD.info : '#ccc', padding: '0 4px', height: 22 }}
-                                />
-                              </Space>
+                          </Col>
+                        </Row>
+                        <Row>
+                          <Col span={24}>
+                            <Form.Item
+                              label="Description"
+                              labelCol={{ span: 4 }}
+                              wrapperCol={{ span: 20 }}
+                            >
+                              <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                                <Form.Item name="paymentDescription" noStyle>
+                                  <Input disabled={!selectedBuLegalEntityName} style={{ flex: 1 }} />
+                                </Form.Item>
+                                <span style={{ color: '#999', fontSize: 12, flexShrink: 0 }}>Attachments:</span>
+                                <Space size={4} style={{ flexShrink: 0 }}>
+                                  <Text style={{ color: '#666', fontSize: 13 }}>None</Text>
+                                  <Button
+                                    size="small"
+                                    type="text"
+                                    icon={<PlusOutlined />}
+                                    disabled={!selectedBuLegalEntityName}
+                                    style={{ color: selectedBuLegalEntityName ? REDWOOD.info : '#ccc', padding: '0 4px', height: 22 }}
+                                  />
+                                </Space>
+                              </div>
                             </Form.Item>
                           </Col>
                         </Row>
