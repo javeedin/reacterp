@@ -580,11 +580,12 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
         p_json_data IN CLOB,
         p_result OUT VARCHAR2
     ) IS
-        v_count    NUMBER := 0;
-        v_errors   NUMBER := 0;
-        v_result   VARCHAR2(4000);
-        v_check_ids VARCHAR2(4000) := '';
-        v_check_id_str VARCHAR2(50);
+        v_count         NUMBER := 0;
+        v_errors        NUMBER := 0;
+        v_result        VARCHAR2(4000);
+        v_check_ids     VARCHAR2(4000) := '';
+        v_check_id_str  VARCHAR2(50);
+        v_first_check_id VARCHAR2(50) := 'null';
     BEGIN
         -- Loop through JSON array
         FOR rec IN (
@@ -604,6 +605,10 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
                     IF v_check_id_str IS NOT NULL THEN
                         IF v_check_ids IS NOT NULL THEN v_check_ids := v_check_ids || ','; END IF;
                         v_check_ids := v_check_ids || v_check_id_str;
+                        -- Keep first checkId as top-level convenience field
+                        IF v_first_check_id = 'null' THEN
+                            v_first_check_id := v_check_id_str;
+                        END IF;
                     END IF;
                 ELSE
                     v_errors := v_errors + 1;
@@ -616,6 +621,7 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
 
         p_result := '{"status": "success", "saved": ' || v_count ||
                     ', "errors": ' || v_errors ||
+                    ', "checkId": '  || v_first_check_id ||
                     ', "checkIds": [' || v_check_ids || ']}';
 
     EXCEPTION
@@ -628,11 +634,12 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
         p_json_data IN CLOB,
         p_result OUT VARCHAR2
     ) IS
-        v_count    NUMBER := 0;
-        v_errors   NUMBER := 0;
-        v_result   VARCHAR2(4000);
-        v_check_ids VARCHAR2(4000) := '';
-        v_check_id_str VARCHAR2(50);
+        v_count          NUMBER := 0;
+        v_errors         NUMBER := 0;
+        v_result         VARCHAR2(4000);
+        v_check_ids      VARCHAR2(4000) := '';
+        v_check_id_str   VARCHAR2(50);
+        v_first_check_id VARCHAR2(50) := 'null';
     BEGIN
         -- Loop through items array
         FOR rec IN (
@@ -652,6 +659,10 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
                     IF v_check_id_str IS NOT NULL THEN
                         IF v_check_ids IS NOT NULL THEN v_check_ids := v_check_ids || ','; END IF;
                         v_check_ids := v_check_ids || v_check_id_str;
+                        -- Keep first checkId as top-level convenience field
+                        IF v_first_check_id = 'null' THEN
+                            v_first_check_id := v_check_id_str;
+                        END IF;
                     END IF;
                 ELSE
                     v_errors := v_errors + 1;
@@ -664,6 +675,7 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
 
         p_result := '{"status": "success", "saved": ' || v_count ||
                     ', "errors": ' || v_errors ||
+                    ', "checkId": '  || v_first_check_id ||
                     ', "checkIds": [' || v_check_ids || ']}';
 
     EXCEPTION
