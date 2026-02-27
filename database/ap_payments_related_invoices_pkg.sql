@@ -81,9 +81,16 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENT_REL_INVOICES_PKG AS
         v_temp_str VARCHAR2(100);
 
     BEGIN
-        -- Extract values from JSON
+        -- Step 1: Read InvoicePaymentId (Fusion sync provides it; local payments send null)
+        v_invoice_payment_id := JSON_VALUE(p_json_data, '$.InvoicePaymentId' RETURNING NUMBER);
+
+        -- Step 2: No InvoicePaymentId → auto-assign via sequence (negative = local, never collides with Fusion)
+        IF v_invoice_payment_id IS NULL THEN
+            SELECT -RR_AP_PAY_REL_INV_SEQ.NEXTVAL INTO v_invoice_payment_id FROM DUAL;
+        END IF;
+
+        -- Step 3: Extract remaining fields (InvoicePaymentId already resolved above)
         SELECT
-            JSON_VALUE(p_json_data, '$.InvoicePaymentId' RETURNING NUMBER),
             JSON_VALUE(p_json_data, '$.CheckId' RETURNING NUMBER),
             JSON_VALUE(p_json_data, '$.InvoiceId' RETURNING NUMBER),
             JSON_VALUE(p_json_data, '$.InvoiceBusinessUnit'),
@@ -104,7 +111,6 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENT_REL_INVOICES_PKG AS
             JSON_VALUE(p_json_data, '$.LastUpdatedBy'),
             JSON_VALUE(p_json_data, '$.LastUpdateLogin')
         INTO
-            v_invoice_payment_id,
             v_check_id,
             v_invoice_id,
             v_invoice_business_unit,

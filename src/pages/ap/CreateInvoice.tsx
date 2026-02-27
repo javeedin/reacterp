@@ -4907,19 +4907,32 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             {
               step: pendingInst.length > 0 ? 3 : 2,
               method: 'POST',
-              color: '#fa8c16',
-              url: `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/payments`,
-              desc: '⚠️ Endpoint NEEDS TO BE CREATED on backend (currently GET only). Inserts into RR_AP_INVOICE_PAYMENTS_ALL to link the payment to the invoice — this makes it appear in the Payments tab. Replace <checkId> with the actual value returned in the Step 1 response.',
+              color: '#52c41a',
+              url: `${APEX_DB_CONFIG.baseUrl}/ap/payments/related-invoices`,
+              desc: '✅ Endpoint EXISTS — POST to /ap/payments/related-invoices. Pass InvoicePaymentId: null — backend auto-assigns -RR_AP_PAY_REL_INV_SEQ.NEXTVAL. Replace <checkId from Step 1> with the actual value from the Step 1 response.',
               body: {
-                InvoiceId:           invoiceId,
-                CheckId:             '<checkId from Step 1 response — e.g. -1>',
-                PaperDocumentNumber: fv.paperDocumentNumber || null,
-                PaymentDate:         payDate,
-                Amount:              balance,
-                CurrencyCode:        currency,
-                PaymentStatus:       'Negotiable',
-                BankAccount:         fv.disbursementBankAccount || '',
-                Description:         fv.description || '',
+                // null → backend auto-assigns negative local ID via RR_AP_PAY_REL_INV_SEQ
+                InvoicePaymentId:            null,
+                CheckId:                     '<checkId from Step 1 response>',
+                InvoiceId:                   invoiceId,
+                InvoiceBusinessUnit:         buName || null,
+                InvoiceNumber:               form.getFieldValue('invoiceNumber') || null,
+                InstallmentNumber:           null,
+                // All amount fields map to the payment balance
+                AmountPaidPaymentCurrency:   balance,
+                AmountPaidInvoiceCurrency:   balance,
+                InvoicePaymentAmount:        balance,
+                InvoiceAmount:               balance,
+                InvoiceBaseAmount:           balance,
+                PaymentBaseAmount:           balance,
+                DiscountLost:                null,
+                DiscountTaken:               null,
+                InvoiceCurrency:             currency,
+                CrossCurrencyRate:           headerValues.conversionRate || null,
+                InvoicePaymentStatus:        'Negotiable',
+                CreatedBy:                   null,
+                LastUpdatedBy:               null,
+                LastUpdateLogin:             null,
               },
             },
           ];
@@ -4930,7 +4943,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 type="info"
                 showIcon
                 message="3-step payment creation flow"
-                description="Step 1: POST /ap/payments — pass CheckId:null, backend assigns -RR_AP_PAYMENTS_SEQ.NEXTVAL. Copy the checkId from Step 1's response into Step 3. Steps 2 & 3 endpoints still need to be created on the backend."
+                description="Step 1: POST /ap/payments — pass CheckId:null, backend assigns -RR_AP_PAYMENTS_SEQ.NEXTVAL. Copy the checkId from Step 1's response into the last step. Step 1 and the related-invoices step use existing endpoints. Only the installments PUT (if applicable) still needs a backend endpoint."
                 style={{ fontSize: 12 }}
               />
               {apis.map(api => (
