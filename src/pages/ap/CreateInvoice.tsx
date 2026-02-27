@@ -4768,19 +4768,22 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               step: 1,
               method: 'POST',
               color: '#52c41a',
-              url: `${APEX_DB_CONFIG.baseUrl}/ap/createpayment`,
-              desc: 'Create the payment record. Returns the new payment_id used in step 3.',
+              url: `${APEX_DB_CONFIG.baseUrl}/ap/payments`,
+              desc: '✅ Endpoint EXISTS. Inserts into RR_AP_PAYMENTS_ALL via save_payment(). Keys must be PascalCase. Returns { "status":"success", "checkId":<value> } — use that checkId in Step 3.',
               body: {
-                P_INVOICE_ID:            invoiceId,
-                P_BUSINESS_UNIT:         buName,
-                P_PAYMENT_DATE:          fv.paymentDate ? fv.paymentDate.format('YYYY-MM-DD') : '',
-                P_PAYMENT_METHOD:        fv.paymentMethod || '',
-                P_BANK_ACCOUNT:          fv.disbursementBankAccount || '',
-                P_PAYMENT_DOCUMENT:      fv.paymentDocument || '',
-                P_PAPER_DOCUMENT_NUMBER: fv.paperDocumentNumber || '',
-                P_AMOUNT:                balance,
-                P_CURRENCY_CODE:         currency,
-                P_DESCRIPTION:           fv.description || '',
+                '// CheckId':                 'leave null — APEX/DB will assign a new ID',
+                CheckId:                      null,
+                PaymentDate:                  fv.paymentDate ? fv.paymentDate.format('YYYY-MM-DD') : '',
+                PaymentAmount:                balance,
+                PaymentCurrency:              currency,
+                PaymentStatus:                'Negotiable',
+                PaymentMethod:                fv.paymentMethod || '',
+                PaymentDocument:              fv.paymentDocument || '',
+                PaperDocumentNumber:          fv.paperDocumentNumber || null,
+                PaymentDescription:           fv.description || '',
+                BusinessUnit:                 buName,
+                DisbursementBankAccountName:  fv.disbursementBankAccount || '',
+                '// InvoiceId note':          'NOT in this table — linked in Step 3',
               },
             },
             ...(pendingInst.length > 0 ? [{
@@ -4788,35 +4791,38 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               method: 'PUT',
               color: '#fa8c16',
               url: `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments`,
-              desc: `Update each pending installment (${pendingInst.length} call${pendingInst.length > 1 ? 's' : ''}). Repeat for every row in the Pending Installments table.`,
+              desc: `⚠️ Endpoint NEEDS TO BE CREATED on backend. Update each pending installment (${pendingInst.length} call${pendingInst.length > 1 ? 's' : ''}). Call once per row below.`,
               body: {
-                P_INVOICE_ID:      invoiceId,
-                P_INSTALLMENT_ID:  pendingInst[0]?.key ?? '<INSTALLMENT_ID>',
-                P_PAYMENT_STATUS:  'Fully Paid',
-                P_AMOUNT_REMAINING: 0,
-                '// repeat for': pendingInst.slice(1).map(i => ({
-                  P_INSTALLMENT_ID: i.key,
-                  P_DUE_DATE: i.dueDate,
-                  P_UNPAID_WAS: i.unpaidAmount,
-                })),
+                '// call once per pending installment': '',
+                InvoiceId:       invoiceId,
+                InstallmentId:   pendingInst[0]?.key ?? '<INSTALLMENT_ID>',
+                PaymentStatus:   'Fully Paid',
+                AmountRemaining: 0,
+                ...(pendingInst.length > 1 ? {
+                  '// also call for': pendingInst.slice(1).map(i => ({
+                    InstallmentId:   i.key,
+                    DueDate:         i.dueDate,
+                    UnpaidWas:       i.unpaidAmount,
+                  })),
+                } : {}),
               },
             }] : []),
             {
               step: pendingInst.length > 0 ? 3 : 2,
               method: 'POST',
-              color: '#52c41a',
+              color: '#fa8c16',
               url: `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/payments`,
-              desc: 'Insert a row into the related payments table (shown in the Payments tab).',
+              desc: '⚠️ Endpoint NEEDS TO BE CREATED on backend (currently GET only). Inserts into RR_AP_INVOICE_PAYMENTS_ALL to link the payment to the invoice — this makes it appear in the Payments tab.',
               body: {
-                P_INVOICE_ID:            invoiceId,
-                P_CHECK_ID:              '<payment_id from step 1 response>',
-                P_PAPER_DOCUMENT_NUMBER: fv.paperDocumentNumber || '',
-                P_PAYMENT_DATE:          fv.paymentDate ? fv.paymentDate.format('YYYY-MM-DD') : '',
-                P_AMOUNT:                balance,
-                P_CURRENCY_CODE:         currency,
-                P_PAYMENT_STATUS:        'Negotiable',
-                P_BANK_ACCOUNT:          fv.disbursementBankAccount || '',
-                P_DESCRIPTION:           fv.description || '',
+                InvoiceId:           invoiceId,
+                CheckId:             '<checkId from Step 1 response>',
+                PaperDocumentNumber: fv.paperDocumentNumber || null,
+                PaymentDate:         fv.paymentDate ? fv.paymentDate.format('YYYY-MM-DD') : '',
+                Amount:              balance,
+                CurrencyCode:        currency,
+                PaymentStatus:       'Negotiable',
+                BankAccount:         fv.disbursementBankAccount || '',
+                Description:         fv.description || '',
               },
             },
           ];
@@ -4827,7 +4833,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 type="info"
                 showIcon
                 message="3-step payment creation flow"
-                description="Complete all three steps in order. Step 2 must run once per pending installment."
+                description="Step 1 endpoint exists (POST /ap/payments). Steps 2 & 3 endpoints need to be created on the backend. Test Step 1 in Postman first."
                 style={{ fontSize: 12 }}
               />
               {apis.map(api => (
