@@ -90,12 +90,12 @@ CREATE OR REPLACE PACKAGE BODY XXAP_INVOICE_INSTALLMENTS_PKG AS
         -- Check if installment already exists
         BEGIN
             SELECT INSTALLMENT_ID INTO l_existing_inst_id
-            FROM RR_AR_INVOICE_INSTALLMENTS
+            FROM RR_AP_INVOICE_INSTALLMENTS
             WHERE INVOICE_ID = p_invoice_id
               AND INSTALLMENT_NUMBER = l_installment_number;
 
             -- Update existing installment
-            UPDATE RR_AR_INVOICE_INSTALLMENTS SET
+            UPDATE RR_AP_INVOICE_INSTALLMENTS SET
                 DUE_DATE                    = TO_DATE(JSON_VALUE(p_inst_json, '$.DueDate'), 'YYYY-MM-DD'),
                 GROSS_AMOUNT                = JSON_VALUE(p_inst_json, '$.GrossAmount' RETURNING NUMBER),
                 UNPAID_AMOUNT               = JSON_VALUE(p_inst_json, '$.UnpaidAmount' RETURNING NUMBER),
@@ -139,7 +139,7 @@ CREATE OR REPLACE PACKAGE BODY XXAP_INVOICE_INSTALLMENTS_PKG AS
         EXCEPTION
             WHEN NO_DATA_FOUND THEN
                 -- Insert new installment
-                INSERT INTO RR_AR_INVOICE_INSTALLMENTS (
+                INSERT INTO RR_AP_INVOICE_INSTALLMENTS (
                     INVOICE_ID,
                     INSTALLMENT_NUMBER,
                     DUE_DATE,

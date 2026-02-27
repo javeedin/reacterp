@@ -42,6 +42,9 @@ export interface APSyncProgress {
   // Distributions (child data)
   totalDistributions: number;
   processedDistributions: number;
+  // Installments (child data)
+  totalInstallments: number;
+  processedInstallments: number;
   // Pagination
   currentPage: number;
   totalPages: number;
@@ -63,12 +66,14 @@ export type InvoicePayloadCallback = (
   payload: any,
   result?: any,
   error?: string,
-  linesInfo?: { fetched: number; inserted: number; linesError?: string }
+  linesInfo?: { fetched: number; inserted: number; linesError?: string },
+  installmentsInfo?: { fetched: number; inserted: number; installmentsError?: string }
 ) => void;
 
 // APEX endpoint for creating invoices
 const APEX_CREATE_INVOICE_ENDPOINT = 'ap/createinvoice';
 const APEX_CREATE_INVOICE_LINES_ENDPOINT = 'ap/createinvoiceslines';
+const APEX_CREATE_INVOICE_INSTALLMENTS_ENDPOINT = 'ap/invoices/installments';
 
 // Invoice Lines type
 export interface APInvoiceLine {
@@ -80,6 +85,47 @@ export interface APInvoiceLine {
   Description: string;
   AccountingDate: string;
   DistributionCombination: string;
+  [key: string]: any;
+}
+
+// Invoice Installments type
+export interface APInvoiceInstallment {
+  InvoiceId: number;
+  InvoiceNumber?: string;
+  InstallmentNumber: number;
+  UnpaidAmount: number | null;
+  FirstDiscountAmount: number | null;
+  FirstDiscountDate: string | null;
+  DueDate: string;
+  GrossAmount: number;
+  HoldReason: string | null;
+  PaymentPriority: number;
+  SecondDiscountAmount: number | null;
+  SecondDiscountDate: string | null;
+  ThirdDiscountAmount: number | null;
+  ThirdDiscountDate: string | null;
+  NetAmountOne: number | null;
+  NetAmountTwo: number | null;
+  NetAmountThree: number | null;
+  HoldFlag: boolean;
+  HeldBy: string | null;
+  HoldType: string | null;
+  PaymentMethod: string | null;
+  PaymentMethodCode: string | null;
+  HoldDate: string | null;
+  BankAccount: string | null;
+  ExternalBankAccountId: number | null;
+  CreatedBy: string;
+  CreationDate: string;
+  LastUpdateDate: string;
+  LastUpdatedBy: string;
+  LastUpdateLogin: string | null;
+  RemitToAddressName: string | null;
+  RemitToSupplier: string | null;
+  RemittanceMessageOne: string | null;
+  RemittanceMessageTwo: string | null;
+  RemittanceMessageThree: string | null;
+  DigitalPaymentAccount: string | null;
   [key: string]: any;
 }
 
@@ -198,6 +244,123 @@ const insertInvoiceLinesToApex = async (
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
     log?.('error', `POST Lines Error: ${errorMsg}`);
+    return { success: false, error: errorMsg, successCount: 0 };
+  }
+};
+
+// Fetch invoice installments from Oracle Fusion via proxy
+const fetchInvoiceInstallmentsFromOracle = async (
+  invoiceId: number,
+  log?: LogCallback,
+  verbose = true
+): Promise<{ success: boolean; items: APInvoiceInstallment[]; error?: string }> => {
+  try {
+    const oracleUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/invoices/${invoiceId}/child/invoiceInstallments`;
+    const proxyUrl = `${PROXY_CONFIG.baseUrl}/oracle-url?url=${encodeURIComponent(oracleUrl)}`;
+
+    if (verbose) {
+      log?.('info', `Fetching installments for Invoice ${invoiceId}...`);
+      log?.('info', `Oracle URL: ${oracleUrl}`);
+      log?.('info', `Proxy URL: ${proxyUrl}`);
+    }
+
+    const response = await fetch(proxyUrl);
+    const data = await response.json();
+
+    if (verbose) {
+      log?.('step', `──── [GET] Invoice Installments Response for Invoice ${invoiceId} ────`);
+      log?.('info', `HTTP Status: ${response.status}`);
+      log?.('info', `GET Response: ${JSON.stringify(data, null, 2)}`);
+    }
+
+    if (!data.success && !data.items) {
+      throw new Error(data.error || 'Fetch installments failed');
+    }
+
+    const items = data.items || data || [];
+
+    if (verbose) {
+      log?.('success', `Fetched ${items.length} installments for Invoice ${invoiceId}`);
+      items.forEach((inst: any, idx: number) => {
+        log?.('info', `  Installment ${idx + 1}: #${inst.InstallmentNumber}, DueDate=${inst.DueDate}, GrossAmount=${inst.GrossAmount}, UnpaidAmount=${inst.UnpaidAmount}`);
+      });
+    }
+
+    return {
+      success: true,
+      items: Array.isArray(items) ? items : [],
+    };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    log?.('error', `Fetch Installments Error: ${errorMsg}`);
+    return { success: false, items: [], error: errorMsg };
+  }
+};
+
+// Insert invoice installments to APEX via proxy
+const insertInvoiceInstallmentsToApex = async (
+  invoiceId: number,
+  invoiceNumber: string,
+  installments: APInvoiceInstallment[],
+  log?: LogCallback,
+  verbose = true
+): Promise<{ success: boolean; error?: string; response?: any; successCount: number }> => {
+  try {
+    if (installments.length === 0) {
+      return { success: true, successCount: 0 };
+    }
+
+    const url = `${PROXY_CONFIG.baseUrl}/apex/${APEX_CREATE_INVOICE_INSTALLMENTS_ENDPOINT}`;
+    const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_CREATE_INVOICE_INSTALLMENTS_ENDPOINT}`;
+
+    // Add InvoiceId and InvoiceNumber to each installment, remove links
+    const installmentsWithInvoiceInfo = installments.map(inst => {
+      const { links, ...instWithoutLinks } = inst as any;
+      return {
+        InvoiceId: invoiceId,
+        InvoiceNumber: invoiceNumber,
+        ...instWithoutLinks,
+      };
+    });
+
+    const payload = {
+      items: installmentsWithInvoiceInfo
+    };
+
+    if (verbose) {
+      log?.('step', `──── [POST] APEX - Invoice Installments for ${invoiceNumber} (${installments.length} installments) ────`);
+      log?.('info', `APEX URL: ${apexUrl}`);
+      log?.('info', `Proxy URL: ${url}`);
+      log?.('info', `Installments count: ${installments.length}`);
+      log?.('step', `──── POST PAYLOAD ────`);
+      log?.('info', JSON.stringify(payload, null, 2));
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+
+    if (verbose) {
+      log?.('step', `──── POST RESPONSE ────`);
+      log?.('info', `HTTP Status: ${response.status}`);
+      log?.('success', `Response: ${JSON.stringify(data, null, 2)}`);
+    }
+
+    const isSuccess = data.status === 'SUCCESS' && (data.successCount > 0 || data.success === true);
+
+    return {
+      success: isSuccess,
+      error: isSuccess ? undefined : (data.message || data.error || 'No installments inserted'),
+      response: data,
+      successCount: data.successCount || 0,
+    };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    log?.('error', `POST Installments Error: ${errorMsg}`);
     return { success: false, error: errorMsg, successCount: 0 };
   }
 };
@@ -324,6 +487,8 @@ export const syncAPInvoices = async (
     processedLines: 0,
     totalDistributions: 0,
     processedDistributions: 0,
+    totalInstallments: 0,
+    processedInstallments: 0,
     currentPage: 0,
     totalPages: 0,
     errors: 0,
@@ -370,14 +535,17 @@ export const syncAPInvoices = async (
     log?.('info', '  │ FUSION GET (Source):');
     log?.('info', `  │   Invoices:       ${ORACLE_FUSION_CONFIG.baseUrl}/invoices`);
     log?.('info', `  │   Invoice Lines:  ${ORACLE_FUSION_CONFIG.baseUrl}/invoices/{invoiceId}/child/invoiceLines`);
+    log?.('info', `  │   Installments:   ${ORACLE_FUSION_CONFIG.baseUrl}/invoices/{invoiceId}/child/invoiceInstallments`);
     log?.('info', '  │');
     log?.('info', '  │ APEX POST (Target):');
     log?.('info', `  │   Invoices:       ${APEX_DB_CONFIG.baseUrl}/${APEX_CREATE_INVOICE_ENDPOINT}`);
     log?.('info', `  │   Invoice Lines:  ${APEX_DB_CONFIG.baseUrl}/${APEX_CREATE_INVOICE_LINES_ENDPOINT}`);
+    log?.('info', `  │   Installments:   ${APEX_DB_CONFIG.baseUrl}/${APEX_CREATE_INVOICE_INSTALLMENTS_ENDPOINT}`);
     log?.('info', '  │');
     log?.('info', '  │ PROXY URLs:');
     log?.('info', `  │   Invoices:       ${PROXY_CONFIG.baseUrl}/apex/${APEX_CREATE_INVOICE_ENDPOINT}`);
     log?.('info', `  │   Invoice Lines:  ${PROXY_CONFIG.baseUrl}/apex/${APEX_CREATE_INVOICE_LINES_ENDPOINT}`);
+    log?.('info', `  │   Installments:   ${PROXY_CONFIG.baseUrl}/apex/${APEX_CREATE_INVOICE_INSTALLMENTS_ENDPOINT}`);
     log?.('info', '  └─────────────────────────────────────────────────────────');
     log?.('step', '═══════════════════════════════════════════════════════════');
 
@@ -597,8 +765,55 @@ export const syncAPInvoices = async (
           log?.('error', `✗ Failed to fetch lines for ${invoiceNum}: ${linesResult.error}`);
         }
 
-        // Update payload callback with success result AND lines info
-        onInvoicePayload?.(invoice.InvoiceId, invoiceNum, invoice, insertResult.response, undefined, linesInfo);
+        // ========================================
+        // STEP 2c: Fetch and POST Invoice Installments
+        // ========================================
+        const installmentsResult = await fetchInvoiceInstallmentsFromOracle(invoice.InvoiceId, log, verbose);
+
+        let installmentsInfo = { fetched: 0, inserted: 0, installmentsError: undefined as string | undefined };
+
+        if (installmentsResult.success && installmentsResult.items.length > 0) {
+          installmentsInfo.fetched = installmentsResult.items.length;
+
+          updateProgress({
+            totalInstallments: progress.totalInstallments + installmentsResult.items.length,
+          });
+
+          const installmentsInsertResult = await insertInvoiceInstallmentsToApex(
+            invoice.InvoiceId,
+            invoiceNum,
+            installmentsResult.items,
+            log,
+            verbose
+          );
+
+          if (installmentsInsertResult.success) {
+            installmentsInfo.inserted = installmentsInsertResult.successCount;
+            updateProgress({
+              processedInstallments: progress.processedInstallments + installmentsInsertResult.successCount,
+            });
+            if (verbose) {
+              log?.('success', `✓ ${installmentsInsertResult.successCount} installments inserted for ${invoiceNum}`);
+            }
+          } else {
+            installmentsInfo.installmentsError = installmentsInsertResult.error || 'Installments insert failed';
+            updateProgress({
+              errors: progress.errors + 1,
+              lastError: installmentsInsertResult.error || 'Installments insert failed',
+            });
+            log?.('error', `✗ Installments failed for ${invoiceNum}: ${installmentsInsertResult.error}`);
+          }
+        } else if (installmentsResult.success && installmentsResult.items.length === 0) {
+          if (verbose) {
+            log?.('info', `No installments found for ${invoiceNum}`);
+          }
+        } else if (!installmentsResult.success) {
+          installmentsInfo.installmentsError = installmentsResult.error || 'Failed to fetch installments';
+          log?.('error', `✗ Failed to fetch installments for ${invoiceNum}: ${installmentsResult.error}`);
+        }
+
+        // Update payload callback with success result, lines info, and installments info
+        onInvoicePayload?.(invoice.InvoiceId, invoiceNum, invoice, insertResult.response, undefined, linesInfo, installmentsInfo);
 
       } else {
         updateProgress({
@@ -629,7 +844,7 @@ export const syncAPInvoices = async (
     });
 
     // Always show brief completion summary
-    log?.('success', `✓ Sync completed: ${progress.insertedInvoices} invoices, ${progress.processedLines} lines inserted`);
+    log?.('success', `✓ Sync completed: ${progress.insertedInvoices} invoices, ${progress.processedLines} lines, ${progress.processedInstallments} installments inserted`);
     if (progress.errors > 0) {
       log?.('warning', `⚠ ${progress.errors} errors occurred`);
     }
@@ -640,7 +855,7 @@ export const syncAPInvoices = async (
       log?.('step', '═══════════════════════════════════════════════════════════');
       log?.('success', `Total Invoices Processed: ${progress.processedInvoices}`);
       log?.('success', `Total Invoices Inserted: ${progress.insertedInvoices}`);
-      log?.('success', `Headers: ${progress.processedHeaders}, Lines: ${progress.processedLines}, Distributions: ${progress.processedDistributions}`);
+      log?.('success', `Headers: ${progress.processedHeaders}, Lines: ${progress.processedLines}, Distributions: ${progress.processedDistributions}, Installments: ${progress.processedInstallments}`);
       log?.('info', `Errors: ${progress.errors}`);
     }
 
