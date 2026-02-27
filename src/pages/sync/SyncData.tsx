@@ -3019,7 +3019,7 @@ const SyncData: React.FC = () => {
                 </Row>
               ) : isAPInvoices ? (
                 /* AP Invoices KPI Cards */
-                {/* Row 1: Invoices · Headers · Lines */}
+                <>
                 <Row gutter={16} style={{ marginBottom: 16 }}>
                   {/* Invoices Card */}
                   <Col xs={24} sm={8}>
@@ -3187,6 +3187,7 @@ const SyncData: React.FC = () => {
                     </Card>
                   </Col>
                 </Row>
+                </>
               ) : isGLBatchesOnly ? (
                 /* GL Batches Only KPI Cards */
                 <Row gutter={16} style={{ marginBottom: 16 }}>
