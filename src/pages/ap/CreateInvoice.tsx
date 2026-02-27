@@ -4745,6 +4745,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         {(() => {
           const invoiceId   = savedInvoiceId ?? initialData?.invoiceId ?? '<INVOICE_ID>';
           const fv          = payInFullForm.getFieldsValue();
+          const buName      = form.getFieldValue('businessUnit') || headerValues.businessUnit || '';
           const pendingInst = invoiceInstallments.filter(i => i.unpaidAmount > 0);
           const currency    = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
           const balance     = computedTotal - invoicePayments
@@ -4771,7 +4772,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               desc: 'Create the payment record. Returns the new payment_id used in step 3.',
               body: {
                 P_INVOICE_ID:            invoiceId,
-                P_BUSINESS_UNIT:         fv.businessUnit  || '',
+                P_BUSINESS_UNIT:         buName,
                 P_PAYMENT_DATE:          fv.paymentDate ? fv.paymentDate.format('YYYY-MM-DD') : '',
                 P_PAYMENT_METHOD:        fv.paymentMethod || '',
                 P_BANK_ACCOUNT:          fv.disbursementBankAccount || '',
