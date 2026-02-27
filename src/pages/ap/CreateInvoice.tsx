@@ -471,37 +471,21 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
       const data = await response.json();
       console.log('[Payments Tab] Raw response:', data);
-      if (data.items?.[0]) console.log('[Payments Tab] First item keys:', Object.keys(data.items[0]));
       const items = data.items || (Array.isArray(data) ? data : []);
-      // helper: try multiple field name variants (lowercase, UPPERCASE)
-      const pick = (item: any, ...keys: string[]): any => {
-        for (const k of keys) {
-          if (item[k] !== undefined && item[k] !== null) return item[k];
-          const u = k.toUpperCase();
-          if (item[u] !== undefined && item[u] !== null) return item[u];
-        }
-        return undefined;
-      };
-      // Oracle AP payment_status_flag: N=Negotiable, V=Voided, C=Cleared, S=Set Up
-      const mapStatus = (s: string) => ({ V: 'Voided', N: 'Negotiable', C: 'Cleared', S: 'Set Up' }[s] ?? s);
       setInvoicePayments(
-        items.map((item: any, index: number) => {
-          const rawStatus = pick(item, 'payment_status_flag', 'payment_status', 'status', 'status_lookup_code') ?? '';
-          const reconciledRaw = pick(item, 'reconciliation_flag', 'reconciled_flag', 'cleared_flag', 'reconcile_flag') ?? '';
-          return {
-            key: (pick(item, 'payment_id', 'check_id') ?? index).toString(),
-            number:           pick(item, 'check_number', 'payment_number', 'payment_num') ?? '',
-            paymentDocument:  pick(item, 'payment_document_name', 'doc_sequence_value', 'document_name', 'bank_account_name') ?? '',
-            status:           mapStatus(rawStatus),
-            reconciled:       reconciledRaw === 'Y' ? 'Yes' : reconciledRaw === 'N' ? 'No' : reconciledRaw,
-            currentPayeeName: pick(item, 'payee_name', 'vendor_name', 'supplier_name', 'party_name') ?? '',
-            paymentDate:      formatDateStr(pick(item, 'check_date', 'payment_date') ?? ''),
-            paidAmount:       Number(pick(item, 'amount', 'payment_amount', 'check_amount') ?? 0),
-            currency:         pick(item, 'currency_code', 'payment_currency_code', 'invoice_currency_code') ?? '',
-            address:          pick(item, 'address_line1', 'address', 'payee_address', 'vendor_address') ?? '',
-            remitToAccount:   pick(item, 'remit_to_supplier_name', 'remit_account', 'remittance_account', 'bank_account_name', 'remit_to_bank') ?? '',
-          };
-        })
+        items.map((item: any, index: number) => ({
+          key:              (item.id ?? index).toString(),
+          number:           (item.id ?? '').toString(),
+          paymentDocument:  item.invoice_number ?? '',
+          status:           item.invoice_payment_status ?? '',
+          reconciled:       '',                          // not returned by API
+          currentPayeeName: item.invoice_business_unit ?? '',
+          paymentDate:      formatDateStr(item.creation_date ?? ''),
+          paidAmount:       Number(item.amount_paid_payment_currency ?? 0),
+          currency:         item.invoice_currency ?? '',
+          address:          '',                          // not returned by API
+          remitToAccount:   '',                          // not returned by API
+        }))
       );
     } catch (error) {
       console.error('[Payments Tab] Error:', error);
@@ -2909,18 +2893,26 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   <Table
                     dataSource={invoicePayments}
                     columns={[
-                      { title: 'Number',            dataIndex: 'number',           key: 'number',           width: 100 },
-                      { title: 'Payment Document',  dataIndex: 'paymentDocument',  key: 'paymentDocument',  width: 150, ellipsis: true },
-                      { title: 'Status',            dataIndex: 'status',           key: 'status',           width: 110,
-                        render: (s: string) => <Tag color={s === 'Cleared' ? 'green' : s === 'Voided' ? 'red' : s === 'Negotiable' ? 'blue' : 'default'}>{s}</Tag> },
-                      { title: 'Reconciled',        dataIndex: 'reconciled',       key: 'reconciled',       width: 100, align: 'center' as const,
-                        render: (v: string) => v === 'Yes' ? <Tag color="green">Yes</Tag> : v === 'No' ? <Tag color="default">No</Tag> : v },
-                      { title: 'Current Payee Name', dataIndex: 'currentPayeeName', key: 'currentPayeeName', width: 180, ellipsis: true },
-                      { title: 'Payment Date',      dataIndex: 'paymentDate',      key: 'paymentDate',      width: 110 },
-                      { title: 'Paid Amount',       dataIndex: 'paidAmount',       key: 'paidAmount',       width: 150, align: 'right' as const,
-                        render: (amt: number, row: any) => <Text strong style={{ color: REDWOOD.success }}>{formatAmount(amt)}{row.currency ? ` ${row.currency}` : ''}</Text> },
-                      { title: 'Address',           dataIndex: 'address',          key: 'address',          ellipsis: true },
-                      { title: 'Remit-to Account',  dataIndex: 'remitToAccount',   key: 'remitToAccount',   width: 160, ellipsis: true },
+                      { title: 'Number',             dataIndex: 'number',           key: 'number',           width: 80 },
+                      { title: 'Payment Document',   dataIndex: 'paymentDocument',  key: 'paymentDocument',  width: 200, ellipsis: true },
+                      { title: 'Status',             dataIndex: 'status',           key: 'status',           width: 130,
+                        render: (s: string) => {
+                          const lower = s?.toLowerCase() ?? '';
+                          const color = lower.includes('fully') ? 'green' : lower.includes('partial') ? 'orange' : lower.includes('not') ? 'red' : lower.includes('void') ? 'red' : lower.includes('clear') ? 'green' : 'default';
+                          return <Tag color={color}>{s}</Tag>;
+                        }},
+                      { title: 'Reconciled',         dataIndex: 'reconciled',       key: 'reconciled',       width: 100, align: 'center' as const,
+                        render: (v: string) => v ? (v === 'Yes' ? <Tag color="green">Yes</Tag> : <Tag>No</Tag>) : '—' },
+                      { title: 'Current Payee Name', dataIndex: 'currentPayeeName', key: 'currentPayeeName', width: 220, ellipsis: true },
+                      { title: 'Payment Date',       dataIndex: 'paymentDate',      key: 'paymentDate',      width: 110 },
+                      { title: 'Paid Amount',        dataIndex: 'paidAmount',       key: 'paidAmount',       width: 160, align: 'right' as const,
+                        render: (amt: number, row: any) => (
+                          <Text strong style={{ color: REDWOOD.success }}>{formatAmount(amt)}{row.currency ? ` ${row.currency}` : ''}</Text>
+                        )},
+                      { title: 'Address',            dataIndex: 'address',          key: 'address',          ellipsis: true,
+                        render: (v: string) => v || '—' },
+                      { title: 'Remit-to Account',   dataIndex: 'remitToAccount',   key: 'remitToAccount',   width: 160, ellipsis: true,
+                        render: (v: string) => v || '—' },
                     ]}
                     rowKey="key"
                     size="small"
