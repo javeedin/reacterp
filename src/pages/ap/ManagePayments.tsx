@@ -1593,18 +1593,6 @@ const ManagePayments: React.FC = () => {
                                 <Option value="CASH">Cash</Option>
                               </Select>
                             </Form.Item>
-                            <Form.Item label="Payment Process Profile" name="paymentProcessProfile">
-                              <Select placeholder="Select Profile" allowClear disabled={!selectedBuLegalEntityName} />
-                            </Form.Item>
-                            <Form.Item label="Remit-to Account" name="remitToAccount">
-                              <Select placeholder="Select Remit-to Account" allowClear disabled={!selectedBuLegalEntityName} />
-                            </Form.Item>
-                            <Form.Item label="Remit-to Bank Name" name="remitToBankName">
-                              <Input readOnly style={{ background: '#f5f5f5', color: '#555' }} placeholder="—" />
-                            </Form.Item>
-                            <Form.Item label="Remit-to Branch Name" name="remitToBranchName">
-                              <Input readOnly style={{ background: '#f5f5f5', color: '#555' }} placeholder="—" />
-                            </Form.Item>
                             <Form.Item label="Payment Document" name="paymentDocument">
                               <Select placeholder="Select Payment Document" allowClear disabled={!selectedBuLegalEntityName} />
                             </Form.Item>
@@ -1633,6 +1621,7 @@ const ManagePayments: React.FC = () => {
                     label: 'Bank Details',
                     children: (
                       <div style={{ padding: '12px 0' }}>
+                        <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, color: '#666', marginTop: 0 }}>Disbursement Bank Account</Divider>
                         {selectedBankAccount ? (
                           <Row gutter={32}>
                             <Col span={12}>
@@ -1662,10 +1651,30 @@ const ManagePayments: React.FC = () => {
                             </Col>
                           </Row>
                         ) : (
-                          <div style={{ textAlign: 'center', padding: '40px 0', color: '#aaa' }}>
+                          <div style={{ padding: '8px 0 16px', color: '#aaa', fontSize: 12 }}>
                             Select a Disbursement Bank Account in Payment Details to view bank information here.
                           </div>
                         )}
+
+                        <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, color: '#666' }}>Remittance</Divider>
+                        <Row gutter={32}>
+                          <Col span={12}>
+                            <Form.Item label="Payment Process Profile" name="paymentProcessProfile">
+                              <Select placeholder="Select Profile" allowClear disabled={!selectedBuLegalEntityName} />
+                            </Form.Item>
+                            <Form.Item label="Remit-to Account" name="remitToAccount">
+                              <Select placeholder="Select Remit-to Account" allowClear disabled={!selectedBuLegalEntityName} />
+                            </Form.Item>
+                          </Col>
+                          <Col span={12}>
+                            <Form.Item label="Remit-to Bank Name" name="remitToBankName">
+                              <Input readOnly style={{ background: '#f5f5f5', color: '#555' }} placeholder="—" />
+                            </Form.Item>
+                            <Form.Item label="Remit-to Branch Name" name="remitToBranchName">
+                              <Input readOnly style={{ background: '#f5f5f5', color: '#555' }} placeholder="—" />
+                            </Form.Item>
+                          </Col>
+                        </Row>
                       </div>
                     ),
                   },
