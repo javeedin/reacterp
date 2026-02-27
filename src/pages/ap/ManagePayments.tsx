@@ -2307,6 +2307,26 @@ const ManagePayments: React.FC = () => {
                 width: 110,
               },
             ]}
+            summary={() => availableInvoices.length === 0 ? null : (
+              <Table.Summary.Row style={{ background: '#f0f2f5', fontWeight: 600 }}>
+                <Table.Summary.Cell index={0} colSpan={5} align="right">
+                  <span style={{ fontSize: 12, color: '#555' }}>Totals</span>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={1} align="right">
+                  <span style={{ fontSize: 12 }}>
+                    {availableInvoices.reduce((s, i) => s + (i.invoiceAmount || 0), 0)
+                      .toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  </span>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={2} align="right">
+                  <span style={{ fontSize: 12, color: '#cf1322', fontWeight: 600 }}>
+                    {availableInvoices.reduce((s, i) => s + (i.amountDue || 0), 0)
+                      .toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  </span>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={3} />
+              </Table.Summary.Row>
+            )}
           />
         </Modal>
 
