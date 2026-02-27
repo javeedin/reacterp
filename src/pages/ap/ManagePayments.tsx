@@ -1593,9 +1593,6 @@ const ManagePayments: React.FC = () => {
                             <Form.Item label="Payment Document" name="paymentDocument">
                               <Select placeholder="Select Payment Document" allowClear disabled={!selectedBuLegalEntityName} />
                             </Form.Item>
-                            <Form.Item label="Paper Document Number" name="paperDocumentNumber">
-                              <Input disabled={!selectedBuLegalEntityName} style={{ background: '#f5f5f5' }} />
-                            </Form.Item>
                           </Col>
                         </Row>
                         <Row>
@@ -1608,6 +1605,10 @@ const ManagePayments: React.FC = () => {
                               <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                                 <Form.Item name="paymentDescription" noStyle>
                                   <Input disabled={!selectedBuLegalEntityName} style={{ flex: 1 }} />
+                                </Form.Item>
+                                <span style={{ color: '#999', fontSize: 12, flexShrink: 0 }}>Paper Doc #</span>
+                                <Form.Item name="paperDocumentNumber" noStyle>
+                                  <Input disabled={!selectedBuLegalEntityName} style={{ width: 140, background: '#f5f5f5' }} />
                                 </Form.Item>
                                 <span style={{ color: '#999', fontSize: 12, flexShrink: 0 }}>Attachments:</span>
                                 <Space size={4} style={{ flexShrink: 0 }}>
