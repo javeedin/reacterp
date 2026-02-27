@@ -4779,7 +4779,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               method: 'POST',
               color: '#52c41a',
               url: `${APEX_DB_CONFIG.baseUrl}/ap/payments`,
-              desc: `✅ Endpoint EXISTS — POST flat JSON object (no items wrapper needed). Routes to save_payment() directly. ⚠️ BACKEND BUG: CHECK_ID is PK/NOT NULL — inserting null causes ORA-01400. Workaround: pass a large negative CheckId (e.g. ${localCheckId}) until backend adds sequence fallback. Returns { "status":"success", "checkId":<value> } — save checkId for Step 3.`,
+              desc: `✅ Endpoint EXISTS — POST flat JSON object (no items wrapper). Routes to save_payment() directly. ⚠️ BACKEND BUG: CHECK_ID is PK/NOT NULL — null causes ORA-01400. Workaround: we pre-generate CheckId = ${localCheckId} (large negative, no Fusion collision). Response: { "status":"success", "checkId": ${localCheckId} } — same value, already known, used as-is in Step 3.`,
               body: {
                 // Identification — CheckId MUST NOT be null (PK constraint). Backend fix: add NEXTVAL fallback.
                 CheckId:                         localCheckId,
@@ -4910,12 +4910,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               method: 'POST',
               color: '#fa8c16',
               url: `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/payments`,
-              desc: '⚠️ Endpoint NEEDS TO BE CREATED on backend (currently GET only). Inserts into RR_AP_INVOICE_PAYMENTS_ALL to link the payment to the invoice — this makes it appear in the Payments tab.',
+              desc: `⚠️ Endpoint NEEDS TO BE CREATED on backend (currently GET only). Inserts into RR_AP_INVOICE_PAYMENTS_ALL to link the payment to the invoice — this makes it appear in the Payments tab. CheckId = ${localCheckId} (same value sent in Step 1 — Step 1 response echoes it back as "checkId").`,
               body: {
                 InvoiceId:           invoiceId,
-                CheckId:             '<checkId from Step 1 response>',
+                CheckId:             localCheckId,
                 PaperDocumentNumber: fv.paperDocumentNumber || null,
-                PaymentDate:         fv.paymentDate ? fv.paymentDate.format('YYYY-MM-DD') : '',
+                PaymentDate:         payDate,
                 Amount:              balance,
                 CurrencyCode:        currency,
                 PaymentStatus:       'Negotiable',
