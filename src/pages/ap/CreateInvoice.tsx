@@ -4756,6 +4756,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           const selBankAcct    = payInFullBankAccounts.find(a => a.bankAccountName === fv.disbursementBankAccount);
           const legalEntityName = selBankAcct?.legalEntityName || '';
           const payDate        = fv.paymentDate ? fv.paymentDate.format('YYYY-MM-DD') : null;
+          // Local CHECK_ID workaround: CHECK_ID is NOT NULL/PK in RR_AP_PAYMENTS_ALL.
+          // Backend needs: IF v_check_id IS NULL THEN SELECT SEQ.NEXTVAL INTO v_check_id FROM DUAL; END IF;
+          // Until then, use a large negative number (won't collide with 18-digit Fusion IDs).
+          const localCheckId   = -(Date.now());
 
           const blockStyle: React.CSSProperties = {
             background: '#1e1e1e', color: '#d4d4d4',
@@ -4775,10 +4779,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               method: 'POST',
               color: '#52c41a',
               url: `${APEX_DB_CONFIG.baseUrl}/ap/payments`,
-              desc: '✅ Endpoint EXISTS. Inserts into RR_AP_PAYMENTS_ALL via save_payment(). All PascalCase keys. Returns { "status":"success", "checkId":<value> } — save checkId for Step 3.',
+              desc: `✅ Endpoint EXISTS — POST flat JSON object (no items wrapper needed). Routes to save_payment() directly. ⚠️ BACKEND BUG: CHECK_ID is PK/NOT NULL — inserting null causes ORA-01400. Workaround: pass a large negative CheckId (e.g. ${localCheckId}) until backend adds sequence fallback. Returns { "status":"success", "checkId":<value> } — save checkId for Step 3.`,
               body: {
-                // Identification
-                CheckId:                         null,
+                // Identification — CheckId MUST NOT be null (PK constraint). Backend fix: add NEXTVAL fallback.
+                CheckId:                         localCheckId,
                 PaymentId:                       null,
                 PaymentReference:                null,
                 PaperDocumentNumber:             fv.paperDocumentNumber ? Number(fv.paperDocumentNumber) : null,
@@ -4926,8 +4930,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               <Alert
                 type="info"
                 showIcon
-                message="3-step payment creation flow"
-                description="Step 1 endpoint exists (POST /ap/payments). Steps 2 & 3 endpoints need to be created on the backend. Test Step 1 in Postman first."
+                message="3-step payment creation flow — Step 1 has a backend bug (ORA-01400)"
+                description="POST /ap/payments exists and auto-routes: flat object → save_payment(), array → bulk, {items:[]} → from_items. No separate endpoint needed. Fix needed: save_payment() must assign NEXTVAL when CheckId is null. Steps 2 & 3 endpoints still need to be created."
                 style={{ fontSize: 12 }}
               />
               {apis.map(api => (
