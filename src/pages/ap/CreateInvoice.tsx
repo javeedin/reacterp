@@ -4756,12 +4756,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           const selBankAcct    = payInFullBankAccounts.find(a => a.bankAccountName === fv.disbursementBankAccount);
           const legalEntityName = selBankAcct?.legalEntityName || '';
           const payDate        = fv.paymentDate ? fv.paymentDate.format('YYYY-MM-DD') : null;
-          // Local CHECK_ID workaround: CHECK_ID is NOT NULL/PK in RR_AP_PAYMENTS_ALL.
-          // Backend needs: IF v_check_id IS NULL THEN SELECT SEQ.NEXTVAL INTO v_check_id FROM DUAL; END IF;
-          // Date.now() alone risks duplicate PK if two users save simultaneously (same ms).
-          // Fix: timestamp (ms) * 1000 + random(0-999) → 16-digit unique negative number.
-          // Collision probability: ~1 in 10 billion per concurrent pair.
-          const localCheckId   = -(Math.floor(Date.now() * 1000 + Math.random() * 1000));
+          // CheckId: null → backend assigns -RR_AP_PAYMENTS_SEQ.NEXTVAL (negative integer).
+          // Negative keeps local IDs separate from Fusion's positive 18-digit IDs.
+          // Step 1 response: { "status":"success", "checkId": -N } — pass that value to Step 3.
 
           const blockStyle: React.CSSProperties = {
             background: '#1e1e1e', color: '#d4d4d4',
@@ -4781,10 +4778,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               method: 'POST',
               color: '#52c41a',
               url: `${APEX_DB_CONFIG.baseUrl}/ap/payments`,
-              desc: `✅ Endpoint EXISTS — POST flat JSON object (no items wrapper). Routes to save_payment() directly. ⚠️ BACKEND BUG: CHECK_ID is PK/NOT NULL — null causes ORA-01400. Workaround: we pre-generate CheckId = ${localCheckId} (large negative, no Fusion collision). Response: { "status":"success", "checkId": ${localCheckId} } — same value, already known, used as-is in Step 3.`,
+              desc: '✅ Endpoint EXISTS — POST flat JSON object (no items wrapper). Routes to save_payment() directly. Pass CheckId: null — backend assigns -RR_AP_PAYMENTS_SEQ.NEXTVAL automatically. Response: { "status":"success", "checkId": -N } — copy that checkId value into Step 3.',
               body: {
-                // Identification — CheckId MUST NOT be null (PK constraint). Backend fix: add NEXTVAL fallback.
-                CheckId:                         localCheckId,
+                // Identification — null tells backend to auto-assign via -RR_AP_PAYMENTS_SEQ.NEXTVAL
+                CheckId:                         null,
                 PaymentId:                       null,
                 PaymentReference:                null,
                 PaperDocumentNumber:             fv.paperDocumentNumber ? Number(fv.paperDocumentNumber) : null,
@@ -4912,10 +4909,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               method: 'POST',
               color: '#fa8c16',
               url: `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/payments`,
-              desc: `⚠️ Endpoint NEEDS TO BE CREATED on backend (currently GET only). Inserts into RR_AP_INVOICE_PAYMENTS_ALL to link the payment to the invoice — this makes it appear in the Payments tab. CheckId = ${localCheckId} (same value sent in Step 1 — Step 1 response echoes it back as "checkId").`,
+              desc: '⚠️ Endpoint NEEDS TO BE CREATED on backend (currently GET only). Inserts into RR_AP_INVOICE_PAYMENTS_ALL to link the payment to the invoice — this makes it appear in the Payments tab. Replace <checkId> with the actual value returned in the Step 1 response.',
               body: {
                 InvoiceId:           invoiceId,
-                CheckId:             localCheckId,
+                CheckId:             '<checkId from Step 1 response — e.g. -1>',
                 PaperDocumentNumber: fv.paperDocumentNumber || null,
                 PaymentDate:         payDate,
                 Amount:              balance,
@@ -4932,8 +4929,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               <Alert
                 type="info"
                 showIcon
-                message="3-step payment creation flow — Step 1 has a backend bug (ORA-01400)"
-                description="POST /ap/payments exists and auto-routes: flat object → save_payment(), array → bulk, {items:[]} → from_items. No separate endpoint needed. Fix needed: save_payment() must assign NEXTVAL when CheckId is null. Steps 2 & 3 endpoints still need to be created."
+                message="3-step payment creation flow"
+                description="Step 1: POST /ap/payments — pass CheckId:null, backend assigns -RR_AP_PAYMENTS_SEQ.NEXTVAL. Copy the checkId from Step 1's response into Step 3. Steps 2 & 3 endpoints still need to be created on the backend."
                 style={{ fontSize: 12 }}
               />
               {apis.map(api => (

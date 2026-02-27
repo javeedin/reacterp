@@ -3,6 +3,25 @@
 -- Handles AP Payment data operations
 -- ============================================
 
+-- ============================================
+-- Sequence for locally-created payments
+-- Used when CheckId is null (not synced from Fusion).
+-- Generates negative IDs so they never collide with
+-- Oracle Fusion's positive 18-digit CHECK_IDs.
+-- Safe to re-run: ignores ORA-00955 if already exists.
+-- ============================================
+BEGIN
+    EXECUTE IMMEDIATE 'CREATE SEQUENCE RR_AP_PAYMENTS_SEQ
+        START WITH 1
+        INCREMENT BY 1
+        NOCACHE
+        NOCYCLE';
+EXCEPTION
+    WHEN OTHERS THEN
+        IF SQLCODE != -955 THEN RAISE; END IF; -- ORA-00955: already exists
+END;
+/
+
 CREATE OR REPLACE PACKAGE XXAP_PAYMENTS_PKG AS
 
     -- Save single payment from JSON
@@ -172,6 +191,7 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
         -- Temp variables for parsing
         v_temp_str VARCHAR2(100);
         v_reconciled_raw VARCHAR2(10);
+        v_is_local VARCHAR2(1) := 'N'; -- 'Y' when CHECK_ID was auto-generated (not from Fusion)
 
     BEGIN
         -- Extract all values from JSON
@@ -392,6 +412,13 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
             END;
         END;
 
+        -- Auto-generate CHECK_ID for locally created payments (not synced from Fusion).
+        -- Fusion IDs are positive 18-digit numbers; local IDs are negative → zero collision risk.
+        IF v_check_id IS NULL THEN
+            SELECT -RR_AP_PAYMENTS_SEQ.NEXTVAL INTO v_check_id FROM DUAL;
+            v_is_local := 'Y';
+        END IF;
+
         -- Merge (upsert) payment data
         MERGE INTO RR_AP_PAYMENTS_ALL tgt
         USING (SELECT v_check_id AS CHECK_ID FROM DUAL) src
@@ -536,7 +563,7 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
                 v_city, v_county, v_province, v_state, v_country, v_zip,
                 v_stop_reason, v_stop_reference,
                 v_created_by, v_creation_date, v_last_updated_by, v_last_update_date, v_last_update_login,
-                SYSTIMESTAMP, SYSTIMESTAMP, 'SYNCED'
+                SYSTIMESTAMP, SYSTIMESTAMP, CASE WHEN v_is_local = 'Y' THEN 'LOCAL' ELSE 'SYNCED' END
             );
 
         COMMIT;
