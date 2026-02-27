@@ -475,16 +475,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       setInvoicePayments(
         items.map((item: any, index: number) => ({
           key:              (item.id ?? index).toString(),
-          number:           (item.id ?? '').toString(),
+          number:           (item.paper_document_number ?? item.id ?? '').toString(),
           paymentDocument:  item.invoice_number ?? '',
-          status:           item.invoice_payment_status ?? '',
-          reconciled:       '',                          // not returned by API
+          status:           item.payment_status ?? '',
+          reconciled:       item.reconciled_flag === 'Y' ? 'Yes' : item.reconciled_flag === 'N' ? 'No' : (item.reconciled_flag ?? ''),
           currentPayeeName: item.invoice_business_unit ?? '',
           paymentDate:      formatDateStr(item.creation_date ?? ''),
           paidAmount:       Number(item.amount_paid_payment_currency ?? 0),
           currency:         item.invoice_currency ?? '',
-          address:          '',                          // not returned by API
-          remitToAccount:   '',                          // not returned by API
+          address:          '',
+          remitToAccount:   '',
         }))
       );
     } catch (error) {
@@ -2902,7 +2902,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           return <Tag color={color}>{s}</Tag>;
                         }},
                       { title: 'Reconciled',         dataIndex: 'reconciled',       key: 'reconciled',       width: 100, align: 'center' as const,
-                        render: (v: string) => v ? (v === 'Yes' ? <Tag color="green">Yes</Tag> : <Tag>No</Tag>) : '—' },
+                        render: (v: string) => v === 'Yes' ? <Tag color="green">Yes</Tag> : v === 'No' ? <Tag>No</Tag> : '—' },
                       { title: 'Current Payee Name', dataIndex: 'currentPayeeName', key: 'currentPayeeName', width: 220, ellipsis: true },
                       { title: 'Payment Date',       dataIndex: 'paymentDate',      key: 'paymentDate',      width: 110 },
                       { title: 'Paid Amount',        dataIndex: 'paidAmount',       key: 'paidAmount',       width: 160, align: 'right' as const,
@@ -3165,6 +3165,43 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     {formatAmount(computedTotal)}
                   </Text>
                 </Row>
+                {isEditMode && invoicePayments.length > 0 && (() => {
+                  const paidTotal = invoicePayments
+                    .filter(p => p.status !== 'Voided')
+                    .reduce((sum, p) => sum + p.paidAmount, 0);
+                  const currency = invoicePayments[0]?.currency ?? '';
+                  const balance = computedTotal - paidTotal;
+                  return (
+                    <>
+                      <Divider style={{ margin: '4px 0' }} />
+                      <Row justify="space-between" align="middle">
+                        <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Total Paid (excl. Voided)</Text>
+                        <Text style={{ fontSize: 13, color: REDWOOD.success }}>
+                          {formatAmount(paidTotal)}{currency ? ` ${currency}` : ''}
+                        </Text>
+                      </Row>
+                      <Row
+                        justify="space-between"
+                        align="middle"
+                        style={{
+                          padding: '8px 12px',
+                          background: balance <= 0 ? '#f6ffed' : '#fff7e6',
+                          borderRadius: 6,
+                          border: `1px solid ${balance <= 0 ? '#b7eb8f' : '#ffd591'}`,
+                          marginTop: 4,
+                        }}
+                      >
+                        <Space>
+                          <CreditCardOutlined style={{ color: balance <= 0 ? REDWOOD.success : REDWOOD.warning }} />
+                          <Text strong style={{ fontSize: 14 }}>Invoice Balance</Text>
+                        </Space>
+                        <Text strong style={{ fontSize: 20, color: balance <= 0 ? REDWOOD.success : REDWOOD.warning }}>
+                          {formatAmount(Math.abs(balance))}{currency ? ` ${currency}` : ''}
+                        </Text>
+                      </Row>
+                    </>
+                  );
+                })()}
               </div>
             </Card>
           </Col>
