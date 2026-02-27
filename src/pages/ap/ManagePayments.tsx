@@ -1358,6 +1358,13 @@ const ManagePayments: React.FC = () => {
                 onChange={setCreatePaymentActiveTab}
                 style={{ padding: '0 16px' }}
                 tabBarStyle={{ marginBottom: 0 }}
+                tabBarExtraContent={
+                  <Space style={{ paddingRight: 4 }}>
+                    <Button size="small" onClick={() => { setCreatePaymentTabOpen(false); setActiveTab('search'); }}>Cancel</Button>
+                    <Button size="small">Save and Create Another</Button>
+                    <Button size="small" type="primary" style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Save and Close</Button>
+                  </Space>
+                }
                 items={[
                   {
                     key: 'paymentDetails',
@@ -1848,21 +1855,6 @@ const ManagePayments: React.FC = () => {
             />
           </Card>
 
-          {/* Footer action buttons */}
-          <div style={{
-            display: 'flex',
-            justifyContent: 'flex-end',
-            gap: 8,
-            marginTop: 12,
-            padding: '12px 16px',
-            background: REDWOOD.surface,
-            border: `1px solid ${REDWOOD.neutral200}`,
-            borderRadius: 8,
-          }}>
-            <Button onClick={() => { setCreatePaymentTabOpen(false); setActiveTab('search'); }}>Cancel</Button>
-            <Button>Save and Create Another</Button>
-            <Button type="primary" style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Save and Close</Button>
-          </div>
         </div>
       ),
     }] : []),
