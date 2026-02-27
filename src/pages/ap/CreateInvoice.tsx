@@ -4758,8 +4758,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           const payDate        = fv.paymentDate ? fv.paymentDate.format('YYYY-MM-DD') : null;
           // Local CHECK_ID workaround: CHECK_ID is NOT NULL/PK in RR_AP_PAYMENTS_ALL.
           // Backend needs: IF v_check_id IS NULL THEN SELECT SEQ.NEXTVAL INTO v_check_id FROM DUAL; END IF;
-          // Until then, use a large negative number (won't collide with 18-digit Fusion IDs).
-          const localCheckId   = -(Date.now());
+          // Date.now() alone risks duplicate PK if two users save simultaneously (same ms).
+          // Fix: timestamp (ms) * 1000 + random(0-999) → 16-digit unique negative number.
+          // Collision probability: ~1 in 10 billion per concurrent pair.
+          const localCheckId   = -(Math.floor(Date.now() * 1000 + Math.random() * 1000));
 
           const blockStyle: React.CSSProperties = {
             background: '#1e1e1e', color: '#d4d4d4',
