@@ -481,6 +481,10 @@ const ManagePayments: React.FC = () => {
   const [selectedInvoiceKeys, setSelectedInvoiceKeys] = useState<React.Key[]>([]);
   const [invoicesToPay, setInvoicesToPay] = useState<PaymentInvoice[]>([]);
 
+  const supplierDueBalance = invoicesToPay.reduce((sum, i) => sum + (i.amountDue || 0), 0);
+  const totalAppliedAmount = invoicesToPay.reduce((sum, i) => sum + (i.applyAmount || 0), 0);
+  const balanceAfterApplication = supplierDueBalance - totalAppliedAmount;
+
   const fetchAvailableInvoices = async (supplierNumber: string) => {
     setAvailableInvoicesLoading(true);
     try {
@@ -1405,8 +1409,9 @@ const ManagePayments: React.FC = () => {
             <Form
               form={createPaymentForm}
               layout="horizontal"
-              labelCol={{ span: 8 }}
-              wrapperCol={{ span: 16 }}
+              labelCol={{ span: 7 }}
+              wrapperCol={{ span: 17 }}
+              labelAlign="right"
               size="small"
             >
               <Tabs
@@ -1612,6 +1617,24 @@ const ManagePayments: React.FC = () => {
                               <Input disabled={!selectedBuLegalEntityName} />
                             </Form.Item>
                           </Col>
+                        </Row>
+                        {/* Stats row */}
+                        <Row gutter={0} style={{ borderTop: `1px solid ${REDWOOD.neutral200}`, marginTop: 8, paddingTop: 8, background: '#fafafa', borderRadius: '0 0 6px 6px' }}>
+                          {[
+                            { label: 'Supplier Due Balance', value: supplierDueBalance },
+                            { label: 'Selected Invoices', value: invoicesToPay.length, isCount: true },
+                            { label: 'Applied Amount', value: totalAppliedAmount },
+                            { label: 'Balance After Application', value: balanceAfterApplication },
+                          ].map((stat, idx, arr) => (
+                            <Col key={stat.label} span={6} style={{ textAlign: 'center', padding: '6px 8px', borderRight: idx < arr.length - 1 ? `1px solid ${REDWOOD.neutral200}` : 'none' }}>
+                              <div style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>{stat.label}</div>
+                              <div style={{ fontSize: 14, fontWeight: 600, color: stat.label === 'Balance After Application' && balanceAfterApplication < 0 ? REDWOOD.warning : REDWOOD.neutral800 }}>
+                                {stat.isCount
+                                  ? stat.value
+                                  : (stat.value as number).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </div>
+                            </Col>
+                          ))}
                         </Row>
                       </div>
                     ),
@@ -1857,6 +1880,30 @@ const ManagePayments: React.FC = () => {
               dataSource={invoicesToPay}
               pagination={false}
               locale={{ emptyText: 'Select a supplier and click Add Invoices to add unpaid invoices' }}
+              summary={() => invoicesToPay.length === 0 ? null : (
+                <Table.Summary.Row style={{ background: '#f0f2f5', fontWeight: 600 }}>
+                  <Table.Summary.Cell index={0} colSpan={4} align="right">
+                    <span style={{ fontSize: 12, color: '#555' }}>Totals</span>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={1} align="right">
+                    <span style={{ fontSize: 12 }}>
+                      {invoicesToPay.reduce((s, i) => s + (i.amountDue || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    </span>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={2} align="right">
+                    <span style={{ fontSize: 12, color: REDWOOD.primary }}>
+                      {totalAppliedAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    </span>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={3} align="right">
+                    <span style={{ fontSize: 12 }}>
+                      {invoicesToPay.reduce((s, i) => s + (i.discountAmount || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    </span>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={4} />
+                  <Table.Summary.Cell index={5} />
+                </Table.Summary.Row>
+              )}
               columns={[
                 {
                   title: 'Invoice Number',
