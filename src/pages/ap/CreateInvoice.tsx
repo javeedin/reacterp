@@ -63,6 +63,7 @@ import {
   DownloadOutlined,
   FileExcelOutlined,
   InboxOutlined,
+  ScheduleOutlined,
 } from '@ant-design/icons';
 
 dayjs.extend(customParseFormat);
@@ -415,6 +416,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   // Import Lines modal
   const [importModalVisible, setImportModalVisible] = useState(false);
+  const [installmentsModalOpen, setInstallmentsModalOpen] = useState(false);
+  const [installmentsModalData, setInstallmentsModalData] = useState<any[]>([]);
+  const [installmentsModalLoading, setInstallmentsModalLoading] = useState(false);
   const [importPreviewData, setImportPreviewData] = useState<{ type: string; amount: number; description: string }[]>([]);
   const [pasteText, setPasteText] = useState('');
 
@@ -1209,6 +1213,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       icon: <CopyOutlined />,
       label: 'Duplicate Invoice',
     },
+    { type: 'divider' },
+    {
+      key: 'installments',
+      icon: <ScheduleOutlined />,
+      label: 'Installments',
+    },
   ];
 
   // Handle invoice action menu clicks
@@ -1307,6 +1317,26 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     }
   };
 
+  const fetchInstallmentsForModal = async () => {
+    const invoiceId = savedInvoiceId || initialData?.invoiceId;
+    if (!invoiceId) { message.warning('Invoice ID not available'); return; }
+    setInstallmentsModalLoading(true);
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments?invoice_id=${invoiceId}`;
+      const response = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      const items = data.items || (Array.isArray(data) ? data : []);
+      setInstallmentsModalData(items);
+    } catch (err) {
+      console.error('Error fetching installments:', err);
+      message.error('Failed to load installments');
+      setInstallmentsModalData([]);
+    } finally {
+      setInstallmentsModalLoading(false);
+    }
+  };
+
   const handleInvoiceAction = ({ key }: { key: string }) => {
     switch (key) {
       case 'validate':
@@ -1335,6 +1365,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         break;
       case 'duplicate':
         message.info('Duplicating invoice...');
+        break;
+      case 'installments':
+        setInstallmentsModalOpen(true);
+        fetchInstallmentsForModal();
         break;
       default:
         break;
@@ -2677,25 +2711,29 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               )}
             </Text>
             <Space>
-              <Button
-                size="small"
-                icon={<UploadOutlined />}
-                onClick={() => { setImportPreviewData([]); setPasteText(''); setImportModalVisible(true); }}
-                disabled={!isHeaderComplete}
-                style={{ fontSize: 12, borderColor: REDWOOD.info, color: REDWOOD.info }}
-              >
-                Import Lines
-              </Button>
-              <Button
-                size="small"
-                type="primary"
-                icon={<PlusOutlined />}
-                onClick={addLine}
-                disabled={!isHeaderComplete}
-                style={{ background: isHeaderComplete ? REDWOOD.info : undefined, borderColor: isHeaderComplete ? REDWOOD.info : undefined, fontSize: 12 }}
-              >
-                Add Line
-              </Button>
+              {!isReadOnly && (
+                <Button
+                  size="small"
+                  icon={<UploadOutlined />}
+                  onClick={() => { setImportPreviewData([]); setPasteText(''); setImportModalVisible(true); }}
+                  disabled={!isHeaderComplete}
+                  style={{ fontSize: 12, borderColor: REDWOOD.info, color: REDWOOD.info }}
+                >
+                  Import Lines
+                </Button>
+              )}
+              {!isReadOnly && (
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={addLine}
+                  disabled={!isHeaderComplete}
+                  style={{ background: isHeaderComplete ? REDWOOD.info : undefined, borderColor: isHeaderComplete ? REDWOOD.info : undefined, fontSize: 12 }}
+                >
+                  Add Line
+                </Button>
+              )}
               <Button
                 size="small"
                 icon={<DeleteOutlined />}
@@ -4212,6 +4250,81 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             No balance data available for this supplier.
           </div>
         )}
+      </Modal>
+
+      {/* Installments Modal */}
+      <Modal
+        title={
+          <Space>
+            <ScheduleOutlined style={{ color: '#722ed1' }} />
+            <span>Installments</span>
+          </Space>
+        }
+        open={installmentsModalOpen}
+        onCancel={() => setInstallmentsModalOpen(false)}
+        footer={[<Button key="close" onClick={() => setInstallmentsModalOpen(false)}>Close</Button>]}
+        width={900}
+        destroyOnClose
+      >
+        <Spin spinning={installmentsModalLoading}>
+          <Table
+            dataSource={installmentsModalData.map((item: any, idx: number) => ({
+              key: (item.installment_id ?? item.INSTALLMENT_ID ?? idx).toString(),
+              paymentNum:    item.payment_num         ?? item.PAYMENT_NUM         ?? item.PaymentNum         ?? idx + 1,
+              dueDate:       item.due_date            ?? item.DUE_DATE            ?? item.DueDate            ?? '',
+              grossAmount:   item.gross_amount        ?? item.GROSS_AMOUNT        ?? item.GrossAmount        ?? 0,
+              remaining:     item.amount_remaining    ?? item.AMOUNT_REMAINING    ?? item.unpaid_amount      ?? item.UNPAID_AMOUNT ?? item.UnpaidAmount ?? 0,
+              status:        item.payment_status_flag ?? item.PAYMENT_STATUS_FLAG ?? item.status             ?? item.STATUS       ?? '',
+              paymentMethod: item.payment_method_code ?? item.PAYMENT_METHOD_CODE ?? item.payment_method     ?? item.PAYMENT_METHOD ?? '',
+              priority:      item.payment_priority    ?? item.PAYMENT_PRIORITY    ?? item.PaymentPriority    ?? '',
+              holdFlag:      item.hold_flag           ?? item.HOLD_FLAG           ?? 'N',
+            }))}
+            columns={[
+              { title: '#',              dataIndex: 'paymentNum',    key: 'paymentNum',    width: 55,  align: 'center' as const },
+              { title: 'Due Date',       dataIndex: 'dueDate',       key: 'dueDate',       width: 110,
+                render: (v: string) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '' },
+              { title: 'Gross Amount',   dataIndex: 'grossAmount',   key: 'grossAmount',   width: 130, align: 'right' as const,
+                render: (v: number) => Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 }) },
+              { title: 'Remaining',      dataIndex: 'remaining',     key: 'remaining',     width: 130, align: 'right' as const,
+                render: (v: number) => Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 }) },
+              { title: 'Status',         dataIndex: 'status',        key: 'status',        width: 90,
+                render: (v: string) => {
+                  const s = (v || '').toUpperCase();
+                  const color = s === 'Y' || s === 'PAID' ? 'success' : s === 'P' || s === 'PARTIAL' ? 'warning' : 'default';
+                  const label = s === 'Y' ? 'Paid' : s === 'N' ? 'Unpaid' : s === 'P' ? 'Partial' : v || 'Unpaid';
+                  return <Tag color={color}>{label}</Tag>;
+                }},
+              { title: 'Payment Method', dataIndex: 'paymentMethod', key: 'paymentMethod', width: 130 },
+              { title: 'Priority',       dataIndex: 'priority',      key: 'priority',      width: 70, align: 'center' as const },
+              { title: 'Hold',           dataIndex: 'holdFlag',      key: 'holdFlag',      width: 60, align: 'center' as const,
+                render: (v: string) => v === 'Y' ? <Tag color="error">Hold</Tag> : null },
+            ]}
+            size="small"
+            bordered
+            pagination={false}
+            locale={{ emptyText: 'No installments found for this invoice.' }}
+            summary={(rows) => rows.length === 0 ? undefined : (
+              <Table.Summary fixed>
+                <Table.Summary.Row>
+                  <Table.Summary.Cell index={0} colSpan={2}><span style={{ fontWeight: 600 }}>Totals</span></Table.Summary.Cell>
+                  <Table.Summary.Cell index={1} align="right">
+                    <span style={{ fontWeight: 600 }}>
+                      {rows.reduce((s, r: any) => s + Number(r.grossAmount || 0), 0)
+                        .toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    </span>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={2} align="right">
+                    <span style={{ fontWeight: 600 }}>
+                      {rows.reduce((s, r: any) => s + Number(r.remaining || 0), 0)
+                        .toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    </span>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={3} colSpan={4} />
+                </Table.Summary.Row>
+              </Table.Summary>
+            )}
+          />
+        </Spin>
       </Modal>
 
       <style>{`
