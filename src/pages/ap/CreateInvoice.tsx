@@ -4743,13 +4743,19 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         destroyOnClose={false}
       >
         {(() => {
-          const invoiceId   = savedInvoiceId ?? initialData?.invoiceId ?? '<INVOICE_ID>';
-          const fv          = payInFullForm.getFieldsValue();
-          const buName      = form.getFieldValue('businessUnit') || headerValues.businessUnit || '';
-          const pendingInst = invoiceInstallments.filter(i => i.unpaidAmount > 0);
-          const currency    = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
-          const balance     = computedTotal - invoicePayments
+          const invoiceId      = savedInvoiceId ?? initialData?.invoiceId ?? '<INVOICE_ID>';
+          const fv             = payInFullForm.getFieldsValue();
+          const buName         = form.getFieldValue('businessUnit') || headerValues.businessUnit || '';
+          const supplierName   = form.getFieldValue('supplier') || '';
+          const supplierNumber = form.getFieldValue('supplierNumber') || null;
+          const pendingInst    = invoiceInstallments.filter(i => i.unpaidAmount > 0);
+          const currency       = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
+          const balance        = computedTotal - invoicePayments
             .filter(p => p.status !== 'Voided').reduce((s, p) => s + p.paidAmount, 0);
+          // resolve legalEntityName from the selected bank account
+          const selBankAcct    = payInFullBankAccounts.find(a => a.bankAccountName === fv.disbursementBankAccount);
+          const legalEntityName = selBankAcct?.legalEntityName || '';
+          const payDate        = fv.paymentDate ? fv.paymentDate.format('YYYY-MM-DD') : null;
 
           const blockStyle: React.CSSProperties = {
             background: '#1e1e1e', color: '#d4d4d4',
@@ -4769,21 +4775,109 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               method: 'POST',
               color: '#52c41a',
               url: `${APEX_DB_CONFIG.baseUrl}/ap/payments`,
-              desc: '✅ Endpoint EXISTS. Inserts into RR_AP_PAYMENTS_ALL via save_payment(). Keys must be PascalCase. Returns { "status":"success", "checkId":<value> } — use that checkId in Step 3.',
+              desc: '✅ Endpoint EXISTS. Inserts into RR_AP_PAYMENTS_ALL via save_payment(). All PascalCase keys. Returns { "status":"success", "checkId":<value> } — save checkId for Step 3.',
               body: {
-                '// CheckId':                 'leave null — APEX/DB will assign a new ID',
-                CheckId:                      null,
-                PaymentDate:                  fv.paymentDate ? fv.paymentDate.format('YYYY-MM-DD') : '',
-                PaymentAmount:                balance,
-                PaymentCurrency:              currency,
-                PaymentStatus:                'Negotiable',
-                PaymentMethod:                fv.paymentMethod || '',
-                PaymentDocument:              fv.paymentDocument || '',
-                PaperDocumentNumber:          fv.paperDocumentNumber || null,
-                PaymentDescription:           fv.description || '',
-                BusinessUnit:                 buName,
-                DisbursementBankAccountName:  fv.disbursementBankAccount || '',
-                '// InvoiceId note':          'NOT in this table — linked in Step 3',
+                // Identification
+                CheckId:                         null,
+                PaymentId:                       null,
+                PaymentReference:                null,
+                PaperDocumentNumber:             fv.paperDocumentNumber ? Number(fv.paperDocumentNumber) : null,
+                PaymentNumber:                   null,
+                PaymentFileReference:            null,
+                PaymentProcessRequest:           null,
+                VoucherNumber:                   null,
+                // Amounts
+                PaymentAmount:                   balance,
+                PaymentBaseAmount:               balance,
+                WithheldAmount:                  null,
+                BankChargeAmount:                null,
+                // Dates
+                PaymentDate:                     payDate,
+                AccountingDate:                  payDate,
+                MaturityDate:                    null,
+                AnticipatedValueDate:            null,
+                StopDate:                        null,
+                VoidDate:                        null,
+                VoidAccountingDate:              null,
+                ConversionDate:                  payDate,
+                ClearingDate:                    null,
+                ClearingConversionDate:          null,
+                ClearingValueDate:               null,
+                MaturityConversionDate:          null,
+                // Timestamps (ISO-8601 with TZ)
+                CreationDate:                    null,
+                LastUpdateDate:                  null,
+                // Details
+                PaymentDescription:              fv.description || null,
+                PaymentStatus:                   'Negotiable',
+                PaymentType:                     null,
+                PaymentMode:                     null,
+                PaymentFunction:                 'Supplier Payments',
+                // Currency
+                PaymentCurrency:                 currency,
+                PaymentBaseCurrency:             currency,
+                ConversionRate:                  headerValues.conversionRate || null,
+                ConversionRateType:              headerValues.conversionRateType || null,
+                CrossCurrencyRateType:           null,
+                // Clearing
+                ClearingAmount:                  null,
+                ClearingLedgerAmount:            null,
+                ClearingConversionRate:          null,
+                ClearingConversionRateType:      null,
+                // Maturity
+                MaturityConversionRateType:      null,
+                MaturityConversionRate:          null,
+                // Status flags
+                AccountingStatus:                null,
+                ReconciledFlag:                  'false',
+                SeparateRemittanceAdviceCreated: null,
+                IbyPaymentStatus:                null,
+                // Organization
+                LegalEntity:                     legalEntityName || null,
+                BusinessUnit:                    buName,
+                ProcurementBU:                   buName,
+                // Payee
+                Payee:                           supplierName,
+                PartyId:                         null,
+                PayeeSite:                       null,
+                SupplierNumber:                  supplierNumber,
+                EmployeeAddress:                 null,
+                ThirdPartySupplier:              null,
+                ThirdPartyAddressName:           null,
+                // Bank
+                ExternalBankAccountId:           null,
+                RemitToAccountNumber:            null,
+                DisbursementBankAccountNumber:   null,
+                DisbursementBankAccountName:     fv.disbursementBankAccount || null,
+                FundingCardAccount:              null,
+                DigitalPaymentAccount:           null,
+                // Payment method
+                PaymentMethodCode:               null,
+                PaymentMethod:                   fv.paymentMethod || null,
+                PaymentDocument:                 fv.paymentDocument || null,
+                PaymentProcessProfileCode:       null,
+                PaymentProcessProfile:           null,
+                // Document
+                DocumentCategory:                null,
+                DocumentSequence:                null,
+                // Address
+                AddressLine1:                    null,
+                AddressLine2:                    null,
+                AddressLine3:                    null,
+                AddressLine4:                    null,
+                City:                            null,
+                County:                          null,
+                Province:                        null,
+                State:                           null,
+                Country:                         null,
+                Zip:                             null,
+                // Stop / Void
+                StopReason:                      null,
+                StopReference:                   null,
+                // Audit
+                CreatedBy:                       null,
+                LastUpdatedBy:                   null,
+                LastUpdateLogin:                 null,
               },
             },
             ...(pendingInst.length > 0 ? [{
