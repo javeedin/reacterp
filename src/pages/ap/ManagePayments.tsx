@@ -170,6 +170,21 @@ interface BankAccountRecord {
   legalEntityName: string;
 }
 
+// Invoice record used in the "Invoices to Pay" grid within Create Payment
+interface PaymentInvoice {
+  key: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+  description: string;
+  invoiceAmount: number;
+  amountDue: number;
+  applyAmount: number;
+  discountAmount: number;
+  dueDate: string;
+  currency: string;
+  supplierSite: string;
+}
+
 // Supplier record from API
 interface SupplierRecord {
   key: string;
@@ -195,6 +210,7 @@ const APEX_PAYMENTS_URL = `${APEX_DB_CONFIG.baseUrl}/ap/payments`;
 const APEX_SUPPLIERS_URL = `${APEX_DB_CONFIG.baseUrl}/suppliers`;
 const APEX_BANK_ACCOUNTS_URL = `${APEX_DB_CONFIG.baseUrl}/banks/bankaccounts`;
 const APEX_BUSINESS_UNITS_URL = `${APEX_DB_CONFIG.baseUrl}/gl/businessunits`;
+const APEX_INVOICE_URL = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice`;
 
 // Helper function to format amount in UAE format (000,000.00)
 const formatAmount = (value: number): string => {
@@ -457,6 +473,46 @@ const ManagePayments: React.FC = () => {
       fetchBankAccounts();
     }
   }, [createPaymentTabOpen]);
+
+  // Add Invoices modal state
+  const [addInvoicesModalVisible, setAddInvoicesModalVisible] = useState(false);
+  const [availableInvoices, setAvailableInvoices] = useState<PaymentInvoice[]>([]);
+  const [availableInvoicesLoading, setAvailableInvoicesLoading] = useState(false);
+  const [selectedInvoiceKeys, setSelectedInvoiceKeys] = useState<React.Key[]>([]);
+  const [invoicesToPay, setInvoicesToPay] = useState<PaymentInvoice[]>([]);
+
+  const fetchAvailableInvoices = async (supplierNumber: string) => {
+    setAvailableInvoicesLoading(true);
+    try {
+      const url = `${APEX_INVOICE_URL}?supplier_number=${encodeURIComponent(supplierNumber)}`;
+      const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      const already = new Set(invoicesToPay.map(i => i.key));
+      const items = (data.items || [])
+        .map((item: any, index: number) => ({
+          key: item.invoice_id?.toString() || item.invoice_number || index.toString(),
+          invoiceNumber: item.invoice_number || '',
+          invoiceDate: item.invoice_date ? item.invoice_date.substring(0, 10) : '',
+          description: item.description || '',
+          invoiceAmount: item.invoice_amount || 0,
+          amountDue: (item.invoice_amount || 0) - (item.amount_paid || 0),
+          applyAmount: (item.invoice_amount || 0) - (item.amount_paid || 0),
+          discountAmount: 0,
+          dueDate: item.due_date ? item.due_date.substring(0, 10) : '',
+          currency: item.invoice_currency || 'AED',
+          supplierSite: item.supplier_site || '',
+        }))
+        .filter((inv: PaymentInvoice) => inv.amountDue > 0 && !already.has(inv.key));
+      setAvailableInvoices(items);
+      setSelectedInvoiceKeys([]);
+    } catch (err) {
+      console.error('Failed to fetch invoices:', err);
+      message.error('Failed to load invoices');
+    } finally {
+      setAvailableInvoicesLoading(false);
+    }
+  };
 
   // Filter bank accounts to only those matching the selected BU's legal entity
   const filteredBankAccounts = useMemo(() => {
@@ -1421,7 +1477,9 @@ const ManagePayments: React.FC = () => {
                                 style={{ cursor: selectedBuLegalEntityName ? 'pointer' : 'not-allowed' }}
                               />
                             </Form.Item>
-                            <Form.Item name="supplierNumber" hidden><Input /></Form.Item>
+                            <Form.Item label="Supplier Number" name="supplierNumber">
+                              <Input readOnly style={{ background: '#f5f5f5', color: '#555' }} placeholder="Auto-filled" />
+                            </Form.Item>
                             <Form.Item
                               label={<><span style={{ color: REDWOOD.primary }}>*</span> Supplier Site</>}
                               name="payeeSite"
@@ -1771,16 +1829,25 @@ const ManagePayments: React.FC = () => {
                 <Text strong style={{ fontSize: 13 }}>Invoices to Pay</Text>
               </Space>
               <Space>
-                <Button size="small" icon={<PlusOutlined />}>Add Invoices</Button>
+                <Button
+                  size="small"
+                  icon={<PlusOutlined />}
+                  onClick={() => {
+                    const supplierNum = createPaymentForm.getFieldValue('supplierNumber');
+                    if (!supplierNum) { message.warning('Please select a supplier first'); return; }
+                    fetchAvailableInvoices(supplierNum);
+                    setAddInvoicesModalVisible(true);
+                  }}
+                >Add Invoices</Button>
                 <Button size="small" icon={<ReloadOutlined />}>Refresh</Button>
               </Space>
             </div>
             <Table
               size="small"
               style={{ padding: 0 }}
-              dataSource={[]}
+              dataSource={invoicesToPay}
               pagination={false}
-              locale={{ emptyText: 'Select a supplier and add invoices to pay' }}
+              locale={{ emptyText: 'Select a supplier and click Add Invoices to add unpaid invoices' }}
               columns={[
                 {
                   title: 'Invoice Number',
@@ -1793,7 +1860,7 @@ const ManagePayments: React.FC = () => {
                   title: 'Invoice Date',
                   dataIndex: 'invoiceDate',
                   key: 'invoiceDate',
-                  width: 120,
+                  width: 110,
                 },
                 {
                   title: 'Description',
@@ -1823,8 +1890,17 @@ const ManagePayments: React.FC = () => {
                   key: 'applyAmount',
                   width: 140,
                   align: 'right' as const,
-                  render: () => (
-                    <Input size="small" type="number" placeholder="0.00" style={{ textAlign: 'right', width: 120 }} />
+                  render: (val: number, record: PaymentInvoice) => (
+                    <Input
+                      size="small"
+                      type="number"
+                      defaultValue={val.toFixed(2)}
+                      style={{ textAlign: 'right', width: 120 }}
+                      onBlur={(e) => {
+                        const newVal = parseFloat(e.target.value) || 0;
+                        setInvoicesToPay(prev => prev.map(i => i.key === record.key ? { ...i, applyAmount: newVal } : i));
+                      }}
+                    />
                   ),
                 },
                 {
@@ -1833,22 +1909,37 @@ const ManagePayments: React.FC = () => {
                   key: 'discountAmount',
                   width: 140,
                   align: 'right' as const,
-                  render: () => (
-                    <Input size="small" type="number" placeholder="0.00" style={{ textAlign: 'right', width: 120 }} />
+                  render: (val: number, record: PaymentInvoice) => (
+                    <Input
+                      size="small"
+                      type="number"
+                      defaultValue={(val || 0).toFixed(2)}
+                      style={{ textAlign: 'right', width: 120 }}
+                      onBlur={(e) => {
+                        const newVal = parseFloat(e.target.value) || 0;
+                        setInvoicesToPay(prev => prev.map(i => i.key === record.key ? { ...i, discountAmount: newVal } : i));
+                      }}
+                    />
                   ),
                 },
                 {
                   title: 'Due Date',
                   dataIndex: 'dueDate',
                   key: 'dueDate',
-                  width: 120,
+                  width: 110,
                 },
                 {
                   title: '',
                   key: 'remove',
-                  width: 50,
-                  render: () => (
-                    <Button type="link" size="small" danger icon={<CloseCircleOutlined />} />
+                  width: 40,
+                  render: (_: any, record: PaymentInvoice) => (
+                    <Button
+                      type="link"
+                      size="small"
+                      danger
+                      icon={<CloseCircleOutlined />}
+                      onClick={() => setInvoicesToPay(prev => prev.filter(i => i.key !== record.key))}
+                    />
                   ),
                 },
               ]}
@@ -2009,6 +2100,112 @@ const ManagePayments: React.FC = () => {
             background: ${REDWOOD.neutral100};
           }
         `}</style>
+
+        {/* Add Invoices Modal */}
+        <Modal
+          title={
+            <Space>
+              <FileTextOutlined style={{ color: REDWOOD.info }} />
+              <span>Select Invoices to Pay</span>
+            </Space>
+          }
+          open={addInvoicesModalVisible}
+          onCancel={() => { setAddInvoicesModalVisible(false); setSelectedInvoiceKeys([]); }}
+          width={1000}
+          footer={[
+            <Button key="cancel" onClick={() => { setAddInvoicesModalVisible(false); setSelectedInvoiceKeys([]); }}>
+              Cancel
+            </Button>,
+            <Button
+              key="add"
+              type="primary"
+              style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+              disabled={selectedInvoiceKeys.length === 0}
+              onClick={() => {
+                const selected = availableInvoices.filter(inv => selectedInvoiceKeys.includes(inv.key));
+                setInvoicesToPay(prev => [...prev, ...selected]);
+                setAddInvoicesModalVisible(false);
+                setSelectedInvoiceKeys([]);
+              }}
+            >
+              Add Selected ({selectedInvoiceKeys.length})
+            </Button>,
+          ]}
+          styles={{ body: { padding: '12px 24px' } }}
+        >
+          <Table
+            size="small"
+            loading={availableInvoicesLoading}
+            dataSource={availableInvoices}
+            pagination={{ pageSize: 10, showSizeChanger: false }}
+            locale={{ emptyText: availableInvoicesLoading ? 'Loading...' : 'No unpaid invoices found for this supplier' }}
+            rowSelection={{
+              type: 'checkbox',
+              selectedRowKeys: selectedInvoiceKeys,
+              onChange: (keys) => setSelectedInvoiceKeys(keys),
+            }}
+            columns={[
+              {
+                title: 'Invoice Number',
+                dataIndex: 'invoiceNumber',
+                key: 'invoiceNumber',
+                width: 140,
+                render: (text: string) => <span style={{ color: REDWOOD.info, fontWeight: 500 }}>{text}</span>,
+              },
+              {
+                title: 'Invoice Date',
+                dataIndex: 'invoiceDate',
+                key: 'invoiceDate',
+                width: 110,
+              },
+              {
+                title: 'Supplier Site',
+                dataIndex: 'supplierSite',
+                key: 'supplierSite',
+                width: 120,
+              },
+              {
+                title: 'Description',
+                dataIndex: 'description',
+                key: 'description',
+                ellipsis: true,
+              },
+              {
+                title: 'Currency',
+                dataIndex: 'currency',
+                key: 'currency',
+                width: 80,
+                render: (val: string) => <Tag>{val}</Tag>,
+              },
+              {
+                title: 'Invoice Amount',
+                dataIndex: 'invoiceAmount',
+                key: 'invoiceAmount',
+                width: 130,
+                align: 'right' as const,
+                render: (val: number) => val?.toLocaleString('en-US', { minimumFractionDigits: 2 }),
+              },
+              {
+                title: 'Amount Due',
+                dataIndex: 'amountDue',
+                key: 'amountDue',
+                width: 120,
+                align: 'right' as const,
+                render: (val: number) => (
+                  <span style={{ color: val > 0 ? '#cf1322' : '#389e0d', fontWeight: 500 }}>
+                    {val?.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  </span>
+                ),
+              },
+              {
+                title: 'Due Date',
+                dataIndex: 'dueDate',
+                key: 'dueDate',
+                width: 110,
+              },
+            ]}
+          />
+        </Modal>
 
         {/* Supplier Search Modal */}
         <Modal
