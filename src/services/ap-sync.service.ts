@@ -73,7 +73,7 @@ export type InvoicePayloadCallback = (
 // APEX endpoint for creating invoices
 const APEX_CREATE_INVOICE_ENDPOINT = 'ap/createinvoice';
 const APEX_CREATE_INVOICE_LINES_ENDPOINT = 'ap/createinvoiceslines';
-const APEX_CREATE_INVOICE_INSTALLMENTS_ENDPOINT = 'ap/invoices/installments';
+const APEX_CREATE_INVOICE_INSTALLMENTS_ENDPOINT = 'ap/createinvoice/installments';
 
 // Invoice Lines type
 export interface APInvoiceLine {
