@@ -23,6 +23,7 @@ import {
   Descriptions,
   Dropdown,
   Alert,
+  Drawer,
   Statistic,
   Progress,
   Spin,
@@ -420,6 +421,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [importModalVisible, setImportModalVisible] = useState(false);
   // Pay in Full modal state
   const [payInFullOpen, setPayInFullOpen] = useState(false);
+  const [payInFullApiDrawerOpen, setPayInFullApiDrawerOpen] = useState(false);
   const [payInFullBankAccounts, setPayInFullBankAccounts] = useState<{ bankAccountName: string; currencyCode: string; legalEntityName: string }[]>([]);
   const [payInFullBankLoading, setPayInFullBankLoading] = useState(false);
   const [payInFullSubmitting, setPayInFullSubmitting] = useState(false);
@@ -4507,6 +4509,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           <Space>
             <CreditCardOutlined style={{ color: REDWOOD.success }} />
             <span>Pay Invoice in Full</span>
+            <Tooltip title="View POST endpoints & JSON bodies">
+              <ApiOutlined
+                style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 15, marginLeft: 4 }}
+                onClick={(e) => { e.stopPropagation(); setPayInFullApiDrawerOpen(true); }}
+              />
+            </Tooltip>
           </Space>
         }
         open={payInFullOpen}
@@ -4719,6 +4727,133 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           })()}
         </Form>
       </Modal>
+
+      {/* ═══════════════ PAY IN FULL — API REFERENCE DRAWER ═══════════════ */}
+      <Drawer
+        title={
+          <Space>
+            <ApiOutlined style={{ color: REDWOOD.info }} />
+            <span>Pay in Full — API Endpoints</span>
+          </Space>
+        }
+        placement="right"
+        width={520}
+        open={payInFullApiDrawerOpen}
+        onClose={() => setPayInFullApiDrawerOpen(false)}
+        destroyOnClose={false}
+      >
+        {(() => {
+          const invoiceId   = savedInvoiceId ?? initialData?.invoiceId ?? '<INVOICE_ID>';
+          const fv          = payInFullForm.getFieldsValue();
+          const pendingInst = invoiceInstallments.filter(i => i.unpaidAmount > 0);
+          const currency    = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
+          const balance     = computedTotal - invoicePayments
+            .filter(p => p.status !== 'Voided').reduce((s, p) => s + p.paidAmount, 0);
+
+          const blockStyle: React.CSSProperties = {
+            background: '#1e1e1e', color: '#d4d4d4',
+            fontFamily: 'monospace', fontSize: 11,
+            padding: '10px 12px', borderRadius: 6,
+            overflowX: 'auto', whiteSpace: 'pre',
+            marginTop: 6, marginBottom: 0,
+          };
+          const labelStyle: React.CSSProperties = {
+            fontSize: 11, fontWeight: 700, letterSpacing: 0.5,
+            padding: '2px 8px', borderRadius: 4, marginRight: 8,
+          };
+
+          const apis = [
+            {
+              step: 1,
+              method: 'POST',
+              color: '#52c41a',
+              url: `${APEX_DB_CONFIG.baseUrl}/ap/createpayment`,
+              desc: 'Create the payment record. Returns the new payment_id used in step 3.',
+              body: {
+                P_INVOICE_ID:            invoiceId,
+                P_BUSINESS_UNIT:         fv.businessUnit  || '',
+                P_PAYMENT_DATE:          fv.paymentDate ? fv.paymentDate.format('YYYY-MM-DD') : '',
+                P_PAYMENT_METHOD:        fv.paymentMethod || '',
+                P_BANK_ACCOUNT:          fv.disbursementBankAccount || '',
+                P_PAYMENT_DOCUMENT:      fv.paymentDocument || '',
+                P_PAPER_DOCUMENT_NUMBER: fv.paperDocumentNumber || '',
+                P_AMOUNT:                balance,
+                P_CURRENCY_CODE:         currency,
+                P_DESCRIPTION:           fv.description || '',
+              },
+            },
+            ...(pendingInst.length > 0 ? [{
+              step: 2,
+              method: 'PUT',
+              color: '#fa8c16',
+              url: `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments`,
+              desc: `Update each pending installment (${pendingInst.length} call${pendingInst.length > 1 ? 's' : ''}). Repeat for every row in the Pending Installments table.`,
+              body: {
+                P_INVOICE_ID:      invoiceId,
+                P_INSTALLMENT_ID:  pendingInst[0]?.key ?? '<INSTALLMENT_ID>',
+                P_PAYMENT_STATUS:  'Fully Paid',
+                P_AMOUNT_REMAINING: 0,
+                '// repeat for': pendingInst.slice(1).map(i => ({
+                  P_INSTALLMENT_ID: i.key,
+                  P_DUE_DATE: i.dueDate,
+                  P_UNPAID_WAS: i.unpaidAmount,
+                })),
+              },
+            }] : []),
+            {
+              step: pendingInst.length > 0 ? 3 : 2,
+              method: 'POST',
+              color: '#52c41a',
+              url: `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/payments`,
+              desc: 'Insert a row into the related payments table (shown in the Payments tab).',
+              body: {
+                P_INVOICE_ID:            invoiceId,
+                P_CHECK_ID:              '<payment_id from step 1 response>',
+                P_PAPER_DOCUMENT_NUMBER: fv.paperDocumentNumber || '',
+                P_PAYMENT_DATE:          fv.paymentDate ? fv.paymentDate.format('YYYY-MM-DD') : '',
+                P_AMOUNT:                balance,
+                P_CURRENCY_CODE:         currency,
+                P_PAYMENT_STATUS:        'Negotiable',
+                P_BANK_ACCOUNT:          fv.disbursementBankAccount || '',
+                P_DESCRIPTION:           fv.description || '',
+              },
+            },
+          ];
+
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              <Alert
+                type="info"
+                showIcon
+                message="3-step payment creation flow"
+                description="Complete all three steps in order. Step 2 must run once per pending installment."
+                style={{ fontSize: 12 }}
+              />
+              {apis.map(api => (
+                <div key={api.step} style={{ border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 8, overflow: 'hidden' }}>
+                  <div style={{ padding: '8px 12px', background: REDWOOD.neutral100, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
+                    <Space>
+                      <Text strong style={{ color: REDWOOD.neutral600, fontSize: 12 }}>Step {api.step}</Text>
+                      <span style={{ ...labelStyle, background: api.color, color: '#fff' }}>{api.method}</span>
+                      <Text style={{ fontSize: 11, fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                        {api.url}
+                      </Text>
+                    </Space>
+                  </div>
+                  <div style={{ padding: '6px 12px 4px' }}>
+                    <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{api.desc}</Text>
+                  </div>
+                  <div style={{ padding: '0 12px 12px' }}>
+                    <pre style={blockStyle}>{JSON.stringify(api.body, null, 2)}</pre>
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+      </Drawer>
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+
       {/* ═══════════════════════════════════════════════════════════ */}
 
       <style>{`
