@@ -1363,7 +1363,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   };
 
   // ── Pay in Full helpers ─────────────────────────────────────────────────
-  const fetchPayInFullBankAccounts = async (buName: string) => {
+  const fetchPayInFullBankAccounts = async (legalEntityName: string) => {
     setPayInFullBankLoading(true);
     try {
       const response = await fetch(`${APEX_DB_CONFIG.baseUrl}/banks/bankaccounts`, {
@@ -1376,10 +1376,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         currencyCode:    item.currency_code    || '',
         legalEntityName: item.legal_entity_name || '',
       }));
-      // filter to this invoice's business unit
-      const filtered = buName ? all.filter((a: any) => a.legalEntityName === buName) : all;
+      const filtered = legalEntityName
+        ? all.filter((a: any) => a.legalEntityName === legalEntityName)
+        : all;
       setPayInFullBankAccounts(filtered);
-      if (filtered.length === 0) message.warning(`No bank accounts found for "${buName}"`);
+      if (filtered.length === 0)
+        message.warning(`No bank accounts found for legal entity "${legalEntityName}"`);
     } catch {
       message.error('Failed to load bank accounts');
     } finally {
@@ -1387,22 +1389,41 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     }
   };
 
-  const openPayInFullModal = () => {
-    const bu = form.getFieldValue('businessUnit') || headerValues.businessUnit || '';
-    const invoiceBalance = computedTotal - invoicePayments
-      .filter(p => p.status !== 'Voided')
-      .reduce((sum, p) => sum + p.paidAmount, 0);
+  const openPayInFullModal = async () => {
+    const buName = form.getFieldValue('businessUnit') || headerValues.businessUnit || '';
     payInFullForm.resetFields();
     payInFullForm.setFieldsValue({
-      businessUnit:  bu,
+      businessUnit:  buName,
       supplier:      form.getFieldValue('supplier') || '',
       invoiceNumber: form.getFieldValue('invoiceNumber') || '',
-      payAmount:     invoiceBalance,
+      payAmount:     computedTotal - invoicePayments
+        .filter(p => p.status !== 'Voided')
+        .reduce((sum, p) => sum + p.paidAmount, 0),
       currency:      headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED',
       paymentDate:   dayjs(),
     });
     setPayInFullOpen(true);
-    fetchPayInFullBankAccounts(bu);
+
+    // Step 1: fetch BUs to resolve legalEntityName for the current BU
+    try {
+      const buRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/businessunits`, {
+        headers: { Accept: 'application/json' },
+      });
+      if (!buRes.ok) throw new Error(`HTTP ${buRes.status}`);
+      const buData = await buRes.json();
+      const buList = (buData.items || []).map((item: any) => ({
+        name:            item.business_unit_name || item.name || '',
+        legalEntityName: item.legal_entity_name  || '',
+      }));
+      const matched = buList.find((b: any) => b.name === buName);
+      const legalEntityName = matched?.legalEntityName || '';
+      console.log(`[Pay in Full] BU="${buName}" → legalEntity="${legalEntityName}"`);
+      // Step 2: fetch bank accounts filtered by legalEntityName
+      fetchPayInFullBankAccounts(legalEntityName);
+    } catch {
+      // fallback: load all accounts
+      fetchPayInFullBankAccounts('');
+    }
   };
   // ────────────────────────────────────────────────────────────────────────
 
@@ -4570,48 +4591,6 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             </Row>
           </div>
 
-          {/* ── Pending installments ── */}
-          {(() => {
-            const pending = invoiceInstallments.filter(i => i.unpaidAmount > 0);
-            if (pending.length === 0) return null;
-            const totalUnpaid = pending.reduce((s, i) => s + i.unpaidAmount, 0);
-            const currency = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
-            return (
-              <div style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.neutral700, marginBottom: 6 }}>
-                  Pending Installments
-                </div>
-                <Table
-                  dataSource={pending}
-                  rowKey="key"
-                  size="small"
-                  pagination={false}
-                  scroll={{ y: 160 }}
-                  columns={[
-                    { title: '#', dataIndex: 'installmentNumber', key: 'installmentNumber', width: 45, align: 'center' as const },
-                    { title: 'Due Date', dataIndex: 'dueDate', key: 'dueDate', width: 105 },
-                    { title: 'Gross Amount', dataIndex: 'grossAmount', key: 'grossAmount', width: 130, align: 'right' as const,
-                      render: (v: number) => <Text>{formatAmount(v)}</Text> },
-                    { title: 'Unpaid Amount', dataIndex: 'unpaidAmount', key: 'unpaidAmount', align: 'right' as const,
-                      render: (v: number) => <Text strong style={{ color: REDWOOD.warning }}>{formatAmount(v)} {currency}</Text> },
-                  ]}
-                  summary={() => (
-                    <Table.Summary.Row style={{ background: '#fffbe6' }}>
-                      <Table.Summary.Cell index={0} colSpan={3} align="right">
-                        <Text strong style={{ fontSize: 12 }}>Total Unpaid</Text>
-                      </Table.Summary.Cell>
-                      <Table.Summary.Cell index={1} align="right">
-                        <Text strong style={{ color: REDWOOD.warning, fontSize: 13 }}>
-                          {formatAmount(totalUnpaid)} {currency}
-                        </Text>
-                      </Table.Summary.Cell>
-                    </Table.Summary.Row>
-                  )}
-                />
-              </div>
-            );
-          })()}
-
           <Divider style={{ margin: '0 0 14px' }} />
 
           {/* ── Payment fields ── */}
@@ -4693,6 +4672,51 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           <Form.Item label="Description" name="description">
             <Input.TextArea rows={2} placeholder="Optional payment description" />
           </Form.Item>
+
+          {/* ── Pending installments (below form fields) ── */}
+          {(() => {
+            const pending = invoiceInstallments.filter(i => i.unpaidAmount > 0);
+            if (pending.length === 0) return null;
+            const totalUnpaid = pending.reduce((s, i) => s + i.unpaidAmount, 0);
+            const currency = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
+            return (
+              <>
+                <Divider style={{ margin: '12px 0 10px' }} />
+                <div style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.neutral700, marginBottom: 6 }}>
+                  Pending Installments
+                </div>
+                <Table
+                  dataSource={pending}
+                  rowKey="key"
+                  size="small"
+                  pagination={false}
+                  scroll={{ y: 180 }}
+                  columns={[
+                    { title: '#',            dataIndex: 'installmentNumber', key: 'installmentNumber', width: 45,  align: 'center' as const },
+                    { title: 'Due Date',     dataIndex: 'dueDate',           key: 'dueDate',           width: 110 },
+                    { title: 'Gross Amount', dataIndex: 'grossAmount',       key: 'grossAmount',       width: 140, align: 'right' as const,
+                      render: (v: number) => <Text>{formatAmount(v)}</Text> },
+                    { title: 'Unpaid Amount', dataIndex: 'unpaidAmount',     key: 'unpaidAmount',      align: 'right' as const,
+                      render: (v: number) => (
+                        <Text strong style={{ color: REDWOOD.warning }}>{formatAmount(v)} {currency}</Text>
+                      )},
+                  ]}
+                  summary={() => (
+                    <Table.Summary.Row style={{ background: '#fffbe6' }}>
+                      <Table.Summary.Cell index={0} colSpan={3} align="right">
+                        <Text strong style={{ fontSize: 12 }}>Total Unpaid</Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={1} align="right">
+                        <Text strong style={{ color: REDWOOD.warning, fontSize: 13 }}>
+                          {formatAmount(totalUnpaid)} {currency}
+                        </Text>
+                      </Table.Summary.Cell>
+                    </Table.Summary.Row>
+                  )}
+                />
+              </>
+            );
+          })()}
         </Form>
       </Modal>
       {/* ═══════════════════════════════════════════════════════════ */}
