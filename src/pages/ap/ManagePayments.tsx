@@ -1340,28 +1340,6 @@ const ManagePayments: React.FC = () => {
       closable: true,
       children: (
         <div style={{ padding: 16, background: REDWOOD.neutral100, minHeight: 'calc(100vh - 160px)' }}>
-          {/* Header bar */}
-          <div style={{
-            background: REDWOOD.surface,
-            border: `1px solid ${REDWOOD.neutral200}`,
-            borderRadius: 8,
-            padding: '10px 16px',
-            marginBottom: 12,
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}>
-            <Space>
-              <DollarOutlined style={{ color: REDWOOD.primary, fontSize: 16 }} />
-              <Text strong style={{ fontSize: 14 }}>Create Payment</Text>
-              <Tag color="blue">New</Tag>
-            </Space>
-            <Space>
-              <Button size="small" onClick={() => { setCreatePaymentTabOpen(false); setActiveTab('search'); }}>Cancel</Button>
-              <Button size="small">Save and Create Another</Button>
-              <Button size="small" type="primary" style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Save and Close</Button>
-            </Space>
-          </div>
 
           {/* Payment Header Form */}
           <Card
@@ -1869,6 +1847,22 @@ const ManagePayments: React.FC = () => {
               ]}
             />
           </Card>
+
+          {/* Footer action buttons */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'flex-end',
+            gap: 8,
+            marginTop: 12,
+            padding: '12px 16px',
+            background: REDWOOD.surface,
+            border: `1px solid ${REDWOOD.neutral200}`,
+            borderRadius: 8,
+          }}>
+            <Button onClick={() => { setCreatePaymentTabOpen(false); setActiveTab('search'); }}>Cancel</Button>
+            <Button>Save and Create Another</Button>
+            <Button type="primary" style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Save and Close</Button>
+          </div>
         </div>
       ),
     }] : []),
