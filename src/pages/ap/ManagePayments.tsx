@@ -480,10 +480,11 @@ const ManagePayments: React.FC = () => {
   const [availableInvoicesLoading, setAvailableInvoicesLoading] = useState(false);
   const [selectedInvoiceKeys, setSelectedInvoiceKeys] = useState<React.Key[]>([]);
   const [invoicesToPay, setInvoicesToPay] = useState<PaymentInvoice[]>([]);
+  const [supplierTotalBalance, setSupplierTotalBalance] = useState<number | null>(null);
+  const [supplierBalanceLoading, setSupplierBalanceLoading] = useState(false);
 
-  const supplierDueBalance = invoicesToPay.reduce((sum, i) => sum + (i.amountDue || 0), 0);
   const totalAppliedAmount = invoicesToPay.reduce((sum, i) => sum + (i.applyAmount || 0), 0);
-  const balanceAfterApplication = supplierDueBalance - totalAppliedAmount;
+  const balanceAfterApplication = supplierTotalBalance !== null ? supplierTotalBalance - totalAppliedAmount : null;
 
   const fetchAvailableInvoices = async (supplierNumber: string) => {
     setAvailableInvoicesLoading(true);
@@ -515,6 +516,27 @@ const ManagePayments: React.FC = () => {
       message.error('Failed to load invoices');
     } finally {
       setAvailableInvoicesLoading(false);
+    }
+  };
+
+  const fetchSupplierDueBalance = async (supplierNumber: string) => {
+    setSupplierBalanceLoading(true);
+    setSupplierTotalBalance(null);
+    try {
+      const url = `${APEX_INVOICE_URL}?supplier_number=${encodeURIComponent(supplierNumber)}`;
+      const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      const balance = (data.items || []).reduce((sum: number, item: any) => {
+        const due = (item.invoice_amount || 0) - (item.amount_paid || 0);
+        return due > 0 ? sum + due : sum;
+      }, 0);
+      setSupplierTotalBalance(balance);
+    } catch (err) {
+      console.error('Failed to fetch supplier balance:', err);
+      setSupplierTotalBalance(0);
+    } finally {
+      setSupplierBalanceLoading(false);
     }
   };
 
@@ -583,6 +605,8 @@ const ManagePayments: React.FC = () => {
         supplierNumber: record.supplierNumber,
         payeeSite: undefined,
       });
+      setInvoicesToPay([]);
+      fetchSupplierDueBalance(record.supplierNumber);
     } else {
       form.setFieldsValue({
         supplierOrParty: record.supplier,
@@ -1450,12 +1474,16 @@ const ManagePayments: React.FC = () => {
                                   const bu = businessUnitsList.find(b => b.name === value);
                                   setSelectedBuLegalEntityName(bu?.legalEntityName || '');
                                   setSelectedBankAccount(null);
-                                  createPaymentForm.setFieldsValue({ disbursementBankAccount: undefined });
+                                  setSupplierTotalBalance(null);
+                                  setInvoicesToPay([]);
+                                  createPaymentForm.setFieldsValue({ disbursementBankAccount: undefined, payee: undefined, supplierNumber: undefined });
                                 }}
                                 onClear={() => {
                                   setSelectedBuLegalEntityName('');
                                   setSelectedBankAccount(null);
-                                  createPaymentForm.setFieldsValue({ disbursementBankAccount: undefined });
+                                  setSupplierTotalBalance(null);
+                                  setInvoicesToPay([]);
+                                  createPaymentForm.setFieldsValue({ disbursementBankAccount: undefined, payee: undefined, supplierNumber: undefined });
                                 }}
                               >
                                 {businessUnitsList.map(bu => (
@@ -1620,21 +1648,40 @@ const ManagePayments: React.FC = () => {
                         </Row>
                         {/* Stats row */}
                         <Row gutter={0} style={{ borderTop: `1px solid ${REDWOOD.neutral200}`, marginTop: 8, paddingTop: 8, background: '#fafafa', borderRadius: '0 0 6px 6px' }}>
-                          {[
-                            { label: 'Supplier Due Balance', value: supplierDueBalance },
-                            { label: 'Selected Invoices', value: invoicesToPay.length, isCount: true },
-                            { label: 'Applied Amount', value: totalAppliedAmount },
-                            { label: 'Balance After Application', value: balanceAfterApplication },
-                          ].map((stat, idx, arr) => (
-                            <Col key={stat.label} span={6} style={{ textAlign: 'center', padding: '6px 8px', borderRight: idx < arr.length - 1 ? `1px solid ${REDWOOD.neutral200}` : 'none' }}>
-                              <div style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>{stat.label}</div>
-                              <div style={{ fontSize: 14, fontWeight: 600, color: stat.label === 'Balance After Application' && balanceAfterApplication < 0 ? REDWOOD.warning : REDWOOD.neutral800 }}>
-                                {stat.isCount
-                                  ? stat.value
-                                  : (stat.value as number).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              </div>
-                            </Col>
-                          ))}
+                          {/* Supplier Due Balance */}
+                          <Col span={6} style={{ textAlign: 'center', padding: '6px 8px', borderRight: `1px solid ${REDWOOD.neutral200}` }}>
+                            <div style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>Supplier Due Balance</div>
+                            <div style={{ fontSize: 14, fontWeight: 600, color: REDWOOD.neutral800 }}>
+                              {supplierBalanceLoading
+                                ? <span style={{ fontSize: 12, color: '#aaa' }}>Loading…</span>
+                                : supplierTotalBalance !== null
+                                  ? supplierTotalBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                  : <span style={{ fontSize: 12, color: '#ccc' }}>—</span>}
+                            </div>
+                          </Col>
+                          {/* Selected Invoices */}
+                          <Col span={6} style={{ textAlign: 'center', padding: '6px 8px', borderRight: `1px solid ${REDWOOD.neutral200}` }}>
+                            <div style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>Selected Invoices</div>
+                            <div style={{ fontSize: 14, fontWeight: 600, color: REDWOOD.neutral800 }}>{invoicesToPay.length}</div>
+                          </Col>
+                          {/* Applied Amount */}
+                          <Col span={6} style={{ textAlign: 'center', padding: '6px 8px', borderRight: `1px solid ${REDWOOD.neutral200}` }}>
+                            <div style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>Applied Amount</div>
+                            <div style={{ fontSize: 14, fontWeight: 600, color: REDWOOD.neutral800 }}>
+                              {totalAppliedAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                          </Col>
+                          {/* Balance After Application */}
+                          <Col span={6} style={{ textAlign: 'center', padding: '6px 8px' }}>
+                            <div style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>Balance After Application</div>
+                            <div style={{ fontSize: 14, fontWeight: 600, color: balanceAfterApplication !== null && balanceAfterApplication < 0 ? REDWOOD.warning : REDWOOD.neutral800 }}>
+                              {supplierBalanceLoading
+                                ? <span style={{ fontSize: 12, color: '#aaa' }}>Loading…</span>
+                                : balanceAfterApplication !== null
+                                  ? balanceAfterApplication.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                  : <span style={{ fontSize: 12, color: '#ccc' }}>—</span>}
+                            </div>
+                          </Col>
                         </Row>
                       </div>
                     ),
