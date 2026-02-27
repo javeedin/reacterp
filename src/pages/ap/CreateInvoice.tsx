@@ -447,7 +447,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   }, [initialData]);
 
   // Payments tab state (for edit mode)
-  const [invoicePayments, setInvoicePayments] = useState<{ key: string; number: string; paymentDocument: string; status: string; reconciled: string; currentPayeeName: string; paymentDate: string; paidAmount: string; address: string }[]>([]);
+  const [invoicePayments, setInvoicePayments] = useState<{ key: string; number: string; paymentDocument: string; status: string; reconciled: string; currentPayeeName: string; paymentDate: string; paidAmount: number; currency: string; address: string; remitToAccount: string }[]>([]);
   const [invoicePaymentsLoading, setInvoicePaymentsLoading] = useState(false);
   const [invoicePaymentsUrl, setInvoicePaymentsUrl] = useState('');
 
@@ -471,21 +471,35 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
       const data = await response.json();
       console.log('[Payments Tab] Raw response:', data);
+      if (data.items?.[0]) console.log('[Payments Tab] First item keys:', Object.keys(data.items[0]));
       const items = data.items || (Array.isArray(data) ? data : []);
+      // helper: try multiple field name variants (lowercase, UPPERCASE)
+      const pick = (item: any, ...keys: string[]): any => {
+        for (const k of keys) {
+          if (item[k] !== undefined && item[k] !== null) return item[k];
+          const u = k.toUpperCase();
+          if (item[u] !== undefined && item[u] !== null) return item[u];
+        }
+        return undefined;
+      };
+      // Oracle AP payment_status_flag: N=Negotiable, V=Voided, C=Cleared, S=Set Up
+      const mapStatus = (s: string) => ({ V: 'Voided', N: 'Negotiable', C: 'Cleared', S: 'Set Up' }[s] ?? s);
       setInvoicePayments(
         items.map((item: any, index: number) => {
-          const v = (a: string, b?: string) => item[a] ?? item[a.toUpperCase()] ?? (b ? (item[b] ?? item[b.toUpperCase()]) : undefined);
-          const reconciledFlag = v('reconciled_flag', 'reconcile_flag');
+          const rawStatus = pick(item, 'payment_status_flag', 'payment_status', 'status', 'status_lookup_code') ?? '';
+          const reconciledRaw = pick(item, 'reconciliation_flag', 'reconciled_flag', 'cleared_flag', 'reconcile_flag') ?? '';
           return {
-            key: (v('payment_id') ?? index).toString(),
-            number: v('payment_number', 'check_number') ?? '',
-            paymentDocument: v('payment_document_name', 'document_name') ?? '',
-            status: v('payment_status', 'status') ?? '',
-            reconciled: reconciledFlag === 'Y' ? 'Yes' : reconciledFlag === 'N' ? 'No' : (reconciledFlag ?? ''),
-            currentPayeeName: v('payee_name', 'vendor_name') ?? '',
-            paymentDate: formatDateStr(v('payment_date', 'check_date') ?? ''),
-            paidAmount: (v('payment_amount', 'amount') ?? 0).toString(),
-            address: v('address', 'payee_address') ?? '',
+            key: (pick(item, 'payment_id', 'check_id') ?? index).toString(),
+            number:           pick(item, 'check_number', 'payment_number', 'payment_num') ?? '',
+            paymentDocument:  pick(item, 'payment_document_name', 'doc_sequence_value', 'document_name', 'bank_account_name') ?? '',
+            status:           mapStatus(rawStatus),
+            reconciled:       reconciledRaw === 'Y' ? 'Yes' : reconciledRaw === 'N' ? 'No' : reconciledRaw,
+            currentPayeeName: pick(item, 'payee_name', 'vendor_name', 'supplier_name', 'party_name') ?? '',
+            paymentDate:      formatDateStr(pick(item, 'check_date', 'payment_date') ?? ''),
+            paidAmount:       Number(pick(item, 'amount', 'payment_amount', 'check_amount') ?? 0),
+            currency:         pick(item, 'currency_code', 'payment_currency_code', 'invoice_currency_code') ?? '',
+            address:          pick(item, 'address_line1', 'address', 'payee_address', 'vendor_address') ?? '',
+            remitToAccount:   pick(item, 'remit_to_supplier_name', 'remit_account', 'remittance_account', 'bank_account_name', 'remit_to_bank') ?? '',
           };
         })
       );
@@ -2895,18 +2909,23 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   <Table
                     dataSource={invoicePayments}
                     columns={[
-                      { title: 'Payment Number', dataIndex: 'number', key: 'number', width: 140 },
-                      { title: 'Payment Date', dataIndex: 'paymentDate', key: 'paymentDate', width: 110 },
-                      { title: 'Paid Amount', dataIndex: 'paidAmount', key: 'paidAmount', width: 130, align: 'right' as const, render: (v: string) => <Text strong style={{ color: REDWOOD.success }}>{v}</Text> },
-                      { title: 'Status', dataIndex: 'status', key: 'status', width: 100, render: (s: string) => <Tag color={s === 'NEGOTIABLE' || s === 'Cleared' ? 'green' : 'default'}>{s}</Tag> },
-                      { title: 'Reconciled', dataIndex: 'reconciled', key: 'reconciled', width: 90 },
-                      { title: 'Payee Name', dataIndex: 'currentPayeeName', key: 'currentPayeeName', ellipsis: true },
-                      { title: 'Document', dataIndex: 'paymentDocument', key: 'paymentDocument', width: 140, ellipsis: true },
+                      { title: 'Number',            dataIndex: 'number',           key: 'number',           width: 100 },
+                      { title: 'Payment Document',  dataIndex: 'paymentDocument',  key: 'paymentDocument',  width: 150, ellipsis: true },
+                      { title: 'Status',            dataIndex: 'status',           key: 'status',           width: 110,
+                        render: (s: string) => <Tag color={s === 'Cleared' ? 'green' : s === 'Voided' ? 'red' : s === 'Negotiable' ? 'blue' : 'default'}>{s}</Tag> },
+                      { title: 'Reconciled',        dataIndex: 'reconciled',       key: 'reconciled',       width: 100, align: 'center' as const,
+                        render: (v: string) => v === 'Yes' ? <Tag color="green">Yes</Tag> : v === 'No' ? <Tag color="default">No</Tag> : v },
+                      { title: 'Current Payee Name', dataIndex: 'currentPayeeName', key: 'currentPayeeName', width: 180, ellipsis: true },
+                      { title: 'Payment Date',      dataIndex: 'paymentDate',      key: 'paymentDate',      width: 110 },
+                      { title: 'Paid Amount',       dataIndex: 'paidAmount',       key: 'paidAmount',       width: 150, align: 'right' as const,
+                        render: (amt: number, row: any) => <Text strong style={{ color: REDWOOD.success }}>{formatAmount(amt)}{row.currency ? ` ${row.currency}` : ''}</Text> },
+                      { title: 'Address',           dataIndex: 'address',          key: 'address',          ellipsis: true },
+                      { title: 'Remit-to Account',  dataIndex: 'remitToAccount',   key: 'remitToAccount',   width: 160, ellipsis: true },
                     ]}
                     rowKey="key"
                     size="small"
                     pagination={false}
-                    scroll={{ y: 300 }}
+                    scroll={{ x: 1200, y: 300 }}
                   />
                 ) : (
                   <div style={{ textAlign: 'center', padding: 30, color: REDWOOD.neutral600, fontSize: 12 }}>
