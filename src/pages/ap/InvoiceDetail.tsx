@@ -17,6 +17,7 @@ import {
   Collapse,
   DatePicker,
   Input,
+  Modal,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -33,6 +34,7 @@ import {
   SendOutlined,
   FormOutlined,
   QuestionCircleOutlined,
+  ScheduleOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 
@@ -181,6 +183,9 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
   const [paymentsLoading, setPaymentsLoading] = useState(false);
   const [installments, setInstallments] = useState<Installment[]>([]);
   const [installmentsLoading, setInstallmentsLoading] = useState(false);
+  const [installmentsModalOpen, setInstallmentsModalOpen] = useState(false);
+  const [installmentsModalData, setInstallmentsModalData] = useState<any[]>([]);
+  const [installmentsModalLoading, setInstallmentsModalLoading] = useState(false);
 
   // Fetch all data on mount
   useEffect(() => {
@@ -354,6 +359,33 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
     }
   };
 
+  // Fetch installments from createinvoice endpoint for the modal
+  const fetchInstallmentsForModal = async () => {
+    setInstallmentsModalLoading(true);
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments?invoice_id=${invoice.invoiceId}`;
+      const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      const items = data.items || (Array.isArray(data) ? data : []);
+      setInstallmentsModalData(items);
+    } catch (error) {
+      console.error('Error fetching installments:', error);
+      message.error('Failed to load installments');
+      setInstallmentsModalData([]);
+    } finally {
+      setInstallmentsModalLoading(false);
+    }
+  };
+
+  // Handle Invoice Actions menu click
+  const handleActionsMenuClick: MenuProps['onClick'] = ({ key }) => {
+    if (key === 'installments') {
+      setInstallmentsModalOpen(true);
+      fetchInstallmentsForModal();
+    }
+  };
+
   // Get validation status tag
   const getValidationTag = (status: string) => {
     const isValidated = status === 'Validated';
@@ -385,6 +417,8 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
     { key: 'payInFull', label: 'Pay in Full', icon: <DollarOutlined /> },
     { key: 'postToLedger', label: 'Post to Ledger', icon: <SendOutlined /> },
     { key: 'accountInDraft', label: 'Account in Draft', icon: <FormOutlined /> },
+    { type: 'divider' },
+    { key: 'installments', label: 'Installments', icon: <ScheduleOutlined /> },
   ];
 
   // Items table columns
@@ -660,9 +694,9 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
         <Title level={5} style={{ margin: 0 }}>Invoice Details</Title>
         <Space>
           {getValidationTag(invoice.validationStatus)}
-          <Dropdown menu={{ items: actionsMenuItems }} trigger={['click']}>
+          <Dropdown menu={{ items: actionsMenuItems, onClick: handleActionsMenuClick }} trigger={['click']}>
             <Button type="primary">
-              Actions <DownOutlined />
+              Invoice Actions <DownOutlined />
             </Button>
           </Dropdown>
           <Button icon={<SaveOutlined />}>Save</Button>
@@ -904,7 +938,8 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
               </Spin>
             ),
           },
-          {
+          // Installments tab hidden — accessible via Invoice Actions > Installments
+          ...(false ? [{
             key: 'installments',
             label: `Installments (${installments.length})`,
             children: (
@@ -1044,9 +1079,88 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
               </div>
               </Spin>
             ),
-          },
+          }] : []),
         ]}
       />
+
+      {/* Installments Modal */}
+      <Modal
+        title={
+          <Space>
+            <ScheduleOutlined style={{ color: '#722ed1' }} />
+            <span>Installments — {invoice.invoiceNumber}</span>
+          </Space>
+        }
+        open={installmentsModalOpen}
+        onCancel={() => setInstallmentsModalOpen(false)}
+        footer={[
+          <Button key="close" onClick={() => setInstallmentsModalOpen(false)}>
+            Close
+          </Button>,
+        ]}
+        width={900}
+        destroyOnClose
+      >
+        <Spin spinning={installmentsModalLoading}>
+          <Table
+            dataSource={installmentsModalData.map((item: any, idx: number) => ({
+              key: (item.installment_id ?? item.INSTALLMENT_ID ?? idx).toString(),
+              paymentNum:   item.payment_num        ?? item.PAYMENT_NUM        ?? item.PaymentNum        ?? idx + 1,
+              dueDate:      item.due_date           ?? item.DUE_DATE           ?? item.DueDate           ?? '',
+              grossAmount:  item.gross_amount       ?? item.GROSS_AMOUNT       ?? item.GrossAmount       ?? 0,
+              remaining:    item.amount_remaining   ?? item.AMOUNT_REMAINING   ?? item.unpaid_amount     ?? item.UNPAID_AMOUNT ?? item.UnpaidAmount ?? 0,
+              status:       item.payment_status_flag ?? item.PAYMENT_STATUS_FLAG ?? item.status ?? item.STATUS ?? '',
+              paymentMethod:item.payment_method_code ?? item.PAYMENT_METHOD_CODE ?? item.payment_method ?? item.PAYMENT_METHOD ?? '',
+              priority:     item.payment_priority   ?? item.PAYMENT_PRIORITY   ?? item.PaymentPriority  ?? '',
+              holdFlag:     item.hold_flag          ?? item.HOLD_FLAG          ?? 'N',
+            }))}
+            columns={[
+              { title: '#', dataIndex: 'paymentNum', key: 'paymentNum', width: 60, align: 'center' },
+              { title: 'Due Date', dataIndex: 'dueDate', key: 'dueDate', width: 110,
+                render: (v: string) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '' },
+              { title: 'Gross Amount', dataIndex: 'grossAmount', key: 'grossAmount', width: 130, align: 'right',
+                render: (v: number) => Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 }) },
+              { title: 'Remaining', dataIndex: 'remaining', key: 'remaining', width: 130, align: 'right',
+                render: (v: number) => Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 }) },
+              { title: 'Status', dataIndex: 'status', key: 'status', width: 90,
+                render: (v: string) => {
+                  const s = (v || '').toUpperCase();
+                  const color = s === 'Y' || s === 'PAID' ? 'success' : s === 'P' || s === 'PARTIAL' ? 'warning' : 'default';
+                  const label = s === 'Y' ? 'Paid' : s === 'N' ? 'Unpaid' : s === 'P' ? 'Partial' : v || 'Unpaid';
+                  return <Tag color={color}>{label}</Tag>;
+                }},
+              { title: 'Payment Method', dataIndex: 'paymentMethod', key: 'paymentMethod', width: 130 },
+              { title: 'Priority', dataIndex: 'priority', key: 'priority', width: 70, align: 'center' },
+              { title: 'Hold', dataIndex: 'holdFlag', key: 'holdFlag', width: 60, align: 'center',
+                render: (v: string) => v === 'Y' ? <Tag color="error">Hold</Tag> : null },
+            ]}
+            size="small"
+            bordered
+            pagination={false}
+            locale={{ emptyText: 'No installments found for this invoice.' }}
+            summary={(rows) => rows.length === 0 ? undefined : (
+              <Table.Summary fixed>
+                <Table.Summary.Row>
+                  <Table.Summary.Cell index={0} colSpan={2}><Text strong>Totals</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={1} align="right">
+                    <Text strong>
+                      {rows.reduce((s, r: any) => s + Number(r.grossAmount || 0), 0)
+                        .toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    </Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={2} align="right">
+                    <Text strong>
+                      {rows.reduce((s, r: any) => s + Number(r.remaining || 0), 0)
+                        .toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    </Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={3} colSpan={4} />
+                </Table.Summary.Row>
+              </Table.Summary>
+            )}
+          />
+        </Spin>
+      </Modal>
 
       {/* Custom styles */}
       <style>{`
