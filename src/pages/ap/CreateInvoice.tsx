@@ -2979,23 +2979,6 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     size="small"
                     pagination={false}
                     scroll={{ x: 1200, y: 300 }}
-                    summary={(rows) => {
-                      const total = rows.reduce((sum, r) => sum + (r.paidAmount ?? 0), 0);
-                      const currency = rows[0]?.currency ?? '';
-                      return (
-                        <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
-                          <Table.Summary.Cell index={0} colSpan={6} align="right">
-                            <Text strong style={{ fontSize: 12 }}>Total Paid Amount</Text>
-                          </Table.Summary.Cell>
-                          <Table.Summary.Cell index={1} align="right">
-                            <Text strong style={{ color: REDWOOD.success, fontSize: 13 }}>
-                              {formatAmount(total)}{currency ? ` ${currency}` : ''}
-                            </Text>
-                          </Table.Summary.Cell>
-                          <Table.Summary.Cell index={2} colSpan={2} />
-                        </Table.Summary.Row>
-                      );
-                    }}
                   />
                 ) : (
                   <div style={{ textAlign: 'center', padding: 30, color: REDWOOD.neutral600, fontSize: 12 }}>
@@ -4507,7 +4490,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         }
         open={payInFullOpen}
         onCancel={() => { setPayInFullOpen(false); payInFullForm.resetFields(); }}
-        width={620}
+        width={750}
         destroyOnClose
         footer={[
           <Button key="cancel" onClick={() => { setPayInFullOpen(false); payInFullForm.resetFields(); }}>
@@ -4586,6 +4569,48 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               </Col>
             </Row>
           </div>
+
+          {/* ── Pending installments ── */}
+          {(() => {
+            const pending = invoiceInstallments.filter(i => i.unpaidAmount > 0);
+            if (pending.length === 0) return null;
+            const totalUnpaid = pending.reduce((s, i) => s + i.unpaidAmount, 0);
+            const currency = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
+            return (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.neutral700, marginBottom: 6 }}>
+                  Pending Installments
+                </div>
+                <Table
+                  dataSource={pending}
+                  rowKey="key"
+                  size="small"
+                  pagination={false}
+                  scroll={{ y: 160 }}
+                  columns={[
+                    { title: '#', dataIndex: 'installmentNumber', key: 'installmentNumber', width: 45, align: 'center' as const },
+                    { title: 'Due Date', dataIndex: 'dueDate', key: 'dueDate', width: 105 },
+                    { title: 'Gross Amount', dataIndex: 'grossAmount', key: 'grossAmount', width: 130, align: 'right' as const,
+                      render: (v: number) => <Text>{formatAmount(v)}</Text> },
+                    { title: 'Unpaid Amount', dataIndex: 'unpaidAmount', key: 'unpaidAmount', align: 'right' as const,
+                      render: (v: number) => <Text strong style={{ color: REDWOOD.warning }}>{formatAmount(v)} {currency}</Text> },
+                  ]}
+                  summary={() => (
+                    <Table.Summary.Row style={{ background: '#fffbe6' }}>
+                      <Table.Summary.Cell index={0} colSpan={3} align="right">
+                        <Text strong style={{ fontSize: 12 }}>Total Unpaid</Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={1} align="right">
+                        <Text strong style={{ color: REDWOOD.warning, fontSize: 13 }}>
+                          {formatAmount(totalUnpaid)} {currency}
+                        </Text>
+                      </Table.Summary.Cell>
+                    </Table.Summary.Row>
+                  )}
+                />
+              </div>
+            );
+          })()}
 
           <Divider style={{ margin: '0 0 14px' }} />
 
