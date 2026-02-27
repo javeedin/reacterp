@@ -457,6 +457,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // Installments tab state (for edit mode)
   const [invoiceInstallments, setInvoiceInstallments] = useState<{ key: string; installmentNumber: number; dueDate: string; grossAmount: number; unpaidAmount: number; paymentPriority: number; paymentMethod: string; bankAccount: string }[]>([]);
   const [invoiceInstallmentsLoading, setInvoiceInstallmentsLoading] = useState(false);
+  const [invoiceInstallmentsUrl, setInvoiceInstallmentsUrl] = useState('');
 
   // Fetch invoice payments (edit mode)
   const fetchInvoicePayments = useCallback(async (invoiceId: number) => {
@@ -517,8 +518,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // Fetch invoice installments (edit mode)
   const fetchInvoiceInstallments = useCallback(async (invoiceId: number) => {
     setInvoiceInstallmentsLoading(true);
+    const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments?P_INVOICE_ID=${invoiceId}`;
+    setInvoiceInstallmentsUrl(url);
+    console.log('[Installments Tab] Fetching:', url);
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/installments/${invoiceId}`;
       const response = await fetch(url);
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
       const data = await response.json();
@@ -1320,7 +1323,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   const fetchInstallmentsForModal = async () => {
     const invoiceId = savedInvoiceId ?? initialData?.invoiceId ?? null;
-    const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments?invoice_id=${invoiceId ?? ''}`;
+    const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments?P_INVOICE_ID=${invoiceId ?? ''}`;
     setInstallmentsModalUrl(url);
     if (!invoiceId) { message.warning('Invoice ID not available'); return; }
     setInstallmentsModalLoading(true);
@@ -2937,6 +2940,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   <Space size={4}>
                     <DollarOutlined />
                     <span>Installments ({invoiceInstallments.length})</span>
+                    <Tooltip
+                      title={
+                        <span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>
+                          {invoiceInstallmentsUrl}
+                        </span>
+                      }
+                      placement="bottom"
+                    >
+                      <ApiOutlined style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 12 }} />
+                    </Tooltip>
                   </Space>
                 ),
                 children: invoiceInstallmentsLoading ? (
