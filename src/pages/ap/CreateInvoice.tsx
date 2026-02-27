@@ -2918,6 +2918,23 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     size="small"
                     pagination={false}
                     scroll={{ x: 1200, y: 300 }}
+                    summary={(rows) => {
+                      const total = rows.reduce((sum, r) => sum + (r.paidAmount ?? 0), 0);
+                      const currency = rows[0]?.currency ?? '';
+                      return (
+                        <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
+                          <Table.Summary.Cell index={0} colSpan={6} align="right">
+                            <Text strong style={{ fontSize: 12 }}>Total Paid Amount</Text>
+                          </Table.Summary.Cell>
+                          <Table.Summary.Cell index={1} align="right">
+                            <Text strong style={{ color: REDWOOD.success, fontSize: 13 }}>
+                              {formatAmount(total)}{currency ? ` ${currency}` : ''}
+                            </Text>
+                          </Table.Summary.Cell>
+                          <Table.Summary.Cell index={2} colSpan={2} />
+                        </Table.Summary.Row>
+                      );
+                    }}
                   />
                 ) : (
                   <div style={{ textAlign: 'center', padding: 30, color: REDWOOD.neutral600, fontSize: 12 }}>
