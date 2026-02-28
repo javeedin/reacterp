@@ -431,6 +431,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [step1CheckId, setStep1CheckId] = useState<number | null>(null);
   const [stepResults, setStepResults] = useState<Record<number, { status: 'success' | 'error'; data: any }>>({});
   const [stepLoading, setStepLoading] = useState<Record<number, boolean>>({});
+  // Incremented on every payInFullForm field change so the API drawer IIFE re-runs with fresh values
+  const [payInFullTick, setPayInFullTick] = useState(0);
 
   const [installmentsModalOpen, setInstallmentsModalOpen] = useState(false);
   const [installmentsModalData, setInstallmentsModalData] = useState<any[]>([]);
@@ -4584,6 +4586,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           form={payInFullForm}
           layout="vertical"
           size="small"
+          onValuesChange={() => setPayInFullTick(t => t + 1)}
           onFinish={async (values) => {
             setPayInFullSubmitting(true);
             try {
