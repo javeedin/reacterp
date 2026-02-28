@@ -49,7 +49,7 @@ CREATE OR REPLACE PACKAGE XXAP_PAYMENTS_PKG AS
 
     -- Get payments with filters
     FUNCTION get_payments(
-        p_payment_number    IN NUMBER DEFAULT NULL,
+        p_payment_number    IN VARCHAR2 DEFAULT NULL,
         p_payment_status    IN VARCHAR2 DEFAULT NULL,
         p_payee             IN VARCHAR2 DEFAULT NULL,
         p_supplier_number   IN VARCHAR2 DEFAULT NULL,
@@ -74,8 +74,8 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
         v_check_id NUMBER;
         v_payment_id NUMBER;
         v_payment_reference VARCHAR2(240);
-        v_paper_document_number NUMBER;
-        v_payment_number NUMBER;
+        v_paper_document_number VARCHAR2(100);
+        v_payment_number VARCHAR2(100);
         v_payment_file_reference NUMBER;
         v_payment_process_request VARCHAR2(500);
         v_voucher_number VARCHAR2(100);
@@ -207,8 +207,8 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
         SELECT
             JSON_VALUE(p_json_data, '$.PaymentId' RETURNING NUMBER),
             JSON_VALUE(p_json_data, '$.PaymentReference'),
-            JSON_VALUE(p_json_data, '$.PaperDocumentNumber' RETURNING NUMBER),
-            JSON_VALUE(p_json_data, '$.PaymentNumber' RETURNING NUMBER),
+            JSON_VALUE(p_json_data, '$.PaperDocumentNumber'),
+            JSON_VALUE(p_json_data, '$.PaymentNumber'),
             JSON_VALUE(p_json_data, '$.PaymentFileReference' RETURNING NUMBER),
             JSON_VALUE(p_json_data, '$.PaymentProcessRequest'),
             JSON_VALUE(p_json_data, '$.VoucherNumber'),
@@ -793,7 +793,7 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
 
     -- Get payments with filters
     FUNCTION get_payments(
-        p_payment_number    IN NUMBER DEFAULT NULL,
+        p_payment_number    IN VARCHAR2 DEFAULT NULL,
         p_payment_status    IN VARCHAR2 DEFAULT NULL,
         p_payee             IN VARCHAR2 DEFAULT NULL,
         p_supplier_number   IN VARCHAR2 DEFAULT NULL,
