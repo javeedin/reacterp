@@ -517,6 +517,97 @@ END;
 /
 
 -- =====================================================
+-- PUT /ap/createinvoice/installments
+-- Updates PaymentStatus and UnpaidAmount (AmountRemaining)
+-- for a single installment identified by InstallmentId.
+-- Body: { "InstallmentId": 26, "InvoiceId": ...,
+--         "PaymentStatus": "Fully Paid", "AmountRemaining": 0 }
+-- =====================================================
+
+-- Define template (no-op if already exists)
+BEGIN
+    ORDS.DEFINE_TEMPLATE(
+        p_module_name => 'ap',
+        p_pattern     => 'createinvoice/installments',
+        p_priority    => 0,
+        p_etag_type   => 'HASH',
+        p_comments    => 'AP Invoice Installment payment status update'
+    );
+    COMMIT;
+EXCEPTION
+    WHEN OTHERS THEN NULL; -- template already defined by another handler
+END;
+/
+
+BEGIN
+    ORDS.DEFINE_HANDLER(
+        p_module_name   => 'ap',
+        p_pattern       => 'createinvoice/installments',
+        p_method        => 'PUT',
+        p_source_type   => 'plsql/block',
+        p_mimes_allowed => 'application/json',
+        p_comments      => 'Update installment payment status and unpaid amount',
+        p_source        => q'[
+DECLARE
+    l_installment_id  NUMBER;
+    l_invoice_id      NUMBER;
+    l_payment_status  VARCHAR2(50);
+    l_amount_remaining NUMBER;
+    l_rows_updated    NUMBER;
+BEGIN
+    -- Extract fields from JSON body
+    SELECT
+        JSON_VALUE(:body_text, '$.InstallmentId' RETURNING NUMBER),
+        JSON_VALUE(:body_text, '$.InvoiceId'     RETURNING NUMBER),
+        JSON_VALUE(:body_text, '$.PaymentStatus'),
+        JSON_VALUE(:body_text, '$.AmountRemaining' RETURNING NUMBER)
+    INTO l_installment_id, l_invoice_id, l_payment_status, l_amount_remaining
+    FROM DUAL;
+
+    IF l_installment_id IS NULL THEN
+        :status_code := 400;
+        HTP.P('{"status":"error","message":"InstallmentId is required"}');
+        RETURN;
+    END IF;
+
+    UPDATE RR_AP_INVOICE_INSTALLMENTS
+    SET
+        PAYMENT_STATUS    = NVL(l_payment_status, PAYMENT_STATUS),
+        UNPAID_AMOUNT     = NVL(l_amount_remaining, UNPAID_AMOUNT),
+        LAST_UPDATE_DATE  = SYSTIMESTAMP,
+        LAST_UPDATED_BY   = NVL(SYS_CONTEXT('APEX$SESSION','APP_USER'), USER)
+    WHERE INSTALLMENT_ID = l_installment_id
+      AND (l_invoice_id IS NULL OR INVOICE_ID = l_invoice_id);
+
+    l_rows_updated := SQL%ROWCOUNT;
+    COMMIT;
+
+    IF l_rows_updated > 0 THEN
+        :status_code := 200;
+        HTP.P('{');
+        HTP.P('"status":"success",');
+        HTP.P('"message":"Installment updated successfully",');
+        HTP.P('"installmentId":' || l_installment_id || ',');
+        HTP.P('"paymentStatus":"' || l_payment_status || '",');
+        HTP.P('"amountRemaining":' || NVL(l_amount_remaining, 0));
+        HTP.P('}');
+    ELSE
+        :status_code := 404;
+        HTP.P('{"status":"error","message":"Installment not found"}');
+    END IF;
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+        :status_code := 500;
+        HTP.P('{"status":"error","message":"' || REPLACE(SQLERRM, '"', '''') || '"}');
+END;
+]'
+    );
+    COMMIT;
+END;
+/
+
+-- =====================================================
 -- Verify the endpoints
 -- =====================================================
 SELECT

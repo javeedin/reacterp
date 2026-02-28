@@ -4957,9 +4957,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             ...(pendingInst.length > 0 ? [{
               step: 2,
               method: 'PUT',
-              color: '#fa8c16',
+              color: '#52c41a',
               url: `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments`,
-              desc: `⚠️ Endpoint NEEDS TO BE CREATED on backend. Update each pending installment (${pendingInst.length} call${pendingInst.length > 1 ? 's' : ''}). Call once per row below.`,
+              desc: `✅ PUT /ap/createinvoice/installments — Call once per pending installment (${pendingInst.length} call${pendingInst.length > 1 ? 's' : ''}). Sets PaymentStatus=Fully Paid and AmountRemaining=0.`,
               body: {
                 '// call once per pending installment': '',
                 InvoiceId:       invoiceId,

@@ -72,6 +72,9 @@ CREATE TABLE RR_AP_INVOICE_INSTALLMENTS (
     LAST_UPDATED_BY                     VARCHAR2(100) DEFAULT USER,
     LAST_UPDATE_DATE                    TIMESTAMP DEFAULT SYSTIMESTAMP,
 
+    -- Payment Status (updated when invoice is paid)
+    PAYMENT_STATUS                      VARCHAR2(50) DEFAULT 'Unpaid',
+
     -- Processing Status
     PROCESS_STATUS                      VARCHAR2(20) DEFAULT 'NEW',
     ERROR_MESSAGE                       VARCHAR2(4000),
@@ -95,5 +98,12 @@ COMMENT ON COLUMN RR_AP_INVOICE_INSTALLMENTS.HOLD_FLAG IS 'Y if installment is o
 
 -- Grant permissions (adjust schema as needed)
 -- GRANT SELECT, INSERT, UPDATE, DELETE ON RR_AP_INVOICE_INSTALLMENTS TO your_app_user;
+
+-- ============================================================
+-- Migration: add PAYMENT_STATUS column to existing table
+-- Run in APEX SQL Workshop if table already exists
+-- ============================================================
+ALTER TABLE RR_AP_INVOICE_INSTALLMENTS ADD (PAYMENT_STATUS VARCHAR2(50) DEFAULT 'Unpaid');
+COMMIT;
 
 COMMIT;
