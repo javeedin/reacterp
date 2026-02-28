@@ -66,6 +66,7 @@ import {
   InboxOutlined,
   ScheduleOutlined,
   BankOutlined,
+  PlayCircleOutlined,
 } from '@ant-design/icons';
 
 dayjs.extend(customParseFormat);
@@ -425,6 +426,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [payInFullBankAccounts, setPayInFullBankAccounts] = useState<{ bankAccountName: string; currencyCode: string; legalEntityName: string }[]>([]);
   const [payInFullBankLoading, setPayInFullBankLoading] = useState(false);
   const [payInFullSubmitting, setPayInFullSubmitting] = useState(false);
+  const [step1CheckId, setStep1CheckId] = useState<number | null>(null);
+  const [stepResults, setStepResults] = useState<Record<number, { status: 'success' | 'error'; data: any }>>({});
+  const [stepLoading, setStepLoading] = useState<Record<number, boolean>>({});
 
   const [installmentsModalOpen, setInstallmentsModalOpen] = useState(false);
   const [installmentsModalData, setInstallmentsModalData] = useState<any[]>([]);
@@ -1390,6 +1394,27 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       setPayInFullBankLoading(false);
     }
   };
+
+  const executePayStep = useCallback(async (step: number, method: string, url: string, body: object) => {
+    setStepLoading(prev => ({ ...prev, [step]: true }));
+    setStepResults(prev => { const n = { ...prev }; delete n[step]; return n; });
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (step === 1 && data?.checkId != null) {
+        setStep1CheckId(data.checkId);
+      }
+      setStepResults(prev => ({ ...prev, [step]: { status: res.ok ? 'success' : 'error', data } }));
+    } catch (err: any) {
+      setStepResults(prev => ({ ...prev, [step]: { status: 'error', data: { message: err?.message ?? 'Network error' } } }));
+    } finally {
+      setStepLoading(prev => ({ ...prev, [step]: false }));
+    }
+  }, []);
 
   const openPayInFullModal = async () => {
     const buName = form.getFieldValue('businessUnit') || headerValues.businessUnit || '';
@@ -4737,28 +4762,30 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           </Space>
         }
         placement="right"
-        width={520}
+        width={680}
         open={payInFullApiDrawerOpen}
-        onClose={() => setPayInFullApiDrawerOpen(false)}
+        onClose={() => {
+          setPayInFullApiDrawerOpen(false);
+          setStep1CheckId(null);
+          setStepResults({});
+          setStepLoading({});
+        }}
         destroyOnClose={false}
       >
         {(() => {
-          const invoiceId      = savedInvoiceId ?? initialData?.invoiceId ?? '<INVOICE_ID>';
-          const fv             = payInFullForm.getFieldsValue();
-          const buName         = form.getFieldValue('businessUnit') || headerValues.businessUnit || '';
-          const supplierName   = form.getFieldValue('supplier') || '';
-          const supplierNumber = form.getFieldValue('supplierNumber') || null;
-          const pendingInst    = invoiceInstallments.filter(i => i.unpaidAmount > 0);
-          const currency       = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
-          const balance        = computedTotal - invoicePayments
+          const invoiceId       = savedInvoiceId ?? initialData?.invoiceId ?? '<INVOICE_ID>';
+          const fv              = payInFullForm.getFieldsValue();
+          const buName          = form.getFieldValue('businessUnit') || headerValues.businessUnit || '';
+          const supplierName    = form.getFieldValue('supplier') || '';
+          const supplierNumber  = form.getFieldValue('supplierNumber') || null;
+          const pendingInst     = invoiceInstallments.filter(i => i.unpaidAmount > 0);
+          const currency        = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
+          const balance         = computedTotal - invoicePayments
             .filter(p => p.status !== 'Voided').reduce((s, p) => s + p.paidAmount, 0);
-          // resolve legalEntityName from the selected bank account
-          const selBankAcct    = payInFullBankAccounts.find(a => a.bankAccountName === fv.disbursementBankAccount);
+          const selBankAcct     = payInFullBankAccounts.find(a => a.bankAccountName === fv.disbursementBankAccount);
           const legalEntityName = selBankAcct?.legalEntityName || '';
-          const payDate        = fv.paymentDate ? fv.paymentDate.format('YYYY-MM-DD') : null;
-          // CheckId: null → backend assigns -RR_AP_PAYMENTS_SEQ.NEXTVAL (negative integer).
-          // Negative keeps local IDs separate from Fusion's positive 18-digit IDs.
-          // Step 1 response: { "status":"success", "checkId": -N } — pass that value to Step 3.
+          const payDate         = fv.paymentDate ? fv.paymentDate.format('YYYY-MM-DD') : null;
+          const relatedStep     = pendingInst.length > 0 ? 3 : 2;
 
           const blockStyle: React.CSSProperties = {
             background: '#1e1e1e', color: '#d4d4d4',
@@ -4778,9 +4805,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               method: 'POST',
               color: '#52c41a',
               url: `${APEX_DB_CONFIG.baseUrl}/ap/payments`,
-              desc: '✅ Endpoint EXISTS — POST flat JSON object (no items wrapper). Routes to save_payment() directly. Pass CheckId: null — backend assigns -RR_AP_PAYMENTS_SEQ.NEXTVAL automatically. Response: { "status":"success", "checkId": -N } — copy that checkId value into Step 3.',
+              desc: '✅ POST /ap/payments — CheckId:null → backend assigns seq. Response returns checkId which is auto-injected into the last step body.',
               body: {
-                // Identification — null tells backend to auto-assign via -RR_AP_PAYMENTS_SEQ.NEXTVAL
                 CheckId:                         null,
                 PaymentId:                       null,
                 PaymentReference:                null,
@@ -4789,12 +4815,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 PaymentFileReference:            null,
                 PaymentProcessRequest:           null,
                 VoucherNumber:                   null,
-                // Amounts
                 PaymentAmount:                   balance,
                 PaymentBaseAmount:               balance,
                 WithheldAmount:                  null,
                 BankChargeAmount:                null,
-                // Dates
                 PaymentDate:                     payDate,
                 AccountingDate:                  payDate,
                 MaturityDate:                    null,
@@ -4807,39 +4831,31 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 ClearingConversionDate:          null,
                 ClearingValueDate:               null,
                 MaturityConversionDate:          null,
-                // Timestamps (ISO-8601 with TZ)
                 CreationDate:                    null,
                 LastUpdateDate:                  null,
-                // Details
                 PaymentDescription:              fv.description || null,
                 PaymentStatus:                   'Negotiable',
                 PaymentType:                     null,
                 PaymentMode:                     null,
                 PaymentFunction:                 'Supplier Payments',
-                // Currency
                 PaymentCurrency:                 currency,
                 PaymentBaseCurrency:             currency,
                 ConversionRate:                  headerValues.conversionRate || null,
                 ConversionRateType:              headerValues.conversionRateType || null,
                 CrossCurrencyRateType:           null,
-                // Clearing
                 ClearingAmount:                  null,
                 ClearingLedgerAmount:            null,
                 ClearingConversionRate:          null,
                 ClearingConversionRateType:      null,
-                // Maturity
                 MaturityConversionRateType:      null,
                 MaturityConversionRate:          null,
-                // Status flags
                 AccountingStatus:                null,
                 ReconciledFlag:                  'false',
                 SeparateRemittanceAdviceCreated: null,
                 IbyPaymentStatus:                null,
-                // Organization
                 LegalEntity:                     legalEntityName || null,
                 BusinessUnit:                    buName,
                 ProcurementBU:                   buName,
-                // Payee
                 Payee:                           supplierName,
                 PartyId:                         null,
                 PayeeSite:                       null,
@@ -4847,23 +4863,19 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 EmployeeAddress:                 null,
                 ThirdPartySupplier:              null,
                 ThirdPartyAddressName:           null,
-                // Bank
                 ExternalBankAccountId:           null,
                 RemitToAccountNumber:            null,
                 DisbursementBankAccountNumber:   null,
                 DisbursementBankAccountName:     fv.disbursementBankAccount || null,
                 FundingCardAccount:              null,
                 DigitalPaymentAccount:           null,
-                // Payment method
                 PaymentMethodCode:               null,
                 PaymentMethod:                   fv.paymentMethod || null,
                 PaymentDocument:                 fv.paymentDocument || null,
                 PaymentProcessProfileCode:       null,
                 PaymentProcessProfile:           null,
-                // Document
                 DocumentCategory:                null,
                 DocumentSequence:                null,
-                // Address
                 AddressLine1:                    null,
                 AddressLine2:                    null,
                 AddressLine3:                    null,
@@ -4874,10 +4886,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 State:                           null,
                 Country:                         null,
                 Zip:                             null,
-                // Stop / Void
                 StopReason:                      null,
                 StopReference:                   null,
-                // Audit
                 CreatedBy:                       null,
                 LastUpdatedBy:                   null,
                 LastUpdateLogin:                 null,
@@ -4905,20 +4915,18 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               },
             }] : []),
             {
-              step: pendingInst.length > 0 ? 3 : 2,
+              step: relatedStep,
               method: 'POST',
               color: '#52c41a',
               url: `${APEX_DB_CONFIG.baseUrl}/ap/payments/related-invoices`,
-              desc: '✅ Endpoint EXISTS — POST to /ap/payments/related-invoices. Pass InvoicePaymentId: null — backend auto-assigns -RR_AP_PAY_REL_INV_SEQ.NEXTVAL. Replace <checkId from Step 1> with the actual value from the Step 1 response.',
+              desc: '✅ POST /ap/payments/related-invoices — InvoicePaymentId:null auto-assigned. CheckId is filled automatically after Step 1 succeeds.',
               body: {
-                // null → backend auto-assigns negative local ID via RR_AP_PAY_REL_INV_SEQ
                 InvoicePaymentId:            null,
-                CheckId:                     '<checkId from Step 1 response>',
+                CheckId:                     step1CheckId !== null ? step1CheckId : '<checkId from Step 1 response>',
                 InvoiceId:                   invoiceId,
                 InvoiceBusinessUnit:         buName || null,
                 InvoiceNumber:               form.getFieldValue('invoiceNumber') || null,
                 InstallmentNumber:           null,
-                // All amount fields map to the payment balance
                 AmountPaidPaymentCurrency:   balance,
                 AmountPaidInvoiceCurrency:   balance,
                 InvoicePaymentAmount:        balance,
@@ -4942,29 +4950,66 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               <Alert
                 type="info"
                 showIcon
-                message="3-step payment creation flow"
-                description="Step 1: POST /ap/payments — pass CheckId:null, backend assigns -RR_AP_PAYMENTS_SEQ.NEXTVAL. Copy the checkId from Step 1's response into the last step. Step 1 and the related-invoices step use existing endpoints. Only the installments PUT (if applicable) still needs a backend endpoint."
+                message="Execute steps in order: 1 → 2 → 3"
+                description="Click Execute on each step. Step 1 response checkId is captured automatically and injected into the last step. Step 3 Execute button is locked until Step 1 succeeds."
                 style={{ fontSize: 12 }}
               />
-              {apis.map(api => (
-                <div key={api.step} style={{ border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 8, overflow: 'hidden' }}>
-                  <div style={{ padding: '8px 12px', background: REDWOOD.neutral100, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
-                    <Space>
-                      <Text strong style={{ color: REDWOOD.neutral600, fontSize: 12 }}>Step {api.step}</Text>
-                      <span style={{ ...labelStyle, background: api.color, color: '#fff' }}>{api.method}</span>
-                      <Text style={{ fontSize: 11, fontFamily: 'monospace', wordBreak: 'break-all' }}>
-                        {api.url}
-                      </Text>
-                    </Space>
+              {apis.map(api => {
+                const result    = stepResults[api.step];
+                const isLoading = stepLoading[api.step] ?? false;
+                const isRelated = api.step === relatedStep;
+                const locked    = isRelated && step1CheckId === null;
+                return (
+                  <div key={api.step} style={{ border: `1px solid ${result ? (result.status === 'success' ? '#b7eb8f' : '#ffa39e') : REDWOOD.neutral200}`, borderRadius: 8, overflow: 'hidden' }}>
+                    {/* Header row */}
+                    <div style={{ padding: '8px 12px', background: REDWOOD.neutral100, borderBottom: `1px solid ${REDWOOD.neutral200}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                      <Space size={4} wrap>
+                        <Text strong style={{ color: REDWOOD.neutral600, fontSize: 12 }}>Step {api.step}</Text>
+                        <span style={{ ...labelStyle, background: api.color, color: '#fff' }}>{api.method}</span>
+                        <Text style={{ fontSize: 11, fontFamily: 'monospace', wordBreak: 'break-all' }}>{api.url}</Text>
+                      </Space>
+                      <Tooltip title={locked ? 'Execute Step 1 first to capture CheckId' : ''}>
+                        <Button
+                          type="primary"
+                          size="small"
+                          icon={<PlayCircleOutlined />}
+                          loading={isLoading}
+                          disabled={locked}
+                          style={{ flexShrink: 0 }}
+                          onClick={() => executePayStep(api.step, api.method, api.url, api.body)}
+                        >
+                          Execute
+                        </Button>
+                      </Tooltip>
+                    </div>
+                    {/* Description */}
+                    <div style={{ padding: '6px 12px 4px' }}>
+                      <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{api.desc}</Text>
+                    </div>
+                    {/* Request body */}
+                    <div style={{ padding: '0 12px 10px' }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: REDWOOD.neutral400, marginBottom: 2 }}>REQUEST BODY</div>
+                      <pre style={blockStyle}>{JSON.stringify(api.body, null, 2)}</pre>
+                    </div>
+                    {/* Response result */}
+                    {result && (
+                      <div style={{ padding: '0 12px 12px', borderTop: `1px solid ${REDWOOD.neutral200}` }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: result.status === 'success' ? '#52c41a' : '#ff4d4f', margin: '8px 0 2px' }}>
+                          {result.status === 'success' ? '✅ RESPONSE' : '❌ ERROR'}
+                        </div>
+                        <pre style={{ ...blockStyle, border: `1px solid ${result.status === 'success' ? '#52c41a33' : '#ff4d4f33'}` }}>
+                          {JSON.stringify(result.data, null, 2)}
+                        </pre>
+                        {result.status === 'success' && api.step === 1 && step1CheckId !== null && (
+                          <div style={{ marginTop: 6, padding: '4px 10px', background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 4, fontSize: 11 }}>
+                            CheckId <strong>{step1CheckId}</strong> captured — Step {relatedStep} body updated automatically.
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <div style={{ padding: '6px 12px 4px' }}>
-                    <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{api.desc}</Text>
-                  </div>
-                  <div style={{ padding: '0 12px 12px' }}>
-                    <pre style={blockStyle}>{JSON.stringify(api.body, null, 2)}</pre>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           );
         })()}
