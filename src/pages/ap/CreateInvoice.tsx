@@ -74,6 +74,7 @@ import * as XLSX from 'xlsx';
 import type { ColumnsType } from 'antd/es/table';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
+import { useAuth } from '../../context/AuthContext';
 
 const { Text, Title } = Typography;
 const { Option } = Select;
@@ -358,6 +359,7 @@ interface CreateInvoiceProps {
 }
 
 const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialData }) => {
+  const { user } = useAuth();
   const [form] = Form.useForm();
   const [payInFullForm] = Form.useForm();
 
@@ -423,7 +425,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // Pay in Full modal state
   const [payInFullOpen, setPayInFullOpen] = useState(false);
   const [payInFullApiDrawerOpen, setPayInFullApiDrawerOpen] = useState(false);
-  const [payInFullBankAccounts, setPayInFullBankAccounts] = useState<{ bankAccountName: string; currencyCode: string; legalEntityName: string }[]>([]);
+  const [payInFullBankAccounts, setPayInFullBankAccounts] = useState<{ bankAccountName: string; bankAccountNumber: string; currencyCode: string; legalEntityName: string }[]>([]);
   const [payInFullBankLoading, setPayInFullBankLoading] = useState(false);
   const [payInFullSubmitting, setPayInFullSubmitting] = useState(false);
   const [step1CheckId, setStep1CheckId] = useState<number | null>(null);
@@ -736,9 +738,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   const handleSupplierSelect = (record: SupplierRecord) => {
     form.setFieldsValue({
-      supplier: record.supplier,
+      supplier:       record.supplier,
       supplierNumber: record.supplierNumber,
-      supplierSite: '',
+      supplierId:     record.supplierId,
+      supplierSite:   '',
     });
     setSupplierModalVisible(false);
     message.success(`Selected: ${record.supplier}`);
@@ -1378,9 +1381,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       const all = (data.items || []).map((item: any) => ({
-        bankAccountName: item.bank_account_name || '',
-        currencyCode:    item.currency_code    || '',
-        legalEntityName: item.legal_entity_name || '',
+        bankAccountName:   item.bank_account_name   || '',
+        bankAccountNumber: item.bank_account_num    || item.bank_account_number || '',
+        currencyCode:      item.currency_code       || '',
+        legalEntityName:   item.legal_entity_name   || '',
       }));
       const filtered = legalEntityName
         ? all.filter((a: any) => a.legalEntityName === legalEntityName)
@@ -2535,6 +2539,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           </Space.Compact>
                         </Form.Item>
                         <Form.Item name="supplierNumber" hidden>
+                          <Input />
+                        </Form.Item>
+                        <Form.Item name="supplierId" hidden>
                           <Input />
                         </Form.Item>
                         <Form.Item
@@ -4702,6 +4709,19 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             </Col>
           </Row>
 
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item label="Payment Reference" name="paymentReference">
+                <Input placeholder="Optional reference" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Voucher Number" name="voucherNumber">
+                <Input placeholder="Optional voucher number" />
+              </Form.Item>
+            </Col>
+          </Row>
+
           <Form.Item label="Description" name="description">
             <Input.TextArea rows={2} placeholder="Optional payment description" />
           </Form.Item>
@@ -4782,8 +4802,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           const currency        = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
           const balance         = computedTotal - invoicePayments
             .filter(p => p.status !== 'Voided').reduce((s, p) => s + p.paidAmount, 0);
-          const selBankAcct     = payInFullBankAccounts.find(a => a.bankAccountName === fv.disbursementBankAccount);
-          const legalEntityName = selBankAcct?.legalEntityName || '';
+          const selBankAcct        = payInFullBankAccounts.find(a => a.bankAccountName === fv.disbursementBankAccount);
+          const legalEntityName    = selBankAcct?.legalEntityName    || '';
+          const bankAccountNumber  = selBankAcct?.bankAccountNumber  || null;
+          const supplierId         = form.getFieldValue('supplierId') || null;
+          const supplierSite       = form.getFieldValue('supplierSite') || null;
+          const loginUser          = user?.username || null;
+          const sysdate            = dayjs().toISOString();
           const payDate         = fv.paymentDate ? fv.paymentDate.format('YYYY-MM-DD') : null;
           const relatedStep     = pendingInst.length > 0 ? 3 : 2;
 
@@ -4807,18 +4832,21 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               url: `${APEX_DB_CONFIG.baseUrl}/ap/payments`,
               desc: '✅ POST /ap/payments — CheckId:null → backend assigns seq. Response returns checkId which is auto-injected into the last step body.',
               body: {
+                // ── IDs (auto-generated by backend) ──────────────────────
                 CheckId:                         null,
                 PaymentId:                       null,
-                PaymentReference:                null,
+                PaymentReference:                fv.paymentReference || null,
                 PaperDocumentNumber:             fv.paperDocumentNumber ? Number(fv.paperDocumentNumber) : null,
-                PaymentNumber:                   null,
+                PaymentNumber:                   fv.paperDocumentNumber ? Number(fv.paperDocumentNumber) : null,
                 PaymentFileReference:            null,
                 PaymentProcessRequest:           null,
-                VoucherNumber:                   null,
+                VoucherNumber:                   fv.voucherNumber || null,
+                // ── Amounts ──────────────────────────────────────────────
                 PaymentAmount:                   balance,
                 PaymentBaseAmount:               balance,
                 WithheldAmount:                  null,
                 BankChargeAmount:                null,
+                // ── Dates ────────────────────────────────────────────────
                 PaymentDate:                     payDate,
                 AccountingDate:                  payDate,
                 MaturityDate:                    null,
@@ -4831,51 +4859,65 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 ClearingConversionDate:          null,
                 ClearingValueDate:               null,
                 MaturityConversionDate:          null,
-                CreationDate:                    null,
-                LastUpdateDate:                  null,
+                // ── Audit timestamps ─────────────────────────────────────
+                CreationDate:                    sysdate,
+                LastUpdateDate:                  sysdate,
+                LocalCreatedDate:                sysdate,
+                LocalUpdatedDate:                sysdate,
+                // ── Details ──────────────────────────────────────────────
                 PaymentDescription:              fv.description || null,
                 PaymentStatus:                   'Negotiable',
-                PaymentType:                     null,
+                PaymentType:                     'Quick',
                 PaymentMode:                     null,
                 PaymentFunction:                 'Supplier Payments',
+                // ── Currency ─────────────────────────────────────────────
                 PaymentCurrency:                 currency,
                 PaymentBaseCurrency:             currency,
                 ConversionRate:                  headerValues.conversionRate || null,
                 ConversionRateType:              headerValues.conversionRateType || null,
-                CrossCurrencyRateType:           null,
+                CrossCurrencyRateType:           'Corporate',
+                // ── Clearing ─────────────────────────────────────────────
                 ClearingAmount:                  null,
                 ClearingLedgerAmount:            null,
                 ClearingConversionRate:          null,
                 ClearingConversionRateType:      null,
+                // ── Maturity ─────────────────────────────────────────────
                 MaturityConversionRateType:      null,
                 MaturityConversionRate:          null,
+                // ── Status flags ─────────────────────────────────────────
                 AccountingStatus:                null,
                 ReconciledFlag:                  'false',
                 SeparateRemittanceAdviceCreated: null,
                 IbyPaymentStatus:                null,
+                // ── Organization ─────────────────────────────────────────
                 LegalEntity:                     legalEntityName || null,
                 BusinessUnit:                    buName,
                 ProcurementBU:                   buName,
+                // ── Payee / Supplier ─────────────────────────────────────
                 Payee:                           supplierName,
-                PartyId:                         null,
-                PayeeSite:                       null,
+                PartyId:                         supplierId,
+                PayeeSite:                       supplierSite,
                 SupplierNumber:                  supplierNumber,
                 EmployeeAddress:                 null,
                 ThirdPartySupplier:              null,
                 ThirdPartyAddressName:           null,
+                // ── Bank ─────────────────────────────────────────────────
                 ExternalBankAccountId:           null,
                 RemitToAccountNumber:            null,
-                DisbursementBankAccountNumber:   null,
+                DisbursementBankAccountNumber:   bankAccountNumber,
                 DisbursementBankAccountName:     fv.disbursementBankAccount || null,
                 FundingCardAccount:              null,
                 DigitalPaymentAccount:           null,
-                PaymentMethodCode:               null,
+                // ── Payment method ───────────────────────────────────────
+                PaymentMethodCode:               fv.paymentDocument || null,
                 PaymentMethod:                   fv.paymentMethod || null,
                 PaymentDocument:                 fv.paymentDocument || null,
                 PaymentProcessProfileCode:       null,
                 PaymentProcessProfile:           null,
+                // ── Document ─────────────────────────────────────────────
                 DocumentCategory:                null,
                 DocumentSequence:                null,
+                // ── Address ──────────────────────────────────────────────
                 AddressLine1:                    null,
                 AddressLine2:                    null,
                 AddressLine3:                    null,
@@ -4884,13 +4926,15 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 County:                          null,
                 Province:                        null,
                 State:                           null,
-                Country:                         null,
+                Country:                         'AE',
                 Zip:                             null,
+                // ── Stop / Void ──────────────────────────────────────────
                 StopReason:                      null,
                 StopReference:                   null,
-                CreatedBy:                       null,
-                LastUpdatedBy:                   null,
-                LastUpdateLogin:                 null,
+                // ── Audit user ───────────────────────────────────────────
+                CreatedBy:                       loginUser,
+                LastUpdatedBy:                   loginUser,
+                LastUpdateLogin:                 loginUser,
               },
             },
             ...(pendingInst.length > 0 ? [{
