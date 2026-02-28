@@ -4805,7 +4805,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           const selBankAcct        = payInFullBankAccounts.find(a => a.bankAccountName === fv.disbursementBankAccount);
           const legalEntityName    = selBankAcct?.legalEntityName    || '';
           const bankAccountNumber  = selBankAcct?.bankAccountNumber  || null;
-          const supplierId         = form.getFieldValue('supplierId') || null;
+          const supplierId         = form.getFieldValue('supplierId')
+                                     || suppliers.find(s => s.supplierNumber === supplierNumber || s.supplier === supplierName)?.supplierId
+                                     || null;
           const supplierSite       = form.getFieldValue('supplierSite') || null;
           const loginUser          = user?.username || null;
           const sysdate            = dayjs().toISOString();
