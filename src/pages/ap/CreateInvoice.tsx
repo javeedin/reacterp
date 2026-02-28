@@ -4797,6 +4797,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         }
         placement="right"
         width={680}
+        zIndex={1100}
         open={payInFullApiDrawerOpen}
         onClose={() => {
           setPayInFullApiDrawerOpen(false);
