@@ -13,12 +13,12 @@ CREATE TABLE RR_AP_PAYMENTS_ALL (
     PAYMENT_ID                      NUMBER,
 
     -- Payment Identification
-    PAYMENT_REFERENCE               NUMBER,
+    PAYMENT_REFERENCE               VARCHAR2(240),
     PAPER_DOCUMENT_NUMBER           NUMBER,
     PAYMENT_NUMBER                  NUMBER,
     PAYMENT_FILE_REFERENCE          NUMBER,
     PAYMENT_PROCESS_REQUEST         VARCHAR2(500),
-    VOUCHER_NUMBER                  NUMBER,
+    VOUCHER_NUMBER                  VARCHAR2(100),
 
     -- Payment Amounts
     PAYMENT_AMOUNT                  NUMBER(18,2),
@@ -143,6 +143,16 @@ CREATE INDEX RR_AP_PAYMENTS_N4 ON RR_AP_PAYMENTS_ALL (PAYMENT_STATUS);
 CREATE INDEX RR_AP_PAYMENTS_N5 ON RR_AP_PAYMENTS_ALL (BUSINESS_UNIT);
 CREATE INDEX RR_AP_PAYMENTS_N6 ON RR_AP_PAYMENTS_ALL (SUPPLIER_NUMBER);
 CREATE INDEX RR_AP_PAYMENTS_N7 ON RR_AP_PAYMENTS_ALL (PARTY_ID);
+
+-- ============================================
+-- Migration: fix column data types
+-- Run this on existing DB (do NOT recreate table)
+-- ============================================
+-- PAYMENT_REFERENCE: NUMBER → VARCHAR2(240) (can hold text like "test123")
+-- VOUCHER_NUMBER:    NUMBER → VARCHAR2(100) (can hold text like "v12345")
+ALTER TABLE RR_AP_PAYMENTS_ALL MODIFY (PAYMENT_REFERENCE VARCHAR2(240));
+ALTER TABLE RR_AP_PAYMENTS_ALL MODIFY (VOUCHER_NUMBER    VARCHAR2(100));
+COMMIT;
 
 -- Add comments
 COMMENT ON TABLE RR_AP_PAYMENTS_ALL IS 'Stores AP Payment data synchronized from Oracle Fusion Cloud';

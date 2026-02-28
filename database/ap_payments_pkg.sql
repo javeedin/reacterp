@@ -73,12 +73,12 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
         -- Payment identification
         v_check_id NUMBER;
         v_payment_id NUMBER;
-        v_payment_reference NUMBER;
+        v_payment_reference VARCHAR2(240);
         v_paper_document_number NUMBER;
         v_payment_number NUMBER;
         v_payment_file_reference NUMBER;
         v_payment_process_request VARCHAR2(500);
-        v_voucher_number NUMBER;
+        v_voucher_number VARCHAR2(100);
 
         -- Amounts
         v_payment_amount NUMBER;
@@ -206,12 +206,12 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
         -- Step 3: Extract all other fields (CheckId already resolved above)
         SELECT
             JSON_VALUE(p_json_data, '$.PaymentId' RETURNING NUMBER),
-            JSON_VALUE(p_json_data, '$.PaymentReference' RETURNING NUMBER),
+            JSON_VALUE(p_json_data, '$.PaymentReference'),
             JSON_VALUE(p_json_data, '$.PaperDocumentNumber' RETURNING NUMBER),
             JSON_VALUE(p_json_data, '$.PaymentNumber' RETURNING NUMBER),
             JSON_VALUE(p_json_data, '$.PaymentFileReference' RETURNING NUMBER),
             JSON_VALUE(p_json_data, '$.PaymentProcessRequest'),
-            JSON_VALUE(p_json_data, '$.VoucherNumber' RETURNING NUMBER),
+            JSON_VALUE(p_json_data, '$.VoucherNumber'),
             JSON_VALUE(p_json_data, '$.PaymentAmount' RETURNING NUMBER),
             JSON_VALUE(p_json_data, '$.PaymentBaseAmount' RETURNING NUMBER),
             JSON_VALUE(p_json_data, '$.WithheldAmount' RETURNING NUMBER),
