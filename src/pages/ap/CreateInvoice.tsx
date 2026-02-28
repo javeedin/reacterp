@@ -4564,7 +4564,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         }
         open={payInFullOpen}
         onCancel={() => { setPayInFullOpen(false); payInFullForm.resetFields(); }}
-        width={750}
+        width={960}
         destroyOnClose
         footer={[
           <Button key="cancel" onClick={() => { setPayInFullOpen(false); payInFullForm.resetFields(); }}>
@@ -4648,8 +4648,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           <Divider style={{ margin: '0 0 14px' }} />
 
           {/* ── Payment fields ── */}
-          <Row gutter={16}>
-            <Col span={12}>
+          {/* Row 1: Date | Method | Document */}
+          <Row gutter={12}>
+            <Col span={8}>
               <Form.Item
                 label="Payment Date"
                 name="paymentDate"
@@ -4658,7 +4659,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col span={8}>
               <Form.Item
                 label="Payment Method"
                 name="paymentMethod"
@@ -4672,8 +4673,36 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 </Select>
               </Form.Item>
             </Col>
+            <Col span={8}>
+              <Form.Item label="Payment Document" name="paymentDocument">
+                <Select placeholder="Select document" allowClear>
+                  <Select.Option value="Check">Check</Select.Option>
+                  <Select.Option value="Manual">Manual</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
           </Row>
 
+          {/* Row 2: Paper Doc # | Reference | Voucher */}
+          <Row gutter={12}>
+            <Col span={8}>
+              <Form.Item label="Paper Document Number" name="paperDocumentNumber">
+                <Input placeholder="Auto-assigned if blank" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item label="Payment Reference" name="paymentReference">
+                <Input placeholder="Optional reference" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item label="Voucher Number" name="voucherNumber">
+                <Input placeholder="Optional voucher number" />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          {/* Row 3: Disbursement Bank Account (full width — has dynamic label) */}
           <Form.Item
             label={
               <Space>
@@ -4706,35 +4735,6 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               ))}
             </Select>
           </Form.Item>
-
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item label="Payment Document" name="paymentDocument">
-                <Select placeholder="Select document" allowClear>
-                  <Select.Option value="Check">Check</Select.Option>
-                  <Select.Option value="Manual">Manual</Select.Option>
-                </Select>
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item label="Paper Document Number" name="paperDocumentNumber">
-                <Input placeholder="Auto-assigned if blank" />
-              </Form.Item>
-            </Col>
-          </Row>
-
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item label="Payment Reference" name="paymentReference">
-                <Input placeholder="Optional reference" />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item label="Voucher Number" name="voucherNumber">
-                <Input placeholder="Optional voucher number" />
-              </Form.Item>
-            </Col>
-          </Row>
 
           <Form.Item label="Description" name="description">
             <Input.TextArea rows={2} placeholder="Optional payment description" />
