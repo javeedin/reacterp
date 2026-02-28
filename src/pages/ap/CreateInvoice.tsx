@@ -1408,11 +1408,22 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify(body),
       });
-      const data = await res.json().catch(() => ({}));
+      // Read as text first — ORDS can return HTML error pages for system errors
+      const text = await res.text();
+      let data: any;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = { raw: text };
+      }
+      const isAppError = data?.status === 'error';
       if (step === 1 && data?.checkId != null) {
         setStep1CheckId(data.checkId);
       }
-      setStepResults(prev => ({ ...prev, [step]: { status: res.ok ? 'success' : 'error', data } }));
+      setStepResults(prev => ({
+        ...prev,
+        [step]: { status: (res.ok && !isAppError) ? 'success' : 'error', data },
+      }));
     } catch (err: any) {
       setStepResults(prev => ({ ...prev, [step]: { status: 'error', data: { message: err?.message ?? 'Network error' } } }));
     } finally {
@@ -4810,7 +4821,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                                      || null;
           const supplierSite       = form.getFieldValue('supplierSite') || null;
           const loginUser          = user?.username || null;
-          const sysdate            = dayjs().toISOString();
+          // Oracle TO_TIMESTAMP_TZ expects +00:00 not Z
+          const sysdate            = dayjs().format('YYYY-MM-DDTHH:mm:ss.SSS+00:00');
           const payDate         = fv.paymentDate ? fv.paymentDate.format('YYYY-MM-DD') : null;
           const relatedStep     = pendingInst.length > 0 ? 3 : 2;
 
