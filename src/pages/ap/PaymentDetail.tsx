@@ -22,7 +22,7 @@ import {
   Divider,
   Tooltip,
   message,
-  Drawer,
+  Collapse,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -155,13 +155,14 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
 
   // ── Void Payment state ────────────────────────────────────────────────────
   const [voidForm] = Form.useForm();
-  const [voidModalOpen, setVoidModalOpen]         = useState(false);
-  const [voidApiDrawerOpen, setVoidApiDrawerOpen] = useState(false);
-  const [voidEligibility, setVoidEligibility]     = useState<{ eligible: boolean; errors: string[] } | null>(null);
-  const [voidEligLoading, setVoidEligLoading]     = useState(false);
+  const [voidModalOpen, setVoidModalOpen]           = useState(false);
+  const [showApiSection, setShowApiSection]         = useState(false);
+  const [voidEligibility, setVoidEligibility]       = useState<{ eligible: boolean; errors: string[] } | null>(null);
+  const [voidEligLoading, setVoidEligLoading]       = useState(false);
   const [voidEligApiRunning, setVoidEligApiRunning] = useState(false);
-  const [voidEligApiResult, setVoidEligApiResult] = useState<any>(null);
-  const [voidSubmitting, setVoidSubmitting]       = useState(false);
+  const [voidEligApiResult, setVoidEligApiResult]   = useState<any>(null);
+  const [voidPutResult, setVoidPutResult]           = useState<any>(null);
+  const [voidSubmitting, setVoidSubmitting]         = useState(false);
   const [voidStepStatus, setVoidStepStatus]       = useState<
     { step: number; label: string; status: 'idle' | 'running' | 'success' | 'error'; detail?: string }[]
   >([]);
@@ -231,6 +232,8 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
   const openVoidModal = async () => {
     setVoidEligibility(null);
     setVoidEligApiResult(null);
+    setVoidPutResult(null);
+    setShowApiSection(false);
     setVoidStepStatus([]);
     voidForm.setFieldsValue({ voidDate: dayjs(), voidReason: '' });
     setVoidModalOpen(true);
@@ -312,6 +315,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
         body: JSON.stringify(voidBody),
       });
       const voidData = await voidRes.json();
+      setVoidPutResult(voidData);
       if (voidData.status === 'error' || !voidRes.ok) {
         setStep(1, 'error', voidData.message ?? `HTTP ${voidRes.status}`);
         message.error('Void failed: ' + (voidData.message ?? 'Unknown error'));
@@ -882,21 +886,21 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
             <StopOutlined style={{ color: REDWOOD.error }} />
             <span>Void Payment</span>
             <Tag color="red" style={{ marginLeft: 4 }}>{payment.paymentNumber}</Tag>
-            <Tooltip title="View Void APIs">
+            <Tooltip title={showApiSection ? 'Hide APIs' : 'Show APIs'}>
               <Button
                 size="small"
-                type="text"
-                icon={<ApiOutlined style={{ color: REDWOOD.info }} />}
-                onClick={() => setVoidApiDrawerOpen(true)}
+                type={showApiSection ? 'primary' : 'text'}
+                icon={<ApiOutlined style={{ color: showApiSection ? '#fff' : REDWOOD.info }} />}
+                onClick={() => setShowApiSection(v => !v)}
                 style={{ marginLeft: 4 }}
               />
             </Tooltip>
           </Space>
         }
         open={voidModalOpen}
-        onCancel={() => { setVoidModalOpen(false); voidForm.resetFields(); setVoidStepStatus([]); }}
+        onCancel={() => { setVoidModalOpen(false); voidForm.resetFields(); setVoidStepStatus([]); setShowApiSection(false); }}
         footer={null}
-        width={700}
+        width={showApiSection ? 900 : 700}
         destroyOnClose
       >
         <Spin spinning={voidEligLoading} tip="Checking eligibility...">
@@ -1027,9 +1031,72 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
               </div>
             )}
 
+            {/* ── Inline API Reference Panel ─────────────────────────────── */}
+            {showApiSection && (
+              <div style={{ marginBottom: 16 }}>
+                <Divider orientation="left" style={{ fontSize: 12, margin: '8px 0 10px' }}>
+                  API Reference
+                </Divider>
+
+                {/* GET eligibility */}
+                <div style={{ border: '1px solid #d9d9d9', borderRadius: 6, padding: '10px 12px', marginBottom: 10, background: '#fafafa' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <Space size={6}>
+                      <Tag color="blue" style={{ margin: 0 }}>GET</Tag>
+                      <Text strong style={{ fontSize: 12 }}>Check Void Eligibility</Text>
+                    </Space>
+                    <Button
+                      size="small"
+                      type="primary"
+                      icon={voidEligApiRunning ? <LoadingOutlined spin /> : <PlayCircleOutlined />}
+                      loading={voidEligApiRunning}
+                      onClick={runVoidEligibilityApi}
+                    >
+                      Run
+                    </Button>
+                  </div>
+                  <code style={{ fontSize: 11, background: '#e8f5e9', padding: '3px 8px', borderRadius: 4, display: 'block', wordBreak: 'break-all', marginBottom: 8 }}>
+                    {APEX_DB_CONFIG.baseUrl}/ap/payments/{payment.checkId}/void-eligibility
+                  </code>
+                  {voidEligApiResult && (
+                    <pre style={{ fontSize: 10, background: '#1e1e1e', color: '#d4d4d4', padding: 8, borderRadius: 4, maxHeight: 140, overflowY: 'auto', margin: 0 }}>
+                      {JSON.stringify(voidEligApiResult, null, 2)}
+                    </pre>
+                  )}
+                </div>
+
+                {/* PUT void */}
+                <div style={{ border: '1px solid #d9d9d9', borderRadius: 6, padding: '10px 12px', background: '#fafafa' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+                    <Space size={6}>
+                      <Tag color="orange" style={{ margin: 0 }}>PUT</Tag>
+                      <Text strong style={{ fontSize: 12 }}>Execute Void</Text>
+                      <Text type="secondary" style={{ fontSize: 11 }}>(runs on "Void Payment" click)</Text>
+                    </Space>
+                  </div>
+                  <code style={{ fontSize: 11, background: '#fff3e0', padding: '3px 8px', borderRadius: 4, display: 'block', wordBreak: 'break-all', marginBottom: 8 }}>
+                    {APEX_DB_CONFIG.baseUrl}/ap/payments/void
+                  </code>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Request body:</Text>
+                  <pre style={{ fontSize: 10, background: '#1e1e1e', color: '#d4d4d4', padding: 8, borderRadius: 4, margin: '4px 0', maxHeight: 100, overflowY: 'auto' }}>
+                    {JSON.stringify({ CheckId: payment.checkId, VoidDate: dayjs().format('YYYY-MM-DD'), VoidedBy: null, StopReason: 'Payment Voided', StopReference: payment.paymentNumber?.toString() ?? null }, null, 2)}
+                  </pre>
+                  {voidPutResult && (
+                    <>
+                      <Text type="secondary" style={{ fontSize: 11 }}>Response:</Text>
+                      <pre style={{ fontSize: 10, background: '#1e1e1e', color: '#d4d4d4', padding: 8, borderRadius: 4, margin: '4px 0 0', maxHeight: 100, overflowY: 'auto' }}>
+                        {JSON.stringify(voidPutResult, null, 2)}
+                      </pre>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+            {/* ─────────────────────────────────────────────────────────── */}
+
             {/* Buttons */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
-              <Button onClick={() => { setVoidModalOpen(false); voidForm.resetFields(); setVoidStepStatus([]); }}>
+              <Button onClick={() => { setVoidModalOpen(false); voidForm.resetFields(); setVoidStepStatus([]); setShowApiSection(false); }}>
                 Cancel
               </Button>
               <Tooltip title={isVoided ? 'Already voided' : isCleared ? 'Cleared — cannot void' : ''}>
@@ -1050,84 +1117,6 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
       </Modal>
       {/* ─────────────────────────────────────────────────────────────────── */}
 
-      {/* ── Void Payment API Drawer ──────────────────────────────────────── */}
-      <Drawer
-        title={
-          <Space>
-            <ApiOutlined style={{ color: REDWOOD.info }} />
-            <span>Void Payment APIs</span>
-          </Space>
-        }
-        open={voidApiDrawerOpen}
-        onClose={() => setVoidApiDrawerOpen(false)}
-        width={500}
-        placement="right"
-        zIndex={1200}
-      >
-        {/* GET Eligibility */}
-        <Card
-          size="small"
-          style={{ marginBottom: 16 }}
-          title={
-            <Space>
-              <Tag color="blue">GET</Tag>
-              <Text strong style={{ fontSize: 12 }}>Check Void Eligibility</Text>
-            </Space>
-          }
-          extra={
-            <Button
-              size="small"
-              type="primary"
-              icon={voidEligApiRunning ? <LoadingOutlined /> : <PlayCircleOutlined />}
-              loading={voidEligApiRunning}
-              onClick={runVoidEligibilityApi}
-            >
-              Run
-            </Button>
-          }
-        >
-          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 8 }}>
-            Pre-checks whether the payment can be voided. Runs automatically when the void popup opens.
-          </Text>
-          <code style={{ fontSize: 11, background: '#e8f5e9', padding: '4px 8px', borderRadius: 4, display: 'block', wordBreak: 'break-all', marginBottom: 10 }}>
-            {APEX_DB_CONFIG.baseUrl}/ap/payments/{payment.checkId}/void-eligibility
-          </code>
-          {voidEligApiResult && (
-            <pre style={{ fontSize: 10, background: '#1e1e1e', color: '#d4d4d4', padding: 10, borderRadius: 4, maxHeight: 200, overflowY: 'auto', margin: 0 }}>
-              {JSON.stringify(voidEligApiResult, null, 2)}
-            </pre>
-          )}
-        </Card>
-
-        {/* PUT Void */}
-        <Card
-          size="small"
-          title={
-            <Space>
-              <Tag color="orange">PUT</Tag>
-              <Text strong style={{ fontSize: 12 }}>Execute Void</Text>
-            </Space>
-          }
-        >
-          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 8 }}>
-            Voids the payment: marks as Voided, sets STOP_DATE/STOP_REASON/STOP_REFERENCE, restores invoice installment balance.
-          </Text>
-          <code style={{ fontSize: 11, background: '#fff3e0', padding: '4px 8px', borderRadius: 4, display: 'block', wordBreak: 'break-all', marginBottom: 10 }}>
-            {APEX_DB_CONFIG.baseUrl}/ap/payments/void
-          </code>
-          <Text type="secondary" style={{ fontSize: 11 }}>Request body:</Text>
-          <pre style={{ fontSize: 10, background: '#1e1e1e', color: '#d4d4d4', padding: 10, borderRadius: 4, margin: '6px 0 0', maxHeight: 160, overflowY: 'auto' }}>
-            {JSON.stringify({
-              CheckId:       payment.checkId,
-              VoidDate:      dayjs().format('YYYY-MM-DD'),
-              VoidedBy:      null,
-              StopReason:    'Payment Voided',
-              StopReference: payment.paymentNumber?.toString() ?? null,
-            }, null, 2)}
-          </pre>
-        </Card>
-      </Drawer>
-      {/* ─────────────────────────────────────────────────────────────────── */}
 
       {/* Custom styles */}
       <style>{`
