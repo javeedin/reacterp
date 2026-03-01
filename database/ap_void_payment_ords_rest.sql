@@ -17,9 +17,11 @@
 --      Response: { status, message, checkId,
 --                  paymentNumber, invoiceId, newBalance }
 --
--- NOTE: All handlers explicitly set Access-Control-Allow-Origin: *
---       so the browser accepts cross-origin responses.
---       The OPTIONS handler is required for the PUT CORS preflight.
+-- NOTE: HTTP_HEADER_CLOSE must NOT be used in GET/PUT handlers.
+--       In ORDS plsql/block, calling it flushes/commits the response
+--       before HTP.PRN runs, producing an empty body.
+--       Pattern: MIME_HEADER(type, FALSE) -> HTP.P(cors) -> HTP.PRN(body)
+--       HTTP_HEADER_CLOSE is only safe in the OPTIONS handler (no body).
 -- ============================================
 
 -- ============================================================
@@ -64,13 +66,11 @@ BEGIN
     );
     OWA_UTIL.MIME_HEADER(''application/json'', FALSE);
     HTP.P(''Access-Control-Allow-Origin: *'');
-    OWA_UTIL.HTTP_HEADER_CLOSE;
-    HTP.PRN(v_result);
+    HTP.PRN(NVL(v_result, ''{"eligible":false,"errors":["Procedure returned no result"]}''));
 EXCEPTION
     WHEN OTHERS THEN
         OWA_UTIL.MIME_HEADER(''application/json'', FALSE);
         HTP.P(''Access-Control-Allow-Origin: *'');
-        OWA_UTIL.HTTP_HEADER_CLOSE;
         HTP.PRN(''{"eligible":false,"errors":["'' || REPLACE(SQLERRM,''"'',''\"'') || ''"]}'');
 END;
 '
@@ -104,7 +104,8 @@ BEGIN
 END;
 /
 
--- OPTIONS handler — answers the browser CORS preflight before the PUT
+-- OPTIONS handler — answers the browser CORS preflight before the PUT.
+-- HTTP_HEADER_CLOSE is used here because OPTIONS has no body.
 BEGIN
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'ap',
@@ -128,7 +129,8 @@ END;
 END;
 /
 
--- PUT handler — executes the void
+-- PUT handler — executes the void.
+-- Do NOT add HTTP_HEADER_CLOSE here; it would flush the response before the body.
 BEGIN
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'ap',
@@ -148,13 +150,11 @@ BEGIN
     );
     OWA_UTIL.MIME_HEADER(''application/json'', FALSE);
     HTP.P(''Access-Control-Allow-Origin: *'');
-    OWA_UTIL.HTTP_HEADER_CLOSE;
-    HTP.PRN(v_result);
+    HTP.PRN(NVL(v_result, ''{"status":"error","message":"void_payment returned no result — check package"}''));
 EXCEPTION
     WHEN OTHERS THEN
         OWA_UTIL.MIME_HEADER(''application/json'', FALSE);
         HTP.P(''Access-Control-Allow-Origin: *'');
-        OWA_UTIL.HTTP_HEADER_CLOSE;
         HTP.PRN(''{"status":"error","message":"'' || REPLACE(SQLERRM,''"'',''\"'') || ''"}'' );
 END;
 '
