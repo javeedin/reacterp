@@ -469,6 +469,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [invoicePaymentsLoading, setInvoicePaymentsLoading] = useState(false);
   const [invoicePaymentsUrl, setInvoicePaymentsUrl] = useState('');
 
+  // Invoice balance from API (edit mode)
+  const [invoiceBalance, setInvoiceBalance] = useState<number | null>(null);
+  const [invoiceBalanceLoading, setInvoiceBalanceLoading] = useState(false);
+
   // Holds tab state (for edit mode)
   const [invoiceHolds, setInvoiceHolds] = useState<{ key: string; holdName: string; holdReason: string; holdDate: string; heldBy: string; releaseDate: string; releasedBy: string }[]>([]);
   const [invoiceHoldsLoading, setInvoiceHoldsLoading] = useState(false);
@@ -509,6 +513,25 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       console.error('[Payments Tab] Error:', error);
     } finally {
       setInvoicePaymentsLoading(false);
+    }
+  }, []);
+
+  // Fetch invoice balance from API (edit mode)
+  const fetchInvoiceBalance = useCallback(async (invoiceId: number): Promise<number | null> => {
+    setInvoiceBalanceLoading(true);
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/invoices/${invoiceId}/balance`;
+      const response = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      const bal = data.balance ?? null;
+      setInvoiceBalance(bal);
+      return bal;
+    } catch (error) {
+      console.error('[Invoice Balance] Error:', error);
+      return null;
+    } finally {
+      setInvoiceBalanceLoading(false);
     }
   }, []);
 
@@ -655,6 +678,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         fetchInvoicePayments(initialData.invoiceId);
         fetchInvoiceHolds(initialData.invoiceId);
         fetchInvoiceInstallments(initialData.invoiceId);
+        fetchInvoiceBalance(initialData.invoiceId);
         // Mark as validated if it was already validated
         if (initialData.validationStatus === 'Validated') {
           setIsValidated(true);
@@ -1440,9 +1464,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       businessUnit:  buName,
       supplier:      form.getFieldValue('supplier') || '',
       invoiceNumber: form.getFieldValue('invoiceNumber') || '',
-      payAmount:     computedTotal - invoicePayments
-        .filter(p => p.status !== 'Voided')
-        .reduce((sum, p) => sum + p.paidAmount, 0),
+      payAmount:     invoiceBalance !== null
+        ? invoiceBalance
+        : computedTotal - invoicePayments
+          .filter(p => p.status !== 'Voided')
+          .reduce((sum, p) => sum + p.paidAmount, 0),
       currency:      headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED',
       paymentDate:   dayjs(),
     });
@@ -1481,7 +1507,17 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         break;
       case 'payInFull':
         if (!isEditMode) { message.warning('Save the invoice first before making a payment.'); return; }
-        openPayInFullModal();
+        // Re-fetch balance from API before opening modal
+        (async () => {
+          const invoiceId = savedInvoiceId || initialData?.invoiceId;
+          if (!invoiceId) { openPayInFullModal(); return; }
+          const latestBalance = await fetchInvoiceBalance(invoiceId);
+          if (latestBalance !== null && latestBalance <= 0) {
+            message.warning('Invoice already paid. No remaining balance.');
+            return;
+          }
+          openPayInFullModal();
+        })();
         break;
       case 'applyPrepayment':
         message.info('Apply prepayment...');
@@ -2265,9 +2301,18 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             <FileTextOutlined style={{ marginRight: 8, color: REDWOOD.primary }} />
             {isEditMode ? (isReadOnly ? 'View Invoice' : 'Edit Invoice') : 'Create Invoice'}
           </Title>
-          {isEditMode && initialData?.unpaidAmount !== undefined && (
-            <Tag color={initialData.unpaidAmount === 0 ? 'green' : 'blue'} style={{ marginLeft: 8, fontSize: 12 }}>
-              Unpaid: {formatAmount(initialData.unpaidAmount)} {initialData.invoiceCurrency || 'AED'}
+          {isEditMode && (
+            <Tag
+              color={invoiceBalanceLoading ? 'default' : invoiceBalance === 0 ? 'green' : 'blue'}
+              style={{ marginLeft: 8, fontSize: 12 }}
+            >
+              {invoiceBalanceLoading
+                ? 'Loading balance...'
+                : invoiceBalance !== null
+                  ? `Balance: ${formatAmount(invoiceBalance)} ${initialData?.invoiceCurrency || headerValues.invoiceCurrency || 'AED'}`
+                  : initialData?.unpaidAmount !== undefined
+                    ? `Unpaid: ${formatAmount(initialData.unpaidAmount)} ${initialData.invoiceCurrency || 'AED'}`
+                    : null}
             </Tag>
           )}
         </Space>
@@ -4632,11 +4677,15 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 </div>
               </Col>
               <Col span={12}>
-                <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Pay Amount</div>
+                <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Remaining Balance</div>
                 <div style={{ fontSize: 18, fontWeight: 700, color: REDWOOD.success }}>
-                  {formatAmount(
-                    computedTotal - invoicePayments.filter(p => p.status !== 'Voided').reduce((s, p) => s + p.paidAmount, 0)
-                  )}{' '}
+                  {invoiceBalanceLoading
+                    ? 'Loading...'
+                    : formatAmount(
+                        invoiceBalance !== null
+                          ? invoiceBalance
+                          : computedTotal - invoicePayments.filter(p => p.status !== 'Voided').reduce((s, p) => s + p.paidAmount, 0)
+                      )}{' '}
                   <span style={{ fontSize: 13 }}>
                     {headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED'}
                   </span>
