@@ -7,12 +7,19 @@
 --                  paymentStatus, reconciledFlag,
 --                  clearingDate, clearingAmount }
 --
+-- OPTIONS /ap/payments/void
+--      CORS preflight handler (browser sends this before PUT).
+--
 -- PUT  /ap/payments/void
 --      Execute the void.
 --      Body:     { CheckId, VoidDate?, VoidedBy?,
 --                  StopReason?, StopReference? }
 --      Response: { status, message, checkId,
 --                  paymentNumber, invoiceId, newBalance }
+--
+-- NOTE: All handlers explicitly set Access-Control-Allow-Origin: *
+--       so the browser accepts cross-origin responses.
+--       The OPTIONS handler is required for the PUT CORS preflight.
 -- ============================================
 
 -- ============================================================
@@ -56,10 +63,14 @@ BEGIN
         p_check_id => TO_NUMBER(:check_id)
     );
     OWA_UTIL.MIME_HEADER(''application/json'', FALSE);
+    HTP.P(''Access-Control-Allow-Origin: *'');
+    OWA_UTIL.HTTP_HEADER_CLOSE;
     HTP.PRN(v_result);
 EXCEPTION
     WHEN OTHERS THEN
         OWA_UTIL.MIME_HEADER(''application/json'', FALSE);
+        HTP.P(''Access-Control-Allow-Origin: *'');
+        OWA_UTIL.HTTP_HEADER_CLOSE;
         HTP.PRN(''{"eligible":false,"errors":["'' || REPLACE(SQLERRM,''"'',''\"'') || ''"]}'');
 END;
 '
@@ -69,7 +80,7 @@ END;
 /
 
 -- ============================================================
--- Template: payments/void  (PUT)
+-- Template: payments/void  (OPTIONS + PUT)
 -- ============================================================
 BEGIN
     ORDS.DELETE_TEMPLATE(
@@ -93,6 +104,31 @@ BEGIN
 END;
 /
 
+-- OPTIONS handler — answers the browser CORS preflight before the PUT
+BEGIN
+    ORDS.DEFINE_HANDLER(
+        p_module_name    => 'ap',
+        p_pattern        => 'payments/void',
+        p_method         => 'OPTIONS',
+        p_source_type    => 'plsql/block',
+        p_items_per_page => 0,
+        p_comments       => 'CORS preflight for PUT /ap/payments/void',
+        p_source         => '
+BEGIN
+    OWA_UTIL.MIME_HEADER(''text/plain'', FALSE);
+    HTP.P(''Access-Control-Allow-Origin: *'');
+    HTP.P(''Access-Control-Allow-Methods: PUT, OPTIONS'');
+    HTP.P(''Access-Control-Allow-Headers: Content-Type, Accept'');
+    HTP.P(''Access-Control-Max-Age: 86400'');
+    OWA_UTIL.HTTP_HEADER_CLOSE;
+END;
+'
+    );
+    COMMIT;
+END;
+/
+
+-- PUT handler — executes the void
 BEGIN
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'ap',
@@ -111,10 +147,14 @@ BEGIN
         p_result    => v_result
     );
     OWA_UTIL.MIME_HEADER(''application/json'', FALSE);
+    HTP.P(''Access-Control-Allow-Origin: *'');
+    OWA_UTIL.HTTP_HEADER_CLOSE;
     HTP.PRN(v_result);
 EXCEPTION
     WHEN OTHERS THEN
         OWA_UTIL.MIME_HEADER(''application/json'', FALSE);
+        HTP.P(''Access-Control-Allow-Origin: *'');
+        OWA_UTIL.HTTP_HEADER_CLOSE;
         HTP.PRN(''{"status":"error","message":"'' || REPLACE(SQLERRM,''"'',''\"'') || ''"}'' );
 END;
 '
@@ -124,7 +164,7 @@ END;
 /
 
 -- ============================================================
--- Verify both endpoints registered
+-- Verify all endpoints registered
 -- ============================================================
 SELECT t.uri_template, h.method, h.comments
 FROM   user_ords_handlers  h
