@@ -84,9 +84,9 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENT_REL_INVOICES_PKG AS
         -- Step 1: Read InvoicePaymentId (Fusion sync provides it; local payments send null)
         v_invoice_payment_id := JSON_VALUE(p_json_data, '$.InvoicePaymentId' RETURNING NUMBER);
 
-        -- Step 2: No InvoicePaymentId → auto-assign via sequence (negative = local, never collides with Fusion)
+        -- Step 2: No InvoicePaymentId → auto-assign via sequence
         IF v_invoice_payment_id IS NULL THEN
-            SELECT -RR_AP_PAY_REL_INV_SEQ.NEXTVAL INTO v_invoice_payment_id FROM DUAL;
+            SELECT RR_INVOICE_PAYMENT_ID.NEXTVAL INTO v_invoice_payment_id FROM DUAL;
         END IF;
 
         -- Step 3: Extract remaining fields (InvoicePaymentId already resolved above)
