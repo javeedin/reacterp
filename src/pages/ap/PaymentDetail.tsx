@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import dayjs from 'dayjs';
 import {
   Card,
   Typography,
@@ -14,6 +15,13 @@ import {
   Input,
   Select,
   DatePicker,
+  Form,
+  Modal,
+  Spin,
+  Alert,
+  Divider,
+  Tooltip,
+  message,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -24,6 +32,8 @@ import {
   CloseCircleOutlined,
   FileTextOutlined,
   ScissorOutlined,
+  LoadingOutlined,
+  CheckCircleOutlined,
 } from '@ant-design/icons';
 
 const { Title, Text } = Typography;
@@ -140,13 +150,33 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
   const [relatedInvoices, setRelatedInvoices] = useState<RelatedInvoice[]>([]);
   const [loadingInvoices, setLoadingInvoices] = useState(false);
 
+  // ── Void Payment state ────────────────────────────────────────────────────
+  const [voidForm] = Form.useForm();
+  const [voidModalOpen, setVoidModalOpen]       = useState(false);
+  const [voidEligibility, setVoidEligibility]   = useState<{ eligible: boolean; errors: string[] } | null>(null);
+  const [voidEligLoading, setVoidEligLoading]   = useState(false);
+  const [voidSubmitting, setVoidSubmitting]     = useState(false);
+  const [voidStepStatus, setVoidStepStatus]     = useState<
+    { step: number; label: string; status: 'idle' | 'running' | 'success' | 'error'; detail?: string }[]
+  >([]);
+  // ─────────────────────────────────────────────────────────────────────────
+
   // Actions menu
+  const isVoided  = payment.paymentStatus === 'Voided';
+  const isCleared = !!(payment.clearingDate || payment.clearingAmount || payment.reconciled);
   const actionsMenuItems: MenuProps['items'] = [
     { key: 'edit', label: 'Edit', icon: <EditOutlined /> },
     { type: 'divider' },
-    { key: 'void', label: 'Void Payment', icon: <CloseCircleOutlined />, danger: true },
+    {
+      key: 'void', label: 'Void Payment', icon: <CloseCircleOutlined />, danger: true,
+      disabled: isVoided || isCleared,
+    },
     { key: 'stop', label: 'Stop Payment', icon: <StopOutlined />, danger: true },
   ];
+
+  const handleActionsClick = ({ key }: { key: string }) => {
+    if (key === 'void') openVoidModal();
+  };
 
   // Fetch related invoices from APEX
   const fetchRelatedInvoices = async () => {
@@ -188,6 +218,86 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
       setRelatedInvoices([]);
     } finally {
       setLoadingInvoices(false);
+    }
+  };
+
+  // Open void modal — auto-runs eligibility check
+  const openVoidModal = async () => {
+    setVoidEligibility(null);
+    setVoidStepStatus([]);
+    voidForm.setFieldsValue({ voidDate: dayjs(), voidReason: '' });
+    setVoidModalOpen(true);
+    setVoidEligLoading(true);
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/${payment.checkId}/void-eligibility`;
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!res.ok) {
+        setVoidEligibility({ eligible: false, errors: [`API returned HTTP ${res.status}`] });
+      } else {
+        const data = await res.json();
+        setVoidEligibility({ ...data, errors: Array.isArray(data.errors) ? data.errors : [] });
+      }
+    } catch (e: any) {
+      setVoidEligibility({ eligible: false, errors: [e?.message ?? 'Network error'] });
+    } finally {
+      setVoidEligLoading(false);
+    }
+  };
+
+  const handleVoidSubmit = async (values: any) => {
+    const steps = [
+      { step: 0, label: 'Re-check eligibility', status: 'idle' as const },
+      { step: 1, label: 'Void payment',          status: 'idle' as const },
+    ];
+    setVoidStepStatus(steps);
+    setVoidSubmitting(true);
+    const setStep = (step: number, status: 'running' | 'success' | 'error', detail?: string) =>
+      setVoidStepStatus(prev => prev.map(s => s.step === step ? { ...s, status, detail } : s));
+    try {
+      setStep(0, 'running');
+      const eligRes = await fetch(
+        `${APEX_DB_CONFIG.baseUrl}/ap/payments/${payment.checkId}/void-eligibility`,
+        { headers: { Accept: 'application/json' } }
+      );
+      const eligData = eligRes.ok ? await eligRes.json() : { eligible: false, errors: [`HTTP ${eligRes.status}`] };
+      if (!eligData.eligible) {
+        setStep(0, 'error', (eligData.errors ?? [])[0] ?? 'Not eligible');
+        message.error('Payment is not eligible for void');
+        return;
+      }
+      setStep(0, 'success', 'Eligible for void');
+
+      setStep(1, 'running');
+      const voidBody = {
+        CheckId:       payment.checkId,
+        VoidDate:      values.voidDate ? values.voidDate.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD'),
+        VoidedBy:      null,
+        StopReason:    values.voidReason || 'Payment Voided',
+        StopReference: payment.paymentNumber?.toString() ?? null,
+      };
+      const voidRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/payments/void`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(voidBody),
+      });
+      const voidData = await voidRes.json();
+      if (voidData.status === 'error' || !voidRes.ok) {
+        setStep(1, 'error', voidData.message ?? `HTTP ${voidRes.status}`);
+        message.error('Void failed: ' + (voidData.message ?? 'Unknown error'));
+        return;
+      }
+      setStep(1, 'success',
+        `Voided — New balance: ${voidData.newBalance != null ? Number(voidData.newBalance).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—'}`
+      );
+      message.success('Payment voided successfully');
+      setTimeout(() => {
+        setVoidModalOpen(false);
+        voidForm.resetFields();
+        setVoidStepStatus([]);
+        onClose(); // close the detail view so user sees refreshed list
+      }, 1800);
+    } finally {
+      setVoidSubmitting(false);
     }
   };
 
@@ -661,7 +771,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
             Payment: {payment.paymentNumber}
           </Title>
           <Space>
-            <Dropdown menu={{ items: actionsMenuItems }} trigger={['click']}>
+            <Dropdown menu={{ items: actionsMenuItems, onClick: handleActionsClick }} trigger={['click']}>
               <Button>Actions <DownOutlined /></Button>
             </Dropdown>
             <Button type="primary" style={{ background: REDWOOD.primary }} onClick={onClose}>
@@ -733,6 +843,172 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
           }}
         />
       </Card>
+
+      {/* ── Void Payment Modal ──────────────────────────────────────────── */}
+      <Modal
+        title={
+          <Space>
+            <StopOutlined style={{ color: REDWOOD.error }} />
+            <span>Void Payment</span>
+            <Tag color="red" style={{ marginLeft: 4 }}>{payment.paymentNumber}</Tag>
+          </Space>
+        }
+        open={voidModalOpen}
+        onCancel={() => { setVoidModalOpen(false); voidForm.resetFields(); setVoidStepStatus([]); }}
+        footer={null}
+        width={700}
+        destroyOnClose
+      >
+        <Spin spinning={voidEligLoading} tip="Checking eligibility...">
+          {/* Eligibility Banner */}
+          {voidEligibility && !voidEligLoading && (
+            <Alert
+              type={voidEligibility.eligible ? 'success' : 'error'}
+              showIcon
+              message={voidEligibility.eligible ? 'Payment is eligible for void' : 'Payment cannot be voided'}
+              description={
+                !voidEligibility.eligible && (voidEligibility.errors?.length ?? 0) > 0 ? (
+                  <ul style={{ margin: 0, paddingLeft: 16 }}>
+                    {voidEligibility.errors.map((e, i) => <li key={i}>{e}</li>)}
+                  </ul>
+                ) : null
+              }
+              style={{ marginBottom: 16 }}
+            />
+          )}
+
+          <Form form={voidForm} layout="vertical" onFinish={handleVoidSubmit} size="small">
+            {/* Row 1: Payment Number | Void Date */}
+            <Row gutter={16}>
+              <Col span={12}>
+                <Form.Item label="Payment Number">
+                  <Input value={payment.paymentNumber?.toString() ?? ''} readOnly style={{ background: '#f5f5f5', color: '#555' }} />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item
+                  label={<><span style={{ color: REDWOOD.primary }}>*</span> Void Date</>}
+                  name="voidDate"
+                  rules={[{ required: true, message: 'Required' }]}
+                >
+                  <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
+                </Form.Item>
+              </Col>
+            </Row>
+
+            {/* Row 2: Payment Date | Accounting Date */}
+            <Row gutter={16}>
+              <Col span={12}>
+                <Form.Item label="Payment Date">
+                  <Input value={payment.paymentDate ?? ''} readOnly style={{ background: '#f5f5f5', color: '#555' }} />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item label="Accounting Date">
+                  <Input value={payment.accountingDate ?? ''} readOnly style={{ background: '#f5f5f5', color: '#555' }} />
+                </Form.Item>
+              </Col>
+            </Row>
+
+            {/* Row 3: Payment Amount | Void Reason */}
+            <Row gutter={16}>
+              <Col span={12}>
+                <Form.Item label="Payment Amount">
+                  <Input
+                    value={`${payment.paymentAmount.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${payment.paymentCurrency}`}
+                    readOnly
+                    style={{ background: '#f5f5f5', color: '#555', fontWeight: 500 }}
+                  />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item label="Void Reason" name="voidReason">
+                  <Input placeholder="Enter void reason (optional)" />
+                </Form.Item>
+              </Col>
+            </Row>
+
+            {/* Related Invoices */}
+            <Divider orientation="left" style={{ fontSize: 12, margin: '4px 0 10px' }}>
+              Related Invoices
+            </Divider>
+            <Table
+              size="small"
+              loading={loadingInvoices}
+              dataSource={relatedInvoices}
+              rowKey="key"
+              pagination={false}
+              scroll={{ y: 140 }}
+              style={{ marginBottom: 16 }}
+              locale={{ emptyText: loadingInvoices ? 'Loading...' : 'No related invoices found' }}
+              columns={[
+                { title: 'Invoice #', dataIndex: 'invoiceNumber', key: 'invoiceNumber', width: 140, ellipsis: true },
+                {
+                  title: 'Invoice Amount', dataIndex: 'invoiceAmount', key: 'invoiceAmount', width: 130, align: 'right' as const,
+                  render: (v: number) => v != null ? v.toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—',
+                },
+                {
+                  title: 'Amt Paid', dataIndex: 'amountPaidInvoiceCurrency', key: 'amountPaidInvoiceCurrency', width: 120, align: 'right' as const,
+                  render: (v: number) => v != null ? v.toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—',
+                },
+                { title: 'Currency', dataIndex: 'invoiceCurrency', key: 'invoiceCurrency', width: 80 },
+                {
+                  title: 'Status', dataIndex: 'invoicePaymentStatus', key: 'invoicePaymentStatus', width: 100,
+                  render: (s: string) => s ? <Tag color={s === 'Voided' ? 'red' : 'blue'}>{s}</Tag> : null,
+                },
+              ]}
+            />
+
+            {/* Step Status Panel */}
+            {voidStepStatus.length > 0 && (
+              <div style={{ marginBottom: 16, background: '#fafafa', border: '1px solid #e8e8e8', borderRadius: 6, padding: '10px 14px' }}>
+                {voidStepStatus.map(s => {
+                  const icon =
+                    s.status === 'running' ? <LoadingOutlined style={{ color: REDWOOD.info }} spin /> :
+                    s.status === 'success' ? <CheckCircleOutlined style={{ color: REDWOOD.success }} /> :
+                    s.status === 'error'   ? <CloseCircleOutlined style={{ color: REDWOOD.error }} /> :
+                    <span style={{ display: 'inline-block', width: 14, height: 14, borderRadius: '50%', background: '#d9d9d9', verticalAlign: 'middle' }} />;
+                  const textColor =
+                    s.status === 'success' ? REDWOOD.success :
+                    s.status === 'error'   ? REDWOOD.error   :
+                    s.status === 'running' ? REDWOOD.info    : '#6B6B6B';
+                  return (
+                    <div key={s.step} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 4 }}>
+                      <span style={{ marginTop: 2 }}>{icon}</span>
+                      <div>
+                        <Text style={{ fontSize: 12, color: textColor }}>
+                          <strong>Step {s.step}:</strong> {s.label}
+                        </Text>
+                        {s.detail && <div><Text type="secondary" style={{ fontSize: 11 }}>{s.detail}</Text></div>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Buttons */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+              <Button onClick={() => { setVoidModalOpen(false); voidForm.resetFields(); setVoidStepStatus([]); }}>
+                Cancel
+              </Button>
+              <Tooltip title={isVoided ? 'Already voided' : isCleared ? 'Cleared — cannot void' : ''}>
+                <Button
+                  type="primary"
+                  danger
+                  htmlType="submit"
+                  loading={voidSubmitting}
+                  disabled={!voidEligibility?.eligible || voidEligLoading}
+                  icon={<StopOutlined />}
+                >
+                  Void Payment
+                </Button>
+              </Tooltip>
+            </div>
+          </Form>
+        </Spin>
+      </Modal>
+      {/* ─────────────────────────────────────────────────────────────────── */}
 
       {/* Custom styles */}
       <style>{`
