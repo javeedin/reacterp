@@ -3062,6 +3062,7 @@ const ManagePayments: React.FC = () => {
           onClose={() => setVoidApiDrawerOpen(false)}
           width={520}
           placement="right"
+          zIndex={1200}
         >
           {/* GET Eligibility */}
           <Card

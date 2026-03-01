@@ -1062,6 +1062,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
         onClose={() => setVoidApiDrawerOpen(false)}
         width={500}
         placement="right"
+        zIndex={1200}
       >
         {/* GET Eligibility */}
         <Card
