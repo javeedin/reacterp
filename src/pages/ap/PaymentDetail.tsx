@@ -161,6 +161,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
   const [voidEligLoading, setVoidEligLoading]       = useState(false);
   const [voidEligApiRunning, setVoidEligApiRunning] = useState(false);
   const [voidEligApiResult, setVoidEligApiResult]   = useState<any>(null);
+  const [voidPutApiRunning, setVoidPutApiRunning]   = useState(false);
   const [voidPutResult, setVoidPutResult]           = useState<any>(null);
   const [voidSubmitting, setVoidSubmitting]         = useState(false);
   const [voidStepStatus, setVoidStepStatus]       = useState<
@@ -254,6 +255,31 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
       setVoidEligibility({ eligible: false, errors: [e?.message ?? 'Network error'] });
     } finally {
       setVoidEligLoading(false);
+    }
+  };
+
+  const runVoidPutApi = async () => {
+    setVoidPutApiRunning(true);
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/void`;
+      const body = {
+        CheckId:       payment.checkId,
+        VoidDate:      dayjs().format('YYYY-MM-DD'),
+        VoidedBy:      null,
+        StopReason:    'Payment Voided',
+        StopReference: payment.paymentNumber?.toString() ?? null,
+      };
+      const res = await fetch(url, {
+        method:  'PUT',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body:    JSON.stringify(body),
+      });
+      const data = await res.json();
+      setVoidPutResult(data);
+    } catch (e: any) {
+      setVoidPutResult({ error: e?.message ?? 'Network error' });
+    } finally {
+      setVoidPutApiRunning(false);
     }
   };
 
@@ -1067,12 +1093,21 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
 
                 {/* PUT void */}
                 <div style={{ border: '1px solid #d9d9d9', borderRadius: 6, padding: '10px 12px', background: '#fafafa' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                     <Space size={6}>
                       <Tag color="orange" style={{ margin: 0 }}>PUT</Tag>
                       <Text strong style={{ fontSize: 12 }}>Execute Void</Text>
-                      <Text type="secondary" style={{ fontSize: 11 }}>(runs on "Void Payment" click)</Text>
                     </Space>
+                    <Button
+                      size="small"
+                      type="primary"
+                      danger
+                      icon={voidPutApiRunning ? <LoadingOutlined spin /> : <PlayCircleOutlined />}
+                      loading={voidPutApiRunning}
+                      onClick={runVoidPutApi}
+                    >
+                      Run
+                    </Button>
                   </div>
                   <code style={{ fontSize: 11, background: '#fff3e0', padding: '3px 8px', borderRadius: 4, display: 'block', wordBreak: 'break-all', marginBottom: 8 }}>
                     {APEX_DB_CONFIG.baseUrl}/ap/payments/void
