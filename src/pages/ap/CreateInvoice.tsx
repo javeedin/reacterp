@@ -458,9 +458,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const isEditMode = Boolean(initialData?.invoiceId);
   const isReadOnly = useMemo(() => {
     if (!initialData) return false;
-    const status = initialData.holdPaidStatus || '';
+    const status = (initialData.holdPaidStatus || '').toLowerCase();
     const isPosted = initialData.validationStatus === 'Validated';
-    const isPaid = status === 'Fully paid' || status === 'Paid';
+    const isPaid = status === 'fully paid' || status === 'paid' || status.includes('partial');
     return isPosted || isPaid;
   }, [initialData]);
 
@@ -1847,6 +1847,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           onChange={(v) => updateLine(record.key, 'type', v)}
           style={{ width: '100%' }}
           variant="borderless"
+          disabled={isReadOnly}
         >
           <Option value="Item">Item</Option>
           <Option value="Freight">Freight</Option>
@@ -1871,6 +1872,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           precision={2}
           style={{ width: '100%', fontWeight: 600 }}
           variant="borderless"
+          disabled={isReadOnly}
         />
       ),
     },
@@ -1886,6 +1888,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           onChange={(e) => updateLine(record.key, 'distributionSet', e.target.value)}
           variant="borderless"
           placeholder=""
+          disabled={isReadOnly}
           suffix={<SearchOutlined style={{ color: REDWOOD.neutral300, fontSize: 11 }} />}
         />
       ),
@@ -1905,10 +1908,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             placeholder="e.g. 01-000-2100-0000-000"
             variant="borderless"
             style={{ flex: 1 }}
+            disabled={isReadOnly}
             suffix={
               <SearchOutlined
-                style={{ color: REDWOOD.info, fontSize: 12, cursor: 'pointer' }}
-                onClick={() => openAccountSelector(record.key, val)}
+                style={{ color: isReadOnly ? REDWOOD.neutral300 : REDWOOD.info, fontSize: 12, cursor: isReadOnly ? 'default' : 'pointer' }}
+                onClick={() => !isReadOnly && openAccountSelector(record.key, val)}
               />
             }
           />
@@ -1956,6 +1960,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           variant="borderless"
           placeholder="dd-mmm-yyyy"
           style={{ width: '100%' }}
+          disabled={isReadOnly}
         />
       ),
     },
@@ -1971,6 +1976,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           onChange={(v) => updateLine(record.key, 'prorateAcrossAllItemLines', v)}
           style={{ width: '100%' }}
           variant="borderless"
+          disabled={isReadOnly}
         >
           <Option value="Yes">Yes</Option>
           <Option value="No">No</Option>
@@ -1989,6 +1995,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           onChange={(e) => updateLine(record.key, 'description', e.target.value)}
           placeholder=""
           variant="borderless"
+          disabled={isReadOnly}
         />
       ),
     },
@@ -2006,6 +2013,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           variant="borderless"
           placeholder=""
           allowClear
+          disabled={isReadOnly}
         >
           <Option value="VAT 5%">VAT 5%</Option>
           <Option value="Zero Rated">Zero Rated</Option>
@@ -2043,6 +2051,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           onChange={(e) => updateLine(record.key, 'shipToLocation', e.target.value)}
           variant="borderless"
           placeholder=""
+          disabled={isReadOnly}
           suffix={<SearchOutlined style={{ color: REDWOOD.neutral300, fontSize: 11 }} />}
         />
       ),
@@ -2073,7 +2082,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       key: 'poNumber',
       width: 130,
       render: (val: string, record: InvoiceLine) => (
-        <Input size="small" value={val} onChange={(e) => updateLine(record.key, 'poNumber', e.target.value)} variant="borderless" placeholder="" suffix={<SearchOutlined style={{ color: REDWOOD.neutral300, fontSize: 11 }} />} />
+        <Input size="small" value={val} onChange={(e) => updateLine(record.key, 'poNumber', e.target.value)} variant="borderless" placeholder="" disabled={isReadOnly} suffix={<SearchOutlined style={{ color: REDWOOD.neutral300, fontSize: 11 }} />} />
       ),
     },
     {
@@ -2082,7 +2091,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       key: 'poLine',
       width: 80,
       render: (val: string, record: InvoiceLine) => (
-        <Input size="small" value={val} onChange={(e) => updateLine(record.key, 'poLine', e.target.value)} variant="borderless" />
+        <Input size="small" value={val} onChange={(e) => updateLine(record.key, 'poLine', e.target.value)} variant="borderless" disabled={isReadOnly} />
       ),
     },
     {
@@ -2091,7 +2100,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       key: 'poSchedule',
       width: 100,
       render: (val: string, record: InvoiceLine) => (
-        <Input size="small" value={val} onChange={(e) => updateLine(record.key, 'poSchedule', e.target.value)} variant="borderless" />
+        <Input size="small" value={val} onChange={(e) => updateLine(record.key, 'poSchedule', e.target.value)} variant="borderless" disabled={isReadOnly} />
       ),
     },
     {
@@ -2100,7 +2109,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       key: 'receiptNumber',
       width: 130,
       render: (val: string, record: InvoiceLine) => (
-        <Input size="small" value={val} onChange={(e) => updateLine(record.key, 'receiptNumber', e.target.value)} variant="borderless" />
+        <Input size="small" value={val} onChange={(e) => updateLine(record.key, 'receiptNumber', e.target.value)} variant="borderless" disabled={isReadOnly} />
       ),
     },
     {
@@ -2109,7 +2118,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       key: 'receiptLine',
       width: 100,
       render: (val: string, record: InvoiceLine) => (
-        <Input size="small" value={val} onChange={(e) => updateLine(record.key, 'receiptLine', e.target.value)} variant="borderless" />
+        <Input size="small" value={val} onChange={(e) => updateLine(record.key, 'receiptLine', e.target.value)} variant="borderless" disabled={isReadOnly} />
       ),
     },
     {
@@ -2118,7 +2127,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       key: 'consumptionAdviceNumber',
       width: 190,
       render: (val: string, record: InvoiceLine) => (
-        <Input size="small" value={val} onChange={(e) => updateLine(record.key, 'consumptionAdviceNumber', e.target.value)} variant="borderless" />
+        <Input size="small" value={val} onChange={(e) => updateLine(record.key, 'consumptionAdviceNumber', e.target.value)} variant="borderless" disabled={isReadOnly} />
       ),
     },
     {
@@ -2127,7 +2136,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       key: 'consumptionAdviceLine',
       width: 170,
       render: (val: string, record: InvoiceLine) => (
-        <Input size="small" value={val} onChange={(e) => updateLine(record.key, 'consumptionAdviceLine', e.target.value)} variant="borderless" />
+        <Input size="small" value={val} onChange={(e) => updateLine(record.key, 'consumptionAdviceLine', e.target.value)} variant="borderless" disabled={isReadOnly} />
       ),
     },
     {
@@ -2136,7 +2145,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       key: 'shipToLocation',
       width: 150,
       render: (val: string, record: InvoiceLine) => (
-        <Input size="small" value={val} onChange={(e) => updateLine(record.key, 'shipToLocation', e.target.value)} variant="borderless" suffix={<SearchOutlined style={{ color: REDWOOD.neutral300, fontSize: 11 }} />} />
+        <Input size="small" value={val} onChange={(e) => updateLine(record.key, 'shipToLocation', e.target.value)} variant="borderless" disabled={isReadOnly} suffix={<SearchOutlined style={{ color: REDWOOD.neutral300, fontSize: 11 }} />} />
       ),
     },
     {
@@ -2153,6 +2162,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           variant="borderless"
           placeholder="dd-mmm-yyyy"
           style={{ width: '100%' }}
+          disabled={isReadOnly}
         />
       ),
     },
@@ -2170,6 +2180,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           variant="borderless"
           placeholder="dd-mmm-yyyy"
           style={{ width: '100%' }}
+          disabled={isReadOnly}
         />
       ),
     },
@@ -2448,6 +2459,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             labelCol={{ span: 9 }}
             wrapperCol={{ span: 15 }}
             size="small"
+            disabled={isReadOnly}
             initialValues={{
               invoiceType: 'Standard',
               invoiceCurrency: 'AED',
