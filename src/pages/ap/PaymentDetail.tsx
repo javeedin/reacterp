@@ -260,6 +260,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
 
   const runVoidPutApi = async () => {
     setVoidPutApiRunning(true);
+    setVoidPutResult(null);
     try {
       const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/void`;
       const body = {
@@ -274,10 +275,24 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body:    JSON.stringify(body),
       });
-      const data = await res.json();
-      setVoidPutResult(data);
+      const text = await res.text();
+      try {
+        const data = JSON.parse(text);
+        setVoidPutResult(data);
+      } catch {
+        setVoidPutResult({ error: `HTTP ${res.status} — non-JSON response`, raw: text.slice(0, 500) });
+      }
     } catch (e: any) {
-      setVoidPutResult({ error: e?.message ?? 'Network error' });
+      const msg: string = e?.message ?? 'Network error';
+      if (msg === 'Failed to fetch' || msg.includes('NetworkError') || msg.includes('CORS')) {
+        setVoidPutResult({
+          error: 'Failed to fetch',
+          hint: 'CORS or network error. Likely causes: (1) ORDS handler missing OWA_UTIL.MIME_HEADER call — re-run ap_void_payment_ords_rest.sql on the DB, (2) CORS not enabled for this ORDS module, (3) VPN/network connectivity.',
+          url: `${APEX_DB_CONFIG.baseUrl}/ap/payments/void`,
+        });
+      } else {
+        setVoidPutResult({ error: msg });
+      }
     } finally {
       setVoidPutApiRunning(false);
     }
