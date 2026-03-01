@@ -298,6 +298,15 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
         -- Parse reconciled flag
         v_reconciled_flag := CASE WHEN UPPER(v_reconciled_raw) IN ('TRUE', 'Y', '1') THEN 'Y' ELSE 'N' END;
 
+        -- Auto-generate PaymentNumber if not supplied
+        -- Format: PAY-YYYYMMDD-<abs(check_id) zero-padded to 6>
+        IF v_payment_number IS NULL THEN
+            v_payment_number := 'PAY-' || TO_CHAR(SYSDATE, 'YYYYMMDD') || '-' || LPAD(TO_CHAR(ABS(v_check_id)), 6, '0');
+        END IF;
+        IF v_paper_document_number IS NULL THEN
+            v_paper_document_number := v_payment_number;
+        END IF;
+
         -- Parse dates
         BEGIN
             v_temp_str := JSON_VALUE(p_json_data, '$.PaymentDate');
@@ -568,7 +577,7 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
             );
 
         COMMIT;
-        p_result := '{"status": "success", "message": "Payment saved successfully", "checkId": ' || v_check_id || '}';
+        p_result := '{"status": "success", "message": "Payment saved successfully", "checkId": ' || v_check_id || ', "paymentNumber": "' || v_payment_number || '"}';
 
     EXCEPTION
         WHEN OTHERS THEN

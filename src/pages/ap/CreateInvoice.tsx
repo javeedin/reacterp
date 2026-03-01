@@ -4759,7 +4759,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 }
                 capturedCheckId = data1?.checkId ?? null;
                 setStep1CheckId(capturedCheckId);
-                setStep(1, 'success', `CheckId: ${capturedCheckId}`);
+                const generatedPaymentNumber = data1?.paymentNumber ?? null;
+                setStep(1, 'success', `Payment No: ${generatedPaymentNumber ?? capturedCheckId}`);
               } catch (e: any) {
                 setStep(1, 'error', e?.message ?? 'Network error');
                 message.error('Step 1 failed — network error');
