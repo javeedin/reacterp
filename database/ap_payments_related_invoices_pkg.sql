@@ -157,6 +157,13 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENT_REL_INVOICES_PKG AS
             END;
         END;
 
+        -- Default audit columns when not provided in JSON
+        v_created_by        := NVL(v_created_by,        SYS_CONTEXT('USERENV', 'SESSION_USER'));
+        v_creation_date     := NVL(v_creation_date,     SYSTIMESTAMP);
+        v_last_updated_by   := NVL(v_last_updated_by,   SYS_CONTEXT('USERENV', 'SESSION_USER'));
+        v_last_update_date  := NVL(v_last_update_date,  SYSTIMESTAMP);
+        v_last_update_login := NVL(v_last_update_login, SYS_CONTEXT('USERENV', 'SESSION_USER'));
+
         -- Merge (upsert) data
         MERGE INTO RR_AP_PAYMENTS_RELATED_INVOICES tgt
         USING (SELECT v_invoice_payment_id AS INVOICE_PAYMENT_ID FROM DUAL) src
