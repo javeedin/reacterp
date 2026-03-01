@@ -363,6 +363,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const { user } = useAuth();
   const [form] = Form.useForm();
   const [payInFullForm] = Form.useForm();
+  const [ciVoidForm] = Form.useForm();
 
   // Unified invoice lines - shared across both tabs
   const [lines, setLines] = useState<InvoiceLine[]>([createBlankLine(1)]);
@@ -439,6 +440,17 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     { step: number; label: string; status: 'idle' | 'running' | 'success' | 'error'; detail?: string }[]
   >([]);
 
+  // Void Payment from invoice edit page
+  const [ciVoidOpen, setCiVoidOpen]           = useState(false);
+  const [ciVoidCheckId, setCiVoidCheckId]     = useState<number | null>(null);
+  const [ciVoidPaymentInfo, setCiVoidPaymentInfo] = useState<{ number: string; paymentDate: string; paidAmount: number; currency: string } | null>(null);
+  const [ciVoidEligibility, setCiVoidEligibility] = useState<{ eligible: boolean; errors: string[] } | null>(null);
+  const [ciVoidEligLoading, setCiVoidEligLoading] = useState(false);
+  const [ciVoidSubmitting, setCiVoidSubmitting]   = useState(false);
+  const [ciVoidStepStatus, setCiVoidStepStatus]   = useState<
+    { step: number; label: string; status: 'idle' | 'running' | 'success' | 'error'; detail?: string }[]
+  >([]);
+
   const [installmentsModalOpen, setInstallmentsModalOpen] = useState(false);
   const [installmentsModalData, setInstallmentsModalData] = useState<any[]>([]);
   const [installmentsModalLoading, setInstallmentsModalLoading] = useState(false);
@@ -470,7 +482,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   }, [initialData]);
 
   // Payments tab state (for edit mode)
-  const [invoicePayments, setInvoicePayments] = useState<{ key: string; number: string; paymentDocument: string; status: string; reconciled: string; currentPayeeName: string; paymentDate: string; paidAmount: number; currency: string; address: string; remitToAccount: string }[]>([]);
+  const [invoicePayments, setInvoicePayments] = useState<{ key: string; checkId: number; number: string; paymentDocument: string; status: string; reconciled: string; currentPayeeName: string; paymentDate: string; paidAmount: number; currency: string; address: string; remitToAccount: string }[]>([]);
   const [invoicePaymentsLoading, setInvoicePaymentsLoading] = useState(false);
   const [invoicePaymentsUrl, setInvoicePaymentsUrl] = useState('');
 
@@ -502,6 +514,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       setInvoicePayments(
         items.map((item: any, index: number) => ({
           key:              (item.id ?? index).toString(),
+          checkId:          Number(item.id ?? item.check_id ?? 0),
           number:           (item.paper_document_number ?? item.id ?? '').toString(),
           paymentDocument:  item.invoice_number ?? '',
           status:           item.payment_status ?? '',
@@ -539,6 +552,91 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       setInvoiceBalanceLoading(false);
     }
   }, []);
+
+  // Open void modal from invoice edit (Payments tab or Invoice Actions)
+  const openInvoiceVoidModal = async (
+    checkId: number,
+    paymentInfo: { number: string; paymentDate: string; paidAmount: number; currency: string }
+  ) => {
+    setCiVoidCheckId(checkId);
+    setCiVoidPaymentInfo(paymentInfo);
+    setCiVoidEligibility(null);
+    setCiVoidStepStatus([]);
+    ciVoidForm.setFieldsValue({ voidDate: dayjs(), voidReason: '' });
+    setCiVoidOpen(true);
+    setCiVoidEligLoading(true);
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/${checkId}/void-eligibility`;
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!res.ok) {
+        setCiVoidEligibility({ eligible: false, errors: [`API returned HTTP ${res.status}`] });
+      } else {
+        const data = await res.json();
+        setCiVoidEligibility({ ...data, errors: Array.isArray(data.errors) ? data.errors : [] });
+      }
+    } catch (e: any) {
+      setCiVoidEligibility({ eligible: false, errors: [e?.message ?? 'Network error'] });
+    } finally {
+      setCiVoidEligLoading(false);
+    }
+  };
+
+  const handleCiVoidSubmit = async (values: any) => {
+    if (!ciVoidCheckId) return;
+    const steps = [
+      { step: 0, label: 'Re-check eligibility', status: 'idle' as const },
+      { step: 1, label: 'Void payment',          status: 'idle' as const },
+    ];
+    setCiVoidStepStatus(steps);
+    setCiVoidSubmitting(true);
+    const setStep = (step: number, status: 'running' | 'success' | 'error', detail?: string) =>
+      setCiVoidStepStatus(prev => prev.map(s => s.step === step ? { ...s, status, detail } : s));
+    try {
+      setStep(0, 'running');
+      const eligRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/payments/${ciVoidCheckId}/void-eligibility`, { headers: { Accept: 'application/json' } });
+      const eligData = eligRes.ok ? await eligRes.json() : { eligible: false, errors: [`HTTP ${eligRes.status}`] };
+      if (!eligData.eligible) {
+        setStep(0, 'error', (eligData.errors ?? [])[0] ?? 'Not eligible');
+        message.error('Payment is not eligible for void');
+        return;
+      }
+      setStep(0, 'success', 'Eligible for void');
+
+      setStep(1, 'running');
+      const voidBody = {
+        CheckId:       ciVoidCheckId,
+        VoidDate:      values.voidDate ? values.voidDate.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD'),
+        VoidedBy:      null,
+        StopReason:    values.voidReason || 'Payment Voided',
+        StopReference: ciVoidPaymentInfo?.number ?? null,
+      };
+      const voidRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/payments/void`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(voidBody),
+      });
+      const voidData = await voidRes.json();
+      if (voidData.status === 'error' || !voidRes.ok) {
+        setStep(1, 'error', voidData.message ?? `HTTP ${voidRes.status}`);
+        message.error('Void failed: ' + (voidData.message ?? 'Unknown error'));
+        return;
+      }
+      setStep(1, 'success', `Voided — New balance: ${voidData.newBalance != null ? Number(voidData.newBalance).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—'}`);
+      message.success('Payment voided successfully');
+      setTimeout(() => {
+        setCiVoidOpen(false);
+        ciVoidForm.resetFields();
+        setCiVoidStepStatus([]);
+        const invoiceId = savedInvoiceId || initialData?.invoiceId;
+        if (invoiceId) {
+          fetchInvoicePayments(invoiceId);
+          fetchInvoiceBalance(invoiceId);
+        }
+      }, 1800);
+    } finally {
+      setCiVoidSubmitting(false);
+    }
+  };
 
   // Fetch invoice holds (edit mode)
   const fetchInvoiceHolds = useCallback(async (invoiceId: number) => {
@@ -1245,6 +1343,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       label: 'Apply Prepayment',
     },
     {
+      key: 'voidPayment',
+      icon: <StopOutlined />,
+      label: 'Void Payment',
+      danger: true,
+    },
+    {
       key: 'placeHold',
       icon: <LockOutlined />,
       label: 'Place Hold',
@@ -1527,6 +1631,19 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       case 'applyPrepayment':
         message.info('Apply prepayment...');
         break;
+      case 'voidPayment': {
+        if (!isEditMode) { message.warning('Open an existing invoice with a payment to void.'); return; }
+        if (invoicePayments.length === 0) { message.warning('No payments found for this invoice.'); return; }
+        const firstVoidable = invoicePayments.find(p => !p.status?.toLowerCase().includes('void'));
+        if (!firstVoidable) { message.warning('All payments are already voided.'); return; }
+        openInvoiceVoidModal(firstVoidable.checkId, {
+          number: firstVoidable.number,
+          paymentDate: firstVoidable.paymentDate,
+          paidAmount: firstVoidable.paidAmount,
+          currency: firstVoidable.currency,
+        });
+        break;
+      }
       case 'placeHold':
         message.info('Placing hold on invoice...');
         break;
@@ -3104,11 +3221,29 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                         render: (v: string) => v || '—' },
                       { title: 'Remit-to Account',   dataIndex: 'remitToAccount',   key: 'remitToAccount',   width: 160, ellipsis: true,
                         render: (v: string) => v || '—' },
+                      {
+                        title: 'Action', key: 'voidAction', width: 70, fixed: 'right' as const,
+                        render: (_: any, row: any) => {
+                          const isVoided = row.status?.toLowerCase().includes('void');
+                          return (
+                            <Tooltip title={isVoided ? 'Already voided' : 'Void Payment'}>
+                              <Button
+                                size="small"
+                                danger={!isVoided}
+                                disabled={isVoided}
+                                icon={<StopOutlined />}
+                                style={{ fontSize: 11, padding: '0 6px' }}
+                                onClick={() => openInvoiceVoidModal(row.checkId, { number: row.number, paymentDate: row.paymentDate, paidAmount: row.paidAmount, currency: row.currency })}
+                              />
+                            </Tooltip>
+                          );
+                        },
+                      },
                     ]}
                     rowKey="key"
                     size="small"
                     pagination={false}
-                    scroll={{ x: 1200, y: 300 }}
+                    scroll={{ x: 1300, y: 300 }}
                   />
                 ) : (
                   <div style={{ textAlign: 'center', padding: 30, color: REDWOOD.neutral600, fontSize: 12 }}>
@@ -5360,7 +5495,131 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       </Drawer>
       {/* ═══════════════════════════════════════════════════════════════════ */}
 
-      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* ─── Void Payment Modal (from invoice edit) ─────────────────────── */}
+      <Modal
+        title={
+          <Space>
+            <StopOutlined style={{ color: '#cf1322' }} />
+            <span>Void Payment</span>
+            {ciVoidPaymentInfo && (
+              <Tag color="red" style={{ marginLeft: 4 }}>{ciVoidPaymentInfo.number}</Tag>
+            )}
+          </Space>
+        }
+        open={ciVoidOpen}
+        onCancel={() => { setCiVoidOpen(false); ciVoidForm.resetFields(); setCiVoidStepStatus([]); }}
+        footer={null}
+        width={620}
+        destroyOnClose
+      >
+        <Spin spinning={ciVoidEligLoading} tip="Checking eligibility...">
+          {/* Eligibility Banner */}
+          {ciVoidEligibility && !ciVoidEligLoading && (
+            <Alert
+              type={ciVoidEligibility.eligible ? 'success' : 'error'}
+              showIcon
+              message={ciVoidEligibility.eligible ? 'Payment is eligible for void' : 'Payment cannot be voided'}
+              description={
+                !ciVoidEligibility.eligible && (ciVoidEligibility.errors?.length ?? 0) > 0 ? (
+                  <ul style={{ margin: 0, paddingLeft: 16 }}>
+                    {ciVoidEligibility.errors.map((e, i) => <li key={i}>{e}</li>)}
+                  </ul>
+                ) : null
+              }
+              style={{ marginBottom: 16 }}
+            />
+          )}
+
+          <Form form={ciVoidForm} layout="vertical" onFinish={handleCiVoidSubmit} size="small">
+            {/* Row 1: Payment Number | Void Date */}
+            <Row gutter={16}>
+              <Col span={12}>
+                <Form.Item label="Payment Number">
+                  <Input value={ciVoidPaymentInfo?.number ?? ''} readOnly style={{ background: '#f5f5f5', color: '#555' }} />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item
+                  label={<><span style={{ color: '#C74634' }}>*</span> Void Date</>}
+                  name="voidDate"
+                  rules={[{ required: true, message: 'Required' }]}
+                >
+                  <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
+                </Form.Item>
+              </Col>
+            </Row>
+
+            {/* Row 2: Payment Date | Payment Amount */}
+            <Row gutter={16}>
+              <Col span={12}>
+                <Form.Item label="Payment Date">
+                  <Input value={ciVoidPaymentInfo?.paymentDate ?? ''} readOnly style={{ background: '#f5f5f5', color: '#555' }} />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item label="Payment Amount">
+                  <Input
+                    value={ciVoidPaymentInfo ? `${new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(ciVoidPaymentInfo.paidAmount)} ${ciVoidPaymentInfo.currency}` : ''}
+                    readOnly
+                    style={{ background: '#f5f5f5', color: '#555', fontWeight: 500 }}
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+
+            {/* Void Reason */}
+            <Form.Item label="Void Reason" name="voidReason">
+              <Input placeholder="Enter void reason (optional)" />
+            </Form.Item>
+
+            {/* Step Status Panel */}
+            {ciVoidStepStatus.length > 0 && (
+              <div style={{ marginBottom: 16, background: '#fafafa', border: '1px solid #e8e8e8', borderRadius: 6, padding: '10px 14px' }}>
+                {ciVoidStepStatus.map(s => {
+                  const icon =
+                    s.status === 'running' ? <LoadingOutlined style={{ color: '#0572CE' }} spin /> :
+                    s.status === 'success' ? <CheckCircleOutlined style={{ color: '#1D7B4D' }} /> :
+                    s.status === 'error'   ? <CloseCircleOutlined style={{ color: '#D93025' }} /> :
+                    <span style={{ display: 'inline-block', width: 14, height: 14, borderRadius: '50%', background: '#d9d9d9', verticalAlign: 'middle' }} />;
+                  const textColor =
+                    s.status === 'success' ? '#1D7B4D' :
+                    s.status === 'error'   ? '#D93025' :
+                    s.status === 'running' ? '#0572CE' : '#6B6B6B';
+                  return (
+                    <div key={s.step} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 4 }}>
+                      <span style={{ marginTop: 2 }}>{icon}</span>
+                      <div>
+                        <Text style={{ fontSize: 12, color: textColor }}>
+                          <strong>Step {s.step}:</strong> {s.label}
+                        </Text>
+                        {s.detail && <div><Text type="secondary" style={{ fontSize: 11 }}>{s.detail}</Text></div>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Buttons */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+              <Button onClick={() => { setCiVoidOpen(false); ciVoidForm.resetFields(); setCiVoidStepStatus([]); }}>
+                Cancel
+              </Button>
+              <Button
+                type="primary"
+                danger
+                htmlType="submit"
+                loading={ciVoidSubmitting}
+                disabled={!ciVoidEligibility?.eligible || ciVoidEligLoading}
+                icon={<StopOutlined />}
+              >
+                Void Payment
+              </Button>
+            </div>
+          </Form>
+        </Spin>
+      </Modal>
+      {/* ─────────────────────────────────────────────────────────────────── */}
 
       <style>{`
         .ant-table-thead > tr > th {

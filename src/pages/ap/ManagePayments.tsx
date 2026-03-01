@@ -1267,11 +1267,18 @@ const ManagePayments: React.FC = () => {
     try {
       const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/${record.checkId}/void-eligibility`;
       const res = await fetch(url, { headers: { Accept: 'application/json' } });
-      const data = await res.json();
-      setVoidEligibility(data);
-      setVoidEligApiResult(data);
+      if (!res.ok) {
+        const errMsg = `API returned HTTP ${res.status} — payment may not exist in local DB`;
+        setVoidEligibility({ eligible: false, errors: [errMsg], paymentNumber: record.paymentNumber?.toString() ?? '', paymentStatus: record.paymentStatus, reconciledFlag: 'N', clearingDate: null, clearingAmount: null });
+        setVoidEligApiResult({ error: errMsg, status: res.status });
+      } else {
+        const data = await res.json();
+        setVoidEligibility({ ...data, errors: Array.isArray(data.errors) ? data.errors : [] });
+        setVoidEligApiResult(data);
+      }
     } catch (e: any) {
-      setVoidEligibility({ eligible: false, errors: ['Network error checking eligibility'], paymentNumber: '', paymentStatus: record.paymentStatus, reconciledFlag: 'N', clearingDate: null, clearingAmount: null });
+      const errMsg = e?.message ?? 'Network error checking eligibility';
+      setVoidEligibility({ eligible: false, errors: [errMsg], paymentNumber: '', paymentStatus: record.paymentStatus, reconciledFlag: 'N', clearingDate: null, clearingAmount: null });
     } finally {
       setVoidEligibilityLoading(false);
     }
@@ -1285,9 +1292,15 @@ const ManagePayments: React.FC = () => {
     try {
       const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/${voidTargetPayment.checkId}/void-eligibility`;
       const res = await fetch(url, { headers: { Accept: 'application/json' } });
-      const data = await res.json();
-      setVoidEligApiResult(data);
-      setVoidEligibility(data);
+      if (!res.ok) {
+        const errResult = { error: `HTTP ${res.status}`, eligible: false, errors: [`API returned HTTP ${res.status}`] };
+        setVoidEligApiResult(errResult);
+        setVoidEligibility({ ...errResult, paymentNumber: '', paymentStatus: voidTargetPayment.paymentStatus, reconciledFlag: 'N', clearingDate: null, clearingAmount: null });
+      } else {
+        const data = await res.json();
+        setVoidEligApiResult(data);
+        setVoidEligibility({ ...data, errors: Array.isArray(data.errors) ? data.errors : [] });
+      }
     } catch (e: any) {
       setVoidEligApiResult({ error: e?.message ?? 'Network error' });
     } finally {
@@ -2868,7 +2881,7 @@ const ManagePayments: React.FC = () => {
                 showIcon
                 message={voidEligibility.eligible ? 'Payment is eligible for void' : 'Payment cannot be voided'}
                 description={
-                  !voidEligibility.eligible && voidEligibility.errors.length > 0 ? (
+                  !voidEligibility.eligible && (voidEligibility.errors?.length ?? 0) > 0 ? (
                     <ul style={{ margin: 0, paddingLeft: 16 }}>
                       {voidEligibility.errors.map((e, i) => <li key={i}>{e}</li>)}
                     </ul>
