@@ -1242,10 +1242,19 @@ const ManagePayments: React.FC = () => {
   const fetchVoidRelatedInvoices = async (checkId: number) => {
     setVoidRelatedLoading(true);
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/related-invoices?check_id=${checkId}`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/${checkId}/related-invoices`;
       const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      setVoidRelatedInvoices(data.items || []);
+      const items = (data.items || []).map((item: any, index: number) => ({
+        key:                  item.InvoicePaymentId?.toString() || index.toString(),
+        invoiceNumber:        item.InvoiceNumber || '',
+        invoiceAmount:        item.InvoiceAmount || 0,
+        amountPaid:           item.AmountPaidInvoiceCurrency || item.AmountPaidPaymentCurrency || 0,
+        invoiceCurrency:      item.InvoiceCurrency || '',
+        invoicePaymentStatus: item.InvoicePaymentStatus || '',
+      }));
+      setVoidRelatedInvoices(items);
     } catch {
       setVoidRelatedInvoices([]);
     } finally {
@@ -2965,24 +2974,25 @@ const ManagePayments: React.FC = () => {
               <Table
                 size="small"
                 loading={voidRelatedLoading}
-                dataSource={voidRelatedInvoices.map((inv, i) => ({ ...inv, key: i }))}
+                dataSource={voidRelatedInvoices}
+                rowKey="key"
                 pagination={false}
                 scroll={{ y: 150 }}
                 style={{ marginBottom: 16 }}
                 locale={{ emptyText: voidRelatedLoading ? 'Loading...' : 'No related invoices found' }}
                 columns={[
-                  { title: 'Invoice #', dataIndex: 'INVOICE_NUMBER', key: 'INVOICE_NUMBER', width: 140, ellipsis: true },
+                  { title: 'Invoice #', dataIndex: 'invoiceNumber', key: 'invoiceNumber', width: 140, ellipsis: true },
                   {
-                    title: 'Invoice Amount', dataIndex: 'INVOICE_AMOUNT', key: 'INVOICE_AMOUNT', width: 130, align: 'right' as const,
+                    title: 'Invoice Amount', dataIndex: 'invoiceAmount', key: 'invoiceAmount', width: 130, align: 'right' as const,
                     render: (v: number) => v != null ? formatAmount(v) : '—',
                   },
                   {
-                    title: 'Amt Paid', dataIndex: 'AMOUNT_PAID_INVOICE_CURRENCY', key: 'AMOUNT_PAID_INVOICE_CURRENCY', width: 120, align: 'right' as const,
+                    title: 'Amt Paid', dataIndex: 'amountPaid', key: 'amountPaid', width: 120, align: 'right' as const,
                     render: (v: number) => v != null ? formatAmount(v) : '—',
                   },
-                  { title: 'Currency', dataIndex: 'INVOICE_CURRENCY', key: 'INVOICE_CURRENCY', width: 80 },
+                  { title: 'Currency', dataIndex: 'invoiceCurrency', key: 'invoiceCurrency', width: 80 },
                   {
-                    title: 'Status', dataIndex: 'INVOICE_PAYMENT_STATUS', key: 'INVOICE_PAYMENT_STATUS', width: 100,
+                    title: 'Status', dataIndex: 'invoicePaymentStatus', key: 'invoicePaymentStatus', width: 100,
                     render: (s: string) => s ? <Tag color={s === 'Voided' ? 'red' : 'blue'}>{s}</Tag> : null,
                   },
                 ]}
