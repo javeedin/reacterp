@@ -40,6 +40,7 @@ import {
   FileTextOutlined,
   ShoppingCartOutlined,
   CheckCircleOutlined,
+  CloseCircleOutlined,
   UndoOutlined,
   DownOutlined,
   CheckSquareOutlined,
@@ -433,6 +434,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [stepLoading, setStepLoading] = useState<Record<number, boolean>>({});
   // Incremented on every payInFullForm field change so the API drawer IIFE re-runs with fresh values
   const [payInFullTick, setPayInFullTick] = useState(0);
+  // Step-by-step execution status for Pay in Full
+  const [payInFullStepStatus, setPayInFullStepStatus] = useState<
+    { step: number; label: string; status: 'idle' | 'running' | 'success' | 'error'; detail?: string }[]
+  >([]);
 
   const [installmentsModalOpen, setInstallmentsModalOpen] = useState(false);
   const [installmentsModalData, setInstallmentsModalData] = useState<any[]>([]);
@@ -4620,7 +4625,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           </Space>
         }
         open={payInFullOpen}
-        onCancel={() => { setPayInFullOpen(false); payInFullForm.resetFields(); }}
+        onCancel={() => { setPayInFullOpen(false); payInFullForm.resetFields(); setPayInFullStepStatus([]); setStep1CheckId(null); }}
         width={960}
         destroyOnClose
         footer={[
@@ -4645,15 +4650,194 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           size="small"
           onValuesChange={() => setPayInFullTick(t => t + 1)}
           onFinish={async (values) => {
+            const invoiceId      = savedInvoiceId ?? initialData?.invoiceId;
+            const buName         = form.getFieldValue('businessUnit') || headerValues.businessUnit || '';
+            const supplierName   = form.getFieldValue('supplier') || '';
+            const supplierNumber = form.getFieldValue('supplierNumber') || null;
+            const supplierSite   = form.getFieldValue('supplierSite') || null;
+            const invoiceNumber  = form.getFieldValue('invoiceNumber') || null;
+            const currency       = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
+            const payDate        = values.paymentDate ? values.paymentDate.format('YYYY-MM-DD') : null;
+            const sysdate        = dayjs().format('YYYY-MM-DDTHH:mm:ss.SSS+00:00');
+            const loginUser      = user?.username || null;
+            const selBankAcct    = payInFullBankAccounts.find(a => a.bankAccountName === values.disbursementBankAccount);
+            const legalEntityName   = selBankAcct?.legalEntityName   || '';
+            const bankAccountNumber = selBankAcct?.bankAccountNumber || null;
+            const supplierId        = form.getFieldValue('supplierId')
+                                      || suppliers.find(s => s.supplierNumber === supplierNumber || s.supplier === supplierName)?.supplierId
+                                      || null;
+            const pendingInst = invoiceInstallments.filter(i => i.unpaidAmount > 0);
+            const hasInstallments = pendingInst.length > 0;
+
+            // Build initial step list
+            const initSteps = [
+              { step: 0, label: 'Check invoice balance',         status: 'idle' as const, detail: undefined },
+              { step: 1, label: 'Create payment record',         status: 'idle' as const, detail: undefined },
+              ...(hasInstallments ? [{ step: 2, label: `Update installments (${pendingInst.length})`, status: 'idle' as const, detail: undefined }] : []),
+              { step: hasInstallments ? 3 : 2, label: 'Link payment to invoice', status: 'idle' as const, detail: undefined },
+            ];
+            setPayInFullStepStatus(initSteps);
             setPayInFullSubmitting(true);
+
+            const setStep = (step: number, status: 'running' | 'success' | 'error', detail?: string) =>
+              setPayInFullStepStatus(prev => prev.map(s => s.step === step ? { ...s, status, detail } : s));
+
             try {
-              // TODO: wire up payment submission API
-              console.log('[Pay in Full] Payload:', values);
-              message.success('Payment submitted successfully');
-              setPayInFullOpen(false);
-              payInFullForm.resetFields();
-            } catch {
-              message.error('Payment submission failed');
+              // ── Step 0: balance check ──────────────────────────────────────
+              setStep(0, 'running');
+              const latestBalance = await fetchInvoiceBalance(invoiceId!);
+              if (latestBalance !== null && latestBalance <= 0) {
+                setStep(0, 'error', 'Invoice already paid — no remaining balance');
+                message.error('Invoice already paid. No remaining balance.');
+                return;
+              }
+              const payBalance = latestBalance ?? invoiceBalance ?? 0;
+              setStep(0, 'success', `Balance: ${formatAmount(payBalance)} ${currency}`);
+
+              // ── Step 1: POST /ap/payments ──────────────────────────────────
+              setStep(1, 'running');
+              const step1Body = {
+                CheckId: null, PaymentId: null,
+                PaymentReference: values.paymentReference || null,
+                PaperDocumentNumber: values.paperDocumentNumber || null,
+                PaymentNumber: values.paperDocumentNumber || null,
+                VoucherNumber: values.voucherNumber || null,
+                PaymentAmount: payBalance, PaymentBaseAmount: payBalance,
+                WithheldAmount: null, BankChargeAmount: null,
+                PaymentDate: payDate, AccountingDate: payDate,
+                MaturityDate: null, AnticipatedValueDate: null, StopDate: null,
+                VoidDate: null, VoidAccountingDate: null,
+                ConversionDate: payDate, ClearingDate: null,
+                ClearingConversionDate: null, ClearingValueDate: null, MaturityConversionDate: null,
+                CreationDate: sysdate, LastUpdateDate: sysdate,
+                LocalCreatedDate: sysdate, LocalUpdatedDate: sysdate,
+                PaymentDescription: values.description || null,
+                PaymentStatus: 'Negotiable', PaymentType: 'Quick',
+                PaymentMode: null, PaymentFunction: 'Supplier Payments',
+                PaymentCurrency: currency, PaymentBaseCurrency: currency,
+                ConversionRate: headerValues.conversionRate || null,
+                ConversionRateType: headerValues.conversionRateType || null,
+                CrossCurrencyRateType: 'Corporate',
+                ClearingAmount: null, ClearingLedgerAmount: null,
+                ClearingConversionRate: null, ClearingConversionRateType: null,
+                MaturityConversionRateType: null, MaturityConversionRate: null,
+                AccountingStatus: null, ReconciledFlag: 'false',
+                SeparateRemittanceAdviceCreated: null, IbyPaymentStatus: null,
+                LegalEntity: legalEntityName || null,
+                BusinessUnit: buName, ProcurementBU: buName,
+                Payee: supplierName, PartyId: supplierId,
+                PayeeSite: supplierSite, SupplierNumber: supplierNumber,
+                EmployeeAddress: null, ThirdPartySupplier: null, ThirdPartyAddressName: null,
+                ExternalBankAccountId: null, RemitToAccountNumber: null,
+                DisbursementBankAccountNumber: bankAccountNumber,
+                DisbursementBankAccountName: values.disbursementBankAccount || null,
+                FundingCardAccount: null, DigitalPaymentAccount: null,
+                PaymentMethodCode: values.paymentDocument || null,
+                PaymentMethod: values.paymentMethod || null,
+                PaymentDocument: values.paymentDocument || null,
+                PaymentProcessProfileCode: null, PaymentProcessProfile: null,
+                DocumentCategory: null, DocumentSequence: null,
+                AddressLine1: null, AddressLine2: null, AddressLine3: null, AddressLine4: null,
+                City: null, County: null, Province: null, State: null,
+                Country: 'AE', Zip: null,
+                StopReason: null, StopReference: null,
+                CreatedBy: loginUser, LastUpdatedBy: loginUser, LastUpdateLogin: loginUser,
+              };
+              let capturedCheckId: number | null = null;
+              try {
+                const res1 = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/payments`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                  body: JSON.stringify(step1Body),
+                });
+                const text1 = await res1.text();
+                const data1 = (() => { try { return JSON.parse(text1); } catch { return { raw: text1 }; } })();
+                if (data1?.status === 'error' || !res1.ok) {
+                  setStep(1, 'error', data1?.message || `HTTP ${res1.status}`);
+                  message.error('Step 1 failed — payment not created');
+                  return;
+                }
+                capturedCheckId = data1?.checkId ?? null;
+                setStep1CheckId(capturedCheckId);
+                setStep(1, 'success', `CheckId: ${capturedCheckId}`);
+              } catch (e: any) {
+                setStep(1, 'error', e?.message ?? 'Network error');
+                message.error('Step 1 failed — network error');
+                return;
+              }
+
+              // ── Step 2 (optional): PUT installments ────────────────────────
+              if (hasInstallments) {
+                setStep(2, 'running');
+                let instErrors = 0;
+                for (const inst of pendingInst) {
+                  try {
+                    const res2 = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments`, {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                      body: JSON.stringify({
+                        InvoiceId: invoiceId, InstallmentId: inst.key,
+                        PaymentStatus: 'Fully Paid', AmountRemaining: 0,
+                      }),
+                    });
+                    const d2 = await res2.json().catch(() => ({}));
+                    if (d2?.status === 'error' || !res2.ok) instErrors++;
+                  } catch { instErrors++; }
+                }
+                if (instErrors > 0) {
+                  setStep(2, 'error', `${instErrors} of ${pendingInst.length} installment(s) failed`);
+                } else {
+                  setStep(2, 'success', `${pendingInst.length} installment(s) updated`);
+                }
+              }
+
+              // ── Step 3: POST /ap/payments/related-invoices ─────────────────
+              const relatedStep = hasInstallments ? 3 : 2;
+              setStep(relatedStep, 'running');
+              const step3Body = {
+                InvoicePaymentId: null,
+                CheckId: capturedCheckId,
+                InvoiceId: invoiceId,
+                InvoiceBusinessUnit: buName || null,
+                InvoiceNumber: invoiceNumber,
+                InstallmentNumber: null,
+                AmountPaidPaymentCurrency: payBalance,
+                AmountPaidInvoiceCurrency: payBalance,
+                InvoicePaymentAmount: payBalance,
+                InvoiceAmount: payBalance,
+                InvoiceBaseAmount: payBalance,
+                PaymentBaseAmount: payBalance,
+                DiscountLost: null, DiscountTaken: null,
+                InvoiceCurrency: currency,
+                CrossCurrencyRate: headerValues.conversionRate || null,
+                InvoicePaymentStatus: 'Negotiable',
+                CreatedBy: null, LastUpdatedBy: null, LastUpdateLogin: null,
+              };
+              try {
+                const res3 = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/payments/related-invoices`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                  body: JSON.stringify(step3Body),
+                });
+                const text3 = await res3.text();
+                const data3 = (() => { try { return JSON.parse(text3); } catch { return { raw: text3 }; } })();
+                if (data3?.status === 'error' || !res3.ok) {
+                  setStep(relatedStep, 'error', data3?.message || `HTTP ${res3.status}`);
+                  message.error('Step 3 failed — invoice link not created');
+                  return;
+                }
+                setStep(relatedStep, 'success', 'Payment linked to invoice');
+              } catch (e: any) {
+                setStep(relatedStep, 'error', e?.message ?? 'Network error');
+                message.error('Step 3 failed — network error');
+                return;
+              }
+
+              // ── All done ───────────────────────────────────────────────────
+              message.success('Payment submitted successfully!');
+              fetchInvoiceBalance(invoiceId!);
+              fetchInvoicePayments(invoiceId!);
+
             } finally {
               setPayInFullSubmitting(false);
             }
@@ -4800,6 +4984,42 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           <Form.Item label="Description" name="description">
             <Input.TextArea rows={2} placeholder="Optional payment description" />
           </Form.Item>
+
+          {/* ── Step execution status ── */}
+          {payInFullStepStatus.length > 0 && (
+            <>
+              <Divider style={{ margin: '12px 0 10px' }} />
+              <div style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.neutral700, marginBottom: 8 }}>
+                Payment Progress
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {payInFullStepStatus.map(s => {
+                  const icon =
+                    s.status === 'idle'    ? <span style={{ color: REDWOOD.neutral300, fontSize: 16 }}>○</span> :
+                    s.status === 'running' ? <Spin size="small" /> :
+                    s.status === 'success' ? <CheckCircleOutlined style={{ color: REDWOOD.success, fontSize: 16 }} /> :
+                                             <CloseCircleOutlined style={{ color: REDWOOD.error,   fontSize: 16 }} />;
+                  const bg =
+                    s.status === 'success' ? '#f6ffed' :
+                    s.status === 'error'   ? '#fff2f0' :
+                    s.status === 'running' ? '#e6f4ff' : REDWOOD.neutral100;
+                  const border =
+                    s.status === 'success' ? '#b7eb8f' :
+                    s.status === 'error'   ? '#ffa39e' :
+                    s.status === 'running' ? '#91caff' : REDWOOD.neutral200;
+                  return (
+                    <div key={s.step} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 12px', borderRadius: 6, background: bg, border: `1px solid ${border}` }}>
+                      {icon}
+                      <div style={{ flex: 1 }}>
+                        <span style={{ fontSize: 12, fontWeight: 600 }}>Step {s.step}: {s.label}</span>
+                        {s.detail && <span style={{ fontSize: 11, color: REDWOOD.neutral600, marginLeft: 8 }}>{s.detail}</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
 
           {/* ── Pending installments (below form fields) ── */}
           {(() => {
