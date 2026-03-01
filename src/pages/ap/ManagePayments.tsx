@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import dayjs from 'dayjs';
 import {
   Layout,
   Card,
@@ -23,6 +24,9 @@ import {
   Switch,
   Checkbox,
   Divider,
+  Spin,
+  Alert,
+  Drawer,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -51,6 +55,11 @@ import {
   BugOutlined,
   ClearOutlined,
   CloseCircleOutlined,
+  StopOutlined,
+  ExclamationCircleOutlined,
+  PlayCircleOutlined,
+  LoadingOutlined,
+  CheckCircleOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -355,6 +364,7 @@ const mapApexToPaymentRecord = (item: any, index: number): PaymentRecord => ({
 const ManagePayments: React.FC = () => {
   const [form] = Form.useForm();
   const [createPaymentForm] = Form.useForm();
+  const [voidForm] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
@@ -388,6 +398,26 @@ const ManagePayments: React.FC = () => {
       console.log(`[${timeStr}] [${type}]`, msg);
     }
   };
+
+  // ── Void Payment state ───────────────────────────────────────────────────
+  const [voidModalOpen, setVoidModalOpen]           = useState(false);
+  const [voidApiDrawerOpen, setVoidApiDrawerOpen]   = useState(false);
+  const [voidTargetPayment, setVoidTargetPayment]   = useState<PaymentRecord | null>(null);
+  const [voidEligibility, setVoidEligibility]       = useState<{
+    eligible: boolean; errors: string[];
+    paymentNumber: string; paymentStatus: string;
+    reconciledFlag: string; clearingDate: string | null; clearingAmount: number | null;
+  } | null>(null);
+  const [voidEligibilityLoading, setVoidEligibilityLoading] = useState(false);
+  const [voidRelatedInvoices, setVoidRelatedInvoices]       = useState<any[]>([]);
+  const [voidRelatedLoading, setVoidRelatedLoading]         = useState(false);
+  const [voidSubmitting, setVoidSubmitting]                 = useState(false);
+  const [voidStepStatus, setVoidStepStatus]                 = useState<
+    { step: number; label: string; status: 'idle' | 'running' | 'success' | 'error'; detail?: string }[]
+  >([]);
+  const [voidEligApiRunning, setVoidEligApiRunning] = useState(false);
+  const [voidEligApiResult, setVoidEligApiResult]   = useState<any>(null);
+  // ────────────────────────────────────────────────────────────────────────
 
   // Create Payment tab state
   const [createPaymentTabOpen, setCreatePaymentTabOpen] = useState(false);
@@ -783,7 +813,7 @@ const ManagePayments: React.FC = () => {
   };
 
   // Search payments from API
-  const handleSearch = async (values: any) => {
+  const handleSearch = async (values: any = {}) => {
     setLoading(true);
     const source = useApex ? 'APEX/ORDS' : 'Fusion';
     debugLog('INFO', `══════════════════════════════════════════════════`);
@@ -920,13 +950,21 @@ const ManagePayments: React.FC = () => {
     );
   };
 
-  // Action menu items
+  // Action menu items (top toolbar — works on first selected row)
   const actionsMenuItems: MenuProps['items'] = [
     { key: 'edit', label: 'Edit', icon: <EditOutlined /> },
     { type: 'divider' },
-    { key: 'void', label: 'Void Payment', danger: true },
+    { key: 'void', label: 'Void Payment', icon: <StopOutlined />, danger: true },
     { key: 'stop', label: 'Stop Payment', danger: true },
   ];
+
+  const handleActionsMenuClick = ({ key }: { key: string }) => {
+    if (key === 'void') {
+      const firstSelected = payments.find(p => p.key === selectedRowKeys[0]);
+      if (!firstSelected) { message.warning('Select a payment row first'); return; }
+      openVoidModal(firstSelected);
+    }
+  };
 
   // View menu items
   const viewMenuItems: MenuProps['items'] = [
@@ -1166,22 +1204,162 @@ const ManagePayments: React.FC = () => {
       width: 180,
     },
     {
-      title: 'Details',
-      key: 'details',
-      width: 80,
+      title: 'Actions',
+      key: 'rowActions',
+      width: 90,
       fixed: 'right',
-      render: (_, record: PaymentRecord) => (
-        <Tooltip title="View Details">
-          <Button
-            type="link"
-            size="small"
-            icon={<FileTextOutlined />}
-            onClick={() => openPaymentTab(record)}
-          />
-        </Tooltip>
-      ),
+      render: (_, record: PaymentRecord) => {
+        const isVoided   = record.paymentStatus === 'Voided';
+        const isCleared  = !!(record.clearingDate || record.clearingAmount || record.reconciled);
+        const canVoid    = !isVoided && !isCleared;
+        return (
+          <Space size={2}>
+            <Tooltip title={isVoided ? 'Already voided' : isCleared ? 'Cleared — cannot void' : 'Void Payment'}>
+              <Button
+                size="small"
+                danger={canVoid}
+                disabled={!canVoid}
+                icon={<StopOutlined />}
+                style={{ fontSize: 11, padding: '0 6px' }}
+                onClick={() => openVoidModal(record)}
+              />
+            </Tooltip>
+            <Tooltip title="View Details">
+              <Button
+                type="link"
+                size="small"
+                icon={<FileTextOutlined />}
+                onClick={() => openPaymentTab(record)}
+              />
+            </Tooltip>
+          </Space>
+        );
+      },
     },
   ];
+
+  // ── Void Payment handlers ────────────────────────────────────────────────
+  const fetchVoidRelatedInvoices = async (checkId: number) => {
+    setVoidRelatedLoading(true);
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/related-invoices?check_id=${checkId}`;
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      const data = await res.json();
+      setVoidRelatedInvoices(data.items || []);
+    } catch {
+      setVoidRelatedInvoices([]);
+    } finally {
+      setVoidRelatedLoading(false);
+    }
+  };
+
+  const openVoidModal = async (record: PaymentRecord) => {
+    setVoidTargetPayment(record);
+    setVoidEligibility(null);
+    setVoidEligApiResult(null);
+    setVoidStepStatus([]);
+    setVoidRelatedInvoices([]);
+    voidForm.setFieldsValue({ voidDate: dayjs(), voidReason: '' });
+    setVoidModalOpen(true);
+
+    // Run eligibility check immediately on open
+    setVoidEligibilityLoading(true);
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/${record.checkId}/void-eligibility`;
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      const data = await res.json();
+      setVoidEligibility(data);
+      setVoidEligApiResult(data);
+    } catch (e: any) {
+      setVoidEligibility({ eligible: false, errors: ['Network error checking eligibility'], paymentNumber: '', paymentStatus: record.paymentStatus, reconciledFlag: 'N', clearingDate: null, clearingAmount: null });
+    } finally {
+      setVoidEligibilityLoading(false);
+    }
+
+    fetchVoidRelatedInvoices(record.checkId);
+  };
+
+  const runVoidEligibilityApi = async () => {
+    if (!voidTargetPayment) return;
+    setVoidEligApiRunning(true);
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/${voidTargetPayment.checkId}/void-eligibility`;
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      const data = await res.json();
+      setVoidEligApiResult(data);
+      setVoidEligibility(data);
+    } catch (e: any) {
+      setVoidEligApiResult({ error: e?.message ?? 'Network error' });
+    } finally {
+      setVoidEligApiRunning(false);
+    }
+  };
+
+  const handleVoidSubmit = async (values: any) => {
+    if (!voidTargetPayment) return;
+    const steps = [
+      { step: 0, label: 'Re-check eligibility',    status: 'idle' as const },
+      { step: 1, label: 'Void payment',             status: 'idle' as const },
+    ];
+    setVoidStepStatus(steps);
+    setVoidSubmitting(true);
+
+    const setStep = (step: number, status: 'running' | 'success' | 'error', detail?: string) =>
+      setVoidStepStatus(prev => prev.map(s => s.step === step ? { ...s, status, detail } : s));
+
+    try {
+      // Step 0: re-check eligibility
+      setStep(0, 'running');
+      const eligRes = await fetch(
+        `${APEX_DB_CONFIG.baseUrl}/ap/payments/${voidTargetPayment.checkId}/void-eligibility`,
+        { headers: { Accept: 'application/json' } }
+      );
+      const eligData = await eligRes.json();
+      if (!eligData.eligible) {
+        setStep(0, 'error', eligData.errors?.[0] ?? 'Not eligible');
+        message.error('Payment is not eligible for void');
+        return;
+      }
+      setStep(0, 'success', 'Eligible for void');
+
+      // Step 1: void the payment
+      setStep(1, 'running');
+      const voidBody = {
+        CheckId:       voidTargetPayment.checkId,
+        VoidDate:      values.voidDate ? values.voidDate.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD'),
+        VoidedBy:      null,
+        StopReason:    values.voidReason || 'Payment Voided',
+        StopReference: voidTargetPayment.paymentNumber?.toString() ?? null,
+      };
+      const voidRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/payments/void`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(voidBody),
+      });
+      const voidData = await voidRes.json();
+      if (voidData.status === 'error' || !voidRes.ok) {
+        setStep(1, 'error', voidData.message ?? `HTTP ${voidRes.status}`);
+        message.error('Void failed: ' + (voidData.message ?? 'Unknown error'));
+        return;
+      }
+      setStep(1, 'success',
+        `Voided — New balance: ${voidData.newBalance != null ? Number(voidData.newBalance).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—'}`
+      );
+      message.success('Payment voided successfully');
+
+      // Refresh the payments list after a short delay
+      setTimeout(() => {
+        setVoidModalOpen(false);
+        voidForm.resetFields();
+        setVoidStepStatus([]);
+        handleSearch(); // re-run the search to refresh the grid
+      }, 1800);
+
+    } finally {
+      setVoidSubmitting(false);
+    }
+  };
+  // ────────────────────────────────────────────────────────────────────────
 
   // Row selection config
   const rowSelection = {
@@ -1365,7 +1543,7 @@ const ManagePayments: React.FC = () => {
               background: REDWOOD.neutral100,
             }}>
               <Space size="small">
-                <Dropdown menu={{ items: actionsMenuItems }} trigger={['click']}>
+                <Dropdown menu={{ items: actionsMenuItems, onClick: handleActionsMenuClick }} trigger={['click']}>
                   <Button size="small">
                     Actions <DownOutlined />
                   </Button>
@@ -2653,6 +2831,280 @@ const ManagePayments: React.FC = () => {
             ))}
           </Card>
         </Modal>
+
+        {/* ── Void Payment Modal ──────────────────────────────────────────── */}
+        <Modal
+          title={
+            <Space>
+              <StopOutlined style={{ color: REDWOOD.error }} />
+              <span>Void Payment</span>
+              {voidTargetPayment && (
+                <Tag color="red" style={{ marginLeft: 4 }}>
+                  {voidTargetPayment.paymentNumber}
+                </Tag>
+              )}
+              <Tooltip title="View Void APIs">
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<ApiOutlined style={{ color: REDWOOD.info }} />}
+                  onClick={() => setVoidApiDrawerOpen(true)}
+                  style={{ marginLeft: 4 }}
+                />
+              </Tooltip>
+            </Space>
+          }
+          open={voidModalOpen}
+          onCancel={() => { setVoidModalOpen(false); voidForm.resetFields(); setVoidStepStatus([]); }}
+          footer={null}
+          width={760}
+          destroyOnClose
+        >
+          <Spin spinning={voidEligibilityLoading} tip="Checking eligibility...">
+            {/* Eligibility Banner */}
+            {voidEligibility && !voidEligibilityLoading && (
+              <Alert
+                type={voidEligibility.eligible ? 'success' : 'error'}
+                showIcon
+                message={voidEligibility.eligible ? 'Payment is eligible for void' : 'Payment cannot be voided'}
+                description={
+                  !voidEligibility.eligible && voidEligibility.errors.length > 0 ? (
+                    <ul style={{ margin: 0, paddingLeft: 16 }}>
+                      {voidEligibility.errors.map((e, i) => <li key={i}>{e}</li>)}
+                    </ul>
+                  ) : null
+                }
+                style={{ marginBottom: 16 }}
+              />
+            )}
+
+            <Form form={voidForm} layout="vertical" onFinish={handleVoidSubmit} size="small">
+              {/* Row 1: Payment Number | Void Date */}
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item label="Payment Number">
+                    <Input
+                      value={voidTargetPayment?.paymentNumber?.toString() ?? ''}
+                      readOnly
+                      style={{ background: '#f5f5f5', color: '#555' }}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item
+                    label={<><span style={{ color: REDWOOD.primary }}>*</span> Void Date</>}
+                    name="voidDate"
+                    rules={[{ required: true, message: 'Void Date is required' }]}
+                  >
+                    <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              {/* Row 2: Payment Date | Accounting Date */}
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item label="Payment Date">
+                    <Input
+                      value={voidTargetPayment?.paymentDate ?? ''}
+                      readOnly
+                      style={{ background: '#f5f5f5', color: '#555' }}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item label="Accounting Date">
+                    <Input
+                      value={voidTargetPayment?.accountingDate ?? ''}
+                      readOnly
+                      style={{ background: '#f5f5f5', color: '#555' }}
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              {/* Row 3: Payment Amount | Void Reason */}
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item label="Payment Amount">
+                    <Input
+                      value={
+                        voidTargetPayment
+                          ? `${formatAmount(voidTargetPayment.paymentAmount)} ${voidTargetPayment.paymentCurrency}`
+                          : ''
+                      }
+                      readOnly
+                      style={{ background: '#f5f5f5', color: '#555', fontWeight: 500 }}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item label="Void Reason" name="voidReason">
+                    <Input placeholder="Enter void reason (optional)" />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              {/* Related Invoices */}
+              <Divider orientation="left" style={{ fontSize: 12, margin: '4px 0 10px' }}>
+                Related Invoices
+              </Divider>
+              <Table
+                size="small"
+                loading={voidRelatedLoading}
+                dataSource={voidRelatedInvoices.map((inv, i) => ({ ...inv, key: i }))}
+                pagination={false}
+                scroll={{ y: 150 }}
+                style={{ marginBottom: 16 }}
+                locale={{ emptyText: voidRelatedLoading ? 'Loading...' : 'No related invoices found' }}
+                columns={[
+                  { title: 'Invoice #', dataIndex: 'INVOICE_NUMBER', key: 'INVOICE_NUMBER', width: 140, ellipsis: true },
+                  {
+                    title: 'Invoice Amount', dataIndex: 'INVOICE_AMOUNT', key: 'INVOICE_AMOUNT', width: 130, align: 'right' as const,
+                    render: (v: number) => v != null ? formatAmount(v) : '—',
+                  },
+                  {
+                    title: 'Amt Paid', dataIndex: 'AMOUNT_PAID_INVOICE_CURRENCY', key: 'AMOUNT_PAID_INVOICE_CURRENCY', width: 120, align: 'right' as const,
+                    render: (v: number) => v != null ? formatAmount(v) : '—',
+                  },
+                  { title: 'Currency', dataIndex: 'INVOICE_CURRENCY', key: 'INVOICE_CURRENCY', width: 80 },
+                  {
+                    title: 'Status', dataIndex: 'INVOICE_PAYMENT_STATUS', key: 'INVOICE_PAYMENT_STATUS', width: 100,
+                    render: (s: string) => s ? <Tag color={s === 'Voided' ? 'red' : 'blue'}>{s}</Tag> : null,
+                  },
+                ]}
+              />
+
+              {/* Step Status Panel */}
+              {voidStepStatus.length > 0 && (
+                <div style={{ marginBottom: 16, background: '#fafafa', border: '1px solid #e8e8e8', borderRadius: 6, padding: '10px 14px' }}>
+                  {voidStepStatus.map(s => {
+                    const icon =
+                      s.status === 'running' ? <LoadingOutlined style={{ color: REDWOOD.info }} spin /> :
+                      s.status === 'success' ? <CheckCircleOutlined style={{ color: REDWOOD.success }} /> :
+                      s.status === 'error'   ? <CloseCircleOutlined style={{ color: REDWOOD.error }} /> :
+                      <span style={{ display: 'inline-block', width: 14, height: 14, borderRadius: '50%', background: '#d9d9d9', verticalAlign: 'middle' }} />;
+                    const textColor =
+                      s.status === 'success' ? REDWOOD.success :
+                      s.status === 'error'   ? REDWOOD.error   :
+                      s.status === 'running' ? REDWOOD.info    : REDWOOD.neutral600;
+                    return (
+                      <div key={s.step} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 4 }}>
+                        <span style={{ marginTop: 2 }}>{icon}</span>
+                        <div>
+                          <Text style={{ fontSize: 12, color: textColor }}>
+                            <strong>Step {s.step}:</strong> {s.label}
+                          </Text>
+                          {s.detail && (
+                            <div>
+                              <Text type="secondary" style={{ fontSize: 11 }}>{s.detail}</Text>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Modal Buttons */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+                <Button onClick={() => { setVoidModalOpen(false); voidForm.resetFields(); setVoidStepStatus([]); }}>
+                  Cancel
+                </Button>
+                <Button
+                  type="primary"
+                  danger
+                  htmlType="submit"
+                  loading={voidSubmitting}
+                  disabled={!voidEligibility?.eligible || voidEligibilityLoading}
+                  icon={<StopOutlined />}
+                >
+                  Void Payment
+                </Button>
+              </div>
+            </Form>
+          </Spin>
+        </Modal>
+
+        {/* ── Void Payment API Drawer ──────────────────────────────────────── */}
+        <Drawer
+          title={
+            <Space>
+              <ApiOutlined style={{ color: REDWOOD.info }} />
+              <span>Void Payment APIs</span>
+            </Space>
+          }
+          open={voidApiDrawerOpen}
+          onClose={() => setVoidApiDrawerOpen(false)}
+          width={520}
+          placement="right"
+        >
+          {/* GET Eligibility */}
+          <Card
+            size="small"
+            style={{ marginBottom: 16 }}
+            title={
+              <Space>
+                <Tag color="blue">GET</Tag>
+                <Text strong style={{ fontSize: 12 }}>Check Void Eligibility</Text>
+              </Space>
+            }
+            extra={
+              <Button
+                size="small"
+                type="primary"
+                icon={voidEligApiRunning ? <LoadingOutlined /> : <PlayCircleOutlined />}
+                loading={voidEligApiRunning}
+                onClick={runVoidEligibilityApi}
+                disabled={!voidTargetPayment}
+              >
+                Run
+              </Button>
+            }
+          >
+            <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 8 }}>
+              Pre-checks whether the payment can be voided. Runs automatically when the void popup opens.
+            </Text>
+            <code style={{ fontSize: 11, background: '#e8f5e9', padding: '4px 8px', borderRadius: 4, display: 'block', wordBreak: 'break-all', marginBottom: 10 }}>
+              {APEX_DB_CONFIG.baseUrl}/ap/payments/{voidTargetPayment?.checkId ?? ':check_id'}/void-eligibility
+            </code>
+            {voidEligApiResult && (
+              <pre style={{ fontSize: 10, background: '#1e1e1e', color: '#d4d4d4', padding: 10, borderRadius: 4, maxHeight: 200, overflowY: 'auto', margin: 0 }}>
+                {JSON.stringify(voidEligApiResult, null, 2)}
+              </pre>
+            )}
+          </Card>
+
+          {/* PUT Void */}
+          <Card
+            size="small"
+            title={
+              <Space>
+                <Tag color="orange">PUT</Tag>
+                <Text strong style={{ fontSize: 12 }}>Execute Void</Text>
+              </Space>
+            }
+          >
+            <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 8 }}>
+              Voids the payment: marks as Voided, sets STOP_DATE/STOP_REASON/STOP_REFERENCE, restores invoice installment balance.
+            </Text>
+            <code style={{ fontSize: 11, background: '#fff3e0', padding: '4px 8px', borderRadius: 4, display: 'block', wordBreak: 'break-all', marginBottom: 10 }}>
+              {APEX_DB_CONFIG.baseUrl}/ap/payments/void
+            </code>
+            <Text type="secondary" style={{ fontSize: 11 }}>Request body:</Text>
+            <pre style={{ fontSize: 10, background: '#1e1e1e', color: '#d4d4d4', padding: 10, borderRadius: 4, margin: '6px 0 0', maxHeight: 160, overflowY: 'auto' }}>
+              {JSON.stringify({
+                CheckId:       voidTargetPayment?.checkId ?? -42,
+                VoidDate:      dayjs().format('YYYY-MM-DD'),
+                VoidedBy:      null,
+                StopReason:    'Payment Voided',
+                StopReference: voidTargetPayment?.paymentNumber?.toString() ?? null,
+              }, null, 2)}
+            </pre>
+          </Card>
+        </Drawer>
+
       </Content>
       <Autopilot module="ap" />
       <FloatingMenu />
