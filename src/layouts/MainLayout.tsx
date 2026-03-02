@@ -17,7 +17,7 @@ import {
 import { Outlet, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import type { MenuProps } from 'antd';
-import APIMonitor from '../components/APIMonitor';
+import APIEndpointBar from '../components/APIEndpointBar';
 
 // Type for BeforeInstallPromptEvent
 interface BeforeInstallPromptEvent extends Event {
@@ -217,12 +217,12 @@ const MainLayout: React.FC = () => {
         </Space>
       </div>
 
+      {/* API Endpoint Status Bar */}
+      <APIEndpointBar />
+
       <Content>
         <Outlet />
       </Content>
-
-      {/* Global API Monitor */}
-      <APIMonitor />
 
       {/* iOS Install Instructions Modal */}
       <Modal
