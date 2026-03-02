@@ -21,6 +21,7 @@ import {
   BankOutlined,
   AppstoreOutlined,
   CloseOutlined,
+  KeyOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import type { Module } from '../types';
@@ -141,6 +142,14 @@ const modules: Module[] = [
     icon: <SettingOutlined style={{ fontSize: 32 }} />,
     path: '/admin',
     color: '#595959',
+  },
+  {
+    id: 'rm',
+    name: 'Rental Management',
+    description: 'Agreements, Tenants, Installments, Revenue Split — Dubai',
+    icon: <KeyOutlined style={{ fontSize: 32 }} />,
+    path: '/rm',
+    color: '#0B6E6E',
   },
   {
     id: 'sync',

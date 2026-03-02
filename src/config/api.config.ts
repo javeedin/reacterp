@@ -30,6 +30,12 @@ export const APEX_DB_CONFIG = {
     apInvoicesStats: 'ap/invoices/stats',
     apPayments: 'ap/payments',
     apPaymentByCheckId: 'ap/payments',  // append /:check_id
+    // Rental Management endpoints
+    rmAgreements:  'rm/agreements',
+    rmProperties:  'rm/properties',
+    rmCustomers:   'rm/customers',
+    rmExpenses:    'rm/expenses',
+    rmInstallments:'rm/installments',
   },
 };
 
