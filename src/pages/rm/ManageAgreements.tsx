@@ -112,6 +112,8 @@ const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct'
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 const ManageAgreements: React.FC = () => {
+  console.log('[RM] ManageAgreements mounted. RM_BASE =', RM_BASE);
+
   const [agreements, setAgreements]   = useState<Agreement[]>([]);
   const [loading, setLoading]         = useState(false);
   const [properties, setProperties]   = useState<Property[]>([]);
@@ -149,13 +151,28 @@ const ManageAgreements: React.FC = () => {
       if (filters?.customerId)      params.append('customer_id',      filters.customerId);
       if (filters?.propertyId)      params.append('property_id',      filters.propertyId);
 
-      const res  = await fetch(`${RM_BASE}/agreements?${params}`);
+      const url = `${RM_BASE}/agreements?${params}`;
+      console.log('[RM] fetchAgreements URL:', url);
+
+      const res  = await fetch(url);
+      console.log('[RM] fetchAgreements status:', res.status, res.ok);
+
       const text = await res.text();
+      console.log('[RM] fetchAgreements raw response (first 500):', text.slice(0, 500));
+
       try {
         const data = JSON.parse(text);
+        console.log('[RM] fetchAgreements parsed data:', data);
+        console.log('[RM] agreements array length:', data.agreements?.length ?? 'key missing');
         setAgreements(data.agreements || []);
-      } catch { setAgreements([]); }
-    } catch { setAgreements([]); }
+      } catch (parseErr) {
+        console.error('[RM] fetchAgreements JSON parse error:', parseErr);
+        setAgreements([]);
+      }
+    } catch (fetchErr) {
+      console.error('[RM] fetchAgreements network error:', fetchErr);
+      setAgreements([]);
+    }
     setLoading(false);
   }, []);
 
@@ -167,9 +184,11 @@ const ManageAgreements: React.FC = () => {
       ]);
       const pText = await pRes.text();
       const cText = await cRes.text();
-      try { const d = JSON.parse(pText); setProperties(d.properties || []); } catch { /* skip */ }
-      try { const d = JSON.parse(cText); setCustomers(d.customers || []); }   catch { /* skip */ }
-    } catch { /* skip */ }
+      console.log('[RM] properties raw (first 300):', pText.slice(0, 300));
+      console.log('[RM] customers raw (first 300):', cText.slice(0, 300));
+      try { const d = JSON.parse(pText); setProperties(d.properties || []); } catch (e) { console.error('[RM] properties parse error', e); }
+      try { const d = JSON.parse(cText); setCustomers(d.customers || []); }   catch (e) { console.error('[RM] customers parse error', e); }
+    } catch (e) { console.error('[RM] fetchLookups network error', e); }
   }, []);
 
   useEffect(() => { fetchAgreements(); fetchLookups(); }, [fetchAgreements, fetchLookups]);
@@ -454,6 +473,7 @@ const ManageAgreements: React.FC = () => {
         </Card>
 
         {/* Agreements table */}
+        {console.log('[RM] rendering table — agreements.length =', agreements.length, 'loading =', loading)}
         <Card style={{ borderRadius: 8 }}>
           <Table
             columns={columns}
