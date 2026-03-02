@@ -515,6 +515,19 @@ const ManageAgreements: React.FC = () => {
         destroyOnClose
       >
         <Spin spinning={detailLoading}>
+          {/* API URL bar */}
+          {selectedId && (
+            <div style={{
+              background: '#1a1a2e', borderRadius: 6, padding: '6px 12px',
+              marginBottom: 12, fontSize: 11, fontFamily: 'monospace',
+              display: 'flex', flexDirection: 'column', gap: 3,
+            }}>
+              <div><span style={{ color: '#1D7B4D', fontWeight: 700, marginRight: 8 }}>GET</span><span style={{ color: '#e0e0e0' }}>{RM_BASE}/agreements/{selectedId}</span></div>
+              <div><span style={{ color: '#1D7B4D', fontWeight: 700, marginRight: 8 }}>GET</span><span style={{ color: '#e0e0e0' }}>{RM_BASE}/agreements/{selectedId}/installments</span></div>
+              <div><span style={{ color: '#1D7B4D', fontWeight: 700, marginRight: 8 }}>GET</span><span style={{ color: '#e0e0e0' }}>{RM_BASE}/agreements/{selectedId}/splits</span></div>
+            </div>
+          )}
+
           <div style={{ minHeight: 300 }}>
           {!detailLoading && !activeAgreement && (
             <div style={{ padding: 40, textAlign: 'center', color: '#aaa' }}>
