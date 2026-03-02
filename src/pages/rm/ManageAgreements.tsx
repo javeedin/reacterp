@@ -203,6 +203,7 @@ const ManageAgreements: React.FC = () => {
   useEffect(() => { fetchAgreements(); fetchLookups(); }, [fetchAgreements, fetchLookups]);
 
   const loadDetail = async (id: number) => {
+    console.log('[RM] loadDetail starting for id:', id);
     setDetailLoading(true);
     try {
       const [aRes, iRes, sRes] = await Promise.all([
@@ -210,6 +211,7 @@ const ManageAgreements: React.FC = () => {
         fetch(`${RM_BASE}/agreements/${id}/installments`),
         fetch(`${RM_BASE}/agreements/${id}/splits`),
       ]);
+      console.log('[RM] loadDetail responses — agreement:', aRes.status, '/ installments:', iRes.status, '/ splits:', sRes.status);
       const aText = await aRes.text(); const iText = await iRes.text(); const sText = await sRes.text();
       console.log('[RM] loadDetail agreement raw (first 200):', aText.slice(0, 200));
       console.log('[RM] loadDetail installments raw (first 200):', iText.slice(0, 200));
@@ -222,6 +224,10 @@ const ManageAgreements: React.FC = () => {
   };
 
   const openView = async (id: number) => {
+    console.log('[RM] openView called for id:', id);
+    setActiveAgreement(null);   // clear previous data so modal shows spinner, not stale data
+    setInstallments([]);
+    setSplits([]);
     setSelectedId(id);
     setViewOpen(true);
     await loadDetail(id);
@@ -509,6 +515,12 @@ const ManageAgreements: React.FC = () => {
         destroyOnClose
       >
         <Spin spinning={detailLoading}>
+          <div style={{ minHeight: 300 }}>
+          {!detailLoading && !activeAgreement && (
+            <div style={{ padding: 40, textAlign: 'center', color: '#aaa' }}>
+              Failed to load agreement details — check console for errors.
+            </div>
+          )}
           {activeAgreement && (
             <Tabs defaultActiveKey="header" size="small">
 
@@ -669,6 +681,7 @@ const ManageAgreements: React.FC = () => {
 
             </Tabs>
           )}
+          </div>
         </Spin>
       </Modal>
 
