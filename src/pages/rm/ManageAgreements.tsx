@@ -32,6 +32,13 @@ const REDWOOD = {
 
 const RM_BASE = `${APEX_DB_CONFIG.baseUrl}/rm`;
 
+// ORDS sometimes writes the CORS header into the body when HTTP_HEADER_CLOSE is missing.
+// Strip everything before the first JSON character { or [ to get clean JSON.
+const toJson = (text: string) => {
+  const start = text.search(/[{[]/);
+  return JSON.parse(start > 0 ? text.slice(start) : text);
+};
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Agreement {
   agreementId: number;
@@ -161,7 +168,7 @@ const ManageAgreements: React.FC = () => {
       console.log('[RM] fetchAgreements raw response (first 500):', text.slice(0, 500));
 
       try {
-        const data = JSON.parse(text);
+        const data = toJson(text);
         console.log('[RM] fetchAgreements parsed data:', data);
         console.log('[RM] agreements array length:', data.agreements?.length ?? 'key missing');
         setAgreements(data.agreements || []);
@@ -182,12 +189,14 @@ const ManageAgreements: React.FC = () => {
         fetch(`${RM_BASE}/properties`),
         fetch(`${RM_BASE}/customers`),
       ]);
+      console.log('[RM] properties status:', pRes.status, pRes.ok);
+      console.log('[RM] customers status:', cRes.status, cRes.ok);
       const pText = await pRes.text();
       const cText = await cRes.text();
       console.log('[RM] properties raw (first 300):', pText.slice(0, 300));
       console.log('[RM] customers raw (first 300):', cText.slice(0, 300));
-      try { const d = JSON.parse(pText); setProperties(d.properties || []); } catch (e) { console.error('[RM] properties parse error', e); }
-      try { const d = JSON.parse(cText); setCustomers(d.customers || []); }   catch (e) { console.error('[RM] customers parse error', e); }
+      try { const d = toJson(pText); setProperties(d.properties || []); } catch (e) { console.error('[RM] properties parse error', e); }
+      try { const d = toJson(cText); setCustomers(d.customers || []); }   catch (e) { console.error('[RM] customers parse error', e); }
     } catch (e) { console.error('[RM] fetchLookups network error', e); }
   }, []);
 
@@ -202,9 +211,12 @@ const ManageAgreements: React.FC = () => {
         fetch(`${RM_BASE}/agreements/${id}/splits`),
       ]);
       const aText = await aRes.text(); const iText = await iRes.text(); const sText = await sRes.text();
-      try { setActiveAgreement(JSON.parse(aText)); }  catch { /* skip */ }
-      try { const d = JSON.parse(iText); setInstallments(Array.isArray(d) ? d : []); } catch { setInstallments([]); }
-      try { const d = JSON.parse(sText); setSplits(Array.isArray(d) ? d : []); }       catch { setSplits([]); }
+      console.log('[RM] loadDetail agreement raw (first 200):', aText.slice(0, 200));
+      console.log('[RM] loadDetail installments raw (first 200):', iText.slice(0, 200));
+      console.log('[RM] loadDetail splits raw (first 200):', sText.slice(0, 200));
+      try { setActiveAgreement(toJson(aText)); }  catch (e) { console.error('[RM] agreement detail parse error', e); }
+      try { const d = toJson(iText); setInstallments(Array.isArray(d) ? d : []); } catch (e) { console.error('[RM] installments parse error', e); setInstallments([]); }
+      try { const d = toJson(sText); setSplits(Array.isArray(d) ? d : []); }       catch (e) { console.error('[RM] splits parse error', e); setSplits([]); }
     } catch { /* skip */ }
     setDetailLoading(false);
   };
