@@ -69,6 +69,7 @@ import {
   ScheduleOutlined,
   BankOutlined,
   PlayCircleOutlined,
+  EditOutlined,
 } from '@ant-design/icons';
 
 dayjs.extend(customParseFormat);
@@ -318,7 +319,7 @@ const getEndOfMonth = (dateStr: string): string => {
 };
 
 // Create a blank line — accepts optional defaults to inherit from header
-const createBlankLine = (lineNumber: number, defaults?: { accountingDate?: string; taxClassification?: string; accrualAccount?: string }): InvoiceLine => {
+const createBlankLine = (lineNumber: number, defaults?: { accountingDate?: string; taxClassification?: string; accrualAccount?: string; description?: string }): InvoiceLine => {
   const acctDate = defaults?.accountingDate || '';
   return {
     key: Date.now().toString() + '-' + lineNumber,
@@ -329,7 +330,7 @@ const createBlankLine = (lineNumber: number, defaults?: { accountingDate?: strin
     distributionCombination: '',
     accountingDate: acctDate,
     prorateAcrossAllItemLines: 'No',
-    description: '',
+    description: defaults?.description || '',
     taxClassification: defaults?.taxClassification || '',
     shipToLocation: '',
     quantity: 1,
@@ -515,13 +516,15 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   // Edit mode: determine if invoice is editable or read-only
   const isEditMode = Boolean(initialData?.invoiceId);
-  const isReadOnly = useMemo(() => {
-    if (!initialData) return false;
+  const [isEditing, setIsEditing] = useState(false);
+  const { isReadOnly, isPermanentlyLocked } = useMemo(() => {
+    if (!initialData?.invoiceId) return { isReadOnly: false, isPermanentlyLocked: false };
     const status = (initialData.holdPaidStatus || '').toLowerCase();
     const isPosted = initialData.validationStatus === 'Validated';
     const isPaid = status === 'fully paid' || status === 'paid' || status.includes('partial');
-    return isPosted || isPaid;
-  }, [initialData]);
+    const permanentlyLocked = isPosted || isPaid;
+    return { isReadOnly: permanentlyLocked || !isEditing, isPermanentlyLocked: permanentlyLocked };
+  }, [initialData, isEditing]);
 
   // Payments tab state (for edit mode)
   const [invoicePayments, setInvoicePayments] = useState<{ key: string; checkId: number; number: string; paymentDocument: string; status: string; reconciled: string; currentPayeeName: string; paymentDate: string; paidAmount: number; currency: string; address: string; remitToAccount: string }[]>([]);
@@ -1124,7 +1127,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     const defaultAcctDate = invoiceDate?.format?.('DD-MMM-YYYY') || '';
     const existingTax = lines.find((l) => l.taxClassification)?.taxClassification || '';
     const defaultAccrual = form.getFieldValue('liabilityDistribution') || '';
-    setLines([...lines, createBlankLine(nextLine, { accountingDate: defaultAcctDate, taxClassification: existingTax, accrualAccount: defaultAccrual })]);
+    const headerDescription = form.getFieldValue('description') || '';
+    setLines([...lines, createBlankLine(nextLine, { accountingDate: defaultAcctDate, taxClassification: existingTax, accrualAccount: defaultAccrual, description: headerDescription })]);
   };
 
   const removeLines = () => {
@@ -2825,6 +2829,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               <CheckCircleOutlined /> Invoice ID: {savedInvoiceId}
             </Tag>
           )}
+          {isEditMode && !isEditing && (
+            <Button
+              icon={<EditOutlined />}
+              onClick={() => setIsEditing(true)}
+              disabled={isPermanentlyLocked}
+              title={isPermanentlyLocked ? 'Invoice cannot be edited (paid or accounted)' : 'Enable editing'}
+            >
+              Edit
+            </Button>
+          )}
           {!savedInvoiceId && !isReadOnly && (
             <Button onClick={handleSaveAndCreateNext} loading={saving} disabled={saving || !isValidated}>
               Save and Create Next
@@ -2945,9 +2959,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   endDate,
                 })));
               }
-              // Copy header description to all lines' description
+              // Copy header description to lines that don't already have a description
               if ('description' in changedValues) {
-                setLines((prev) => prev.map((line) => ({ ...line, description: changedValues.description || '' })));
+                setLines((prev) => prev.map((line) => ({
+                  ...line,
+                  description: line.description ? line.description : (changedValues.description || ''),
+                })));
               }
               // Copy liability distribution to all lines' accrual account
               if ('liabilityDistribution' in changedValues) {
