@@ -2813,15 +2813,15 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               {isValidated ? 'Validated' : 'Validate'}
             </Button>
           )}
-          <Tooltip title={!isValidated ? 'Run validation first' : ''}>
+          <Tooltip title={!savedInvoiceId && lines.every(l => l.amount === 0) ? 'Add invoice lines first' : ''}>
             <Button
               icon={<AccountBookOutlined />}
               onClick={() => setAccountingModalVisible(true)}
-              disabled={!isValidated}
+              disabled={!savedInvoiceId && lines.every(l => l.amount === 0)}
               style={{
                 fontWeight: 500,
-                borderColor: isValidated ? REDWOOD.info : undefined,
-                color: isValidated ? REDWOOD.info : undefined,
+                borderColor: (savedInvoiceId || lines.some(l => l.amount !== 0)) ? REDWOOD.info : undefined,
+                color: (savedInvoiceId || lines.some(l => l.amount !== 0)) ? REDWOOD.info : undefined,
               }}
             >
               View Accounting
