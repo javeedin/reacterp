@@ -3926,6 +3926,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             ? lines.find((l) => l.key === editingLineKey)?.distributionCombination
             : undefined)
         }
+        lockedFirstSegment={
+          editingLineKey && editingLineKey !== '__liability__'
+            ? (form.getFieldValue('liabilityDistribution') || '').split('-')[0] || undefined
+            : undefined
+        }
       />
 
       {/* ========== VALIDATION CHECKLIST MODAL ========== */}

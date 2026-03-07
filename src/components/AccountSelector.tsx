@@ -31,6 +31,7 @@ interface AccountSelectorProps {
   onCancel: () => void;
   onSelect: (accountCode: string, segments: Record<string, { value: string; description: string }>) => void;
   initialValue?: string;
+  lockedFirstSegment?: string; // When set, the first (Company) segment is locked to this value
 }
 
 // API endpoints
@@ -179,6 +180,7 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
   onCancel,
   onSelect,
   initialValue,
+  lockedFirstSegment,
 }) => {
   const [loading, setLoading] = useState(false);
   const [segments, setSegments] = useState<Segment[]>([]);
@@ -257,27 +259,26 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
 
   // Parse initial value when modal opens
   useEffect(() => {
-    if (visible && initialValue && segments.length > 0) {
-      const parts = initialValue.split('-');
+    if (visible && segments.length > 0) {
       const newValues: Record<string, string> = {};
-      segments.forEach((seg, index) => {
-        if (parts[index]) {
-          newValues[seg.segment_code] = parts[index];
-        }
-      });
+      if (initialValue) {
+        const parts = initialValue.split('-');
+        segments.forEach((seg, index) => {
+          if (parts[index]) newValues[seg.segment_code] = parts[index];
+        });
+      } else {
+        segments.forEach(seg => {
+          const values = segmentValues[seg.segment_code] || valuesCache.get(seg.segment_code) || [];
+          if (values.length > 0) newValues[seg.segment_code] = values[0].Value;
+        });
+      }
+      // Always override first segment with locked value when provided
+      if (lockedFirstSegment && segments.length > 0) {
+        newValues[segments[0].segment_code] = lockedFirstSegment;
+      }
       setSelectedValues(newValues);
-    } else if (visible && !initialValue) {
-      // Set defaults if no initial value
-      const defaults: Record<string, string> = {};
-      segments.forEach(seg => {
-        const values = segmentValues[seg.segment_code] || valuesCache.get(seg.segment_code) || [];
-        if (values.length > 0) {
-          defaults[seg.segment_code] = values[0].Value;
-        }
-      });
-      setSelectedValues(defaults);
     }
-  }, [visible, initialValue, segments, segmentValues]);
+  }, [visible, initialValue, segments, segmentValues, lockedFirstSegment]);
 
   // Handle value change
   const handleValueChange = (segmentCode: string, value: string) => {
@@ -314,10 +315,12 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
   // Handle Reset
   const handleReset = () => {
     const defaults: Record<string, string> = {};
-    segments.forEach(seg => {
-      const values = segmentValues[seg.segment_code] || valuesCache.get(seg.segment_code) || [];
-      if (values.length > 0) {
-        defaults[seg.segment_code] = values[0].Value;
+    segments.forEach((seg, index) => {
+      if (index === 0 && lockedFirstSegment) {
+        defaults[seg.segment_code] = lockedFirstSegment;
+      } else {
+        const values = segmentValues[seg.segment_code] || valuesCache.get(seg.segment_code) || [];
+        if (values.length > 0) defaults[seg.segment_code] = values[0].Value;
       }
     });
     setSelectedValues(defaults);
@@ -384,11 +387,12 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
   };
 
   // Render segment row
-  const renderSegmentRow = (segment: Segment) => {
+  const renderSegmentRow = (segment: Segment, index: number) => {
     const values = segmentValues[segment.segment_code] || valuesCache.get(segment.segment_code) || [];
     const isLoading = valuesLoading[segment.segment_code];
     const selectedValue = selectedValues[segment.segment_code] || '';
     const description = getDescription(segment.segment_code, selectedValue);
+    const isLocked = index === 0 && !!lockedFirstSegment;
 
     return (
       <Row
@@ -406,6 +410,7 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
             onChange={(val) => handleValueChange(segment.segment_code, val)}
             style={{ width: '100%' }}
             loading={isLoading}
+            disabled={isLocked}
             showSearch
             optionFilterProp="label"
             filterOption={(input, option) => {
@@ -480,7 +485,7 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
         <>
           {/* All segments displayed directly */}
           <div>
-            {segments.map(segment => renderSegmentRow(segment))}
+            {segments.map((segment, index) => renderSegmentRow(segment, index))}
           </div>
 
           {/* Preview of combined account code */}
