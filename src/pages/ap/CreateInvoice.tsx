@@ -403,7 +403,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [headerValues, setHeaderValues] = useState<Record<string, any>>({
     invoiceType: 'Standard',
     invoiceCurrency: 'AED',
-    invoiceDate: isEditMode ? undefined : dayjs(),
+    invoiceDate: initialData?.invoiceId ? undefined : dayjs(),
   });
   const [taxRate, setTaxRate] = useState<number>(0);
 
@@ -2868,7 +2868,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               payAlone: 'No',
               calculateTax: 'Yes',
               liabilityDistribution: '02-00-00-2313101-0000-000-00-000-000',
-              invoiceDate: isEditMode ? undefined : dayjs(),
+              invoiceDate: initialData?.invoiceId ? undefined : dayjs(),
             }}
             onValuesChange={(changedValues, allValues) => {
               setHeaderValues(allValues);
