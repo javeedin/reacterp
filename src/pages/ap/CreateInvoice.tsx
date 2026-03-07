@@ -233,6 +233,7 @@ interface InvoiceLine {
 
 interface InstallmentRow {
   key: string;
+  installmentId?: number | null;   // DB primary key — null/undefined for new rows
   installmentNumber: number;
   dueDate: dayjs.Dayjs | null;
   grossAmount: number;
@@ -1823,6 +1824,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               if (items.length > 0) {
                 setInstEditRows(items.map((item: any, idx: number) => ({
                   key:               item.installment_id?.toString() || idx.toString(),
+                  installmentId:     item.installment_id ? Number(item.installment_id) : null,
                   installmentNumber: item.installment_number || idx + 1,
                   dueDate:           formatDateStr(item.due_date) ? dayjs(formatDateStr(item.due_date), 'DD-MMM-YYYY') : null,
                   grossAmount:       item.gross_amount || 0,
@@ -2072,6 +2074,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
     const items = instEditRows.map((row) => ({
       InvoiceId:              invoiceId,
+      InstallmentId:          row.installmentId || null,
       InstallmentNumber:      row.installmentNumber,
       DueDate:                row.dueDate?.format('YYYY-MM-DD') || null,
       GrossAmount:            row.grossAmount,
@@ -6176,6 +6179,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             updated.splice(idx + 1, 0, {
               ...selectedRow,
               key:               newKey,
+              installmentId:     null,   // new row — no DB record yet
               grossAmount:       half2,
               unpaidAmount:      half2,
               dueDate:           selectedRow.dueDate ? selectedRow.dueDate.add(30, 'day') : null,
