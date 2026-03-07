@@ -915,28 +915,35 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const fetchSupplierSites = async (supplierId: number, procurementBU: string) => {
     setSupplierSiteLoading(true);
     setSupplierSites([]);
+    const url = `https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/suppliers/sites?P_SUPPLIER_ID=${supplierId}&P_PROCUREMENT_BU=${encodeURIComponent(procurementBU)}`;
+    console.log('[SupplierSites] Fetching URL:', url);
     try {
-      const url = `${APEX_SUPPLIER_SITES_URL}?P_SUPPLIER_ID=${supplierId}&P_PROCUREMENT_BU=${encodeURIComponent(procurementBU)}`;
       const res = await fetch(url, { headers: { Accept: 'application/json' } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
+      console.log('[SupplierSites] Raw response:', JSON.stringify(data, null, 2));
       const items: any[] = data.items || (Array.isArray(data) ? data : []);
+      console.log('[SupplierSites] Items count:', items.length);
+      if (items.length > 0) console.log('[SupplierSites] First item keys:', Object.keys(items[0]));
+      // Try every plausible field name Oracle ORDS might return
       const mapped: SupplierSiteRecord[] = items.map((item: any) => ({
-        siteId:       item.vendor_site_id?.toString() || item.site_id?.toString() || '',
-        siteCode:     item.vendor_site_code || item.site_code || item.site_name || '',
-        addressLine1: item.address_line1 || item.address1 || '',
-        city:         item.city || '',
-        country:      item.country || '',
+        siteId:       (item.vendor_site_id ?? item.site_id ?? item.VENDOR_SITE_ID ?? item.SITE_ID ?? '').toString(),
+        siteCode:     item.vendor_site_code || item.site_code || item.site_name || item.VENDOR_SITE_CODE || item.SITE_CODE || item.SITE_NAME || '',
+        addressLine1: item.address_line1 || item.address1 || item.ADDRESS_LINE1 || '',
+        city:         item.city || item.CITY || '',
+        country:      item.country || item.COUNTRY || '',
       })).filter(s => s.siteCode);
+      console.log('[SupplierSites] Mapped sites:', mapped);
       setSupplierSites(mapped);
       if (mapped.length === 1) {
         form.setFieldsValue({ supplierSite: mapped[0].siteCode });
         message.success(`Site auto-selected: ${mapped[0].siteCode}`);
       } else if (mapped.length === 0) {
-        message.warning('No supplier sites found for this supplier.');
+        message.warning('No supplier sites found. Check browser console for raw API response.');
       }
-    } catch {
-      message.error('Failed to load supplier sites.');
+    } catch (err) {
+      console.error('[SupplierSites] Error:', err);
+      message.error(`Failed to load supplier sites: ${err}`);
     } finally {
       setSupplierSiteLoading(false);
     }
