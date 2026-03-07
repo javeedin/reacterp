@@ -234,7 +234,11 @@ interface InstallmentRow {
   key: string;
   installmentNumber: number;
   dueDate: dayjs.Dayjs | null;
-  amount: number;
+  grossAmount: number;
+  unpaidAmount: number;
+  paymentPriority: number;
+  paymentMethod: string;
+  bankAccount: string;
 }
 
 // Currency list
@@ -480,6 +484,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // Installment editor (shown before saving invoice)
   const [instEditVisible, setInstEditVisible]     = useState(false);
   const [instEditRows, setInstEditRows]           = useState<InstallmentRow[]>([]);
+  const [instSelectedKey, setInstSelectedKey]     = useState<string | null>(null);
   const [pendingFormValues, setPendingFormValues] = useState<any>(null);
   const [pendingSaveMode, setPendingSaveMode]     = useState<'save' | 'saveClose' | 'saveNext'>('save');
   const [importPreviewData, setImportPreviewData] = useState<{ type: string; amount: number; description: string }[]>([]);
@@ -1974,11 +1979,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
       setPendingFormValues(values);
       setPendingSaveMode(mode);
+      setInstSelectedKey(null);
       setInstEditRows([{
-        key:                '1',
-        installmentNumber:  1,
-        dueDate:            dueDate ? dayjs(dueDate) : null,
-        amount:             grossAmount,
+        key:               '1',
+        installmentNumber: 1,
+        dueDate:           dueDate ? dayjs(dueDate) : null,
+        grossAmount,
+        unpaidAmount:      grossAmount,
+        paymentPriority:   99,
+        paymentMethod:     values.paymentMethod || '',
+        bankAccount:       '',
       }]);
       setInstEditVisible(true);
     } catch {
@@ -1991,7 +2001,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     if (!pendingFormValues) return;
 
     const invoiceAmount = pendingFormValues.invoiceAmount || 0;
-    const rowTotal = instEditRows.reduce((s, r) => s + (r.amount || 0), 0);
+    const rowTotal = instEditRows.reduce((s, r) => s + (r.grossAmount || 0), 0);
     if (Math.abs(rowTotal - invoiceAmount) > 0.01) {
       message.error(`Total installments ${rowTotal.toFixed(2)} must equal invoice amount ${invoiceAmount.toFixed(2)}`);
       return;
@@ -2016,8 +2026,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       const instPayload = {
         InvoiceId:              invoiceId,
         DueDate:                row.dueDate?.format('YYYY-MM-DD') || null,
-        GrossAmount:            row.amount,
-        UnpaidAmount:           row.amount,
+        GrossAmount:            row.grossAmount,
+        UnpaidAmount:           row.unpaidAmount,
         FirstDiscountAmount:    null,
         FirstDiscountDate:      null,
         SecondDiscountAmount:   null,
@@ -2027,14 +2037,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         NetAmountOne:           null,
         NetAmountTwo:           null,
         NetAmountThree:         null,
-        PaymentPriority:        99,
-        PaymentMethod:          values.paymentMethod || null,
-        PaymentMethodCode:      values.paymentMethod || null,
+        PaymentPriority:        row.paymentPriority,
+        PaymentMethod:          row.paymentMethod || null,
+        PaymentMethodCode:      row.paymentMethod || null,
         HoldReason:             null,
         HoldType:               null,
         HoldDate:               null,
         HeldBy:                 null,
-        BankAccount:            null,
+        BankAccount:            row.bankAccount || null,
         ExternalBankAccountId:  null,
         DigitalPaymentAccount:  null,
         RemitToAddressName:     null,
@@ -5910,188 +5920,319 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         </Spin>
       </Modal>
       {/* ── Installment Editor Modal ──────────────────────────────────────── */}
-      <Modal
-        title={
-          <Space>
-            <ScheduleOutlined style={{ color: REDWOOD.primary }} />
-            <span>Payment Installments</span>
-            <Tag color="blue">{pendingFormValues?.invoiceCurrency || 'AED'}</Tag>
-          </Space>
-        }
-        open={instEditVisible}
-        onCancel={() => setInstEditVisible(false)}
-        width={680}
-        destroyOnClose
-        footer={
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              Total: <strong>{instEditRows.reduce((s, r) => s + (r.amount || 0), 0).toFixed(2)}</strong>
-              {' / '}
-              Invoice: <strong>{(pendingFormValues?.invoiceAmount || 0).toFixed(2)}</strong>
-              {Math.abs(instEditRows.reduce((s, r) => s + (r.amount || 0), 0) - (pendingFormValues?.invoiceAmount || 0)) > 0.01 && (
-                <Tag color="red" style={{ marginLeft: 8 }}>
-                  Diff: {(instEditRows.reduce((s, r) => s + (r.amount || 0), 0) - (pendingFormValues?.invoiceAmount || 0)).toFixed(2)}
+      {(() => {
+        const invoiceAmt  = pendingFormValues?.invoiceAmount || 0;
+        const grossTotal  = instEditRows.reduce((s, r) => s + (r.grossAmount  || 0), 0);
+        const unpaidTotal = instEditRows.reduce((s, r) => s + (r.unpaidAmount || 0), 0);
+        const isBalanced  = Math.abs(grossTotal - invoiceAmt) <= 0.01;
+        const selectedRow = instEditRows.find(r => r.key === instSelectedKey) ?? null;
+
+        const updateRow = (key: string, patch: Partial<InstallmentRow>) =>
+          setInstEditRows(prev => prev.map(r => r.key === key ? { ...r, ...patch } : r));
+
+        const addRow = () => {
+          const used      = instEditRows.reduce((s, r) => s + (r.grossAmount || 0), 0);
+          const remaining = parseFloat(Math.max(0, invoiceAmt - used).toFixed(2));
+          const lastDue   = instEditRows[instEditRows.length - 1]?.dueDate;
+          const lastPM    = instEditRows[instEditRows.length - 1]?.paymentMethod || '';
+          const newRow: InstallmentRow = {
+            key:               Date.now().toString(),
+            installmentNumber: instEditRows.length + 1,
+            dueDate:           lastDue ? lastDue.add(30, 'day') : null,
+            grossAmount:       remaining,
+            unpaidAmount:      remaining,
+            paymentPriority:   99,
+            paymentMethod:     lastPM,
+            bankAccount:       '',
+          };
+          setInstEditRows(prev => [...prev, newRow]);
+          setInstSelectedKey(newRow.key);
+        };
+
+        const deleteRow = (key: string) => {
+          setInstEditRows(prev =>
+            prev.filter(r => r.key !== key).map((r, i) => ({ ...r, installmentNumber: i + 1 }))
+          );
+          setInstSelectedKey(null);
+        };
+
+        const splitInstallment = () => {
+          if (!selectedRow) { message.info('Select an installment row to split'); return; }
+          const half1 = parseFloat((selectedRow.grossAmount / 2).toFixed(2));
+          const half2 = parseFloat((selectedRow.grossAmount - half1).toFixed(2));
+          const newKey = Date.now().toString();
+          setInstEditRows(prev => {
+            const idx = prev.findIndex(r => r.key === selectedRow.key);
+            const updated = [...prev];
+            updated[idx] = { ...selectedRow, grossAmount: half1, unpaidAmount: half1 };
+            updated.splice(idx + 1, 0, {
+              ...selectedRow,
+              key:               newKey,
+              grossAmount:       half2,
+              unpaidAmount:      half2,
+              dueDate:           selectedRow.dueDate ? selectedRow.dueDate.add(30, 'day') : null,
+            });
+            return updated.map((r, i) => ({ ...r, installmentNumber: i + 1 }));
+          });
+          setInstSelectedKey(newKey);
+        };
+
+        return (
+          <Modal
+            title={
+              <Space>
+                <ScheduleOutlined style={{ color: REDWOOD.primary }} />
+                <span style={{ fontWeight: 600 }}>Payment Installments</span>
+                <Tag color="blue" style={{ fontWeight: 500 }}>{pendingFormValues?.invoiceCurrency || 'AED'}</Tag>
+                <Tag color={isBalanced ? 'green' : 'red'} style={{ fontWeight: 500 }}>
+                  {isBalanced ? 'Balanced' : `Diff: ${(grossTotal - invoiceAmt).toFixed(2)}`}
                 </Tag>
-              )}
-            </Text>
-            <Space>
-              <Button onClick={() => setInstEditVisible(false)}>Cancel</Button>
-              <Button
-                type="primary"
-                icon={<SaveOutlined />}
-                loading={saving}
-                disabled={
-                  saving ||
-                  Math.abs(instEditRows.reduce((s, r) => s + (r.amount || 0), 0) - (pendingFormValues?.invoiceAmount || 0)) > 0.01
-                }
-                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
-                onClick={executeInstallmentSave}
-              >
-                Confirm &amp; Save
-              </Button>
-            </Space>
-          </div>
-        }
-      >
-        <div style={{ marginBottom: 12 }}>
-          <Alert
-            type="info"
-            showIcon
-            style={{ borderRadius: 6 }}
-            message="Review and split payment installments before saving."
-            description="You can add installments, change due dates, and split the amount. Total must equal the invoice amount."
-          />
-        </div>
-
-        {/* Installment rows */}
-        <Table<InstallmentRow>
-          size="small"
-          dataSource={instEditRows}
-          rowKey="key"
-          pagination={false}
-          bordered
-          columns={[
-            {
-              title: '#',
-              dataIndex: 'installmentNumber',
-              width: 44,
-              align: 'center',
-              render: (_v, _r, idx) => (
-                <Text style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.neutral600 }}>{idx + 1}</Text>
-              ),
-            },
-            {
-              title: 'Due Date',
-              dataIndex: 'dueDate',
-              width: 160,
-              render: (_v, row) => (
-                <DatePicker
-                  size="small"
-                  value={row.dueDate}
-                  format="DD-MMM-YYYY"
-                  style={{ width: '100%' }}
-                  onChange={(d) =>
-                    setInstEditRows(prev =>
-                      prev.map(r => r.key === row.key ? { ...r, dueDate: d } : r)
-                    )
-                  }
-                />
-              ),
-            },
-            {
-              title: 'Amount',
-              dataIndex: 'amount',
-              render: (_v, row) => (
-                <InputNumber
-                  size="small"
-                  value={row.amount}
-                  min={0}
-                  precision={2}
-                  style={{ width: '100%' }}
-                  formatter={v => `${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-                  parser={v => Number(v?.replace(/,/g, '') || 0)}
-                  onChange={(val) =>
-                    setInstEditRows(prev =>
-                      prev.map(r => r.key === row.key ? { ...r, amount: val ?? 0 } : r)
-                    )
-                  }
-                />
-              ),
-            },
-            {
-              title: '',
-              width: 40,
-              align: 'center',
-              render: (_v, row) => (
-                <Button
-                  type="text"
-                  size="small"
-                  danger
-                  icon={<DeleteOutlined />}
-                  disabled={instEditRows.length === 1}
-                  onClick={() =>
-                    setInstEditRows(prev =>
-                      prev
-                        .filter(r => r.key !== row.key)
-                        .map((r, i) => ({ ...r, installmentNumber: i + 1 }))
-                    )
-                  }
-                />
-              ),
-            },
-          ]}
-          summary={() => {
-            const total = instEditRows.reduce((s, r) => s + (r.amount || 0), 0);
-            const invoiceAmt = pendingFormValues?.invoiceAmount || 0;
-            const isBalanced = Math.abs(total - invoiceAmt) <= 0.01;
-            return (
-              <Table.Summary.Row>
-                <Table.Summary.Cell index={0} colSpan={2} align="right">
-                  <Text strong style={{ fontSize: 12 }}>Total</Text>
-                </Table.Summary.Cell>
-                <Table.Summary.Cell index={1}>
-                  <Text
-                    strong
-                    style={{ color: isBalanced ? REDWOOD.success : REDWOOD.error, fontSize: 13 }}
+              </Space>
+            }
+            open={instEditVisible}
+            onCancel={() => setInstEditVisible(false)}
+            width={960}
+            destroyOnClose
+            footer={
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  Invoice Amount: <strong>{invoiceAmt.toFixed(2)}</strong>
+                  {'  ·  '}
+                  Gross Total: <strong style={{ color: isBalanced ? REDWOOD.success : REDWOOD.error }}>{grossTotal.toFixed(2)}</strong>
+                </Text>
+                <Space>
+                  <Button onClick={() => setInstEditVisible(false)}>Cancel</Button>
+                  <Button
+                    type="primary"
+                    icon={<SaveOutlined />}
+                    loading={saving}
+                    disabled={saving || !isBalanced}
+                    style={{ background: isBalanced ? REDWOOD.primary : undefined, borderColor: isBalanced ? REDWOOD.primary : undefined }}
+                    onClick={executeInstallmentSave}
                   >
-                    {total.toFixed(2)}
-                  </Text>
-                  {!isBalanced && (
-                    <Text type="danger" style={{ fontSize: 11, marginLeft: 6 }}>
-                      (need {invoiceAmt.toFixed(2)})
-                    </Text>
-                  )}
-                </Table.Summary.Cell>
-                <Table.Summary.Cell index={2} />
-              </Table.Summary.Row>
-            );
-          }}
-        />
+                    Confirm &amp; Save
+                  </Button>
+                </Space>
+              </div>
+            }
+          >
+            {/* ── Oracle-style toolbar ── */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`,
+              borderRadius: '6px 6px 0 0', padding: '6px 10px', flexWrap: 'wrap',
+            }}>
+              <Button
+                size="small"
+                icon={<PlusOutlined />}
+                onClick={addRow}
+                style={{ fontSize: 12 }}
+              >
+                Add Row
+              </Button>
+              <Button
+                size="small"
+                icon={<DeleteOutlined />}
+                danger
+                disabled={!instSelectedKey || instEditRows.length === 1}
+                onClick={() => instSelectedKey && deleteRow(instSelectedKey)}
+                style={{ fontSize: 12 }}
+              >
+                Delete
+              </Button>
+              <Divider type="vertical" style={{ margin: '0 2px' }} />
+              <Button
+                size="small"
+                icon={<LockOutlined />}
+                disabled={!instSelectedKey}
+                style={{ fontSize: 12, borderColor: REDWOOD.warning, color: REDWOOD.warning }}
+              >
+                Place Hold
+              </Button>
+              <Button
+                size="small"
+                icon={<UnlockOutlined />}
+                disabled={!instSelectedKey}
+                style={{ fontSize: 12, borderColor: REDWOOD.success, color: REDWOOD.success }}
+              >
+                Release Hold
+              </Button>
+              <Divider type="vertical" style={{ margin: '0 2px' }} />
+              <Button
+                size="small"
+                icon={<AppstoreOutlined />}
+                disabled={!instSelectedKey}
+                onClick={splitInstallment}
+                style={{ fontSize: 12 }}
+              >
+                Split Installment
+              </Button>
+            </div>
 
-        {/* Add installment button */}
-        <Button
-          type="dashed"
-          icon={<PlusOutlined />}
-          style={{ marginTop: 10, width: '100%' }}
-          onClick={() => {
-            const invoiceAmt = pendingFormValues?.invoiceAmount || 0;
-            const usedAmt    = instEditRows.reduce((s, r) => s + (r.amount || 0), 0);
-            const remaining  = Math.max(0, invoiceAmt - usedAmt);
-            const lastDue    = instEditRows[instEditRows.length - 1]?.dueDate;
-            setInstEditRows(prev => [
-              ...prev,
-              {
-                key:               Date.now().toString(),
-                installmentNumber: prev.length + 1,
-                dueDate:           lastDue ? lastDue.add(30, 'day') : null,
-                amount:            parseFloat(remaining.toFixed(2)),
-              },
-            ]);
-          }}
-        >
-          Add Installment
-        </Button>
-      </Modal>
+            {/* ── Installment table ── */}
+            <Table<InstallmentRow>
+              size="small"
+              dataSource={instEditRows}
+              rowKey="key"
+              pagination={false}
+              bordered
+              rowSelection={{
+                type: 'radio',
+                selectedRowKeys: instSelectedKey ? [instSelectedKey] : [],
+                onChange: (keys) => setInstSelectedKey(keys[0] as string ?? null),
+              }}
+              onRow={(row) => ({
+                onClick: () => setInstSelectedKey(row.key),
+                style: {
+                  cursor: 'pointer',
+                  background: row.key === instSelectedKey ? '#e6f4ff' : undefined,
+                },
+              })}
+              style={{ borderRadius: 0 }}
+              columns={[
+                {
+                  title: 'Installment',
+                  dataIndex: 'installmentNumber',
+                  width: 80,
+                  align: 'center',
+                  render: (_v, _r, idx) => (
+                    <Text style={{ fontSize: 12, fontWeight: 600 }}>{idx + 1}</Text>
+                  ),
+                },
+                {
+                  title: 'Due Date',
+                  dataIndex: 'dueDate',
+                  width: 148,
+                  render: (_v, row) => (
+                    <DatePicker
+                      size="small"
+                      value={row.dueDate}
+                      format="D-MMM-YYYY"
+                      style={{ width: '100%' }}
+                      onChange={(d) => updateRow(row.key, { dueDate: d })}
+                    />
+                  ),
+                },
+                {
+                  title: 'Gross Amount',
+                  dataIndex: 'grossAmount',
+                  width: 130,
+                  align: 'right',
+                  render: (_v, row) => (
+                    <InputNumber
+                      size="small"
+                      value={row.grossAmount}
+                      min={0}
+                      precision={2}
+                      style={{ width: '100%' }}
+                      formatter={v => `${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                      parser={v => Number(v?.replace(/,/g, '') || 0)}
+                      onChange={(val) => {
+                        const amt = val ?? 0;
+                        updateRow(row.key, { grossAmount: amt, unpaidAmount: amt });
+                      }}
+                    />
+                  ),
+                },
+                {
+                  title: 'Unpaid Amount',
+                  dataIndex: 'unpaidAmount',
+                  width: 120,
+                  align: 'right',
+                  render: (_v, row) => (
+                    <Text style={{ fontSize: 12, paddingRight: 4 }}>
+                      {row.unpaidAmount.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </Text>
+                  ),
+                },
+                {
+                  title: 'Payment Priority',
+                  dataIndex: 'paymentPriority',
+                  width: 110,
+                  align: 'center',
+                  render: (_v, row) => (
+                    <InputNumber
+                      size="small"
+                      value={row.paymentPriority}
+                      min={1}
+                      max={999}
+                      style={{ width: '100%' }}
+                      onChange={(val) => updateRow(row.key, { paymentPriority: val ?? 99 })}
+                    />
+                  ),
+                },
+                {
+                  title: 'Payment Method',
+                  dataIndex: 'paymentMethod',
+                  width: 130,
+                  render: (_v, row) => (
+                    <Select
+                      size="small"
+                      value={row.paymentMethod || undefined}
+                      style={{ width: '100%' }}
+                      placeholder="Select"
+                      allowClear
+                      onChange={(val) => updateRow(row.key, { paymentMethod: val ?? '' })}
+                    >
+                      <Option value="Check">Check</Option>
+                      <Option value="Electronic">Electronic</Option>
+                      <Option value="Wire">Wire</Option>
+                      <Option value="EFT">EFT</Option>
+                    </Select>
+                  ),
+                },
+                {
+                  title: 'Bank Account',
+                  dataIndex: 'bankAccount',
+                  render: (_v, row) => (
+                    <Select
+                      size="small"
+                      value={row.bankAccount || undefined}
+                      style={{ width: '100%' }}
+                      placeholder="Select"
+                      allowClear
+                      onChange={(val) => updateRow(row.key, { bankAccount: val ?? '' })}
+                    >
+                      {/* Bank accounts come from pay-in-full modal data when available */}
+                      {payInFullBankAccounts.map(ba => (
+                        <Option key={ba.bankAccountNumber} value={ba.bankAccountName}>
+                          {ba.bankAccountName}
+                        </Option>
+                      ))}
+                    </Select>
+                  ),
+                },
+              ]}
+              summary={() => (
+                <Table.Summary.Row style={{ background: REDWOOD.neutral100, fontWeight: 700 }}>
+                  <Table.Summary.Cell index={0} colSpan={2} align="right">
+                    <Text strong style={{ fontSize: 12 }}>Totals</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={1} align="right">
+                    <Text strong style={{ color: isBalanced ? REDWOOD.success : REDWOOD.error, fontSize: 12 }}>
+                      {grossTotal.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={2} align="right">
+                    <Text strong style={{ fontSize: 12 }}>
+                      {unpaidTotal.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={3} colSpan={3} />
+                </Table.Summary.Row>
+              )}
+            />
+            {!isBalanced && (
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginTop: 8, borderRadius: 4 }}
+                message={`Gross total (${grossTotal.toFixed(2)}) does not match invoice amount (${invoiceAmt.toFixed(2)}). Difference: ${(grossTotal - invoiceAmt).toFixed(2)}`}
+              />
+            )}
+          </Modal>
+        );
+      })()}
       {/* ─────────────────────────────────────────────────────────────────── */}
 
       <style>{`
