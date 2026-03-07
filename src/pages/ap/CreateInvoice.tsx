@@ -495,6 +495,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // API Preview modal
   const [apiPreviewVisible, setApiPreviewVisible] = useState(false);
   const [apiPreviewData, setApiPreviewData] = useState<{ url: string; body: string; installmentUrl: string; installmentBody: string } | null>(null);
+  // Live-execute results for each card in the preview modal
+  const [apiExecInvoice, setApiExecInvoice]     = useState<{ loading: boolean; httpStatus: number; body: string } | null>(null);
+  const [apiExecInstall, setApiExecInstall]     = useState<{ loading: boolean; httpStatus: number; body: string } | null>(null);
 
   // API Log (last request/response)
   const [apiLog, setApiLog] = useState<{ url: string; method: string; requestBody: string; responseBody: string; status: string; httpStatus: number; timestamp: string } | null>(null);
@@ -2166,7 +2169,58 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       installmentUrl:   `POST ${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments`,
       installmentBody:  JSON.stringify(instPayload, null, 2),
     });
+    setApiExecInvoice(null);
+    setApiExecInstall(null);
     setApiPreviewVisible(true);
+  };
+
+  // Execute invoice API directly from the preview modal
+  const executePreviewInvoiceApi = async () => {
+    if (!apiPreviewData) return;
+    const [method, ...rest] = apiPreviewData.url.split(' ');
+    const url = rest.join(' ');
+    setApiExecInvoice({ loading: true, httpStatus: 0, body: '' });
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: apiPreviewData.body,
+      });
+      const text = await res.text();
+      let pretty = text;
+      try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch { /* not JSON */ }
+      setApiExecInvoice({ loading: false, httpStatus: res.status, body: pretty });
+    } catch (e: any) {
+      setApiExecInvoice({ loading: false, httpStatus: 0, body: e?.message ?? 'Network error' });
+    }
+  };
+
+  // Execute installment API directly from the preview modal
+  const executePreviewInstallApi = async () => {
+    if (!apiPreviewData) return;
+    // Prefer invoiceId captured from the invoice execute result, then savedInvoiceId
+    let invoiceId: number | null = null;
+    if (apiExecInvoice?.body) {
+      try { invoiceId = JSON.parse(apiExecInvoice.body)?.invoiceId ?? null; } catch { /* ignore */ }
+    }
+    if (!invoiceId) invoiceId = savedInvoiceId;
+    const [, ...rest] = apiPreviewData.installmentUrl.split(' ');
+    const baseUrl = rest.join(' ');
+    const url = invoiceId ? `${baseUrl}?P_INVOICE_ID=${invoiceId}` : baseUrl;
+    setApiExecInstall({ loading: true, httpStatus: 0, body: '' });
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: apiPreviewData.installmentBody,
+      });
+      const text = await res.text();
+      let pretty = text;
+      try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch { /* not JSON */ }
+      setApiExecInstall({ loading: false, httpStatus: res.status, body: pretty });
+    } catch (e: any) {
+      setApiExecInstall({ loading: false, httpStatus: 0, body: e?.message ?? 'Network error' });
+    }
   };
 
   // ========== Distribution Tab Columns (matching Fusion Payables) ==========
@@ -4689,112 +4743,175 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       >
         {apiPreviewData && (
           <>
-            <Card
-              size="small"
-              title={
-                <Row justify="space-between" align="middle">
-                  <Space>
-                    <Tag color="green">POST</Tag>
-                    <Text strong>Create Invoice (Header + Lines)</Text>
-                  </Space>
-                  <Button
-                    size="small"
-                    icon={<CopyOutlined />}
-                    onClick={() => {
-                      navigator.clipboard.writeText(apiPreviewData.url);
-                      message.success('URL copied');
-                    }}
-                  >
-                    Copy URL
-                  </Button>
-                </Row>
-              }
-            >
-              <div style={{ marginBottom: 8 }}>
-                <Text type="secondary" style={{ fontSize: 11 }}>URL</Text>
-                <div
-                  style={{
-                    background: '#1e1e1e',
-                    color: '#d4d4d4',
-                    padding: '8px 12px',
-                    borderRadius: 4,
-                    fontSize: 12,
-                    fontFamily: 'monospace',
-                    wordBreak: 'break-all',
-                  }}
+            {/* ── Card 1: Invoice ── */}
+            {(() => {
+              const r = apiExecInvoice;
+              const isOk = r && r.httpStatus >= 200 && r.httpStatus < 300;
+              return (
+                <Card
+                  size="small"
+                  style={{ border: r ? `1px solid ${isOk ? '#b7eb8f' : '#ffa39e'}` : undefined }}
+                  title={
+                    <Row justify="space-between" align="middle">
+                      <Space>
+                        <Tag color={apiPreviewData.url.startsWith('PUT') ? 'orange' : 'green'}>
+                          {apiPreviewData.url.split(' ')[0]}
+                        </Tag>
+                        <Text strong>Create Invoice (Header + Lines)</Text>
+                      </Space>
+                      <Space size={4}>
+                        <Button size="small" icon={<CopyOutlined />}
+                          onClick={() => { navigator.clipboard.writeText(apiPreviewData.url); message.success('URL copied'); }}>
+                          Copy URL
+                        </Button>
+                        <Button size="small" icon={<CopyOutlined />}
+                          onClick={() => { navigator.clipboard.writeText(apiPreviewData.body); message.success('JSON copied'); }}>
+                          Copy JSON
+                        </Button>
+                        <Button
+                          size="small" type="primary" icon={<PlayCircleOutlined />}
+                          loading={r?.loading}
+                          style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+                          onClick={executePreviewInvoiceApi}
+                        >
+                          Execute
+                        </Button>
+                      </Space>
+                    </Row>
+                  }
                 >
-                  {apiPreviewData.url}
-                </div>
-              </div>
-              <div>
-                <Row justify="space-between" align="middle" style={{ marginBottom: 4 }}>
-                  <Text type="secondary" style={{ fontSize: 11 }}>JSON Body (Header + Lines combined)</Text>
-                  <Button
-                    size="small"
-                    icon={<CopyOutlined />}
-                    onClick={() => {
-                      navigator.clipboard.writeText(apiPreviewData.body);
-                      message.success('JSON copied');
-                    }}
-                  >
-                    Copy JSON
-                  </Button>
-                </Row>
-                <pre
-                  style={{
-                    background: '#1e1e1e',
-                    color: '#d4d4d4',
-                    padding: '10px 14px',
-                    borderRadius: 4,
-                    fontSize: 11,
-                    fontFamily: 'monospace',
-                    maxHeight: 450,
-                    overflow: 'auto',
-                    margin: 0,
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                  }}
-                >
-                  {apiPreviewData.body}
-                </pre>
-              </div>
-            </Card>
+                  {/* URL bar */}
+                  <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8,
+                    background: '#1e1e1e', borderRadius: 4, padding: '7px 12px' }}>
+                    <Tag color={apiPreviewData.url.startsWith('PUT') ? 'orange' : 'green'} style={{ margin: 0, fontWeight: 700, fontSize: 11 }}>
+                      {apiPreviewData.url.split(' ')[0]}
+                    </Tag>
+                    <Text style={{ color: '#d4d4d4', fontSize: 12, fontFamily: 'monospace', wordBreak: 'break-all', flex: 1 }}>
+                      {apiPreviewData.url.split(' ').slice(1).join(' ')}
+                    </Text>
+                  </div>
+                  {/* Request body */}
+                  <Text type="secondary" style={{ fontSize: 11 }}>Request Body</Text>
+                  <pre style={{ background: '#1e1e1e', color: '#d4d4d4', padding: '10px 14px', borderRadius: 4,
+                    fontSize: 11, fontFamily: 'monospace', maxHeight: 300, overflow: 'auto', margin: '4px 0 0', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {apiPreviewData.body}
+                  </pre>
+                  {/* Response */}
+                  {r && !r.loading && (
+                    <div style={{ marginTop: 10 }}>
+                      <Row align="middle" style={{ marginBottom: 4 }} gutter={8}>
+                        <Col><Text type="secondary" style={{ fontSize: 11 }}>Response</Text></Col>
+                        <Col>
+                          <Tag color={isOk ? 'success' : 'error'} style={{ fontWeight: 700 }}>
+                            HTTP {r.httpStatus || 'ERR'}
+                          </Tag>
+                        </Col>
+                        {isOk && (() => {
+                          try {
+                            const id = JSON.parse(r.body)?.invoiceId;
+                            return id ? <Col><Tag color="blue">Invoice ID: {id}</Tag></Col> : null;
+                          } catch { return null; }
+                        })()}
+                      </Row>
+                      <pre style={{ background: isOk ? '#0d1a0d' : '#1a0d0d', color: isOk ? '#b5e8b5' : '#f5a5a5',
+                        padding: '10px 14px', borderRadius: 4, fontSize: 11, fontFamily: 'monospace',
+                        maxHeight: 220, overflow: 'auto', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                        {r.body}
+                      </pre>
+                    </div>
+                  )}
+                  {r?.loading && (
+                    <div style={{ marginTop: 10, textAlign: 'center', padding: '12px 0' }}>
+                      <Spin size="small" /><Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>Executing...</Text>
+                    </div>
+                  )}
+                </Card>
+              );
+            })()}
 
-            <Card
-              size="small"
-              style={{ marginTop: 12 }}
-              title={
-                <Row justify="space-between" align="middle">
-                  <Space>
-                    <Tag color="blue">POST</Tag>
-                    <Text strong>Create Installment</Text>
-                  </Space>
-                  <Button
-                    size="small"
-                    icon={<CopyOutlined />}
-                    onClick={() => {
-                      navigator.clipboard.writeText(apiPreviewData!.installmentBody);
-                      message.success('Installment JSON copied');
-                    }}
-                  >
-                    Copy JSON
-                  </Button>
-                </Row>
+            {/* ── Card 2: Installment ── */}
+            {(() => {
+              const r = apiExecInstall;
+              const isOk = r && r.httpStatus >= 200 && r.httpStatus < 300;
+              // Determine effective invoiceId for the installment URL
+              let capturedId: number | null = null;
+              if (apiExecInvoice?.body) {
+                try { capturedId = JSON.parse(apiExecInvoice.body)?.invoiceId ?? null; } catch { /* */ }
               }
-            >
-              <div style={{ marginBottom: 8 }}>
-                <Text type="secondary" style={{ fontSize: 11 }}>URL</Text>
-                <div style={{ background: '#1e1e1e', color: '#d4d4d4', padding: '8px 12px', borderRadius: 4, fontSize: 12, fontFamily: 'monospace', wordBreak: 'break-all' }}>
-                  {apiPreviewData!.installmentUrl}
-                </div>
-              </div>
-              <div>
-                <Text type="secondary" style={{ fontSize: 11 }}>JSON Body</Text>
-                <pre style={{ background: '#1e1e1e', color: '#d4d4d4', padding: '10px 14px', borderRadius: 4, fontSize: 11, fontFamily: 'monospace', maxHeight: 300, overflow: 'auto', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                  {apiPreviewData!.installmentBody}
-                </pre>
-              </div>
-            </Card>
+              const effectiveId = capturedId || savedInvoiceId;
+              const instUrlDisplay = effectiveId
+                ? `${apiPreviewData!.installmentUrl.split(' ').slice(1).join(' ')}?P_INVOICE_ID=${effectiveId}`
+                : apiPreviewData!.installmentUrl.split(' ').slice(1).join(' ');
+              return (
+                <Card
+                  size="small"
+                  style={{ marginTop: 12, border: r ? `1px solid ${isOk ? '#b7eb8f' : '#ffa39e'}` : undefined }}
+                  title={
+                    <Row justify="space-between" align="middle">
+                      <Space>
+                        <Tag color="blue">POST</Tag>
+                        <Text strong>Create Installment</Text>
+                        {!effectiveId && (
+                          <Tooltip title="Execute the Invoice API first to capture the Invoice ID">
+                            <Tag color="warning" style={{ fontSize: 10 }}>Needs Invoice ID</Tag>
+                          </Tooltip>
+                        )}
+                        {effectiveId && <Tag color="green" style={{ fontSize: 10 }}>ID: {effectiveId}</Tag>}
+                      </Space>
+                      <Space size={4}>
+                        <Button size="small" icon={<CopyOutlined />}
+                          onClick={() => { navigator.clipboard.writeText(apiPreviewData!.installmentBody); message.success('Copied'); }}>
+                          Copy JSON
+                        </Button>
+                        <Button
+                          size="small" type="primary" icon={<PlayCircleOutlined />}
+                          loading={r?.loading}
+                          disabled={!effectiveId}
+                          style={{ background: effectiveId ? REDWOOD.info : undefined, borderColor: effectiveId ? REDWOOD.info : undefined }}
+                          onClick={executePreviewInstallApi}
+                        >
+                          Execute
+                        </Button>
+                      </Space>
+                    </Row>
+                  }
+                >
+                  {/* URL bar */}
+                  <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8,
+                    background: '#1e1e1e', borderRadius: 4, padding: '7px 12px' }}>
+                    <Tag color="blue" style={{ margin: 0, fontWeight: 700, fontSize: 11 }}>POST</Tag>
+                    <Text style={{ color: effectiveId ? '#d4d4d4' : '#888', fontSize: 12, fontFamily: 'monospace', wordBreak: 'break-all', flex: 1 }}>
+                      {instUrlDisplay}
+                    </Text>
+                  </div>
+                  {/* Request body */}
+                  <Text type="secondary" style={{ fontSize: 11 }}>Request Body</Text>
+                  <pre style={{ background: '#1e1e1e', color: '#d4d4d4', padding: '10px 14px', borderRadius: 4,
+                    fontSize: 11, fontFamily: 'monospace', maxHeight: 260, overflow: 'auto', margin: '4px 0 0', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {apiPreviewData!.installmentBody}
+                  </pre>
+                  {/* Response */}
+                  {r && !r.loading && (
+                    <div style={{ marginTop: 10 }}>
+                      <Row align="middle" style={{ marginBottom: 4 }} gutter={8}>
+                        <Col><Text type="secondary" style={{ fontSize: 11 }}>Response</Text></Col>
+                        <Col><Tag color={isOk ? 'success' : 'error'} style={{ fontWeight: 700 }}>HTTP {r.httpStatus || 'ERR'}</Tag></Col>
+                      </Row>
+                      <pre style={{ background: isOk ? '#0d1a0d' : '#1a0d0d', color: isOk ? '#b5e8b5' : '#f5a5a5',
+                        padding: '10px 14px', borderRadius: 4, fontSize: 11, fontFamily: 'monospace',
+                        maxHeight: 200, overflow: 'auto', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                        {r.body}
+                      </pre>
+                    </div>
+                  )}
+                  {r?.loading && (
+                    <div style={{ marginTop: 10, textAlign: 'center', padding: '12px 0' }}>
+                      <Spin size="small" /><Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>Executing...</Text>
+                    </div>
+                  )}
+                </Card>
+              );
+            })()}
 
             <Alert
               type="info"
