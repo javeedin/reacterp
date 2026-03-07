@@ -1929,6 +1929,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         const invoiceDate = values.invoiceDate?.format('YYYY-MM-DD') || null;
         const dueDate = values.termsDate?.format('YYYY-MM-DD') || invoiceDate;
         const grossAmount = values.invoiceAmount || 0;
+        const loginUser = user?.username || null;
 
         const instPayload = {
           InvoiceId:                invoiceId,
@@ -1961,6 +1962,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           RemittanceMessageOne:     null,
           RemittanceMessageTwo:     null,
           RemittanceMessageThree:   null,
+          CreatedBy:                loginUser,
+          LastUpdatedBy:            loginUser,
+          LastUpdateLogin:          loginUser,
         };
 
         try {
@@ -2072,6 +2076,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
     const invoiceDate = values.invoiceDate?.format('YYYY-MM-DD') || null;
     const grossAmt = values.invoiceAmount || 0;
+    const previewLoginUser = user?.username || null;
     const instPayload = {
       InvoiceId:                savedInvoiceId || '<invoice_id after save>',
       InstallmentNumber:        1,
@@ -2103,6 +2108,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       RemittanceMessageOne:     null,
       RemittanceMessageTwo:     null,
       RemittanceMessageThree:   null,
+      CreatedBy:                previewLoginUser,
+      LastUpdatedBy:            previewLoginUser,
+      LastUpdateLogin:          previewLoginUser,
     };
 
     setApiPreviewData({
