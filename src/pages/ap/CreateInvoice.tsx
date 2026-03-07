@@ -403,6 +403,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [headerValues, setHeaderValues] = useState<Record<string, any>>({
     invoiceType: 'Standard',
     invoiceCurrency: 'AED',
+    invoiceDate: isEditMode ? undefined : dayjs(),
   });
   const [taxRate, setTaxRate] = useState<number>(0);
 
@@ -2031,7 +2032,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         LastUpdateLogin:        loginUser,
       };
       try {
-        const instUrl = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments`;
+        const instUrl = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments?P_INVOICE_ID=${invoiceId}`;
         const instRes = await fetch(instUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2813,10 +2814,20 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               payAlone: 'No',
               calculateTax: 'Yes',
               liabilityDistribution: '02-00-00-2313101-0000-000-00-000-000',
+              invoiceDate: isEditMode ? undefined : dayjs(),
             }}
             onValuesChange={(changedValues, allValues) => {
               setHeaderValues(allValues);
               setIsValidated(false);
+              // When header amount changes and there is only 1 line, push amount into it
+              if ('invoiceAmount' in changedValues) {
+                const amt = changedValues.invoiceAmount || 0;
+                setLines(prev => {
+                  if (prev.length !== 1) return prev;           // user added more lines — don't override
+                  if (prev[0].amount === amt) return prev;
+                  return [{ ...prev[0], amount: amt, unitPrice: amt }];
+                });
+              }
               // Copy invoice date to all lines' accounting date + derive multiperiod dates
               if (changedValues.invoiceDate) {
                 const formattedDate = changedValues.invoiceDate.format('DD-MMM-YYYY');
