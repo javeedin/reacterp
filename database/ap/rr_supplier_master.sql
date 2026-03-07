@@ -290,6 +290,28 @@ BEGIN
 END;
 /
 
+-- GET Handler - Fetch distinct Procurement Business Units (used to populate UI dropdowns)
+BEGIN
+    ORDS.DEFINE_HANDLER(
+        p_module_name    => 'reerp',
+        p_pattern        => 'business-units',
+        p_method         => 'GET',
+        p_source_type    => 'json/collection',
+        p_items_per_page => 0,
+        p_mimes_allowed  => 'application/json',
+        p_comments       => 'Get distinct Procurement Business Units from RR_SUPPLIER_SITES',
+        p_source         => q'[
+SELECT DISTINCT
+    PROCUREMENT_BU   AS business_unit
+FROM RR_SUPPLIER_SITES
+WHERE PROCUREMENT_BU IS NOT NULL
+ORDER BY PROCUREMENT_BU
+]'
+    );
+    COMMIT;
+END;
+/
+
 -- POST Handler - Sync Suppliers from Oracle Fusion
 BEGIN
     ORDS.DEFINE_HANDLER(

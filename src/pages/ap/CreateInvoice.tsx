@@ -98,7 +98,8 @@ const REDWOOD = {
   surface: '#FFFFFF',
 };
 
-const APEX_SUPPLIERS_URL = `${APEX_DB_CONFIG.baseUrl}/suppliers?limit=500`;
+const APEX_SUPPLIERS_URL      = `${APEX_DB_CONFIG.baseUrl}/suppliers?limit=500`;
+const APEX_BUSINESS_UNITS_URL = `${APEX_DB_CONFIG.baseUrl}/business-units`;
 
 // Supplier record
 interface SupplierRecord {
@@ -373,6 +374,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
   const [supplierLoading, setSupplierLoading] = useState(false);
   const [supplierSearchText, setSupplierSearchText] = useState('');
+  const [businessUnits, setBusinessUnits] = useState<string[]>([]);
 
   // Header completion tracking
   const [headerValues, setHeaderValues] = useState<Record<string, any>>({
@@ -757,6 +759,17 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       message.warning('Could not load existing invoice lines');
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch Procurement Business Units from DB on mount
+  useEffect(() => {
+    fetch(APEX_BUSINESS_UNITS_URL, { headers: { Accept: 'application/json' } })
+      .then(r => r.json())
+      .then(data => {
+        const items: string[] = (data?.items ?? []).map((i: any) => i.business_unit).filter(Boolean);
+        setBusinessUnits(items);
+      })
+      .catch(() => {/* keep empty — dropdowns will stay blank until resolved */});
+  }, []);
 
   // Pre-fill from initialData (Quick Create or Edit mode)
   useEffect(() => {
@@ -2645,8 +2658,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           style={{ marginBottom: 4 }}
                         >
                           <Select placeholder="Select Business Unit" showSearch allowClear>
-                            <Option value="BUIMERC CORP FZE_JAFZA">BUIMERC CORP FZE_JAFZA</Option>
-                            <Option value="BUIMERC CORP_DIFC_INVST">BUIMERC CORP_DIFC_INVST</Option>
+                            {businessUnits.map(bu => (
+                              <Option key={bu} value={bu}>{bu}</Option>
+                            ))}
                           </Select>
                         </Form.Item>
                         <Form.Item
@@ -2697,8 +2711,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           style={{ marginBottom: 4 }}
                         >
                           <Select placeholder="Select entity" allowClear showSearch>
-                            <Option value="BUIMERC CORP FZE">BUIMERC CORP FZE</Option>
-                            <Option value="BUIMERC CORP DIFC">BUIMERC CORP DIFC</Option>
+                            {businessUnits.map(bu => (
+                              <Option key={bu} value={bu}>{bu}</Option>
+                            ))}
                           </Select>
                         </Form.Item>
                       </Col>
