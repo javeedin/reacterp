@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import dayjs from 'dayjs';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
 import {
@@ -439,6 +439,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   // Saving state
   const [saving, setSaving] = useState(false);
+  const amountDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Validation state
   const [isValidated, setIsValidated] = useState(false);
@@ -2896,17 +2897,23 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               invoiceDate: initialData?.invoiceId ? undefined : dayjs(),
             }}
             onValuesChange={(changedValues, allValues) => {
-              setHeaderValues(allValues);
               setIsValidated(false);
-              // When header amount changes and there is only 1 line, push amount into it
+              // Debounce invoiceAmount — every keystroke triggers onValuesChange, which
+              // causes expensive re-renders of the lines table. Delay state sync by 300ms.
               if ('invoiceAmount' in changedValues) {
-                const amt = changedValues.invoiceAmount || 0;
-                setLines(prev => {
-                  if (prev.length !== 1) return prev;           // user added more lines — don't override
-                  if (prev[0].amount === amt) return prev;
-                  return [{ ...prev[0], amount: amt, unitPrice: amt }];
-                });
+                if (amountDebounceRef.current) clearTimeout(amountDebounceRef.current);
+                amountDebounceRef.current = setTimeout(() => {
+                  setHeaderValues(allValues);
+                  const amt = changedValues.invoiceAmount || 0;
+                  setLines(prev => {
+                    if (prev.length !== 1) return prev;
+                    if (prev[0].amount === amt) return prev;
+                    return [{ ...prev[0], amount: amt, unitPrice: amt }];
+                  });
+                }, 300);
+                return;
               }
+              setHeaderValues(allValues);
               // Copy invoice date to all lines' accounting date + derive multiperiod dates
               if (changedValues.invoiceDate) {
                 const formattedDate = changedValues.invoiceDate.format('DD-MMM-YYYY');
