@@ -760,15 +760,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fetch Procurement Business Units from DB on mount
+  // Fetch Procurement Business Units from DB on mount; fall back to known values if endpoint not yet deployed
+  const FALLBACK_BUSINESS_UNITS = ['BUIMERC CORP FZE_JAFZA', 'BUIMERC CORP_DIFC_INVST', 'BUIMERC CORP FZE', 'BUIMERC CORP DIFC'];
   useEffect(() => {
     fetch(APEX_BUSINESS_UNITS_URL, { headers: { Accept: 'application/json' } })
       .then(r => r.json())
       .then(data => {
         const items: string[] = (data?.items ?? []).map((i: any) => i.business_unit).filter(Boolean);
-        setBusinessUnits(items);
+        setBusinessUnits(items.length > 0 ? items : FALLBACK_BUSINESS_UNITS);
       })
-      .catch(() => {/* keep empty — dropdowns will stay blank until resolved */});
+      .catch(() => setBusinessUnits(FALLBACK_BUSINESS_UNITS));
   }, []);
 
   // Pre-fill from initialData (Quick Create or Edit mode)
