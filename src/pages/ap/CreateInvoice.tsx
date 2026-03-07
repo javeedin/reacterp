@@ -2730,19 +2730,19 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           style={{ marginBottom: 4 }}
                         >
                           <Space.Compact style={{ width: '100%' }}>
-                            <Form.Item name="supplier" noStyle rules={[{ required: true, message: 'Required' }]}>
-                              <Tooltip
-                                title={
-                                  selectedSupplierInfo ? (
-                                    <div>
-                                      <div><strong>Supplier #:</strong> {selectedSupplierInfo.number}</div>
-                                      <div><strong>Supplier ID:</strong> {selectedSupplierInfo.id}</div>
-                                    </div>
-                                  ) : null
-                                }
-                                placement="bottom"
-                                mouseEnterDelay={0.3}
-                              >
+                            <Tooltip
+                              title={
+                                selectedSupplierInfo ? (
+                                  <div>
+                                    <div><strong>Supplier #:</strong> {selectedSupplierInfo.number}</div>
+                                    <div><strong>Supplier ID:</strong> {selectedSupplierInfo.id}</div>
+                                  </div>
+                                ) : null
+                              }
+                              placement="bottom"
+                              mouseEnterDelay={0.3}
+                            >
+                              <Form.Item name="supplier" noStyle rules={[{ required: true, message: 'Required' }]}>
                                 <Input
                                   placeholder="Search supplier..."
                                   readOnly
@@ -2755,8 +2755,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                                   onClick={openSupplierModal}
                                   style={{ cursor: 'pointer', flex: 1 }}
                                 />
-                              </Tooltip>
-                            </Form.Item>
+                              </Form.Item>
+                            </Tooltip>
                             <Tooltip title="Check Balance">
                               <Button
                                 icon={<WalletOutlined />}
