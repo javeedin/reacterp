@@ -1742,7 +1742,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   };
   // ────────────────────────────────────────────────────────────────────────
 
-  const handleInvoiceAction = ({ key }: { key: string }) => {
+  const handleInvoiceAction = async ({ key }: { key: string }) => {
     switch (key) {
       case 'validate':
         runValidation();
@@ -1798,10 +1798,35 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       case 'duplicate':
         message.info('Duplicating invoice...');
         break;
-      case 'manageInstallments':
+      case 'manageInstallments': {
+        const invId = savedInvoiceId ?? initialData?.invoiceId ?? null;
+        if (invId) {
+          // Invoice already saved — retrieve real installments from the API
+          try {
+            const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments?P_INVOICE_ID=${invId}`;
+            const res = await fetch(url, { headers: { Accept: 'application/json' } });
+            if (res.ok) {
+              const data = await res.json();
+              const items: any[] = data.items || data.installments || (Array.isArray(data) ? data : []);
+              if (items.length > 0) {
+                setInstEditRows(items.map((item: any, idx: number) => ({
+                  key:               item.installment_id?.toString() || idx.toString(),
+                  installmentNumber: item.installment_number || idx + 1,
+                  dueDate:           formatDateStr(item.due_date) ? dayjs(formatDateStr(item.due_date), 'DD-MMM-YYYY') : null,
+                  grossAmount:       item.gross_amount || 0,
+                  unpaidAmount:      item.amount_remaining || item.unpaid_amount || 0,
+                  paymentPriority:   item.payment_priority ?? 99,
+                  paymentMethod:     item.payment_method || '',
+                  bankAccount:       item.bank_account || item.bank_account_name || '',
+                })));
+              }
+            }
+          } catch { /* keep existing rows on error */ }
+        }
         setInstSelectedKey(null);
         setInstEditVisible(true);
         break;
+      }
       default:
         break;
     }
