@@ -4839,6 +4839,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 try { capturedId = JSON.parse(apiExecInvoice.body)?.invoiceId ?? null; } catch { /* */ }
               }
               const effectiveId = capturedId || savedInvoiceId;
+              const instBodyDisplay = effectiveId
+                ? apiPreviewData!.installmentBody.replace(/"<invoice_id after save>"/g, String(effectiveId))
+                : apiPreviewData!.installmentBody;
               const instUrlDisplay = effectiveId
                 ? `${apiPreviewData!.installmentUrl.split(' ').slice(1).join(' ')}?P_INVOICE_ID=${effectiveId}`
                 : apiPreviewData!.installmentUrl.split(' ').slice(1).join(' ');
@@ -4860,7 +4863,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                       </Space>
                       <Space size={4}>
                         <Button size="small" icon={<CopyOutlined />}
-                          onClick={() => { navigator.clipboard.writeText(apiPreviewData!.installmentBody); message.success('Copied'); }}>
+                          onClick={() => { navigator.clipboard.writeText(instBodyDisplay); message.success('Copied'); }}>
                           Copy JSON
                         </Button>
                         <Button
@@ -4888,7 +4891,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   <Text type="secondary" style={{ fontSize: 11 }}>Request Body</Text>
                   <pre style={{ background: '#1e1e1e', color: '#d4d4d4', padding: '10px 14px', borderRadius: 4,
                     fontSize: 11, fontFamily: 'monospace', maxHeight: 260, overflow: 'auto', margin: '4px 0 0', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                    {apiPreviewData!.installmentBody}
+                    {instBodyDisplay}
                   </pre>
                   {/* Response */}
                   {r && !r.loading && (
