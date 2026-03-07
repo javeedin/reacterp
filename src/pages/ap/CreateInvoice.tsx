@@ -2014,6 +2014,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     for (const row of instEditRows) {
       const instPayload = {
         InvoiceId:              invoiceId,
+        InstallmentNumber:      row.installmentNumber,   // required: duplicate-check + INSERT
         DueDate:                row.dueDate?.format('YYYY-MM-DD') || null,
         GrossAmount:            row.grossAmount,
         UnpaidAmount:           row.unpaidAmount,
