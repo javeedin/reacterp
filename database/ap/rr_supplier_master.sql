@@ -235,8 +235,40 @@ END RR_SYNC_SUPPLIERS;
 /
 
 -- =============================================
--- 3. Create APEX REST Handler
+-- 3. Create APEX REST Handlers
 -- =============================================
+
+-- GET Handler - Fetch Suppliers list
+BEGIN
+    ORDS.DEFINE_HANDLER(
+        p_module_name    => 'reerp',
+        p_pattern        => 'suppliers',
+        p_method         => 'GET',
+        p_source_type    => 'json/collection',
+        p_items_per_page => 0,
+        p_mimes_allowed  => 'application/json',
+        p_comments       => 'Get Suppliers from RR_SUPPLIER_MASTER',
+        p_source         => q'[
+SELECT
+    supplier_id,
+    supplier,
+    supplier_number,
+    alternate_name,
+    status,
+    supplier_type,
+    taxpayer_id,
+    TO_CHAR(creation_date, 'YYYY-MM-DD') AS creation_date
+FROM RR_SUPPLIER_MASTER
+WHERE (:supplier_number IS NULL OR supplier_number = :supplier_number)
+  AND (:supplier      IS NULL OR UPPER(supplier) LIKE '%' || UPPER(:supplier) || '%')
+ORDER BY supplier
+]'
+    );
+    COMMIT;
+END;
+/
+
+-- POST Handler - Sync Suppliers from Oracle Fusion
 BEGIN
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'reerp',
