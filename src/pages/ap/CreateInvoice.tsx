@@ -3212,6 +3212,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 },
                 {
                   key: 'accounting',
+                  forceRender: true,
                   label: (
                     <Space size={4}>
                       <AccountBookOutlined />
