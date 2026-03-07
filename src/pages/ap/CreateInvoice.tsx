@@ -2147,49 +2147,36 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       : `${APEX_DB_CONFIG.baseUrl}/ap/createinvoicefull`;
     if (isUpdate) payload.InvoiceId = savedInvoiceId;
 
-    const invoiceDate = values.invoiceDate?.format('YYYY-MM-DD') || null;
-    const grossAmt = values.invoiceAmount || 0;
     const previewLoginUser = user?.username || null;
-    const instPayload = {
+    const instItems = instEditRows.map((row) => ({
       InvoiceId:                savedInvoiceId || '<invoice_id after save>',
-      InstallmentNumber:        1,
-      DueDate:                  values.termsDate?.format('YYYY-MM-DD') || invoiceDate,
-      GrossAmount:              grossAmt,
-      UnpaidAmount:             grossAmt,
-      FirstDiscountAmount:      null,
-      FirstDiscountDate:        null,
-      SecondDiscountAmount:     null,
-      SecondDiscountDate:       null,
-      ThirdDiscountAmount:      null,
-      ThirdDiscountDate:        null,
-      NetAmountOne:             null,
-      NetAmountTwo:             null,
-      NetAmountThree:           null,
-      PaymentPriority:          99,
-      PaymentMethod:            values.paymentMethod || null,
-      PaymentMethodCode:        values.paymentMethod || null,
-      HoldReason:               null,
-      HoldType:                 null,
-      HoldDate:                 null,
-      HeldBy:                   null,
-      BankAccount:              null,
-      ExternalBankAccountId:    null,
-      DigitalPaymentAccount:    null,
-      RemitToAddressName:       null,
-      RemitToSupplier:          null,
-      RemittanceMessageOne:     null,
-      RemittanceMessageTwo:     null,
-      RemittanceMessageThree:   null,
+      InstallmentNumber:        row.installmentNumber,
+      DueDate:                  row.dueDate?.format('YYYY-MM-DD') || null,
+      GrossAmount:              row.grossAmount,
+      UnpaidAmount:             row.unpaidAmount,
+      FirstDiscountAmount:      null, FirstDiscountDate:      null,
+      SecondDiscountAmount:     null, SecondDiscountDate:     null,
+      ThirdDiscountAmount:      null, ThirdDiscountDate:      null,
+      NetAmountOne:             null, NetAmountTwo:           null, NetAmountThree: null,
+      PaymentPriority:          row.paymentPriority,
+      PaymentMethod:            row.paymentMethod || null,
+      PaymentMethodCode:        row.paymentMethod || null,
+      HoldReason:               null, HoldType:               null,
+      HoldDate:                 null, HeldBy:                 null,
+      BankAccount:              row.bankAccount || null,
+      ExternalBankAccountId:    null, DigitalPaymentAccount:  null,
+      RemitToAddressName:       null, RemitToSupplier:        null,
+      RemittanceMessageOne:     null, RemittanceMessageTwo:   null, RemittanceMessageThree: null,
       CreatedBy:                previewLoginUser,
       LastUpdatedBy:            previewLoginUser,
       LastUpdateLogin:          previewLoginUser,
-    };
+    }));
 
     setApiPreviewData({
       url:              `${isUpdate ? 'PUT' : 'POST'} ${url}`,
       body:             JSON.stringify(payload, null, 2),
       installmentUrl:   `POST ${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments`,
-      installmentBody:  JSON.stringify({ items: [instPayload] }, null, 2),  // ORDS envelope
+      installmentBody:  JSON.stringify({ items: instItems }, null, 2),
     });
     setApiExecInvoice(null);
     setApiExecInstall(null);
