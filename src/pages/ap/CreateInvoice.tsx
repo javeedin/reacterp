@@ -1589,6 +1589,26 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       detail: !lines.some((l) => l.amount !== 0 || l.description) ? 'Add at least one invoice line' : undefined,
     });
 
+    // 7. Installments total must equal invoice amount (only if installments exist)
+    if (instEditRows.length > 0) {
+      const instGrossTotal = instEditRows.reduce((s, r) => s + (r.grossAmount || 0), 0);
+      const instBalanced   = Math.abs(instGrossTotal - hdrAmt) <= 0.01;
+      results.push({
+        label: 'Installments total matches invoice amount',
+        passed: instBalanced,
+        detail: !instBalanced
+          ? `Installments total: ${formatAmount(instGrossTotal)}, Invoice amount: ${formatAmount(hdrAmt)} (diff: ${formatAmount(instGrossTotal - hdrAmt)})`
+          : undefined,
+        action: !instBalanced ? {
+          label: 'Open Installments',
+          onClick: () => {
+            setValidationModalVisible(false);
+            setTimeout(() => setInstEditVisible(true), 150);
+          },
+        } : undefined,
+      });
+    }
+
     const allPassed = results.every((r) => r.passed);
     setValidationResults(results);
     setIsValidated(allPassed);
@@ -6133,7 +6153,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               </Space>
             }
             open={instEditVisible}
-            onCancel={() => setInstEditVisible(false)}
+            onCancel={() => {
+              if (!isBalanced) {
+                message.error(`Installments total (${grossTotal.toFixed(2)}) must equal invoice amount (${invoiceAmt.toFixed(2)}) before closing.`);
+                return;
+              }
+              setInstEditVisible(false);
+            }}
             width={960}
             destroyOnClose
             footer={
@@ -6144,12 +6170,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   Gross Total: <strong style={{ color: isBalanced ? REDWOOD.success : REDWOOD.error }}>{grossTotal.toFixed(2)}</strong>
                   {!isBalanced && (
                     <Text type="danger" style={{ marginLeft: 8, fontSize: 11 }}>
-                      ⚠ Must balance before saving
+                      ⚠ Installments must balance with invoice amount before closing
                     </Text>
                   )}
                 </Text>
-                <Button type="primary" onClick={() => setInstEditVisible(false)}
-                  style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
+                <Button
+                  type="primary"
+                  disabled={!isBalanced}
+                  onClick={() => setInstEditVisible(false)}
+                  style={{ background: isBalanced ? REDWOOD.primary : undefined, borderColor: isBalanced ? REDWOOD.primary : undefined }}
+                >
                   Done
                 </Button>
               </div>
