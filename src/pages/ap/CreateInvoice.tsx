@@ -101,6 +101,7 @@ const REDWOOD = {
 
 const APEX_SUPPLIERS_URL      = `${APEX_DB_CONFIG.baseUrl}/suppliers?limit=500`;
 const APEX_BUSINESS_UNITS_URL = `${APEX_DB_CONFIG.baseUrl}/gl/businessunits`;
+const APEX_SUPPLIER_SITES_URL = `${APEX_DB_CONFIG.baseUrl}/suppliers/sites`;
 
 // Supplier record
 interface SupplierRecord {
@@ -113,6 +114,14 @@ interface SupplierRecord {
   supplierType: string;
   creationDate: string;
   taxpayerId: string;
+}
+
+interface SupplierSiteRecord {
+  siteId: string;
+  siteCode: string;
+  addressLine1?: string;
+  city?: string;
+  country?: string;
 }
 
 // Supplier balance interfaces
@@ -377,6 +386,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [supplierSearchText, setSupplierSearchText] = useState('');
   const [selectedSupplierInfo, setSelectedSupplierInfo] = useState<{ number: string; id: number } | null>(null);
   const [businessUnits, setBusinessUnits] = useState<string[]>([]);
+
+  // Supplier sites
+  const [supplierSites, setSupplierSites] = useState<SupplierSiteRecord[]>([]);
+  const [supplierSiteLoading, setSupplierSiteLoading] = useState(false);
 
   // Header completion tracking
   const [headerValues, setHeaderValues] = useState<Record<string, any>>({
@@ -886,15 +899,47 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   };
 
   const handleSupplierSelect = (record: SupplierRecord) => {
+    const bu = form.getFieldValue('businessUnit') || '';
     form.setFieldsValue({
       supplier:       `${record.supplier} (${record.supplierNumber})`,
       supplierNumber: record.supplierNumber,
       supplierId:     record.supplierId,
-      supplierSite:   '',
+      supplierSite:   undefined,
     });
     setSelectedSupplierInfo({ number: record.supplierNumber, id: record.supplierId });
     setSupplierModalVisible(false);
     message.success(`Selected: ${record.supplier}`);
+    fetchSupplierSites(record.supplierId, bu);
+  };
+
+  const fetchSupplierSites = async (supplierId: number, procurementBU: string) => {
+    setSupplierSiteLoading(true);
+    setSupplierSites([]);
+    try {
+      const url = `${APEX_SUPPLIER_SITES_URL}?P_SUPPLIER_ID=${supplierId}&P_PROCUREMENT_BU=${encodeURIComponent(procurementBU)}`;
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const items: any[] = data.items || (Array.isArray(data) ? data : []);
+      const mapped: SupplierSiteRecord[] = items.map((item: any) => ({
+        siteId:       item.vendor_site_id?.toString() || item.site_id?.toString() || '',
+        siteCode:     item.vendor_site_code || item.site_code || item.site_name || '',
+        addressLine1: item.address_line1 || item.address1 || '',
+        city:         item.city || '',
+        country:      item.country || '',
+      })).filter(s => s.siteCode);
+      setSupplierSites(mapped);
+      if (mapped.length === 1) {
+        form.setFieldsValue({ supplierSite: mapped[0].siteCode });
+        message.success(`Site auto-selected: ${mapped[0].siteCode}`);
+      } else if (mapped.length === 0) {
+        message.warning('No supplier sites found for this supplier.');
+      }
+    } catch {
+      message.error('Failed to load supplier sites.');
+    } finally {
+      setSupplierSiteLoading(false);
+    }
   };
 
   const filteredSuppliers = useMemo(() => {
@@ -2778,12 +2823,21 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Supplier Site</Text>}
                           name="supplierSite"
+                          rules={[{ required: true, message: 'Supplier site is required' }]}
                           style={{ marginBottom: 4 }}
                         >
-                          <Select placeholder="Select site" allowClear>
-                            <Option value="SHARJAH">SHARJAH</Option>
-                            <Option value="DUBAI">DUBAI</Option>
-                            <Option value="ABU DHABI">ABU DHABI</Option>
+                          <Select
+                            placeholder={supplierSiteLoading ? 'Loading sites...' : 'Select site'}
+                            loading={supplierSiteLoading}
+                            disabled={supplierSiteLoading}
+                            allowClear
+                            notFoundContent={supplierSiteLoading ? 'Loading…' : 'No sites — select a supplier first'}
+                          >
+                            {supplierSites.map(site => (
+                              <Option key={site.siteCode} value={site.siteCode}>
+                                {site.siteCode}{site.city ? ` — ${site.city}` : ''}
+                              </Option>
+                            ))}
                           </Select>
                         </Form.Item>
                         <Form.Item
