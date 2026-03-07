@@ -826,11 +826,15 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fetch suppliers
+  // Fetch suppliers filtered by the currently selected business unit
   const fetchSuppliers = async () => {
     setSupplierLoading(true);
     try {
-      const response = await fetch(APEX_SUPPLIERS_URL, {
+      const bu = form.getFieldValue('businessUnit') || '';
+      const url = bu
+        ? `${APEX_SUPPLIERS_URL}&business_unit=${encodeURIComponent(bu)}`
+        : APEX_SUPPLIERS_URL;
+      const response = await fetch(url, {
         method: 'GET',
         headers: { 'Accept': 'application/json' },
       });
@@ -862,7 +866,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const openSupplierModal = () => {
     setSupplierModalVisible(true);
     setSupplierSearchText('');
-    if (suppliers.length === 0) fetchSuppliers();
+    fetchSuppliers(); // always refetch — business unit may have changed
   };
 
   const handleSupplierSelect = (record: SupplierRecord) => {
@@ -3649,7 +3653,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         }}>
           <div>
             <span style={{ color: '#1D7B4D', fontWeight: 700, marginRight: 8 }}>GET</span>
-            <span style={{ color: '#e0e0e0' }}>{APEX_SUPPLIERS_URL}</span>
+            <span style={{ color: '#e0e0e0' }}>
+              {form.getFieldValue('businessUnit')
+                ? `${APEX_SUPPLIERS_URL}&business_unit=${encodeURIComponent(form.getFieldValue('businessUnit'))}`
+                : APEX_SUPPLIERS_URL}
+            </span>
           </div>
         </div>
         <div style={{ marginBottom: 12 }}>

@@ -249,19 +249,24 @@ BEGIN
         p_mimes_allowed  => 'application/json',
         p_comments       => 'Get Suppliers from RR_SUPPLIER_MASTER',
         p_source         => q'[
-SELECT
-    supplier_id,
-    supplier,
-    supplier_number,
-    alternate_name,
-    status,
-    supplier_type,
-    taxpayer_id,
-    TO_CHAR(creation_date, 'YYYY-MM-DD') AS creation_date
-FROM RR_SUPPLIER_MASTER
-WHERE (:supplier_number IS NULL OR supplier_number = :supplier_number)
-  AND (:supplier      IS NULL OR UPPER(supplier) LIKE '%' || UPPER(:supplier) || '%')
-ORDER BY supplier
+SELECT DISTINCT
+    sm.supplier_id,
+    sm.supplier,
+    sm.supplier_number,
+    sm.alternate_name,
+    sm.status,
+    sm.supplier_type,
+    sm.taxpayer_id,
+    TO_CHAR(sm.creation_date, 'YYYY-MM-DD') AS creation_date
+FROM RR_SUPPLIER_MASTER sm
+WHERE (:supplier_number IS NULL OR sm.supplier_number = :supplier_number)
+  AND (:supplier        IS NULL OR UPPER(sm.supplier) LIKE '%' || UPPER(:supplier) || '%')
+  AND (:business_unit   IS NULL OR EXISTS (
+        SELECT 1 FROM RR_SUPPLIER_SITES ss
+        WHERE ss.supplier_id = sm.supplier_id
+          AND UPPER(ss.procurement_bu) = UPPER(:business_unit)
+      ))
+ORDER BY sm.supplier
 ]'
     );
     COMMIT;
