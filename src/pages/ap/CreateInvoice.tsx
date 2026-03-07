@@ -370,6 +370,10 @@ export interface InvoiceInitialData {
   validationStatus?: string;
   approvalStatus?: string;
   holdPaidStatus?: string;
+  paymentTerms?: string;
+  invoiceGroup?: string;
+  termsDate?: string;
+  goodsReceivedDate?: string;
 }
 
 interface CreateInvoiceProps {
@@ -822,6 +826,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       if (initialData.businessUnit) formValues.businessUnit = initialData.businessUnit;
       if (initialData.invoiceType) formValues.invoiceType = initialData.invoiceType;
       if (initialData.supplierSite) formValues.supplierSite = initialData.supplierSite;
+      if (initialData.paymentTerms) formValues.paymentTerms = initialData.paymentTerms;
+      if (initialData.invoiceGroup) formValues.invoiceGroup = initialData.invoiceGroup;
+      if (initialData.termsDate) formValues.termsDate = dayjs(initialData.termsDate, ['YYYY-MM-DD', 'DD-MMM-YYYY', 'DD MMM YYYY']);
+      if (initialData.goodsReceivedDate) formValues.goodsReceivedDate = dayjs(initialData.goodsReceivedDate, ['YYYY-MM-DD', 'DD-MMM-YYYY', 'DD MMM YYYY']);
       form.setFieldsValue(formValues);
       setHeaderValues((prev) => ({ ...prev, ...formValues }));
 

@@ -117,6 +117,10 @@ interface InvoiceRecord {
   businessUnit: string;
   invoiceCurrency: string;
   supplierNumber: string;
+  paymentTerms: string;
+  invoiceGroup: string;
+  termsDate: string;
+  goodsReceivedDate: string;
 }
 
 // Tab item interface
@@ -249,6 +253,10 @@ const mapApiToInvoiceRecord = (item: any, index: number): InvoiceRecord => ({
   businessUnit: item.business_unit || '',
   invoiceCurrency: item.invoice_currency || 'AED',
   supplierNumber: item.supplier_number || '',
+  paymentTerms: item.payment_terms || item.terms_name || '',
+  invoiceGroup: item.invoice_group || '',
+  termsDate: item.terms_date || '',
+  goodsReceivedDate: item.goods_received_date || '',
 });
 
 const ManageInvoices: React.FC = () => {
@@ -771,6 +779,10 @@ const ManageInvoices: React.FC = () => {
       validationStatus: record.validationStatus,
       approvalStatus: record.approvalStatus,
       holdPaidStatus: record.holdPaidStatus,
+      paymentTerms: record.paymentTerms,
+      invoiceGroup: record.invoiceGroup,
+      termsDate: record.termsDate,
+      goodsReceivedDate: record.goodsReceivedDate,
     };
 
     // Add new tab — use 'create' tabType so it renders CreateInvoice
