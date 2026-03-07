@@ -474,7 +474,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   // API Preview modal
   const [apiPreviewVisible, setApiPreviewVisible] = useState(false);
-  const [apiPreviewData, setApiPreviewData] = useState<{ url: string; body: string } | null>(null);
+  const [apiPreviewData, setApiPreviewData] = useState<{ url: string; body: string; installmentUrl: string; installmentBody: string } | null>(null);
 
   // API Log (last request/response)
   const [apiLog, setApiLog] = useState<{ url: string; method: string; requestBody: string; responseBody: string; status: string; httpStatus: number; timestamp: string } | null>(null);
@@ -2048,9 +2048,23 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       : `${APEX_DB_CONFIG.baseUrl}/ap/createinvoicefull`;
     if (isUpdate) payload.InvoiceId = savedInvoiceId;
 
+    const invoiceDate = values.invoiceDate?.format('YYYY-MM-DD') || null;
+    const instPayload = {
+      InvoiceId:         savedInvoiceId || '<invoice_id after save>',
+      InstallmentNumber: 1,
+      DueDate:           values.termsDate?.format('YYYY-MM-DD') || invoiceDate,
+      GrossAmount:       values.invoiceAmount || 0,
+      UnpaidAmount:      values.invoiceAmount || 0,
+      PaymentPriority:   99,
+      PaymentMethod:     values.paymentMethod || null,
+      PaymentMethodCode: values.paymentMethod || null,
+    };
+
     setApiPreviewData({
-      url: `${isUpdate ? 'PUT' : 'POST'} ${url}`,
-      body: JSON.stringify(payload, null, 2),
+      url:              `${isUpdate ? 'PUT' : 'POST'} ${url}`,
+      body:             JSON.stringify(payload, null, 2),
+      installmentUrl:   `POST ${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments`,
+      installmentBody:  JSON.stringify(instPayload, null, 2),
     });
     setApiPreviewVisible(true);
   };
@@ -4631,6 +4645,42 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   }}
                 >
                   {apiPreviewData.body}
+                </pre>
+              </div>
+            </Card>
+
+            <Card
+              size="small"
+              style={{ marginTop: 12 }}
+              title={
+                <Row justify="space-between" align="middle">
+                  <Space>
+                    <Tag color="blue">POST</Tag>
+                    <Text strong>Create Installment</Text>
+                  </Space>
+                  <Button
+                    size="small"
+                    icon={<CopyOutlined />}
+                    onClick={() => {
+                      navigator.clipboard.writeText(apiPreviewData!.installmentBody);
+                      message.success('Installment JSON copied');
+                    }}
+                  >
+                    Copy JSON
+                  </Button>
+                </Row>
+              }
+            >
+              <div style={{ marginBottom: 8 }}>
+                <Text type="secondary" style={{ fontSize: 11 }}>URL</Text>
+                <div style={{ background: '#1e1e1e', color: '#d4d4d4', padding: '8px 12px', borderRadius: 4, fontSize: 12, fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                  {apiPreviewData!.installmentUrl}
+                </div>
+              </div>
+              <div>
+                <Text type="secondary" style={{ fontSize: 11 }}>JSON Body</Text>
+                <pre style={{ background: '#1e1e1e', color: '#d4d4d4', padding: '10px 14px', borderRadius: 4, fontSize: 11, fontFamily: 'monospace', maxHeight: 300, overflow: 'auto', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {apiPreviewData!.installmentBody}
                 </pre>
               </div>
             </Card>
