@@ -61,6 +61,7 @@ import {
   AccountBookOutlined,
   AppstoreOutlined,
   CalendarOutlined,
+  InfoCircleOutlined,
   UploadOutlined,
   DownloadOutlined,
   FileExcelOutlined,
@@ -886,7 +887,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   const handleSupplierSelect = (record: SupplierRecord) => {
     form.setFieldsValue({
-      supplier:       record.supplier,
+      supplier:       `${record.supplier} (${record.supplierNumber})`,
       supplierNumber: record.supplierNumber,
       supplierId:     record.supplierId,
       supplierSite:   '',
@@ -1031,17 +1032,17 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   };
 
   const supplierColumns: ColumnsType<SupplierRecord> = [
-    { title: 'Supplier Number', dataIndex: 'supplierNumber', key: 'supplierNumber', width: 130, sorter: (a, b) => a.supplierNumber.localeCompare(b.supplierNumber) },
-    { title: 'Supplier Name', dataIndex: 'supplier', key: 'supplier', width: 280, ellipsis: true, sorter: (a, b) => a.supplier.localeCompare(b.supplier) },
-    { title: 'Alternative Name', dataIndex: 'alternativeName', key: 'alternativeName', width: 200, ellipsis: true },
-    { title: 'Status', dataIndex: 'status', key: 'status', width: 100, render: (status: string) => <Tag color={status === 'ACTIVE' ? 'green' : 'red'}>{status}</Tag> },
-    { title: 'Taxpayer ID', dataIndex: 'taxpayerId', key: 'taxpayerId', width: 120 },
     {
       title: 'Action', key: 'action', width: 80,
       render: (_: any, record: SupplierRecord) => (
         <Button type="link" size="small" onClick={() => handleSupplierSelect(record)} style={{ color: REDWOOD.info }}>Select</Button>
       ),
     },
+    { title: 'Supplier Number', dataIndex: 'supplierNumber', key: 'supplierNumber', width: 130, sorter: (a, b) => a.supplierNumber.localeCompare(b.supplierNumber) },
+    { title: 'Supplier Name', dataIndex: 'supplier', key: 'supplier', width: 280, ellipsis: true, sorter: (a, b) => a.supplier.localeCompare(b.supplier) },
+    { title: 'Alternative Name', dataIndex: 'alternativeName', key: 'alternativeName', width: 200, ellipsis: true },
+    { title: 'Status', dataIndex: 'status', key: 'status', width: 100, render: (status: string) => <Tag color={status === 'ACTIVE' ? 'green' : 'red'}>{status}</Tag> },
+    { title: 'Taxpayer ID', dataIndex: 'taxpayerId', key: 'taxpayerId', width: 120 },
   ];
 
   // Line management
@@ -2730,33 +2731,35 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           style={{ marginBottom: 4 }}
                         >
                           <Space.Compact style={{ width: '100%' }}>
-                            <Tooltip
-                              title={
-                                selectedSupplierInfo ? (
-                                  <div>
-                                    <div><strong>Supplier #:</strong> {selectedSupplierInfo.number}</div>
-                                    <div><strong>Supplier ID:</strong> {selectedSupplierInfo.id}</div>
-                                  </div>
-                                ) : null
-                              }
-                              placement="bottom"
-                              mouseEnterDelay={0.3}
-                            >
-                              <Form.Item name="supplier" noStyle rules={[{ required: true, message: 'Required' }]}>
-                                <Input
-                                  placeholder="Search supplier..."
-                                  readOnly
-                                  suffix={
+                            <Form.Item name="supplier" noStyle rules={[{ required: true, message: 'Required' }]}>
+                              <Input
+                                placeholder="Search supplier..."
+                                readOnly
+                                suffix={
+                                  <Space size={4}>
+                                    {selectedSupplierInfo && (
+                                      <Tooltip
+                                        title={
+                                          <div>
+                                            <div><strong>Supplier #:</strong> {selectedSupplierInfo.number}</div>
+                                            <div><strong>Supplier ID:</strong> {selectedSupplierInfo.id}</div>
+                                          </div>
+                                        }
+                                        placement="bottom"
+                                      >
+                                        <InfoCircleOutlined style={{ color: REDWOOD.info, fontSize: 13 }} />
+                                      </Tooltip>
+                                    )}
                                     <SearchOutlined
                                       style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 14 }}
                                       onClick={openSupplierModal}
                                     />
-                                  }
-                                  onClick={openSupplierModal}
-                                  style={{ cursor: 'pointer', flex: 1 }}
-                                />
-                              </Form.Item>
-                            </Tooltip>
+                                  </Space>
+                                }
+                                onClick={openSupplierModal}
+                                style={{ cursor: 'pointer', flex: 1 }}
+                              />
+                            </Form.Item>
                             <Tooltip title="Check Balance">
                               <Button
                                 icon={<WalletOutlined />}
