@@ -1924,6 +1924,53 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         setSavedInvoiceId(invoiceId);
       }
 
+      // ── Create / update installment ─────────────────────────────────────
+      if (invoiceId) {
+        const invoiceDate = values.invoiceDate?.format('YYYY-MM-DD') || null;
+        const dueDate = values.termsDate?.format('YYYY-MM-DD') || invoiceDate;
+        const grossAmount = values.invoiceAmount || 0;
+
+        const instPayload = {
+          InvoiceId:         invoiceId,
+          InstallmentNumber: 1,
+          DueDate:           dueDate,
+          GrossAmount:       grossAmount,
+          UnpaidAmount:      grossAmount,
+          PaymentPriority:   99,
+          PaymentMethod:     values.paymentMethod || null,
+          PaymentMethodCode: values.paymentMethod || null,
+        };
+
+        try {
+          const instUrl = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments`;
+          const instRes = await fetch(instUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(instPayload),
+          });
+          const instText = await instRes.text();
+          let instData: any = null;
+          try { instData = JSON.parse(instText); } catch { /* non-JSON */ }
+
+          logApiCall('Create Installment', {
+            url: instUrl,
+            method: 'POST',
+            requestBody: JSON.stringify(instPayload, null, 2),
+            responseBody: instData ? JSON.stringify(instData, null, 2) : instText,
+            status: instData?.status || (instRes.ok ? 'SUCCESS' : 'ERROR'),
+            httpStatus: instRes.status,
+            timestamp,
+          });
+
+          if (!instRes.ok || instData?.status === 'ERROR') {
+            message.warning(`Invoice saved but installment failed: ${instData?.message || instText}`);
+          }
+        } catch (instErr) {
+          message.warning(`Invoice saved but installment error: ${instErr}`);
+        }
+      }
+      // ───────────────────────────────────────────────────────────────────
+
       message.success(data.message || `Invoice ${isUpdate ? 'updated' : 'created'} (ID: ${invoiceId})`);
 
       // Notify parent
