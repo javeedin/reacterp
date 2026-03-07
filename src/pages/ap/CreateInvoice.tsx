@@ -2039,7 +2039,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         const instRes = await fetch(instUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(instPayload),
+          body: JSON.stringify([instPayload]),   // API expects an array
         });
         const instText = await instRes.text();
         let instData: any = null;
@@ -2167,7 +2167,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       url:              `${isUpdate ? 'PUT' : 'POST'} ${url}`,
       body:             JSON.stringify(payload, null, 2),
       installmentUrl:   `POST ${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments`,
-      installmentBody:  JSON.stringify(instPayload, null, 2),
+      installmentBody:  JSON.stringify([instPayload], null, 2),  // array — API expects $[*]
     });
     setApiExecInvoice(null);
     setApiExecInstall(null);
@@ -2207,12 +2207,17 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     const [, ...rest] = apiPreviewData.installmentUrl.split(' ');
     const baseUrl = rest.join(' ');
     const url = invoiceId ? `${baseUrl}?P_INVOICE_ID=${invoiceId}` : baseUrl;
+    // Substitute captured invoiceId into the body and wrap in array (API expects array)
+    const rawBody = invoiceId
+      ? apiPreviewData.installmentBody.replace(/"<invoice_id after save>"/g, String(invoiceId))
+      : apiPreviewData.installmentBody;
+    const bodyPayload = JSON.stringify([JSON.parse(rawBody)]);
     setApiExecInstall({ loading: true, httpStatus: 0, body: '' });
     try {
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: apiPreviewData.installmentBody,
+        body: bodyPayload,
       });
       const text = await res.text();
       let pretty = text;
