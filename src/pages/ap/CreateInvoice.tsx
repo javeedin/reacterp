@@ -118,10 +118,7 @@ interface SupplierRecord {
 
 interface SupplierSiteRecord {
   siteId: string;
-  siteCode: string;
-  addressLine1?: string;
-  city?: string;
-  country?: string;
+  procurementBu: string;
 }
 
 // Supplier balance interfaces
@@ -915,34 +912,24 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const fetchSupplierSites = async (supplierId: number, procurementBU: string) => {
     setSupplierSiteLoading(true);
     setSupplierSites([]);
-    const url = `https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/suppliers/sites?P_SUPPLIER_ID=${supplierId}&P_PROCUREMENT_BU=${encodeURIComponent(procurementBU)}`;
-    console.log('[SupplierSites] Fetching URL:', url);
     try {
+      const url = `https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/suppliers/sites?P_SUPPLIER_ID=${supplierId}&P_PROCUREMENT_BU=${encodeURIComponent(procurementBU)}`;
       const res = await fetch(url, { headers: { Accept: 'application/json' } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      console.log('[SupplierSites] Raw response:', JSON.stringify(data, null, 2));
       const items: any[] = data.items || (Array.isArray(data) ? data : []);
-      console.log('[SupplierSites] Items count:', items.length);
-      if (items.length > 0) console.log('[SupplierSites] First item keys:', Object.keys(items[0]));
-      // Try every plausible field name Oracle ORDS might return
       const mapped: SupplierSiteRecord[] = items.map((item: any) => ({
-        siteId:       (item.vendor_site_id ?? item.site_id ?? item.VENDOR_SITE_ID ?? item.SITE_ID ?? '').toString(),
-        siteCode:     item.vendor_site_code || item.site_code || item.site_name || item.VENDOR_SITE_CODE || item.SITE_CODE || item.SITE_NAME || '',
-        addressLine1: item.address_line1 || item.address1 || item.ADDRESS_LINE1 || '',
-        city:         item.city || item.CITY || '',
-        country:      item.country || item.COUNTRY || '',
-      })).filter(s => s.siteCode);
-      console.log('[SupplierSites] Mapped sites:', mapped);
+        siteId:       item.suppliersiteid?.toString() || '',
+        procurementBu: item.procurement_bu || '',
+      })).filter(s => s.siteId);
       setSupplierSites(mapped);
       if (mapped.length === 1) {
-        form.setFieldsValue({ supplierSite: mapped[0].siteCode });
-        message.success(`Site auto-selected: ${mapped[0].siteCode}`);
+        form.setFieldsValue({ supplierSite: mapped[0].siteId });
+        message.success(`Site auto-selected: ${mapped[0].procurementBu}`);
       } else if (mapped.length === 0) {
-        message.warning('No supplier sites found. Check browser console for raw API response.');
+        message.warning('No supplier sites found for this supplier.');
       }
     } catch (err) {
-      console.error('[SupplierSites] Error:', err);
       message.error(`Failed to load supplier sites: ${err}`);
     } finally {
       setSupplierSiteLoading(false);
@@ -2841,8 +2828,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                             notFoundContent={supplierSiteLoading ? 'Loading…' : 'No sites — select a supplier first'}
                           >
                             {supplierSites.map(site => (
-                              <Option key={site.siteCode} value={site.siteCode}>
-                                {site.siteCode}{site.city ? ` — ${site.city}` : ''}
+                              <Option key={site.siteId} value={site.siteId}>
+                                {site.procurementBu}
                               </Option>
                             ))}
                           </Select>
