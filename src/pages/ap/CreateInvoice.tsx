@@ -2024,60 +2024,60 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     }
   };
 
-  // POST all installment rows for a saved invoice
+  // POST all installment rows for a saved invoice in a single request
   const saveInstallments = async (invoiceId: number) => {
     const loginUser = user?.username || null;
     const timestamp = new Date().toLocaleString('en-GB', {
       day: '2-digit', month: 'short', year: 'numeric',
       hour: '2-digit', minute: '2-digit', second: '2-digit',
     });
-    for (const row of instEditRows) {
-      const instPayload = {
-        InvoiceId:              invoiceId,
-        InstallmentNumber:      row.installmentNumber,   // required: duplicate-check + INSERT
-        DueDate:                row.dueDate?.format('YYYY-MM-DD') || null,
-        GrossAmount:            row.grossAmount,
-        UnpaidAmount:           row.unpaidAmount,
-        FirstDiscountAmount:    null, FirstDiscountDate:      null,
-        SecondDiscountAmount:   null, SecondDiscountDate:     null,
-        ThirdDiscountAmount:    null, ThirdDiscountDate:      null,
-        NetAmountOne:           null, NetAmountTwo:           null, NetAmountThree:         null,
-        PaymentPriority:        row.paymentPriority,
-        PaymentMethod:          row.paymentMethod || null,
-        PaymentMethodCode:      row.paymentMethod || null,
-        HoldReason:             null, HoldType:               null,
-        HoldDate:               null, HeldBy:                 null,
-        BankAccount:            row.bankAccount || null,
-        ExternalBankAccountId:  null, DigitalPaymentAccount:  null,
-        RemitToAddressName:     null, RemitToSupplier:        null,
-        RemittanceMessageOne:   null, RemittanceMessageTwo:   null, RemittanceMessageThree: null,
-        CreatedBy:              loginUser,
-        LastUpdatedBy:          loginUser,
-        LastUpdateLogin:        loginUser,
-      };
-      try {
-        const instUrl = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments?P_INVOICE_ID=${invoiceId}`;
-        const instRes = await fetch(instUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ items: [instPayload] }),  // ORDS envelope: {"items":[...]}
-        });
-        const instText = await instRes.text();
-        let instData: any = null;
-        try { instData = JSON.parse(instText); } catch { /* non-JSON */ }
-        logApiCall(`Create Installment #${row.installmentNumber}`, {
-          url: instUrl, method: 'POST',
-          requestBody: JSON.stringify(instPayload, null, 2),
-          responseBody: instData ? JSON.stringify(instData, null, 2) : instText,
-          status: instData?.status || (instRes.ok ? 'SUCCESS' : 'ERROR'),
-          httpStatus: instRes.status, timestamp,
-        });
-        if (!instRes.ok || instData?.status === 'ERROR') {
-          message.warning(`Invoice saved but installment #${row.installmentNumber} failed: ${instData?.message || instText}`);
-        }
-      } catch (e) {
-        message.warning(`Invoice saved but installment #${row.installmentNumber} error: ${e}`);
+
+    const items = instEditRows.map((row) => ({
+      InvoiceId:              invoiceId,
+      InstallmentNumber:      row.installmentNumber,
+      DueDate:                row.dueDate?.format('YYYY-MM-DD') || null,
+      GrossAmount:            row.grossAmount,
+      UnpaidAmount:           row.unpaidAmount,
+      FirstDiscountAmount:    null, FirstDiscountDate:      null,
+      SecondDiscountAmount:   null, SecondDiscountDate:     null,
+      ThirdDiscountAmount:    null, ThirdDiscountDate:      null,
+      NetAmountOne:           null, NetAmountTwo:           null, NetAmountThree: null,
+      PaymentPriority:        row.paymentPriority,
+      PaymentMethod:          row.paymentMethod || null,
+      PaymentMethodCode:      row.paymentMethod || null,
+      HoldReason:             null, HoldType:               null,
+      HoldDate:               null, HeldBy:                 null,
+      BankAccount:            row.bankAccount || null,
+      ExternalBankAccountId:  null, DigitalPaymentAccount:  null,
+      RemitToAddressName:     null, RemitToSupplier:        null,
+      RemittanceMessageOne:   null, RemittanceMessageTwo:   null, RemittanceMessageThree: null,
+      CreatedBy:              loginUser,
+      LastUpdatedBy:          loginUser,
+      LastUpdateLogin:        loginUser,
+    }));
+
+    const instUrl = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments?P_INVOICE_ID=${invoiceId}`;
+    try {
+      const instRes = await fetch(instUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items }),   // all installments in one request
+      });
+      const instText = await instRes.text();
+      let instData: any = null;
+      try { instData = JSON.parse(instText); } catch { /* non-JSON */ }
+      logApiCall(`Save Installments (${items.length})`, {
+        url: instUrl, method: 'POST',
+        requestBody: JSON.stringify({ items }, null, 2),
+        responseBody: instData ? JSON.stringify(instData, null, 2) : instText,
+        status: instData?.status || (instRes.ok ? 'SUCCESS' : 'ERROR'),
+        httpStatus: instRes.status, timestamp,
+      });
+      if (!instRes.ok || instData?.status === 'ERROR') {
+        message.warning(`Invoice saved but installments failed: ${instData?.message || instText}`);
       }
+    } catch (e) {
+      message.warning(`Invoice saved but installments error: ${e}`);
     }
   };
 
