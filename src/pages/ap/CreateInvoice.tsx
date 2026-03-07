@@ -230,6 +230,13 @@ interface InvoiceLine {
   taxAmount: number;
 }
 
+interface InstallmentRow {
+  key: string;
+  installmentNumber: number;
+  dueDate: dayjs.Dayjs | null;
+  amount: number;
+}
+
 // Currency list
 const CURRENCIES = [
   { code: 'AED', name: 'UAE Dirham' },
@@ -469,6 +476,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [installmentsModalData, setInstallmentsModalData] = useState<any[]>([]);
   const [installmentsModalLoading, setInstallmentsModalLoading] = useState(false);
   const [installmentsModalUrl, setInstallmentsModalUrl] = useState('');
+
+  // Installment editor (shown before saving invoice)
+  const [instEditVisible, setInstEditVisible]     = useState(false);
+  const [instEditRows, setInstEditRows]           = useState<InstallmentRow[]>([]);
+  const [pendingFormValues, setPendingFormValues] = useState<any>(null);
+  const [pendingSaveMode, setPendingSaveMode]     = useState<'save' | 'saveClose' | 'saveNext'>('save');
   const [importPreviewData, setImportPreviewData] = useState<{ type: string; amount: number; description: string }[]>([]);
   const [pasteText, setPasteText] = useState('');
 
@@ -1844,8 +1857,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     setApiLogHistory((prev) => [{ action, ...entry }, ...prev]);
   };
 
-  // POST combined invoice (header + lines) to APEX
-  const saveInvoice = async (values: any): Promise<boolean> => {
+  // POST combined invoice (header + lines) to APEX; returns invoiceId on success, false on failure
+  const saveInvoice = async (values: any): Promise<number | false> => {
     setSaving(true);
     const payload = buildInvoicePayload(values);
     const isUpdate = savedInvoiceId !== null;
@@ -1924,84 +1937,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         setSavedInvoiceId(invoiceId);
       }
 
-      // ── Create / update installment ─────────────────────────────────────
-      if (invoiceId) {
-        const invoiceDate = values.invoiceDate?.format('YYYY-MM-DD') || null;
-        const dueDate = values.termsDate?.format('YYYY-MM-DD') || invoiceDate;
-        const grossAmount = values.invoiceAmount || 0;
-        const loginUser = user?.username || null;
-
-        const instPayload = {
-          InvoiceId:                invoiceId,
-          InstallmentNumber:        1,
-          DueDate:                  dueDate,
-          GrossAmount:              grossAmount,
-          UnpaidAmount:             grossAmount,
-          FirstDiscountAmount:      null,
-          FirstDiscountDate:        null,
-          SecondDiscountAmount:     null,
-          SecondDiscountDate:       null,
-          ThirdDiscountAmount:      null,
-          ThirdDiscountDate:        null,
-          NetAmountOne:             null,
-          NetAmountTwo:             null,
-          NetAmountThree:           null,
-          PaymentPriority:          99,
-          PaymentMethod:            values.paymentMethod || null,
-          PaymentMethodCode:        values.paymentMethod || null,
-          HoldReason:               null,
-          HoldType:                 null,
-          HoldDate:                 null,
-          HeldBy:                   null,
-          BankAccount:              null,
-          ExternalBankAccountId:    null,
-          DigitalPaymentAccount:    null,
-          RemitToAddressName:       null,
-          RemitToSupplier:          null,
-          RemittanceMessageOne:     null,
-          RemittanceMessageTwo:     null,
-          RemittanceMessageThree:   null,
-          CreatedBy:                loginUser,
-          LastUpdatedBy:            loginUser,
-          LastUpdateLogin:          loginUser,
-        };
-
-        try {
-          const instUrl = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments`;
-          const instRes = await fetch(instUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(instPayload),
-          });
-          const instText = await instRes.text();
-          let instData: any = null;
-          try { instData = JSON.parse(instText); } catch { /* non-JSON */ }
-
-          logApiCall('Create Installment', {
-            url: instUrl,
-            method: 'POST',
-            requestBody: JSON.stringify(instPayload, null, 2),
-            responseBody: instData ? JSON.stringify(instData, null, 2) : instText,
-            status: instData?.status || (instRes.ok ? 'SUCCESS' : 'ERROR'),
-            httpStatus: instRes.status,
-            timestamp,
-          });
-
-          if (!instRes.ok || instData?.status === 'ERROR') {
-            message.warning(`Invoice saved but installment failed: ${instData?.message || instText}`);
-          }
-        } catch (instErr) {
-          message.warning(`Invoice saved but installment error: ${instErr}`);
-        }
-      }
-      // ───────────────────────────────────────────────────────────────────
-
       message.success(data.message || `Invoice ${isUpdate ? 'updated' : 'created'} (ID: ${invoiceId})`);
 
       // Notify parent
       if (onSave) onSave({ ...values, invoiceId });
 
-      return true;
+      return invoiceId;
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       console.error('Save invoice error:', error);
@@ -2021,47 +1962,138 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     }
   };
 
-  // Save and create next handler
-  const handleSaveAndCreateNext = async () => {
+  // Open installment editor modal before saving
+  const openInstallmentsEditor = async (mode: 'save' | 'saveClose' | 'saveNext') => {
     try {
       const values = await form.validateFields();
       if (!validateTally()) return;
 
-      const success = await saveInvoice(values);
-      if (success) {
-        message.success('Invoice saved. Creating next...');
-        // Reset form and lines for next invoice
-        form.resetFields();
-        setLines([createBlankLine(1)]);
-        setSelectedLineKeys([]);
-        setHeaderValues({ invoiceType: 'Standard', invoiceCurrency: 'AED' });
-        setTaxRate(5);
-        setIsValidated(false);
-        setSavedInvoiceId(null); // Reset to create mode
-        setSelectedSupplierInfo(null);
-      }
+      const invoiceDate = values.invoiceDate;
+      const dueDate     = values.termsDate || invoiceDate;
+      const grossAmount = values.invoiceAmount || 0;
+
+      setPendingFormValues(values);
+      setPendingSaveMode(mode);
+      setInstEditRows([{
+        key:                '1',
+        installmentNumber:  1,
+        dueDate:            dueDate ? dayjs(dueDate) : null,
+        amount:             grossAmount,
+      }]);
+      setInstEditVisible(true);
     } catch {
       message.error('Please fill in required fields');
     }
   };
 
-  // Save handler
-  const handleSave = async (): Promise<boolean> => {
-    try {
-      const values = await form.validateFields();
-      if (!validateTally()) return false;
+  // Called when user clicks "Confirm & Save" inside the installments modal
+  const executeInstallmentSave = async () => {
+    if (!pendingFormValues) return;
 
-      const success = await saveInvoice(values);
-      if (success) {
-        message.success('Invoice saved successfully');
+    const invoiceAmount = pendingFormValues.invoiceAmount || 0;
+    const rowTotal = instEditRows.reduce((s, r) => s + (r.amount || 0), 0);
+    if (Math.abs(rowTotal - invoiceAmount) > 0.01) {
+      message.error(`Total installments ${rowTotal.toFixed(2)} must equal invoice amount ${invoiceAmount.toFixed(2)}`);
+      return;
+    }
+
+    setInstEditVisible(false);
+    setSaving(true);
+
+    // 1. Save the invoice header + lines; returns the invoiceId on success
+    const invoiceId = await saveInvoice(pendingFormValues);
+    if (!invoiceId) { setSaving(false); return; }
+
+    // 2. Create each installment
+    const loginUser = user?.username || null;
+    const values    = pendingFormValues;
+    const timestamp = new Date().toLocaleString('en-GB', {
+      day: '2-digit', month: 'short', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    });
+
+    for (const row of instEditRows) {
+      const instPayload = {
+        InvoiceId:              invoiceId,
+        DueDate:                row.dueDate?.format('YYYY-MM-DD') || null,
+        GrossAmount:            row.amount,
+        UnpaidAmount:           row.amount,
+        FirstDiscountAmount:    null,
+        FirstDiscountDate:      null,
+        SecondDiscountAmount:   null,
+        SecondDiscountDate:     null,
+        ThirdDiscountAmount:    null,
+        ThirdDiscountDate:      null,
+        NetAmountOne:           null,
+        NetAmountTwo:           null,
+        NetAmountThree:         null,
+        PaymentPriority:        99,
+        PaymentMethod:          values.paymentMethod || null,
+        PaymentMethodCode:      values.paymentMethod || null,
+        HoldReason:             null,
+        HoldType:               null,
+        HoldDate:               null,
+        HeldBy:                 null,
+        BankAccount:            null,
+        ExternalBankAccountId:  null,
+        DigitalPaymentAccount:  null,
+        RemitToAddressName:     null,
+        RemitToSupplier:        null,
+        RemittanceMessageOne:   null,
+        RemittanceMessageTwo:   null,
+        RemittanceMessageThree: null,
+        CreatedBy:              loginUser,
+        LastUpdatedBy:          loginUser,
+        LastUpdateLogin:        loginUser,
+      };
+      try {
+        const instUrl = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments`;
+        const instRes = await fetch(instUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(instPayload),
+        });
+        const instText = await instRes.text();
+        let instData: any = null;
+        try { instData = JSON.parse(instText); } catch { /* non-JSON */ }
+        logApiCall(`Create Installment #${row.installmentNumber}`, {
+          url: instUrl, method: 'POST',
+          requestBody: JSON.stringify(instPayload, null, 2),
+          responseBody: instData ? JSON.stringify(instData, null, 2) : instText,
+          status: instData?.status || (instRes.ok ? 'SUCCESS' : 'ERROR'),
+          httpStatus: instRes.status, timestamp,
+        });
+        if (!instRes.ok || instData?.status === 'ERROR') {
+          message.warning(`Invoice saved but installment #${row.installmentNumber} failed: ${instData?.message || instText}`);
+        }
+      } catch (e) {
+        message.warning(`Invoice saved but installment #${row.installmentNumber} error: ${e}`);
       }
-      return success;
-    } catch (err) {
-      console.log('Validation failed:', err);
-      message.error('Please fill in required fields');
-      return false;
+    }
+
+    setSaving(false);
+
+    // 3. Post-save action
+    if (pendingSaveMode === 'saveNext') {
+      message.success('Invoice saved. Creating next...');
+      form.resetFields();
+      setLines([createBlankLine(1)]);
+      setSelectedLineKeys([]);
+      setHeaderValues({ invoiceType: 'Standard', invoiceCurrency: 'AED' });
+      setTaxRate(5);
+      setIsValidated(false);
+      setSavedInvoiceId(null);
+      setSelectedSupplierInfo(null);
+    } else if (pendingSaveMode === 'saveClose') {
+      onClose();
     }
   };
+
+  // Save and create next handler
+  const handleSaveAndCreateNext = () => openInstallmentsEditor('saveNext');
+
+  // Save handler
+  const handleSave = () => openInstallmentsEditor('save');
 
   // Show API preview (URL + JSON body for Postman testing)
   const handleApiPreview = () => {
@@ -2695,7 +2727,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           {!isReadOnly && (
             <Button
               type="primary"
-              onClick={async () => { const success = await handleSave(); if (success !== false) onClose(); }}
+              onClick={() => openInstallmentsEditor('saveClose')}
               loading={saving}
               disabled={saving || !isValidated}
               style={{ background: isValidated ? REDWOOD.primary : undefined, borderColor: isValidated ? REDWOOD.primary : undefined }}
@@ -5876,6 +5908,189 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             </div>
           </Form>
         </Spin>
+      </Modal>
+      {/* ── Installment Editor Modal ──────────────────────────────────────── */}
+      <Modal
+        title={
+          <Space>
+            <ScheduleOutlined style={{ color: REDWOOD.primary }} />
+            <span>Payment Installments</span>
+            <Tag color="blue">{pendingFormValues?.invoiceCurrency || 'AED'}</Tag>
+          </Space>
+        }
+        open={instEditVisible}
+        onCancel={() => setInstEditVisible(false)}
+        width={680}
+        destroyOnClose
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              Total: <strong>{instEditRows.reduce((s, r) => s + (r.amount || 0), 0).toFixed(2)}</strong>
+              {' / '}
+              Invoice: <strong>{(pendingFormValues?.invoiceAmount || 0).toFixed(2)}</strong>
+              {Math.abs(instEditRows.reduce((s, r) => s + (r.amount || 0), 0) - (pendingFormValues?.invoiceAmount || 0)) > 0.01 && (
+                <Tag color="red" style={{ marginLeft: 8 }}>
+                  Diff: {(instEditRows.reduce((s, r) => s + (r.amount || 0), 0) - (pendingFormValues?.invoiceAmount || 0)).toFixed(2)}
+                </Tag>
+              )}
+            </Text>
+            <Space>
+              <Button onClick={() => setInstEditVisible(false)}>Cancel</Button>
+              <Button
+                type="primary"
+                icon={<SaveOutlined />}
+                loading={saving}
+                disabled={
+                  saving ||
+                  Math.abs(instEditRows.reduce((s, r) => s + (r.amount || 0), 0) - (pendingFormValues?.invoiceAmount || 0)) > 0.01
+                }
+                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+                onClick={executeInstallmentSave}
+              >
+                Confirm &amp; Save
+              </Button>
+            </Space>
+          </div>
+        }
+      >
+        <div style={{ marginBottom: 12 }}>
+          <Alert
+            type="info"
+            showIcon
+            style={{ borderRadius: 6 }}
+            message="Review and split payment installments before saving."
+            description="You can add installments, change due dates, and split the amount. Total must equal the invoice amount."
+          />
+        </div>
+
+        {/* Installment rows */}
+        <Table<InstallmentRow>
+          size="small"
+          dataSource={instEditRows}
+          rowKey="key"
+          pagination={false}
+          bordered
+          columns={[
+            {
+              title: '#',
+              dataIndex: 'installmentNumber',
+              width: 44,
+              align: 'center',
+              render: (_v, _r, idx) => (
+                <Text style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.neutral600 }}>{idx + 1}</Text>
+              ),
+            },
+            {
+              title: 'Due Date',
+              dataIndex: 'dueDate',
+              width: 160,
+              render: (_v, row) => (
+                <DatePicker
+                  size="small"
+                  value={row.dueDate}
+                  format="DD-MMM-YYYY"
+                  style={{ width: '100%' }}
+                  onChange={(d) =>
+                    setInstEditRows(prev =>
+                      prev.map(r => r.key === row.key ? { ...r, dueDate: d } : r)
+                    )
+                  }
+                />
+              ),
+            },
+            {
+              title: 'Amount',
+              dataIndex: 'amount',
+              render: (_v, row) => (
+                <InputNumber
+                  size="small"
+                  value={row.amount}
+                  min={0}
+                  precision={2}
+                  style={{ width: '100%' }}
+                  formatter={v => `${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                  parser={v => Number(v?.replace(/,/g, '') || 0)}
+                  onChange={(val) =>
+                    setInstEditRows(prev =>
+                      prev.map(r => r.key === row.key ? { ...r, amount: val ?? 0 } : r)
+                    )
+                  }
+                />
+              ),
+            },
+            {
+              title: '',
+              width: 40,
+              align: 'center',
+              render: (_v, row) => (
+                <Button
+                  type="text"
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  disabled={instEditRows.length === 1}
+                  onClick={() =>
+                    setInstEditRows(prev =>
+                      prev
+                        .filter(r => r.key !== row.key)
+                        .map((r, i) => ({ ...r, installmentNumber: i + 1 }))
+                    )
+                  }
+                />
+              ),
+            },
+          ]}
+          summary={() => {
+            const total = instEditRows.reduce((s, r) => s + (r.amount || 0), 0);
+            const invoiceAmt = pendingFormValues?.invoiceAmount || 0;
+            const isBalanced = Math.abs(total - invoiceAmt) <= 0.01;
+            return (
+              <Table.Summary.Row>
+                <Table.Summary.Cell index={0} colSpan={2} align="right">
+                  <Text strong style={{ fontSize: 12 }}>Total</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={1}>
+                  <Text
+                    strong
+                    style={{ color: isBalanced ? REDWOOD.success : REDWOOD.error, fontSize: 13 }}
+                  >
+                    {total.toFixed(2)}
+                  </Text>
+                  {!isBalanced && (
+                    <Text type="danger" style={{ fontSize: 11, marginLeft: 6 }}>
+                      (need {invoiceAmt.toFixed(2)})
+                    </Text>
+                  )}
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={2} />
+              </Table.Summary.Row>
+            );
+          }}
+        />
+
+        {/* Add installment button */}
+        <Button
+          type="dashed"
+          icon={<PlusOutlined />}
+          style={{ marginTop: 10, width: '100%' }}
+          onClick={() => {
+            const invoiceAmt = pendingFormValues?.invoiceAmount || 0;
+            const usedAmt    = instEditRows.reduce((s, r) => s + (r.amount || 0), 0);
+            const remaining  = Math.max(0, invoiceAmt - usedAmt);
+            const lastDue    = instEditRows[instEditRows.length - 1]?.dueDate;
+            setInstEditRows(prev => [
+              ...prev,
+              {
+                key:               Date.now().toString(),
+                installmentNumber: prev.length + 1,
+                dueDate:           lastDue ? lastDue.add(30, 'day') : null,
+                amount:            parseFloat(remaining.toFixed(2)),
+              },
+            ]);
+          }}
+        >
+          Add Installment
+        </Button>
       </Modal>
       {/* ─────────────────────────────────────────────────────────────────── */}
 
