@@ -99,7 +99,7 @@ const REDWOOD = {
 };
 
 const APEX_SUPPLIERS_URL      = `${APEX_DB_CONFIG.baseUrl}/suppliers?limit=500`;
-const APEX_BUSINESS_UNITS_URL = `${APEX_DB_CONFIG.baseUrl}/business-units`;
+const APEX_BUSINESS_UNITS_URL = `${APEX_DB_CONFIG.baseUrl}/gl/businessunits`;
 
 // Supplier record
 interface SupplierRecord {
@@ -766,7 +766,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     fetch(APEX_BUSINESS_UNITS_URL, { headers: { Accept: 'application/json' } })
       .then(r => r.json())
       .then(data => {
-        const items: string[] = (data?.items ?? []).map((i: any) => i.business_unit).filter(Boolean);
+        const items: string[] = (data?.items ?? []).map((i: any) => i.business_unit_name).filter(Boolean);
         setBusinessUnits(items.length > 0 ? items : FALLBACK_BUSINESS_UNITS);
       })
       .catch(() => setBusinessUnits(FALLBACK_BUSINESS_UNITS));
