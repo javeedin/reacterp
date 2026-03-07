@@ -481,12 +481,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [installmentsModalLoading, setInstallmentsModalLoading] = useState(false);
   const [installmentsModalUrl, setInstallmentsModalUrl] = useState('');
 
-  // Installment editor (shown before saving invoice)
-  const [instEditVisible, setInstEditVisible]     = useState(false);
-  const [instEditRows, setInstEditRows]           = useState<InstallmentRow[]>([]);
-  const [instSelectedKey, setInstSelectedKey]     = useState<string | null>(null);
-  const [pendingFormValues, setPendingFormValues] = useState<any>(null);
-  const [pendingSaveMode, setPendingSaveMode]     = useState<'save' | 'saveClose' | 'saveNext'>('save');
+  // Installment editor — accessible via Invoice Actions → Manage Installments
+  const [instEditVisible, setInstEditVisible] = useState(false);
+  const [instEditRows, setInstEditRows]       = useState<InstallmentRow[]>([{
+    key: '1', installmentNumber: 1, dueDate: null,
+    grossAmount: 0, unpaidAmount: 0, paymentPriority: 99, paymentMethod: '', bankAccount: '',
+  }]);
+  const [instSelectedKey, setInstSelectedKey] = useState<string | null>(null);
   const [importPreviewData, setImportPreviewData] = useState<{ type: string; amount: number; description: string }[]>([]);
   const [pasteText, setPasteText] = useState('');
 
@@ -1402,8 +1403,46 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     return Math.abs(headerInvoiceAmount - computedTotal) > 0.01;
   }, [isHeaderComplete, headerInvoiceAmount, computedTotal, linesTotal]);
 
+  // ── Reactive installment sync ────────────────────────────────────────────
+  // When the header invoice amount, due date, or payment method changes,
+  // keep the single installment row in sync automatically.
+  // Once the user splits into multiple rows we stop auto-updating.
+  useEffect(() => {
+    const amt = headerValues.invoiceAmount || 0;
+    setInstEditRows(prev => {
+      if (prev.length !== 1) return prev;          // user split — leave as-is
+      if (prev[0].grossAmount === amt) return prev; // no change
+      return [{ ...prev[0], grossAmount: amt, unpaidAmount: amt }];
+    });
+  }, [headerValues.invoiceAmount]);
+
+  useEffect(() => {
+    const rawDue = headerValues.termsDate || headerValues.invoiceDate;
+    if (!rawDue) return;
+    const due = dayjs.isDayjs(rawDue) ? rawDue : dayjs(rawDue);
+    setInstEditRows(prev => {
+      if (prev.length !== 1) return prev;
+      return [{ ...prev[0], dueDate: due }];
+    });
+  }, [headerValues.termsDate, headerValues.invoiceDate]);
+
+  useEffect(() => {
+    if (!headerValues.paymentMethod) return;
+    setInstEditRows(prev => {
+      if (prev.length !== 1) return prev;
+      return [{ ...prev[0], paymentMethod: headerValues.paymentMethod }];
+    });
+  }, [headerValues.paymentMethod]);
+  // ────────────────────────────────────────────────────────────────────────
+
   // Invoice Actions dropdown menu items
   const invoiceActionItems: MenuProps['items'] = [
+    {
+      key: 'manageInstallments',
+      icon: <ScheduleOutlined />,
+      label: 'Manage Installments',
+    },
+    { type: 'divider' },
     {
       key: 'calculateTax',
       icon: <CalculatorOutlined />,
@@ -1457,12 +1496,6 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       key: 'duplicate',
       icon: <CopyOutlined />,
       label: 'Duplicate Invoice',
-    },
-    { type: 'divider' },
-    {
-      key: 'installments',
-      icon: <ScheduleOutlined />,
-      label: 'Installments',
     },
   ];
 
@@ -1740,9 +1773,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       case 'duplicate':
         message.info('Duplicating invoice...');
         break;
-      case 'installments':
-        setInstallmentsModalOpen(true);
-        fetchInstallmentsForModal();
+      case 'manageInstallments':
+        setInstSelectedKey(null);
+        setInstEditVisible(true);
         break;
       default:
         break;
@@ -1967,91 +2000,32 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     }
   };
 
-  // Open installment editor modal before saving
-  const openInstallmentsEditor = async (mode: 'save' | 'saveClose' | 'saveNext') => {
-    try {
-      const values = await form.validateFields();
-      if (!validateTally()) return;
-
-      const invoiceDate = values.invoiceDate;
-      const dueDate     = values.termsDate || invoiceDate;
-      const grossAmount = values.invoiceAmount || 0;
-
-      setPendingFormValues(values);
-      setPendingSaveMode(mode);
-      setInstSelectedKey(null);
-      setInstEditRows([{
-        key:               '1',
-        installmentNumber: 1,
-        dueDate:           dueDate ? dayjs(dueDate) : null,
-        grossAmount,
-        unpaidAmount:      grossAmount,
-        paymentPriority:   99,
-        paymentMethod:     values.paymentMethod || '',
-        bankAccount:       '',
-      }]);
-      setInstEditVisible(true);
-    } catch {
-      message.error('Please fill in required fields');
-    }
-  };
-
-  // Called when user clicks "Confirm & Save" inside the installments modal
-  const executeInstallmentSave = async () => {
-    if (!pendingFormValues) return;
-
-    const invoiceAmount = pendingFormValues.invoiceAmount || 0;
-    const rowTotal = instEditRows.reduce((s, r) => s + (r.grossAmount || 0), 0);
-    if (Math.abs(rowTotal - invoiceAmount) > 0.01) {
-      message.error(`Total installments ${rowTotal.toFixed(2)} must equal invoice amount ${invoiceAmount.toFixed(2)}`);
-      return;
-    }
-
-    setInstEditVisible(false);
-    setSaving(true);
-
-    // 1. Save the invoice header + lines; returns the invoiceId on success
-    const invoiceId = await saveInvoice(pendingFormValues);
-    if (!invoiceId) { setSaving(false); return; }
-
-    // 2. Create each installment
+  // POST all installment rows for a saved invoice
+  const saveInstallments = async (invoiceId: number) => {
     const loginUser = user?.username || null;
-    const values    = pendingFormValues;
     const timestamp = new Date().toLocaleString('en-GB', {
       day: '2-digit', month: 'short', year: 'numeric',
       hour: '2-digit', minute: '2-digit', second: '2-digit',
     });
-
     for (const row of instEditRows) {
       const instPayload = {
         InvoiceId:              invoiceId,
         DueDate:                row.dueDate?.format('YYYY-MM-DD') || null,
         GrossAmount:            row.grossAmount,
         UnpaidAmount:           row.unpaidAmount,
-        FirstDiscountAmount:    null,
-        FirstDiscountDate:      null,
-        SecondDiscountAmount:   null,
-        SecondDiscountDate:     null,
-        ThirdDiscountAmount:    null,
-        ThirdDiscountDate:      null,
-        NetAmountOne:           null,
-        NetAmountTwo:           null,
-        NetAmountThree:         null,
+        FirstDiscountAmount:    null, FirstDiscountDate:      null,
+        SecondDiscountAmount:   null, SecondDiscountDate:     null,
+        ThirdDiscountAmount:    null, ThirdDiscountDate:      null,
+        NetAmountOne:           null, NetAmountTwo:           null, NetAmountThree:         null,
         PaymentPriority:        row.paymentPriority,
         PaymentMethod:          row.paymentMethod || null,
         PaymentMethodCode:      row.paymentMethod || null,
-        HoldReason:             null,
-        HoldType:               null,
-        HoldDate:               null,
-        HeldBy:                 null,
+        HoldReason:             null, HoldType:               null,
+        HoldDate:               null, HeldBy:                 null,
         BankAccount:            row.bankAccount || null,
-        ExternalBankAccountId:  null,
-        DigitalPaymentAccount:  null,
-        RemitToAddressName:     null,
-        RemitToSupplier:        null,
-        RemittanceMessageOne:   null,
-        RemittanceMessageTwo:   null,
-        RemittanceMessageThree: null,
+        ExternalBankAccountId:  null, DigitalPaymentAccount:  null,
+        RemitToAddressName:     null, RemitToSupplier:        null,
+        RemittanceMessageOne:   null, RemittanceMessageTwo:   null, RemittanceMessageThree: null,
         CreatedBy:              loginUser,
         LastUpdatedBy:          loginUser,
         LastUpdateLogin:        loginUser,
@@ -2080,30 +2054,62 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         message.warning(`Invoice saved but installment #${row.installmentNumber} error: ${e}`);
       }
     }
+  };
 
-    setSaving(false);
-
-    // 3. Post-save action
-    if (pendingSaveMode === 'saveNext') {
-      message.success('Invoice saved. Creating next...');
-      form.resetFields();
-      setLines([createBlankLine(1)]);
-      setSelectedLineKeys([]);
-      setHeaderValues({ invoiceType: 'Standard', invoiceCurrency: 'AED' });
-      setTaxRate(5);
-      setIsValidated(false);
-      setSavedInvoiceId(null);
-      setSelectedSupplierInfo(null);
-    } else if (pendingSaveMode === 'saveClose') {
-      onClose();
+  // Core save: validate installments, save invoice, save installments
+  const saveInvoiceWithInstallments = async (values: any): Promise<number | false> => {
+    const invoiceAmount = values.invoiceAmount || 0;
+    const rowTotal = instEditRows.reduce((s, r) => s + (r.grossAmount || 0), 0);
+    if (invoiceAmount > 0 && Math.abs(rowTotal - invoiceAmount) > 0.01) {
+      message.error(
+        `Installments total (${rowTotal.toFixed(2)}) doesn't match invoice amount (${invoiceAmount.toFixed(2)}). ` +
+        'Use Invoice Actions → Manage Installments to fix.'
+      );
+      return false;
     }
+    const invoiceId = await saveInvoice(values);
+    if (!invoiceId) return false;
+    await saveInstallments(invoiceId);
+    return invoiceId;
   };
 
   // Save and create next handler
-  const handleSaveAndCreateNext = () => openInstallmentsEditor('saveNext');
+  const handleSaveAndCreateNext = async () => {
+    try {
+      const values = await form.validateFields();
+      if (!validateTally()) return;
+      const invoiceId = await saveInvoiceWithInstallments(values);
+      if (invoiceId) {
+        message.success('Invoice saved. Creating next...');
+        form.resetFields();
+        setLines([createBlankLine(1)]);
+        setSelectedLineKeys([]);
+        setHeaderValues({ invoiceType: 'Standard', invoiceCurrency: 'AED' });
+        setTaxRate(5);
+        setIsValidated(false);
+        setSavedInvoiceId(null);
+        setSelectedSupplierInfo(null);
+        setInstEditRows([{ key: '1', installmentNumber: 1, dueDate: null, grossAmount: 0, unpaidAmount: 0, paymentPriority: 99, paymentMethod: '', bankAccount: '' }]);
+      }
+    } catch {
+      message.error('Please fill in required fields');
+    }
+  };
 
   // Save handler
-  const handleSave = () => openInstallmentsEditor('save');
+  const handleSave = async (): Promise<boolean> => {
+    try {
+      const values = await form.validateFields();
+      if (!validateTally()) return false;
+      const result = await saveInvoiceWithInstallments(values);
+      if (result) message.success('Invoice saved successfully');
+      return Boolean(result);
+    } catch (err) {
+      console.log('Validation failed:', err);
+      message.error('Please fill in required fields');
+      return false;
+    }
+  };
 
   // Show API preview (URL + JSON body for Postman testing)
   const handleApiPreview = () => {
@@ -2207,7 +2213,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           onChange={(v) => updateLine(record.key, 'amount', v || 0)}
           min={0}
           precision={2}
-          style={{ width: '100%', fontWeight: 600 }}
+          style={{ width: '100%', fontWeight: 600, textAlign: 'right' }}
+          styles={{ input: { textAlign: 'right' } }}
           variant="borderless"
           disabled={isReadOnly}
         />
@@ -2737,7 +2744,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           {!isReadOnly && (
             <Button
               type="primary"
-              onClick={() => openInstallmentsEditor('saveClose')}
+              onClick={async () => { const ok = await handleSave(); if (ok) onClose(); }}
               loading={saving}
               disabled={saving || !isValidated}
               style={{ background: isValidated ? REDWOOD.primary : undefined, borderColor: isValidated ? REDWOOD.primary : undefined }}
@@ -5921,7 +5928,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       </Modal>
       {/* ── Installment Editor Modal ──────────────────────────────────────── */}
       {(() => {
-        const invoiceAmt  = pendingFormValues?.invoiceAmount || 0;
+        const invoiceAmt  = headerValues.invoiceAmount || 0;
         const grossTotal  = instEditRows.reduce((s, r) => s + (r.grossAmount  || 0), 0);
         const unpaidTotal = instEditRows.reduce((s, r) => s + (r.unpaidAmount || 0), 0);
         const isBalanced  = Math.abs(grossTotal - invoiceAmt) <= 0.01;
@@ -5983,7 +5990,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               <Space>
                 <ScheduleOutlined style={{ color: REDWOOD.primary }} />
                 <span style={{ fontWeight: 600 }}>Payment Installments</span>
-                <Tag color="blue" style={{ fontWeight: 500 }}>{pendingFormValues?.invoiceCurrency || 'AED'}</Tag>
+                <Tag color="blue" style={{ fontWeight: 500 }}>{headerValues.invoiceCurrency || 'AED'}</Tag>
                 <Tag color={isBalanced ? 'green' : 'red'} style={{ fontWeight: 500 }}>
                   {isBalanced ? 'Balanced' : `Diff: ${(grossTotal - invoiceAmt).toFixed(2)}`}
                 </Tag>
@@ -5999,20 +6006,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   Invoice Amount: <strong>{invoiceAmt.toFixed(2)}</strong>
                   {'  ·  '}
                   Gross Total: <strong style={{ color: isBalanced ? REDWOOD.success : REDWOOD.error }}>{grossTotal.toFixed(2)}</strong>
+                  {!isBalanced && (
+                    <Text type="danger" style={{ marginLeft: 8, fontSize: 11 }}>
+                      ⚠ Must balance before saving
+                    </Text>
+                  )}
                 </Text>
-                <Space>
-                  <Button onClick={() => setInstEditVisible(false)}>Cancel</Button>
-                  <Button
-                    type="primary"
-                    icon={<SaveOutlined />}
-                    loading={saving}
-                    disabled={saving || !isBalanced}
-                    style={{ background: isBalanced ? REDWOOD.primary : undefined, borderColor: isBalanced ? REDWOOD.primary : undefined }}
-                    onClick={executeInstallmentSave}
-                  >
-                    Confirm &amp; Save
-                  </Button>
-                </Space>
+                <Button type="primary" onClick={() => setInstEditVisible(false)}
+                  style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
+                  Done
+                </Button>
               </div>
             }
           >
