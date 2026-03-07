@@ -118,7 +118,7 @@ interface SupplierRecord {
 
 interface SupplierSiteRecord {
   siteId: string;
-  procurementBu: string;
+  siteName: string;
 }
 
 // Supplier balance interfaces
@@ -920,12 +920,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       const items: any[] = data.items || (Array.isArray(data) ? data : []);
       const mapped: SupplierSiteRecord[] = items.map((item: any) => ({
         siteId:       item.suppliersiteid?.toString() || '',
-        procurementBu: item.procurement_bu || '',
+        siteName: item.supplier_site || item.SUPPLIER_SITE || '',
       })).filter(s => s.siteId);
       setSupplierSites(mapped);
       if (mapped.length === 1) {
         form.setFieldsValue({ supplierSite: mapped[0].siteId });
-        message.success(`Site auto-selected: ${mapped[0].procurementBu}`);
+        message.success(`Site auto-selected: ${mapped[0].siteName}`);
       } else if (mapped.length === 0) {
         message.warning('No supplier sites found for this supplier.');
       }
@@ -2829,7 +2829,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           >
                             {supplierSites.map(site => (
                               <Option key={site.siteId} value={site.siteId}>
-                                {site.procurementBu}
+                                {site.siteName}
                               </Option>
                             ))}
                           </Select>
