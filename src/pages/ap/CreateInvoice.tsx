@@ -374,6 +374,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
   const [supplierLoading, setSupplierLoading] = useState(false);
   const [supplierSearchText, setSupplierSearchText] = useState('');
+  const [selectedSupplierInfo, setSelectedSupplierInfo] = useState<{ number: string; id: number } | null>(null);
   const [businessUnits, setBusinessUnits] = useState<string[]>([]);
 
   // Header completion tracking
@@ -890,6 +891,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       supplierId:     record.supplierId,
       supplierSite:   '',
     });
+    setSelectedSupplierInfo({ number: record.supplierNumber, id: record.supplierId });
     setSupplierModalVisible(false);
     message.success(`Selected: ${record.supplier}`);
   };
@@ -1924,6 +1926,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         setTaxRate(5);
         setIsValidated(false);
         setSavedInvoiceId(null); // Reset to create mode
+        setSelectedSupplierInfo(null);
       }
     } catch {
       message.error('Please fill in required fields');
@@ -2728,18 +2731,31 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                         >
                           <Space.Compact style={{ width: '100%' }}>
                             <Form.Item name="supplier" noStyle rules={[{ required: true, message: 'Required' }]}>
-                              <Input
-                                placeholder="Search supplier..."
-                                readOnly
-                                suffix={
-                                  <SearchOutlined
-                                    style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 14 }}
-                                    onClick={openSupplierModal}
-                                  />
+                              <Tooltip
+                                title={
+                                  selectedSupplierInfo ? (
+                                    <div>
+                                      <div><strong>Supplier #:</strong> {selectedSupplierInfo.number}</div>
+                                      <div><strong>Supplier ID:</strong> {selectedSupplierInfo.id}</div>
+                                    </div>
+                                  ) : null
                                 }
-                                onClick={openSupplierModal}
-                                style={{ cursor: 'pointer', flex: 1 }}
-                              />
+                                placement="bottom"
+                                mouseEnterDelay={0.3}
+                              >
+                                <Input
+                                  placeholder="Search supplier..."
+                                  readOnly
+                                  suffix={
+                                    <SearchOutlined
+                                      style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 14 }}
+                                      onClick={openSupplierModal}
+                                    />
+                                  }
+                                  onClick={openSupplierModal}
+                                  style={{ cursor: 'pointer', flex: 1 }}
+                                />
+                              </Tooltip>
                             </Form.Item>
                             <Tooltip title="Check Balance">
                               <Button
