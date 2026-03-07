@@ -832,7 +832,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     try {
       const bu = form.getFieldValue('businessUnit') || '';
       const url = bu
-        ? `${APEX_SUPPLIERS_URL}&business_unit=${encodeURIComponent(bu)}`
+        ? `${APEX_SUPPLIERS_URL}&P_BUSINESS_UNIT=${encodeURIComponent(bu)}`
         : APEX_SUPPLIERS_URL;
       const response = await fetch(url, {
         method: 'GET',
@@ -3655,7 +3655,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             <span style={{ color: '#1D7B4D', fontWeight: 700, marginRight: 8 }}>GET</span>
             <span style={{ color: '#e0e0e0' }}>
               {form.getFieldValue('businessUnit')
-                ? `${APEX_SUPPLIERS_URL}&business_unit=${encodeURIComponent(form.getFieldValue('businessUnit'))}`
+                ? `${APEX_SUPPLIERS_URL}&P_BUSINESS_UNIT=${encodeURIComponent(form.getFieldValue('businessUnit'))}`
                 : APEX_SUPPLIERS_URL}
             </span>
           </div>

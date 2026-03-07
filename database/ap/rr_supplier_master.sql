@@ -259,15 +259,32 @@ SELECT DISTINCT
     sm.taxpayer_id,
     TO_CHAR(sm.creation_date, 'YYYY-MM-DD') AS creation_date
 FROM RR_SUPPLIER_MASTER sm
-WHERE (:supplier_number IS NULL OR sm.supplier_number = :supplier_number)
-  AND (:supplier        IS NULL OR UPPER(sm.supplier) LIKE '%' || UPPER(:supplier) || '%')
-  AND (:business_unit   IS NULL OR EXISTS (
+WHERE (:supplier_number  IS NULL OR sm.supplier_number = :supplier_number)
+  AND (:supplier         IS NULL OR UPPER(sm.supplier) LIKE '%' || UPPER(:supplier) || '%')
+  AND (:P_BUSINESS_UNIT  IS NULL OR EXISTS (
         SELECT 1 FROM RR_SUPPLIER_SITES ss
         WHERE ss.supplier_id = sm.supplier_id
-          AND UPPER(ss.procurement_bu) = UPPER(:business_unit)
+          AND UPPER(ss.procurement_bu) = UPPER(:P_BUSINESS_UNIT)
       ))
 ORDER BY sm.supplier
 ]'
+    );
+    COMMIT;
+END;
+/
+
+-- Register P_BUSINESS_UNIT as a formal query-string parameter
+BEGIN
+    ORDS.DEFINE_PARAMETER(
+        p_module_name        => 'reerp',
+        p_pattern            => 'suppliers',
+        p_method             => 'GET',
+        p_name               => 'P_BUSINESS_UNIT',
+        p_bind_variable_name => 'P_BUSINESS_UNIT',
+        p_source_type        => 'URI',
+        p_param_type         => 'STRING',
+        p_access_method      => 'IN',
+        p_comments           => 'Filter suppliers by Procurement Business Unit name'
     );
     COMMIT;
 END;
