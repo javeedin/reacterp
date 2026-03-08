@@ -4653,7 +4653,17 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
               periodLines.forEach((l) => {
                 const amt = l.amount || 0;
-                allEntries.push({ key: keyIdx++, period, line: `Line ${l.lineNumber}`, account: l.distributionCombination || l.distributionSet || '—', description: l.description || l.type || 'Item', debit: amt, credit: 0 });
+                // Oracle MPA: if this line has multiperiod dates, park the full amount in
+                // the accrual/prepaid account (not the expense account). The expense is
+                // recognised period-by-period in the Multiperiod Accounting tab.
+                const isMpa = !!(l.startDate && l.endDate && l.accrualAccount);
+                const debitAccount = isMpa
+                  ? l.accrualAccount
+                  : (l.distributionCombination || l.distributionSet || '—');
+                const debitDesc = isMpa
+                  ? `Prepaid/Accrual — ${l.description || l.type || 'Item'}`
+                  : (l.description || l.type || 'Item');
+                allEntries.push({ key: keyIdx++, period, line: `Line ${l.lineNumber}`, account: debitAccount, description: debitDesc, debit: amt, credit: 0 });
                 periodDebit += amt;
               });
 
