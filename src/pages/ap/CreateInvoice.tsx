@@ -1002,6 +1002,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
       // Edit mode: fetch existing lines, payments, holds, installments, applied prepayments
       if (initialData.invoiceId) {
+        fetchSuppliers(); // load suppliers so supplierId fallback lookup works for prepayments
         fetchExistingLines(initialData.invoiceId);
         fetchInvoicePayments(initialData.invoiceId);
         fetchInvoiceHolds(initialData.invoiceId);
