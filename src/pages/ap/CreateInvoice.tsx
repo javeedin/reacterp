@@ -4005,8 +4005,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   </div>
                 ),
               }] : []),
-              // Pre-Payment Applications tab (edit mode only, shown when applied prepayments exist)
-              ...(isEditMode && appliedPrepaymentsList.length > 0 ? [{
+              // Pre-Payment Applications tab (edit mode only)
+              ...(isEditMode ? [{
                 key: 'prepaymentApplications',
                 label: (
                   <Space size={4}>
