@@ -311,9 +311,12 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_UPDATE_INVOICE_PKG AS
                     uom                      VARCHAR2(25)    PATH '$.UOM',
                     purchase_order_number    VARCHAR2(50)    PATH '$.PONumber',
                     purchase_order_line_number NUMBER        PATH '$.POLineNumber',
-                    receipt_number           VARCHAR2(50)    PATH '$.ReceiptNumber',
-                    receipt_line_number      NUMBER          PATH '$.ReceiptLineNumber',
-                    ship_to_location         VARCHAR2(240)   PATH '$.ShipToLocation'
+                    receipt_number               VARCHAR2(50)    PATH '$.ReceiptNumber',
+                    receipt_line_number          NUMBER          PATH '$.ReceiptLineNumber',
+                    ship_to_location             VARCHAR2(240)   PATH '$.ShipToLocation',
+                    multiperiod_start_date       VARCHAR2(10)    PATH '$.MultiperiodStartDate',
+                    multiperiod_end_date         VARCHAR2(10)    PATH '$.MultiperiodEndDate',
+                    multiperiod_accrual_account  VARCHAR2(500)   PATH '$.MultiperiodAccrualAccount'
                 )
             ) jt
         ) LOOP
@@ -350,6 +353,9 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_UPDATE_INVOICE_PKG AS
                     RECEIPT_NUMBER,
                     RECEIPT_LINE_NUMBER,
                     SHIP_TO_LOCATION,
+                    MULTIPERIOD_START_DATE,
+                    MULTIPERIOD_END_DATE,
+                    MULTIPERIOD_ACCRUAL_ACCOUNT,
                     PROCESS_STATUS,
                     CREATED_BY,
                     CREATION_DATE
@@ -372,6 +378,9 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_UPDATE_INVOICE_PKG AS
                     rec.receipt_number,
                     rec.receipt_line_number,
                     rec.ship_to_location,
+                    TO_DATE(rec.multiperiod_start_date, 'YYYY-MM-DD'),
+                    TO_DATE(rec.multiperiod_end_date, 'YYYY-MM-DD'),
+                    rec.multiperiod_accrual_account,
                     'UPDATED',
                     USER,
                     SYSTIMESTAMP
