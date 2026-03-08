@@ -7224,6 +7224,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                       setAppliedPrepaymentsList(applied);
                       setSupplierHasPrepayments(avail.length > 0);
                       setSelectedAvailKeys([]);
+                      fetchInvoiceBalance(invoiceId);
                     } catch (err: any) {
                       message.error(`Failed to apply prepayment: ${err.message}`);
                     } finally {
