@@ -428,6 +428,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // Account Selector (Distribution Combination popup)
   const [accountSelectorVisible, setAccountSelectorVisible] = useState(false);
   const [editingLineKey, setEditingLineKey] = useState<string | null>(null);
+  const [editingLineField, setEditingLineField] = useState<'distributionCombination' | 'accrualAccount'>('distributionCombination');
   const [accountSelectorInitialValue, setAccountSelectorInitialValue] = useState<string | undefined>(undefined);
 
   // Supplier balance popup state
@@ -1324,8 +1325,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   }, []);
 
   // Open account selector for a line
-  const openAccountSelector = (lineKey: string, initialValue?: string) => {
+  const openAccountSelector = (lineKey: string, initialValue?: string, field: 'distributionCombination' | 'accrualAccount' = 'distributionCombination') => {
     setEditingLineKey(lineKey);
+    setEditingLineField(field);
     setAccountSelectorInitialValue(initialValue);
     setAccountSelectorVisible(true);
   };
@@ -1363,38 +1365,42 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       form.setFieldValue('liabilityDistribution', accountCode);
       setHeaderValues((prev) => ({ ...prev, liabilityDistribution: accountCode }));
     } else if (editingLineKey) {
+      const field = editingLineField; // 'distributionCombination' or 'accrualAccount'
+
       // Set on the current line first
       setLines((prev) =>
         prev.map((line) =>
-          line.key === editingLineKey ? { ...line, distributionCombination: accountCode } : line
+          line.key === editingLineKey ? { ...line, [field]: accountCode } : line
         )
       );
-      // Offer to apply to all lines if there are multiple
+
+      // Offer to apply to all lines — scoped to the same field only
       const otherLines = lines.filter((l) => l.key !== editingLineKey && (l.amount !== 0 || l.description));
       if (otherLines.length > 0) {
-        const linesWithout = otherLines.filter((l) => !l.distributionCombination);
+        const fieldLabel = field === 'accrualAccount' ? 'Accrual Account' : 'Distribution';
+        const linesWithout = otherLines.filter((l) => !l[field]);
         Modal.confirm({
-          title: 'Apply to All Lines?',
+          title: `Apply ${fieldLabel} to All Lines?`,
           icon: <AppstoreOutlined style={{ color: REDWOOD.info }} />,
           content: (
             <div style={{ fontSize: 13 }}>
               <div style={{ marginBottom: 8 }}>
-                Distribution: <Text code style={{ fontSize: 12 }}>{accountCode}</Text>
+                {fieldLabel}: <Text code style={{ fontSize: 12 }}>{accountCode}</Text>
               </div>
               {linesWithout.length > 0 && (
                 <div style={{ color: REDWOOD.neutral600, fontSize: 12 }}>
-                  {linesWithout.length} line(s) have no distribution set.
+                  {linesWithout.length} line(s) have no {fieldLabel.toLowerCase()} set.
                 </div>
               )}
             </div>
           ),
-          okText: 'Apply to All Lines',
+          okText: `Apply to All Lines`,
           cancelText: 'Only This Line',
           onOk: () => {
             setLines((prev) =>
-              prev.map((line) => ({ ...line, distributionCombination: accountCode }))
+              prev.map((line) => ({ ...line, [field]: accountCode }))
             );
-            message.success(`Distribution applied to all ${lines.length} lines`);
+            message.success(`${fieldLabel} applied to all ${lines.length} lines`);
             setIsValidated(false);
           },
         });
@@ -2729,7 +2735,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           suffix={
             <SearchOutlined
               style={{ color: REDWOOD.info, fontSize: 12, cursor: 'pointer' }}
-              onClick={() => openAccountSelector(record.key, val)}
+              onClick={() => openAccountSelector(record.key, val, 'accrualAccount')}
             />
           }
         />
