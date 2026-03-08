@@ -52,6 +52,19 @@ CREATE OR REPLACE PACKAGE RR_AP_APPLIED_PREPAYMENTS_PKG AS
         p_supplier_number       IN VARCHAR2 DEFAULT NULL
     ) RETURN CLOB;
 
+    -- Get available prepayments for a supplier (by supplier_id)
+    -- Returns snake_case JSON items for the Apply Prepayments modal
+    -- Filters: invoice_type = 'Prepayment', available_amount > 0
+    FUNCTION get_available_by_supplier_id(
+        p_supplier_id IN NUMBER
+    ) RETURN CLOB;
+
+    -- Get applied prepayments for a target invoice (snake_case JSON)
+    -- Used by the Applied section of the Apply/Unapply Prepayments modal
+    FUNCTION get_applied_by_invoice_snake(
+        p_invoice_id IN NUMBER
+    ) RETURN CLOB;
+
 END RR_AP_APPLIED_PREPAYMENTS_PKG;
 /
 
@@ -448,6 +461,115 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_APPLIED_PREPAYMENTS_PKG AS
         WHEN OTHERS THEN
             RETURN '{"status":"error","message":"' || REPLACE(SQLERRM, '"', '\"') || '"}';
     END get_prepayment_balances;
+
+    -- --------------------------------------------------------
+    -- Get available prepayments for a supplier by SUPPLIER_ID
+    -- Returns snake_case items array for the frontend modal
+    -- --------------------------------------------------------
+    FUNCTION get_available_by_supplier_id(
+        p_supplier_id IN NUMBER
+    ) RETURN CLOB IS
+        v_result        CLOB;
+        v_supplier_num  VARCHAR2(30);
+    BEGIN
+        -- Resolve supplier_number from supplier_id
+        BEGIN
+            SELECT supplier_number
+            INTO   v_supplier_num
+            FROM   RR_SUPPLIER_MASTER
+            WHERE  supplier_id = p_supplier_id;
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+                RETURN '{"items":[],"count":0}';
+        END;
+
+        SELECT JSON_OBJECT(
+            'items' VALUE JSON_ARRAYAGG(
+                JSON_OBJECT(
+                    'invoice_id'              VALUE inv.invoice_id,
+                    'invoice_number'          VALUE inv.invoice_number,
+                    'description'             VALUE inv.description,
+                    'supplier_site'           VALUE inv.supplier_site,
+                    'purchase_order'          VALUE l.purchase_order_number,
+                    'currency'                VALUE inv.invoice_currency,
+                    'available_amount'        VALUE (inv.invoice_amount - NVL(agg.total_applied, 0)),
+                    'line_number'             VALUE 1,
+                    'prepayment_line_number'  VALUE 1,
+                    'business_unit'           VALUE inv.business_unit
+                    ABSENT ON NULL
+                ) ORDER BY inv.invoice_id
+            ),
+            'count' VALUE COUNT(*)
+        )
+        INTO v_result
+        FROM RR_AP_INVOICES_ALL inv
+        LEFT JOIN (
+            SELECT prepayment_invoice_id,
+                   SUM(CASE WHEN status != 'Cancelled' THEN applied_amount ELSE 0 END) AS total_applied
+            FROM   RR_AP_APPLIED_PREPAYMENTS
+            GROUP BY prepayment_invoice_id
+        ) agg ON agg.prepayment_invoice_id = inv.invoice_id
+        LEFT JOIN (
+            SELECT invoice_id,
+                   MIN(purchase_order_number) AS purchase_order_number
+            FROM   RR_AP_INVOICE_LINES_ALL
+            WHERE  purchase_order_number IS NOT NULL
+            GROUP BY invoice_id
+        ) l ON l.invoice_id = inv.invoice_id
+        WHERE inv.invoice_type     = 'Prepayment'
+          AND NVL(inv.canceled_flag, 'N') != 'Y'
+          AND inv.supplier_number  = v_supplier_num
+          AND (inv.invoice_amount - NVL(agg.total_applied, 0)) > 0;
+
+        RETURN NVL(v_result, '{"items":[],"count":0}');
+    EXCEPTION
+        WHEN OTHERS THEN
+            RETURN '{"status":"error","message":"' || REPLACE(SQLERRM, '"', '\"') || '"}';
+    END get_available_by_supplier_id;
+
+    -- --------------------------------------------------------
+    -- Get applied prepayments for a target invoice (snake_case)
+    -- Returns items wrapper for the frontend modal Applied section
+    -- --------------------------------------------------------
+    FUNCTION get_applied_by_invoice_snake(
+        p_invoice_id IN NUMBER
+    ) RETURN CLOB IS
+        v_result CLOB;
+    BEGIN
+        SELECT JSON_OBJECT(
+            'items' VALUE JSON_ARRAYAGG(
+                JSON_OBJECT(
+                    'application_id'              VALUE application_id,
+                    'invoice_id'                  VALUE invoice_id,
+                    'invoice_number'              VALUE invoice_number,
+                    'prepayment_invoice_id'       VALUE prepayment_invoice_id,
+                    'prepayment_number'           VALUE prepayment_number,
+                    'line_number'                 VALUE line_number,
+                    'prepayment_line_number'      VALUE prepayment_line_number,
+                    'description'                 VALUE description,
+                    'business_unit'               VALUE business_unit,
+                    'supplier_site'               VALUE supplier_site,
+                    'purchase_order'              VALUE purchase_order,
+                    'currency'                    VALUE currency,
+                    'applied_amount'              VALUE applied_amount,
+                    'included_tax'                VALUE included_tax,
+                    'application_accounting_date' VALUE TO_CHAR(application_accounting_date, 'YYYY-MM-DD'),
+                    'status'                      VALUE status
+                    ABSENT ON NULL
+                ) ORDER BY application_id
+            ),
+            'count' VALUE COUNT(*)
+        )
+        INTO v_result
+        FROM RR_AP_APPLIED_PREPAYMENTS
+        WHERE invoice_id = p_invoice_id
+          AND NVL(status, 'Applied') != 'Cancelled';
+
+        RETURN NVL(v_result, '{"items":[],"count":0}');
+    EXCEPTION
+        WHEN OTHERS THEN
+            RETURN '{"status":"error","message":"' || REPLACE(SQLERRM, '"', '\"') || '"}';
+    END get_applied_by_invoice_snake;
 
 END RR_AP_APPLIED_PREPAYMENTS_PKG;
 /
