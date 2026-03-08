@@ -1265,6 +1265,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     const invoiceId = savedInvoiceId || initialData?.invoiceId;
     if (!supplierId) { message.warning('Select a supplier first.'); return; }
     if (!invoiceId) { message.warning('Please save the invoice before applying a prepayment.'); return; }
+    if (invoiceBalance !== null && invoiceBalance <= 0) { message.info('Invoice balance is zero — no prepayment needed.'); return; }
+    const remainingBalance = invoiceBalance ?? form.getFieldValue('invoiceAmount') ?? 0;
     setPrepaymentLoading(true);
     setPrepaymentModalVisible(true);
     setSelectedAvailKeys([]);
@@ -1273,17 +1275,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         fetchAvailablePrepayments(Number(supplierId)),
         invoiceId ? fetchAppliedPrepayments(invoiceId) : Promise.resolve([]),
       ]);
-      const invoiceAmt = form.getFieldValue('invoiceAmount') || 0;
       setAvailablePrepayments(avail.map(r => ({
         ...r,
-        toApply: invoiceAmt > 0 ? Math.min(r.availableAmount, invoiceAmt) : 0,
+        toApply: remainingBalance > 0 ? Math.min(r.availableAmount, remainingBalance) : 0,
       })));
       setAppliedPrepaymentsList(applied);
       setSupplierHasPrepayments(avail.length > 0);
     } finally {
       setPrepaymentLoading(false);
     }
-  }, [form, savedInvoiceId, initialData, fetchAvailablePrepayments, fetchAppliedPrepayments, suppliers]);
+  }, [form, savedInvoiceId, initialData, fetchAvailablePrepayments, fetchAppliedPrepayments, suppliers, invoiceBalance]);
 
   const filteredSuppliers = useMemo(() => {
     if (!supplierSearchText) return suppliers;
