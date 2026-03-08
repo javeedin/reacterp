@@ -4167,12 +4167,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                         return (
                           <Table.Summary fixed>
                             <Table.Summary.Row>
-                              <Table.Summary.Cell index={0} colSpan={4} align="right">
+                              <Table.Summary.Cell index={0} colSpan={3} align="right">
                                 <Text strong style={{ fontSize: 12 }}>Total Applied</Text>
                               </Table.Summary.Cell>
-                              <Table.Summary.Cell index={4} align="right">
+                              <Table.Summary.Cell index={3} align="right">
                                 <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>{formatAmount(total)}</Text>
                               </Table.Summary.Cell>
+                              <Table.Summary.Cell index={4} />
                               <Table.Summary.Cell index={5} />
                             </Table.Summary.Row>
                           </Table.Summary>
