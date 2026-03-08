@@ -2700,10 +2700,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           onChange={(e) => updateLine(record.key, 'accrualAccount', e.target.value)}
           variant="borderless"
           placeholder="e.g. 01-000-2200-0000-000"
+          readOnly={isReadOnly}
           suffix={
             <SearchOutlined
-              style={{ color: REDWOOD.info, fontSize: 12, cursor: 'pointer' }}
-              onClick={() => openAccountSelector(record.key, val, 'accrualAccount')}
+              style={{ color: isReadOnly ? REDWOOD.neutral300 : REDWOOD.info, fontSize: 12, cursor: isReadOnly ? 'default' : 'pointer' }}
+              onClick={() => !isReadOnly && openAccountSelector(record.key, val, 'accrualAccount')}
             />
           }
         />
@@ -3242,15 +3243,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                               <Input
                                 placeholder="e.g. 02-00-00-2313101-0000-000-00-000-000"
                                 readOnly
-                                style={{ cursor: 'pointer' }}
-                                onClick={() => openAccountSelector('__liability__', form.getFieldValue('liabilityDistribution'))}
+                                style={{ cursor: isReadOnly ? 'default' : 'pointer' }}
+                                onClick={() => !isReadOnly && openAccountSelector('__liability__', form.getFieldValue('liabilityDistribution'))}
                               />
                             </Form.Item>
                             <Tooltip title="Select Account">
                               <Button
                                 icon={<SearchOutlined />}
-                                onClick={() => openAccountSelector('__liability__', form.getFieldValue('liabilityDistribution'))}
-                                style={{ borderColor: REDWOOD.info, color: REDWOOD.info }}
+                                disabled={isReadOnly}
+                                onClick={() => !isReadOnly && openAccountSelector('__liability__', form.getFieldValue('liabilityDistribution'))}
+                                style={{ borderColor: isReadOnly ? undefined : REDWOOD.info, color: isReadOnly ? undefined : REDWOOD.info }}
                               />
                             </Tooltip>
                           </Space.Compact>
