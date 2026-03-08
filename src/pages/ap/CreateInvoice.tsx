@@ -556,6 +556,22 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   }
   const [prepaymentAPIResults, setPrepaymentAPIResults] = useState<PrepaymentAPIResult[]>([]);
 
+  // API Preview modal
+  const [apiPreviewVisible, setApiPreviewVisible] = useState(false);
+  const [apiPreviewData, setApiPreviewData] = useState<{ url: string; body: string; installmentUrl: string; installmentBody: string } | null>(null);
+  // Live-execute results for each card in the preview modal
+  const [apiExecInvoice, setApiExecInvoice]     = useState<{ loading: boolean; httpStatus: number; body: string } | null>(null);
+  const [apiExecInstall, setApiExecInstall]     = useState<{ loading: boolean; httpStatus: number; body: string } | null>(null);
+
+  // API Log (last request/response)
+  const [apiLog, setApiLog] = useState<{ url: string; method: string; requestBody: string; responseBody: string; status: string; httpStatus: number; timestamp: string } | null>(null);
+  // API Log history (all requests during session)
+  const [apiLogHistory, setApiLogHistory] = useState<{ action: string; url: string; method: string; requestBody: string; responseBody: string; status: string; httpStatus: number; timestamp: string }[]>([]);
+  const [apiLogHistoryVisible, setApiLogHistoryVisible] = useState(false);
+
+  // Saved invoice state — tracks whether we're in create or update mode
+  const [savedInvoiceId, setSavedInvoiceId] = useState<number | null>(initialData?.invoiceId || null);
+
   const openPrepaymentAPIDrawer = useCallback(async () => {
     const supplierId = form.getFieldValue('supplierId');
     const invoiceId = savedInvoiceId ?? initialData?.invoiceId ?? null;
@@ -620,22 +636,6 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       }
     });
   }, [form, savedInvoiceId, initialData]);
-
-  // API Preview modal
-  const [apiPreviewVisible, setApiPreviewVisible] = useState(false);
-  const [apiPreviewData, setApiPreviewData] = useState<{ url: string; body: string; installmentUrl: string; installmentBody: string } | null>(null);
-  // Live-execute results for each card in the preview modal
-  const [apiExecInvoice, setApiExecInvoice]     = useState<{ loading: boolean; httpStatus: number; body: string } | null>(null);
-  const [apiExecInstall, setApiExecInstall]     = useState<{ loading: boolean; httpStatus: number; body: string } | null>(null);
-
-  // API Log (last request/response)
-  const [apiLog, setApiLog] = useState<{ url: string; method: string; requestBody: string; responseBody: string; status: string; httpStatus: number; timestamp: string } | null>(null);
-  // API Log history (all requests during session)
-  const [apiLogHistory, setApiLogHistory] = useState<{ action: string; url: string; method: string; requestBody: string; responseBody: string; status: string; httpStatus: number; timestamp: string }[]>([]);
-  const [apiLogHistoryVisible, setApiLogHistoryVisible] = useState(false);
-
-  // Saved invoice state — tracks whether we're in create or update mode
-  const [savedInvoiceId, setSavedInvoiceId] = useState<number | null>(initialData?.invoiceId || null);
 
   // Edit mode: determine if invoice is editable or read-only
   const isEditMode = Boolean(initialData?.invoiceId);
