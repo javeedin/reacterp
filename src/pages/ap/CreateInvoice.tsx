@@ -231,6 +231,38 @@ interface InvoiceLine {
   taxAmount: number;
 }
 
+// Prepayment interfaces
+interface AvailablePrepayment {
+  key: string;
+  invoiceId: number;
+  invoiceNumber: string;
+  description: string;
+  supplierSite: string;
+  purchaseOrder: string;
+  currency: string;
+  availableAmount: number;
+  lineNumber: number;
+  prepaymentLineNumber: number;
+  businessUnit: string;
+  toApply: number;
+  accountingDate: dayjs.Dayjs | null;
+}
+
+interface AppliedPrepayment {
+  key: string;
+  applicationId: number;
+  prepaymentInvoiceId: number;
+  prepaymentNumber: string;
+  description: string;
+  supplierSite: string;
+  purchaseOrder: string;
+  currency: string;
+  appliedAmount: number;
+  lineNumber: number;
+  prepaymentLineNumber: number;
+  applicationAccountingDate: string;
+}
+
 interface InstallmentRow {
   key: string;
   installmentId?: number | null;   // DB primary key — null/undefined for new rows
@@ -500,6 +532,15 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [instSelectedKey, setInstSelectedKey] = useState<string | null>(null);
   const [importPreviewData, setImportPreviewData] = useState<{ type: string; amount: number; description: string }[]>([]);
   const [pasteText, setPasteText] = useState('');
+
+  // Apply/Unapply Prepayments modal state
+  const [prepaymentModalVisible, setPrepaymentModalVisible] = useState(false);
+  const [availablePrepayments, setAvailablePrepayments] = useState<AvailablePrepayment[]>([]);
+  const [appliedPrepaymentsList, setAppliedPrepaymentsList] = useState<AppliedPrepayment[]>([]);
+  const [prepaymentLoading, setPrepaymentLoading] = useState(false);
+  const [prepaymentApplying, setPrepaymentApplying] = useState(false);
+  const [supplierHasPrepayments, setSupplierHasPrepayments] = useState(false);
+  const [selectedAvailKeys, setSelectedAvailKeys] = useState<React.Key[]>([]);
 
   // API Preview modal
   const [apiPreviewVisible, setApiPreviewVisible] = useState(false);
@@ -948,6 +989,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     setSupplierModalVisible(false);
     message.success(`Selected: ${record.supplier}`);
     fetchSupplierSites(record.supplierId, bu);
+    // Check for available prepayments in background (to show badge)
+    fetchAvailablePrepayments(record.supplierId).then(avail => {
+      setSupplierHasPrepayments(avail.length > 0);
+      setAvailablePrepayments(avail);
+    });
   };
 
   const fetchSupplierSites = async (supplierId: number, procurementBU: string) => {
@@ -976,6 +1022,82 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       setSupplierSiteLoading(false);
     }
   };
+
+  // Fetch available prepayments for the supplier (to show badge and populate Available section)
+  const fetchAvailablePrepayments = useCallback(async (supplierId: number): Promise<AvailablePrepayment[]> => {
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/prepayments/available?P_SUPPLIER_ID=${supplierId}`;
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!res.ok) return [];
+      const data = await res.json();
+      const items: any[] = data.items || (Array.isArray(data) ? data : []);
+      return items.map((item: any, idx: number) => ({
+        key: (item.invoice_id ?? idx).toString(),
+        invoiceId: Number(item.invoice_id ?? 0),
+        invoiceNumber: item.invoice_number ?? '',
+        description: item.description ?? '',
+        supplierSite: item.supplier_site ?? '',
+        purchaseOrder: item.purchase_order ?? '',
+        currency: item.currency ?? 'AED',
+        availableAmount: Number(item.available_amount ?? 0),
+        lineNumber: Number(item.line_number ?? 1),
+        prepaymentLineNumber: Number(item.prepayment_line_number ?? 1),
+        businessUnit: item.business_unit ?? '',
+        toApply: 0,
+        accountingDate: dayjs(),
+      }));
+    } catch {
+      return [];
+    }
+  }, []);
+
+  // Fetch already-applied prepayments for this invoice
+  const fetchAppliedPrepayments = useCallback(async (invoiceId: number): Promise<AppliedPrepayment[]> => {
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/appliedprepayments?P_INVOICE_ID=${invoiceId}`;
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!res.ok) return [];
+      const data = await res.json();
+      const items: any[] = data.items || (Array.isArray(data) ? data : []);
+      return items.map((item: any, idx: number) => ({
+        key: (item.application_id ?? idx).toString(),
+        applicationId: Number(item.application_id ?? 0),
+        prepaymentInvoiceId: Number(item.prepayment_invoice_id ?? 0),
+        prepaymentNumber: item.prepayment_number ?? '',
+        description: item.description ?? '',
+        supplierSite: item.supplier_site ?? '',
+        purchaseOrder: item.purchase_order ?? '',
+        currency: item.currency ?? 'AED',
+        appliedAmount: Number(item.applied_amount ?? 0),
+        lineNumber: Number(item.line_number ?? 1),
+        prepaymentLineNumber: Number(item.prepayment_line_number ?? 1),
+        applicationAccountingDate: item.application_accounting_date ?? '',
+      }));
+    } catch {
+      return [];
+    }
+  }, []);
+
+  // Open the prepayment modal — load available + applied in parallel
+  const openPrepaymentModal = useCallback(async () => {
+    const supplierId = form.getFieldValue('supplierId');
+    const invoiceId = savedInvoiceId || initialData?.invoiceId;
+    if (!supplierId) { message.warning('Select a supplier first.'); return; }
+    setPrepaymentLoading(true);
+    setPrepaymentModalVisible(true);
+    setSelectedAvailKeys([]);
+    try {
+      const [avail, applied] = await Promise.all([
+        fetchAvailablePrepayments(Number(supplierId)),
+        invoiceId ? fetchAppliedPrepayments(invoiceId) : Promise.resolve([]),
+      ]);
+      setAvailablePrepayments(avail);
+      setAppliedPrepaymentsList(applied);
+      setSupplierHasPrepayments(avail.length > 0);
+    } finally {
+      setPrepaymentLoading(false);
+    }
+  }, [form, savedInvoiceId, initialData, fetchAvailablePrepayments, fetchAppliedPrepayments]);
 
   const filteredSuppliers = useMemo(() => {
     if (!supplierSearchText) return suppliers;
@@ -1758,7 +1880,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         })();
         break;
       case 'applyPrepayment':
-        message.info('Apply prepayment...');
+        openPrepaymentModal();
         break;
       case 'voidPayment': {
         if (!isEditMode) { message.warning('Open an existing invoice with a payment to void.'); return; }
@@ -3117,6 +3239,19 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                                 style={{ borderColor: REDWOOD.info, color: REDWOOD.info }}
                               />
                             </Tooltip>
+                            {supplierHasPrepayments && (
+                              <Tooltip title="Prepayments available — click to apply">
+                                <Button
+                                  icon={<DollarOutlined />}
+                                  onClick={openPrepaymentModal}
+                                  style={{
+                                    borderColor: REDWOOD.success,
+                                    color: REDWOOD.success,
+                                    background: '#f6ffed',
+                                  }}
+                                />
+                              </Tooltip>
+                            )}
                           </Space.Compact>
                         </Form.Item>
                         <Form.Item name="supplierNumber" hidden>
@@ -6546,6 +6681,259 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         );
       })()}
       {/* ─────────────────────────────────────────────────────────────────── */}
+
+      {/* ── Apply or Unapply Prepayments Modal ─────────────────────────── */}
+      <Modal
+        title={
+          <Space>
+            <DollarOutlined style={{ color: REDWOOD.success }} />
+            <span>Apply or Unapply Prepayments</span>
+          </Space>
+        }
+        open={prepaymentModalVisible}
+        onCancel={() => setPrepaymentModalVisible(false)}
+        footer={<Button onClick={() => setPrepaymentModalVisible(false)}>Done</Button>}
+        width={1000}
+        styles={{ body: { padding: '16px 24px', maxHeight: '75vh', overflowY: 'auto' } }}
+        destroyOnClose
+      >
+        {prepaymentLoading ? (
+          <div style={{ textAlign: 'center', padding: 60 }}>
+            <Spin indicator={<LoadingOutlined style={{ fontSize: 32 }} spin />} />
+            <div style={{ marginTop: 12, color: REDWOOD.neutral600 }}>Loading prepayments...</div>
+          </div>
+        ) : (
+          <>
+            {/* ── Available Section ─────────────────────────────────── */}
+            <Title level={5} style={{ marginBottom: 8, color: REDWOOD.neutral900 }}>Available</Title>
+            <div style={{ marginBottom: 4 }}>
+              <Space>
+                <Button
+                  size="small"
+                  type="primary"
+                  disabled={selectedAvailKeys.length === 0 || prepaymentApplying}
+                  loading={prepaymentApplying}
+                  style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+                  onClick={async () => {
+                    const invoiceId = savedInvoiceId || initialData?.invoiceId;
+                    if (!invoiceId) {
+                      message.warning('Save the invoice first before applying a prepayment.');
+                      return;
+                    }
+                    const selected = availablePrepayments.filter(r => selectedAvailKeys.includes(r.key));
+                    // Validate
+                    for (const row of selected) {
+                      if (!row.toApply || row.toApply <= 0) {
+                        message.warning(`Enter a "To Apply" amount for prepayment ${row.invoiceNumber}.`);
+                        return;
+                      }
+                      if (row.toApply > row.availableAmount) {
+                        message.warning(`Amount to apply (${row.toApply}) exceeds available balance (${row.availableAmount}) for ${row.invoiceNumber}.`);
+                        return;
+                      }
+                      if (!row.accountingDate) {
+                        message.warning(`Enter an accounting date for prepayment ${row.invoiceNumber}.`);
+                        return;
+                      }
+                    }
+                    setPrepaymentApplying(true);
+                    try {
+                      const invoiceNumber = form.getFieldValue('invoiceNumber');
+                      const businessUnit = form.getFieldValue('businessUnit') || selected[0]?.businessUnit || '';
+                      const supplierSite = (() => {
+                        const siteId = form.getFieldValue('supplierSite');
+                        const site = supplierSites.find(s => s.siteId === siteId);
+                        return site?.siteName || siteId || '';
+                      })();
+                      let successCount = 0;
+                      for (const row of selected) {
+                        const body = {
+                          InvoiceId: invoiceId,
+                          InvoiceNumber: invoiceNumber,
+                          PrepaymentInvoiceId: row.invoiceId,
+                          PrepaymentNumber: row.invoiceNumber,
+                          LineNumber: 1,
+                          PrepaymentLineNumber: row.prepaymentLineNumber,
+                          Description: row.description || null,
+                          BusinessUnit: businessUnit,
+                          SupplierSite: supplierSite,
+                          PurchaseOrder: row.purchaseOrder || null,
+                          Currency: row.currency,
+                          AppliedAmount: row.toApply,
+                          IncludedTax: null,
+                          IncludedonInvoiceFlag: false,
+                          ApplicationAccountingDate: row.accountingDate!.format('YYYY-MM-DD'),
+                          Status: 'Applied',
+                        };
+                        const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/appliedprepayments`;
+                        const res = await fetch(url, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                          body: JSON.stringify(body),
+                        });
+                        if (!res.ok) {
+                          const errText = await res.text();
+                          throw new Error(`HTTP ${res.status}: ${errText}`);
+                        }
+                        successCount++;
+                      }
+                      message.success(`${successCount} prepayment(s) applied successfully.`);
+                      // Refresh applied list and available list
+                      const [avail, applied] = await Promise.all([
+                        fetchAvailablePrepayments(Number(form.getFieldValue('supplierId'))),
+                        fetchAppliedPrepayments(invoiceId),
+                      ]);
+                      setAvailablePrepayments(avail);
+                      setAppliedPrepaymentsList(applied);
+                      setSupplierHasPrepayments(avail.length > 0);
+                      setSelectedAvailKeys([]);
+                    } catch (err: any) {
+                      message.error(`Failed to apply prepayment: ${err.message}`);
+                    } finally {
+                      setPrepaymentApplying(false);
+                    }
+                  }}
+                >
+                  Apply
+                </Button>
+              </Space>
+            </div>
+            <Table<AvailablePrepayment>
+              dataSource={availablePrepayments}
+              size="small"
+              pagination={false}
+              rowSelection={{
+                selectedRowKeys: selectedAvailKeys,
+                onChange: setSelectedAvailKeys,
+              }}
+              summary={rows => {
+                const total = rows.reduce((s, r) => s + r.availableAmount, 0);
+                return (
+                  <Table.Summary.Row>
+                    <Table.Summary.Cell index={0} colSpan={6} align="right">
+                      <Text strong style={{ fontSize: 12 }}>{formatAmount(total)}</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={1} colSpan={3} />
+                  </Table.Summary.Row>
+                );
+              }}
+              columns={[
+                {
+                  title: 'Number',
+                  dataIndex: 'invoiceNumber',
+                  width: 140,
+                  render: (v: string) => (
+                    <Text style={{ color: REDWOOD.info, fontSize: 12 }}>
+                      {v.length > 12 ? v.slice(0, 12) + ' ...' : v}
+                    </Text>
+                  ),
+                },
+                { title: 'Description', dataIndex: 'description', width: 160, render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text> },
+                { title: 'Site', dataIndex: 'supplierSite', width: 90, render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text> },
+                { title: 'Purchase Order', dataIndex: 'purchaseOrder', width: 110, render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text> },
+                { title: 'Currency', dataIndex: 'currency', width: 80, render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text> },
+                {
+                  title: 'Available',
+                  dataIndex: 'availableAmount',
+                  width: 100,
+                  align: 'right' as const,
+                  render: (v: number) => <Text strong style={{ fontSize: 12 }}>{formatAmount(v)}</Text>,
+                },
+                {
+                  title: <span><span style={{ color: REDWOOD.error }}>* </span>To Apply</span>,
+                  dataIndex: 'toApply',
+                  width: 110,
+                  render: (_: any, record: AvailablePrepayment) => (
+                    <InputNumber
+                      size="small"
+                      min={0}
+                      max={record.availableAmount}
+                      precision={2}
+                      value={record.toApply}
+                      style={{ width: '100%' }}
+                      onChange={val => {
+                        setAvailablePrepayments(prev =>
+                          prev.map(r => r.key === record.key ? { ...r, toApply: val ?? 0 } : r)
+                        );
+                      }}
+                    />
+                  ),
+                },
+                {
+                  title: <span><span style={{ color: REDWOOD.error }}>* </span>Accounting Date</span>,
+                  dataIndex: 'accountingDate',
+                  width: 140,
+                  render: (_: any, record: AvailablePrepayment) => (
+                    <DatePicker
+                      size="small"
+                      format="D-MMM-YYYY"
+                      value={record.accountingDate}
+                      style={{ width: '100%' }}
+                      onChange={date => {
+                        setAvailablePrepayments(prev =>
+                          prev.map(r => r.key === record.key ? { ...r, accountingDate: date } : r)
+                        );
+                      }}
+                    />
+                  ),
+                },
+              ]}
+              locale={{ emptyText: 'No available prepayments for this supplier.' }}
+              style={{ marginBottom: 24 }}
+            />
+
+            {/* ── Applied Section ───────────────────────────────────── */}
+            <Title level={5} style={{ marginBottom: 8, color: REDWOOD.neutral900 }}>Applied</Title>
+            <Table<AppliedPrepayment>
+              dataSource={appliedPrepaymentsList}
+              size="small"
+              pagination={false}
+              summary={rows => {
+                const total = rows.reduce((s, r) => s + r.appliedAmount, 0);
+                return (
+                  <Table.Summary.Row>
+                    <Table.Summary.Cell index={0} colSpan={6} align="right">
+                      <Text strong style={{ fontSize: 12 }}>{formatAmount(total)}</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={1} colSpan={1} />
+                  </Table.Summary.Row>
+                );
+              }}
+              columns={[
+                {
+                  title: 'Number',
+                  dataIndex: 'prepaymentNumber',
+                  width: 140,
+                  render: (v: string) => (
+                    <Text style={{ color: REDWOOD.info, fontSize: 12 }}>
+                      {v.length > 12 ? v.slice(0, 12) + ' ...' : v}
+                    </Text>
+                  ),
+                },
+                { title: 'Description', dataIndex: 'description', width: 160, render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text> },
+                { title: 'Site', dataIndex: 'supplierSite', width: 90, render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text> },
+                { title: 'Purchase Order', dataIndex: 'purchaseOrder', width: 110, render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text> },
+                { title: 'Currency', dataIndex: 'currency', width: 80, render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text> },
+                {
+                  title: 'Applied',
+                  dataIndex: 'appliedAmount',
+                  width: 100,
+                  align: 'right' as const,
+                  render: (v: number) => <Text strong style={{ fontSize: 12 }}>{formatAmount(v)}</Text>,
+                },
+                {
+                  title: <span><span style={{ color: REDWOOD.error }}>* </span>Application Accounting Date</span>,
+                  dataIndex: 'applicationAccountingDate',
+                  width: 160,
+                  render: (v: string) => <Text style={{ fontSize: 12 }}>{v ? dayjs(v).format('D-MMM-YYYY') : ''}</Text>,
+                },
+              ]}
+              locale={{ emptyText: 'No prepayments applied to this invoice yet.' }}
+            />
+          </>
+        )}
+      </Modal>
+      {/* ── End Prepayments Modal ────────────────────────────────────────── */}
 
       <style>{`
         .ant-table-thead > tr > th {
