@@ -2756,6 +2756,20 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     : null}
             </Tag>
           )}
+          {isEditMode && isReadOnly && (
+            <Tag color="warning" style={{ fontSize: 12 }}>Read-Only</Tag>
+          )}
+          {isEditMode && initialData?.holdPaidStatus && (
+            <Tag
+              color={initialData.holdPaidStatus === 'Fully paid' || initialData.holdPaidStatus === 'Paid' ? 'blue' : 'default'}
+              style={{ fontSize: 12 }}
+            >
+              {initialData.holdPaidStatus}
+            </Tag>
+          )}
+          {isEditMode && initialData?.validationStatus && (
+            <Tag color="green" style={{ fontSize: 12 }}>{initialData.validationStatus}</Tag>
+          )}
         </Space>
 
         <Space size={8}>
@@ -2855,31 +2869,6 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       </div>
 
       <div style={{ padding: '16px 24px' }}>
-        {/* Edit mode banner */}
-        {isEditMode && (
-          <Alert
-            type={isReadOnly ? 'warning' : 'info'}
-            showIcon
-            style={{ marginBottom: 12, borderRadius: 8 }}
-            message={
-              isReadOnly ? (
-                <span>
-                  <strong>Read-Only</strong> — This invoice is {initialData?.holdPaidStatus === 'Fully paid' || initialData?.holdPaidStatus === 'Paid' ? 'paid' : 'posted/validated'} and cannot be edited.
-                  {initialData?.validationStatus && <Tag color="green" style={{ marginLeft: 8 }}>{initialData.validationStatus}</Tag>}
-                  {initialData?.holdPaidStatus && <Tag color={initialData.holdPaidStatus === 'Fully paid' || initialData.holdPaidStatus === 'Paid' ? 'blue' : 'default'} style={{ marginLeft: 4 }}>{initialData.holdPaidStatus}</Tag>}
-                </span>
-              ) : (
-                <span>
-                  <strong>Edit Mode</strong> — Invoice #{initialData?.invoiceNumber} (ID: {initialData?.invoiceId})
-                  {initialData?.validationStatus && <Tag style={{ marginLeft: 8 }}>{initialData.validationStatus}</Tag>}
-                  {initialData?.approvalStatus && <Tag style={{ marginLeft: 4 }}>{initialData.approvalStatus}</Tag>}
-                  {initialData?.holdPaidStatus && <Tag style={{ marginLeft: 4 }}>{initialData.holdPaidStatus}</Tag>}
-                </span>
-              )
-            }
-          />
-        )}
-
         {/* ========== INVOICE HEADER ========== */}
         <Card
           style={{
