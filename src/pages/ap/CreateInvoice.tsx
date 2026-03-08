@@ -6897,12 +6897,18 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                         successCount++;
                       }
                       message.success(`${successCount} prepayment(s) applied successfully.`);
+                      // Small delay to allow the DB to commit before re-fetching
+                      await new Promise(r => setTimeout(r, 600));
                       // Refresh applied list and available list
                       const [avail, applied] = await Promise.all([
                         fetchAvailablePrepayments(Number(form.getFieldValue('supplierId'))),
                         fetchAppliedPrepayments(invoiceId),
                       ]);
-                      setAvailablePrepayments(avail);
+                      const invoiceAmt = form.getFieldValue('invoiceAmount') || 0;
+                      setAvailablePrepayments(avail.map(r => ({
+                        ...r,
+                        toApply: invoiceAmt > 0 ? Math.min(r.availableAmount, invoiceAmt) : 0,
+                      })));
                       setAppliedPrepaymentsList(applied);
                       setSupplierHasPrepayments(avail.length > 0);
                       setSelectedAvailKeys([]);
