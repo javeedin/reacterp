@@ -1921,6 +1921,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       ReceiptNumber: line.receiptNumber || null,
       ReceiptLineNumber: line.receiptLine || null,
       ShipToLocation: line.shipToLocation || null,
+      MultiperiodStartDate: toISODate(line.startDate) || null,
+      MultiperiodEndDate: toISODate(line.endDate) || null,
+      MultiperiodAccrualAccount: line.accrualAccount || null,
     }));
 
     console.log('Invoice payload lines:', lines.length, 'total,', validLines.length, 'valid, payload:', JSON.stringify(payload).length, 'chars');
