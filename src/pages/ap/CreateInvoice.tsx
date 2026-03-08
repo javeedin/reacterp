@@ -654,6 +654,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     return { isReadOnly: permanentlyLocked || !isEditing, isPermanentlyLocked: permanentlyLocked, isPaid, isPostedToGL };
   }, [initialData, isEditing]);
 
+  // True when applied prepayments fully cover the invoice amount
+  const isPrepaymentFullyPaid = useMemo(() => {
+    if (appliedPrepaymentsList.length === 0) return false;
+    const totalApplied = appliedPrepaymentsList.reduce((s, r) => s + r.appliedAmount, 0);
+    const invoiceAmt = headerValues.invoiceAmount || 0;
+    return invoiceAmt > 0 && totalApplied >= invoiceAmt;
+  }, [appliedPrepaymentsList, headerValues.invoiceAmount]);
+
   // Payments tab state (for edit mode)
   const [invoicePayments, setInvoicePayments] = useState<{ key: string; checkId: number; number: string; paymentDocument: string; status: string; reconciled: string; currentPayeeName: string; paymentDate: string; paidAmount: number; currency: string; address: string; remitToAccount: string }[]>([]);
   const [invoicePaymentsLoading, setInvoicePaymentsLoading] = useState(false);
@@ -3075,12 +3083,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               <CheckCircleOutlined /> Invoice ID: {savedInvoiceId}
             </Tag>
           )}
-          {isEditMode && !isEditing && (hasAnyPayment || isPostedToGL || isPaid) ? (
+          {isEditMode && !isEditing && (hasAnyPayment || isPostedToGL || isPaid || isPrepaymentFullyPaid) ? (
             <Tag
-              color={isPaid || hasAnyPayment ? 'blue' : 'purple'}
+              color={isPaid || hasAnyPayment || isPrepaymentFullyPaid ? 'blue' : 'purple'}
               style={{ fontSize: 12, padding: '4px 12px', fontWeight: 600, borderRadius: 6 }}
             >
-              {isPaid || hasAnyPayment ? 'Paid' : 'Posted'}
+              {isPrepaymentFullyPaid && !isPaid && !hasAnyPayment ? 'Prepayment Paid' : isPaid || hasAnyPayment ? 'Paid' : 'Posted'}
             </Tag>
           ) : isEditMode && !isEditing ? (
             <Button
@@ -4005,8 +4013,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   </div>
                 ),
               }] : []),
-              // Pre-Payment Applications tab (edit mode only)
-              ...(isEditMode ? [{
+              // Pre-Payment Applications tab (always visible)
+              ...[{
                 key: 'prepaymentApplications',
                 label: (
                   <Space size={4}>
@@ -4103,7 +4111,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     locale={{ emptyText: 'No prepayments applied to this invoice.' }}
                   />
                 ),
-              }] : []),
+              }],
             ]}
           />
         </Card>
