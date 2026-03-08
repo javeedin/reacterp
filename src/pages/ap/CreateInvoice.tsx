@@ -2169,11 +2169,27 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     try {
       console.log(`${httpMethod} Invoice (${actionLabel}):`, url, payload);
 
-      const response = await fetch(url, {
-        method: httpMethod,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method: httpMethod,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+      } catch (fetchErr: any) {
+        clearTimeout(timeoutId);
+        if (fetchErr?.name === 'AbortError') {
+          message.error('Request timed out after 30 seconds. The server may be busy — please try again.');
+        } else {
+          message.error(`Network error: ${fetchErr?.message ?? fetchErr}`);
+        }
+        return false;
+      }
+      clearTimeout(timeoutId);
 
       // Read response as text first (ORDS may return HTML error pages, not JSON)
       const responseText = await response.text();
