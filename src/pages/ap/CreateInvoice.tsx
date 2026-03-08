@@ -1208,13 +1208,22 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       const res = await fetch(url, { headers: { Accept: 'application/json' } });
       if (!res.ok) return;
       const json = await res.json();
-      const item = Array.isArray(json) ? json[0] : json;
+      // Handle ORDS { items: [...] }, plain array, or single object
+      let item: any = null;
+      if (Array.isArray(json)) {
+        item = json[0];
+      } else if (json?.items && Array.isArray(json.items)) {
+        item = json.items[0];
+      } else {
+        item = json;
+      }
       if (item) {
+        // Support both PascalCase and snake_case field names from ORDS
         setPrepaymentBalance({
-          invoiceAmount: Number(item.InvoiceAmount ?? 0),
-          totalApplied: Number(item.TotalApplied ?? 0),
-          availableBalance: Number(item.AvailableBalance ?? 0),
-          applicationCount: Number(item.ApplicationCount ?? 0),
+          invoiceAmount: Number(item.InvoiceAmount ?? item.invoice_amount ?? 0),
+          totalApplied: Number(item.TotalApplied ?? item.total_applied ?? 0),
+          availableBalance: Number(item.AvailableBalance ?? item.available_balance ?? 0),
+          applicationCount: Number(item.ApplicationCount ?? item.application_count ?? 0),
         });
       }
     } catch { /* silent */ }
@@ -1227,7 +1236,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       const res = await fetch(url, { headers: { Accept: 'application/json' } });
       if (!res.ok) return;
       const json = await res.json();
-      const items: any[] = Array.isArray(json) ? json : [];
+      const items: any[] = Array.isArray(json) ? json : Array.isArray(json?.items) ? json.items : [];
       setAppliedInvoicesList(items.map((item: any, idx: number) => ({
         key: String(item.ApplicationId ?? idx),
         applicationId: Number(item.ApplicationId ?? 0),
