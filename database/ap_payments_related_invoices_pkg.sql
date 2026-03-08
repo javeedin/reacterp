@@ -221,6 +221,18 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENT_REL_INVOICES_PKG AS
                 SYSTIMESTAMP, SYSTIMESTAMP, 'SYNCED'
             );
 
+        -- If the linked invoice is a Prepayment, mark it as Available (funded and ready to apply)
+        BEGIN
+            UPDATE RR_AP_INVOICES_ALL
+            SET    paid_status      = 'Available',
+                   last_updated_by  = USER,
+                   last_update_date = SYSTIMESTAMP
+            WHERE  invoice_id   = v_invoice_id
+              AND  invoice_type = 'Prepayment'
+              AND  NVL(paid_status, 'Unpaid') != 'Available';
+        EXCEPTION WHEN OTHERS THEN NULL; -- non-fatal; only applies to RR invoices
+        END;
+
         COMMIT;
         p_result := '{"status":"success","message":"Related invoice saved","invoicePaymentId":' || v_invoice_payment_id || '}';
 

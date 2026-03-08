@@ -372,6 +372,7 @@ export interface InvoiceInitialData {
   validationStatus?: string;
   approvalStatus?: string;
   holdPaidStatus?: string;
+  applyAfterDate?: string;
   paymentTerms?: string;
   invoiceGroup?: string;
   termsDate?: string;
@@ -523,7 +524,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     if (!initialData?.invoiceId) return { isReadOnly: false, isPermanentlyLocked: false };
     const status = (initialData.holdPaidStatus || '').toLowerCase();
     const isPosted = initialData.validationStatus === 'Validated';
-    const isPaid = status === 'fully paid' || status === 'paid' || status.includes('partial');
+    const isPaid = status === 'fully paid' || status === 'paid' || status === 'available' || status.includes('partial');
     const permanentlyLocked = isPosted || isPaid;
     return { isReadOnly: permanentlyLocked || !isEditing, isPermanentlyLocked: permanentlyLocked };
   }, [initialData, isEditing]);
@@ -845,9 +846,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         fetchInvoiceHolds(initialData.invoiceId);
         fetchInvoiceInstallments(initialData.invoiceId);
         fetchInvoiceBalance(initialData.invoiceId);
-        // Mark as validated if it was already validated
-        if (initialData.validationStatus === 'Validated') {
+        // Mark as validated if it was already validated (or validated-unpaid for prepayments)
+        if (initialData.validationStatus === 'Validated' || initialData.validationStatus === 'Validated-Unpaid') {
           setIsValidated(true);
+        }
+        if (initialData.applyAfterDate) {
+          form.setFieldValue('applyAfterDate', dayjs(initialData.applyAfterDate, ['YYYY-MM-DD', 'DD-MMM-YYYY', 'DD MMM YYYY']));
         }
         return; // Skip blank line creation for edit mode
       }
@@ -1901,6 +1905,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       VoucherNumber: values.voucherNumber || null,
       FirstPartyTaxRegistrationNumber: values.firstPartyTaxRegistrationNumber || null,
       SupplierTaxRegistrationNumber: values.supplierTaxRegistrationNumber || null,
+      ApplyAfterDate: values.invoiceType === 'Prepayment'
+        ? (values.applyAfterDate?.format?.('YYYY-MM-DD') || invoiceDate || null)
+        : null,
     });
 
     // Always include lines array (even if empty) so PL/SQL JSON_TABLE can parse it
@@ -2761,7 +2768,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           )}
           {isEditMode && initialData?.holdPaidStatus && (
             <Tag
-              color={initialData.holdPaidStatus === 'Fully paid' || initialData.holdPaidStatus === 'Paid' ? 'blue' : 'default'}
+              color={
+                initialData.holdPaidStatus === 'Fully paid' || initialData.holdPaidStatus === 'Paid' ? 'blue'
+                : initialData.holdPaidStatus === 'Available' ? 'cyan'
+                : 'default'
+              }
               style={{ fontSize: 12 }}
             >
               {initialData.holdPaidStatus}
@@ -2927,6 +2938,34 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   accountingDate: formattedDate,
                   startDate: formattedDate,
                   endDate,
+                })));
+                // Keep applyAfterDate in sync with invoice date for Prepayment
+                if (allValues.invoiceType === 'Prepayment') {
+                  form.setFieldValue('applyAfterDate', changedValues.invoiceDate);
+                }
+              }
+              // When switching to Prepayment: set Apply After Date + auto-fill line distribution
+              if (changedValues.invoiceType === 'Prepayment') {
+                const invoiceDateVal = form.getFieldValue('invoiceDate');
+                if (invoiceDateVal && !form.getFieldValue('applyAfterDate')) {
+                  form.setFieldValue('applyAfterDate', invoiceDateVal);
+                }
+                const liabilityDist = form.getFieldValue('liabilityDistribution') || '';
+                const firstSeg = liabilityDist.split('-')[0] || '02';
+                const prepaymentDist = `${firstSeg}-00-00-1223108-0000-000-00-000-000`;
+                setLines((prev) => prev.map((line) => ({
+                  ...line,
+                  distributionCombination: line.distributionCombination || prepaymentDist,
+                })));
+              }
+              // When liability distribution changes for Prepayment, update line distribution first segment
+              if ('liabilityDistribution' in changedValues && allValues.invoiceType === 'Prepayment') {
+                const liabilityDist = changedValues.liabilityDistribution || '';
+                const firstSeg = liabilityDist.split('-')[0] || '02';
+                const prepaymentDist = `${firstSeg}-00-00-1223108-0000-000-00-000-000`;
+                setLines((prev) => prev.map((line) => ({
+                  ...line,
+                  distributionCombination: prepaymentDist,
                 })));
               }
               // Copy header description to lines that don't already have a description
@@ -3111,6 +3150,21 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                             <Option value="Debit Memo">Debit Memo</Option>
                             <Option value="Credit Memo">Credit Memo</Option>
                           </Select>
+                        </Form.Item>
+                        <Form.Item shouldUpdate={(prev, curr) => prev.invoiceType !== curr.invoiceType} noStyle>
+                          {() => form.getFieldValue('invoiceType') === 'Prepayment' ? (
+                            <Form.Item
+                              label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Apply After Date</Text>}
+                              name="applyAfterDate"
+                              style={{ marginBottom: 4 }}
+                            >
+                              <DatePicker
+                                format="DD-MMM-YYYY"
+                                style={{ width: '100%' }}
+                                disabled={isReadOnly}
+                              />
+                            </Form.Item>
+                          ) : null}
                         </Form.Item>
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Payment Currency</Text>}

@@ -112,6 +112,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CREATE_INVOICE_PKG AS
         l_voucher_number            VARCHAR2(50);
         l_first_party_tax_reg_num   VARCHAR2(50);
         l_supplier_tax_reg_num      VARCHAR2(50);
+        l_apply_after_date          DATE;
         -- Validation
         l_dup_count                 NUMBER;
         l_dist_missing              VARCHAR2(4000);
@@ -177,6 +178,16 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CREATE_INVOICE_PKG AS
             l_conversion_date := TO_DATE(JSON_VALUE(p_json, '$.ConversionDate'), 'YYYY-MM-DD');
         EXCEPTION WHEN OTHERS THEN l_conversion_date := NULL;
         END;
+
+        BEGIN
+            l_apply_after_date := TO_DATE(JSON_VALUE(p_json, '$.ApplyAfterDate'), 'YYYY-MM-DD');
+        EXCEPTION WHEN OTHERS THEN l_apply_after_date := NULL;
+        END;
+
+        -- Default ApplyAfterDate to invoice date for Prepayment
+        IF l_invoice_type = 'Prepayment' THEN
+            l_apply_after_date := NVL(l_apply_after_date, l_invoice_date);
+        END IF;
 
         -- ========== VALIDATIONS ==========
 
@@ -256,6 +267,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CREATE_INVOICE_PKG AS
             VOUCHER_NUMBER,
             FIRST_PARTY_TAX_REGISTRATION_NUM,
             SUPPLIER_TAX_REGISTRATION_NUMBER,
+            APPLY_AFTER_DATE,
             VALIDATION_STATUS,
             APPROVAL_STATUS,
             PAID_STATUS,
@@ -294,7 +306,8 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CREATE_INVOICE_PKG AS
             l_voucher_number,
             l_first_party_tax_reg_num,
             l_supplier_tax_reg_num,
-            'Needs Revalidation',
+            l_apply_after_date,
+            CASE WHEN l_invoice_type = 'Prepayment' THEN 'Validated-Unpaid' ELSE 'Needs Revalidation' END,
             'Required',
             'Unpaid',
             'Not Accounted',

@@ -114,6 +114,7 @@ interface InvoiceRecord {
   validationStatus: string;
   approvalStatus: string;
   holdPaidStatus: string;
+  applyAfterDate: string;
   businessUnit: string;
   invoiceCurrency: string;
   supplierNumber: string;
@@ -250,6 +251,7 @@ const mapApiToInvoiceRecord = (item: any, index: number): InvoiceRecord => ({
   validationStatus: item.validation_status || 'Never validated',
   approvalStatus: item.approval_status || 'Not required',
   holdPaidStatus: item.paid_status || 'Not paid',
+  applyAfterDate: item.apply_after_date || '',
   businessUnit: item.business_unit || '',
   invoiceCurrency: item.invoice_currency || 'AED',
   supplierNumber: item.supplier_number || '',
@@ -779,6 +781,7 @@ const ManageInvoices: React.FC = () => {
       validationStatus: record.validationStatus,
       approvalStatus: record.approvalStatus,
       holdPaidStatus: record.holdPaidStatus,
+      applyAfterDate: record.applyAfterDate,
       paymentTerms: record.paymentTerms,
       invoiceGroup: record.invoiceGroup,
       termsDate: record.termsDate,

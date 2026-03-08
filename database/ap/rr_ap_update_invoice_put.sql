@@ -86,6 +86,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_UPDATE_INVOICE_PKG AS
         l_voucher_number            VARCHAR2(50);
         l_first_party_tax_reg_num   VARCHAR2(50);
         l_supplier_tax_reg_num      VARCHAR2(50);
+        l_apply_after_date          DATE;
         -- Existing invoice check
         l_paid_status               VARCHAR2(30);
         l_accounting_status         VARCHAR2(30);
@@ -127,10 +128,10 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_UPDATE_INVOICE_PKG AS
                 RETURN;
         END;
 
-        IF l_paid_status = 'Paid' THEN
+        IF l_paid_status IN ('Paid', 'Available') THEN
             p_invoice_id := l_invoice_id;
             p_status     := 'ERROR';
-            p_message    := 'Invoice cannot be edited: already Paid';
+            p_message    := 'Invoice cannot be edited: already ' || l_paid_status;
             RETURN;
         END IF;
 
@@ -196,6 +197,11 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_UPDATE_INVOICE_PKG AS
         BEGIN
             l_conversion_date := TO_DATE(JSON_VALUE(p_json, '$.ConversionDate'), 'YYYY-MM-DD');
         EXCEPTION WHEN OTHERS THEN l_conversion_date := NULL;
+        END;
+
+        BEGIN
+            l_apply_after_date := TO_DATE(JSON_VALUE(p_json, '$.ApplyAfterDate'), 'YYYY-MM-DD');
+        EXCEPTION WHEN OTHERS THEN l_apply_after_date := NULL;
         END;
 
         -- ========== VALIDATIONS ==========
@@ -273,8 +279,16 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_UPDATE_INVOICE_PKG AS
                voucher_number                    = NVL(l_voucher_number, voucher_number),
                first_party_tax_registration_num  = NVL(l_first_party_tax_reg_num, first_party_tax_registration_num),
                supplier_tax_registration_number  = NVL(l_supplier_tax_reg_num, supplier_tax_registration_number),
-               -- Reset validation after edit
-               validation_status                 = 'Needs Revalidation',
+               apply_after_date                  = CASE
+                   WHEN NVL(l_invoice_type, invoice_type) = 'Prepayment'
+                   THEN NVL(l_apply_after_date, apply_after_date)
+                   ELSE apply_after_date
+               END,
+               -- For Prepayment, keep Validated-Unpaid; reset all others after edit
+               validation_status                 = CASE
+                   WHEN NVL(l_invoice_type, invoice_type) = 'Prepayment' THEN 'Validated-Unpaid'
+                   ELSE 'Needs Revalidation'
+               END,
                last_updated_by                   = USER,
                last_update_date                  = SYSTIMESTAMP
         WHERE  invoice_id = l_invoice_id;
