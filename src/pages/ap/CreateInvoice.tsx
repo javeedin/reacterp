@@ -520,13 +520,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // Edit mode: determine if invoice is editable or read-only
   const isEditMode = Boolean(initialData?.invoiceId);
   const [isEditing, setIsEditing] = useState(false);
-  const { isReadOnly, isPermanentlyLocked } = useMemo(() => {
-    if (!initialData?.invoiceId) return { isReadOnly: false, isPermanentlyLocked: false };
+  const { isReadOnly, isPermanentlyLocked, isPaid, isPostedToGL } = useMemo(() => {
+    if (!initialData?.invoiceId) return { isReadOnly: false, isPermanentlyLocked: false, isPaid: false, isPostedToGL: false };
     const status = (initialData.holdPaidStatus || '').toLowerCase();
-    const isPosted = initialData.validationStatus === 'Validated';
+    const isPostedToGL = initialData.validationStatus === 'Validated';
     const isPaid = status === 'fully paid' || status === 'paid' || status === 'available' || status.includes('partial');
-    const permanentlyLocked = isPosted || isPaid;
-    return { isReadOnly: permanentlyLocked || !isEditing, isPermanentlyLocked: permanentlyLocked };
+    const permanentlyLocked = isPostedToGL || isPaid;
+    return { isReadOnly: permanentlyLocked || !isEditing, isPermanentlyLocked: permanentlyLocked, isPaid, isPostedToGL };
   }, [initialData, isEditing]);
 
   // Payments tab state (for edit mode)
@@ -1393,6 +1393,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // Tally validation: header amount must equal lines total + tax
   const headerInvoiceAmount = headerValues.invoiceAmount || 0;
   const computedTotal = linesTotal + taxTotal;
+  // Any non-voided payment recorded → treat invoice as paid
+  const hasAnyPayment = invoicePayments.filter(p => !p.status?.toLowerCase().includes('void')).length > 0;
   const isTallyMismatch = useMemo(() => {
     if (!isHeaderComplete) return false;
     if (linesTotal === 0) return false;
@@ -2778,7 +2780,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               {initialData.holdPaidStatus}
             </Tag>
           )}
-          {isEditMode && initialData?.validationStatus && (
+          {isEditMode && initialData?.validationStatus && !((hasAnyPayment || isPaid || isPostedToGL) && initialData.validationStatus === 'Needs Revalidation') && (
             <Tag color="green" style={{ fontSize: 12 }}>{initialData.validationStatus}</Tag>
           )}
         </Space>
@@ -2803,7 +2805,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               Invoice Actions <DownOutlined style={{ fontSize: 10 }} />
             </Button>
           </Dropdown>
-          {!isReadOnly && (
+          {!isReadOnly && !hasAnyPayment && !isPostedToGL && (
             <Button
               icon={<CheckSquareOutlined />}
               onClick={runValidation}
@@ -2835,16 +2837,21 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               <CheckCircleOutlined /> Invoice ID: {savedInvoiceId}
             </Tag>
           )}
-          {isEditMode && !isEditing && (
+          {isEditMode && !isEditing && (hasAnyPayment || isPostedToGL || isPaid) ? (
+            <Tag
+              color={isPaid || hasAnyPayment ? 'blue' : 'purple'}
+              style={{ fontSize: 12, padding: '4px 12px', fontWeight: 600, borderRadius: 6 }}
+            >
+              {isPaid || hasAnyPayment ? 'Paid' : 'Posted'}
+            </Tag>
+          ) : isEditMode && !isEditing ? (
             <Button
               icon={<EditOutlined />}
               onClick={() => setIsEditing(true)}
-              disabled={isPermanentlyLocked}
-              title={isPermanentlyLocked ? 'Invoice cannot be edited (paid or accounted)' : 'Enable editing'}
             >
               Edit
             </Button>
-          )}
+          ) : null}
           {!savedInvoiceId && !isReadOnly && (
             <Button onClick={handleSaveAndCreateNext} loading={saving} disabled={saving || !isValidated}>
               Save and Create Next
