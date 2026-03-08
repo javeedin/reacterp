@@ -2170,9 +2170,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       console.log(`${httpMethod} Invoice (${actionLabel}):`, url, payload);
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s covers fetch + body read
 
       let response: Response;
+      let responseText: string;
       try {
         response = await fetch(url, {
           method: httpMethod,
@@ -2180,19 +2181,19 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           body: JSON.stringify(payload),
           signal: controller.signal,
         });
+        // Keep timer running — server can hang AFTER sending headers (during body)
+        responseText = await response.text();
       } catch (fetchErr: any) {
         clearTimeout(timeoutId);
         if (fetchErr?.name === 'AbortError') {
-          message.error('Request timed out after 30 seconds. The server may be busy — please try again.');
+          message.error('Request timed out (30s). The server did not respond — please try again.');
+          console.error('Save invoice timed out after 30s');
         } else {
           message.error(`Network error: ${fetchErr?.message ?? fetchErr}`);
         }
         return false;
       }
       clearTimeout(timeoutId);
-
-      // Read response as text first (ORDS may return HTML error pages, not JSON)
-      const responseText = await response.text();
       let data: any = null;
       let responseBody = responseText;
 
