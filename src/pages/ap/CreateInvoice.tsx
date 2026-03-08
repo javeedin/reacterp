@@ -7018,47 +7018,70 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       </Modal>
       {/* ── End Prepayments Modal ────────────────────────────────────────── */}
 
-      {/* ── Prepayment API Explorer Drawer ──────────────────────────────── */}
-      <Drawer
-        title={
-          <Space>
-            <Badge count={availablePrepayments.length} size="small" style={{ backgroundColor: REDWOOD.success }}>
-              <CreditCardOutlined style={{ color: REDWOOD.success, fontSize: 16 }} />
-            </Badge>
-            <span style={{ fontWeight: 600 }}>Prepayment API Explorer</span>
-            {availablePrepayments.length > 0 && (
-              <Tag color="green">{availablePrepayments.length} available</Tag>
-            )}
-          </Space>
-        }
+      {/* ── Prepayment API Explorer Modal ────────────────────────────────── */}
+      <Modal
         open={prepaymentAPIDrawerVisible}
-        onClose={() => setPrepaymentAPIDrawerVisible(false)}
-        width={760}
-        extra={
-          <Button
-            type="primary"
-            icon={<DollarOutlined />}
-            disabled={availablePrepayments.length === 0}
-            onClick={() => { setPrepaymentAPIDrawerVisible(false); openPrepaymentModal(); }}
-            style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
-          >
-            Apply Prepayments
-          </Button>
+        onCancel={() => setPrepaymentAPIDrawerVisible(false)}
+        width={900}
+        styles={{ body: { padding: '16px 24px', maxHeight: '70vh', overflowY: 'auto' } }}
+        destroyOnHidden
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>
+              {prepaymentAPIResults.length} endpoint{prepaymentAPIResults.length !== 1 ? 's' : ''} queried
+            </Text>
+            <Space>
+              <Button onClick={() => setPrepaymentAPIDrawerVisible(false)}>Close</Button>
+              <Button
+                type="primary"
+                icon={<DollarOutlined />}
+                disabled={availablePrepayments.length === 0}
+                onClick={() => { setPrepaymentAPIDrawerVisible(false); openPrepaymentModal(); }}
+                style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+              >
+                Apply Prepayments ({availablePrepayments.length})
+              </Button>
+            </Space>
+          </div>
+        }
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 0' }}>
+            <div style={{
+              width: 36, height: 36, borderRadius: 8,
+              background: availablePrepayments.length > 0 ? '#f0faf4' : REDWOOD.neutral100,
+              border: `1.5px solid ${availablePrepayments.length > 0 ? REDWOOD.success : REDWOOD.neutral300}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <Badge count={availablePrepayments.length} size="small" style={{ backgroundColor: REDWOOD.success }}>
+                <CreditCardOutlined style={{ fontSize: 16, color: availablePrepayments.length > 0 ? REDWOOD.success : REDWOOD.neutral600 }} />
+              </Badge>
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 14, lineHeight: 1.3 }}>Prepayment API Explorer</div>
+              <div style={{ fontSize: 11, color: REDWOOD.neutral600, fontWeight: 400 }}>
+                Live results from all prepayment endpoints for this supplier
+              </div>
+            </div>
+            {availablePrepayments.length > 0 && (
+              <Tag color="green" style={{ marginLeft: 4 }}>
+                {availablePrepayments.length} available
+              </Tag>
+            )}
+          </div>
         }
       >
         {prepaymentAPIResults.length === 0 ? (
           <div style={{ textAlign: 'center', padding: 60, color: REDWOOD.neutral600 }}>
-            <CreditCardOutlined style={{ fontSize: 32, marginBottom: 12 }} />
-            <div>Select a supplier to load prepayment data</div>
+            <CreditCardOutlined style={{ fontSize: 40, marginBottom: 12, opacity: 0.3 }} />
+            <div style={{ fontSize: 13 }}>Select a supplier to load prepayment data</div>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {prepaymentAPIResults.map((result, idx) => {
               const statusColor = result.status === null ? '#888'
                 : result.status >= 200 && result.status < 300 ? REDWOOD.success
                 : REDWOOD.error;
               const methodColor = '#0572CE';
-              // Build dynamic columns from first data row
               const cols = result.data && result.data.length > 0
                 ? Object.keys(result.data[0]).slice(0, 8).map(k => ({
                     title: k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
@@ -7077,51 +7100,52 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 <Card
                   key={idx}
                   size="small"
-                  style={{ borderRadius: 8, border: `1px solid ${result.error ? REDWOOD.error : REDWOOD.neutral200}` }}
-                  bodyStyle={{ padding: '12px 16px' }}
+                  styles={{ body: { padding: '12px 16px' } }}
+                  style={{
+                    borderRadius: 8,
+                    border: `1px solid ${result.error ? REDWOOD.error : result.data && result.data.length > 0 ? REDWOOD.success + '55' : REDWOOD.neutral200}`,
+                    boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+                  }}
                 >
-                  {/* Endpoint header */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-                    <Tag style={{ background: methodColor, color: '#fff', border: 'none', fontWeight: 700, fontSize: 10 }}>GET</Tag>
+                    <Tag style={{ background: methodColor, color: '#fff', border: 'none', fontWeight: 700, fontSize: 10, margin: 0 }}>GET</Tag>
                     <Text strong style={{ fontSize: 13 }}>{result.endpoint}</Text>
                     {result.loading ? (
                       <LoadingOutlined style={{ color: '#aaa' }} />
                     ) : (
                       <Space size={4}>
-                        <Tag style={{ background: result.error ? REDWOOD.error : REDWOOD.success, color: '#fff', border: 'none', fontSize: 10 }}>
+                        <Tag style={{ background: result.error ? REDWOOD.error : REDWOOD.success, color: '#fff', border: 'none', fontSize: 10, margin: 0 }}>
                           {result.status === 0 ? 'ERR' : result.status}
                         </Tag>
                         {result.durationMs !== null && (
                           <Text style={{ fontSize: 10, color: REDWOOD.neutral600 }}>{result.durationMs}ms</Text>
                         )}
                         {result.data !== null && !result.error && (
-                          <Tag color="blue" style={{ fontSize: 10 }}>{result.data.length} row(s)</Tag>
+                          <Tag color={result.data.length > 0 ? 'green' : 'default'} style={{ fontSize: 10, margin: 0 }}>
+                            {result.data.length} row{result.data.length !== 1 ? 's' : ''}
+                          </Tag>
                         )}
                       </Space>
                     )}
                   </div>
 
-                  {/* URL */}
-                  <div
-                    style={{
-                      background: '#1a1a2e',
-                      borderRadius: 4,
-                      padding: '4px 10px',
-                      marginBottom: 10,
-                      fontFamily: 'monospace',
-                      fontSize: 10,
-                      color: '#e0e0e0',
-                      overflowX: 'auto',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
+                  <div style={{
+                    background: '#1a1a2e',
+                    borderRadius: 4,
+                    padding: '5px 12px',
+                    marginBottom: 10,
+                    fontFamily: 'monospace',
+                    fontSize: 10,
+                    color: '#e0e0e0',
+                    overflowX: 'auto',
+                    whiteSpace: 'nowrap',
+                  }}>
                     <span style={{ color: methodColor, fontWeight: 700 }}>GET </span>
                     <span style={{ color: statusColor }}>{result.url}</span>
                   </div>
 
-                  {/* Results */}
                   {result.loading ? (
-                    <div style={{ textAlign: 'center', padding: 20 }}>
+                    <div style={{ textAlign: 'center', padding: 24 }}>
                       <Spin indicator={<LoadingOutlined spin />} size="small" />
                       <div style={{ marginTop: 6, fontSize: 11, color: REDWOOD.neutral600 }}>Fetching...</div>
                     </div>
@@ -7147,8 +7171,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             })}
           </div>
         )}
-      </Drawer>
-      {/* ── End Prepayment API Explorer Drawer ──────────────────────────── */}
+      </Modal>
+      {/* ── End Prepayment API Explorer Modal ────────────────────────────── */}
 
       <style>{`
         .ant-table-thead > tr > th {
