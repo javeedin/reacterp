@@ -964,13 +964,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       form.setFieldsValue(formValues);
       setHeaderValues((prev) => ({ ...prev, ...formValues }));
 
-      // Edit mode: fetch existing lines, payments, holds, installments
+      // Edit mode: fetch existing lines, payments, holds, installments, applied prepayments
       if (initialData.invoiceId) {
         fetchExistingLines(initialData.invoiceId);
         fetchInvoicePayments(initialData.invoiceId);
         fetchInvoiceHolds(initialData.invoiceId);
         fetchInvoiceInstallments(initialData.invoiceId);
         fetchInvoiceBalance(initialData.invoiceId);
+        fetchAppliedPrepayments(initialData.invoiceId).then(setAppliedPrepaymentsList);
         // Mark as validated if it was already validated (or validated-unpaid for prepayments)
         if (initialData.validationStatus === 'Validated' || initialData.validationStatus === 'Validated-Unpaid') {
           setIsValidated(true);
@@ -4002,6 +4003,105 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   <div style={{ textAlign: 'center', padding: 30, color: REDWOOD.neutral600, fontSize: 12 }}>
                     No installments found for this invoice.
                   </div>
+                ),
+              }] : []),
+              // Pre-Payment Applications tab (edit mode only, shown when applied prepayments exist)
+              ...(isEditMode && appliedPrepaymentsList.length > 0 ? [{
+                key: 'prepaymentApplications',
+                label: (
+                  <Space size={4}>
+                    <CheckCircleOutlined style={{ color: REDWOOD.success }} />
+                    <span>Pre-Payment Applications ({appliedPrepaymentsList.length})</span>
+                    <Tooltip
+                      title={
+                        <span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>
+                          {`${APEX_DB_CONFIG.baseUrl}/ap/invoices/appliedprepayments?P_INVOICE_ID=${savedInvoiceId ?? initialData?.invoiceId ?? ''}`}
+                        </span>
+                      }
+                      placement="bottom"
+                    >
+                      <ApiOutlined style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 12 }} />
+                    </Tooltip>
+                  </Space>
+                ),
+                children: (
+                  <Table<AppliedPrepayment>
+                    dataSource={appliedPrepaymentsList}
+                    rowKey="key"
+                    size="small"
+                    pagination={false}
+                    scroll={{ x: 900, y: 300 }}
+                    summary={rows => {
+                      const total = rows.reduce((s, r) => s + r.appliedAmount, 0);
+                      return (
+                        <Table.Summary fixed>
+                          <Table.Summary.Row>
+                            <Table.Summary.Cell index={0} colSpan={5} align="right">
+                              <Text strong style={{ fontSize: 12 }}>Total Applied</Text>
+                            </Table.Summary.Cell>
+                            <Table.Summary.Cell index={5} align="right">
+                              <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>{formatAmount(total)}</Text>
+                            </Table.Summary.Cell>
+                            <Table.Summary.Cell index={6} />
+                          </Table.Summary.Row>
+                        </Table.Summary>
+                      );
+                    }}
+                    columns={[
+                      {
+                        title: 'Prepayment Number',
+                        dataIndex: 'prepaymentNumber',
+                        width: 150,
+                        render: (v: string) => (
+                          <Text style={{ color: REDWOOD.info, fontSize: 12 }}>
+                            {v.length > 15 ? v.slice(0, 15) + '…' : v}
+                          </Text>
+                        ),
+                      },
+                      {
+                        title: 'Description',
+                        dataIndex: 'description',
+                        ellipsis: true,
+                        render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text>,
+                      },
+                      {
+                        title: 'Site',
+                        dataIndex: 'supplierSite',
+                        width: 110,
+                        render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text>,
+                      },
+                      {
+                        title: 'Purchase Order',
+                        dataIndex: 'purchaseOrder',
+                        width: 130,
+                        render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text>,
+                      },
+                      {
+                        title: 'Currency',
+                        dataIndex: 'currency',
+                        width: 80,
+                        render: (v: string) => <Tag style={{ fontSize: 11 }}>{v}</Tag>,
+                      },
+                      {
+                        title: 'Applied Amount',
+                        dataIndex: 'appliedAmount',
+                        width: 120,
+                        align: 'right' as const,
+                        render: (v: number) => (
+                          <Text strong style={{ fontSize: 12, color: REDWOOD.primary }}>{formatAmount(v)}</Text>
+                        ),
+                      },
+                      {
+                        title: 'Application Accounting Date',
+                        dataIndex: 'applicationAccountingDate',
+                        width: 180,
+                        render: (v: string) => (
+                          <Text style={{ fontSize: 12 }}>{v ? dayjs(v).format('D-MMM-YYYY') : '—'}</Text>
+                        ),
+                      },
+                    ]}
+                    locale={{ emptyText: 'No prepayments applied to this invoice.' }}
+                  />
                 ),
               }] : []),
             ]}
