@@ -4529,7 +4529,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     key: 'period',
                     width: 130,
                     onCell: (record: AcctEntry) => ({
-                      colSpan: record.isGroupHeader ? 6 : record.isPeriodSubtotal ? 4 : 1,
+                      colSpan: record.isGroupHeader ? 6 : record.isPeriodSubtotal ? 5 : 1,
                       style: record.isGroupHeader
                         ? { background: '#e6f4ff', fontWeight: 700, fontSize: 12 }
                         : record.isPeriodSubtotal
