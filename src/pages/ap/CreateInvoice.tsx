@@ -3068,7 +3068,18 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             <FileTextOutlined style={{ marginRight: 8, color: REDWOOD.primary }} />
             {isEditMode ? (isReadOnly ? 'View Invoice' : 'Edit Invoice') : 'Create Invoice'}
           </Title>
-          {isEditMode && (
+          {isEditMode && isPrepaymentInvoice ? (
+            prepaymentBalance ? (
+              <Tag
+                color={prepaymentBalance.availableBalance === 0 ? 'green' : 'cyan'}
+                style={{ marginLeft: 8, fontSize: 12, fontWeight: 600 }}
+              >
+                Available Balance: {formatAmount(prepaymentBalance.availableBalance)} {initialData?.invoiceCurrency || headerValues.invoiceCurrency || 'AED'}
+              </Tag>
+            ) : (
+              <Tag color="default" style={{ marginLeft: 8, fontSize: 12 }}>Loading balance...</Tag>
+            )
+          ) : isEditMode ? (
             <Tag
               color={invoiceBalanceLoading ? 'default' : invoiceBalance === 0 ? 'green' : 'blue'}
               style={{ marginLeft: 8, fontSize: 12 }}
@@ -3081,7 +3092,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     ? `Unpaid: ${formatAmount(initialData.unpaidAmount)} ${initialData.invoiceCurrency || 'AED'}`
                     : null}
             </Tag>
-          )}
+          ) : null}
           {isEditMode && isReadOnly && (
             <Tag color="warning" style={{ fontSize: 12 }}>Read-Only</Tag>
           )}
@@ -3169,17 +3180,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               Edit
             </Button>
           ) : null}
-          {isPrepaymentInvoice && isEditMode && !isEditing && prepaymentBalance && (
-            <Space size={4}>
-              <Tag color="green" style={{ fontSize: 12, padding: '4px 10px', fontWeight: 600, borderRadius: 6 }}>
-                Available: {formatAmount(prepaymentBalance.availableBalance)}
-              </Tag>
-              {prepaymentBalance.totalApplied > 0 && (
-                <Tag color="orange" style={{ fontSize: 11, padding: '2px 8px', borderRadius: 6 }}>
-                  Applied: {formatAmount(prepaymentBalance.totalApplied)}
-                </Tag>
-              )}
-            </Space>
+          {isPrepaymentInvoice && isEditMode && !isEditing && prepaymentBalance && prepaymentBalance.totalApplied > 0 && (
+            <Tag color="orange" style={{ fontSize: 11, padding: '2px 8px', borderRadius: 6 }}>
+              Applied: {formatAmount(prepaymentBalance.totalApplied)}
+            </Tag>
           )}
           {!savedInvoiceId && !isReadOnly && (
             <Button onClick={handleSaveAndCreateNext} loading={saving} disabled={saving || !isValidated}>
