@@ -1256,15 +1256,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   // Open the prepayment modal — load available + applied in parallel
   const openPrepaymentModal = useCallback(async () => {
-    const supplierId = form.getFieldValue('supplierId');
+    const supplierName   = form.getFieldValue('supplier') || '';
+    const supplierNumber = form.getFieldValue('supplierNumber') || '';
+    const supplierId = form.getFieldValue('supplierId')
+      || suppliers.find(s => s.supplierNumber === supplierNumber || s.supplier === supplierName)?.supplierId;
     const invoiceId = savedInvoiceId || initialData?.invoiceId;
-    console.log('[Prepayment Debug]', {
-      supplierId,
-      invoiceId,
-      savedInvoiceId,
-      initialDataSupplierId: initialData?.supplierId,
-      allFormValues: form.getFieldsValue(),
-    });
     if (!supplierId) { message.warning('Select a supplier first.'); return; }
     if (!invoiceId) { message.warning('Please save the invoice before applying a prepayment.'); return; }
     setPrepaymentLoading(true);
