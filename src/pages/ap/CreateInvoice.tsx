@@ -29,6 +29,7 @@ import {
   Spin,
   Upload,
   Badge,
+  Popover,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -611,22 +612,26 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           i === idx ? { ...r, loading: false, status: res.status, durationMs, data, error: res.ok ? null : `HTTP ${res.status}` } : r
         ));
         if (idx === 0) {
+          const invoiceAmt = form.getFieldValue('invoiceAmount') || 0;
           setSupplierHasPrepayments(data.length > 0);
-          setAvailablePrepayments(data.map((item: any, index: number) => ({
-            key: item.invoice_id?.toString() || index.toString(),
-            invoiceId: Number(item.invoice_id ?? 0),
-            invoiceNumber: item.invoice_number ?? '',
-            description: item.description ?? '',
-            supplierSite: item.supplier_site ?? '',
-            purchaseOrder: item.purchase_order ?? '',
-            currency: item.currency ?? '',
-            availableAmount: Number(item.available_amount ?? 0),
-            lineNumber: Number(item.line_number ?? 1),
-            prepaymentLineNumber: Number(item.prepayment_line_number ?? 1),
-            businessUnit: item.business_unit ?? '',
-            toApply: 0,
-            accountingDate: null,
-          })));
+          setAvailablePrepayments(data.map((item: any, index: number) => {
+            const avail = Number(item.available_amount ?? 0);
+            return {
+              key: item.invoice_id?.toString() || index.toString(),
+              invoiceId: Number(item.invoice_id ?? 0),
+              invoiceNumber: item.invoice_number ?? '',
+              description: item.description ?? '',
+              supplierSite: item.supplier_site ?? '',
+              purchaseOrder: item.purchase_order ?? '',
+              currency: item.currency ?? '',
+              availableAmount: avail,
+              lineNumber: Number(item.line_number ?? 1),
+              prepaymentLineNumber: Number(item.prepayment_line_number ?? 1),
+              businessUnit: item.business_unit ?? '',
+              toApply: invoiceAmt > 0 ? Math.min(avail, invoiceAmt) : 0,
+              accountingDate: null,
+            };
+          }));
         }
       } catch (err: any) {
         const durationMs = Math.round(performance.now() - t0);
@@ -1171,7 +1176,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         fetchAvailablePrepayments(Number(supplierId)),
         invoiceId ? fetchAppliedPrepayments(invoiceId) : Promise.resolve([]),
       ]);
-      setAvailablePrepayments(avail);
+      const invoiceAmt = form.getFieldValue('invoiceAmount') || 0;
+      setAvailablePrepayments(avail.map(r => ({
+        ...r,
+        toApply: invoiceAmt > 0 ? Math.min(r.availableAmount, invoiceAmt) : 0,
+      })));
       setAppliedPrepaymentsList(applied);
       setSupplierHasPrepayments(avail.length > 0);
     } finally {
@@ -6897,6 +6906,73 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 >
                   Apply
                 </Button>
+                <Popover
+                  trigger="click"
+                  placement="rightTop"
+                  title={
+                    <Space>
+                      <ApiOutlined style={{ color: REDWOOD.info }} />
+                      <span style={{ fontSize: 13 }}>Apply Prepayment — API Endpoint</span>
+                    </Space>
+                  }
+                  content={
+                    <div style={{ width: 480, maxHeight: 420, overflowY: 'auto' }}>
+                      <div style={{ marginBottom: 8 }}>
+                        <Text type="secondary" style={{ fontSize: 11 }}>METHOD</Text>
+                        <div>
+                          <Tag color="blue" style={{ fontFamily: 'monospace', fontSize: 12 }}>POST</Tag>
+                          <Text code style={{ fontSize: 11, wordBreak: 'break-all' }}>
+                            {APEX_DB_CONFIG.baseUrl}/ap/invoices/appliedprepayments
+                          </Text>
+                        </div>
+                      </div>
+                      <Divider style={{ margin: '8px 0' }} />
+                      <Text type="secondary" style={{ fontSize: 11 }}>SAMPLE REQUEST BODY (first selected row)</Text>
+                      <pre style={{
+                        background: '#f5f5f5', border: '1px solid #e0e0e0',
+                        borderRadius: 4, padding: '8px 10px', fontSize: 11,
+                        marginTop: 6, overflowX: 'auto',
+                      }}>
+                        {(() => {
+                          const invoiceId = savedInvoiceId || initialData?.invoiceId;
+                          const invoiceNumber = form.getFieldValue('invoiceNumber');
+                          const businessUnit = form.getFieldValue('businessUnit') || '';
+                          const siteId = form.getFieldValue('supplierSite');
+                          const site = supplierSites.find(s => s.siteId === siteId);
+                          const supplierSite = site?.siteName || siteId || '';
+                          const row = availablePrepayments.find(r => selectedAvailKeys.includes(r.key))
+                            || availablePrepayments[0];
+                          if (!row) return '// No prepayment selected';
+                          return JSON.stringify({
+                            InvoiceId: invoiceId ?? '<save invoice first>',
+                            InvoiceNumber: invoiceNumber,
+                            PrepaymentInvoiceId: row.invoiceId,
+                            PrepaymentNumber: row.invoiceNumber,
+                            LineNumber: 1,
+                            PrepaymentLineNumber: row.prepaymentLineNumber,
+                            Description: row.description || null,
+                            BusinessUnit: businessUnit,
+                            SupplierSite: supplierSite,
+                            PurchaseOrder: row.purchaseOrder || null,
+                            Currency: row.currency,
+                            AppliedAmount: row.toApply,
+                            IncludedTax: null,
+                            IncludedonInvoiceFlag: false,
+                            ApplicationAccountingDate: row.accountingDate?.format('YYYY-MM-DD') ?? dayjs().format('YYYY-MM-DD'),
+                            Status: 'Applied',
+                          }, null, 2);
+                        })()}
+                      </pre>
+                    </div>
+                  }
+                >
+                  <Button
+                    size="small"
+                    icon={<ApiOutlined />}
+                    title="View API endpoint"
+                    style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
+                  />
+                </Popover>
               </Space>
             </div>
             <Table<AvailablePrepayment>
