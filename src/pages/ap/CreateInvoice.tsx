@@ -411,6 +411,7 @@ const createBlankLine = (lineNumber: number, defaults?: { accountingDate?: strin
 export interface InvoiceInitialData {
   supplier?: string;
   supplierNumber?: string;
+  supplierId?: number;
   invoiceNumber?: string;
   invoiceAmount?: number;
   invoiceDate?: any;
@@ -983,6 +984,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       const formValues: Record<string, any> = {};
       if (initialData.supplier) formValues.supplier = initialData.supplier;
       if (initialData.supplierNumber) formValues.supplierNumber = initialData.supplierNumber;
+      if (initialData.supplierId) formValues.supplierId = initialData.supplierId;
       if (initialData.invoiceNumber) formValues.invoiceNumber = initialData.invoiceNumber;
       if (initialData.invoiceAmount) formValues.invoiceAmount = initialData.invoiceAmount;
       if (initialData.invoiceDate) formValues.invoiceDate = initialData.invoiceDate;

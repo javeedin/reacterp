@@ -769,6 +769,7 @@ const ManageInvoices: React.FC = () => {
       invoiceId: record.invoiceId,
       supplier: record.supplierOrParty,
       supplierNumber: record.supplierNumber,
+      supplierId: record.supplierId,
       invoiceNumber: record.invoiceNumber,
       invoiceAmount: record.invoiceAmount,
       invoiceDate: record.invoiceDate ? dayjs(record.invoiceDate, 'DD MMM YYYY') : undefined,
