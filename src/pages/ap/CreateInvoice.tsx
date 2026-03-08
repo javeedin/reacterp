@@ -2242,7 +2242,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       });
 
       if (data.status !== 'SUCCESS' || !data.success) {
-        message.error(`Failed: ${data.message || 'Unknown error'}`);
+        const errMsg = data.message || 'Unknown error';
+        if (errMsg.toLowerCase().includes('already exists')) {
+          Modal.error({
+            title: 'Duplicate Invoice Number',
+            content: errMsg,
+            okText: 'OK',
+          });
+        } else {
+          message.error(`Failed: ${errMsg}`);
+        }
         return false;
       }
 
