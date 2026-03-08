@@ -3078,16 +3078,26 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             {isEditMode ? (isReadOnly ? 'View Invoice' : 'Edit Invoice') : 'Create Invoice'}
           </Title>
           {isEditMode && isPrepaymentInvoice ? (
-            prepaymentBalance ? (
-              <Tag
-                color={prepaymentBalance.availableBalance === 0 ? 'green' : 'cyan'}
-                style={{ marginLeft: 8, fontSize: 12, fontWeight: 600 }}
-              >
-                Available Balance: {formatAmount(prepaymentBalance.availableBalance)} {initialData?.invoiceCurrency || headerValues.invoiceCurrency || 'AED'}
-              </Tag>
-            ) : (
-              <Tag color="default" style={{ marginLeft: 8, fontSize: 12 }}>Loading balance...</Tag>
-            )
+            (() => {
+              const balUrl = `${APEX_DB_CONFIG.baseUrl}/ap/applied-prepayments/balances?prepayment_invoice_id=${initialData?.invoiceId || ''}`;
+              return prepaymentBalance ? (
+                <Space size={4} style={{ marginLeft: 8 }}>
+                  <Tag color={prepaymentBalance.availableBalance === 0 ? 'green' : 'cyan'} style={{ fontSize: 12, fontWeight: 600, margin: 0 }}>
+                    Available Balance: {formatAmount(prepaymentBalance.availableBalance)} {initialData?.invoiceCurrency || headerValues.invoiceCurrency || 'AED'}
+                  </Tag>
+                  <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>{balUrl}</span>} placement="bottom">
+                    <InfoCircleOutlined style={{ fontSize: 13, color: '#1677ff', cursor: 'pointer' }} />
+                  </Tooltip>
+                </Space>
+              ) : (
+                <Space size={4} style={{ marginLeft: 8 }}>
+                  <Tag color="default" style={{ fontSize: 12, margin: 0 }}>Loading balance...</Tag>
+                  <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>{balUrl}</span>} placement="bottom">
+                    <InfoCircleOutlined style={{ fontSize: 13, color: '#faad14', cursor: 'pointer' }} />
+                  </Tooltip>
+                </Space>
+              );
+            })()
           ) : isEditMode ? (
             <Tag
               color={invoiceBalanceLoading ? 'default' : invoiceBalance === 0 ? 'green' : 'blue'}
