@@ -1367,44 +1367,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     } else if (editingLineKey) {
       const field = editingLineField; // 'distributionCombination' or 'accrualAccount'
 
-      // Set on the current line first
+      // Set on the current line only — user can click the Apply icon to propagate
       setLines((prev) =>
         prev.map((line) =>
           line.key === editingLineKey ? { ...line, [field]: accountCode } : line
         )
       );
-
-      // Offer to apply to all lines — scoped to the same field only
-      const otherLines = lines.filter((l) => l.key !== editingLineKey && (l.amount !== 0 || l.description));
-      if (otherLines.length > 0) {
-        const fieldLabel = field === 'accrualAccount' ? 'Accrual Account' : 'Distribution';
-        const linesWithout = otherLines.filter((l) => !l[field]);
-        Modal.confirm({
-          title: `Apply ${fieldLabel} to All Lines?`,
-          icon: <AppstoreOutlined style={{ color: REDWOOD.info }} />,
-          content: (
-            <div style={{ fontSize: 13 }}>
-              <div style={{ marginBottom: 8 }}>
-                {fieldLabel}: <Text code style={{ fontSize: 12 }}>{accountCode}</Text>
-              </div>
-              {linesWithout.length > 0 && (
-                <div style={{ color: REDWOOD.neutral600, fontSize: 12 }}>
-                  {linesWithout.length} line(s) have no {fieldLabel.toLowerCase()} set.
-                </div>
-              )}
-            </div>
-          ),
-          okText: `Apply to All Lines`,
-          cancelText: 'Only This Line',
-          onOk: () => {
-            setLines((prev) =>
-              prev.map((line) => ({ ...line, [field]: accountCode }))
-            );
-            message.success(`${fieldLabel} applied to all ${lines.length} lines`);
-            setIsValidated(false);
-          },
-        });
-      }
     }
     setAccountSelectorVisible(false);
     setEditingLineKey(null);
