@@ -100,6 +100,7 @@ const REDWOOD = {
 interface InvoiceRecord {
   key: string;
   invoiceId: number;
+  supplierId: number;
   invoiceNumber: string;
   invoiceDate: string;
   creationDate: string;
@@ -237,6 +238,7 @@ const getAgingColor = (bucket: string): string => {
 const mapApiToInvoiceRecord = (item: any, index: number): InvoiceRecord => ({
   key: item.invoice_id?.toString() || index.toString(),
   invoiceId: item.invoice_id,
+  supplierId: item.supplier_id,
   invoiceNumber: item.invoice_number || '',
   invoiceDate: formatDate(item.invoice_date),
   creationDate: formatDate(item.creation_date || item.fusion_creation_date),
