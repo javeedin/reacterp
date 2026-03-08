@@ -265,6 +265,27 @@ interface AppliedPrepayment {
   applicationAccountingDate: string;
 }
 
+// When viewing a Prepayment invoice: balance summary
+interface PrepaymentBalance {
+  invoiceAmount: number;
+  totalApplied: number;
+  availableBalance: number;
+  applicationCount: number;
+}
+
+// When viewing a Prepayment invoice: which standard invoices applied this prepayment
+interface AppliedInvoice {
+  key: string;
+  applicationId: number;
+  invoiceId: number;
+  invoiceNumber: string;
+  description: string;
+  currency: string;
+  appliedAmount: number;
+  applicationAccountingDate: string;
+  status: string;
+}
+
 interface InstallmentRow {
   key: string;
   installmentId?: number | null;   // DB primary key — null/undefined for new rows
@@ -543,6 +564,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [prepaymentApplying, setPrepaymentApplying] = useState(false);
   const [supplierHasPrepayments, setSupplierHasPrepayments] = useState(false);
   const [selectedAvailKeys, setSelectedAvailKeys] = useState<React.Key[]>([]);
+  // Prepayment invoice view: balance + applied invoices
+  const [prepaymentBalance, setPrepaymentBalance] = useState<PrepaymentBalance | null>(null);
+  const [appliedInvoicesList, setAppliedInvoicesList] = useState<AppliedInvoice[]>([]);
 
   // Prepayment API Drawer state
   const [prepaymentAPIDrawerVisible, setPrepaymentAPIDrawerVisible] = useState(false);
@@ -644,6 +668,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   // Edit mode: determine if invoice is editable or read-only
   const isEditMode = Boolean(initialData?.invoiceId);
+  const isPrepaymentInvoice = (initialData?.invoiceType || '').toLowerCase() === 'prepayment';
   const [isEditing, setIsEditing] = useState(false);
   const { isReadOnly, isPermanentlyLocked, isPaid, isPostedToGL } = useMemo(() => {
     if (!initialData?.invoiceId) return { isReadOnly: false, isPermanentlyLocked: false, isPaid: false, isPostedToGL: false };
@@ -980,6 +1005,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         fetchInvoiceInstallments(initialData.invoiceId);
         fetchInvoiceBalance(initialData.invoiceId);
         fetchAppliedPrepayments(initialData.invoiceId).then(setAppliedPrepaymentsList);
+        // When viewing a Prepayment invoice, also load balance + applied invoices
+        if ((initialData.invoiceType || '').toLowerCase() === 'prepayment') {
+          fetchPrepaymentBalance(initialData.invoiceId);
+          fetchAppliedInvoices(initialData.invoiceId);
+        }
         // Mark as validated if it was already validated (or validated-unpaid for prepayments)
         if (initialData.validationStatus === 'Validated' || initialData.validationStatus === 'Validated-Unpaid') {
           setIsValidated(true);
@@ -1169,6 +1199,47 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     } catch {
       return [];
     }
+  }, []);
+
+  // Fetch balance (InvoiceAmount / TotalApplied / AvailableBalance) for a prepayment invoice
+  const fetchPrepaymentBalance = useCallback(async (prepaymentInvoiceId: number) => {
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/prepayments/balance?P_PREPAYMENT_INVOICE_ID=${prepaymentInvoiceId}`;
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!res.ok) return;
+      const json = await res.json();
+      const item = Array.isArray(json) ? json[0] : json;
+      if (item) {
+        setPrepaymentBalance({
+          invoiceAmount: Number(item.InvoiceAmount ?? 0),
+          totalApplied: Number(item.TotalApplied ?? 0),
+          availableBalance: Number(item.AvailableBalance ?? 0),
+          applicationCount: Number(item.ApplicationCount ?? 0),
+        });
+      }
+    } catch { /* silent */ }
+  }, []);
+
+  // Fetch standard invoices that have applied this prepayment (source: PREPAYMENT_INVOICE_ID)
+  const fetchAppliedInvoices = useCallback(async (prepaymentInvoiceId: number) => {
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/prepayments/applications?P_PREPAYMENT_INVOICE_ID=${prepaymentInvoiceId}`;
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!res.ok) return;
+      const json = await res.json();
+      const items: any[] = Array.isArray(json) ? json : [];
+      setAppliedInvoicesList(items.map((item: any, idx: number) => ({
+        key: String(item.ApplicationId ?? idx),
+        applicationId: Number(item.ApplicationId ?? 0),
+        invoiceId: Number(item.InvoiceId ?? 0),
+        invoiceNumber: item.InvoiceNumber ?? '',
+        description: item.Description ?? '',
+        currency: item.Currency ?? '',
+        appliedAmount: Number(item.AppliedAmount ?? 0),
+        applicationAccountingDate: item.ApplicationAccountingDate ?? '',
+        status: item.Status ?? '',
+      })));
+    } catch { /* silent */ }
   }, []);
 
   // Open the prepayment modal — load available + applied in parallel
@@ -3098,6 +3169,18 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               Edit
             </Button>
           ) : null}
+          {isPrepaymentInvoice && isEditMode && !isEditing && prepaymentBalance && (
+            <Space size={4}>
+              <Tag color="green" style={{ fontSize: 12, padding: '4px 10px', fontWeight: 600, borderRadius: 6 }}>
+                Available: {formatAmount(prepaymentBalance.availableBalance)}
+              </Tag>
+              {prepaymentBalance.totalApplied > 0 && (
+                <Tag color="orange" style={{ fontSize: 11, padding: '2px 8px', borderRadius: 6 }}>
+                  Applied: {formatAmount(prepaymentBalance.totalApplied)}
+                </Tag>
+              )}
+            </Space>
+          )}
           {!savedInvoiceId && !isReadOnly && (
             <Button onClick={handleSaveAndCreateNext} loading={saving} disabled={saving || !isValidated}>
               Save and Create Next
@@ -4014,16 +4097,24 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 ),
               }] : []),
               // Pre-Payment Applications tab (always visible)
+              // — Prepayment invoice: shows which standard invoices applied THIS prepayment
+              // — Standard invoice:   shows which prepayments were applied to THIS invoice
               ...[{
                 key: 'prepaymentApplications',
                 label: (
                   <Space size={4}>
                     <CheckCircleOutlined style={{ color: REDWOOD.success }} />
-                    <span>Pre-Payment Applications ({appliedPrepaymentsList.length})</span>
+                    <span>
+                      {isPrepaymentInvoice
+                        ? `Applied to Invoices (${appliedInvoicesList.length})`
+                        : `Pre-Payment Applications (${appliedPrepaymentsList.length})`}
+                    </span>
                     <Tooltip
                       title={
                         <span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>
-                          {`${APEX_DB_CONFIG.baseUrl}/ap/invoices/appliedprepayments?P_INVOICE_ID=${savedInvoiceId ?? initialData?.invoiceId ?? ''}`}
+                          {isPrepaymentInvoice
+                            ? `${APEX_DB_CONFIG.baseUrl}/ap/prepayments/applications?P_PREPAYMENT_INVOICE_ID=${initialData?.invoiceId ?? ''}`
+                            : `${APEX_DB_CONFIG.baseUrl}/ap/invoices/appliedprepayments?P_INVOICE_ID=${savedInvoiceId ?? initialData?.invoiceId ?? ''}`}
                         </span>
                       }
                       placement="bottom"
@@ -4032,7 +4123,88 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     </Tooltip>
                   </Space>
                 ),
-                children: (
+                children: isPrepaymentInvoice ? (
+                  // ── Prepayment invoice view: which standard invoices used this prepayment ──
+                  <>
+                    {prepaymentBalance && (
+                      <div style={{ display: 'flex', gap: 24, padding: '8px 12px', background: '#f6ffed', borderRadius: 6, marginBottom: 10, border: '1px solid #b7eb8f', fontSize: 12 }}>
+                        <span><Text type="secondary">Invoice Amount:</Text> <Text strong>{formatAmount(prepaymentBalance.invoiceAmount)}</Text></span>
+                        <span><Text type="secondary">Total Applied:</Text> <Text strong style={{ color: REDWOOD.primary }}>{formatAmount(prepaymentBalance.totalApplied)}</Text></span>
+                        <span><Text type="secondary">Available Balance:</Text> <Text strong style={{ color: REDWOOD.success }}>{formatAmount(prepaymentBalance.availableBalance)}</Text></span>
+                      </div>
+                    )}
+                    <Table<AppliedInvoice>
+                      dataSource={appliedInvoicesList}
+                      rowKey="key"
+                      size="small"
+                      pagination={false}
+                      scroll={{ x: 800, y: 300 }}
+                      summary={rows => {
+                        const total = rows.reduce((s, r) => s + r.appliedAmount, 0);
+                        return (
+                          <Table.Summary fixed>
+                            <Table.Summary.Row>
+                              <Table.Summary.Cell index={0} colSpan={4} align="right">
+                                <Text strong style={{ fontSize: 12 }}>Total Applied</Text>
+                              </Table.Summary.Cell>
+                              <Table.Summary.Cell index={4} align="right">
+                                <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>{formatAmount(total)}</Text>
+                              </Table.Summary.Cell>
+                              <Table.Summary.Cell index={5} />
+                            </Table.Summary.Row>
+                          </Table.Summary>
+                        );
+                      }}
+                      columns={[
+                        {
+                          title: 'Invoice Number',
+                          dataIndex: 'invoiceNumber',
+                          width: 160,
+                          render: (v: string) => <Text style={{ color: REDWOOD.info, fontSize: 12 }}>{v || '—'}</Text>,
+                        },
+                        {
+                          title: 'Description',
+                          dataIndex: 'description',
+                          ellipsis: true,
+                          render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text>,
+                        },
+                        {
+                          title: 'Currency',
+                          dataIndex: 'currency',
+                          width: 80,
+                          render: (v: string) => v ? <Tag style={{ fontSize: 11 }}>{v}</Tag> : <Text style={{ fontSize: 12 }}>—</Text>,
+                        },
+                        {
+                          title: 'Applied Amount',
+                          dataIndex: 'appliedAmount',
+                          width: 130,
+                          align: 'right' as const,
+                          render: (v: number) => (
+                            <Text strong style={{ fontSize: 12, color: REDWOOD.primary }}>{formatAmount(v)}</Text>
+                          ),
+                        },
+                        {
+                          title: 'Application Date',
+                          dataIndex: 'applicationAccountingDate',
+                          width: 160,
+                          render: (v: string) => (
+                            <Text style={{ fontSize: 12 }}>{v ? dayjs(v).format('D-MMM-YYYY') : '—'}</Text>
+                          ),
+                        },
+                        {
+                          title: 'Status',
+                          dataIndex: 'status',
+                          width: 100,
+                          render: (v: string) => v ? (
+                            <Tag color={v.toLowerCase() === 'cancelled' ? 'red' : 'green'} style={{ fontSize: 11 }}>{v}</Tag>
+                          ) : <Text style={{ fontSize: 12 }}>—</Text>,
+                        },
+                      ]}
+                      locale={{ emptyText: 'No invoices have applied this prepayment yet.' }}
+                    />
+                  </>
+                ) : (
+                  // ── Standard invoice view: which prepayments were applied to this invoice ──
                   <Table<AppliedPrepayment>
                     dataSource={appliedPrepaymentsList}
                     rowKey="key"

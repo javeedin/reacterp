@@ -499,6 +499,160 @@ END;
 /
 
 -- ============================================================
+-- Template: /ap/prepayments/balance
+-- GET  - Balance summary for a single prepayment invoice
+--        Returns InvoiceAmount, TotalApplied, AvailableBalance
+-- ============================================================
+BEGIN
+    ORDS.DELETE_TEMPLATE(p_module_name => 'ap', p_pattern => 'prepayments/balance');
+    COMMIT;
+EXCEPTION WHEN OTHERS THEN NULL;
+END;
+/
+
+BEGIN
+    ORDS.DEFINE_TEMPLATE(
+        p_module_name => 'ap',
+        p_pattern     => 'prepayments/balance',
+        p_priority    => 0,
+        p_etag_type   => 'HASH',
+        p_comments    => 'Balance summary for a prepayment invoice'
+    );
+    COMMIT;
+END;
+/
+
+BEGIN
+    ORDS.DEFINE_HANDLER(
+        p_module_name    => 'ap',
+        p_pattern        => 'prepayments/balance',
+        p_method         => 'GET',
+        p_source_type    => 'plsql/block',
+        p_source         => q'[
+DECLARE
+    v_result    CLOB;
+    v_offset    NUMBER := 1;
+    v_chunk     NUMBER := 30000;
+    v_length    NUMBER;
+BEGIN
+    v_result := RR_AP_APPLIED_PREPAYMENTS_PKG.get_prepayment_balances(
+        p_prepayment_invoice_id => TO_NUMBER(:P_PREPAYMENT_INVOICE_ID DEFAULT NULL ON CONVERSION ERROR)
+    );
+
+    OWA_UTIL.MIME_HEADER('application/json', FALSE);
+    v_length := NVL(DBMS_LOB.GETLENGTH(v_result), 0);
+    WHILE v_offset <= v_length LOOP
+        HTP.PRN(DBMS_LOB.SUBSTR(v_result, v_chunk, v_offset));
+        v_offset := v_offset + v_chunk;
+    END LOOP;
+EXCEPTION
+    WHEN OTHERS THEN
+        :status_code := 500;
+        HTP.P('{"status":"error","message":"' || REPLACE(SQLERRM, '"', '\"') || '"}');
+END;
+]',
+        p_items_per_page => 0,
+        p_comments       => 'GET prepayment balance — calls get_prepayment_balances'
+    );
+    COMMIT;
+END;
+/
+
+BEGIN
+    ORDS.DEFINE_PARAMETER(
+        p_module_name        => 'ap',
+        p_pattern            => 'prepayments/balance',
+        p_method             => 'GET',
+        p_name               => 'P_PREPAYMENT_INVOICE_ID',
+        p_bind_variable_name => 'P_PREPAYMENT_INVOICE_ID',
+        p_source_type        => 'URI',
+        p_param_type         => 'STRING',
+        p_access_method      => 'IN',
+        p_comments           => 'Prepayment Invoice ID to retrieve balance for'
+    );
+    COMMIT;
+EXCEPTION WHEN OTHERS THEN NULL;
+END;
+/
+
+-- ============================================================
+-- Template: /ap/prepayments/applications
+-- GET  - Standard invoices that have applied this prepayment
+--        Source filter: PREPAYMENT_INVOICE_ID
+-- ============================================================
+BEGIN
+    ORDS.DELETE_TEMPLATE(p_module_name => 'ap', p_pattern => 'prepayments/applications');
+    COMMIT;
+EXCEPTION WHEN OTHERS THEN NULL;
+END;
+/
+
+BEGIN
+    ORDS.DEFINE_TEMPLATE(
+        p_module_name => 'ap',
+        p_pattern     => 'prepayments/applications',
+        p_priority    => 0,
+        p_etag_type   => 'HASH',
+        p_comments    => 'Standard invoices that applied this prepayment'
+    );
+    COMMIT;
+END;
+/
+
+BEGIN
+    ORDS.DEFINE_HANDLER(
+        p_module_name    => 'ap',
+        p_pattern        => 'prepayments/applications',
+        p_method         => 'GET',
+        p_source_type    => 'plsql/block',
+        p_source         => q'[
+DECLARE
+    v_result    CLOB;
+    v_offset    NUMBER := 1;
+    v_chunk     NUMBER := 30000;
+    v_length    NUMBER;
+BEGIN
+    v_result := RR_AP_APPLIED_PREPAYMENTS_PKG.get_by_prepayment_id(
+        p_prepayment_invoice_id => TO_NUMBER(:P_PREPAYMENT_INVOICE_ID DEFAULT NULL ON CONVERSION ERROR)
+    );
+
+    OWA_UTIL.MIME_HEADER('application/json', FALSE);
+    v_length := NVL(DBMS_LOB.GETLENGTH(v_result), 0);
+    WHILE v_offset <= v_length LOOP
+        HTP.PRN(DBMS_LOB.SUBSTR(v_result, v_chunk, v_offset));
+        v_offset := v_offset + v_chunk;
+    END LOOP;
+EXCEPTION
+    WHEN OTHERS THEN
+        :status_code := 500;
+        HTP.P('{"status":"error","message":"' || REPLACE(SQLERRM, '"', '\"') || '"}');
+END;
+]',
+        p_items_per_page => 0,
+        p_comments       => 'GET invoices applied to a prepayment — calls get_by_prepayment_id'
+    );
+    COMMIT;
+END;
+/
+
+BEGIN
+    ORDS.DEFINE_PARAMETER(
+        p_module_name        => 'ap',
+        p_pattern            => 'prepayments/applications',
+        p_method             => 'GET',
+        p_name               => 'P_PREPAYMENT_INVOICE_ID',
+        p_bind_variable_name => 'P_PREPAYMENT_INVOICE_ID',
+        p_source_type        => 'URI',
+        p_param_type         => 'STRING',
+        p_access_method      => 'IN',
+        p_comments           => 'Prepayment Invoice ID to retrieve applied invoices for'
+    );
+    COMMIT;
+EXCEPTION WHEN OTHERS THEN NULL;
+END;
+/
+
+-- ============================================================
 -- Verify all prepayment templates & handlers
 -- ============================================================
 SELECT 'Template: ' || uri_template AS info
