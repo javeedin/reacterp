@@ -28,6 +28,7 @@ import {
   Progress,
   Spin,
   Upload,
+  Badge,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -541,6 +542,84 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [prepaymentApplying, setPrepaymentApplying] = useState(false);
   const [supplierHasPrepayments, setSupplierHasPrepayments] = useState(false);
   const [selectedAvailKeys, setSelectedAvailKeys] = useState<React.Key[]>([]);
+
+  // Prepayment API Drawer state
+  const [prepaymentAPIDrawerVisible, setPrepaymentAPIDrawerVisible] = useState(false);
+  interface PrepaymentAPIResult {
+    endpoint: string;
+    url: string;
+    loading: boolean;
+    status: number | null;
+    durationMs: number | null;
+    data: any[] | null;
+    error: string | null;
+  }
+  const [prepaymentAPIResults, setPrepaymentAPIResults] = useState<PrepaymentAPIResult[]>([]);
+
+  const openPrepaymentAPIDrawer = useCallback(async () => {
+    const supplierId = form.getFieldValue('supplierId');
+    const invoiceId = savedInvoiceId ?? initialData?.invoiceId ?? null;
+    if (!supplierId) { message.warning('Select a supplier first.'); return; }
+
+    const endpoints: { endpoint: string; url: string }[] = [
+      {
+        endpoint: 'Available Prepayments',
+        url: `${APEX_DB_CONFIG.baseUrl}/ap/prepayments/available?P_SUPPLIER_ID=${supplierId}`,
+      },
+      ...(invoiceId ? [
+        {
+          endpoint: 'Applied Prepayments (by Invoice)',
+          url: `${APEX_DB_CONFIG.baseUrl}/ap/invoices/appliedprepayments?P_INVOICE_ID=${invoiceId}`,
+        },
+        {
+          endpoint: 'Applied Prepayments (by-invoice REST)',
+          url: `${APEX_DB_CONFIG.baseUrl}/ap/applied-prepayments/by-invoice/${invoiceId}`,
+        },
+      ] : []),
+    ];
+
+    setPrepaymentAPIResults(endpoints.map(e => ({ ...e, loading: true, status: null, durationMs: null, data: null, error: null })));
+    setPrepaymentAPIDrawerVisible(true);
+
+    endpoints.forEach(async (ep, idx) => {
+      const t0 = performance.now();
+      try {
+        const res = await fetch(ep.url, { headers: { Accept: 'application/json' } });
+        const durationMs = Math.round(performance.now() - t0);
+        let data: any[] = [];
+        if (res.ok) {
+          const json = await res.json();
+          data = json.items ?? json.prepayments ?? json.applied ?? (Array.isArray(json) ? json : []);
+        }
+        setPrepaymentAPIResults(prev => prev.map((r, i) =>
+          i === idx ? { ...r, loading: false, status: res.status, durationMs, data, error: res.ok ? null : `HTTP ${res.status}` } : r
+        ));
+        if (idx === 0) {
+          setSupplierHasPrepayments(data.length > 0);
+          setAvailablePrepayments(data.map((item: any, index: number) => ({
+            key: item.invoice_id?.toString() || index.toString(),
+            invoiceId: Number(item.invoice_id ?? 0),
+            invoiceNumber: item.invoice_number ?? '',
+            description: item.description ?? '',
+            supplierSite: item.supplier_site ?? '',
+            purchaseOrder: item.purchase_order ?? '',
+            currency: item.currency ?? '',
+            availableAmount: Number(item.available_amount ?? 0),
+            lineNumber: Number(item.line_number ?? 1),
+            prepaymentLineNumber: Number(item.prepayment_line_number ?? 1),
+            businessUnit: item.business_unit ?? '',
+            toApply: 0,
+            accountingDate: null,
+          })));
+        }
+      } catch (err: any) {
+        const durationMs = Math.round(performance.now() - t0);
+        setPrepaymentAPIResults(prev => prev.map((r, i) =>
+          i === idx ? { ...r, loading: false, status: 0, durationMs, data: [], error: String(err?.message ?? err) } : r
+        ));
+      }
+    });
+  }, [form, savedInvoiceId, initialData]);
 
   // API Preview modal
   const [apiPreviewVisible, setApiPreviewVisible] = useState(false);
@@ -3239,19 +3318,23 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                                 style={{ borderColor: REDWOOD.info, color: REDWOOD.info }}
                               />
                             </Tooltip>
-                            {supplierHasPrepayments && (
-                              <Tooltip title="Prepayments available — click to apply">
+                            <Tooltip title={supplierHasPrepayments ? `${availablePrepayments.length} prepayment(s) available — view API results` : 'Check prepayments for this supplier'}>
+                              <Badge
+                                count={availablePrepayments.length}
+                                size="small"
+                                style={{ backgroundColor: REDWOOD.success }}
+                              >
                                 <Button
-                                  icon={<DollarOutlined />}
-                                  onClick={openPrepaymentModal}
+                                  icon={<CreditCardOutlined />}
+                                  onClick={openPrepaymentAPIDrawer}
                                   style={{
-                                    borderColor: REDWOOD.success,
-                                    color: REDWOOD.success,
-                                    background: '#f6ffed',
+                                    borderColor: supplierHasPrepayments ? REDWOOD.success : REDWOOD.neutral300,
+                                    color: supplierHasPrepayments ? REDWOOD.success : REDWOOD.neutral600,
+                                    background: supplierHasPrepayments ? '#f6ffed' : undefined,
                                   }}
                                 />
-                              </Tooltip>
-                            )}
+                              </Badge>
+                            </Tooltip>
                           </Space.Compact>
                         </Form.Item>
                         <Form.Item name="supplierNumber" hidden>
@@ -6934,6 +7017,138 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         )}
       </Modal>
       {/* ── End Prepayments Modal ────────────────────────────────────────── */}
+
+      {/* ── Prepayment API Explorer Drawer ──────────────────────────────── */}
+      <Drawer
+        title={
+          <Space>
+            <Badge count={availablePrepayments.length} size="small" style={{ backgroundColor: REDWOOD.success }}>
+              <CreditCardOutlined style={{ color: REDWOOD.success, fontSize: 16 }} />
+            </Badge>
+            <span style={{ fontWeight: 600 }}>Prepayment API Explorer</span>
+            {availablePrepayments.length > 0 && (
+              <Tag color="green">{availablePrepayments.length} available</Tag>
+            )}
+          </Space>
+        }
+        open={prepaymentAPIDrawerVisible}
+        onClose={() => setPrepaymentAPIDrawerVisible(false)}
+        width={760}
+        extra={
+          <Button
+            type="primary"
+            icon={<DollarOutlined />}
+            disabled={availablePrepayments.length === 0}
+            onClick={() => { setPrepaymentAPIDrawerVisible(false); openPrepaymentModal(); }}
+            style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+          >
+            Apply Prepayments
+          </Button>
+        }
+      >
+        {prepaymentAPIResults.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: 60, color: REDWOOD.neutral600 }}>
+            <CreditCardOutlined style={{ fontSize: 32, marginBottom: 12 }} />
+            <div>Select a supplier to load prepayment data</div>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {prepaymentAPIResults.map((result, idx) => {
+              const statusColor = result.status === null ? '#888'
+                : result.status >= 200 && result.status < 300 ? REDWOOD.success
+                : REDWOOD.error;
+              const methodColor = '#0572CE';
+              // Build dynamic columns from first data row
+              const cols = result.data && result.data.length > 0
+                ? Object.keys(result.data[0]).slice(0, 8).map(k => ({
+                    title: k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+                    dataIndex: k,
+                    key: k,
+                    ellipsis: true,
+                    render: (v: any) => {
+                      if (v === null || v === undefined) return <span style={{ color: '#ccc' }}>—</span>;
+                      if (typeof v === 'number' && k.includes('amount')) return <span style={{ fontWeight: 600, color: REDWOOD.success }}>{v.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>;
+                      return <span style={{ fontSize: 11 }}>{String(v)}</span>;
+                    },
+                  }))
+                : [];
+
+              return (
+                <Card
+                  key={idx}
+                  size="small"
+                  style={{ borderRadius: 8, border: `1px solid ${result.error ? REDWOOD.error : REDWOOD.neutral200}` }}
+                  bodyStyle={{ padding: '12px 16px' }}
+                >
+                  {/* Endpoint header */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                    <Tag style={{ background: methodColor, color: '#fff', border: 'none', fontWeight: 700, fontSize: 10 }}>GET</Tag>
+                    <Text strong style={{ fontSize: 13 }}>{result.endpoint}</Text>
+                    {result.loading ? (
+                      <LoadingOutlined style={{ color: '#aaa' }} />
+                    ) : (
+                      <Space size={4}>
+                        <Tag style={{ background: result.error ? REDWOOD.error : REDWOOD.success, color: '#fff', border: 'none', fontSize: 10 }}>
+                          {result.status === 0 ? 'ERR' : result.status}
+                        </Tag>
+                        {result.durationMs !== null && (
+                          <Text style={{ fontSize: 10, color: REDWOOD.neutral600 }}>{result.durationMs}ms</Text>
+                        )}
+                        {result.data !== null && !result.error && (
+                          <Tag color="blue" style={{ fontSize: 10 }}>{result.data.length} row(s)</Tag>
+                        )}
+                      </Space>
+                    )}
+                  </div>
+
+                  {/* URL */}
+                  <div
+                    style={{
+                      background: '#1a1a2e',
+                      borderRadius: 4,
+                      padding: '4px 10px',
+                      marginBottom: 10,
+                      fontFamily: 'monospace',
+                      fontSize: 10,
+                      color: '#e0e0e0',
+                      overflowX: 'auto',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    <span style={{ color: methodColor, fontWeight: 700 }}>GET </span>
+                    <span style={{ color: statusColor }}>{result.url}</span>
+                  </div>
+
+                  {/* Results */}
+                  {result.loading ? (
+                    <div style={{ textAlign: 'center', padding: 20 }}>
+                      <Spin indicator={<LoadingOutlined spin />} size="small" />
+                      <div style={{ marginTop: 6, fontSize: 11, color: REDWOOD.neutral600 }}>Fetching...</div>
+                    </div>
+                  ) : result.error ? (
+                    <Alert type="error" showIcon message={result.error} style={{ fontSize: 11 }} />
+                  ) : result.data && result.data.length > 0 ? (
+                    <Table
+                      size="small"
+                      dataSource={result.data.map((r: any, i: number) => ({ ...r, _key: i }))}
+                      rowKey="_key"
+                      columns={cols}
+                      pagination={result.data.length > 5 ? { pageSize: 5, size: 'small' } : false}
+                      scroll={{ x: true }}
+                      style={{ fontSize: 11 }}
+                    />
+                  ) : (
+                    <div style={{ textAlign: 'center', padding: 16, color: REDWOOD.neutral600, fontSize: 12 }}>
+                      No records found
+                    </div>
+                  )}
+                </Card>
+              );
+            })}
+          </div>
+        )}
+      </Drawer>
+      {/* ── End Prepayment API Explorer Drawer ──────────────────────────── */}
 
       <style>{`
         .ant-table-thead > tr > th {
