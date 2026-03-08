@@ -199,6 +199,101 @@ END;
 /
 
 -- ============================================================
+-- Template: /ap/applied-prepayments/balances
+-- GET - Prepayment available balances
+-- Query params: prepayment_invoice_id, supplier_number
+-- ============================================================
+BEGIN
+    ORDS.DELETE_TEMPLATE(p_module_name => 'ap', p_pattern => 'applied-prepayments/balances');
+    COMMIT;
+EXCEPTION WHEN OTHERS THEN NULL;
+END;
+/
+
+BEGIN
+    ORDS.DEFINE_TEMPLATE(
+        p_module_name => 'ap',
+        p_pattern     => 'applied-prepayments/balances',
+        p_priority    => 0,
+        p_etag_type   => 'HASH',
+        p_comments    => 'Get prepayment available balances'
+    );
+    COMMIT;
+END;
+/
+
+BEGIN
+    ORDS.DEFINE_HANDLER(
+        p_module_name    => 'ap',
+        p_pattern        => 'applied-prepayments/balances',
+        p_method         => 'GET',
+        p_source_type    => 'plsql/block',
+        p_source         => q'[
+DECLARE
+    v_result    CLOB;
+    v_offset    NUMBER := 1;
+    v_chunk     NUMBER := 30000;
+    v_length    NUMBER;
+BEGIN
+    v_result := RR_AP_APPLIED_PREPAYMENTS_PKG.get_prepayment_balances(
+        p_prepayment_invoice_id => TO_NUMBER(:prepayment_invoice_id DEFAULT NULL ON CONVERSION ERROR),
+        p_supplier_number       => :supplier_number
+    );
+
+    OWA_UTIL.MIME_HEADER('application/json', FALSE);
+    v_length := NVL(DBMS_LOB.GETLENGTH(v_result), 0);
+    WHILE v_offset <= v_length LOOP
+        HTP.PRN(DBMS_LOB.SUBSTR(v_result, v_chunk, v_offset));
+        v_offset := v_offset + v_chunk;
+    END LOOP;
+EXCEPTION
+    WHEN OTHERS THEN
+        :status_code := 500;
+        HTP.P('{"status":"error","message":"' || REPLACE(SQLERRM, '"', '\"') || '"}');
+END;
+]',
+        p_items_per_page => 0,
+        p_comments       => 'Get prepayment available balances (InvoiceAmount - TotalApplied)'
+    );
+    COMMIT;
+END;
+/
+
+BEGIN
+    ORDS.DEFINE_PARAMETER(
+        p_module_name        => 'ap',
+        p_pattern            => 'applied-prepayments/balances',
+        p_method             => 'GET',
+        p_name               => 'prepayment_invoice_id',
+        p_bind_variable_name => 'prepayment_invoice_id',
+        p_source_type        => 'URI',
+        p_param_type         => 'STRING',
+        p_access_method      => 'IN',
+        p_comments           => 'Filter by prepayment invoice ID'
+    );
+    COMMIT;
+EXCEPTION WHEN OTHERS THEN NULL;
+END;
+/
+
+BEGIN
+    ORDS.DEFINE_PARAMETER(
+        p_module_name        => 'ap',
+        p_pattern            => 'applied-prepayments/balances',
+        p_method             => 'GET',
+        p_name               => 'supplier_number',
+        p_bind_variable_name => 'supplier_number',
+        p_source_type        => 'URI',
+        p_param_type         => 'STRING',
+        p_access_method      => 'IN',
+        p_comments           => 'Filter by supplier number (returns all prepayments for that supplier)'
+    );
+    COMMIT;
+EXCEPTION WHEN OTHERS THEN NULL;
+END;
+/
+
+-- ============================================================
 -- Verify
 -- ============================================================
 SELECT 'Template: ' || uri_template AS info

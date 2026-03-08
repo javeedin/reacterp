@@ -42,6 +42,16 @@ CREATE OR REPLACE PACKAGE RR_AP_APPLIED_PREPAYMENTS_PKG AS
         p_prepayment_invoice_id IN NUMBER
     ) RETURN CLOB;
 
+    -- Get prepayment balance for one or many prepayment invoices
+    -- Returns: InvoiceAmount, TotalApplied, AvailableBalance per prepayment
+    -- p_prepayment_invoice_id  → single prepayment
+    -- p_supplier_number        → all prepayments for a supplier
+    -- Both NULL                → all prepayments in the system
+    FUNCTION get_prepayment_balances(
+        p_prepayment_invoice_id IN NUMBER  DEFAULT NULL,
+        p_supplier_number       IN VARCHAR2 DEFAULT NULL
+    ) RETURN CLOB;
+
 END RR_AP_APPLIED_PREPAYMENTS_PKG;
 /
 
@@ -387,6 +397,57 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_APPLIED_PREPAYMENTS_PKG AS
         WHEN OTHERS THEN
             RETURN '{"status":"error","message":"' || REPLACE(SQLERRM, '"', '\"') || '"}';
     END get_by_prepayment_id;
+
+    -- --------------------------------------------------------
+    -- Prepayment balance summary
+    -- InvoiceAmount comes from RR_AP_INVOICES_ALL
+    -- TotalApplied  = SUM(applied_amount) from RR_AP_APPLIED_PREPAYMENTS
+    -- AvailableBalance = InvoiceAmount - TotalApplied
+    -- --------------------------------------------------------
+    FUNCTION get_prepayment_balances(
+        p_prepayment_invoice_id IN NUMBER   DEFAULT NULL,
+        p_supplier_number       IN VARCHAR2 DEFAULT NULL
+    ) RETURN CLOB IS
+        v_result CLOB;
+    BEGIN
+        SELECT JSON_ARRAYAGG(
+            JSON_OBJECT(
+                'PrepaymentInvoiceId'    VALUE inv.invoice_id,
+                'PrepaymentNumber'       VALUE inv.invoice_number,
+                'Supplier'               VALUE inv.supplier,
+                'SupplierNumber'         VALUE inv.supplier_number,
+                'SupplierSite'           VALUE inv.supplier_site,
+                'BusinessUnit'           VALUE inv.business_unit,
+                'Currency'               VALUE inv.invoice_currency,
+                'InvoiceDate'            VALUE TO_CHAR(inv.invoice_date,       'YYYY-MM-DD'),
+                'ApplyAfterDate'         VALUE TO_CHAR(inv.apply_after_date,   'YYYY-MM-DD'),
+                'InvoiceAmount'          VALUE inv.invoice_amount,
+                'TotalApplied'           VALUE NVL(agg.total_applied, 0),
+                'AvailableBalance'       VALUE inv.invoice_amount - NVL(agg.total_applied, 0),
+                'ApplicationCount'       VALUE NVL(agg.application_count, 0),
+                'PaidStatus'             VALUE inv.paid_status,
+                'ValidationStatus'       VALUE inv.validation_status
+                ABSENT ON NULL
+            ) ORDER BY inv.invoice_id
+        )
+        INTO v_result
+        FROM RR_AP_INVOICES_ALL inv
+        LEFT JOIN (
+            SELECT prepayment_invoice_id,
+                   SUM(CASE WHEN status != 'Cancelled' THEN applied_amount ELSE 0 END) AS total_applied,
+                   COUNT(CASE WHEN status != 'Cancelled' THEN 1 END)                   AS application_count
+            FROM   RR_AP_APPLIED_PREPAYMENTS
+            GROUP BY prepayment_invoice_id
+        ) agg ON agg.prepayment_invoice_id = inv.invoice_id
+        WHERE inv.invoice_type = 'Prepayment'
+          AND (p_prepayment_invoice_id IS NULL OR inv.invoice_id      = p_prepayment_invoice_id)
+          AND (p_supplier_number       IS NULL OR inv.supplier_number  = p_supplier_number);
+
+        RETURN NVL(v_result, '[]');
+    EXCEPTION
+        WHEN OTHERS THEN
+            RETURN '{"status":"error","message":"' || REPLACE(SQLERRM, '"', '\"') || '"}';
+    END get_prepayment_balances;
 
 END RR_AP_APPLIED_PREPAYMENTS_PKG;
 /
