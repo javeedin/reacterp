@@ -1260,7 +1260,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     const supplierName   = form.getFieldValue('supplier') || '';
     const supplierNumber = form.getFieldValue('supplierNumber') || '';
     const supplierId = form.getFieldValue('supplierId')
-      || suppliers.find(s => s.supplierNumber === supplierNumber || s.supplier === supplierName)?.supplierId;
+      || suppliers.find(s => supplierNumber && s.supplierNumber === supplierNumber)?.supplierId
+      || suppliers.find(s => supplierName && (s.supplier === supplierName || supplierName.startsWith(s.supplier)))?.supplierId;
     const invoiceId = savedInvoiceId || initialData?.invoiceId;
     if (!supplierId) { message.warning('Select a supplier first.'); return; }
     if (!invoiceId) { message.warning('Please save the invoice before applying a prepayment.'); return; }
@@ -1282,7 +1283,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     } finally {
       setPrepaymentLoading(false);
     }
-  }, [form, savedInvoiceId, initialData, fetchAvailablePrepayments, fetchAppliedPrepayments]);
+  }, [form, savedInvoiceId, initialData, fetchAvailablePrepayments, fetchAppliedPrepayments, suppliers]);
 
   const filteredSuppliers = useMemo(() => {
     if (!supplierSearchText) return suppliers;
