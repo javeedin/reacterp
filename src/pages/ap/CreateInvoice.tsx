@@ -4519,143 +4519,22 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         title={
           <Space>
             <AccountBookOutlined style={{ color: REDWOOD.info }} />
-            <span>Accounting Entries — Multi-Period</span>
+            <span>Accounting Entries</span>
           </Space>
         }
         open={accountingModalVisible}
         onCancel={() => setAccountingModalVisible(false)}
         footer={<Button type="primary" onClick={() => setAccountingModalVisible(false)}>Close</Button>}
-        width={900}
+        width={960}
       >
         {(() => {
           const liabilityDist = form.getFieldValue('liabilityDistribution') || '—';
           const invoiceDate = form.getFieldValue('invoiceDate');
           const defaultAcctDate = invoiceDate?.format?.('DD-MMM-YYYY') || 'N/A';
-
-          // Build entries grouped by accounting period (date)
           type AcctEntry = { key: number; period: string; line: string; account: string; description: string; debit: number; credit: number; isGroupHeader?: boolean; isPeriodSubtotal?: boolean; subtotalDebit?: number; subtotalCredit?: number };
-          const allEntries: AcctEntry[] = [];
-          let keyIdx = 0;
 
-          // Active lines with data
-          const activeLines = lines.filter((l) => l.amount > 0 || l.description);
-
-          // Group lines by their accounting date (period)
-          const periodMap = new Map<string, typeof activeLines>();
-          activeLines.forEach((l) => {
-            const period = l.accountingDate || defaultAcctDate;
-            if (!periodMap.has(period)) periodMap.set(period, []);
-            periodMap.get(period)!.push(l);
-          });
-
-          // Sort periods chronologically
-          const sortedPeriods = Array.from(periodMap.keys()).sort((a, b) => {
-            const da = new Date(a);
-            const db = new Date(b);
-            return da.getTime() - db.getTime();
-          });
-
-          let grandTotalDebit = 0;
-          let grandTotalCredit = 0;
-
-          sortedPeriods.forEach((period) => {
-            const periodLines = periodMap.get(period)!;
-            let periodDebit = 0;
-            let periodCredit = 0;
-
-            // Period header row
-            allEntries.push({
-              key: keyIdx++,
-              period,
-              line: '',
-              account: '',
-              description: '',
-              debit: 0,
-              credit: 0,
-              isGroupHeader: true,
-            });
-
-            // Debit: each expense line
-            periodLines.forEach((l) => {
-              const amt = l.amount || 0;
-              allEntries.push({
-                key: keyIdx++,
-                period,
-                line: `Line ${l.lineNumber}`,
-                account: l.distributionCombination || l.distributionSet || '—',
-                description: l.description || (l.type || 'Item'),
-                debit: amt,
-                credit: 0,
-              });
-              periodDebit += amt;
-            });
-
-            // Debit: tax recoverable for this period's lines
-            const periodLineTax = periodLines.reduce((sum, l) => {
-              const rate = getTaxRateForClassification(l.taxClassification);
-              return sum + Math.round((l.amount || 0) * (rate / 100) * 100) / 100;
-            }, 0);
-            if (periodLineTax > 0) {
-              allEntries.push({
-                key: keyIdx++,
-                period,
-                line: 'Tax',
-                account: 'Tax Recoverable',
-                description: 'Input VAT',
-                debit: periodLineTax,
-                credit: 0,
-              });
-              periodDebit += periodLineTax;
-            }
-
-            // Credit: liability for each expense line
-            periodLines.forEach((l) => {
-              const amt = l.amount || 0;
-              allEntries.push({
-                key: keyIdx++,
-                period,
-                line: `Line ${l.lineNumber}`,
-                account: liabilityDist,
-                description: `AP — ${l.description || l.type || 'Item'}`,
-                debit: 0,
-                credit: amt,
-              });
-              periodCredit += amt;
-            });
-
-            // Credit: liability for tax
-            if (periodLineTax > 0) {
-              allEntries.push({
-                key: keyIdx++,
-                period,
-                line: 'Tax',
-                account: liabilityDist,
-                description: 'AP — Input VAT',
-                debit: 0,
-                credit: periodLineTax,
-              });
-              periodCredit += periodLineTax;
-            }
-
-            // Period subtotal row
-            allEntries.push({
-              key: keyIdx++,
-              period,
-              line: '',
-              account: '',
-              description: '',
-              debit: 0,
-              credit: 0,
-              isPeriodSubtotal: true,
-              subtotalDebit: periodDebit,
-              subtotalCredit: periodCredit,
-            });
-
-            grandTotalDebit += periodDebit;
-            grandTotalCredit += periodCredit;
-          });
-
-          return (
+          // ── Shared table renderer ────────────────────────────────────────────
+          const renderAcctTable = (allEntries: AcctEntry[], periodMap: Map<string, any[]>, grandTotalDebit: number, grandTotalCredit: number, sortedPeriods: string[]) => (
             <>
               <Table
                 dataSource={allEntries}
@@ -4668,7 +4547,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     title: 'Accounting Date',
                     dataIndex: 'period',
                     key: 'period',
-                    width: 120,
+                    width: 130,
                     onCell: (record: AcctEntry) => ({
                       colSpan: record.isGroupHeader ? 6 : record.isPeriodSubtotal ? 4 : 1,
                       style: record.isGroupHeader
@@ -4679,21 +4558,21 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     }),
                     render: (v: string, record: AcctEntry) => {
                       if (record.isGroupHeader) {
-                        const periodLines = periodMap.get(v)!;
-                        const periodTotal = periodLines.reduce((s, l) => s + (l.amount || 0), 0);
-                        const periodTax = periodLines.reduce((s, l) => s + Math.round((l.amount || 0) * (getTaxRateForClassification(l.taxClassification) / 100) * 100) / 100, 0);
+                        const pl = periodMap.get(v) || [];
+                        const periodTotal = pl.reduce((s: number, l: any) => s + (l.amount || 0), 0);
+                        const periodTax = pl.reduce((s: number, l: any) => s + Math.round((l.amount || 0) * (getTaxRateForClassification(l.taxClassification) / 100) * 100) / 100, 0);
                         return (
                           <span>
                             Period: <strong>{v}</strong>
-                            <span style={{ marginLeft: 16, color: REDWOOD.neutral600, fontWeight: 400 }}>
-                              Lines: {formatAmount(periodTotal)} | Tax: {formatAmount(periodTax)} | Total: {formatAmount(periodTotal + periodTax)}
-                            </span>
+                            {periodTax > 0 && (
+                              <span style={{ marginLeft: 16, color: REDWOOD.neutral600, fontWeight: 400 }}>
+                                Lines: {formatAmount(periodTotal)} | Tax: {formatAmount(periodTax)} | Total: {formatAmount(periodTotal + periodTax)}
+                              </span>
+                            )}
                           </span>
                         );
                       }
-                      if (record.isPeriodSubtotal) {
-                        return <Text strong style={{ fontSize: 12 }}>Period Subtotal — {v}</Text>;
-                      }
+                      if (record.isPeriodSubtotal) return <Text strong style={{ fontSize: 12 }}>Period Subtotal — {v}</Text>;
                       return <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{v}</Text>;
                     },
                   },
@@ -4709,7 +4588,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     title: 'Account',
                     dataIndex: 'account',
                     key: 'account',
-                    width: 240,
+                    width: 230,
                     onCell: (record: AcctEntry) => ({ colSpan: record.isGroupHeader || record.isPeriodSubtotal ? 0 : 1 }),
                     render: (v: string) => <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{v}</Text>,
                   },
@@ -4731,9 +4610,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                       style: record.isPeriodSubtotal ? { background: '#f0f5ff', borderTop: '1px solid #d6e4ff' } : undefined,
                     }),
                     render: (v: number, record: AcctEntry) => {
-                      if (record.isPeriodSubtotal) {
-                        return <Text strong style={{ fontSize: 12, color: '#389e0d' }}>{formatAmount(record.subtotalDebit || 0)}</Text>;
-                      }
+                      if (record.isPeriodSubtotal) return <Text strong style={{ fontSize: 12, color: '#389e0d' }}>{formatAmount(record.subtotalDebit || 0)}</Text>;
                       return v > 0 ? <Text style={{ fontSize: 12, fontWeight: 600, color: '#389e0d' }}>{formatAmount(v)}</Text> : null;
                     },
                   },
@@ -4748,9 +4625,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                       style: record.isPeriodSubtotal ? { background: '#f0f5ff', borderTop: '1px solid #d6e4ff' } : undefined,
                     }),
                     render: (v: number, record: AcctEntry) => {
-                      if (record.isPeriodSubtotal) {
-                        return <Text strong style={{ fontSize: 12, color: REDWOOD.primary }}>{formatAmount(record.subtotalCredit || 0)}</Text>;
-                      }
+                      if (record.isPeriodSubtotal) return <Text strong style={{ fontSize: 12, color: REDWOOD.primary }}>{formatAmount(record.subtotalCredit || 0)}</Text>;
                       return v > 0 ? <Text style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.primary }}>{formatAmount(v)}</Text> : null;
                     },
                   },
@@ -4758,43 +4633,211 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 summary={() => (
                   <Table.Summary fixed>
                     <Table.Summary.Row>
-                      <Table.Summary.Cell index={0} colSpan={4}>
-                        <Text strong style={{ fontSize: 13 }}>Grand Total</Text>
-                      </Table.Summary.Cell>
-                      <Table.Summary.Cell index={4} align="right">
-                        <Text strong style={{ fontSize: 13, color: '#389e0d' }}>{formatAmount(grandTotalDebit)}</Text>
-                      </Table.Summary.Cell>
-                      <Table.Summary.Cell index={5} align="right">
-                        <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>{formatAmount(grandTotalCredit)}</Text>
+                      <Table.Summary.Cell index={0} colSpan={4}><Text strong style={{ fontSize: 13 }}>Grand Total</Text></Table.Summary.Cell>
+                      <Table.Summary.Cell index={4} align="right"><Text strong style={{ fontSize: 13, color: '#389e0d' }}>{formatAmount(grandTotalDebit)}</Text></Table.Summary.Cell>
+                      <Table.Summary.Cell index={5} align="right"><Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>{formatAmount(grandTotalCredit)}</Text></Table.Summary.Cell>
+                    </Table.Summary.Row>
+                    <Table.Summary.Row>
+                      <Table.Summary.Cell index={0} colSpan={6}>
+                        {Math.abs(grandTotalDebit - grandTotalCredit) > 0.01
+                          ? <Text type="danger" style={{ fontSize: 12 }}>Out of balance by {formatAmount(Math.abs(grandTotalDebit - grandTotalCredit))}</Text>
+                          : <Text style={{ fontSize: 12, color: '#389e0d' }}>Balanced — Debit equals Credit</Text>
+                        }
                       </Table.Summary.Cell>
                     </Table.Summary.Row>
-                    {Math.abs(grandTotalDebit - grandTotalCredit) > 0.01 && (
-                      <Table.Summary.Row>
-                        <Table.Summary.Cell index={0} colSpan={6}>
-                          <Text type="danger" style={{ fontSize: 12 }}>
-                            Debit/Credit out of balance by {formatAmount(Math.abs(grandTotalDebit - grandTotalCredit))}
-                          </Text>
-                        </Table.Summary.Cell>
-                      </Table.Summary.Row>
-                    )}
-                    {Math.abs(grandTotalDebit - grandTotalCredit) <= 0.01 && (
-                      <Table.Summary.Row>
-                        <Table.Summary.Cell index={0} colSpan={6}>
-                          <Text style={{ fontSize: 12, color: '#389e0d' }}>
-                            Balanced — Debit equals Credit
-                          </Text>
-                        </Table.Summary.Cell>
-                      </Table.Summary.Row>
-                    )}
                   </Table.Summary>
                 )}
               />
               {sortedPeriods.length > 1 && (
                 <div style={{ marginTop: 8, fontSize: 11, color: REDWOOD.neutral600 }}>
-                  Multi-period invoice across {sortedPeriods.length} accounting periods
+                  {sortedPeriods.length} accounting periods
                 </div>
               )}
             </>
+          );
+
+          // ── Tab 1: Invoice Accounting ────────────────────────────────────────
+          const buildInvoiceAccounting = () => {
+            const allEntries: AcctEntry[] = [];
+            let keyIdx = 0;
+            const activeLines = lines.filter((l) => l.amount > 0 || l.description);
+            const periodMap = new Map<string, typeof activeLines>();
+            activeLines.forEach((l) => {
+              const period = l.accountingDate || defaultAcctDate;
+              if (!periodMap.has(period)) periodMap.set(period, []);
+              periodMap.get(period)!.push(l);
+            });
+            const sortedPeriods = Array.from(periodMap.keys()).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+            let grandTotalDebit = 0;
+            let grandTotalCredit = 0;
+
+            sortedPeriods.forEach((period) => {
+              const periodLines = periodMap.get(period)!;
+              let periodDebit = 0;
+              let periodCredit = 0;
+              allEntries.push({ key: keyIdx++, period, line: '', account: '', description: '', debit: 0, credit: 0, isGroupHeader: true });
+
+              periodLines.forEach((l) => {
+                const amt = l.amount || 0;
+                allEntries.push({ key: keyIdx++, period, line: `Line ${l.lineNumber}`, account: l.distributionCombination || l.distributionSet || '—', description: l.description || l.type || 'Item', debit: amt, credit: 0 });
+                periodDebit += amt;
+              });
+
+              const periodLineTax = periodLines.reduce((sum, l) => sum + Math.round((l.amount || 0) * (getTaxRateForClassification(l.taxClassification) / 100) * 100) / 100, 0);
+              if (periodLineTax > 0) {
+                allEntries.push({ key: keyIdx++, period, line: 'Tax', account: 'Tax Recoverable', description: 'Input VAT', debit: periodLineTax, credit: 0 });
+                periodDebit += periodLineTax;
+              }
+
+              periodLines.forEach((l) => {
+                const amt = l.amount || 0;
+                allEntries.push({ key: keyIdx++, period, line: `Line ${l.lineNumber}`, account: liabilityDist, description: `AP — ${l.description || l.type || 'Item'}`, debit: 0, credit: amt });
+                periodCredit += amt;
+              });
+
+              if (periodLineTax > 0) {
+                allEntries.push({ key: keyIdx++, period, line: 'Tax', account: liabilityDist, description: 'AP — Input VAT', debit: 0, credit: periodLineTax });
+                periodCredit += periodLineTax;
+              }
+
+              allEntries.push({ key: keyIdx++, period, line: '', account: '', description: '', debit: 0, credit: 0, isPeriodSubtotal: true, subtotalDebit: periodDebit, subtotalCredit: periodCredit });
+              grandTotalDebit += periodDebit;
+              grandTotalCredit += periodCredit;
+            });
+
+            if (allEntries.length === 0) return <Text type="secondary">No invoice lines with amounts.</Text>;
+            return renderAcctTable(allEntries, periodMap as Map<string, any[]>, grandTotalDebit, grandTotalCredit, sortedPeriods);
+          };
+
+          // ── Tab 2: Multiperiod (Accrual) Accounting ──────────────────────────
+          const buildMultiperiodAccounting = () => {
+            // Only lines that have startDate + endDate + accrualAccount filled
+            const mpaLines = lines.filter((l) => l.startDate && l.endDate && l.accrualAccount && l.amount !== 0);
+            if (mpaLines.length === 0) {
+              return (
+                <div style={{ textAlign: 'center', padding: '32px 0', color: REDWOOD.neutral600 }}>
+                  <CalendarOutlined style={{ fontSize: 32, marginBottom: 8, display: 'block' }} />
+                  <div>No multiperiod accounting lines.</div>
+                  <div style={{ fontSize: 12, marginTop: 4 }}>Enter Start Date, End Date and Accrual Account on an invoice line to generate accrual entries.</div>
+                </div>
+              );
+            }
+
+            const allEntries: AcctEntry[] = [];
+            let keyIdx = 0;
+            // Collect all periods across all MPA lines for the period map (used by header renderer — pass empty for MPA)
+            const periodMap = new Map<string, any[]>();
+            let grandTotalDebit = 0;
+            let grandTotalCredit = 0;
+            const allPeriods = new Set<string>();
+
+            mpaLines.forEach((line) => {
+              const start = dayjs(line.startDate, 'DD-MMM-YYYY');
+              const end   = dayjs(line.endDate,   'DD-MMM-YYYY');
+              if (!start.isValid() || !end.isValid() || end.isBefore(start)) return;
+
+              const totalDays  = end.diff(start, 'day') + 1;
+              const totalAmt   = line.amount;
+              const expAccount = line.distributionCombination || line.distributionSet || '—';
+              const accrualAcc = line.accrualAccount;
+              const lineDesc   = line.description || `Line ${line.lineNumber}`;
+
+              // Build per-month slices
+              type Slice = { period: string; days: number; amount: number };
+              const slices: Slice[] = [];
+              let cursor = start.startOf('month');
+              let remaining = totalAmt;
+
+              while (!cursor.isAfter(end, 'month')) {
+                const sliceStart = cursor.isBefore(start) ? start : cursor;
+                const sliceEnd   = cursor.endOf('month').isAfter(end) ? end : cursor.endOf('month');
+                const days       = sliceEnd.diff(sliceStart, 'day') + 1;
+                const isLast     = cursor.add(1, 'month').startOf('month').isAfter(end);
+                const amount     = isLast ? Math.round(remaining * 100) / 100 : Math.round(totalAmt * days / totalDays * 100) / 100;
+                remaining        = Math.round((remaining - amount) * 100) / 100;
+                slices.push({ period: cursor.format('MMM-YYYY'), days, amount });
+                cursor = cursor.add(1, 'month').startOf('month');
+              }
+
+              // Line header spanning all periods for this invoice line
+              allEntries.push({
+                key: keyIdx++,
+                period: `Line ${line.lineNumber} — ${lineDesc} | ${line.startDate} → ${line.endDate} | ${totalDays} days | ${formatAmount(totalAmt)}`,
+                line: '', account: '', description: '', debit: 0, credit: 0,
+                isGroupHeader: true,
+              });
+
+              let lineTotalDebit = 0;
+              let lineTotalCredit = 0;
+
+              slices.forEach(({ period, days, amount }) => {
+                allPeriods.add(period);
+                // Dr Expense
+                allEntries.push({
+                  key: keyIdx++, period,
+                  line: `Line ${line.lineNumber}`,
+                  account: expAccount,
+                  description: `Dr Expense — ${lineDesc} (${days}d)`,
+                  debit: amount, credit: 0,
+                });
+                // Cr Accrual/Prepaid
+                allEntries.push({
+                  key: keyIdx++, period,
+                  line: `Line ${line.lineNumber}`,
+                  account: accrualAcc,
+                  description: `Cr Accrual — ${lineDesc} (${days}d)`,
+                  debit: 0, credit: amount,
+                });
+                lineTotalDebit  += amount;
+                lineTotalCredit += amount;
+              });
+
+              // Line subtotal
+              allEntries.push({
+                key: keyIdx++, period: `Line ${line.lineNumber}`,
+                line: '', account: '', description: '',
+                debit: 0, credit: 0,
+                isPeriodSubtotal: true,
+                subtotalDebit: lineTotalDebit, subtotalCredit: lineTotalCredit,
+              });
+
+              grandTotalDebit  += lineTotalDebit;
+              grandTotalCredit += lineTotalCredit;
+            });
+
+            return renderAcctTable(allEntries, periodMap, grandTotalDebit, grandTotalCredit, Array.from(allPeriods));
+          };
+
+          const mpaCount = lines.filter((l) => l.startDate && l.endDate && l.accrualAccount && l.amount !== 0).length;
+
+          return (
+            <Tabs
+              defaultActiveKey="invoice"
+              size="small"
+              items={[
+                {
+                  key: 'invoice',
+                  label: (
+                    <span><AccountBookOutlined style={{ marginRight: 4 }} />Invoice Accounting</span>
+                  ),
+                  children: buildInvoiceAccounting(),
+                },
+                {
+                  key: 'multiperiod',
+                  label: (
+                    <span>
+                      <CalendarOutlined style={{ marginRight: 4 }} />
+                      Multiperiod Accounting
+                      {mpaCount > 0
+                        ? <Tag color="blue" style={{ marginLeft: 6, fontSize: 10 }}>{mpaCount} line{mpaCount > 1 ? 's' : ''}</Tag>
+                        : <Tag style={{ marginLeft: 6, fontSize: 10 }}>None</Tag>
+                      }
+                    </span>
+                  ),
+                  children: buildMultiperiodAccounting(),
+                },
+              ]}
+            />
           );
         })()}
       </Modal>
