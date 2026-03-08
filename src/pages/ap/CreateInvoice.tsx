@@ -744,11 +744,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const fetchInvoiceBalance = useCallback(async (invoiceId: number): Promise<number | null> => {
     setInvoiceBalanceLoading(true);
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/invoices/${invoiceId}/balance`;
+      // Use net-balance endpoint which deducts both cash payments and prepayment applications
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/${invoiceId}/net-balance`;
       const response = await fetch(url, { headers: { Accept: 'application/json' } });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
-      const bal = data.balance ?? null;
+      const bal = data.netBalance ?? data.balance ?? null;
       setInvoiceBalance(bal);
       return bal;
     } catch (error) {

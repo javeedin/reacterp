@@ -28,6 +28,13 @@ CREATE OR REPLACE PACKAGE XXAP_INVOICE_BALANCE_PKG AS
         p_invoice_payment_id IN NUMBER
     ) RETURN CLOB;
 
+    -- Get invoice net balance including prepayment applications
+    -- Returns: invoiceAmount, totalPaid, totalPrepaymentApplied, netBalance
+    -- netBalance = invoiceAmount - totalPaid - totalPrepaymentApplied
+    FUNCTION get_invoice_net_balance(
+        p_invoice_id IN NUMBER
+    ) RETURN CLOB;
+
 END XXAP_INVOICE_BALANCE_PKG;
 /
 
@@ -238,6 +245,61 @@ CREATE OR REPLACE PACKAGE BODY XXAP_INVOICE_BALANCE_PKG AS
         WHEN OTHERS THEN
             RETURN '{"valid":false,"errors":["' || REPLACE(SQLERRM, '"', '\"') || '"]}';
     END validate_void_payment;
+
+    -- ----------------------------------------------------------------
+    -- get_invoice_net_balance
+    -- Net balance = invoice_amount - cash payments - prepayment applications
+    -- ----------------------------------------------------------------
+    FUNCTION get_invoice_net_balance(
+        p_invoice_id IN NUMBER
+    ) RETURN CLOB IS
+        v_invoice_amount           NUMBER;
+        v_total_paid               NUMBER := 0;
+        v_total_prepayment_applied NUMBER := 0;
+        v_net_balance              NUMBER;
+        v_result                   CLOB;
+    BEGIN
+        -- Invoice amount
+        SELECT INVOICE_AMOUNT
+        INTO   v_invoice_amount
+        FROM   RR_AP_INVOICES_ALL
+        WHERE  INVOICE_ID = p_invoice_id;
+
+        -- Cash payments, excluding voided
+        SELECT NVL(SUM(AMOUNT_PAID_INVOICE_CURRENCY), 0)
+        INTO   v_total_paid
+        FROM   V_RR_AP_RELATED_PAYMENTS_ALL
+        WHERE  INVOICE_ID = p_invoice_id
+          AND  NVL(PAYMENT_STATUS, 'Active') != 'Voided';
+
+        -- Prepayment applications on this invoice, excluding cancelled
+        SELECT NVL(SUM(APPLIED_AMOUNT), 0)
+        INTO   v_total_prepayment_applied
+        FROM   RR_AP_APPLIED_PREPAYMENTS
+        WHERE  INVOICE_ID = p_invoice_id
+          AND  NVL(STATUS, 'Applied') != 'Cancelled';
+
+        v_net_balance := v_invoice_amount - v_total_paid - v_total_prepayment_applied;
+
+        SELECT JSON_OBJECT(
+            'invoiceId'               VALUE p_invoice_id,
+            'invoiceAmount'           VALUE v_invoice_amount,
+            'totalPaid'               VALUE v_total_paid,
+            'totalPrepaymentApplied'  VALUE v_total_prepayment_applied,
+            'netBalance'              VALUE v_net_balance
+            RETURNING CLOB
+        )
+        INTO v_result
+        FROM DUAL;
+
+        RETURN v_result;
+
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            RETURN '{"status":"error","message":"Invoice not found"}';
+        WHEN OTHERS THEN
+            RETURN '{"status":"error","message":"' || REPLACE(SQLERRM, '"', '\"') || '"}';
+    END get_invoice_net_balance;
 
 END XXAP_INVOICE_BALANCE_PKG;
 /

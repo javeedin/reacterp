@@ -447,6 +447,66 @@ ENDPOINTS:
 */
 
 -- =====================================================
+-- GET Handler - Invoice Net Balance (includes prepayment applications)
+-- GET /ap/invoices/:invoice_id/net-balance
+-- Returns: invoiceAmount, totalPaid, totalPrepaymentApplied, netBalance
+-- =====================================================
+BEGIN
+    ORDS.DELETE_TEMPLATE(p_module_name => 'ap', p_pattern => 'invoices/:invoice_id/net-balance');
+    COMMIT;
+EXCEPTION WHEN OTHERS THEN NULL;
+END;
+/
+
+BEGIN
+    ORDS.DEFINE_TEMPLATE(
+        p_module_name => 'ap',
+        p_pattern     => 'invoices/:invoice_id/net-balance',
+        p_priority    => 0,
+        p_etag_type   => 'HASH',
+        p_comments    => 'Invoice net balance after cash payments and prepayment applications'
+    );
+    COMMIT;
+END;
+/
+
+BEGIN
+    ORDS.DEFINE_HANDLER(
+        p_module_name    => 'ap',
+        p_pattern        => 'invoices/:invoice_id/net-balance',
+        p_method         => 'GET',
+        p_source_type    => 'plsql/block',
+        p_source         => q'[
+DECLARE
+    v_result  CLOB;
+    v_offset  NUMBER := 1;
+    v_chunk   NUMBER := 30000;
+    v_length  NUMBER;
+BEGIN
+    v_result := XXAP_INVOICE_BALANCE_PKG.get_invoice_net_balance(
+        p_invoice_id => TO_NUMBER(:invoice_id)
+    );
+
+    OWA_UTIL.MIME_HEADER('application/json', FALSE);
+    v_length := NVL(DBMS_LOB.GETLENGTH(v_result), 0);
+    WHILE v_offset <= v_length LOOP
+        HTP.PRN(DBMS_LOB.SUBSTR(v_result, v_chunk, v_offset));
+        v_offset := v_offset + v_chunk;
+    END LOOP;
+EXCEPTION
+    WHEN OTHERS THEN
+        :status_code := 500;
+        HTP.P('{"status":"error","message":"' || REPLACE(SQLERRM, '"', '\"') || '"}');
+END;
+]',
+        p_items_per_page => 0,
+        p_comments       => 'Net balance = invoiceAmount - cashPayments - prepaymentApplications'
+    );
+    COMMIT;
+END;
+/
+
+-- =====================================================
 -- Sample curl commands for testing:
 -- =====================================================
 /*
