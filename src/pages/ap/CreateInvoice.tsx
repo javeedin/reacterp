@@ -1162,6 +1162,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     const supplierId = form.getFieldValue('supplierId');
     const invoiceId = savedInvoiceId || initialData?.invoiceId;
     if (!supplierId) { message.warning('Select a supplier first.'); return; }
+    if (!invoiceId) { message.warning('Please save the invoice before applying a prepayment.'); return; }
     setPrepaymentLoading(true);
     setPrepaymentModalVisible(true);
     setSelectedAvailKeys([]);
@@ -7032,15 +7033,27 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             </Text>
             <Space>
               <Button onClick={() => setPrepaymentAPIDrawerVisible(false)}>Close</Button>
-              <Button
-                type="primary"
-                icon={<DollarOutlined />}
-                disabled={availablePrepayments.length === 0}
-                onClick={() => { setPrepaymentAPIDrawerVisible(false); openPrepaymentModal(); }}
-                style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
-              >
-                Apply Prepayments ({availablePrepayments.length})
-              </Button>
+              <Tooltip title={
+                !(savedInvoiceId || initialData?.invoiceId)
+                  ? 'Save the invoice first before applying a prepayment'
+                  : availablePrepayments.length === 0
+                  ? 'No prepayments available for this supplier'
+                  : ''
+              }>
+                <Button
+                  type="primary"
+                  icon={<DollarOutlined />}
+                  disabled={availablePrepayments.length === 0 || !(savedInvoiceId || initialData?.invoiceId)}
+                  onClick={() => { setPrepaymentAPIDrawerVisible(false); openPrepaymentModal(); }}
+                  style={
+                    availablePrepayments.length > 0 && (savedInvoiceId || initialData?.invoiceId)
+                      ? { background: REDWOOD.success, borderColor: REDWOOD.success }
+                      : {}
+                  }
+                >
+                  Apply Prepayments ({availablePrepayments.length})
+                </Button>
+              </Tooltip>
             </Space>
           </div>
         }
