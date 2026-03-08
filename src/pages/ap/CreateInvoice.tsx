@@ -6927,19 +6927,35 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   title={
                     <Space>
                       <ApiOutlined style={{ color: REDWOOD.info }} />
-                      <span style={{ fontSize: 13 }}>Apply Prepayment — API Endpoint</span>
+                      <span style={{ fontSize: 13 }}>Prepayment — API Endpoints</span>
                     </Space>
                   }
                   content={
-                    <div style={{ width: 480, maxHeight: 420, overflowY: 'auto' }}>
+                    <div style={{ width: 500, maxHeight: 480, overflowY: 'auto' }}>
+                      {/* GET Available */}
+                      <Text type="secondary" style={{ fontSize: 11 }}>GET — Available Prepayments</Text>
                       <div style={{ marginBottom: 8 }}>
-                        <Text type="secondary" style={{ fontSize: 11 }}>METHOD</Text>
-                        <div>
-                          <Tag color="blue" style={{ fontFamily: 'monospace', fontSize: 12 }}>POST</Tag>
-                          <Text code style={{ fontSize: 11, wordBreak: 'break-all' }}>
-                            {APEX_DB_CONFIG.baseUrl}/ap/invoices/appliedprepayments
-                          </Text>
-                        </div>
+                        <Tag color="green" style={{ fontFamily: 'monospace', fontSize: 12 }}>GET</Tag>
+                        <Text code style={{ fontSize: 11, wordBreak: 'break-all' }}>
+                          {APEX_DB_CONFIG.baseUrl}/ap/prepayments/available?P_SUPPLIER_ID={form.getFieldValue('supplierId') ?? '<supplier_id>'}
+                        </Text>
+                      </div>
+                      {/* GET Applied */}
+                      <Text type="secondary" style={{ fontSize: 11 }}>GET — Applied Prepayments</Text>
+                      <div style={{ marginBottom: 8 }}>
+                        <Tag color="green" style={{ fontFamily: 'monospace', fontSize: 12 }}>GET</Tag>
+                        <Text code style={{ fontSize: 11, wordBreak: 'break-all' }}>
+                          {APEX_DB_CONFIG.baseUrl}/ap/invoices/appliedprepayments?P_INVOICE_ID={savedInvoiceId ?? initialData?.invoiceId ?? '<invoice_id>'}
+                        </Text>
+                      </div>
+                      <Divider style={{ margin: '8px 0' }} />
+                      {/* POST Apply */}
+                      <Text type="secondary" style={{ fontSize: 11 }}>POST — Apply Prepayment</Text>
+                      <div style={{ marginBottom: 8 }}>
+                        <Tag color="blue" style={{ fontFamily: 'monospace', fontSize: 12 }}>POST</Tag>
+                        <Text code style={{ fontSize: 11, wordBreak: 'break-all' }}>
+                          {APEX_DB_CONFIG.baseUrl}/ap/invoices/appliedprepayments
+                        </Text>
                       </div>
                       <Divider style={{ margin: '8px 0' }} />
                       <Text type="secondary" style={{ fontSize: 11 }}>SAMPLE REQUEST BODY (first selected row)</Text>
