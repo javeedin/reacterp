@@ -1204,7 +1204,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // Fetch balance (InvoiceAmount / TotalApplied / AvailableBalance) for a prepayment invoice
   const fetchPrepaymentBalance = useCallback(async (prepaymentInvoiceId: number) => {
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/ap/prepayments/balance?P_PREPAYMENT_INVOICE_ID=${prepaymentInvoiceId}`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/applied-prepayments/balances?prepayment_invoice_id=${prepaymentInvoiceId}`;
       const res = await fetch(url, { headers: { Accept: 'application/json' } });
       if (!res.ok) return;
       const json = await res.json();
@@ -1223,7 +1223,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // Fetch standard invoices that have applied this prepayment (source: PREPAYMENT_INVOICE_ID)
   const fetchAppliedInvoices = useCallback(async (prepaymentInvoiceId: number) => {
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/ap/prepayments/applications?P_PREPAYMENT_INVOICE_ID=${prepaymentInvoiceId}`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/applied-prepayments/by-prepayment/${prepaymentInvoiceId}`;
       const res = await fetch(url, { headers: { Accept: 'application/json' } });
       if (!res.ok) return;
       const json = await res.json();
@@ -4113,7 +4113,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                       title={
                         <span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>
                           {isPrepaymentInvoice
-                            ? `${APEX_DB_CONFIG.baseUrl}/ap/prepayments/applications?P_PREPAYMENT_INVOICE_ID=${initialData?.invoiceId ?? ''}`
+                            ? `${APEX_DB_CONFIG.baseUrl}/ap/applied-prepayments/by-prepayment/${initialData?.invoiceId ?? ''}`
                             : `${APEX_DB_CONFIG.baseUrl}/ap/invoices/appliedprepayments?P_INVOICE_ID=${savedInvoiceId ?? initialData?.invoiceId ?? ''}`}
                         </span>
                       }
