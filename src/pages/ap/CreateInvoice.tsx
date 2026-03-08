@@ -1258,6 +1258,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const openPrepaymentModal = useCallback(async () => {
     const supplierId = form.getFieldValue('supplierId');
     const invoiceId = savedInvoiceId || initialData?.invoiceId;
+    console.log('[Prepayment Debug]', {
+      supplierId,
+      invoiceId,
+      savedInvoiceId,
+      initialDataSupplierId: initialData?.supplierId,
+      allFormValues: form.getFieldsValue(),
+    });
     if (!supplierId) { message.warning('Select a supplier first.'); return; }
     if (!invoiceId) { message.warning('Please save the invoice before applying a prepayment.'); return; }
     setPrepaymentLoading(true);
