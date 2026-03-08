@@ -4674,7 +4674,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 const debitDesc = isMpa
                   ? `Prepaid/Accrual — ${l.description || l.type || 'Item'}`
                   : (l.description || l.type || 'Item');
-                const itemClass = isMpa ? 'Prepaid / Accrual' : 'Item expense';
+                const itemClass = isMpa ? 'Deferred item expense' : 'Item expense';
                 allEntries.push({ key: keyIdx++, period, line: `Line ${l.lineNumber}`, account: debitAccount, description: debitDesc, lineClass: itemClass, debit: amt, credit: 0 });
                 periodDebit += amt;
               });
