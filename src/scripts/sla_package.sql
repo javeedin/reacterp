@@ -76,49 +76,6 @@ END RR_SLA_PKG;
 -- =============================================================================
 CREATE OR REPLACE PACKAGE BODY RR_SLA_PKG AS
 
-  -- ── Private helper: parse a single line JSON object and INSERT it ──────────
-  PROCEDURE p_insert_line(
-    p_header_id   IN NUMBER,
-    p_line_json   IN CLOB,
-    p_currency    IN VARCHAR2,
-    p_exch_rate   IN NUMBER,
-    p_created_by  IN VARCHAR2,
-    p_line_count  IN OUT NUMBER
-  ) IS
-  BEGIN
-    p_line_count := p_line_count + 1;
-
-    INSERT INTO RR_SLA_ACCOUNTING_LINES (
-      HEADER_ID,    LINE_NUMBER,    LINE_TYPE,          ACCOUNTING_CLASS,
-      ACCOUNT_COMBINATION,
-      ENTERED_DR,   ENTERED_CR,     ACCOUNTED_DR,       ACCOUNTED_CR,
-      CURRENCY_CODE, EXCHANGE_RATE, DESCRIPTION,
-      SOURCE_LINE_ID, SOURCE_LINE_NUMBER,
-      PARTY_ID,      PARTY_TYPE,
-      CREATED_BY,    CREATION_DATE
-    ) VALUES (
-      p_header_id,
-      TO_NUMBER(JSON_VALUE(p_line_json, '$.lineNumber')),
-      JSON_VALUE(p_line_json, '$.lineType'),
-      JSON_VALUE(p_line_json, '$.accountingClass'),
-      JSON_VALUE(p_line_json, '$.accountCombination'),
-      NVL(TO_NUMBER(JSON_VALUE(p_line_json, '$.enteredDr')),   0),
-      NVL(TO_NUMBER(JSON_VALUE(p_line_json, '$.enteredCr')),   0),
-      NVL(TO_NUMBER(JSON_VALUE(p_line_json, '$.accountedDr')), 0),
-      NVL(TO_NUMBER(JSON_VALUE(p_line_json, '$.accountedCr')), 0),
-      NVL(JSON_VALUE(p_line_json, '$.currencyCode'),  p_currency),
-      NVL(TO_NUMBER(JSON_VALUE(p_line_json, '$.exchangeRate')), p_exch_rate),
-      JSON_VALUE(p_line_json, '$.description'),
-      TO_NUMBER(JSON_VALUE(p_line_json, '$.sourceLineId')),
-      TO_NUMBER(JSON_VALUE(p_line_json, '$.sourceLineNumber')),
-      TO_NUMBER(JSON_VALUE(p_line_json, '$.partyId')),
-      JSON_VALUE(p_line_json, '$.partyType'),
-      p_created_by, SYSDATE
-    );
-    -- Trigger RR_SLA_LINE_SEG_TRG auto-parses ACCOUNT_COMBINATION → SEGMENT1-15
-  END p_insert_line;
-
-
   -- ── Private helper: error JSON shorthand ────────────────────────────────────
   FUNCTION p_err(p_msg IN VARCHAR2) RETURN CLOB IS
   BEGIN
@@ -157,7 +114,6 @@ CREATE OR REPLACE PACKAGE BODY RR_SLA_PKG AS
     v_created_by  VARCHAR2(100);
     j_header      CLOB;
     j_lines       CLOB;
-    j_line        CLOB;
     v_line_count  NUMBER := 0;
   BEGIN
     -- ── Parse header object ──────────────────────────────────────────────────
@@ -222,10 +178,57 @@ CREATE OR REPLACE PACKAGE BODY RR_SLA_PKG AS
       v_created_by, SYSDATE,     v_created_by, SYSDATE
     ) RETURNING HEADER_ID INTO v_header_id;
 
-    -- ── Insert lines ─────────────────────────────────────────────────────────
-    FOR i IN 0 .. JSON_ARRAY_LENGTH(j_lines) - 1 LOOP
-      j_line := JSON_QUERY(j_lines, '$[' || i || ']');
-      p_insert_line(v_header_id, j_line, v_currency, v_exch_rate, v_created_by, v_line_count);
+    -- ── Insert lines via JSON_TABLE cursor (Oracle-native array iteration) ────
+    -- JSON_TABLE '$[*]' flattens the lines array; FOR ORDINALITY gives row order.
+    FOR r IN (
+      SELECT jt.line_number,     jt.line_type,       jt.acct_class,
+             jt.account_combo,   jt.entered_dr,      jt.entered_cr,
+             jt.accounted_dr,    jt.accounted_cr,    jt.currency_code,
+             jt.exchange_rate,   jt.description,
+             jt.source_line_id,  jt.source_line_num,
+             jt.party_id,        jt.party_type
+      FROM JSON_TABLE(j_lines, '$[*]'
+        COLUMNS (
+          line_number      NUMBER         PATH '$.lineNumber',
+          line_type        VARCHAR2(2)    PATH '$.lineType',
+          acct_class       VARCHAR2(60)   PATH '$.accountingClass',
+          account_combo    VARCHAR2(200)  PATH '$.accountCombination',
+          entered_dr       NUMBER         PATH '$.enteredDr'       DEFAULT 0 ON ERROR,
+          entered_cr       NUMBER         PATH '$.enteredCr'       DEFAULT 0 ON ERROR,
+          accounted_dr     NUMBER         PATH '$.accountedDr'     DEFAULT 0 ON ERROR,
+          accounted_cr     NUMBER         PATH '$.accountedCr'     DEFAULT 0 ON ERROR,
+          currency_code    VARCHAR2(15)   PATH '$.currencyCode',
+          exchange_rate    NUMBER         PATH '$.exchangeRate'     DEFAULT 1 ON ERROR,
+          description      VARCHAR2(500)  PATH '$.description',
+          source_line_id   NUMBER         PATH '$.sourceLineId',
+          source_line_num  NUMBER         PATH '$.sourceLineNumber',
+          party_id         NUMBER         PATH '$.partyId',
+          party_type       VARCHAR2(30)   PATH '$.partyType'
+        )
+      ) jt
+    ) LOOP
+      INSERT INTO RR_SLA_ACCOUNTING_LINES (
+        HEADER_ID,        LINE_NUMBER,        LINE_TYPE,          ACCOUNTING_CLASS,
+        ACCOUNT_COMBINATION,
+        ENTERED_DR,       ENTERED_CR,         ACCOUNTED_DR,       ACCOUNTED_CR,
+        CURRENCY_CODE,    EXCHANGE_RATE,      DESCRIPTION,
+        SOURCE_LINE_ID,   SOURCE_LINE_NUMBER,
+        PARTY_ID,         PARTY_TYPE,
+        CREATED_BY,       CREATION_DATE
+      ) VALUES (
+        v_header_id,
+        r.line_number,                         r.line_type,        r.acct_class,
+        r.account_combo,
+        NVL(r.entered_dr,   0),                NVL(r.entered_cr,   0),
+        NVL(r.accounted_dr, 0),                NVL(r.accounted_cr, 0),
+        NVL(r.currency_code, v_currency),      NVL(r.exchange_rate, v_exch_rate),
+        r.description,
+        r.source_line_id,                      r.source_line_num,
+        r.party_id,                            r.party_type,
+        v_created_by, SYSDATE
+        -- Trigger RR_SLA_LINE_SEG_TRG auto-parses ACCOUNT_COMBINATION → SEGMENT1-15
+      );
+      v_line_count := v_line_count + 1;
     END LOOP;
 
     COMMIT;
