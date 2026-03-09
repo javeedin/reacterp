@@ -72,6 +72,8 @@ import {
   BankOutlined,
   PlayCircleOutlined,
   EditOutlined,
+  BugOutlined,
+  EyeOutlined,
 } from '@ant-design/icons';
 
 dayjs.extend(customParseFormat);
@@ -524,6 +526,15 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [slaGlBatchId, setSlaGlBatchId]       = useState<number | null>(null);
   const [slaGlBatchName, setSlaGlBatchName]   = useState<string | null>(null);
   const [slaGlHeaderId, setSlaGlHeaderId]     = useState<number | null>(null);
+
+  // SLA Debug Modal state
+  const [slaDebugVisible, setSlaDebugVisible]       = useState(false);
+  const [slaDebugPayload, setSlaDebugPayload]       = useState<any>(null);
+  const [slaDebugSourceId, setSlaDebugSourceId]     = useState<number | null>(null);
+  const [slaDebugGetResult, setSlaDebugGetResult]   = useState<any>(null);
+  const [slaDebugPostResult, setSlaDebugPostResult] = useState<any>(null);
+  const [slaDebugLoading, setSlaDebugLoading]       = useState<'get' | 'post' | null>(null);
+  const [slaDebugTab, setSlaDebugTab]               = useState<string>('post');
 
   // Import Lines modal
   const [importModalVisible, setImportModalVisible] = useState(false);
@@ -986,60 +997,92 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     if (!invoiceId) { message.warning('Save the invoice first before creating accounting.'); return; }
     if (slaStatus === 'POSTED') { message.warning('Accounting is already posted and locked.'); return; }
 
-    setSlaCreating(true);
+    const invoiceNumber = form.getFieldValue('invoiceNumber');
+    const invoiceDate   = form.getFieldValue('invoiceDate');
+    const currency      = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
+    const bu            = form.getFieldValue('businessUnit') || '';
+    const acctDate      = invoiceDate ? dayjs(invoiceDate).format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD');
+    const periodName    = invoiceDate ? dayjs(invoiceDate).format('MMM-YYYY') : dayjs().format('MMM-YYYY');
+
+    const slaLines_ = buildSlaLines();
+    if (slaLines_.length === 0) { message.warning('No invoice lines with amounts to account.'); return; }
+
+    const payload = {
+      header: {
+        moduleName:       'AP',
+        sourceTable:      'AP_INVOICES',
+        sourceId:         invoiceId,
+        sourceNumber:     invoiceNumber,
+        sourceType:       form.getFieldValue('invoiceType') || 'STANDARD',
+        eventTypeCode:    'INVOICE_VALIDATED',
+        eventDate:        acctDate,
+        accountingDate:   acctDate,
+        periodName,
+        currencyCode:     currency,
+        ledgerCurrency:   'AED',
+        exchangeRate:     1,
+        exchangeRateType: 'Corporate',
+        businessUnit:     bu,
+        description:      `AP Invoice ${invoiceNumber}`,
+        createdBy:        'user',
+      },
+      lines: slaLines_,
+    };
+
+    // Open debug modal to preview & execute
+    setSlaDebugPayload(payload);
+    setSlaDebugSourceId(invoiceId);
+    setSlaDebugGetResult(null);
+    setSlaDebugPostResult(null);
+    setSlaDebugTab('post');
+    setSlaDebugVisible(true);
+  }, [savedInvoiceId, initialData, form, headerValues, lines, buildSlaLines, slaStatus]);
+
+  // ── SLA Debug: Execute POST ───────────────────────────────────────────────
+  const handleDebugPost = useCallback(async () => {
+    if (!slaDebugPayload) return;
+    setSlaDebugLoading('post');
+    const url = `${APEX_DB_CONFIG.baseUrl}/sla/accounting/create`;
     try {
-      const invoiceNumber = form.getFieldValue('invoiceNumber');
-      const invoiceDate   = form.getFieldValue('invoiceDate');
-      const currency      = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
-      const bu            = form.getFieldValue('businessUnit') || '';
-      const acctDate      = invoiceDate ? dayjs(invoiceDate).format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD');
-      const periodName    = invoiceDate ? dayjs(invoiceDate).format('MMM-YYYY') : dayjs().format('MMM-YYYY');
-
-      const slaLines_ = buildSlaLines();
-      if (slaLines_.length === 0) { message.warning('No invoice lines with amounts to account.'); setSlaCreating(false); return; }
-
-      const payload = {
-        header: {
-          moduleName:       'AP',
-          sourceTable:      'AP_INVOICES',
-          sourceId:         invoiceId,
-          sourceNumber:     invoiceNumber,
-          sourceType:       form.getFieldValue('invoiceType') || 'STANDARD',
-          eventTypeCode:    'INVOICE_VALIDATED',
-          eventDate:        acctDate,
-          accountingDate:   acctDate,
-          periodName,
-          currencyCode:     currency,
-          ledgerCurrency:   'AED',
-          exchangeRate:     1,
-          exchangeRateType: 'Corporate',
-          businessUnit:     bu,
-          description:      `AP Invoice ${invoiceNumber}`,
-          createdBy:        'user',
-        },
-        lines: slaLines_,
-      };
-
-      const url = `${APEX_DB_CONFIG.baseUrl}/sla/accounting/create`;
       const res = await fetch(url, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body:    JSON.stringify(payload),
+        body:    JSON.stringify(slaDebugPayload),
       });
-      if (!res.ok) { const t = await res.text(); throw new Error(`HTTP ${res.status}: ${t}`); }
       const data = await res.json();
-      setSlaHeaderId(data.headerId);
-      setSlaStatus('DRAFT');
-      setSlaPostingStatus('UNPOSTED');
-      setSlaLines(slaLines_);
-      message.success(`Accounting created (Header ID: ${data.headerId}) — ${slaLines_.length} lines`);
-      setSlaModalVisible(true);
+      setSlaDebugPostResult({ status: res.status, ok: res.ok, data });
+      if (res.ok) {
+        setSlaHeaderId(data.headerId);
+        setSlaStatus('DRAFT');
+        setSlaPostingStatus('UNPOSTED');
+        setSlaLines(slaDebugPayload.lines || []);
+        message.success(`Accounting created (Header ID: ${data.headerId}) — ${(slaDebugPayload.lines || []).length} lines`);
+      } else {
+        message.error(`Create accounting failed: HTTP ${res.status}`);
+      }
     } catch (err: any) {
-      message.error(`Failed to create accounting: ${err.message}`);
+      setSlaDebugPostResult({ status: 0, ok: false, error: err.message });
+      message.error(`Failed: ${err.message}`);
     } finally {
-      setSlaCreating(false);
+      setSlaDebugLoading(null);
     }
-  }, [savedInvoiceId, initialData, form, headerValues, lines, buildSlaLines, slaStatus]);
+  }, [slaDebugPayload]);
+
+  // ── SLA Debug: Execute GET ────────────────────────────────────────────────
+  const handleDebugGet = useCallback(async () => {
+    if (!slaDebugSourceId) return;
+    setSlaDebugLoading('get');
+    const url = `${APEX_DB_CONFIG.baseUrl}/sla/accounting/exists?sourceTable=AP_INVOICES&sourceId=${slaDebugSourceId}`;
+    try {
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      const data = await res.json();
+      setSlaDebugGetResult({ status: res.status, ok: res.ok, data });
+    } catch (err: any) {
+      setSlaDebugGetResult({ status: 0, ok: false, error: err.message });
+    } finally {
+      setSlaDebugLoading(null);
+    }
+  }, [slaDebugSourceId]);
 
   // ── SLA: Post to Ledger ──────────────────────────────────────────────────
   const handlePostToLedger = useCallback(async () => {
@@ -8099,6 +8142,192 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         )}
       </Modal>
       {/* ── End SLA Modal ─────────────────────────────────────────────────── */}
+
+      {/* ── SLA Debug Modal ───────────────────────────────────────────────── */}
+      <Modal
+        title={
+          <Space>
+            <BugOutlined style={{ color: '#fa8c16' }} />
+            <span style={{ fontWeight: 700 }}>Create Accounting — API Debug</span>
+            <Tag color="orange" style={{ fontSize: 11 }}>Developer Tool</Tag>
+          </Space>
+        }
+        open={slaDebugVisible}
+        onCancel={() => setSlaDebugVisible(false)}
+        footer={
+          <Space>
+            {slaDebugPostResult?.ok && (
+              <Button
+                type="primary"
+                icon={<EyeOutlined />}
+                onClick={() => { setSlaDebugVisible(false); setSlaModalVisible(true); }}
+                style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+              >
+                View Accounting Lines
+              </Button>
+            )}
+            <Button onClick={() => setSlaDebugVisible(false)}>Close</Button>
+          </Space>
+        }
+        width={960}
+        styles={{ body: { padding: '16px 24px', maxHeight: '75vh', overflowY: 'auto' } }}
+        destroyOnClose
+      >
+        <Tabs
+          activeKey={slaDebugTab}
+          onChange={(k) => setSlaDebugTab(k)}
+          type="card"
+          items={[
+            {
+              key: 'post',
+              label: (
+                <Space size={4}>
+                  <Tag color="blue" style={{ margin: 0, fontWeight: 700, fontSize: 11 }}>POST</Tag>
+                  <span>Create Accounting</span>
+                </Space>
+              ),
+              children: (
+                <div>
+                  {/* Endpoint */}
+                  <div style={{ marginBottom: 12, padding: '8px 12px', background: '#f0f5ff', borderRadius: 6, border: '1px solid #adc6ff' }}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>ENDPOINT</Text>
+                    <Text code style={{ fontSize: 12, wordBreak: 'break-all' }}>
+                      POST {APEX_DB_CONFIG.baseUrl}/sla/accounting/create
+                    </Text>
+                  </div>
+
+                  {/* Headers */}
+                  <div style={{ marginBottom: 12, padding: '8px 12px', background: '#f6ffed', borderRadius: 6, border: '1px solid #b7eb8f' }}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>HEADERS</Text>
+                    <Text code style={{ fontSize: 11 }}>Content-Type: application/json</Text><br />
+                    <Text code style={{ fontSize: 11 }}>Accept: application/json</Text>
+                  </div>
+
+                  {/* Request Body */}
+                  <div style={{ marginBottom: 12 }}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 6, fontWeight: 600 }}>REQUEST BODY</Text>
+                    <pre style={{
+                      background: '#1e1e1e',
+                      color: '#d4d4d4',
+                      padding: 14,
+                      borderRadius: 6,
+                      fontSize: 11,
+                      lineHeight: 1.6,
+                      overflow: 'auto',
+                      maxHeight: 280,
+                      margin: 0,
+                      fontFamily: 'monospace',
+                    }}>
+                      {JSON.stringify(slaDebugPayload, null, 2)}
+                    </pre>
+                  </div>
+
+                  {/* Execute button */}
+                  <Button
+                    type="primary"
+                    icon={<SendOutlined />}
+                    loading={slaDebugLoading === 'post'}
+                    onClick={handleDebugPost}
+                    disabled={!!slaDebugPostResult?.ok}
+                    style={{ marginBottom: 12 }}
+                  >
+                    {slaDebugPostResult?.ok ? 'Posted Successfully' : 'Execute POST'}
+                  </Button>
+
+                  {/* Response */}
+                  {slaDebugPostResult && (
+                    <div>
+                      <div style={{ marginBottom: 6 }}>
+                        <Tag color={slaDebugPostResult.ok ? 'success' : 'error'} style={{ fontWeight: 700 }}>
+                          HTTP {slaDebugPostResult.status}
+                        </Tag>
+                        <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>RESPONSE</Text>
+                      </div>
+                      <pre style={{
+                        background: slaDebugPostResult.ok ? '#001529' : '#2b0000',
+                        color: slaDebugPostResult.ok ? '#52c41a' : '#ff7875',
+                        padding: 14,
+                        borderRadius: 6,
+                        fontSize: 11,
+                        lineHeight: 1.6,
+                        overflow: 'auto',
+                        maxHeight: 200,
+                        margin: 0,
+                        fontFamily: 'monospace',
+                      }}>
+                        {JSON.stringify(slaDebugPostResult.data ?? slaDebugPostResult.error, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              ),
+            },
+            {
+              key: 'get',
+              label: (
+                <Space size={4}>
+                  <Tag color="green" style={{ margin: 0, fontWeight: 700, fontSize: 11 }}>GET</Tag>
+                  <span>Check Accounting</span>
+                </Space>
+              ),
+              children: (
+                <div>
+                  {/* Endpoint */}
+                  <div style={{ marginBottom: 12, padding: '8px 12px', background: '#f6ffed', borderRadius: 6, border: '1px solid #b7eb8f' }}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>ENDPOINT</Text>
+                    <Text code style={{ fontSize: 12, wordBreak: 'break-all' }}>
+                      GET {APEX_DB_CONFIG.baseUrl}/sla/accounting/exists?sourceTable=AP_INVOICES&sourceId={slaDebugSourceId}
+                    </Text>
+                  </div>
+
+                  {/* Headers */}
+                  <div style={{ marginBottom: 12, padding: '8px 12px', background: '#f0f5ff', borderRadius: 6, border: '1px solid #adc6ff' }}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>HEADERS</Text>
+                    <Text code style={{ fontSize: 11 }}>Accept: application/json</Text>
+                  </div>
+
+                  {/* Execute button */}
+                  <Button
+                    icon={<ReloadOutlined />}
+                    loading={slaDebugLoading === 'get'}
+                    onClick={handleDebugGet}
+                    style={{ marginBottom: 12, borderColor: '#52c41a', color: '#52c41a' }}
+                  >
+                    Execute GET
+                  </Button>
+
+                  {/* Response */}
+                  {slaDebugGetResult && (
+                    <div>
+                      <div style={{ marginBottom: 6 }}>
+                        <Tag color={slaDebugGetResult.ok ? 'success' : 'error'} style={{ fontWeight: 700 }}>
+                          HTTP {slaDebugGetResult.status}
+                        </Tag>
+                        <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>RESPONSE</Text>
+                      </div>
+                      <pre style={{
+                        background: '#001529',
+                        color: '#52c41a',
+                        padding: 14,
+                        borderRadius: 6,
+                        fontSize: 11,
+                        lineHeight: 1.6,
+                        overflow: 'auto',
+                        maxHeight: 300,
+                        margin: 0,
+                        fontFamily: 'monospace',
+                      }}>
+                        {JSON.stringify(slaDebugGetResult.data ?? slaDebugGetResult.error, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              ),
+            },
+          ]}
+        />
+      </Modal>
+      {/* ── End SLA Debug Modal ───────────────────────────────────────────── */}
 
       {/* ── Prepayment API Explorer Modal ────────────────────────────────── */}
       <Modal
