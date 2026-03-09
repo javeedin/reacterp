@@ -900,7 +900,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     const liabilityDist = form.getFieldValue('liabilityDistribution') || '';
     const currency = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
     const exchangeRate = 1;
-    const supplierId = form.getFieldValue('supplierId');
+    const supplierId = Number(form.getFieldValue('supplierId')) || null;
     const activeLines = lines.filter(l => l.amount > 0);
     const result: any[] = [];
     let lineNum = 1;
@@ -1002,7 +1002,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     const currency      = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
     const bu            = form.getFieldValue('businessUnit') || '';
     const acctDate      = invoiceDate ? dayjs(invoiceDate).format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD');
-    const periodName    = invoiceDate ? dayjs(invoiceDate).format('MMM-YYYY') : dayjs().format('MMM-YYYY');
+    // Oracle GL period format is Mon-YY (e.g. Mar-26), NOT Mar-2026
+    const d             = invoiceDate ? dayjs(invoiceDate).toDate() : new Date();
+    const months        = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const periodName    = `${months[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
 
     const slaLines_ = buildSlaLines();
     if (slaLines_.length === 0) { message.warning('No invoice lines with amounts to account.'); return; }
@@ -1014,10 +1017,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         sourceId:         invoiceId,
         sourceNumber:     invoiceNumber,
         sourceType:       form.getFieldValue('invoiceType') || 'STANDARD',
-        eventTypeCode:    'INVOICE_VALIDATED',
+        eventTypeCode:    'AP_INVOICE_CREATION',
         eventDate:        acctDate,
         accountingDate:   acctDate,
         periodName,
+        ledgerId:         300000003259529,
+        ledgerName:       'BCL DIFC',
         currencyCode:     currency,
         ledgerCurrency:   'AED',
         exchangeRate:     1,
