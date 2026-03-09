@@ -3,13 +3,13 @@ import dayjs from 'dayjs';
 import {
   Card, Table, Tabs, Form, Select, DatePicker, Input, Button,
   Space, Tag, Typography, Row, Col, Tooltip, Badge, Divider,
-  Statistic, message,
+  Statistic, message, Modal, Spin, Descriptions,
 } from 'antd';
 import {
   SearchOutlined, ReloadOutlined, ArrowLeftOutlined,
   AccountBookOutlined, UnorderedListOutlined, FileSearchOutlined,
   CheckCircleOutlined, ClockCircleOutlined, WarningOutlined,
-  DollarOutlined, CalendarOutlined,
+  DollarOutlined, CalendarOutlined, EyeOutlined, FileTextOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../../config/api.config';
@@ -132,6 +132,18 @@ const ManageSLAJournals: React.FC = () => {
   // ── Active tab ───────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState('headers');
 
+  // ── GL Journal Entry modal ────────────────────────────────────────────────
+  const [glJournalModalVisible, setGlJournalModalVisible]   = useState(false);
+  const [glJournalLoading, setGlJournalLoading]             = useState(false);
+  const [glJournalData, setGlJournalData]                   = useState<any>(null);
+  const [glJournalLines, setGlJournalLines]                 = useState<any[]>([]);
+
+  // ── AP Transaction drill-down modal ──────────────────────────────────────
+  const [apTxnModalVisible, setApTxnModalVisible]   = useState(false);
+  const [apTxnLoading, setApTxnLoading]             = useState(false);
+  const [apTxnData, setApTxnData]                   = useState<any>(null);
+  const [apTxnType, setApTxnType]                   = useState<'invoice' | 'payment'>('invoice');
+
   // ── Fetch headers ────────────────────────────────────────────────────────
   const fetchHeaders = useCallback(async (values: any) => {
     setHeaderLoading(true);
@@ -209,6 +221,85 @@ const ManageSLAJournals: React.FC = () => {
     }
   }, []);
 
+  // ── View GL Journal Entry ─────────────────────────────────────────────────
+  const handleViewJournalEntry = async (record: SlaHeader) => {
+    if (!record.glHeaderId && !record.glBatchId) {
+      message.warning('No GL journal has been posted for this entry yet');
+      return;
+    }
+    setGlJournalData(null);
+    setGlJournalLines([]);
+    setGlJournalLoading(true);
+    setGlJournalModalVisible(true);
+    try {
+      // Fetch header
+      const headerUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/headers?jeHeaderId=${record.glHeaderId || ''}&limit=1`;
+      const headerRes = await fetch(headerUrl, { headers: { Accept: 'application/json' } });
+      const headerData = await headerRes.json();
+      const items = headerData.items || (Array.isArray(headerData) ? headerData : []);
+      if (items.length > 0) {
+        setGlJournalData(items[0]);
+      } else {
+        // fallback: use the SLA header info we already have
+        setGlJournalData({
+          journalName: record.glBatchName || `GL Batch ${record.glBatchId}`,
+          batchName: record.glBatchName,
+          glBatchId: record.glBatchId,
+          glHeaderId: record.glHeaderId,
+          periodName: record.periodName,
+          ledgerName: record.ledgerName,
+          effectiveDate: record.accountingDate,
+          currencyCode: record.currencyCode,
+          statusMeaning: record.postingStatus,
+          source: 'Payables',
+          category: record.eventTypeCode,
+        });
+      }
+      // Fetch journal lines
+      if (record.glHeaderId) {
+        const linesUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?jeHeaderId=${record.glHeaderId}&limit=500`;
+        const linesRes = await fetch(linesUrl, { headers: { Accept: 'application/json' } });
+        const linesData = await linesRes.json();
+        setGlJournalLines((linesData.items || linesData || []).map((l: any, i: number) => ({ ...l, key: i })));
+      }
+    } catch {
+      message.error('Failed to load GL journal entry');
+    } finally {
+      setGlJournalLoading(false);
+    }
+  };
+
+  // ── AP Transaction drill-down ─────────────────────────────────────────────
+  const handleTransactionDrilldown = async (record: SlaHeader) => {
+    const isPayment = (record.sourceTable || '').toUpperCase().includes('PAYMENT');
+    setApTxnType(isPayment ? 'payment' : 'invoice');
+    setApTxnData(null);
+    setApTxnLoading(true);
+    setApTxnModalVisible(true);
+    try {
+      let url: string;
+      if (isPayment) {
+        url = `${APEX_DB_CONFIG.baseUrl}/ap/payments?payment_number=${encodeURIComponent(record.sourceNumber)}`;
+      } else {
+        url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice?invoice_number=${encodeURIComponent(record.sourceNumber)}`;
+      }
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      const data = await res.json();
+      const items = data.items || (Array.isArray(data) ? data : [data]);
+      if (items.length > 0 && items[0]) {
+        setApTxnData(items[0]);
+      } else {
+        message.warning('Transaction not found');
+        setApTxnModalVisible(false);
+      }
+    } catch {
+      message.error('Failed to load transaction details');
+      setApTxnModalVisible(false);
+    } finally {
+      setApTxnLoading(false);
+    }
+  };
+
   // ── Header table columns ─────────────────────────────────────────────────
   const headerColumns = [
     {
@@ -223,8 +314,13 @@ const ManageSLAJournals: React.FC = () => {
       dataIndex: 'sourceNumber',
       width: 150,
       render: (v: string, r: SlaHeader) => (
-        <Tooltip title={`Header ID: ${r.headerId} | Source ID: ${r.sourceId}`}>
-          <Text strong style={{ fontSize: 12, color: REDWOOD.info }}>{v}</Text>
+        <Tooltip title={`Click to view ${r.sourceTable?.includes('PAYMENT') ? 'Payment' : 'Invoice'} | Header ID: ${r.headerId}`}>
+          <a
+            style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.info }}
+            onClick={() => handleTransactionDrilldown(r)}
+          >
+            {v}
+          </a>
         </Tooltip>
       ),
     },
@@ -299,6 +395,27 @@ const ManageSLAJournals: React.FC = () => {
       dataIndex: 'createdBy',
       width: 90,
       render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text>,
+    },
+    {
+      title: 'GL Journal',
+      key: 'viewGLJournal',
+      width: 160,
+      fixed: 'right' as const,
+      render: (_: any, r: SlaHeader) => (
+        <Button
+          size="small"
+          icon={<EyeOutlined />}
+          style={{
+            fontSize: 11,
+            color: r.glHeaderId ? REDWOOD.info : REDWOOD.neutral600,
+            borderColor: r.glHeaderId ? REDWOOD.info : REDWOOD.neutral600,
+          }}
+          disabled={!r.glHeaderId && !r.glBatchId}
+          onClick={() => handleViewJournalEntry(r)}
+        >
+          View Journal Entry
+        </Button>
+      ),
     },
   ];
 
@@ -803,6 +920,195 @@ const ManageSLAJournals: React.FC = () => {
           ]}
         />
       </Card>
+
+      {/* ── GL Journal Entry Modal ─────────────────────────────────────────── */}
+      <Modal
+        title={
+          <Space>
+            <AccountBookOutlined style={{ color: '#C74634' }} />
+            <span style={{ fontWeight: 600 }}>
+              GL Journal Entry — {glJournalData?.journalName || glJournalData?.batchName || 'Loading…'}
+            </span>
+            {glJournalData?.statusMeaning && (
+              <Tag color={glJournalData.statusMeaning === 'Posted' ? 'success' : 'warning'}>
+                {glJournalData.statusMeaning}
+              </Tag>
+            )}
+          </Space>
+        }
+        open={glJournalModalVisible}
+        onCancel={() => { setGlJournalModalVisible(false); setGlJournalData(null); setGlJournalLines([]); }}
+        footer={<Button onClick={() => setGlJournalModalVisible(false)}>Close</Button>}
+        width={1200}
+        style={{ top: 16 }}
+        styles={{ body: { padding: 0, maxHeight: 'calc(100vh - 180px)', overflowY: 'auto' } }}
+        destroyOnClose
+      >
+        {glJournalLoading ? (
+          <div style={{ textAlign: 'center', padding: 60 }}>
+            <Spin size="large" />
+            <div style={{ marginTop: 16, color: REDWOOD.neutral600 }}>Loading GL journal entry…</div>
+          </div>
+        ) : glJournalData ? (
+          <div style={{ padding: 16 }}>
+            {/* Header info */}
+            <Card
+              size="small"
+              style={{ marginBottom: 12, borderRadius: 6 }}
+              styles={{ header: { background: REDWOOD.neutral100, fontSize: 13, fontWeight: 600 } }}
+              title="Journal Header"
+            >
+              <Descriptions size="small" column={3} bordered labelStyle={{ fontWeight: 500, width: 130, fontSize: 12 }} contentStyle={{ fontSize: 12 }}>
+                <Descriptions.Item label="Journal Name">{glJournalData.journalName || glJournalData.batchName || '—'}</Descriptions.Item>
+                <Descriptions.Item label="Batch Name">{glJournalData.batchName || '—'}</Descriptions.Item>
+                <Descriptions.Item label="Period">{glJournalData.periodName || '—'}</Descriptions.Item>
+                <Descriptions.Item label="Accounting Date">{glJournalData.effectiveDate || '—'}</Descriptions.Item>
+                <Descriptions.Item label="Ledger">{glJournalData.ledgerName || '—'}</Descriptions.Item>
+                <Descriptions.Item label="Currency">{glJournalData.currencyCode || '—'}</Descriptions.Item>
+                <Descriptions.Item label="Source">{glJournalData.source || 'Payables'}</Descriptions.Item>
+                <Descriptions.Item label="Category">{glJournalData.category || glJournalData.eventTypeCode || '—'}</Descriptions.Item>
+                <Descriptions.Item label="Status">
+                  <Tag color={glJournalData.statusMeaning === 'Posted' ? 'success' : 'warning'}>
+                    {glJournalData.statusMeaning || glJournalData.postingStatus || '—'}
+                  </Tag>
+                </Descriptions.Item>
+                {glJournalData.enteredDebit !== undefined && (
+                  <Descriptions.Item label="Total Entered Dr">
+                    <span style={{ color: REDWOOD.info, fontWeight: 600 }}>
+                      {new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(glJournalData.enteredDebit || 0)}
+                    </span>
+                  </Descriptions.Item>
+                )}
+                {glJournalData.enteredCredit !== undefined && (
+                  <Descriptions.Item label="Total Entered Cr">
+                    <span style={{ color: REDWOOD.error, fontWeight: 600 }}>
+                      {new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(glJournalData.enteredCredit || 0)}
+                    </span>
+                  </Descriptions.Item>
+                )}
+                {glJournalData.jeHeaderId && (
+                  <Descriptions.Item label="GL Header ID">
+                    <span style={{ fontFamily: 'monospace' }}>{glJournalData.jeHeaderId}</span>
+                  </Descriptions.Item>
+                )}
+              </Descriptions>
+            </Card>
+
+            {/* Journal Lines */}
+            <Card
+              size="small"
+              style={{ borderRadius: 6 }}
+              styles={{ header: { background: REDWOOD.neutral100, fontSize: 13, fontWeight: 600 } }}
+              title={`Journal Lines ${glJournalLines.length > 0 ? `(${glJournalLines.length})` : ''}`}
+            >
+              {glJournalLines.length > 0 ? (
+                <Table
+                  dataSource={glJournalLines}
+                  size="small"
+                  bordered
+                  scroll={{ x: 900 }}
+                  pagination={false}
+                  columns={[
+                    { title: 'Line', dataIndex: 'lineNum', key: 'lineNum', width: 55 },
+                    { title: 'Account', dataIndex: 'account', key: 'account', width: 180, render: (v: string) => <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{v || '—'}</span> },
+                    { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true, render: (v: string) => <span style={{ fontSize: 11 }}>{v || '—'}</span> },
+                    { title: 'Currency', dataIndex: 'currency', key: 'currency', width: 70 },
+                    { title: 'Entered Dr', dataIndex: 'enteredDr', key: 'enteredDr', width: 120, align: 'right' as const, render: (v: number) => v > 0 ? <span style={{ color: REDWOOD.info, fontWeight: 600 }}>{formatAmount(v)}</span> : '—' },
+                    { title: 'Entered Cr', dataIndex: 'enteredCr', key: 'enteredCr', width: 120, align: 'right' as const, render: (v: number) => v > 0 ? <span style={{ color: REDWOOD.error, fontWeight: 600 }}>{formatAmount(v)}</span> : '—' },
+                    { title: 'Accounted Dr', dataIndex: 'accountedDr', key: 'accountedDr', width: 120, align: 'right' as const, render: (v: number) => v > 0 ? formatAmount(v) : '—' },
+                    { title: 'Accounted Cr', dataIndex: 'accountedCr', key: 'accountedCr', width: 120, align: 'right' as const, render: (v: number) => v > 0 ? formatAmount(v) : '—' },
+                  ]}
+                  summary={(data) => {
+                    const totDr = data.reduce((s, r) => s + (r.enteredDr || 0), 0);
+                    const totCr = data.reduce((s, r) => s + (r.enteredCr || 0), 0);
+                    const balanced = Math.abs(totDr - totCr) < 0.01;
+                    return (
+                      <Table.Summary.Row style={{ background: balanced ? '#f6ffed' : '#fff2f0' }}>
+                        <Table.Summary.Cell index={0} colSpan={4}>
+                          <span style={{ fontWeight: 700 }}>{balanced ? '✓ Balanced' : '⚠ Out of Balance'}</span>
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={4} align="right">
+                          <span style={{ fontWeight: 700, color: REDWOOD.info }}>{formatAmount(totDr)}</span>
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={5} align="right">
+                          <span style={{ fontWeight: 700, color: REDWOOD.error }}>{formatAmount(totCr)}</span>
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={6} colSpan={2} />
+                      </Table.Summary.Row>
+                    );
+                  }}
+                />
+              ) : (
+                <div style={{ textAlign: 'center', padding: '24px 0', color: REDWOOD.neutral600 }}>
+                  No journal lines available
+                </div>
+              )}
+            </Card>
+          </div>
+        ) : null}
+      </Modal>
+
+      {/* ── AP Transaction Drill-Down Modal ───────────────────────────────── */}
+      <Modal
+        title={
+          <Space>
+            <FileTextOutlined style={{ color: REDWOOD.info }} />
+            <span style={{ fontWeight: 600 }}>
+              {apTxnType === 'payment' ? 'AP Payment' : 'AP Invoice'} — Transaction Detail
+            </span>
+          </Space>
+        }
+        open={apTxnModalVisible}
+        onCancel={() => { setApTxnModalVisible(false); setApTxnData(null); }}
+        footer={<Button onClick={() => { setApTxnModalVisible(false); setApTxnData(null); }}>Close</Button>}
+        width={900}
+        destroyOnClose
+      >
+        {apTxnLoading ? (
+          <div style={{ textAlign: 'center', padding: 60 }}>
+            <Spin size="large" />
+            <div style={{ marginTop: 16, color: REDWOOD.neutral600 }}>
+              Loading {apTxnType === 'payment' ? 'payment' : 'invoice'} details…
+            </div>
+          </div>
+        ) : apTxnData ? (
+          apTxnType === 'payment' ? (
+            <Descriptions size="small" column={2} bordered labelStyle={{ fontWeight: 500, width: 150 }}>
+              <Descriptions.Item label="Payment Number">{apTxnData.paymentNumber || apTxnData.payment_number || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Payment Date">{apTxnData.paymentDate || apTxnData.payment_date || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Payee">{apTxnData.payee || apTxnData.payee_name || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Status">
+                <Tag color="success">{apTxnData.paymentStatus || apTxnData.payment_status || '—'}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="Payment Amount">{apTxnData.paymentAmount || apTxnData.payment_amount || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Currency">{apTxnData.paymentCurrency || apTxnData.currency_code || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Payment Method">{apTxnData.paymentMethod || apTxnData.payment_method || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Payment Document">{apTxnData.paymentDocument || apTxnData.payment_document || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Business Unit" span={2}>{apTxnData.businessUnit || apTxnData.business_unit || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Bank Account">{apTxnData.remitToAccountNumber || apTxnData.remit_to_account_number || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Legal Entity">{apTxnData.legalEntity || apTxnData.legal_entity || '—'}</Descriptions.Item>
+            </Descriptions>
+          ) : (
+            <Descriptions size="small" column={2} bordered labelStyle={{ fontWeight: 500, width: 150 }}>
+              <Descriptions.Item label="Invoice Number">{apTxnData.invoiceNumber || apTxnData.invoice_number || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Invoice Date">{apTxnData.invoiceDate || apTxnData.invoice_date || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Supplier">{apTxnData.supplierOrParty || apTxnData.supplier_name || apTxnData.party_name || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Supplier Site">{apTxnData.supplierSite || apTxnData.supplier_site || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Invoice Amount">{apTxnData.invoiceAmount || apTxnData.invoice_amount || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Currency">{apTxnData.invoiceCurrency || apTxnData.currency_code || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Validation Status">
+                <Tag color="blue">{apTxnData.validationStatus || apTxnData.validation_status || '—'}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="Approval Status">
+                <Tag color="green">{apTxnData.approvalStatus || apTxnData.approval_status || 'N/A'}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="Business Unit" span={2}>{apTxnData.businessUnit || apTxnData.business_unit || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Unpaid Amount">{apTxnData.unpaidAmount || apTxnData.unpaid_amount || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Invoice Type">{apTxnData.invoiceType || apTxnData.invoice_type || '—'}</Descriptions.Item>
+            </Descriptions>
+          )
+        ) : null}
+      </Modal>
     </div>
   );
 };
