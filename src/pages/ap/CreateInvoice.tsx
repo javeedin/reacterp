@@ -513,6 +513,18 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // View Accounting modal
   const [accountingModalVisible, setAccountingModalVisible] = useState(false);
 
+  // SLA – Subledger Accounting state
+  const [slaHeaderId, setSlaHeaderId]         = useState<number | null>(null);
+  const [slaStatus, setSlaStatus]             = useState<string | null>(null); // DRAFT | FINAL | POSTED | ERROR
+  const [slaPostingStatus, setSlaPostingStatus] = useState<string | null>(null);
+  const [slaLines, setSlaLines]               = useState<any[]>([]);
+  const [slaModalVisible, setSlaModalVisible] = useState(false);
+  const [slaCreating, setSlaCreating]         = useState(false);
+  const [slaPosting, setSlaPosting]           = useState(false);
+  const [slaGlBatchId, setSlaGlBatchId]       = useState<number | null>(null);
+  const [slaGlBatchName, setSlaGlBatchName]   = useState<string | null>(null);
+  const [slaGlHeaderId, setSlaGlHeaderId]     = useState<number | null>(null);
+
   // Import Lines modal
   const [importModalVisible, setImportModalVisible] = useState(false);
   // Pay in Full modal state
@@ -853,6 +865,296 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     }
   };
 
+  // ── SLA: fetch existing accounting header for this invoice ──────────────
+  const fetchSlaHeader = useCallback(async (invoiceId: number) => {
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/sla/accounting?sourceTable=AP_INVOICES&sourceId=${invoiceId}`;
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.found) {
+        setSlaHeaderId(data.headerId);
+        setSlaStatus(data.accountingStatus);
+        setSlaPostingStatus(data.postingStatus);
+        setSlaLines(data.lines || []);
+        setSlaGlBatchId(data.glBatchId ?? null);
+        setSlaGlBatchName(data.glBatchName ?? null);
+        setSlaGlHeaderId(data.glHeaderId ?? null);
+      }
+    } catch { /* silent */ }
+  }, []);
+
+  // ── SLA: build flat DR/CR lines from current invoice ────────────────────
+  const buildSlaLines = useCallback(() => {
+    const liabilityDist = form.getFieldValue('liabilityDistribution') || '';
+    const currency = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
+    const exchangeRate = 1;
+    const supplierId = form.getFieldValue('supplierId');
+    const activeLines = lines.filter(l => l.amount > 0);
+    const result: any[] = [];
+    let lineNum = 1;
+
+    activeLines.forEach((l) => {
+      const amt = l.amount || 0;
+      const isMpa = !!(l.startDate && l.endDate && l.accrualAccount);
+      const drAccount = isMpa ? l.accrualAccount : (l.distributionCombination || l.distributionSet || '');
+      // DR line
+      result.push({
+        lineNumber: lineNum++,
+        lineType: 'DR',
+        accountingClass: isMpa ? 'PREPAYMENT' : 'EXPENSE',
+        accountCombination: drAccount,
+        enteredDr: amt,
+        enteredCr: 0,
+        accountedDr: Math.round(amt * exchangeRate * 100) / 100,
+        accountedCr: 0,
+        currencyCode: currency,
+        exchangeRate,
+        description: l.description || `Line ${l.lineNumber} – ${l.type || 'Item'}`,
+        sourceLineId: l.id || null,
+        sourceLineNumber: l.lineNumber,
+        partyId: supplierId || null,
+        partyType: 'SUPPLIER',
+      });
+      // Tax DR (if applicable)
+      const taxRate = getTaxRateForClassification(l.taxClassification);
+      if (taxRate > 0) {
+        const taxAmt = Math.round(amt * taxRate / 100 * 100) / 100;
+        result.push({
+          lineNumber: lineNum++,
+          lineType: 'DR',
+          accountingClass: 'TAX',
+          accountCombination: 'Tax Recoverable',
+          enteredDr: taxAmt,
+          enteredCr: 0,
+          accountedDr: taxAmt,
+          accountedCr: 0,
+          currencyCode: currency,
+          exchangeRate,
+          description: `Input VAT – ${l.taxClassification || ''}`,
+          sourceLineNumber: l.lineNumber,
+        });
+      }
+    });
+
+    // CR lines: one per invoice line against liability account
+    activeLines.forEach((l) => {
+      const amt = l.amount || 0;
+      result.push({
+        lineNumber: lineNum++,
+        lineType: 'CR',
+        accountingClass: 'LIABILITY',
+        accountCombination: liabilityDist,
+        enteredDr: 0,
+        enteredCr: amt,
+        accountedDr: 0,
+        accountedCr: Math.round(amt * exchangeRate * 100) / 100,
+        currencyCode: currency,
+        exchangeRate,
+        description: `AP Liability – ${l.description || `Line ${l.lineNumber}`}`,
+        sourceLineId: l.id || null,
+        sourceLineNumber: l.lineNumber,
+        partyId: supplierId || null,
+        partyType: 'SUPPLIER',
+      });
+      const taxRate = getTaxRateForClassification(l.taxClassification);
+      if (taxRate > 0) {
+        const taxAmt = Math.round(amt * taxRate / 100 * 100) / 100;
+        result.push({
+          lineNumber: lineNum++,
+          lineType: 'CR',
+          accountingClass: 'LIABILITY',
+          accountCombination: liabilityDist,
+          enteredDr: 0,
+          enteredCr: taxAmt,
+          accountedDr: 0,
+          accountedCr: taxAmt,
+          currencyCode: currency,
+          exchangeRate,
+          description: `AP Liability – Input VAT`,
+          sourceLineNumber: l.lineNumber,
+        });
+      }
+    });
+
+    return result;
+  }, [form, lines, headerValues]);
+
+  // ── SLA: Create Accounting ───────────────────────────────────────────────
+  const handleCreateAccounting = useCallback(async () => {
+    const invoiceId = savedInvoiceId || initialData?.invoiceId;
+    if (!invoiceId) { message.warning('Save the invoice first before creating accounting.'); return; }
+    if (slaStatus === 'POSTED') { message.warning('Accounting is already posted and locked.'); return; }
+
+    setSlaCreating(true);
+    try {
+      const invoiceNumber = form.getFieldValue('invoiceNumber');
+      const invoiceDate   = form.getFieldValue('invoiceDate');
+      const currency      = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
+      const bu            = form.getFieldValue('businessUnit') || '';
+      const acctDate      = invoiceDate ? dayjs(invoiceDate).format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD');
+      const periodName    = invoiceDate ? dayjs(invoiceDate).format('MMM-YYYY') : dayjs().format('MMM-YYYY');
+
+      const slaLines_ = buildSlaLines();
+      if (slaLines_.length === 0) { message.warning('No invoice lines with amounts to account.'); setSlaCreating(false); return; }
+
+      const payload = {
+        header: {
+          moduleName:       'AP',
+          sourceTable:      'AP_INVOICES',
+          sourceId:         invoiceId,
+          sourceNumber:     invoiceNumber,
+          sourceType:       form.getFieldValue('invoiceType') || 'STANDARD',
+          eventTypeCode:    'INVOICE_VALIDATED',
+          eventDate:        acctDate,
+          accountingDate:   acctDate,
+          periodName,
+          currencyCode:     currency,
+          ledgerCurrency:   'AED',
+          exchangeRate:     1,
+          exchangeRateType: 'Corporate',
+          businessUnit:     bu,
+          description:      `AP Invoice ${invoiceNumber}`,
+          createdBy:        'user',
+        },
+        lines: slaLines_,
+      };
+
+      const url = `${APEX_DB_CONFIG.baseUrl}/sla/accounting/create`;
+      const res = await fetch(url, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body:    JSON.stringify(payload),
+      });
+      if (!res.ok) { const t = await res.text(); throw new Error(`HTTP ${res.status}: ${t}`); }
+      const data = await res.json();
+      setSlaHeaderId(data.headerId);
+      setSlaStatus('DRAFT');
+      setSlaPostingStatus('UNPOSTED');
+      setSlaLines(slaLines_);
+      message.success(`Accounting created (Header ID: ${data.headerId}) — ${slaLines_.length} lines`);
+      setSlaModalVisible(true);
+    } catch (err: any) {
+      message.error(`Failed to create accounting: ${err.message}`);
+    } finally {
+      setSlaCreating(false);
+    }
+  }, [savedInvoiceId, initialData, form, headerValues, lines, buildSlaLines, slaStatus]);
+
+  // ── SLA: Post to Ledger ──────────────────────────────────────────────────
+  const handlePostToLedger = useCallback(async () => {
+    if (!slaHeaderId) { message.warning('Create Accounting first.'); return; }
+    if (slaStatus === 'POSTED') { message.warning('Already posted and locked.'); return; }
+
+    setSlaPosting(true);
+    try {
+      const invoiceDate   = form.getFieldValue('invoiceDate');
+      const currency      = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
+      const invoiceNumber = form.getFieldValue('invoiceNumber');
+      const bu            = form.getFieldValue('businessUnit') || '';
+      const acctDate      = invoiceDate ? dayjs(invoiceDate).format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD');
+      const periodName    = invoiceDate ? dayjs(invoiceDate).format('MMM-YYYY') : dayjs().format('MMM-YYYY');
+
+      // Build journal payload matching CreateJournal.tsx format
+      const journalPayload = {
+        batch: {
+          batchName:        `AP-${invoiceNumber}-${dayjs().format('YYYYMMDD-HHmmss')}`,
+          batchDescription: `AP Invoice ${invoiceNumber} – Posted from SLA`,
+          ledgerName:       'Primary Ledger',
+          ledgerId:         0,
+          status:           'NEW',
+          accountingPeriod: periodName,
+          controlTotal:     slaLines.filter(l => l.lineType === 'DR').reduce((s, l) => s + (l.enteredDr || 0), 0),
+          runningTotalDr:   slaLines.filter(l => l.lineType === 'DR').reduce((s, l) => s + (l.enteredDr || 0), 0),
+          runningTotalCr:   slaLines.filter(l => l.lineType === 'CR').reduce((s, l) => s + (l.enteredCr || 0), 0),
+          batchSource:      'AP',
+          createdBy:        'user',
+        },
+        header: {
+          ledgerId:               0,
+          ledgerName:             'Primary Ledger',
+          jeCategory:             'Purchase Invoices',
+          jeSource:               'Payables',
+          periodName,
+          journalName:            `AP Invoice ${invoiceNumber}`,
+          description:            `Subledger accounting – Invoice ${invoiceNumber}`,
+          currencyCode:           currency,
+          currencyConversionType: 'Corporate',
+          currencyConversionDate: acctDate,
+          currencyConversionRate: 1,
+          status:                 'NEW',
+          runningTotalDr:         slaLines.filter(l => l.lineType === 'DR').reduce((s, l) => s + (l.enteredDr || 0), 0),
+          runningTotalCr:         slaLines.filter(l => l.lineType === 'CR').reduce((s, l) => s + (l.enteredCr || 0), 0),
+          createdBy:              'user',
+        },
+        lines: slaLines.map((l, idx) => ({
+          enteredDr:                l.lineType === 'DR' ? l.enteredDr : null,
+          enteredCr:                l.lineType === 'CR' ? l.enteredCr : null,
+          accountedDr:              l.lineType === 'DR' ? l.accountedDr : null,
+          accountedCr:              l.lineType === 'CR' ? l.accountedCr : null,
+          statAmount:               null,
+          description:              l.description || '',
+          currencyCode:             currency,
+          currencyConversionDate:   acctDate,
+          currencyConversionRate:   1,
+          userCurrencyConversionType: 'Corporate',
+          accountCombination:       l.accountCombination || '',
+          chartOfAccountsName:      'Chart of Accounts',
+          reference1:               `AP_INVOICES:${savedInvoiceId || initialData?.invoiceId}`,
+          reference2:               invoiceNumber,
+          reference3:               bu,
+          reference4:               null,
+          reference5:               null,
+          createdBy:                'user',
+        })),
+      };
+
+      // 1. Call GL journals/create
+      const glUrl = `${APEX_DB_CONFIG.baseUrl}/journals/create`;
+      const glRes = await fetch(glUrl, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body:    JSON.stringify(journalPayload),
+      });
+
+      if (!glRes.ok) {
+        const errText = await glRes.text();
+        // Mark SLA as ERROR
+        await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/error`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ headerId: slaHeaderId, errorMessage: `HTTP ${glRes.status}: ${errText}`, postedBy: 'user' }),
+        });
+        setSlaStatus('ERROR');
+        throw new Error(`GL journal creation failed: HTTP ${glRes.status}`);
+      }
+
+      const glData = await glRes.json();
+      const glBatchId   = glData.batchId   || glData.batch_id   || null;
+      const glHeaderId  = glData.headerId  || glData.header_id  || null;
+      const glBatchName = glData.batchName || glData.batch_name || journalPayload.batch.batchName;
+
+      // 2. Mark SLA header as POSTED
+      const postRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body:    JSON.stringify({ headerId: slaHeaderId, postedBy: 'user', glBatchId, glBatchName, glHeaderId }),
+      });
+      if (!postRes.ok) { const t = await postRes.text(); throw new Error(`SLA post update failed: ${t}`); }
+
+      setSlaStatus('POSTED');
+      setSlaPostingStatus('POSTED');
+      setSlaGlBatchId(glBatchId);
+      setSlaGlBatchName(glBatchName);
+      setSlaGlHeaderId(glHeaderId);
+      message.success('Posted to General Ledger successfully. Accounting is now locked.');
+    } catch (err: any) {
+      message.error(`Post to Ledger failed: ${err.message}`);
+    } finally {
+      setSlaPosting(false);
+    }
+  }, [slaHeaderId, slaStatus, slaLines, form, headerValues, savedInvoiceId, initialData]);
+
   // Fetch invoice holds (edit mode)
   const fetchInvoiceHolds = useCallback(async (invoiceId: number) => {
     setInvoiceHoldsLoading(true);
@@ -1015,6 +1317,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         fetchInvoiceHolds(initialData.invoiceId);
         fetchInvoiceInstallments(initialData.invoiceId);
         fetchInvoiceBalance(initialData.invoiceId);
+        fetchSlaHeader(initialData.invoiceId);
         fetchAppliedPrepayments(initialData.invoiceId).then(setAppliedPrepaymentsList);
         // When viewing a Prepayment invoice, also load balance + applied invoices
         if ((initialData.invoiceType || '').toLowerCase() === 'prepayment') {
@@ -3195,6 +3498,53 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               View Accounting
             </Button>
           </Tooltip>
+          {/* SLA – Create Accounting */}
+          {savedInvoiceId && slaStatus !== 'POSTED' && (
+            <Tooltip title={slaStatus === 'DRAFT' ? 'Re-create accounting (replaces existing DRAFT)' : 'Create accounting entries in SLA'}>
+              <Button
+                icon={<CheckSquareOutlined />}
+                loading={slaCreating}
+                onClick={handleCreateAccounting}
+                style={{ fontWeight: 500, borderColor: REDWOOD.warning, color: REDWOOD.warning }}
+              >
+                {slaStatus === 'DRAFT' ? 'Re-create Accounting' : 'Create Accounting'}
+              </Button>
+            </Tooltip>
+          )}
+          {/* SLA – Post to Ledger */}
+          {slaStatus === 'DRAFT' && (
+            <Tooltip title="Transfer accounting to General Ledger (locks record)">
+              <Button
+                icon={<SendOutlined />}
+                loading={slaPosting}
+                onClick={handlePostToLedger}
+                type="primary"
+                style={{ fontWeight: 500, background: REDWOOD.success, borderColor: REDWOOD.success }}
+              >
+                Post to Ledger
+              </Button>
+            </Tooltip>
+          )}
+          {/* SLA – View SLA lines when created */}
+          {slaHeaderId && (
+            <Button
+              size="small"
+              icon={<AccountBookOutlined />}
+              onClick={() => setSlaModalVisible(true)}
+              style={{ fontWeight: 500 }}
+            >
+              {slaStatus === 'POSTED' ? 'View Posted Accounting' : 'View Draft Accounting'}
+            </Button>
+          )}
+          {/* SLA Status Tag */}
+          {slaStatus && (
+            <Tag
+              color={slaStatus === 'POSTED' ? 'green' : slaStatus === 'ERROR' ? 'red' : 'orange'}
+              style={{ fontSize: 12, padding: '2px 10px', fontWeight: 600 }}
+            >
+              {slaStatus === 'POSTED' ? 'Accounting Posted' : slaStatus === 'ERROR' ? 'Accounting Error' : 'Accounting: Draft'}
+            </Tag>
+          )}
           {savedInvoiceId && (
             <Tag color="green" style={{ fontSize: 12, padding: '2px 10px', fontWeight: 600 }}>
               <CheckCircleOutlined /> Invoice ID: {savedInvoiceId}
@@ -7619,6 +7969,136 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         )}
       </Modal>
       {/* ── End Un-Apply Modal ───────────────────────────────────────────── */}
+
+      {/* ── SLA Accounting Lines Viewer Modal ────────────────────────────── */}
+      <Modal
+        title={
+          <Space>
+            <AccountBookOutlined style={{ color: slaStatus === 'POSTED' ? REDWOOD.success : REDWOOD.warning }} />
+            <span>Subledger Accounting</span>
+            <Tag color={slaStatus === 'POSTED' ? 'green' : slaStatus === 'ERROR' ? 'red' : 'orange'} style={{ fontSize: 11 }}>
+              {slaStatus}
+            </Tag>
+          </Space>
+        }
+        open={slaModalVisible}
+        onCancel={() => setSlaModalVisible(false)}
+        footer={
+          <Space>
+            {slaStatus === 'DRAFT' && (
+              <Button
+                type="primary"
+                icon={<SendOutlined />}
+                loading={slaPosting}
+                style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+                onClick={() => { setSlaModalVisible(false); handlePostToLedger(); }}
+              >
+                Post to Ledger
+              </Button>
+            )}
+            <Button onClick={() => setSlaModalVisible(false)}>Close</Button>
+          </Space>
+        }
+        width={900}
+        destroyOnClose
+      >
+        {/* Header info */}
+        <Descriptions size="small" column={3} bordered style={{ marginBottom: 16 }}>
+          <Descriptions.Item label="Header ID">{slaHeaderId}</Descriptions.Item>
+          <Descriptions.Item label="Status">
+            <Tag color={slaStatus === 'POSTED' ? 'green' : slaStatus === 'ERROR' ? 'red' : 'orange'}>{slaStatus}</Tag>
+          </Descriptions.Item>
+          <Descriptions.Item label="Posting Status">
+            <Tag color={slaPostingStatus === 'POSTED' ? 'green' : 'default'}>{slaPostingStatus}</Tag>
+          </Descriptions.Item>
+          {slaGlBatchId && <Descriptions.Item label="GL Batch ID">{slaGlBatchId}</Descriptions.Item>}
+          {slaGlBatchName && <Descriptions.Item label="GL Batch Name" span={2}>{slaGlBatchName}</Descriptions.Item>}
+          {slaGlHeaderId && <Descriptions.Item label="GL Header ID">{slaGlHeaderId}</Descriptions.Item>}
+        </Descriptions>
+
+        {/* Lines table */}
+        <Table
+          dataSource={slaLines.map((l, i) => ({ ...l, key: l.lineId || i }))}
+          size="small"
+          pagination={false}
+          bordered
+          scroll={{ x: 900 }}
+          summary={(data) => {
+            const totalDr = data.filter(r => r.lineType === 'DR').reduce((s, r) => s + (r.enteredDr || 0), 0);
+            const totalCr = data.filter(r => r.lineType === 'CR').reduce((s, r) => s + (r.enteredCr || 0), 0);
+            return (
+              <Table.Summary.Row style={{ background: '#f5f5f5', fontWeight: 700 }}>
+                <Table.Summary.Cell index={0} colSpan={4}>Total</Table.Summary.Cell>
+                <Table.Summary.Cell index={4} align="right">
+                  <Text strong style={{ color: REDWOOD.info }}>{formatAmount(totalDr)}</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={5} align="right">
+                  <Text strong style={{ color: REDWOOD.error }}>{formatAmount(totalCr)}</Text>
+                </Table.Summary.Cell>
+              </Table.Summary.Row>
+            );
+          }}
+          columns={[
+            {
+              title: '#',
+              dataIndex: 'lineNumber',
+              width: 45,
+              render: (v: number) => <Text style={{ fontSize: 11 }}>{v}</Text>,
+            },
+            {
+              title: 'Type',
+              dataIndex: 'lineType',
+              width: 55,
+              render: (v: string) => (
+                <Tag color={v === 'DR' ? 'blue' : 'red'} style={{ fontSize: 11, fontWeight: 700 }}>{v}</Tag>
+              ),
+            },
+            {
+              title: 'Class',
+              dataIndex: 'accountingClass',
+              width: 110,
+              render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text>,
+            },
+            {
+              title: 'Account Combination',
+              dataIndex: 'accountCombination',
+              ellipsis: true,
+              render: (v: string) => <Text code style={{ fontSize: 11 }}>{v || '—'}</Text>,
+            },
+            {
+              title: 'Debit',
+              dataIndex: 'enteredDr',
+              width: 120,
+              align: 'right' as const,
+              render: (v: number, r: any) => r.lineType === 'DR'
+                ? <Text strong style={{ fontSize: 12, color: REDWOOD.info }}>{formatAmount(v)}</Text>
+                : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text>,
+            },
+            {
+              title: 'Credit',
+              dataIndex: 'enteredCr',
+              width: 120,
+              align: 'right' as const,
+              render: (v: number, r: any) => r.lineType === 'CR'
+                ? <Text strong style={{ fontSize: 12, color: REDWOOD.error }}>{formatAmount(v)}</Text>
+                : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text>,
+            },
+            {
+              title: 'Description',
+              dataIndex: 'description',
+              ellipsis: true,
+              render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text>,
+            },
+          ]}
+        />
+        {slaStatus === 'POSTED' && (
+          <div style={{ marginTop: 12, padding: '8px 12px', background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 6, fontSize: 12, color: '#52c41a' }}>
+            <CheckCircleOutlined style={{ marginRight: 6 }} />
+            This accounting is <strong>locked</strong> — posted to GL on {slaGlBatchName || `Batch ID ${slaGlBatchId}`}. No further changes are allowed.
+          </div>
+        )}
+      </Modal>
+      {/* ── End SLA Modal ─────────────────────────────────────────────────── */}
 
       {/* ── Prepayment API Explorer Modal ────────────────────────────────── */}
       <Modal
