@@ -10,6 +10,7 @@ import {
   AccountBookOutlined, UnorderedListOutlined, FileSearchOutlined,
   CheckCircleOutlined, ClockCircleOutlined, WarningOutlined,
   DollarOutlined, CalendarOutlined, EyeOutlined, FileTextOutlined,
+  SendOutlined, CopyOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../../config/api.config';
@@ -143,6 +144,12 @@ const ManageSLAJournals: React.FC = () => {
   const [apTxnLoading, setApTxnLoading]             = useState(false);
   const [apTxnData, setApTxnData]                   = useState<any>(null);
   const [apTxnType, setApTxnType]                   = useState<'invoice' | 'payment'>('invoice');
+
+  // ── Post to GL modal ──────────────────────────────────────────────────────
+  const [postGLModalVisible, setPostGLModalVisible] = useState(false);
+  const [postGLRecord, setPostGLRecord]             = useState<SlaHeader | null>(null);
+  const [postGLLoading, setPostGLLoading]           = useState(false);
+  const [postGLResult, setPostGLResult]             = useState<any>(null);
 
   // ── Fetch headers ────────────────────────────────────────────────────────
   const fetchHeaders = useCallback(async (values: any) => {
@@ -300,6 +307,49 @@ const ManageSLAJournals: React.FC = () => {
     }
   };
 
+  // ── Post to GL helpers ────────────────────────────────────────────────────
+  const getPostGLEndpoint = () =>
+    `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.slaAccountingPost}`;
+
+  const getPostGLPayload = (r: SlaHeader) => ({
+    headerId:    r.headerId,
+    glBatchId:   r.glBatchId   ?? null,
+    glBatchName: r.glBatchName ?? `SLA-${r.moduleName}-${r.periodName}-${r.headerId}`,
+    glHeaderId:  r.glHeaderId  ?? null,
+    postedBy:    'SYSTEM',
+  });
+
+  const handleOpenPostGL = (record: SlaHeader) => {
+    setPostGLRecord(record);
+    setPostGLResult(null);
+    setPostGLModalVisible(true);
+  };
+
+  const handlePostToGL = async () => {
+    if (!postGLRecord) return;
+    setPostGLLoading(true);
+    try {
+      const url     = getPostGLEndpoint();
+      const payload = getPostGLPayload(postGLRecord);
+      const res     = await fetch(url, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body:    JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.message || `HTTP ${res.status}`);
+      setPostGLResult({ success: true, ...data });
+      message.success('Posted to GL successfully');
+      // refresh the headers table
+      headerForm.submit();
+    } catch (err: any) {
+      setPostGLResult({ success: false, error: err.message });
+      message.error(`Post to GL failed: ${err.message}`);
+    } finally {
+      setPostGLLoading(false);
+    }
+  };
+
   // ── Header table columns ─────────────────────────────────────────────────
   const headerColumns = [
     {
@@ -397,24 +447,41 @@ const ManageSLAJournals: React.FC = () => {
       render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text>,
     },
     {
-      title: 'GL Journal',
-      key: 'viewGLJournal',
-      width: 160,
+      title: 'Actions',
+      key: 'actions',
+      width: 200,
       fixed: 'right' as const,
       render: (_: any, r: SlaHeader) => (
-        <Button
-          size="small"
-          icon={<EyeOutlined />}
-          style={{
-            fontSize: 11,
-            color: r.glHeaderId ? REDWOOD.info : REDWOOD.neutral600,
-            borderColor: r.glHeaderId ? REDWOOD.info : REDWOOD.neutral600,
-          }}
-          disabled={!r.glHeaderId && !r.glBatchId}
-          onClick={() => handleViewJournalEntry(r)}
-        >
-          View Journal Entry
-        </Button>
+        <Space direction="vertical" size={4}>
+          <Button
+            size="small"
+            icon={<EyeOutlined />}
+            style={{
+              fontSize: 11,
+              color: r.glHeaderId ? REDWOOD.info : REDWOOD.neutral600,
+              borderColor: r.glHeaderId ? REDWOOD.info : REDWOOD.neutral600,
+              width: '100%',
+            }}
+            disabled={!r.glHeaderId && !r.glBatchId}
+            onClick={() => handleViewJournalEntry(r)}
+          >
+            View GL Journal
+          </Button>
+          <Button
+            size="small"
+            icon={<SendOutlined />}
+            style={{
+              fontSize: 11,
+              width: '100%',
+              background: r.accountingStatus === 'DRAFT' ? REDWOOD.primary : undefined,
+              borderColor: r.accountingStatus === 'DRAFT' ? REDWOOD.primary : undefined,
+              color: r.accountingStatus === 'DRAFT' ? '#fff' : REDWOOD.neutral600,
+            }}
+            onClick={() => handleOpenPostGL(r)}
+          >
+            Post to GL
+          </Button>
+        </Space>
       ),
     },
   ];
@@ -1046,6 +1113,156 @@ const ManageSLAJournals: React.FC = () => {
             </Card>
           </div>
         ) : null}
+      </Modal>
+
+      {/* ── Post to GL Modal ──────────────────────────────────────────────── */}
+      <Modal
+        title={
+          <Space>
+            <SendOutlined style={{ color: REDWOOD.primary }} />
+            <span style={{ fontWeight: 600 }}>Post to GL — SLA Header #{postGLRecord?.headerId}</span>
+            {postGLRecord && (
+              <Tag color={postGLRecord.accountingStatus === 'DRAFT' ? 'warning' : 'success'}>
+                {postGLRecord.accountingStatus}
+              </Tag>
+            )}
+          </Space>
+        }
+        open={postGLModalVisible}
+        onCancel={() => { setPostGLModalVisible(false); setPostGLRecord(null); setPostGLResult(null); }}
+        footer={
+          <Space>
+            <Button onClick={() => { setPostGLModalVisible(false); setPostGLRecord(null); setPostGLResult(null); }}>
+              Close
+            </Button>
+            <Button
+              type="primary"
+              icon={<SendOutlined />}
+              loading={postGLLoading}
+              disabled={postGLResult?.success === true}
+              style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+              onClick={handlePostToGL}
+            >
+              Post to GL
+            </Button>
+          </Space>
+        }
+        width={780}
+        destroyOnClose
+      >
+        {postGLRecord && (
+          <div>
+            {/* Endpoint */}
+            <div style={{ marginBottom: 16 }}>
+              <Text strong style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 4 }}>
+                ENDPOINT
+              </Text>
+              <div style={{
+                background: '#1e1e2e',
+                borderRadius: 6,
+                padding: '10px 14px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+              }}>
+                <code style={{ color: '#89d85d', fontSize: 12, wordBreak: 'break-all' }}>
+                  <span style={{ color: '#f59e0b', marginRight: 8 }}>POST</span>
+                  {getPostGLEndpoint()}
+                </code>
+                <Button
+                  size="small"
+                  icon={<CopyOutlined />}
+                  style={{ flexShrink: 0, background: 'transparent', border: '1px solid #555', color: '#aaa' }}
+                  onClick={() => {
+                    navigator.clipboard.writeText(getPostGLEndpoint());
+                    message.success('Endpoint copied');
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Request Body */}
+            <div style={{ marginBottom: 16 }}>
+              <Text strong style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 4 }}>
+                REQUEST BODY (JSON)
+              </Text>
+              <div style={{
+                background: '#1e1e2e',
+                borderRadius: 6,
+                padding: '12px 14px',
+                position: 'relative',
+              }}>
+                <Button
+                  size="small"
+                  icon={<CopyOutlined />}
+                  style={{ position: 'absolute', top: 8, right: 8, background: 'transparent', border: '1px solid #555', color: '#aaa' }}
+                  onClick={() => {
+                    navigator.clipboard.writeText(JSON.stringify(getPostGLPayload(postGLRecord), null, 2));
+                    message.success('JSON body copied');
+                  }}
+                />
+                <pre style={{ margin: 0, color: '#cdd6f4', fontSize: 12, lineHeight: 1.6 }}>
+                  {JSON.stringify(getPostGLPayload(postGLRecord), null, 2)
+                    .replace(/"(\w+)":/g, (_, k) => `"<span style="color:#89b4fa">${k}</span>":`)
+                    .split('\n')
+                    .map((line, i) => {
+                      const colored = line
+                        .replace(/"([^"]+)"(:\s)/g, (_, k, rest) =>
+                          `<span style="color:#89b4fa">"${k}"</span>${rest}`)
+                        .replace(/:\s*"([^"]*)"(,?)$/,
+                          (_, v, c) => `: <span style="color:#a6e3a1">"${v}"</span>${c}`)
+                        .replace(/:\s*(\d+)(,?)$/,
+                          (_, v, c) => `: <span style="color:#fab387">${v}</span>${c}`)
+                        .replace(/:\s*(null)(,?)$/,
+                          (_, v, c) => `: <span style="color:#f38ba8">${v}</span>${c}`);
+                      return (
+                        <span key={i} dangerouslySetInnerHTML={{ __html: colored + '\n' }} />
+                      );
+                    })}
+                </pre>
+              </div>
+            </div>
+
+            {/* SLA Header info */}
+            <Descriptions size="small" column={3} bordered
+              labelStyle={{ fontWeight: 500, fontSize: 11, width: 120 }}
+              contentStyle={{ fontSize: 11 }}
+              style={{ marginBottom: 16 }}
+            >
+              <Descriptions.Item label="Transaction #">{postGLRecord.sourceNumber}</Descriptions.Item>
+              <Descriptions.Item label="Period">{postGLRecord.periodName}</Descriptions.Item>
+              <Descriptions.Item label="Accounting Date">{postGLRecord.accountingDate}</Descriptions.Item>
+              <Descriptions.Item label="Module"><Tag color="blue" style={{ fontSize: 10 }}>{postGLRecord.moduleName}</Tag></Descriptions.Item>
+              <Descriptions.Item label="Event Type">{postGLRecord.eventTypeCode}</Descriptions.Item>
+              <Descriptions.Item label="Current Status">
+                <Tag color={statusColor(postGLRecord.accountingStatus)} icon={statusIcon(postGLRecord.accountingStatus)} style={{ fontSize: 10 }}>
+                  {postGLRecord.accountingStatus}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="Ledger">{postGLRecord.ledgerName}</Descriptions.Item>
+              <Descriptions.Item label="Lines">{postGLRecord.lineCount}</Descriptions.Item>
+              <Descriptions.Item label="Description" span={1}>{postGLRecord.description}</Descriptions.Item>
+            </Descriptions>
+
+            {/* Result */}
+            {postGLResult && (
+              <div style={{
+                background: postGLResult.success ? '#f6ffed' : '#fff2f0',
+                border: `1px solid ${postGLResult.success ? '#b7eb8f' : '#ffa39e'}`,
+                borderRadius: 6,
+                padding: '12px 16px',
+              }}>
+                <Text strong style={{ color: postGLResult.success ? REDWOOD.success : REDWOOD.error }}>
+                  {postGLResult.success ? '✓ Posted to GL successfully' : '✗ Post failed'}
+                </Text>
+                <pre style={{ margin: '8px 0 0', fontSize: 12, color: '#333', whiteSpace: 'pre-wrap' }}>
+                  {JSON.stringify(postGLResult, null, 2)}
+                </pre>
+              </div>
+            )}
+          </div>
+        )}
       </Modal>
 
       {/* ── AP Transaction Drill-Down Modal ───────────────────────────────── */}
