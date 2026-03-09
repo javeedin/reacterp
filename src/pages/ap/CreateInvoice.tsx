@@ -565,6 +565,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [prepaymentApplying, setPrepaymentApplying] = useState(false);
   const [supplierHasPrepayments, setSupplierHasPrepayments] = useState(false);
   const [selectedAvailKeys, setSelectedAvailKeys] = useState<React.Key[]>([]);
+
+  // Un-apply modal state
+  const [unapplyModalVisible, setUnapplyModalVisible] = useState(false);
+  const [unapplyRecord, setUnapplyRecord] = useState<AppliedPrepayment | null>(null);
+  const [unapplyDate, setUnapplyDate] = useState<dayjs.Dayjs>(dayjs());
+  const [unapplyLoading, setUnapplyLoading] = useState(false);
+
   // Prepayment invoice view: balance + applied invoices
   const [prepaymentBalance, setPrepaymentBalance] = useState<PrepaymentBalance | null>(null);
   const [appliedInvoicesList, setAppliedInvoicesList] = useState<AppliedInvoice[]>([]);
@@ -7449,6 +7456,24 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   width: 160,
                   render: (v: string) => <Text style={{ fontSize: 12 }}>{v ? dayjs(v).format('D-MMM-YYYY') : ''}</Text>,
                 },
+                {
+                  title: 'Action',
+                  width: 90,
+                  align: 'center' as const,
+                  render: (_: any, record: AppliedPrepayment) => (
+                    <Button
+                      size="small"
+                      danger
+                      onClick={() => {
+                        setUnapplyRecord(record);
+                        setUnapplyDate(dayjs());
+                        setUnapplyModalVisible(true);
+                      }}
+                    >
+                      Un-Apply
+                    </Button>
+                  ),
+                },
               ]}
               locale={{ emptyText: 'No prepayments applied to this invoice yet.' }}
             />
@@ -7456,6 +7481,126 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         )}
       </Modal>
       {/* ── End Prepayments Modal ────────────────────────────────────────── */}
+
+      {/* ── Un-Apply Prepayment Modal ─────────────────────────────────────── */}
+      <Modal
+        title={
+          <Space>
+            <RollbackOutlined style={{ color: REDWOOD.error }} />
+            <span>Un-Apply Prepayment</span>
+          </Space>
+        }
+        open={unapplyModalVisible}
+        onCancel={() => { if (!unapplyLoading) setUnapplyModalVisible(false); }}
+        destroyOnClose
+        footer={
+          <Space>
+            <Button disabled={unapplyLoading} onClick={() => setUnapplyModalVisible(false)}>Cancel</Button>
+            <Button
+              danger
+              type="primary"
+              loading={unapplyLoading}
+              icon={<RollbackOutlined />}
+              onClick={async () => {
+                if (!unapplyRecord) return;
+                const invoiceId = savedInvoiceId || initialData?.invoiceId;
+                if (!invoiceId) { message.warning('Invoice ID not found.'); return; }
+                setUnapplyLoading(true);
+                try {
+                  const invoiceNumber = form.getFieldValue('invoiceNumber');
+                  const businessUnit = form.getFieldValue('businessUnit') || unapplyRecord.supplierSite || '';
+                  const body = {
+                    InvoiceId: invoiceId,
+                    InvoiceNumber: invoiceNumber,
+                    PrepaymentInvoiceId: unapplyRecord.prepaymentInvoiceId,
+                    PrepaymentNumber: unapplyRecord.prepaymentNumber,
+                    LineNumber: unapplyRecord.lineNumber,
+                    PrepaymentLineNumber: unapplyRecord.prepaymentLineNumber,
+                    Description: unapplyRecord.description || null,
+                    BusinessUnit: businessUnit,
+                    SupplierSite: unapplyRecord.supplierSite,
+                    PurchaseOrder: unapplyRecord.purchaseOrder || null,
+                    Currency: unapplyRecord.currency,
+                    AppliedAmount: -(unapplyRecord.appliedAmount),
+                    IncludedTax: null,
+                    IncludedonInvoiceFlag: false,
+                    ApplicationAccountingDate: unapplyDate.format('YYYY-MM-DD'),
+                    Status: 'Unapplied',
+                  };
+                  const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/appliedprepayments`;
+                  const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                    body: JSON.stringify(body),
+                  });
+                  if (!res.ok) {
+                    const errText = await res.text();
+                    throw new Error(`HTTP ${res.status}: ${errText}`);
+                  }
+                  message.success(`Prepayment ${unapplyRecord.prepaymentNumber} un-applied successfully.`);
+                  setUnapplyModalVisible(false);
+                  // Refresh both lists and balance
+                  await new Promise(r => setTimeout(r, 600));
+                  const supplierId = form.getFieldValue('supplierId');
+                  const remainingBalance = invoiceBalance ?? form.getFieldValue('invoiceAmount') ?? 0;
+                  const [avail, applied] = await Promise.all([
+                    fetchAvailablePrepayments(Number(supplierId)),
+                    fetchAppliedPrepayments(invoiceId),
+                  ]);
+                  setAvailablePrepayments(avail.map(r => ({
+                    ...r,
+                    toApply: remainingBalance > 0 ? Math.min(r.availableAmount, remainingBalance) : 0,
+                  })));
+                  setAppliedPrepaymentsList(applied);
+                  setSupplierHasPrepayments(avail.length > 0);
+                  fetchInvoiceBalance(invoiceId);
+                } catch (err: any) {
+                  message.error(`Failed to un-apply prepayment: ${err.message}`);
+                } finally {
+                  setUnapplyLoading(false);
+                }
+              }}
+            >
+              Un-Apply
+            </Button>
+          </Space>
+        }
+        width={440}
+      >
+        {unapplyRecord && (
+          <Descriptions column={1} size="small" bordered style={{ marginTop: 8 }}>
+            <Descriptions.Item label="Prepayment Number">
+              <Text strong style={{ color: REDWOOD.info }}>{unapplyRecord.prepaymentNumber}</Text>
+            </Descriptions.Item>
+            <Descriptions.Item label="Description">
+              {unapplyRecord.description || '—'}
+            </Descriptions.Item>
+            <Descriptions.Item label="Currency">
+              {unapplyRecord.currency}
+            </Descriptions.Item>
+            <Descriptions.Item label="Un-Applied Amount">
+              <Text strong style={{ color: REDWOOD.error }}>
+                ({formatAmount(unapplyRecord.appliedAmount)})
+              </Text>
+            </Descriptions.Item>
+            <Descriptions.Item label="Original Applied Date">
+              {unapplyRecord.applicationAccountingDate
+                ? dayjs(unapplyRecord.applicationAccountingDate).format('D-MMM-YYYY')
+                : '—'}
+            </Descriptions.Item>
+            <Descriptions.Item label={<span><span style={{ color: REDWOOD.error }}>* </span>Un-Apply Date</span>}>
+              <DatePicker
+                format="D-MMM-YYYY"
+                value={unapplyDate}
+                onChange={d => d && setUnapplyDate(d)}
+                style={{ width: '100%' }}
+                allowClear={false}
+              />
+            </Descriptions.Item>
+          </Descriptions>
+        )}
+      </Modal>
+      {/* ── End Un-Apply Modal ───────────────────────────────────────────── */}
 
       {/* ── Prepayment API Explorer Modal ────────────────────────────────── */}
       <Modal
