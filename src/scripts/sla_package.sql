@@ -63,6 +63,24 @@ CREATE OR REPLACE PACKAGE RR_SLA_PKG AS
   );
 
   -- ---------------------------------------------------------------------------
+  -- check_accounting_exists
+  --   Quick check: does any accounting entry exist for a source transaction?
+  --   Returns found=true/false, headerId, accountingStatus, postingStatus.
+  --   Use this BEFORE calling create_accounting so the caller knows whether
+  --   they are about to create fresh or replace an existing entry.
+  --   p_source_table : e.g. 'AP_INVOICES'
+  --   p_source_id    : e.g. INVOICE_ID
+  --   p_event_type   : optional – when supplied, scopes to that event type only
+  -- ---------------------------------------------------------------------------
+  PROCEDURE check_accounting_exists(
+    p_source_table IN  VARCHAR2,
+    p_source_id    IN  NUMBER,
+    p_event_type   IN  VARCHAR2 DEFAULT NULL,
+    p_status       OUT NUMBER,
+    p_response     OUT CLOB
+  );
+
+  -- ---------------------------------------------------------------------------
   -- Helper: build the lines JSON array for a given HEADER_ID (used internally
   -- by get_accounting; exposed so other packages can reuse it).
   -- ---------------------------------------------------------------------------
@@ -139,6 +157,49 @@ CREATE OR REPLACE PACKAGE BODY RR_SLA_PKG AS
     v_le          := JSON_VALUE(j_header, '$.legalEntity');
     v_desc        := JSON_VALUE(j_header, '$.description');
     v_created_by  := NVL(JSON_VALUE(j_header, '$.createdBy'), 'SYSTEM');
+
+    -- ── Required-field validation ─────────────────────────────────────────────
+    IF v_src_table IS NULL OR v_src_id IS NULL THEN
+      p_status := 400; p_response := p_err('sourceTable and sourceId are required.'); RETURN;
+    END IF;
+    IF v_event_type IS NULL THEN
+      p_status := 400; p_response := p_err('eventTypeCode is required.');            RETURN;
+    END IF;
+    IF v_module IS NULL THEN
+      p_status := 400; p_response := p_err('moduleName is required.');               RETURN;
+    END IF;
+    IF v_ledger_id IS NULL THEN
+      p_status := 400; p_response := p_err('ledgerId is required.');                 RETURN;
+    END IF;
+    IF v_acct_date IS NULL THEN
+      p_status := 400; p_response := p_err('accountingDate is required.');           RETURN;
+    END IF;
+    IF j_lines IS NULL OR j_lines = '[]' THEN
+      p_status := 400; p_response := p_err('lines array must not be empty.');        RETURN;
+    END IF;
+
+    -- ── Block if a POSTED entry already exists for same source + event type ───
+    -- POSTED records are immutable; caller must reverse them explicitly.
+    DECLARE v_posted_id NUMBER;
+    BEGIN
+      SELECT HEADER_ID INTO v_posted_id
+      FROM   RR_SLA_ACCOUNTING_HEADERS
+      WHERE  SOURCE_TABLE      = v_src_table
+      AND    SOURCE_ID         = v_src_id
+      AND    EVENT_TYPE_CODE   = v_event_type
+      AND    ACCOUNTING_STATUS = 'POSTED'
+      AND    ROWNUM = 1;
+
+      p_status   := 409;
+      p_response := p_err(
+        'A POSTED accounting entry (headerId=' || v_posted_id ||
+        ') already exists for this transaction and event type. ' ||
+        'POSTED records are locked and cannot be replaced. Reverse the existing entry first.'
+      );
+      RETURN;
+    EXCEPTION
+      WHEN NO_DATA_FOUND THEN NULL;   -- OK to proceed
+    END;
 
     -- ── Replace existing DRAFT for same source + event type ──────────────────
     BEGIN
@@ -231,6 +292,37 @@ CREATE OR REPLACE PACKAGE BODY RR_SLA_PKG AS
       v_line_count := v_line_count + 1;
     END LOOP;
 
+    -- ── Post-insert validations ───────────────────────────────────────────────
+    IF v_line_count = 0 THEN
+      ROLLBACK;
+      p_status   := 400;
+      p_response := p_err('lines array contained no valid rows after parsing.');
+      RETURN;
+    END IF;
+
+    -- DR must equal CR (accounted amounts) — basic journal balance check
+    DECLARE
+      v_total_dr NUMBER;
+      v_total_cr NUMBER;
+    BEGIN
+      SELECT NVL(SUM(ACCOUNTED_DR), 0),
+             NVL(SUM(ACCOUNTED_CR), 0)
+      INTO   v_total_dr, v_total_cr
+      FROM   RR_SLA_ACCOUNTING_LINES
+      WHERE  HEADER_ID = v_header_id;
+
+      IF v_total_dr <> v_total_cr THEN
+        ROLLBACK;
+        p_status   := 400;
+        p_response := p_err(
+          'Journal is not balanced: accountedDr=' || v_total_dr ||
+          ', accountedCr=' || v_total_cr ||
+          '. Difference=' || (v_total_dr - v_total_cr)
+        );
+        RETURN;
+      END IF;
+    END;
+
     COMMIT;
 
     p_status   := 200;
@@ -270,6 +362,17 @@ CREATE OR REPLACE PACKAGE BODY RR_SLA_PKG AS
     v_gl_batch_name := JSON_VALUE(p_body_json, '$.glBatchName');
     v_gl_header_id  := TO_NUMBER(JSON_VALUE(p_body_json, '$.glHeaderId'));
 
+    -- ── Required-field validation ─────────────────────────────────────────────
+    IF v_header_id IS NULL THEN
+      p_status := 400; p_response := p_err('headerId is required.');     RETURN;
+    END IF;
+    IF v_gl_batch_id IS NULL THEN
+      p_status := 400; p_response := p_err('glBatchId is required.');    RETURN;
+    END IF;
+    IF v_gl_header_id IS NULL THEN
+      p_status := 400; p_response := p_err('glHeaderId is required.');   RETURN;
+    END IF;
+
     -- Guard: header must exist and not already be posted
     BEGIN
       SELECT ACCOUNTING_STATUS INTO v_current_status
@@ -284,8 +387,14 @@ CREATE OR REPLACE PACKAGE BODY RR_SLA_PKG AS
     END;
 
     IF v_current_status = 'POSTED' THEN
-      p_status   := 400;
-      p_response := p_err('Header ' || v_header_id || ' is already POSTED and locked.');
+      p_status   := 409;
+      p_response := p_err('Header ' || v_header_id || ' is already POSTED and locked. Cannot post twice.');
+      RETURN;
+    END IF;
+
+    IF v_current_status = 'ERROR' THEN
+      p_status   := 409;
+      p_response := p_err('Header ' || v_header_id || ' is in ERROR status. Recreate accounting before posting.');
       RETURN;
     END IF;
 
@@ -338,6 +447,29 @@ CREATE OR REPLACE PACKAGE BODY RR_SLA_PKG AS
     v_error_msg := JSON_VALUE(p_body_json, '$.errorMessage');
     v_posted_by := NVL(JSON_VALUE(p_body_json, '$.postedBy'), 'SYSTEM');
 
+    IF v_header_id IS NULL THEN
+      p_status := 400; p_response := p_err('headerId is required.'); RETURN;
+    END IF;
+
+    -- Guard: verify header exists and is not already locked (POSTED)
+    DECLARE v_cur_status VARCHAR2(20);
+    BEGIN
+      SELECT ACCOUNTING_STATUS INTO v_cur_status
+      FROM   RR_SLA_ACCOUNTING_HEADERS
+      WHERE  HEADER_ID = v_header_id;
+
+      IF v_cur_status = 'POSTED' THEN
+        p_status   := 409;
+        p_response := p_err('Header ' || v_header_id || ' is POSTED and locked. Cannot mark as error.');
+        RETURN;
+      END IF;
+    EXCEPTION
+      WHEN NO_DATA_FOUND THEN
+        p_status   := 404;
+        p_response := p_err('SLA Header not found: ' || v_header_id);
+        RETURN;
+    END;
+
     UPDATE RR_SLA_ACCOUNTING_HEADERS
     SET    ACCOUNTING_STATUS = 'ERROR',
            POSTING_STATUS    = 'REJECTED',
@@ -361,6 +493,81 @@ CREATE OR REPLACE PACKAGE BODY RR_SLA_PKG AS
       p_status   := 500;
       p_response := p_err(SQLERRM);
   END mark_error;
+
+
+  -- ===========================================================================
+  -- check_accounting_exists
+  -- ===========================================================================
+  PROCEDURE check_accounting_exists(
+    p_source_table IN  VARCHAR2,
+    p_source_id    IN  NUMBER,
+    p_event_type   IN  VARCHAR2 DEFAULT NULL,
+    p_status       OUT NUMBER,
+    p_response     OUT CLOB
+  ) IS
+    v_header_id  NUMBER;
+    v_acct_stat  VARCHAR2(20);
+    v_post_stat  VARCHAR2(20);
+    v_event      VARCHAR2(60);
+    v_acct_date  DATE;
+    v_created    DATE;
+    v_posted     DATE;
+  BEGIN
+    IF p_source_table IS NULL OR p_source_id IS NULL THEN
+      p_status := 400; p_response := p_err('sourceTable and sourceId are required.'); RETURN;
+    END IF;
+
+    BEGIN
+      SELECT HEADER_ID,       ACCOUNTING_STATUS, POSTING_STATUS,
+             EVENT_TYPE_CODE, ACCOUNTING_DATE,   CREATION_DATE,   POSTED_DATE
+      INTO   v_header_id,  v_acct_stat,  v_post_stat,
+             v_event,      v_acct_date,  v_created,    v_posted
+      FROM   RR_SLA_ACCOUNTING_HEADERS
+      WHERE  SOURCE_TABLE = p_source_table
+      AND    SOURCE_ID    = p_source_id
+      AND    (p_event_type IS NULL OR EVENT_TYPE_CODE = p_event_type)
+      ORDER BY HEADER_ID DESC
+      FETCH FIRST 1 ROWS ONLY;
+    EXCEPTION
+      WHEN NO_DATA_FOUND THEN
+        p_status   := 200;
+        p_response := JSON_OBJECT(
+          'exists'           VALUE FALSE,
+          'headerId'         VALUE NULL,
+          'accountingStatus' VALUE NULL,
+          'postingStatus'    VALUE NULL,
+          'canCreate'        VALUE TRUE,
+          'message'          VALUE 'No accounting entry found. Safe to create.'
+        );
+        RETURN;
+    END;
+
+    -- Exists — tell caller exactly what state it is in and whether they can create
+    p_status   := 200;
+    p_response := JSON_OBJECT(
+      'exists'           VALUE TRUE,
+      'headerId'         VALUE v_header_id,
+      'eventTypeCode'    VALUE v_event,
+      'accountingStatus' VALUE v_acct_stat,
+      'postingStatus'    VALUE v_post_stat,
+      'accountingDate'   VALUE TO_CHAR(v_acct_date, 'YYYY-MM-DD'),
+      'creationDate'     VALUE TO_CHAR(v_created, 'YYYY-MM-DD HH24:MI:SS'),
+      'postedDate'       VALUE TO_CHAR(v_posted, 'YYYY-MM-DD HH24:MI:SS'),
+      -- canCreate=true only when the existing entry is in DRAFT/ERROR (replaceable)
+      'canCreate'        VALUE CASE WHEN v_acct_stat IN ('DRAFT','ERROR') THEN 'true' ELSE 'false' END,
+      'message'          VALUE CASE v_acct_stat
+                                 WHEN 'POSTED' THEN 'A POSTED entry exists. Cannot create without reversing.'
+                                 WHEN 'DRAFT'  THEN 'A DRAFT entry exists and will be replaced on create.'
+                                 WHEN 'ERROR'  THEN 'An ERROR entry exists and will be replaced on create.'
+                                 ELSE 'Accounting exists with status: ' || v_acct_stat
+                               END
+      ABSENT ON NULL
+    );
+  EXCEPTION
+    WHEN OTHERS THEN
+      p_status   := 500;
+      p_response := p_err(SQLERRM);
+  END check_accounting_exists;
 
 
   -- ===========================================================================
