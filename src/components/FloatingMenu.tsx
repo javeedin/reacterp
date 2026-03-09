@@ -30,6 +30,11 @@ import {
   StopOutlined,
   BankOutlined,
   ReloadOutlined,
+  ApiOutlined,
+  CheckCircleFilled,
+  CloseCircleFilled,
+  MinusCircleFilled,
+  LoadingOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -199,9 +204,35 @@ const FloatingIcon = ({
   );
 };
 
+// API endpoint status type
+type EndpointStatus = 'idle' | 'checking' | 'ok' | 'error';
+
+interface EndpointInfo {
+  key: string;
+  label: string;
+  url: string;
+  method: 'GET' | 'POST';
+  status: EndpointStatus;
+  statusCode?: number;
+  latency?: number;
+}
+
+// Build endpoint list from api.config
+const buildEndpoints = (): EndpointInfo[] =>
+  Object.entries(APEX_DB_CONFIG.endpoints).map(([key, path]) => ({
+    key,
+    label: key
+      .replace(/([A-Z])/g, ' $1')
+      .replace(/^./, (c) => c.toUpperCase())
+      .trim(),
+    url: `${APEX_DB_CONFIG.baseUrl}/${path}`,
+    method: path.includes('create') || path.includes('post') || path.includes('error') ? 'POST' : 'GET',
+    status: 'idle',
+  }));
+
 const FloatingMenu: React.FC = () => {
   const navigate = useNavigate();
-  const [activePanel, setActivePanel] = useState<'none' | 'tasks' | 'search' | 'reports' | 'match'>('none');
+  const [activePanel, setActivePanel] = useState<'none' | 'tasks' | 'search' | 'reports' | 'match' | 'api'>('none');
   const [isClosing, setIsClosing] = useState(false);
   const [selectedTaskSection, setSelectedTaskSection] = useState<string>('invoices');
   const panelRef = useRef<HTMLDivElement>(null);
@@ -209,6 +240,41 @@ const FloatingMenu: React.FC = () => {
   const [searchForm] = Form.useForm();
   const [matchForm] = Form.useForm();
   const [quickCreateForm] = Form.useForm();
+
+  // API panel state
+  const [endpoints, setEndpoints] = useState<EndpointInfo[]>(buildEndpoints);
+  const [pingAll, setPingAll] = useState(false);
+
+  const checkEndpoint = async (ep: EndpointInfo): Promise<Partial<EndpointInfo>> => {
+    const start = Date.now();
+    try {
+      const res = await fetch(ep.url, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(8000),
+      });
+      return { status: res.ok || res.status === 400 ? 'ok' : 'error', statusCode: res.status, latency: Date.now() - start };
+    } catch {
+      return { status: 'error', latency: Date.now() - start };
+    }
+  };
+
+  const handlePingAll = async () => {
+    setPingAll(true);
+    setEndpoints((prev) => prev.map((ep) => ({ ...ep, status: 'checking' })));
+    const updated = await Promise.all(
+      endpoints.map(async (ep) => ({ ...ep, ...(await checkEndpoint(ep)) }))
+    );
+    setEndpoints(updated as EndpointInfo[]);
+    setPingAll(false);
+  };
+
+  const handlePingOne = async (key: string) => {
+    setEndpoints((prev) => prev.map((ep) => ep.key === key ? { ...ep, status: 'checking' } : ep));
+    const ep = endpoints.find((e) => e.key === key)!;
+    const result = await checkEndpoint(ep);
+    setEndpoints((prev) => prev.map((e) => e.key === key ? { ...e, ...result } : e));
+  };
 
   // Quick Create Invoice dialog state
   const [quickCreateVisible, setQuickCreateVisible] = useState(false);
@@ -306,6 +372,7 @@ const FloatingMenu: React.FC = () => {
 
   const getPanelWidth = () => {
     if (activePanel === 'match') return 360;
+    if (activePanel === 'api') return 400;
     if (activePanel === 'tasks') return 320;
     if (activePanel === 'search') return 320;
     if (activePanel === 'reports') return 320;
@@ -361,7 +428,7 @@ const FloatingMenu: React.FC = () => {
     }
   };
 
-  const togglePanel = (panel: 'tasks' | 'search' | 'reports' | 'match') => {
+  const togglePanel = (panel: 'tasks' | 'search' | 'reports' | 'match' | 'api') => {
     if (activePanel === panel) {
       closePanel();
     } else {
@@ -534,6 +601,115 @@ const FloatingMenu: React.FC = () => {
     </div>
   );
 
+  // Status icon helper
+  const StatusIcon = ({ status }: { status: EndpointStatus }) => {
+    if (status === 'checking') return <LoadingOutlined style={{ color: '#888' }} spin />;
+    if (status === 'ok')    return <CheckCircleFilled style={{ color: REDWOOD.success }} />;
+    if (status === 'error') return <CloseCircleFilled style={{ color: REDWOOD.primary }} />;
+    return <MinusCircleFilled style={{ color: REDWOOD.neutral300 }} />;
+  };
+
+  // API Services Slide Panel
+  const ApiSlidePanel = () => {
+    const okCount    = endpoints.filter((e) => e.status === 'ok').length;
+    const errorCount = endpoints.filter((e) => e.status === 'error').length;
+    const idleCount  = endpoints.filter((e) => e.status === 'idle').length;
+
+    return (
+      <div style={{ ...panelBaseStyle, width: 400 }}>
+        {/* Header */}
+        <div style={{ padding: '10px 14px', background: '#1a1a2e', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+          <Space>
+            <ApiOutlined style={{ color: '#4fc3f7', fontSize: 16 }} />
+            <Text strong style={{ color: '#fff', fontSize: 14 }}>API Services</Text>
+          </Space>
+          <CloseOutlined style={{ color: '#fff', cursor: 'pointer', fontSize: 14, padding: 4 }} onClick={closePanel} />
+        </div>
+
+        {/* Base URL */}
+        <div style={{ padding: '8px 14px', background: '#0d1117', borderBottom: '1px solid #30363d' }}>
+          <Text style={{ fontSize: 10, color: '#8b949e', display: 'block', marginBottom: 2 }}>BASE URL</Text>
+          <Text style={{ fontSize: 11, color: '#58a6ff', fontFamily: 'monospace', wordBreak: 'break-all' }}>
+            {APEX_DB_CONFIG.baseUrl}
+          </Text>
+        </div>
+
+        {/* Summary strip */}
+        <div style={{ padding: '8px 14px', background: '#161b22', borderBottom: '1px solid #30363d', display: 'flex', gap: 16 }}>
+          <Space size={4}><CheckCircleFilled style={{ color: REDWOOD.success, fontSize: 12 }} /><Text style={{ fontSize: 12, color: '#c9d1d9' }}>{okCount} OK</Text></Space>
+          <Space size={4}><CloseCircleFilled style={{ color: REDWOOD.primary, fontSize: 12 }} /><Text style={{ fontSize: 12, color: '#c9d1d9' }}>{errorCount} Error</Text></Space>
+          <Space size={4}><MinusCircleFilled style={{ color: REDWOOD.neutral300, fontSize: 12 }} /><Text style={{ fontSize: 12, color: '#c9d1d9' }}>{idleCount} Not tested</Text></Space>
+          <div style={{ marginLeft: 'auto' }}>
+            <Button
+              size="small"
+              icon={<ReloadOutlined />}
+              loading={pingAll}
+              onClick={handlePingAll}
+              style={{ fontSize: 11, background: '#21262d', border: '1px solid #30363d', color: '#c9d1d9' }}
+            >
+              Ping All
+            </Button>
+          </div>
+        </div>
+
+        {/* Endpoint list */}
+        <div style={{ flex: 1, overflowY: 'auto', background: '#0d1117' }}>
+          {endpoints.map((ep) => (
+            <div
+              key={ep.key}
+              style={{
+                padding: '8px 14px',
+                borderBottom: '1px solid #21262d',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}
+            >
+              {/* Method badge */}
+              <span style={{
+                fontSize: 9,
+                fontWeight: 700,
+                fontFamily: 'monospace',
+                padding: '1px 5px',
+                borderRadius: 3,
+                background: ep.method === 'GET' ? '#1f6feb' : '#388bfd22',
+                color: ep.method === 'GET' ? '#fff' : '#58a6ff',
+                border: ep.method === 'POST' ? '1px solid #388bfd' : 'none',
+                flexShrink: 0,
+                width: 34,
+                textAlign: 'center',
+              }}>
+                {ep.method}
+              </span>
+
+              {/* Endpoint path */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <Text style={{ fontSize: 11, color: '#c9d1d9', fontWeight: 500, display: 'block' }}>{ep.label}</Text>
+                <Text style={{ fontSize: 10, color: '#8b949e', fontFamily: 'monospace', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  /{ep.url.replace(APEX_DB_CONFIG.baseUrl + '/', '')}
+                </Text>
+              </div>
+
+              {/* Latency */}
+              {ep.latency !== undefined && (
+                <Text style={{ fontSize: 10, color: ep.latency < 500 ? REDWOOD.success : REDWOOD.warning, flexShrink: 0 }}>
+                  {ep.latency}ms
+                </Text>
+              )}
+
+              {/* Status + ping button */}
+              <Tooltip title={ep.statusCode ? `HTTP ${ep.statusCode}` : ep.status}>
+                <span style={{ cursor: 'pointer' }} onClick={() => handlePingOne(ep.key)}>
+                  <StatusIcon status={ep.status} />
+                </span>
+              </Tooltip>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <>
       {/* Floating Connected Icons */}
@@ -583,6 +759,15 @@ const FloatingMenu: React.FC = () => {
           color={REDWOOD.matchOrange}
           isActive={activePanel === 'match'}
           onClick={() => togglePanel('match')}
+          position="middle"
+          panelOpen={activePanel !== 'none' && !isClosing}
+        />
+        <FloatingIcon
+          icon={<ApiOutlined />}
+          label="API Services"
+          color="#1a1a2e"
+          isActive={activePanel === 'api'}
+          onClick={() => togglePanel('api')}
           position="last"
           panelOpen={activePanel !== 'none' && !isClosing}
         />
@@ -611,6 +796,7 @@ const FloatingMenu: React.FC = () => {
         {activePanel === 'search' && <SearchSlidePanel />}
         {activePanel === 'reports' && <ReportsSlidePanel />}
         {activePanel === 'match' && <MatchSlidePanel />}
+        {activePanel === 'api' && <ApiSlidePanel />}
       </div>
 
       {/* ========== QUICK CREATE INVOICE MODAL ========== */}
