@@ -30,6 +30,8 @@ export const APEX_DB_CONFIG = {
     slaAccountingError:   'sla/accounting/error',
     slaAccounting:        'sla/accounting',
     slaAccountingExists:  'sla/accounting/exists',
+    slaJournals:          'sla/journals',
+    slaJournalLines:      'sla/journals/lines',
     // AP Endpoints
     apInvoices: 'ap/invoices',
     apInvoicesBulk: 'ap/invoices/bulk',
