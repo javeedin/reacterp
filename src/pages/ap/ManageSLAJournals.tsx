@@ -146,10 +146,12 @@ const ManageSLAJournals: React.FC = () => {
   const [apTxnType, setApTxnType]                   = useState<'invoice' | 'payment'>('invoice');
 
   // ── Post to GL modal ──────────────────────────────────────────────────────
-  const [postGLModalVisible, setPostGLModalVisible] = useState(false);
-  const [postGLRecord, setPostGLRecord]             = useState<SlaHeader | null>(null);
-  const [postGLLoading, setPostGLLoading]           = useState(false);
-  const [postGLResult, setPostGLResult]             = useState<any>(null);
+  const [postGLModalVisible, setPostGLModalVisible]     = useState(false);
+  const [postGLRecord, setPostGLRecord]                 = useState<SlaHeader | null>(null);
+  const [postGLLines, setPostGLLines]                   = useState<SlaLine[]>([]);
+  const [postGLFetchingLines, setPostGLFetchingLines]   = useState(false);
+  const [postGLLoading, setPostGLLoading]               = useState(false);
+  const [postGLResult, setPostGLResult]                 = useState<any>(null);
 
   // ── Fetch headers ────────────────────────────────────────────────────────
   const fetchHeaders = useCallback(async (values: any) => {
@@ -308,39 +310,127 @@ const ManageSLAJournals: React.FC = () => {
   };
 
   // ── Post to GL helpers ────────────────────────────────────────────────────
-  const getPostGLEndpoint = () =>
-    `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.slaAccountingPost}`;
+  const GL_CREATE_URL = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/journals/create';
+  const SLA_POST_URL  = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.slaAccountingPost}`;
 
-  const getPostGLPayload = (r: SlaHeader) => ({
-    headerId:    r.headerId,
-    glBatchId:   r.glBatchId   ?? null,
-    glBatchName: r.glBatchName ?? `SLA-${r.moduleName}-${r.periodName}-${r.headerId}`,
-    glHeaderId:  r.glHeaderId  ?? null,
-    postedBy:    'SYSTEM',
-  });
+  /** Build the journals/create payload from SLA header + its fetched lines */
+  const buildGLPayload = (hdr: SlaHeader, slaLines: SlaLine[]) => {
+    const totalDr = slaLines.reduce((s, l) => s + (l.enteredDr || 0), 0);
+    const totalCr = slaLines.reduce((s, l) => s + (l.enteredCr || 0), 0);
+    const batchName = `SLA-${hdr.moduleName}-${hdr.periodName}-${hdr.headerId}`;
 
-  const handleOpenPostGL = (record: SlaHeader) => {
+    return {
+      batch: {
+        batchName,
+        batchDescription:  hdr.description || '',
+        ledgerName:        hdr.ledgerName,
+        ledgerId:          0,
+        status:            'NEW',
+        accountingPeriod:  hdr.periodName,
+        controlTotal:      totalDr,
+        runningTotalDr:    totalDr,
+        runningTotalCr:    totalCr,
+        batchSource:       'Subledger',
+        createdBy:         hdr.createdBy || 'SYSTEM',
+      },
+      header: {
+        ledgerId:                 0,
+        ledgerName:               hdr.ledgerName,
+        jeCategory:               hdr.eventTypeCode || 'Payables',
+        jeSource:                 hdr.moduleName || 'Payables',
+        periodName:               hdr.periodName,
+        journalName:              `SLA-${hdr.sourceNumber}-${hdr.eventTypeCode}`,
+        description:              hdr.description || '',
+        currencyCode:             hdr.currencyCode,
+        currencyConversionType:   'User',
+        currencyConversionDate:   hdr.accountingDate,
+        currencyConversionRate:   1,
+        status:                   'NEW',
+        runningTotalDr:           totalDr,
+        runningTotalCr:           totalCr,
+        createdBy:                hdr.createdBy || 'SYSTEM',
+      },
+      lines: slaLines.map(l => ({
+        enteredDr:                l.lineType === 'DR' ? (l.enteredDr || null) : null,
+        enteredCr:                l.lineType === 'CR' ? (l.enteredCr || null) : null,
+        accountedDr:              l.accountedDr || null,
+        accountedCr:              l.accountedCr || null,
+        statAmount:               null,
+        description:              l.description || hdr.description || '',
+        currencyCode:             l.currencyCode || hdr.currencyCode,
+        currencyConversionDate:   l.accountingDate || hdr.accountingDate,
+        currencyConversionRate:   1,
+        userCurrencyConversionType: 'User',
+        accountCombination:       l.accountCombination || '',
+        chartOfAccountsName:      'Chart of Accounts',
+        reference1:               l.sourceNumber  || null,
+        reference2:               l.accountingClass || null,
+        reference3:               l.moduleName    || null,
+        reference4:               l.legalEntity   || null,
+        reference5:               null,
+        createdBy:                hdr.createdBy || 'SYSTEM',
+      })),
+    };
+  };
+
+  const handleOpenPostGL = async (record: SlaHeader) => {
     setPostGLRecord(record);
+    setPostGLLines([]);
     setPostGLResult(null);
     setPostGLModalVisible(true);
+    // Fetch SLA lines for this header so we can build the full GL payload
+    setPostGLFetchingLines(true);
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/sla/journals/lines?headerId=${record.headerId}&limit=500`;
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const items: SlaLine[] = (data.items || data || []).map((r: any, i: number) => ({
+        ...r,
+        key: r.lineId ? String(r.lineId) : `${r.headerId}-${r.lineNumber}-${i}`,
+      }));
+      setPostGLLines(items);
+    } catch (err: any) {
+      message.warning(`Could not load SLA lines: ${err.message}`);
+    } finally {
+      setPostGLFetchingLines(false);
+    }
   };
 
   const handlePostToGL = async () => {
     if (!postGLRecord) return;
     setPostGLLoading(true);
     try {
-      const url     = getPostGLEndpoint();
-      const payload = getPostGLPayload(postGLRecord);
-      const res     = await fetch(url, {
+      // Step 1 — POST to journals/create
+      const payload = buildGLPayload(postGLRecord, postGLLines);
+      const res     = await fetch(GL_CREATE_URL, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body:    JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.message || `HTTP ${res.status}`);
-      setPostGLResult({ success: true, ...data });
-      message.success('Posted to GL successfully');
-      // refresh the headers table
+
+      // Step 2 — stamp GL IDs back on the SLA header
+      const glBatchId   = data.batchId   || data.batch_id   || null;
+      const glHeaderId  = data.headerId  || data.header_id  || null;
+      const glBatchName = data.batchName || payload.batch.batchName;
+      if (glBatchId || glHeaderId) {
+        await fetch(SLA_POST_URL, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            headerId:    postGLRecord.headerId,
+            glBatchId,
+            glBatchName,
+            glHeaderId,
+            postedBy:   'SYSTEM',
+          }),
+        });
+      }
+
+      setPostGLResult({ success: true, journalsCreate: data });
+      message.success('SLA journal posted to GL successfully');
       headerForm.submit();
     } catch (err: any) {
       setPostGLResult({ success: false, error: err.message });
@@ -1139,11 +1229,11 @@ const ManageSLAJournals: React.FC = () => {
               type="primary"
               icon={<SendOutlined />}
               loading={postGLLoading}
-              disabled={postGLResult?.success === true}
+              disabled={postGLResult?.success === true || postGLFetchingLines || postGLLines.length === 0}
               style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
               onClick={handlePostToGL}
             >
-              Post to GL
+              {postGLFetchingLines ? 'Loading Lines…' : `Post to GL (${postGLLines.length} lines)`}
             </Button>
           </Space>
         }
@@ -1153,75 +1243,75 @@ const ManageSLAJournals: React.FC = () => {
         {postGLRecord && (
           <div>
             {/* Endpoint */}
-            <div style={{ marginBottom: 16 }}>
-              <Text strong style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 4 }}>
+            <div style={{ marginBottom: 12 }}>
+              <Text strong style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 4, letterSpacing: 1 }}>
                 ENDPOINT
               </Text>
               <div style={{
-                background: '#1e1e2e',
-                borderRadius: 6,
-                padding: '10px 14px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 8,
+                background: '#1e1e2e', borderRadius: 6, padding: '10px 14px',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
               }}>
                 <code style={{ color: '#89d85d', fontSize: 12, wordBreak: 'break-all' }}>
-                  <span style={{ color: '#f59e0b', marginRight: 8 }}>POST</span>
-                  {getPostGLEndpoint()}
+                  <span style={{ color: '#f59e0b', marginRight: 8, fontWeight: 700 }}>POST</span>
+                  {GL_CREATE_URL}
                 </code>
                 <Button
-                  size="small"
-                  icon={<CopyOutlined />}
+                  size="small" icon={<CopyOutlined />}
                   style={{ flexShrink: 0, background: 'transparent', border: '1px solid #555', color: '#aaa' }}
-                  onClick={() => {
-                    navigator.clipboard.writeText(getPostGLEndpoint());
-                    message.success('Endpoint copied');
-                  }}
+                  onClick={() => { navigator.clipboard.writeText(GL_CREATE_URL); message.success('Endpoint copied'); }}
                 />
               </div>
+              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 4, display: 'block' }}>
+                After success, also stamps GL IDs back via: <code style={{ fontSize: 10 }}>POST {SLA_POST_URL}</code>
+              </Text>
             </div>
 
             {/* Request Body */}
-            <div style={{ marginBottom: 16 }}>
-              <Text strong style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 4 }}>
-                REQUEST BODY (JSON)
-              </Text>
-              <div style={{
-                background: '#1e1e2e',
-                borderRadius: 6,
-                padding: '12px 14px',
-                position: 'relative',
-              }}>
-                <Button
-                  size="small"
-                  icon={<CopyOutlined />}
-                  style={{ position: 'absolute', top: 8, right: 8, background: 'transparent', border: '1px solid #555', color: '#aaa' }}
-                  onClick={() => {
-                    navigator.clipboard.writeText(JSON.stringify(getPostGLPayload(postGLRecord), null, 2));
-                    message.success('JSON body copied');
-                  }}
-                />
-                <pre style={{ margin: 0, color: '#cdd6f4', fontSize: 12, lineHeight: 1.6 }}>
-                  {JSON.stringify(getPostGLPayload(postGLRecord), null, 2)
-                    .replace(/"(\w+)":/g, (_, k) => `"<span style="color:#89b4fa">${k}</span>":`)
-                    .split('\n')
-                    .map((line, i) => {
-                      const colored = line
-                        .replace(/"([^"]+)"(:\s)/g, (_, k, rest) =>
-                          `<span style="color:#89b4fa">"${k}"</span>${rest}`)
-                        .replace(/:\s*"([^"]*)"(,?)$/,
-                          (_, v, c) => `: <span style="color:#a6e3a1">"${v}"</span>${c}`)
-                        .replace(/:\s*(\d+)(,?)$/,
-                          (_, v, c) => `: <span style="color:#fab387">${v}</span>${c}`)
-                        .replace(/:\s*(null)(,?)$/,
-                          (_, v, c) => `: <span style="color:#f38ba8">${v}</span>${c}`);
-                      return (
-                        <span key={i} dangerouslySetInnerHTML={{ __html: colored + '\n' }} />
-                      );
-                    })}
-                </pre>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <Text strong style={{ fontSize: 11, color: REDWOOD.neutral600, letterSpacing: 1 }}>
+                  REQUEST BODY (JSON) — journals/create
+                </Text>
+                {postGLFetchingLines && <Spin size="small" />}
+                {!postGLFetchingLines && (
+                  <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>
+                    {postGLLines.length} SLA lines mapped → GL lines
+                  </Text>
+                )}
               </div>
+              {postGLFetchingLines ? (
+                <div style={{ background: '#1e1e2e', borderRadius: 6, padding: 24, textAlign: 'center' }}>
+                  <Spin />
+                  <div style={{ color: '#aaa', marginTop: 8, fontSize: 12 }}>Fetching SLA lines…</div>
+                </div>
+              ) : (
+                <div style={{ background: '#1e1e2e', borderRadius: 6, padding: '12px 14px', position: 'relative' }}>
+                  <Button
+                    size="small" icon={<CopyOutlined />}
+                    style={{ position: 'absolute', top: 8, right: 8, background: 'transparent', border: '1px solid #555', color: '#aaa' }}
+                    onClick={() => {
+                      navigator.clipboard.writeText(JSON.stringify(buildGLPayload(postGLRecord, postGLLines), null, 2));
+                      message.success('JSON body copied');
+                    }}
+                  />
+                  <pre style={{ margin: 0, color: '#cdd6f4', fontSize: 11, lineHeight: 1.6, maxHeight: 340, overflowY: 'auto' }}>
+                    {JSON.stringify(buildGLPayload(postGLRecord, postGLLines), null, 2)
+                      .split('\n')
+                      .map((line, i) => {
+                        const colored = line
+                          .replace(/"([^"]+)"(:\s)/g, (_, k, rest) =>
+                            `<span style="color:#89b4fa">"${k}"</span>${rest}`)
+                          .replace(/:\s*"([^"]*)"(,?)$/,
+                            (_, v, c) => `: <span style="color:#a6e3a1">"${v}"</span>${c}`)
+                          .replace(/:\s*(\d+(?:\.\d+)?)(,?)$/,
+                            (_, v, c) => `: <span style="color:#fab387">${v}</span>${c}`)
+                          .replace(/:\s*(null|true|false)(,?)$/,
+                            (_, v, c) => `: <span style="color:#f38ba8">${v}</span>${c}`);
+                        return <span key={i} dangerouslySetInnerHTML={{ __html: colored + '\n' }} />;
+                      })}
+                  </pre>
+                </div>
+              )}
             </div>
 
             {/* SLA Header info */}
