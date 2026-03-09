@@ -19,7 +19,10 @@ import {
   message,
   Tabs,
   Modal,
+  Spin,
+  Descriptions,
 } from 'antd';
+import { APEX_DB_CONFIG } from '../../config/api.config';
 import type { MenuProps } from 'antd';
 import {
   HomeOutlined,
@@ -247,6 +250,16 @@ const ManageJournals: React.FC = () => {
   // Journal panel expanded/collapsed state per tab (for Show More/Show Less)
   const [journalExpandedState, setJournalExpandedState] = useState<Record<string, boolean>>({});
   const [activeDetailTabState, setActiveDetailTabState] = useState<Record<string, string>>({});
+
+  // Journal Entry view modal state
+  const [journalViewModalVisible, setJournalViewModalVisible] = useState(false);
+  const [selectedJournalForView, setSelectedJournalForView] = useState<JournalRecord | null>(null);
+
+  // AP transaction drill-down modal state
+  const [apTransactionModalVisible, setApTransactionModalVisible] = useState(false);
+  const [apTransactionLoading, setApTransactionLoading] = useState(false);
+  const [apTransactionData, setApTransactionData] = useState<any>(null);
+  const [apTransactionType, setApTransactionType] = useState<'invoice' | 'payment' | null>(null);
 
   // Floating panel state
   const [activePanel, setActivePanel] = useState<'none' | 'tasks' | 'reports'>('none');
@@ -665,6 +678,57 @@ const ManageJournals: React.FC = () => {
     sessionStorage.removeItem(STORAGE_KEY);
   };
 
+  // Open Journal Entry modal
+  const handleViewJournalEntry = (journal: JournalRecord) => {
+    setSelectedJournalForView(journal);
+    setJournalViewModalVisible(true);
+  };
+
+  // AP transaction drill-down: fetch invoice or payment by reference
+  const handleTransactionDrilldown = async (journal: JournalRecord, line: JournalLine) => {
+    const category = (journal.category || '').toLowerCase();
+    const reference = line.description || journal.externalReference || '';
+
+    if (!reference) {
+      message.info('No transaction reference available for this line');
+      return;
+    }
+
+    setApTransactionData(null);
+    setApTransactionLoading(true);
+    setApTransactionModalVisible(true);
+
+    try {
+      let url: string;
+      let transType: 'invoice' | 'payment';
+
+      if (category.includes('payment')) {
+        transType = 'payment';
+        url = `${APEX_DB_CONFIG.baseUrl}/ap/payments?payment_number=${encodeURIComponent(reference)}`;
+      } else {
+        transType = 'invoice';
+        url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice?invoice_number=${encodeURIComponent(reference)}`;
+      }
+
+      setApTransactionType(transType);
+      const response = await fetch(url, { headers: { Accept: 'application/json' } });
+      const data = await response.json();
+      const items = data.items || (Array.isArray(data) ? data : [data]);
+
+      if (items.length > 0) {
+        setApTransactionData(items[0]);
+      } else {
+        message.warning('Transaction not found in AP');
+        setApTransactionModalVisible(false);
+      }
+    } catch {
+      message.error('Failed to load AP transaction details');
+      setApTransactionModalVisible(false);
+    } finally {
+      setApTransactionLoading(false);
+    }
+  };
+
   // Get status tag color
   const getBatchStatusTag = (status: string) => {
     const statusLower = status?.toLowerCase() || '';
@@ -835,6 +899,22 @@ const ManageJournals: React.FC = () => {
       key: 'headerId',
       width: 100,
       render: (text) => <Text code>{text || '-'}</Text>,
+    },
+    {
+      title: 'Actions',
+      key: 'viewJournalEntry',
+      width: 160,
+      fixed: 'right',
+      render: (_: any, record: JournalRecord) => (
+        <Button
+          size="small"
+          icon={<EyeOutlined />}
+          style={{ fontSize: 11, color: REDWOOD.info, borderColor: REDWOOD.info }}
+          onClick={() => handleViewJournalEntry(record)}
+        >
+          View Journal Entry
+        </Button>
+      ),
     },
   ];
 
@@ -1345,12 +1425,49 @@ const ManageJournals: React.FC = () => {
             columns={[
               { title: 'Line', dataIndex: 'lineNum', key: 'lineNum', width: 60 },
               { title: 'Account', dataIndex: 'account', key: 'account', width: 200 },
-              { title: 'Description', dataIndex: 'description', key: 'description', width: 200, ellipsis: true },
+              {
+                title: 'Description',
+                dataIndex: 'description',
+                key: 'description',
+                width: 200,
+                ellipsis: true,
+                render: (text: string, line: JournalLine) => {
+                  const isAP = (journal.source || '').toLowerCase() === 'payables';
+                  if (isAP && text) {
+                    return (
+                      <Tooltip title="Click to view AP transaction">
+                        <a
+                          style={{ color: REDWOOD.info }}
+                          onClick={() => handleTransactionDrilldown(journal, line)}
+                        >
+                          {text}
+                        </a>
+                      </Tooltip>
+                    );
+                  }
+                  return text || '-';
+                },
+              },
               { title: 'Currency', dataIndex: 'currency', key: 'currency', width: 80 },
               { title: 'Entered Dr', dataIndex: 'enteredDr', key: 'enteredDr', width: 100, align: 'right' as const, render: (v: number) => v > 0 ? formatNumber(v) : '' },
               { title: 'Entered Cr', dataIndex: 'enteredCr', key: 'enteredCr', width: 100, align: 'right' as const, render: (v: number) => v > 0 ? formatNumber(v) : '' },
               { title: 'Accounted Dr', dataIndex: 'accountedDr', key: 'accountedDr', width: 100, align: 'right' as const, render: (v: number) => v > 0 ? formatNumber(v) : '' },
               { title: 'Accounted Cr', dataIndex: 'accountedCr', key: 'accountedCr', width: 100, align: 'right' as const, render: (v: number) => v > 0 ? formatNumber(v) : '' },
+              ...((journal.source || '').toLowerCase() === 'payables' ? [{
+                title: 'Transaction',
+                key: 'viewTransaction',
+                width: 140,
+                render: (_: any, line: JournalLine) => (
+                  <Button
+                    size="small"
+                    type="link"
+                    style={{ fontSize: 11, padding: '0 4px' }}
+                    onClick={() => handleTransactionDrilldown(journal, line)}
+                  >
+                    View Transaction
+                  </Button>
+                ),
+              }] : []),
             ]}
             dataSource={journal.lines?.map((line, idx) => ({ ...line, key: idx })) || []}
             pagination={false}
@@ -2117,6 +2234,116 @@ const ManageJournals: React.FC = () => {
             ))
           )}
         </div>
+      </Modal>
+
+      {/* ── GL Journal Entry View Modal ──────────────────────────────────── */}
+      <Modal
+        title={
+          <Space>
+            <AccountBookOutlined style={{ color: REDWOOD.primary }} />
+            <span style={{ fontWeight: 600 }}>
+              GL Journal Entry — {selectedJournalForView?.journalName}
+            </span>
+            {selectedJournalForView && getBatchStatusTag(selectedJournalForView.statusMeaning)}
+          </Space>
+        }
+        open={journalViewModalVisible}
+        onCancel={() => setJournalViewModalVisible(false)}
+        footer={
+          <Button onClick={() => setJournalViewModalVisible(false)}>Close</Button>
+        }
+        width={1300}
+        style={{ top: 16 }}
+        styles={{ body: { padding: 0, maxHeight: 'calc(100vh - 180px)', overflowY: 'auto' } }}
+        destroyOnClose
+      >
+        {selectedJournalForView && renderJournalEditPanel(
+          selectedJournalForView,
+          `modal-${selectedJournalForView.jeHeaderId}`
+        )}
+      </Modal>
+
+      {/* ── AP Transaction Drill-Down Modal ──────────────────────────────── */}
+      <Modal
+        title={
+          <Space>
+            <FileTextOutlined style={{ color: REDWOOD.info }} />
+            <span style={{ fontWeight: 600 }}>
+              {apTransactionType === 'payment' ? 'AP Payment' : 'AP Invoice'} — Transaction Detail
+            </span>
+          </Space>
+        }
+        open={apTransactionModalVisible}
+        onCancel={() => { setApTransactionModalVisible(false); setApTransactionData(null); }}
+        footer={<Button onClick={() => { setApTransactionModalVisible(false); setApTransactionData(null); }}>Close</Button>}
+        width={900}
+        destroyOnClose
+      >
+        {apTransactionLoading ? (
+          <div style={{ textAlign: 'center', padding: 60 }}>
+            <Spin size="large" />
+            <div style={{ marginTop: 16, color: REDWOOD.neutral600 }}>
+              Loading {apTransactionType === 'payment' ? 'payment' : 'invoice'} details…
+            </div>
+          </div>
+        ) : apTransactionData ? (
+          apTransactionType === 'payment' ? (
+            /* ── Payment detail ── */
+            <div>
+              <Card
+                size="small"
+                style={{ marginBottom: 12, borderRadius: 6, borderColor: REDWOOD.neutral200 }}
+                headStyle={{ background: REDWOOD.neutral100, fontSize: 13, fontWeight: 600 }}
+                title="Payment Information"
+              >
+                <Descriptions size="small" column={2} bordered labelStyle={{ fontWeight: 500, width: 160 }}>
+                  <Descriptions.Item label="Payment Number">{apTransactionData.paymentNumber || apTransactionData.payment_number || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Payment Date">{apTransactionData.paymentDate || apTransactionData.payment_date || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Payee">{apTransactionData.payee || apTransactionData.payee_name || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Status">
+                    <Tag color={REDWOOD.success}>{apTransactionData.paymentStatus || apTransactionData.payment_status || '-'}</Tag>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Payment Amount">{apTransactionData.paymentAmount || apTransactionData.payment_amount || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Currency">{apTransactionData.paymentCurrency || apTransactionData.payment_currency || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Business Unit" span={2}>{apTransactionData.businessUnit || apTransactionData.business_unit || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Payment Method">{apTransactionData.paymentMethod || apTransactionData.payment_method || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Payment Document">{apTransactionData.paymentDocument || apTransactionData.payment_document || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Remit To Address" span={2}>{apTransactionData.remitToAddress || apTransactionData.remit_to_address || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Bank Account">{apTransactionData.remitToAccountNumber || apTransactionData.remit_to_account_number || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Legal Entity">{apTransactionData.legalEntity || apTransactionData.legal_entity || '-'}</Descriptions.Item>
+                </Descriptions>
+              </Card>
+            </div>
+          ) : (
+            /* ── Invoice detail ── */
+            <div>
+              <Card
+                size="small"
+                style={{ marginBottom: 12, borderRadius: 6, borderColor: REDWOOD.neutral200 }}
+                headStyle={{ background: REDWOOD.neutral100, fontSize: 13, fontWeight: 600 }}
+                title="Invoice Information"
+              >
+                <Descriptions size="small" column={2} bordered labelStyle={{ fontWeight: 500, width: 160 }}>
+                  <Descriptions.Item label="Invoice Number">{apTransactionData.invoiceNumber || apTransactionData.invoice_number || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Invoice Date">{apTransactionData.invoiceDate || apTransactionData.invoice_date || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Supplier">{apTransactionData.supplierOrParty || apTransactionData.supplier_name || apTransactionData.party_name || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Supplier Site">{apTransactionData.supplierSite || apTransactionData.supplier_site || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Invoice Amount">{apTransactionData.invoiceAmount || apTransactionData.invoice_amount || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Currency">{apTransactionData.invoiceCurrency || apTransactionData.currency_code || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Status">
+                    <Tag color={REDWOOD.info}>{apTransactionData.validationStatus || apTransactionData.validation_status || '-'}</Tag>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Approval Status">
+                    <Tag color={REDWOOD.success}>{apTransactionData.approvalStatus || apTransactionData.approval_status || 'N/A'}</Tag>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Business Unit" span={2}>{apTransactionData.businessUnit || apTransactionData.business_unit || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Unpaid Amount">{apTransactionData.unpaidAmount || apTransactionData.unpaid_amount || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Invoice Type">{apTransactionData.invoiceType || apTransactionData.invoice_type || '-'}</Descriptions.Item>
+                </Descriptions>
+              </Card>
+            </div>
+          )
+        ) : null}
       </Modal>
     </Layout>
   );
