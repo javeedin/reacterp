@@ -59,6 +59,14 @@ const REDWOOD = {
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import FloatingMenu from '../../components/FloatingMenu';
 import Autopilot from '../../components/Autopilot';
+import {
+  checkAccountingExists,
+  createAccounting,
+  postToLedger as slaPostToLedger,
+  buildApInvoiceSlaPayload,
+  getAccounting,
+  type SlaExistsResult,
+} from '../../services/sla.service';
 
 // Invoice Line interface
 interface InvoiceLine {
@@ -187,11 +195,23 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
   const [installmentsModalData, setInstallmentsModalData] = useState<any[]>([]);
   const [installmentsModalLoading, setInstallmentsModalLoading] = useState(false);
 
+  // ── SLA state ──────────────────────────────────────────────────────────────
+  const [slaStatus, setSlaStatus] = useState<SlaExistsResult | null>(null);
+  const [slaLoading, setSlaLoading] = useState(false);
+  const [slaActionLoading, setSlaActionLoading] = useState(false);
+  // Post-to-Ledger modal
+  const [postModalOpen, setPostModalOpen] = useState(false);
+  const [postModalHeadId, setPostModalHeadId] = useState<number | null>(null);
+  const [glBatchId, setGlBatchId] = useState('');
+  const [glBatchName, setGlBatchName] = useState('');
+  const [glHeaderId, setGlHeaderId] = useState('');
+
   // Fetch all data on mount
   useEffect(() => {
     fetchInvoiceLines();
     fetchPayments();
     fetchInstallments();
+    fetchSlaStatus();
   }, [invoice.invoiceId]);
 
   // Fetch invoice lines from API
@@ -378,11 +398,127 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
     }
   };
 
+  // ── SLA helpers ─────────────────────────────────────────────────────────────
+
+  const fetchSlaStatus = async () => {
+    setSlaLoading(true);
+    try {
+      const result = await checkAccountingExists('AP_INVOICES', invoice.invoiceId, 'AP_INVOICE_CREATION');
+      setSlaStatus(result);
+    } catch (err) {
+      console.error('SLA status check failed:', err);
+    } finally {
+      setSlaLoading(false);
+    }
+  };
+
+  const handleAccountInDraft = async () => {
+    // If POSTED, block immediately with clear message
+    if (slaStatus?.exists && slaStatus.accountingStatus === 'POSTED') {
+      message.error(`Cannot replace. A POSTED accounting entry (ID: ${slaStatus.headerId}) already exists. Reverse it first.`);
+      return;
+    }
+
+    if (lines.length === 0) {
+      message.warning('No invoice lines loaded. Load lines first before creating accounting.');
+      return;
+    }
+
+    setSlaActionLoading(true);
+    try {
+      const payload = buildApInvoiceSlaPayload({
+        invoiceId:          invoice.invoiceId,
+        invoiceNumber:      invoice.invoiceNumber,
+        invoiceDate:        invoice.invoiceDate,
+        invoiceType:        invoice.invoiceType,
+        currencyCode:       invoice.invoiceCurrency,
+        invoiceAmount:      invoice.invoiceAmount,
+        businessUnit:       invoice.businessUnit,
+        expenseAccount:     '101.100.7010.0000.000',   // default expense – override as needed
+        apLiabilityAccount: '101.200.2100.0000.000',   // default AP liability – override as needed
+        invoiceLines:       lines.map(l => ({
+          lineNumber:   l.lineNumber,
+          amount:       l.amount,
+          description:  l.description,
+          accrualAccount: l.accrualAccount || undefined,
+          lineId:       Number(l.key) || undefined,
+        })),
+      });
+
+      const result = await createAccounting(payload);
+      message.success(`Accounting created in DRAFT (Header ID: ${result.headerId}, ${result.lineCount} lines)`);
+      await fetchSlaStatus();   // refresh badge
+    } catch (err: any) {
+      message.error(`Create accounting failed: ${err.message}`);
+    } finally {
+      setSlaActionLoading(false);
+    }
+  };
+
+  const handlePostToLedgerOpen = async () => {
+    // Fetch fresh SLA status to get headerId
+    setSlaActionLoading(true);
+    try {
+      const result = await getAccounting('AP_INVOICES', invoice.invoiceId);
+      if (!result.found || !result.headerId) {
+        message.warning('No accounting entry found. Run "Account in Draft" first.');
+        return;
+      }
+      if (result.accountingStatus === 'POSTED') {
+        message.error(`Header ${result.headerId} is already POSTED and locked.`);
+        return;
+      }
+      if (result.accountingStatus === 'ERROR') {
+        message.error(`Header ${result.headerId} is in ERROR. Recreate accounting first.`);
+        return;
+      }
+      setPostModalHeadId(result.headerId);
+      setGlBatchId('');
+      setGlBatchName(`AP_${invoice.invoiceNumber}_BATCH`);
+      setGlHeaderId('');
+      setPostModalOpen(true);
+    } catch (err: any) {
+      message.error(`Failed to fetch accounting: ${err.message}`);
+    } finally {
+      setSlaActionLoading(false);
+    }
+  };
+
+  const handlePostToLedgerConfirm = async () => {
+    if (!postModalHeadId) return;
+    if (!glBatchId || !glHeaderId) {
+      message.warning('GL Batch ID and GL Header ID are required.');
+      return;
+    }
+    setSlaActionLoading(true);
+    try {
+      const result = await slaPostToLedger(
+        postModalHeadId,
+        Number(glBatchId),
+        glBatchName,
+        Number(glHeaderId),
+      );
+      message.success(`Posted to GL successfully. Header ${result.headerId} is now POSTED and locked.`);
+      setPostModalOpen(false);
+      await fetchSlaStatus();
+    } catch (err: any) {
+      message.error(`Post to ledger failed: ${err.message}`);
+    } finally {
+      setSlaActionLoading(false);
+    }
+  };
+
+  // ── Action menu click ────────────────────────────────────────────────────────
+
   // Handle Invoice Actions menu click
   const handleActionsMenuClick: MenuProps['onClick'] = ({ key }) => {
     if (key === 'installments') {
       setInstallmentsModalOpen(true);
       fetchInstallmentsForModal();
+    } else if (key === 'accountInDraft') {
+      handleAccountInDraft();
+    } else if (key === 'postToLedger') {
+      handlePostToLedgerOpen();
     }
   };
 
@@ -694,8 +830,34 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
         <Title level={5} style={{ margin: 0 }}>Invoice Details</Title>
         <Space>
           {getValidationTag(invoice.validationStatus)}
-          <Dropdown menu={{ items: actionsMenuItems, onClick: handleActionsMenuClick }} trigger={['click']}>
-            <Button type="primary">
+
+          {/* SLA Accounting Status badge */}
+          {slaLoading ? (
+            <Spin size="small" />
+          ) : slaStatus?.exists ? (
+            <Tooltip title={slaStatus.message}>
+              <Tag
+                color={
+                  slaStatus.accountingStatus === 'POSTED' ? 'green' :
+                  slaStatus.accountingStatus === 'DRAFT'  ? 'blue'  :
+                  slaStatus.accountingStatus === 'ERROR'  ? 'red'   : 'default'
+                }
+                style={{ cursor: 'help' }}
+              >
+                SLA: {slaStatus.accountingStatus}
+              </Tag>
+            </Tooltip>
+          ) : (
+            <Tag color="default" style={{ cursor: 'help' }}>
+              <Tooltip title="No accounting entry yet">SLA: None</Tooltip>
+            </Tag>
+          )}
+
+          <Dropdown
+            menu={{ items: actionsMenuItems, onClick: handleActionsMenuClick }}
+            trigger={['click']}
+          >
+            <Button type="primary" loading={slaActionLoading}>
               Invoice Actions <DownOutlined />
             </Button>
           </Dropdown>
@@ -1160,6 +1322,49 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
             )}
           />
         </Spin>
+      </Modal>
+
+      {/* Post to Ledger Modal */}
+      <Modal
+        title={`Post to Ledger — Header ID: ${postModalHeadId}`}
+        open={postModalOpen}
+        onOk={handlePostToLedgerConfirm}
+        onCancel={() => setPostModalOpen(false)}
+        confirmLoading={slaActionLoading}
+        okText="Post to GL"
+        okButtonProps={{ danger: false, type: 'primary' }}
+      >
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <div>
+            <label style={{ fontSize: 12, color: REDWOOD.neutral600 }}>GL Batch ID *</label>
+            <Input
+              placeholder="e.g. 300000123456"
+              value={glBatchId}
+              onChange={e => setGlBatchId(e.target.value)}
+              type="number"
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: REDWOOD.neutral600 }}>GL Batch Name</label>
+            <Input
+              placeholder="e.g. AP_INV_BATCH_001"
+              value={glBatchName}
+              onChange={e => setGlBatchName(e.target.value)}
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: REDWOOD.neutral600 }}>GL Header ID *</label>
+            <Input
+              placeholder="e.g. 300000123457"
+              value={glHeaderId}
+              onChange={e => setGlHeaderId(e.target.value)}
+              type="number"
+            />
+          </div>
+          <div style={{ color: REDWOOD.warning, fontSize: 12 }}>
+            ⚠ Once posted, the accounting entry will be locked and cannot be modified.
+          </div>
+        </Space>
       </Modal>
 
       {/* Custom styles */}

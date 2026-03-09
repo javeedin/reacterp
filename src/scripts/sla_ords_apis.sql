@@ -83,6 +83,26 @@ END;
 */
 
 -- =============================================================================
+-- HANDLER 5 – GET /reerp/sla/accounting/exists?sourceTable=AP_INVOICES&sourceId=123&eventType=AP_INVOICE_CREATION
+-- =============================================================================
+/*
+DECLARE
+  v_status   NUMBER;
+  v_response CLOB;
+BEGIN
+  RR_SLA_PKG.check_accounting_exists(
+    p_source_table => :sourceTable,
+    p_source_id    => TO_NUMBER(:sourceId),
+    p_event_type   => :eventType,
+    p_status       => v_status,
+    p_response     => v_response
+  );
+  :status := v_status;
+  :body   := v_response;
+END;
+*/
+
+-- =============================================================================
 -- ORDS Module Registration
 -- Run once to wire up the module + templates + handlers programmatically.
 -- Alternatively register each handler manually in the APEX REST Workshop UI.
@@ -204,6 +224,36 @@ BEGIN
   RR_SLA_PKG.get_accounting(
     p_source_table => :sourceTable,
     p_source_id    => TO_NUMBER(:sourceId),
+    p_status       => v_status,
+    p_response     => v_response
+  );
+  :status := v_status;
+  :body   := v_response;
+END;
+]'
+  );
+
+  -- ── Template + Handler: check_accounting_exists ──────────────────────────────
+  ORDS.DEFINE_TEMPLATE(
+    p_module_name => 'reerp.sla',
+    p_pattern     => 'accounting/exists',
+    p_comments    => 'Check if SLA accounting entry exists for a source transaction'
+  );
+  ORDS.DEFINE_HANDLER(
+    p_module_name    => 'reerp.sla',
+    p_pattern        => 'accounting/exists',
+    p_method         => 'GET',
+    p_source_type    => ORDS.source_type_plsql,
+    p_comments       => 'Delegates to RR_SLA_PKG.check_accounting_exists',
+    p_source         => q'[
+DECLARE
+  v_status   NUMBER;
+  v_response CLOB;
+BEGIN
+  RR_SLA_PKG.check_accounting_exists(
+    p_source_table => :sourceTable,
+    p_source_id    => TO_NUMBER(:sourceId),
+    p_event_type   => :eventType,
     p_status       => v_status,
     p_response     => v_response
   );

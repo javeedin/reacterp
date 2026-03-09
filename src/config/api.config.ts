@@ -25,10 +25,11 @@ export const APEX_DB_CONFIG = {
     glBalances: 'gl/trialbalance',
     periodsStatus: 'periodsstatus/create',
     // SLA Endpoints
-    slaAccountingCreate: 'sla/accounting/create',
-    slaAccountingPost:   'sla/accounting/post',
-    slaAccountingError:  'sla/accounting/error',
-    slaAccounting:       'sla/accounting',
+    slaAccountingCreate:  'sla/accounting/create',
+    slaAccountingPost:    'sla/accounting/post',
+    slaAccountingError:   'sla/accounting/error',
+    slaAccounting:        'sla/accounting',
+    slaAccountingExists:  'sla/accounting/exists',
     // AP Endpoints
     apInvoices: 'ap/invoices',
     apInvoicesBulk: 'ap/invoices/bulk',

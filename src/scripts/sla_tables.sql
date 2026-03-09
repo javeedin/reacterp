@@ -89,6 +89,32 @@ CREATE INDEX RR_SLA_HDR_STAT_IDX ON RR_SLA_ACCOUNTING_HEADERS (ACCOUNTING_STATUS
 CREATE INDEX RR_SLA_HDR_DATE_IDX ON RR_SLA_ACCOUNTING_HEADERS (ACCOUNTING_DATE);
 CREATE INDEX RR_SLA_HDR_PER_IDX  ON RR_SLA_ACCOUNTING_HEADERS (PERIOD_NAME);
 
+-- ── DB-level duplicate guards (last line of defence) ──────────────────────────
+--
+-- 1. POSTED guard: only one POSTED entry per (source_table, source_id, event_type).
+--    Oracle excludes NULL from unique indexes, so DRAFT/ERROR rows (where the CASE
+--    returns NULL) are not covered and can coexist freely.
+CREATE UNIQUE INDEX RR_SLA_HDR_POSTED_UNQ
+  ON RR_SLA_ACCOUNTING_HEADERS (
+    CASE WHEN ACCOUNTING_STATUS = 'POSTED' THEN SOURCE_TABLE    END,
+    CASE WHEN ACCOUNTING_STATUS = 'POSTED' THEN SOURCE_ID       END,
+    CASE WHEN ACCOUNTING_STATUS = 'POSTED' THEN EVENT_TYPE_CODE END
+  );
+
+-- 2. DRAFT guard: at most one DRAFT per (source_table, source_id, event_type) at
+--    any moment.  Prevents two concurrent sessions both inserting a DRAFT before
+--    either notices the other.
+CREATE UNIQUE INDEX RR_SLA_HDR_DRAFT_UNQ
+  ON RR_SLA_ACCOUNTING_HEADERS (
+    CASE WHEN ACCOUNTING_STATUS = 'DRAFT' THEN SOURCE_TABLE    END,
+    CASE WHEN ACCOUNTING_STATUS = 'DRAFT' THEN SOURCE_ID       END,
+    CASE WHEN ACCOUNTING_STATUS = 'DRAFT' THEN EVENT_TYPE_CODE END
+  );
+
+-- 3. Line-number uniqueness within a header (prevents duplicate line numbers).
+CREATE UNIQUE INDEX RR_SLA_LINE_NUM_UNQ
+  ON RR_SLA_ACCOUNTING_LINES (HEADER_ID, LINE_NUMBER);
+
 COMMENT ON TABLE  RR_SLA_ACCOUNTING_HEADERS                IS 'SLA – one row per accounting event per source transaction';
 COMMENT ON COLUMN RR_SLA_ACCOUNTING_HEADERS.ACCOUNTING_STATUS IS 'DRAFT=editable | FINAL=ready to post | POSTED=locked in GL | ERROR=post failed';
 COMMENT ON COLUMN RR_SLA_ACCOUNTING_HEADERS.MODULE_NAME    IS 'AP | AR | GL | CM | FA';
