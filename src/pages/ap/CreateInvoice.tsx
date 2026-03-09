@@ -4319,6 +4319,24 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           <Text style={{ fontSize: 12 }}>{v ? dayjs(v).format('D-MMM-YYYY') : '—'}</Text>
                         ),
                       },
+                      {
+                        title: 'Action',
+                        width: 90,
+                        align: 'center' as const,
+                        render: (_: any, record: AppliedPrepayment) => (
+                          <Button
+                            size="small"
+                            danger
+                            onClick={() => {
+                              setUnapplyRecord(record);
+                              setUnapplyDate(dayjs());
+                              setUnapplyModalVisible(true);
+                            }}
+                          >
+                            Un-Apply
+                          </Button>
+                        ),
+                      },
                     ]}
                     locale={{ emptyText: 'No prepayments applied to this invoice.' }}
                   />
