@@ -3562,65 +3562,60 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               {isValidated ? 'Validated' : 'Validate'}
             </Button>
           )}
-          <Tooltip title={!savedInvoiceId && lines.every(l => l.amount === 0) ? 'Add invoice lines first' : ''}>
+          {/* Accounting Actions Dropdown */}
+          <Dropdown
+            menu={{
+              items: [
+                {
+                  key: 'viewAccounting',
+                  icon: <AccountBookOutlined />,
+                  label: 'View Accounting',
+                  disabled: !savedInvoiceId && lines.every(l => l.amount === 0),
+                },
+                ...(savedInvoiceId && slaStatus !== 'POSTED' ? [{
+                  key: 'createAccounting',
+                  icon: <CheckSquareOutlined />,
+                  label: slaStatus === 'DRAFT' ? 'Re-create Accounting' : 'Create Accounting',
+                }] : []),
+                ...(slaStatus === 'DRAFT' ? [{
+                  key: 'postToLedger',
+                  icon: <SendOutlined />,
+                  label: 'Post to Ledger',
+                }] : []),
+                ...(slaHeaderId ? [{ type: 'divider' as const }, {
+                  key: 'viewSlaLines',
+                  icon: <AccountBookOutlined />,
+                  label: slaStatus === 'POSTED' ? 'View Posted Accounting' : 'View Draft Accounting',
+                }] : []),
+              ],
+              onClick: ({ key }: { key: string }) => {
+                if (key === 'viewAccounting') setAccountingModalVisible(true);
+                else if (key === 'createAccounting') handleCreateAccounting();
+                else if (key === 'postToLedger') handlePostToLedger();
+                else if (key === 'viewSlaLines') setSlaModalVisible(true);
+              },
+            }}
+            trigger={['click']}
+          >
             <Button
-              icon={<AccountBookOutlined />}
-              onClick={() => setAccountingModalVisible(true)}
-              disabled={!savedInvoiceId && lines.every(l => l.amount === 0)}
-              style={{
-                fontWeight: 500,
-                borderColor: (savedInvoiceId || lines.some(l => l.amount !== 0)) ? REDWOOD.info : undefined,
-                color: (savedInvoiceId || lines.some(l => l.amount !== 0)) ? REDWOOD.info : undefined,
-              }}
+              loading={slaCreating || slaPosting}
+              style={{ fontWeight: 500, borderColor: REDWOOD.info, color: REDWOOD.info }}
             >
-              View Accounting
+              Accounting Actions <DownOutlined style={{ fontSize: 10 }} />
             </Button>
-          </Tooltip>
-          {/* SLA – Create Accounting */}
-          {savedInvoiceId && slaStatus !== 'POSTED' && (
-            <Tooltip title={slaStatus === 'DRAFT' ? 'Re-create accounting (replaces existing DRAFT)' : 'Create accounting entries in SLA'}>
-              <Button
-                icon={<CheckSquareOutlined />}
-                loading={slaCreating}
-                onClick={handleCreateAccounting}
-                style={{ fontWeight: 500, borderColor: REDWOOD.warning, color: REDWOOD.warning }}
-              >
-                {slaStatus === 'DRAFT' ? 'Re-create Accounting' : 'Create Accounting'}
-              </Button>
-            </Tooltip>
-          )}
-          {/* SLA – Post to Ledger */}
-          {slaStatus === 'DRAFT' && (
-            <Tooltip title="Transfer accounting to General Ledger (locks record)">
-              <Button
-                icon={<SendOutlined />}
-                loading={slaPosting}
-                onClick={handlePostToLedger}
-                type="primary"
-                style={{ fontWeight: 500, background: REDWOOD.success, borderColor: REDWOOD.success }}
-              >
-                Post to Ledger
-              </Button>
-            </Tooltip>
-          )}
-          {/* SLA – View SLA lines when created */}
-          {slaHeaderId && (
-            <Button
-              size="small"
-              icon={<AccountBookOutlined />}
-              onClick={() => setSlaModalVisible(true)}
-              style={{ fontWeight: 500 }}
-            >
-              {slaStatus === 'POSTED' ? 'View Posted Accounting' : 'View Draft Accounting'}
-            </Button>
-          )}
-          {/* SLA Status Tag */}
-          {slaStatus && (
+          </Dropdown>
+          {/* Accounting Status Tag */}
+          {slaStatus ? (
             <Tag
-              color={slaStatus === 'POSTED' ? 'green' : slaStatus === 'ERROR' ? 'red' : 'orange'}
+              color={slaStatus === 'POSTED' ? 'green' : slaStatus === 'DRAFT' ? '#1677ff' : slaStatus === 'ERROR' ? 'red' : 'orange'}
+              icon={slaStatus === 'POSTED' ? <CheckCircleOutlined /> : slaStatus === 'DRAFT' ? <AccountBookOutlined /> : <StopOutlined />}
               style={{ fontSize: 12, padding: '2px 10px', fontWeight: 600 }}
             >
-              {slaStatus === 'POSTED' ? 'Accounting Posted' : slaStatus === 'ERROR' ? 'Accounting Error' : 'Accounting: Draft'}
+              {slaStatus === 'POSTED' ? 'Posted Done' : slaStatus === 'DRAFT' ? 'Draft Done' : slaStatus === 'ERROR' ? 'Accounting Error' : slaStatus}
+            </Tag>
+          ) : (
+            <Tag color="default" style={{ fontSize: 12, padding: '2px 8px' }}>
+              Accounting: None
             </Tag>
           )}
           {savedInvoiceId && (
