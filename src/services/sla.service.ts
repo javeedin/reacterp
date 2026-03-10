@@ -200,6 +200,32 @@ export async function getAccounting(
   return apexGet<SlaGetResult>(url);
 }
 
+// ── Ledger lookup ──────────────────────────────────────────────────────────
+
+export interface LedgerInfo {
+  ledgerId: number;
+  ledgerName: string;
+}
+
+/**
+ * Fetch the primary ledger for a given business unit.
+ * Returns null if the BU is blank or the lookup fails.
+ */
+export async function fetchLedgerByBusinessUnit(businessUnitName: string): Promise<LedgerInfo | null> {
+  if (!businessUnitName) return null;
+  try {
+    const url = `${BASE}/gl/getledgername?P_BUSINESS_UNIT_NAME=${encodeURIComponent(businessUnitName)}`;
+    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    if (!res.ok) return null;
+    const body = await res.json();
+    const item = body?.items?.[0];
+    if (!item) return null;
+    return { ledgerId: item.ledger_id, ledgerName: item.ledger_name };
+  } catch {
+    return null;
+  }
+}
+
 // ── Payload builder for AP Invoices ───────────────────────────────────────
 
 /**

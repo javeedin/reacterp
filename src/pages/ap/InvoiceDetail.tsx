@@ -65,6 +65,7 @@ import {
   postToLedger as slaPostToLedger,
   buildApInvoiceSlaPayload,
   getAccounting,
+  fetchLedgerByBusinessUnit,
   type SlaExistsResult,
 } from '../../services/sla.service';
 
@@ -426,6 +427,7 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
 
     setSlaActionLoading(true);
     try {
+      const ledgerInfo = await fetchLedgerByBusinessUnit(invoice.businessUnit ?? '');
       const payload = buildApInvoiceSlaPayload({
         invoiceId:          invoice.invoiceId,
         invoiceNumber:      invoice.invoiceNumber,
@@ -434,6 +436,8 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
         currencyCode:       invoice.invoiceCurrency,
         invoiceAmount:      invoice.invoiceAmount,
         businessUnit:       invoice.businessUnit,
+        ledgerId:           ledgerInfo?.ledgerId,
+        ledgerName:         ledgerInfo?.ledgerName,
         expenseAccount:     '101.100.7010.0000.000',   // default expense – override as needed
         apLiabilityAccount: '101.200.2100.0000.000',   // default AP liability – override as needed
         invoiceLines:       lines.map(l => ({

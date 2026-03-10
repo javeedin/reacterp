@@ -80,6 +80,7 @@ dayjs.extend(customParseFormat);
 import * as XLSX from 'xlsx';
 import type { ColumnsType } from 'antd/es/table';
 import { APEX_DB_CONFIG } from '../../config/api.config';
+import { fetchLedgerByBusinessUnit } from '../../services/sla.service';
 import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
 import { useAuth } from '../../context/AuthContext';
 
@@ -1010,6 +1011,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     const slaLines_ = buildSlaLines();
     if (slaLines_.length === 0) { message.warning('No invoice lines with amounts to account.'); return; }
 
+    const ledgerInfo = await fetchLedgerByBusinessUnit(bu);
+
     const payload = {
       header: {
         moduleName:       'AP',
@@ -1021,8 +1024,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         eventDate:        acctDate,
         accountingDate:   acctDate,
         periodName,
-        ledgerId:         300000003259529,
-        ledgerName:       'BCL DIFC',
+        ledgerId:         ledgerInfo?.ledgerId  ?? 300000003259529,
+        ledgerName:       ledgerInfo?.ledgerName ?? 'BCL DIFC',
         currencyCode:     currency,
         ledgerCurrency:   'AED',
         exchangeRate:     1,
@@ -1103,13 +1106,17 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       const acctDate      = invoiceDate ? dayjs(invoiceDate).format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD');
       const periodName    = invoiceDate ? dayjs(invoiceDate).format('MMM-YYYY') : dayjs().format('MMM-YYYY');
 
+      const ledgerInfo = await fetchLedgerByBusinessUnit(bu);
+      const resolvedLedgerName = ledgerInfo?.ledgerName ?? 'BCL DIFC';
+      const resolvedLedgerId   = ledgerInfo?.ledgerId   ?? 0;
+
       // Build journal payload matching CreateJournal.tsx format
       const journalPayload = {
         batch: {
           batchName:        `AP-${invoiceNumber}-${dayjs().format('YYYYMMDD-HHmmss')}`,
           batchDescription: `AP Invoice ${invoiceNumber} – Posted from SLA`,
-          ledgerName:       'Primary Ledger',
-          ledgerId:         0,
+          ledgerName:       resolvedLedgerName,
+          ledgerId:         resolvedLedgerId,
           status:           'NEW',
           accountingPeriod: periodName,
           controlTotal:     slaLines.filter(l => l.lineType === 'DR').reduce((s, l) => s + (l.enteredDr || 0), 0),
@@ -1119,8 +1126,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           createdBy:        'user',
         },
         header: {
-          ledgerId:               0,
-          ledgerName:             'Primary Ledger',
+          ledgerId:               resolvedLedgerId,
+          ledgerName:             resolvedLedgerName,
           jeCategory:             'Purchase Invoices',
           jeSource:               'Payables',
           periodName,
