@@ -145,6 +145,7 @@ const ManageSLAJournals: React.FC = () => {
   const [apTxnLoading, setApTxnLoading]             = useState(false);
   const [apTxnData, setApTxnData]                   = useState<any>(null);
   const [apTxnType, setApTxnType]                   = useState<'invoice' | 'payment'>('invoice');
+  const [apTxnLines, setApTxnLines]                 = useState<any[]>([]);
 
   // ── Post to GL modal ──────────────────────────────────────────────────────
   const [postGLModalVisible, setPostGLModalVisible]     = useState(false);
@@ -285,6 +286,7 @@ const ManageSLAJournals: React.FC = () => {
     const isPayment = (record.sourceTable || '').toUpperCase().includes('PAYMENT');
     setApTxnType(isPayment ? 'payment' : 'invoice');
     setApTxnData(null);
+    setApTxnLines([]);
     setApTxnLoading(true);
     setApTxnModalVisible(true);
     try {
@@ -299,6 +301,23 @@ const ManageSLAJournals: React.FC = () => {
       const items = data.items || (Array.isArray(data) ? data : [data]);
       if (items.length > 0 && items[0]) {
         setApTxnData(items[0]);
+        if (!isPayment) {
+          // Fetch invoice lines using the source ID from the SLA record
+          const invoiceId = record.sourceId || items[0].invoice_id || items[0].invoiceId;
+          if (invoiceId) {
+            try {
+              const linesRes = await fetch(
+                `${APEX_DB_CONFIG.baseUrl}/ap/createinvoiceslines?P_INVOICE_ID=${invoiceId}`,
+                { headers: { Accept: 'application/json' } }
+              );
+              const linesData = await linesRes.json();
+              const lineItems = linesData.items || (Array.isArray(linesData) ? linesData : []);
+              setApTxnLines(lineItems);
+            } catch {
+              // Lines fetch failure is non-critical; header is still shown
+            }
+          }
+        }
       } else {
         message.warning('Transaction not found');
         setApTxnModalVisible(false);
@@ -1374,9 +1393,9 @@ const ManageSLAJournals: React.FC = () => {
           </Space>
         }
         open={apTxnModalVisible}
-        onCancel={() => { setApTxnModalVisible(false); setApTxnData(null); }}
-        footer={<Button onClick={() => { setApTxnModalVisible(false); setApTxnData(null); }}>Close</Button>}
-        width={900}
+        onCancel={() => { setApTxnModalVisible(false); setApTxnData(null); setApTxnLines([]); }}
+        footer={<Button onClick={() => { setApTxnModalVisible(false); setApTxnData(null); setApTxnLines([]); }}>Close</Button>}
+        width={1000}
         destroyOnClose
       >
         {apTxnLoading ? (
@@ -1404,23 +1423,64 @@ const ManageSLAJournals: React.FC = () => {
               <Descriptions.Item label="Legal Entity">{apTxnData.legalEntity || apTxnData.legal_entity || '—'}</Descriptions.Item>
             </Descriptions>
           ) : (
-            <Descriptions size="small" column={2} bordered labelStyle={{ fontWeight: 500, width: 150 }}>
-              <Descriptions.Item label="Invoice Number">{apTxnData.invoiceNumber || apTxnData.invoice_number || '—'}</Descriptions.Item>
-              <Descriptions.Item label="Invoice Date">{apTxnData.invoiceDate || apTxnData.invoice_date || '—'}</Descriptions.Item>
-              <Descriptions.Item label="Supplier">{apTxnData.supplierOrParty || apTxnData.supplier_name || apTxnData.party_name || '—'}</Descriptions.Item>
-              <Descriptions.Item label="Supplier Site">{apTxnData.supplierSite || apTxnData.supplier_site || '—'}</Descriptions.Item>
-              <Descriptions.Item label="Invoice Amount">{apTxnData.invoiceAmount || apTxnData.invoice_amount || '—'}</Descriptions.Item>
-              <Descriptions.Item label="Currency">{apTxnData.invoiceCurrency || apTxnData.currency_code || '—'}</Descriptions.Item>
-              <Descriptions.Item label="Validation Status">
-                <Tag color="blue">{apTxnData.validationStatus || apTxnData.validation_status || '—'}</Tag>
-              </Descriptions.Item>
-              <Descriptions.Item label="Approval Status">
-                <Tag color="green">{apTxnData.approvalStatus || apTxnData.approval_status || 'N/A'}</Tag>
-              </Descriptions.Item>
-              <Descriptions.Item label="Business Unit" span={2}>{apTxnData.businessUnit || apTxnData.business_unit || '—'}</Descriptions.Item>
-              <Descriptions.Item label="Unpaid Amount">{apTxnData.unpaidAmount || apTxnData.unpaid_amount || '—'}</Descriptions.Item>
-              <Descriptions.Item label="Invoice Type">{apTxnData.invoiceType || apTxnData.invoice_type || '—'}</Descriptions.Item>
-            </Descriptions>
+            <Tabs
+              size="small"
+              items={[
+                {
+                  key: 'header',
+                  label: 'Header',
+                  children: (
+                    <Descriptions size="small" column={2} bordered labelStyle={{ fontWeight: 500, width: 150 }}>
+                      <Descriptions.Item label="Invoice Number">{apTxnData.invoiceNumber || apTxnData.invoice_number || '—'}</Descriptions.Item>
+                      <Descriptions.Item label="Invoice Date">{apTxnData.invoiceDate || apTxnData.invoice_date || '—'}</Descriptions.Item>
+                      <Descriptions.Item label="Supplier">{apTxnData.supplierOrParty || apTxnData.supplier_name || apTxnData.party_name || '—'}</Descriptions.Item>
+                      <Descriptions.Item label="Supplier Site">{apTxnData.supplierSite || apTxnData.supplier_site || '—'}</Descriptions.Item>
+                      <Descriptions.Item label="Invoice Amount">{apTxnData.invoiceAmount || apTxnData.invoice_amount || '—'}</Descriptions.Item>
+                      <Descriptions.Item label="Currency">{apTxnData.invoiceCurrency || apTxnData.currency_code || '—'}</Descriptions.Item>
+                      <Descriptions.Item label="Validation Status">
+                        <Tag color="blue">{apTxnData.validationStatus || apTxnData.validation_status || '—'}</Tag>
+                      </Descriptions.Item>
+                      <Descriptions.Item label="Approval Status">
+                        <Tag color="green">{apTxnData.approvalStatus || apTxnData.approval_status || 'N/A'}</Tag>
+                      </Descriptions.Item>
+                      <Descriptions.Item label="Business Unit" span={2}>{apTxnData.businessUnit || apTxnData.business_unit || '—'}</Descriptions.Item>
+                      <Descriptions.Item label="Unpaid Amount">{apTxnData.unpaidAmount || apTxnData.unpaid_amount || '—'}</Descriptions.Item>
+                      <Descriptions.Item label="Invoice Type">{apTxnData.invoiceType || apTxnData.invoice_type || '—'}</Descriptions.Item>
+                    </Descriptions>
+                  ),
+                },
+                {
+                  key: 'lines',
+                  label: `Lines (${apTxnLines.length})`,
+                  children: (
+                    <Table
+                      size="small"
+                      dataSource={apTxnLines.map((l: any, i: number) => ({ ...l, key: l.line_id?.toString() || String(i) }))}
+                      pagination={false}
+                      scroll={{ x: 800 }}
+                      locale={{ emptyText: 'No lines found' }}
+                      columns={[
+                        { title: '#', dataIndex: 'line_number', key: 'line_number', width: 50 },
+                        { title: 'Type', dataIndex: 'line_type', key: 'line_type', width: 70 },
+                        { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
+                        {
+                          title: 'Amount',
+                          dataIndex: 'line_amount',
+                          key: 'line_amount',
+                          width: 120,
+                          align: 'right' as const,
+                          render: (v: number) => formatAmount(v),
+                        },
+                        { title: 'Quantity', dataIndex: 'quantity', key: 'quantity', width: 80, align: 'right' as const },
+                        { title: 'Unit Price', dataIndex: 'unit_price', key: 'unit_price', width: 100, align: 'right' as const, render: (v: number) => formatAmount(v) },
+                        { title: 'PO Number', dataIndex: 'purchase_order_number', key: 'po_number', width: 110, ellipsis: true },
+                        { title: 'Tax Rate', dataIndex: 'tax_rate_code', key: 'tax_rate_code', width: 100 },
+                      ]}
+                    />
+                  ),
+                },
+              ]}
+            />
           )
         ) : null}
       </Modal>
