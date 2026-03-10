@@ -35,6 +35,8 @@ import {
   FormOutlined,
   QuestionCircleOutlined,
   ScheduleOutlined,
+  ApiOutlined,
+  CopyOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 
@@ -200,6 +202,12 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
   const [slaStatus, setSlaStatus] = useState<SlaExistsResult | null>(null);
   const [slaLoading, setSlaLoading] = useState(false);
   const [slaActionLoading, setSlaActionLoading] = useState(false);
+  // API Debug modal
+  const [apiDebugOpen, setApiDebugOpen] = useState(false);
+  const [apiDebugLoading, setApiDebugLoading] = useState(false);
+  const [apiDebugResponse, setApiDebugResponse] = useState<any>(null);
+  const [apiDebugError, setApiDebugError] = useState<string | null>(null);
+
   // Post-to-Ledger modal
   const [postModalOpen, setPostModalOpen] = useState(false);
   const [postModalHeadId, setPostModalHeadId] = useState<number | null>(null);
@@ -570,9 +578,22 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
     if (slaLoading) return <Spin size="small" />;
     if (!slaStatus?.exists) {
       return (
-        <Tag color="default" style={{ fontSize: 12, padding: '2px 8px' }}>
-          Accounting: None
-        </Tag>
+        <Space size={4}>
+          <Tag color="default" style={{ fontSize: 12, padding: '2px 8px' }}>
+            Accounting: None
+          </Tag>
+          <Tooltip title="Debug API — click to inspect the accounting exists endpoint">
+            <Button
+              type="link"
+              size="small"
+              icon={<ApiOutlined />}
+              style={{ fontSize: 11, padding: '0 4px', color: REDWOOD.info }}
+              onClick={() => { setApiDebugResponse(null); setApiDebugError(null); setApiDebugOpen(true); }}
+            >
+              API
+            </Button>
+          </Tooltip>
+        </Space>
       );
     }
     const status = slaStatus.accountingStatus;
@@ -1410,6 +1431,112 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
             ⚠ Once posted, the accounting entry will be locked and cannot be modified.
           </div>
         </Space>
+      </Modal>
+
+      {/* API Debug Modal */}
+      <Modal
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /> API Debug — Accounting Exists</Space>}
+        open={apiDebugOpen}
+        onCancel={() => setApiDebugOpen(false)}
+        footer={null}
+        width={700}
+      >
+        {(() => {
+          const endpoint = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.slaAccountingExists}?sourceTable=AP_INVOICES&sourceId=${invoice.invoiceId}&eventType=AP_INVOICE_CREATION`;
+          return (
+            <Space direction="vertical" style={{ width: '100%' }} size={16}>
+              <div>
+                <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 4 }}>
+                  Method: <Tag color="blue" style={{ fontSize: 11 }}>GET</Tag>
+                </div>
+                <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 6 }}>Endpoint URL:</div>
+                <div style={{
+                  background: REDWOOD.neutral100,
+                  border: `1px solid ${REDWOOD.neutral200}`,
+                  borderRadius: 6,
+                  padding: '8px 12px',
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  wordBreak: 'break-all',
+                  color: REDWOOD.neutral900,
+                }}>
+                  {endpoint}
+                </div>
+                <Button
+                  size="small"
+                  icon={<CopyOutlined />}
+                  style={{ marginTop: 6 }}
+                  onClick={() => { navigator.clipboard.writeText(endpoint); message.success('URL copied!'); }}
+                >
+                  Copy URL
+                </Button>
+              </div>
+
+              <Button
+                type="primary"
+                icon={<ApiOutlined />}
+                loading={apiDebugLoading}
+                onClick={async () => {
+                  setApiDebugLoading(true);
+                  setApiDebugResponse(null);
+                  setApiDebugError(null);
+                  try {
+                    const res = await fetch(endpoint, { method: 'GET', headers: { Accept: 'application/json' } });
+                    const text = await res.text();
+                    let parsed: any;
+                    try { parsed = JSON.parse(text); } catch { parsed = text; }
+                    setApiDebugResponse({ status: res.status, ok: res.ok, body: parsed });
+                  } catch (err: any) {
+                    setApiDebugError(err.message);
+                  } finally {
+                    setApiDebugLoading(false);
+                  }
+                }}
+                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+              >
+                Run
+              </Button>
+
+              {apiDebugError && (
+                <div style={{
+                  background: '#fff2f0',
+                  border: '1px solid #ffccc7',
+                  borderRadius: 6,
+                  padding: '8px 12px',
+                  color: REDWOOD.error,
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                }}>
+                  ❌ Error: {apiDebugError}
+                </div>
+              )}
+
+              {apiDebugResponse && (
+                <div>
+                  <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 4 }}>
+                    Response:{' '}
+                    <Tag color={apiDebugResponse.ok ? 'success' : 'error'} style={{ fontSize: 11 }}>
+                      HTTP {apiDebugResponse.status}
+                    </Tag>
+                  </div>
+                  <pre style={{
+                    background: REDWOOD.neutral100,
+                    border: `1px solid ${REDWOOD.neutral200}`,
+                    borderRadius: 6,
+                    padding: '8px 12px',
+                    fontSize: 12,
+                    maxHeight: 320,
+                    overflow: 'auto',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-all',
+                  }}>
+                    {JSON.stringify(apiDebugResponse.body, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </Space>
+          );
+        })()}
       </Modal>
 
       {/* Custom styles */}
