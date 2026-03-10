@@ -14,6 +14,7 @@ import {
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../../config/api.config';
+import { fetchLedgerByBusinessUnit } from '../../services/sla.service';
 
 const { Text, Title } = Typography;
 const { RangePicker } = DatePicker;
@@ -152,6 +153,7 @@ const ManageSLAJournals: React.FC = () => {
   const [postGLFetchingLines, setPostGLFetchingLines]   = useState(false);
   const [postGLLoading, setPostGLLoading]               = useState(false);
   const [postGLResult, setPostGLResult]                 = useState<any>(null);
+  const [postGLLedger, setPostGLLedger]                 = useState<{ ledgerName: string; ledgerId: number } | null>(null);
 
   // ── Fetch headers ────────────────────────────────────────────────────────
   const fetchHeaders = useCallback(async (values: any) => {
@@ -314,17 +316,19 @@ const ManageSLAJournals: React.FC = () => {
   const SLA_POST_URL  = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.slaAccountingPost}`;
 
   /** Build the journals/create payload from SLA header + its fetched lines */
-  const buildGLPayload = (hdr: SlaHeader, slaLines: SlaLine[]) => {
+  const buildGLPayload = (hdr: SlaHeader, slaLines: SlaLine[], resolvedLedgerName?: string, resolvedLedgerId?: number) => {
     const totalDr = slaLines.reduce((s, l) => s + (l.enteredDr || 0), 0);
     const totalCr = slaLines.reduce((s, l) => s + (l.enteredCr || 0), 0);
     const batchName = `SLA-${hdr.moduleName}-${hdr.periodName}-${hdr.headerId}`;
+    const ledgerName = resolvedLedgerName ?? hdr.ledgerName;
+    const ledgerId   = resolvedLedgerId   ?? 0;
 
     return {
       batch: {
         batchName,
         batchDescription:  hdr.description || '',
-        ledgerName:        hdr.ledgerName,
-        ledgerId:          0,
+        ledgerName,
+        ledgerId,
         status:            'NEW',
         accountingPeriod:  hdr.periodName,
         controlTotal:      totalDr,
@@ -334,8 +338,8 @@ const ManageSLAJournals: React.FC = () => {
         createdBy:         hdr.createdBy || 'SYSTEM',
       },
       header: {
-        ledgerId:                 0,
-        ledgerName:               hdr.ledgerName,
+        ledgerId,
+        ledgerName,
         jeCategory:               hdr.eventTypeCode || 'Payables',
         jeSource:                 hdr.moduleName || 'Payables',
         periodName:               hdr.periodName,
@@ -377,19 +381,23 @@ const ManageSLAJournals: React.FC = () => {
     setPostGLRecord(record);
     setPostGLLines([]);
     setPostGLResult(null);
+    setPostGLLedger(null);
     setPostGLModalVisible(true);
-    // Fetch SLA lines for this header so we can build the full GL payload
+    // Fetch SLA lines and resolve ledger in parallel
     setPostGLFetchingLines(true);
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/sla/journals/lines?headerId=${record.headerId}&limit=500`;
-      const res = await fetch(url, { headers: { Accept: 'application/json' } });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      const [linesRes, ledgerInfo] = await Promise.all([
+        fetch(`${APEX_DB_CONFIG.baseUrl}/sla/journals/lines?headerId=${record.headerId}&limit=500`, { headers: { Accept: 'application/json' } }),
+        fetchLedgerByBusinessUnit(record.businessUnit),
+      ]);
+      if (!linesRes.ok) throw new Error(`HTTP ${linesRes.status}`);
+      const data = await linesRes.json();
       const items: SlaLine[] = (data.items || data || []).map((r: any, i: number) => ({
         ...r,
         key: r.lineId ? String(r.lineId) : `${r.headerId}-${r.lineNumber}-${i}`,
       }));
       setPostGLLines(items);
+      if (ledgerInfo) setPostGLLedger(ledgerInfo);
     } catch (err: any) {
       message.warning(`Could not load SLA lines: ${err.message}`);
     } finally {
@@ -401,8 +409,8 @@ const ManageSLAJournals: React.FC = () => {
     if (!postGLRecord) return;
     setPostGLLoading(true);
     try {
-      // Step 1 — POST to journals/create
-      const payload = buildGLPayload(postGLRecord, postGLLines);
+      // Step 1 — POST to journals/create (use ledger resolved when modal opened)
+      const payload = buildGLPayload(postGLRecord, postGLLines, postGLLedger?.ledgerName, postGLLedger?.ledgerId);
       const res     = await fetch(GL_CREATE_URL, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -1290,12 +1298,12 @@ const ManageSLAJournals: React.FC = () => {
                     size="small" icon={<CopyOutlined />}
                     style={{ position: 'absolute', top: 8, right: 8, background: 'transparent', border: '1px solid #555', color: '#aaa' }}
                     onClick={() => {
-                      navigator.clipboard.writeText(JSON.stringify(buildGLPayload(postGLRecord, postGLLines), null, 2));
+                      navigator.clipboard.writeText(JSON.stringify(buildGLPayload(postGLRecord, postGLLines, postGLLedger?.ledgerName, postGLLedger?.ledgerId), null, 2));
                       message.success('JSON body copied');
                     }}
                   />
                   <pre style={{ margin: 0, color: '#cdd6f4', fontSize: 11, lineHeight: 1.6, maxHeight: 340, overflowY: 'auto' }}>
-                    {JSON.stringify(buildGLPayload(postGLRecord, postGLLines), null, 2)
+                    {JSON.stringify(buildGLPayload(postGLRecord, postGLLines, postGLLedger?.ledgerName, postGLLedger?.ledgerId), null, 2)
                       .split('\n')
                       .map((line, i) => {
                         const colored = line
