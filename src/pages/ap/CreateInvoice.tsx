@@ -3569,8 +3569,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 {
                   key: 'viewAccounting',
                   icon: <AccountBookOutlined />,
-                  label: 'View Accounting',
-                  disabled: !savedInvoiceId && lines.every(l => l.amount === 0),
+                  label: 'Check Accounting',
+                  disabled: !savedInvoiceId,
                 },
                 ...(savedInvoiceId && slaStatus !== 'POSTED' ? [{
                   key: 'createAccounting',
@@ -3585,7 +3585,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 ...(slaHeaderId ? [{ type: 'divider' as const }, {
                   key: 'viewSlaLines',
                   icon: <AccountBookOutlined />,
-                  label: slaStatus === 'POSTED' ? 'View Posted Accounting' : 'View Draft Accounting',
+                  label: slaStatus === 'POSTED' ? 'Final Accounting' : 'Draft Accounting',
                 }] : []),
               ],
               onClick: ({ key }: { key: string }) => {
