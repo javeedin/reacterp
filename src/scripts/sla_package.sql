@@ -110,7 +110,6 @@ CREATE OR REPLACE PACKAGE BODY RR_SLA_PKG AS
     p_response  OUT CLOB
   ) IS
     v_header_id   NUMBER;
-    v_existing_id NUMBER;
     v_module      VARCHAR2(60);
     v_src_table   VARCHAR2(60);
     v_src_id      NUMBER;
@@ -201,24 +200,25 @@ CREATE OR REPLACE PACKAGE BODY RR_SLA_PKG AS
       WHEN NO_DATA_FOUND THEN NULL;   -- OK to proceed
     END;
 
-    -- ── Replace existing DRAFT for same source + event type ──────────────────
-    BEGIN
-      SELECT HEADER_ID INTO v_existing_id
+    -- ── Replace ALL existing non-POSTED entries for same source + event type ──
+    -- Covers DRAFT and ERROR statuses (and any accumulated duplicates from prior
+    -- runs). POSTED records are already blocked by the 409 guard above, so
+    -- ACCOUNTING_STATUS != 'POSTED' is safe here.
+    DELETE FROM RR_SLA_ACCOUNTING_LINES
+    WHERE  HEADER_ID IN (
+      SELECT HEADER_ID
       FROM   RR_SLA_ACCOUNTING_HEADERS
       WHERE  SOURCE_TABLE      = v_src_table
       AND    SOURCE_ID         = v_src_id
       AND    EVENT_TYPE_CODE   = v_event_type
-      AND    ACCOUNTING_STATUS = 'DRAFT'
-      AND    ROWNUM = 1;
-    EXCEPTION
-      WHEN NO_DATA_FOUND THEN v_existing_id := NULL;
-    END;
+      AND    ACCOUNTING_STATUS != 'POSTED'
+    );
 
-    IF v_existing_id IS NOT NULL THEN
-      -- ON DELETE CASCADE on lines, but explicit delete is safer here
-      DELETE FROM RR_SLA_ACCOUNTING_LINES  WHERE HEADER_ID = v_existing_id;
-      DELETE FROM RR_SLA_ACCOUNTING_HEADERS WHERE HEADER_ID = v_existing_id;
-    END IF;
+    DELETE FROM RR_SLA_ACCOUNTING_HEADERS
+    WHERE  SOURCE_TABLE      = v_src_table
+    AND    SOURCE_ID         = v_src_id
+    AND    EVENT_TYPE_CODE   = v_event_type
+    AND    ACCOUNTING_STATUS != 'POSTED';
 
     -- ── Insert new header ────────────────────────────────────────────────────
     INSERT INTO RR_SLA_ACCOUNTING_HEADERS (
