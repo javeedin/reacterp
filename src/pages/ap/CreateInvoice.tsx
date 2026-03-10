@@ -80,7 +80,7 @@ dayjs.extend(customParseFormat);
 import * as XLSX from 'xlsx';
 import type { ColumnsType } from 'antd/es/table';
 import { APEX_DB_CONFIG } from '../../config/api.config';
-import { fetchLedgerByBusinessUnit } from '../../services/sla.service';
+import { fetchLedgerByBusinessUnit, checkAccountingExists, getAccounting } from '../../services/sla.service';
 import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
 import { useAuth } from '../../context/AuthContext';
 
@@ -877,21 +877,25 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     }
   };
 
-  // ── SLA: fetch existing accounting header for this invoice ──────────────
+  // ── SLA: fetch existing accounting status for this invoice ──────────────
   const fetchSlaHeader = useCallback(async (invoiceId: number) => {
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/sla/accounting?sourceTable=AP_INVOICES&sourceId=${invoiceId}`;
-      const res = await fetch(url, { headers: { Accept: 'application/json' } });
-      if (!res.ok) return;
-      const data = await res.json();
-      if (data.found) {
-        setSlaHeaderId(data.headerId || data.header_id || null);
-        setSlaStatus(data.accountingStatus || data.accounting_status || null);
-        setSlaPostingStatus(data.postingStatus || data.posting_status || null);
-        setSlaLines(data.lines || []);
-        setSlaGlBatchId(data.glBatchId ?? data.gl_batch_id ?? null);
-        setSlaGlBatchName(data.glBatchName ?? data.gl_batch_name ?? null);
-        setSlaGlHeaderId(data.glHeaderId ?? data.gl_header_id ?? null);
+      // Use the /exists endpoint for reliable status check on open/re-open
+      const existsResult = await checkAccountingExists('AP_INVOICES', invoiceId, 'AP_INVOICE_CREATION');
+      if (existsResult.exists) {
+        setSlaHeaderId(existsResult.headerId);
+        setSlaStatus(existsResult.accountingStatus);
+        setSlaPostingStatus(existsResult.postingStatus);
+        // Also fetch full header (lines, GL batch IDs) from the accounting endpoint
+        try {
+          const fullData = await getAccounting('AP_INVOICES', invoiceId);
+          if (fullData.found) {
+            setSlaLines(fullData.lines || []);
+            setSlaGlBatchId(fullData.glBatchId ?? null);
+            setSlaGlBatchName(fullData.glBatchName ?? null);
+            setSlaGlHeaderId(fullData.glHeaderId ?? null);
+          }
+        } catch { /* non-critical */ }
       }
     } catch { /* silent */ }
   }, []);
