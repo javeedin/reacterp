@@ -8081,18 +8081,18 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   <div style={{ marginBottom: 4 }}>
                     <Tag color="blue" style={{ fontSize: 10 }}>GET</Tag>
                     <span style={{ wordBreak: 'break-all' }}>
-                      /sla/accounting/exists?sourceTable=AP_INVOICES&amp;sourceId={savedInvoiceId || initialData?.invoiceId}&amp;eventType=AP_INVOICE_CREATION
+                      {`${APEX_DB_CONFIG.baseUrl}/sla/accounting/exists?sourceTable=AP_INVOICES&sourceId=${savedInvoiceId || initialData?.invoiceId}&eventType=AP_INVOICE_CREATION`}
                     </span>
                   </div>
                   <div>
                     <Tag color="green" style={{ fontSize: 10 }}>GET</Tag>
                     <span style={{ wordBreak: 'break-all' }}>
-                      /sla/accounting?sourceTable=AP_INVOICES&amp;sourceId={savedInvoiceId || initialData?.invoiceId}
+                      {`${APEX_DB_CONFIG.baseUrl}/sla/accounting?sourceTable=AP_INVOICES&sourceId=${savedInvoiceId || initialData?.invoiceId}`}
                     </span>
                   </div>
                 </div>
               }
-              overlayStyle={{ maxWidth: 480 }}
+              overlayStyle={{ maxWidth: 700 }}
             >
               <ApiOutlined style={{ fontSize: 14, color: REDWOOD.info, cursor: 'pointer' }} />
             </Tooltip>
