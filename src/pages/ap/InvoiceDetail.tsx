@@ -555,11 +555,57 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
     },
     { key: 'cancelInvoice', label: 'Cancel Invoice', icon: <StopOutlined /> },
     { key: 'payInFull', label: 'Pay in Full', icon: <DollarOutlined /> },
-    { key: 'postToLedger', label: 'Post to Ledger', icon: <SendOutlined /> },
-    { key: 'accountInDraft', label: 'Account in Draft', icon: <FormOutlined /> },
     { type: 'divider' },
     { key: 'installments', label: 'Installments', icon: <ScheduleOutlined /> },
   ];
+
+  // Accounting Actions menu items
+  const accountingActionsMenuItems: MenuProps['items'] = [
+    { key: 'accountInDraft', label: 'Account in Draft', icon: <FormOutlined /> },
+    { key: 'postToLedger', label: 'Post to Ledger', icon: <SendOutlined /> },
+  ];
+
+  // Helper to render accounting status badge prominently
+  const getAccountingStatusDisplay = () => {
+    if (slaLoading) return <Spin size="small" />;
+    if (!slaStatus?.exists) {
+      return (
+        <Tag color="default" style={{ fontSize: 12, padding: '2px 8px' }}>
+          Accounting: None
+        </Tag>
+      );
+    }
+    const status = slaStatus.accountingStatus;
+    const colorMap: Record<string, string> = {
+      DRAFT: '#1677ff',
+      FINAL: '#52c41a',
+      POSTED: '#52c41a',
+      ERROR: '#ff4d4f',
+    };
+    const labelMap: Record<string, string> = {
+      DRAFT: 'Draft Done',
+      FINAL: 'Final Done',
+      POSTED: 'Posted Done',
+      ERROR: 'Error',
+    };
+    const iconMap: Record<string, React.ReactNode> = {
+      DRAFT: <FormOutlined />,
+      FINAL: <CheckCircleOutlined />,
+      POSTED: <CheckCircleOutlined />,
+      ERROR: <StopOutlined />,
+    };
+    return (
+      <Tooltip title={slaStatus.message}>
+        <Tag
+          color={colorMap[status] || 'default'}
+          icon={iconMap[status]}
+          style={{ fontSize: 12, padding: '2px 8px', cursor: 'help', fontWeight: 600 }}
+        >
+          {labelMap[status] || status}
+        </Tag>
+      </Tooltip>
+    );
+  };
 
   // Items table columns
   const linesColumns: ColumnsType<InvoiceLine> = [
@@ -835,36 +881,31 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
         <Space>
           {getValidationTag(invoice.validationStatus)}
 
-          {/* SLA Accounting Status badge */}
-          {slaLoading ? (
-            <Spin size="small" />
-          ) : slaStatus?.exists ? (
-            <Tooltip title={slaStatus.message}>
-              <Tag
-                color={
-                  slaStatus.accountingStatus === 'POSTED' ? 'green' :
-                  slaStatus.accountingStatus === 'DRAFT'  ? 'blue'  :
-                  slaStatus.accountingStatus === 'ERROR'  ? 'red'   : 'default'
-                }
-                style={{ cursor: 'help' }}
-              >
-                SLA: {slaStatus.accountingStatus}
-              </Tag>
-            </Tooltip>
-          ) : (
-            <Tag color="default" style={{ cursor: 'help' }}>
-              <Tooltip title="No accounting entry yet">SLA: None</Tooltip>
-            </Tag>
-          )}
+          {/* Accounting Status - shown prominently */}
+          {getAccountingStatusDisplay()}
 
           <Dropdown
             menu={{ items: actionsMenuItems, onClick: handleActionsMenuClick }}
             trigger={['click']}
           >
-            <Button type="primary" loading={slaActionLoading}>
+            <Button type="primary">
               Invoice Actions <DownOutlined />
             </Button>
           </Dropdown>
+
+          <Dropdown
+            menu={{ items: accountingActionsMenuItems, onClick: handleActionsMenuClick }}
+            trigger={['click']}
+          >
+            <Button
+              type="default"
+              loading={slaActionLoading}
+              style={{ borderColor: REDWOOD.info, color: REDWOOD.info }}
+            >
+              Accounting Actions <DownOutlined />
+            </Button>
+          </Dropdown>
+
           <Button icon={<SaveOutlined />}>Save</Button>
           <Button>Save and Close</Button>
           <Button onClick={onClose}>Cancel</Button>
