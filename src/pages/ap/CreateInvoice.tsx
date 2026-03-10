@@ -1104,26 +1104,42 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       const invoiceNumber = form.getFieldValue('invoiceNumber');
       const bu            = form.getFieldValue('businessUnit') || '';
       const acctDate      = invoiceDate ? dayjs(invoiceDate).format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD');
-      const periodName    = invoiceDate ? dayjs(invoiceDate).format('MMM-YYYY') : dayjs().format('MMM-YYYY');
+      const d             = invoiceDate ? dayjs(invoiceDate).toDate() : new Date();
+      const months        = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const periodName    = `${months[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
 
-      const ledgerInfo = await fetchLedgerByBusinessUnit(bu);
+      // Fetch lines fresh from DB (same as ManageSLAJournals handleOpenPostGL)
+      const linesRes = await fetch(
+        `${APEX_DB_CONFIG.baseUrl}/sla/journals/lines?headerId=${slaHeaderId}&limit=500`,
+        { headers: { Accept: 'application/json' } },
+      );
+      if (!linesRes.ok) throw new Error(`Failed to load SLA lines: HTTP ${linesRes.status}`);
+      const linesData  = await linesRes.json();
+      const fetchedLines: any[] = linesData.items || linesData || [];
+      if (fetchedLines.length === 0) throw new Error('No SLA lines found for this accounting header.');
+
+      const [ledgerInfo] = await Promise.all([fetchLedgerByBusinessUnit(bu)]);
       const resolvedLedgerName = ledgerInfo?.ledgerName ?? 'BCL DIFC';
       const resolvedLedgerId   = ledgerInfo?.ledgerId   ?? 0;
 
-      // Build journal payload matching CreateJournal.tsx format
+      const totalDr = fetchedLines.reduce((s: number, l: any) => s + (l.enteredDr || 0), 0);
+      const totalCr = fetchedLines.reduce((s: number, l: any) => s + (l.enteredCr || 0), 0);
+      const batchName = `AP-${invoiceNumber}-${dayjs().format('YYYYMMDD-HHmmss')}`;
+
+      // Build journal payload matching ManageSLAJournals buildGLPayload structure
       const journalPayload = {
         batch: {
-          batchName:        `AP-${invoiceNumber}-${dayjs().format('YYYYMMDD-HHmmss')}`,
-          batchDescription: `AP Invoice ${invoiceNumber} – Posted from SLA`,
-          ledgerName:       resolvedLedgerName,
-          ledgerId:         resolvedLedgerId,
-          status:           'NEW',
-          accountingPeriod: periodName,
-          controlTotal:     slaLines.filter(l => l.lineType === 'DR').reduce((s, l) => s + (l.enteredDr || 0), 0),
-          runningTotalDr:   slaLines.filter(l => l.lineType === 'DR').reduce((s, l) => s + (l.enteredDr || 0), 0),
-          runningTotalCr:   slaLines.filter(l => l.lineType === 'CR').reduce((s, l) => s + (l.enteredCr || 0), 0),
-          batchSource:      'Payables',
-          createdBy:        'user',
+          batchName,
+          batchDescription:  `AP Invoice ${invoiceNumber} – Posted from SLA`,
+          ledgerName:        resolvedLedgerName,
+          ledgerId:          resolvedLedgerId,
+          status:            'NEW',
+          accountingPeriod:  periodName,
+          controlTotal:      totalDr,
+          runningTotalDr:    totalDr,
+          runningTotalCr:    totalCr,
+          batchSource:       'Payables',
+          createdBy:         'user',
         },
         header: {
           ledgerId:               resolvedLedgerId,
@@ -1134,81 +1150,84 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           journalName:            `AP Invoice ${invoiceNumber}`,
           description:            `Subledger accounting – Invoice ${invoiceNumber}`,
           currencyCode:           currency,
-          currencyConversionType: 'Corporate',
+          currencyConversionType: 'User',
           currencyConversionDate: acctDate,
           currencyConversionRate: 1,
           status:                 'NEW',
-          runningTotalDr:         slaLines.filter(l => l.lineType === 'DR').reduce((s, l) => s + (l.enteredDr || 0), 0),
-          runningTotalCr:         slaLines.filter(l => l.lineType === 'CR').reduce((s, l) => s + (l.enteredCr || 0), 0),
+          runningTotalDr:         totalDr,
+          runningTotalCr:         totalCr,
           createdBy:              'user',
         },
-        lines: slaLines.map((l, idx) => ({
-          enteredDr:                l.lineType === 'DR' ? l.enteredDr : null,
-          enteredCr:                l.lineType === 'CR' ? l.enteredCr : null,
-          accountedDr:              l.lineType === 'DR' ? l.accountedDr : null,
-          accountedCr:              l.lineType === 'CR' ? l.accountedCr : null,
+        lines: fetchedLines.map((l: any) => ({
+          enteredDr:                l.lineType === 'DR' ? (l.enteredDr || null) : null,
+          enteredCr:                l.lineType === 'CR' ? (l.enteredCr || null) : null,
+          accountedDr:              l.accountedDr || null,
+          accountedCr:              l.accountedCr || null,
           statAmount:               null,
           description:              l.description || '',
-          currencyCode:             currency,
-          currencyConversionDate:   acctDate,
+          currencyCode:             l.currencyCode || currency,
+          currencyConversionDate:   l.accountingDate || acctDate,
           currencyConversionRate:   1,
-          userCurrencyConversionType: 'Corporate',
+          userCurrencyConversionType: 'User',
           accountCombination:       l.accountCombination || '',
           chartOfAccountsName:      'Chart of Accounts',
           reference1:               invoiceNumber,
           reference2:               String(savedInvoiceId || initialData?.invoiceId || ''),
-          reference3:               form.getFieldValue('supplier') || null,
-          reference4:               bu || null,
+          reference3:               l.accountingClass || null,
+          reference4:               l.legalEntity || bu || null,
           reference5:               null,
           createdBy:                'user',
         })),
       };
 
-      // 1. Call GL journals/create
+      // Step 1 — POST to journals/create
       const glUrl = `${APEX_DB_CONFIG.baseUrl}/journals/create`;
       const glRes = await fetch(glUrl, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body:    JSON.stringify(journalPayload),
       });
+      const glData = await glRes.json();
 
       if (!glRes.ok) {
-        const errText = await glRes.text();
         // Mark SLA as ERROR
         await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/error`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ headerId: slaHeaderId, errorMessage: `HTTP ${glRes.status}: ${errText}`, postedBy: 'user' }),
+          body: JSON.stringify({ headerId: slaHeaderId, errorMessage: `HTTP ${glRes.status}: ${glData?.message || ''}`, postedBy: 'user' }),
         });
         setSlaStatus('ERROR');
-        throw new Error(`GL journal creation failed: HTTP ${glRes.status}`);
+        throw new Error(`GL journal creation failed: HTTP ${glRes.status} – ${glData?.message || ''}`);
       }
 
-      const glData = await glRes.json();
       const glBatchId   = glData.batchId   || glData.batch_id   || null;
       const glHeaderId  = glData.headerId  || glData.header_id  || null;
-      const glBatchName = glData.batchName || glData.batch_name || journalPayload.batch.batchName;
+      const glBatchName = glData.batchName || glData.batch_name || batchName;
 
-      // 2. Mark SLA header as POSTED
-      const postRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body:    JSON.stringify({ headerId: slaHeaderId, postedBy: 'user', glBatchId, glBatchName, glHeaderId }),
-      });
-      if (!postRes.ok) { const t = await postRes.text(); throw new Error(`SLA post update failed: ${t}`); }
+      // Step 2 — stamp GL IDs back on the SLA header (same as ManageSLAJournals)
+      if (glBatchId || glHeaderId) {
+        const postRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body:    JSON.stringify({ headerId: slaHeaderId, postedBy: 'user', glBatchId, glBatchName, glHeaderId }),
+        });
+        if (!postRes.ok) { const t = await postRes.text(); throw new Error(`SLA post update failed: ${t}`); }
+      }
 
       setSlaStatus('POSTED');
       setSlaPostingStatus('POSTED');
       setSlaGlBatchId(glBatchId);
       setSlaGlBatchName(glBatchName);
       setSlaGlHeaderId(glHeaderId);
+      // Update local lines state with freshly fetched lines
+      setSlaLines(fetchedLines);
       message.success('Posted to General Ledger successfully. Accounting is now locked.');
     } catch (err: any) {
       message.error(`Post to Ledger failed: ${err.message}`);
     } finally {
       setSlaPosting(false);
     }
-  }, [slaHeaderId, slaStatus, slaLines, form, headerValues, savedInvoiceId, initialData]);
+  }, [slaHeaderId, slaStatus, form, headerValues, savedInvoiceId, initialData]);
 
   // Fetch invoice holds (edit mode)
   const fetchInvoiceHolds = useCallback(async (invoiceId: number) => {
@@ -8046,7 +8065,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 icon={<SendOutlined />}
                 loading={slaPosting}
                 style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
-                onClick={() => { setSlaModalVisible(false); handlePostToLedger(); }}
+                onClick={handlePostToLedger}
               >
                 Post to Ledger
               </Button>
