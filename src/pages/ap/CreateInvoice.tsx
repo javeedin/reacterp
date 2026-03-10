@@ -524,6 +524,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [slaModalVisible, setSlaModalVisible] = useState(false);
   const [slaCreating, setSlaCreating]         = useState(false);
   const [slaPosting, setSlaPosting]           = useState(false);
+  const [slaFetching, setSlaFetching]         = useState(false);
   const [slaGlBatchId, setSlaGlBatchId]       = useState<number | null>(null);
   const [slaGlBatchName, setSlaGlBatchName]   = useState<string | null>(null);
   const [slaGlHeaderId, setSlaGlHeaderId]     = useState<number | null>(null);
@@ -879,6 +880,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   // ── SLA: fetch existing accounting status for this invoice ──────────────
   const fetchSlaHeader = useCallback(async (invoiceId: number) => {
+    setSlaFetching(true);
     try {
       // Use the /exists endpoint for reliable status check on open/re-open
       const existsResult = await checkAccountingExists('AP_INVOICES', invoiceId, 'AP_INVOICE_CREATION');
@@ -896,8 +898,20 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             setSlaGlHeaderId(fullData.glHeaderId ?? null);
           }
         } catch { /* non-critical */ }
+      } else {
+        // Reset SLA state if no accounting found (e.g. re-opened a different invoice)
+        setSlaHeaderId(null);
+        setSlaStatus(null);
+        setSlaPostingStatus(null);
+        setSlaLines([]);
+        setSlaGlBatchId(null);
+        setSlaGlBatchName(null);
+        setSlaGlHeaderId(null);
       }
     } catch { /* silent */ }
+    finally {
+      setSlaFetching(false);
+    }
   }, []);
 
   // ── SLA: build flat DR/CR lines from current invoice ────────────────────
@@ -3596,13 +3610,17 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 if (key === 'viewAccounting') setAccountingModalVisible(true);
                 else if (key === 'createAccounting') handleCreateAccounting();
                 else if (key === 'postToLedger') handlePostToLedger();
-                else if (key === 'viewSlaLines') setSlaModalVisible(true);
+                else if (key === 'viewSlaLines') {
+                  const invoiceId = savedInvoiceId || initialData?.invoiceId;
+                  if (invoiceId) fetchSlaHeader(invoiceId);
+                  setSlaModalVisible(true);
+                }
               },
             }}
             trigger={['click']}
           >
             <Button
-              loading={slaCreating || slaPosting}
+              loading={slaCreating || slaPosting || slaFetching}
               style={{ fontWeight: 500, borderColor: REDWOOD.info, color: REDWOOD.info }}
             >
               Accounting Actions <DownOutlined style={{ fontSize: 10 }} />
@@ -8056,6 +8074,28 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             <Tag color={slaStatus === 'POSTED' ? 'green' : slaStatus === 'ERROR' ? 'red' : 'orange'} style={{ fontSize: 11 }}>
               {slaStatus}
             </Tag>
+            <Tooltip
+              title={
+                <div style={{ fontSize: 11, fontFamily: 'monospace' }}>
+                  <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 12 }}>API Endpoints</div>
+                  <div style={{ marginBottom: 4 }}>
+                    <Tag color="blue" style={{ fontSize: 10 }}>GET</Tag>
+                    <span style={{ wordBreak: 'break-all' }}>
+                      /sla/accounting/exists?sourceTable=AP_INVOICES&amp;sourceId={savedInvoiceId || initialData?.invoiceId}&amp;eventType=AP_INVOICE_CREATION
+                    </span>
+                  </div>
+                  <div>
+                    <Tag color="green" style={{ fontSize: 10 }}>GET</Tag>
+                    <span style={{ wordBreak: 'break-all' }}>
+                      /sla/accounting?sourceTable=AP_INVOICES&amp;sourceId={savedInvoiceId || initialData?.invoiceId}
+                    </span>
+                  </div>
+                </div>
+              }
+              overlayStyle={{ maxWidth: 480 }}
+            >
+              <ApiOutlined style={{ fontSize: 14, color: REDWOOD.info, cursor: 'pointer' }} />
+            </Tooltip>
           </Space>
         }
         open={slaModalVisible}
@@ -8079,6 +8119,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         width={900}
         destroyOnClose
       >
+        <Spin spinning={slaFetching} tip="Loading accounting data...">
         {/* Header info */}
         <Descriptions size="small" column={3} bordered style={{ marginBottom: 16 }}>
           <Descriptions.Item label="Header ID">{slaHeaderId}</Descriptions.Item>
@@ -8174,6 +8215,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             This accounting is <strong>locked</strong> — posted to GL on {slaGlBatchName || `Batch ID ${slaGlBatchId}`}. No further changes are allowed.
           </div>
         )}
+        </Spin>
       </Modal>
       {/* ── End SLA Modal ─────────────────────────────────────────────────── */}
 
