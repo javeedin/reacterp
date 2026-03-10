@@ -885,13 +885,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       if (!res.ok) return;
       const data = await res.json();
       if (data.found) {
-        setSlaHeaderId(data.headerId);
-        setSlaStatus(data.accountingStatus);
-        setSlaPostingStatus(data.postingStatus);
+        setSlaHeaderId(data.headerId || data.header_id || null);
+        setSlaStatus(data.accountingStatus || data.accounting_status || null);
+        setSlaPostingStatus(data.postingStatus || data.posting_status || null);
         setSlaLines(data.lines || []);
-        setSlaGlBatchId(data.glBatchId ?? null);
-        setSlaGlBatchName(data.glBatchName ?? null);
-        setSlaGlHeaderId(data.glHeaderId ?? null);
+        setSlaGlBatchId(data.glBatchId ?? data.gl_batch_id ?? null);
+        setSlaGlBatchName(data.glBatchName ?? data.gl_batch_name ?? null);
+        setSlaGlHeaderId(data.glHeaderId ?? data.gl_header_id ?? null);
       }
     } catch { /* silent */ }
   }, []);
@@ -1060,11 +1060,15 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       const data = await res.json();
       setSlaDebugPostResult({ status: res.status, ok: res.ok, data });
       if (res.ok) {
-        setSlaHeaderId(data.headerId);
+        const headerId = data.headerId || data.header_id || null;
+        setSlaHeaderId(headerId);
         setSlaStatus('DRAFT');
         setSlaPostingStatus('UNPOSTED');
         setSlaLines(slaDebugPayload.lines || []);
-        message.success(`Accounting created (Header ID: ${data.headerId}) — ${(slaDebugPayload.lines || []).length} lines`);
+        message.success(`Accounting created (Header ID: ${headerId}) — ${(slaDebugPayload.lines || []).length} lines`);
+        // Close debug modal and show accounting lines modal
+        setSlaDebugVisible(false);
+        setSlaModalVisible(true);
       } else {
         message.error(`Create accounting failed: HTTP ${res.status}`);
       }
