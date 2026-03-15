@@ -543,10 +543,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [appSlaMap, setAppSlaMap] = useState<Record<number, { headerId: number | null; status: string | null }>>({});
   const [appSlaLoadingId, setAppSlaLoadingId] = useState<number | null>(null);
 
-  // SLA modal – tabs & per-section fetched lines
+  // SLA modal – tabs & per-section fetched full accounting results
   const [slaModalTab, setSlaModalTab]                   = useState<string>('invoice');
-  const [appSlaLines, setAppSlaLines]                   = useState<Record<number, any[]>>({});
-  const [paymentSlaLines, setPaymentSlaLines]           = useState<Record<number, any[]>>({});
+  const [appSlaData, setAppSlaData]                     = useState<Record<number, any>>({});   // full SlaGetResult per applicationId
+  const [paymentSlaData, setPaymentSlaData]             = useState<Record<number, any>>({});   // full SlaGetResult per checkId
   const [slaModalPrepayLoading, setSlaModalPrepayLoading]   = useState(false);
   const [slaModalPaymentLoading, setSlaModalPaymentLoading] = useState(false);
   // Debug GET tab – per-application accounting check results
@@ -1198,36 +1198,53 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     }
   }, [slaDebugSourceId]);
 
-  // ── SLA Modal: tab-change – lazy-load prepayment / payment accounting lines ──
+  // ── SLA Modal: tab-change – lazy-load prepayment / payment accounting data ──
   const handleSlaModalTabChange = useCallback(async (key: string) => {
     setSlaModalTab(key);
 
     if (key === 'prepayments' && appliedPrepaymentsList.length > 0) {
-      const missing = appliedPrepaymentsList.filter(r => !appSlaLines[r.applicationId]);
+      const missing = appliedPrepaymentsList.filter(r => !appSlaData[r.applicationId]);
       if (missing.length === 0) return;
       setSlaModalPrepayLoading(true);
       await Promise.all(missing.map(async (record) => {
         try {
-          const data = await getAccounting('RR_AP_APPLIED_PREPAYMENTS', record.applicationId);
-          setAppSlaLines(prev => ({ ...prev, [record.applicationId]: data.lines || [] }));
+          let result = await getAccounting('RR_AP_APPLIED_PREPAYMENTS', record.applicationId);
+          // Fallback: if lines empty but headerId known, fetch via journals/lines directly
+          if ((!result.lines || result.lines.length === 0) && (result.headerId || appSlaMap[record.applicationId]?.headerId)) {
+            const hId = result.headerId ?? appSlaMap[record.applicationId]?.headerId;
+            const res  = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/journals/lines?headerId=${hId}&limit=500`, { headers: { Accept: 'application/json' } });
+            if (res.ok) {
+              const jData = await res.json();
+              result = { ...result, lines: jData.lines || jData.items || jData || [] };
+            }
+          }
+          setAppSlaData(prev => ({ ...prev, [record.applicationId]: result }));
         } catch { /* non-fatal */ }
       }));
       setSlaModalPrepayLoading(false);
     }
 
     if (key === 'payment' && invoicePayments.length > 0) {
-      const missing = invoicePayments.filter(p => !paymentSlaLines[p.checkId]);
+      const missing = invoicePayments.filter(p => !paymentSlaData[p.checkId]);
       if (missing.length === 0) return;
       setSlaModalPaymentLoading(true);
       await Promise.all(missing.map(async (p) => {
         try {
-          const data = await getAccounting('AP_PAYMENTS', p.checkId);
-          setPaymentSlaLines(prev => ({ ...prev, [p.checkId]: data.lines || [] }));
+          let result = await getAccounting('AP_PAYMENTS', p.checkId);
+          // Fallback via headerId if lines empty
+          if ((!result.lines || result.lines.length === 0) && result.headerId) {
+            const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/journals/lines?headerId=${result.headerId}&limit=500`, { headers: { Accept: 'application/json' } });
+            if (res.ok) {
+              const jData = await res.json();
+              result = { ...result, lines: jData.lines || jData.items || jData || [] };
+            }
+          }
+          setPaymentSlaData(prev => ({ ...prev, [p.checkId]: result }));
         } catch { /* non-fatal */ }
       }));
       setSlaModalPaymentLoading(false);
     }
-  }, [appliedPrepaymentsList, invoicePayments, appSlaLines, paymentSlaLines]);
+  }, [appliedPrepaymentsList, invoicePayments, appSlaData, paymentSlaData, appSlaMap]);
 
   // ── SLA: Post to Ledger ──────────────────────────────────────────────────
   const handlePostToLedger = useCallback(async () => {
@@ -8694,13 +8711,20 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   children: (
                     <Spin spinning={slaModalPrepayLoading} tip="Loading prepayment accounting...">
                       {appliedPrepaymentsList.map((record) => {
+                        const fetched  = appSlaData[record.applicationId];
                         const slaInfo  = appSlaMap[record.applicationId];
-                        const st       = slaInfo?.status ?? 'None';
-                        const lines    = appSlaLines[record.applicationId] ?? [];
-                        const tagColor = st === 'POSTED' ? 'green' : st === 'DRAFT' ? 'blue' : st === 'ERROR' ? 'red' : 'default';
+                        // Prefer fetched full result; fall back to appSlaMap values
+                        const headerId  = fetched?.headerId  ?? slaInfo?.headerId  ?? null;
+                        const st        = fetched?.accountingStatus ?? slaInfo?.status ?? 'None';
+                        const postingSt = fetched?.postingStatus ?? '—';
+                        const glBatch   = fetched?.glBatchName ?? (fetched?.glBatchId ? `Batch ${fetched.glBatchId}` : null);
+                        const lines     = fetched?.lines ?? [];
+                        const tagColor  = st === 'POSTED' ? 'green' : st === 'DRAFT' ? 'blue' : st === 'ERROR' ? 'red' : 'default';
+                        const notLoaded = !fetched;
                         return (
-                          <div key={record.applicationId} style={{ marginBottom: 14, border: '1px solid #d9d9d9', borderRadius: 8, overflow: 'hidden' }}>
-                            <div style={{ padding: '8px 12px', background: '#fafafa', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div key={record.applicationId} style={{ marginBottom: 16, border: '1px solid #d9d9d9', borderRadius: 8, overflow: 'hidden' }}>
+                            {/* Card header */}
+                            <div style={{ padding: '8px 12px', background: '#f9f0ff', borderBottom: '1px solid #e8e8e8', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <Space>
                                 <Text strong style={{ fontSize: 12 }}>Application ID: {record.applicationId}</Text>
                                 <Text style={{ fontSize: 12, color: REDWOOD.info }}>{record.prepaymentNumber}</Text>
@@ -8708,10 +8732,26 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                               </Space>
                               <Tag color={tagColor} style={{ fontSize: 11 }}>SLA: {st}</Tag>
                             </div>
+                            {/* Descriptions row — same structure as Invoice tab */}
+                            <div style={{ padding: '10px 12px', borderBottom: '1px solid #f0f0f0' }}>
+                              <Descriptions size="small" column={3} bordered>
+                                <Descriptions.Item label="Header ID">{headerId ?? '—'}</Descriptions.Item>
+                                <Descriptions.Item label="Status">
+                                  <Tag color={tagColor}>{st}</Tag>
+                                </Descriptions.Item>
+                                <Descriptions.Item label="Posting Status">
+                                  <Tag color={postingSt === 'POSTED' ? 'green' : 'default'}>{postingSt}</Tag>
+                                </Descriptions.Item>
+                                {glBatch && <Descriptions.Item label="GL Batch" span={3}>{glBatch}</Descriptions.Item>}
+                              </Descriptions>
+                            </div>
+                            {/* Lines table */}
                             <div style={{ padding: 12 }}>
-                              {lines.length > 0
-                                ? renderLinesTable(lines)
-                                : <Text type="secondary" style={{ fontSize: 12 }}>{slaInfo ? 'No accounting lines returned.' : 'Accounting not yet created.'}</Text>
+                              {notLoaded
+                                ? <Text type="secondary" style={{ fontSize: 12 }}>Switch to this tab to load lines…</Text>
+                                : lines.length > 0
+                                  ? renderLinesTable(lines)
+                                  : <Text type="secondary" style={{ fontSize: 12 }}>{headerId ? 'No accounting lines found for this header.' : 'Accounting not yet created.'}</Text>
                               }
                             </div>
                           </div>
@@ -8734,10 +8774,18 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   children: (
                     <Spin spinning={slaModalPaymentLoading} tip="Loading payment accounting...">
                       {invoicePayments.map((p) => {
-                        const lines = paymentSlaLines[p.checkId] ?? [];
+                        const fetched   = paymentSlaData[p.checkId];
+                        const headerId  = fetched?.headerId ?? null;
+                        const st        = fetched?.accountingStatus ?? 'None';
+                        const postingSt = fetched?.postingStatus ?? '—';
+                        const glBatch   = fetched?.glBatchName ?? (fetched?.glBatchId ? `Batch ${fetched.glBatchId}` : null);
+                        const lines     = fetched?.lines ?? [];
+                        const tagColor  = st === 'POSTED' ? 'green' : st === 'DRAFT' ? 'blue' : st === 'ERROR' ? 'red' : 'default';
+                        const notLoaded = !fetched;
                         return (
-                          <div key={p.checkId} style={{ marginBottom: 14, border: '1px solid #d9d9d9', borderRadius: 8, overflow: 'hidden' }}>
-                            <div style={{ padding: '8px 12px', background: '#fafafa', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div key={p.checkId} style={{ marginBottom: 16, border: '1px solid #d9d9d9', borderRadius: 8, overflow: 'hidden' }}>
+                            {/* Card header */}
+                            <div style={{ padding: '8px 12px', background: '#e6f4ff', borderBottom: '1px solid #e8e8e8', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <Space>
                                 <Text strong style={{ fontSize: 12 }}>Check ID: {p.checkId}</Text>
                                 <Text style={{ fontSize: 12, color: REDWOOD.info }}>{p.number}</Text>
@@ -8746,10 +8794,26 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                               </Space>
                               <Tag color={p.status === 'NEGOTIABLE' ? 'green' : 'default'} style={{ fontSize: 11 }}>{p.status}</Tag>
                             </div>
+                            {/* Descriptions row — same structure as Invoice tab */}
+                            <div style={{ padding: '10px 12px', borderBottom: '1px solid #f0f0f0' }}>
+                              <Descriptions size="small" column={3} bordered>
+                                <Descriptions.Item label="Header ID">{headerId ?? '—'}</Descriptions.Item>
+                                <Descriptions.Item label="Status">
+                                  <Tag color={tagColor}>{st}</Tag>
+                                </Descriptions.Item>
+                                <Descriptions.Item label="Posting Status">
+                                  <Tag color={postingSt === 'POSTED' ? 'green' : 'default'}>{postingSt}</Tag>
+                                </Descriptions.Item>
+                                {glBatch && <Descriptions.Item label="GL Batch" span={3}>{glBatch}</Descriptions.Item>}
+                              </Descriptions>
+                            </div>
+                            {/* Lines table */}
                             <div style={{ padding: 12 }}>
-                              {lines.length > 0
-                                ? renderLinesTable(lines)
-                                : <Text type="secondary" style={{ fontSize: 12 }}>No accounting lines found for this payment.</Text>
+                              {notLoaded
+                                ? <Text type="secondary" style={{ fontSize: 12 }}>Switch to this tab to load lines…</Text>
+                                : lines.length > 0
+                                  ? renderLinesTable(lines)
+                                  : <Text type="secondary" style={{ fontSize: 12 }}>{headerId ? 'No accounting lines found for this header.' : 'Payment accounting not yet created.'}</Text>
                               }
                             </div>
                           </div>
