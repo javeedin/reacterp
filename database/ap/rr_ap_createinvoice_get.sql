@@ -2,7 +2,8 @@
 -- GET Handler for /ap/createinvoice
 -- =====================================================
 -- Purpose: Search AP Invoices from RR_AP_INVOICES_ALL
---          Returns accounting_status and applied_prepayments
+--          Returns accounting_status (live from RR_SLA_ACCOUNTING_HEADERS)
+--          and applied_prepayments
 -- Filters:  supplier_number, business_unit, invoice_number
 -- =====================================================
 
@@ -65,7 +66,12 @@ SELECT
     i.validation_status,
     i.approval_status,
     i.paid_status,
-    i.accounting_status,
+    (SELECT h.accounting_status
+     FROM   RR_SLA_ACCOUNTING_HEADERS h
+     WHERE  h.source_table = ''AP_INVOICES''
+       AND  h.source_id    = i.invoice_id
+     ORDER BY h.header_id DESC
+     FETCH FIRST 1 ROWS ONLY)                      AS accounting_status,
     TO_CHAR(i.apply_after_date, ''YYYY-MM-DD'')    AS apply_after_date,
     NVL(
         (SELECT SUM(ap.applied_amount)
