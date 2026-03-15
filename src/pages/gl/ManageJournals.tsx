@@ -273,6 +273,7 @@ const ManageJournals: React.FC = () => {
   const [apTransactionError, setApTransactionError] = useState<string | null>(null);
   const [apTransactionLines, setApTransactionLines] = useState<any[]>([]);
   const [apTransactionLinesLoading, setApTransactionLinesLoading] = useState(false);
+  const [apLineDescMap, setApLineDescMap] = useState<Record<string, string>>({});
 
   // Floating panel state
   const [activePanel, setActivePanel] = useState<'none' | 'tasks' | 'reports'>('none');
@@ -391,6 +392,29 @@ const ManageJournals: React.FC = () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [activePanel]);
+
+  // Load natural account descriptions for AP drill-down invoice lines
+  useEffect(() => {
+    if (apTransactionLines.length === 0) return;
+    const uniqueCombos = [...new Set(
+      apTransactionLines.map(l => l.distribution_combination).filter(Boolean)
+    )];
+    if (uniqueCombos.length === 0) return;
+
+    const newMap: Record<string, string> = {};
+    Promise.all(
+      uniqueCombos.map(async (combo: string) => {
+        try {
+          const result = await validateAccountCode(combo);
+          const naturalValue = combo.split('-')[3] || '';
+          const found = Object.values(result.segmentDetails).find(
+            s => s.value === naturalValue && s.name.toLowerCase().includes('account')
+          ) || Object.values(result.segmentDetails).find(s => s.value === naturalValue);
+          if (found?.description) newMap[combo] = found.description;
+        } catch (_) { /* silent */ }
+      })
+    ).then(() => setApLineDescMap(prev => ({ ...prev, ...newMap })));
+  }, [apTransactionLines]);
 
   // Load natural account descriptions when view modal opens
   useEffect(() => {
@@ -2505,7 +2529,20 @@ const ManageJournals: React.FC = () => {
                       { title: 'Line', dataIndex: 'line_number', key: 'line_number', width: 55 },
                       { title: 'Type', dataIndex: 'line_type', key: 'line_type', width: 80 },
                       { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
-                      { title: 'Account', dataIndex: 'distribution_combination', key: 'dist', width: 200, render: (v: string) => <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{v || '-'}</span> },
+                      {
+                        title: 'Account',
+                        dataIndex: 'distribution_combination',
+                        key: 'dist',
+                        width: 220,
+                        render: (v: string) => (
+                          <div>
+                            <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{v || '-'}</span>
+                            {v && apLineDescMap[v] && (
+                              <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 2 }}>{apLineDescMap[v]}</div>
+                            )}
+                          </div>
+                        ),
+                      },
                       { title: 'Amount', dataIndex: 'line_amount', key: 'line_amount', width: 110, align: 'right' as const, render: (v: number) => v != null ? <Text strong style={{ color: v >= 0 ? REDWOOD.info : REDWOOD.error }}>{Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 })}</Text> : '-' },
                       { title: 'Tax', dataIndex: 'tax_classification_code', key: 'tax', width: 100, render: (v: string) => v || '-' },
                     ]}

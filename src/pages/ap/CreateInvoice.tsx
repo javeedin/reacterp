@@ -234,6 +234,7 @@ interface InvoiceLine {
   endDate: string;
   accrualAccount: string;
   taxAmount: number;
+  accountDescription?: string;
 }
 
 // Prepayment interfaces
@@ -2061,16 +2062,25 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         message.info('Could not load segment data for validation.');
         return;
       }
+      const naturalValue = accountCode.split('-')[3] || '';
+      const natDesc = Object.values(result.segmentDetails).find(s => s.value === naturalValue)?.description || '';
       if (!result.isValid) {
         message.warning(`Invalid segment value(s): ${result.invalidSegments.join(', ')}. Please correct using the account selector.`);
         setLines((prev) =>
           prev.map((line) =>
-            line.key === lineKey ? { ...line, distributionCombination: result.validatedCode } : line
+            line.key === lineKey ? { ...line, distributionCombination: result.validatedCode, accountDescription: natDesc } : line
           )
         );
         openAccountSelector(lineKey, result.validatedCode);
       } else {
         message.success('Account code validated successfully');
+        if (natDesc) {
+          setLines((prev) =>
+            prev.map((line) =>
+              line.key === lineKey ? { ...line, accountDescription: natDesc } : line
+            )
+          );
+        }
       }
     } catch (error) {
       console.error('Error validating account code:', error);
@@ -2079,6 +2089,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   // Handle account selection from popup
   const handleAccountSelect = (accountCode: string, segments: Record<string, { value: string; description: string }>) => {
+    const naturalValue = accountCode.split('-')[3] || '';
+    const natDesc = Object.values(segments).find(s => s.value === naturalValue)?.description || '';
+
     if (editingLineKey === '__liability__') {
       // Liability distribution (header)
       form.setFieldValue('liabilityDistribution', accountCode);
@@ -2089,7 +2102,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       // Set on the current line only — user can click the Apply icon to propagate
       setLines((prev) =>
         prev.map((line) =>
-          line.key === editingLineKey ? { ...line, [field]: accountCode } : line
+          line.key === editingLineKey
+            ? { ...line, [field]: accountCode, ...(field === 'distributionCombination' ? { accountDescription: natDesc } : {}) }
+            : line
         )
       );
     }
@@ -3078,50 +3093,57 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       key: 'distributionCombination',
       width: 280,
       render: (val: string, record: InvoiceLine) => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <Input
-            size="small"
-            value={val}
-            onChange={(e) => updateLine(record.key, 'distributionCombination', e.target.value)}
-            onBlur={(e) => handleAccountBlur(record.key, e.target.value)}
-            placeholder="e.g. 01-000-2100-0000-000"
-            variant="borderless"
-            style={{ flex: 1 }}
-            disabled={isReadOnly}
-            suffix={
-              <SearchOutlined
-                style={{ color: isReadOnly ? REDWOOD.neutral300 : REDWOOD.info, fontSize: 12, cursor: isReadOnly ? 'default' : 'pointer' }}
-                onClick={() => !isReadOnly && openAccountSelector(record.key, val)}
-              />
-            }
-          />
-          {val && lines.length > 1 && (
-            <Tooltip title="Apply to all lines">
-              <AppstoreOutlined
-                style={{ color: REDWOOD.info, fontSize: 13, cursor: 'pointer', flexShrink: 0 }}
-                onClick={() => {
-                  Modal.confirm({
-                    title: 'Apply to All Lines?',
-                    icon: <AppstoreOutlined style={{ color: REDWOOD.info }} />,
-                    content: (
-                      <div style={{ fontSize: 13 }}>
-                        Set <Text code style={{ fontSize: 12 }}>{val}</Text> on all {lines.length} lines?
-                      </div>
-                    ),
-                    okText: 'Apply to All',
-                    cancelText: 'Cancel',
-                    onOk: () => {
-                      setLines((prev) =>
-                        prev.map((line) => ({ ...line, distributionCombination: val }))
-                      );
-                      message.success(`Distribution applied to all ${lines.length} lines`);
-                      setIsValidated(false);
-                    },
-                  });
-                }}
-              />
-            </Tooltip>
-          )}
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Input
+              size="small"
+              value={val}
+              onChange={(e) => updateLine(record.key, 'distributionCombination', e.target.value)}
+              onBlur={(e) => handleAccountBlur(record.key, e.target.value)}
+              placeholder="e.g. 01-000-2100-0000-000"
+              variant="borderless"
+              style={{ flex: 1 }}
+              disabled={isReadOnly}
+              suffix={
+                <SearchOutlined
+                  style={{ color: isReadOnly ? REDWOOD.neutral300 : REDWOOD.info, fontSize: 12, cursor: isReadOnly ? 'default' : 'pointer' }}
+                  onClick={() => !isReadOnly && openAccountSelector(record.key, val)}
+                />
+              }
+            />
+                {val && lines.length > 1 && (
+                <Tooltip title="Apply to all lines">
+                  <AppstoreOutlined
+                    style={{ color: REDWOOD.info, fontSize: 13, cursor: 'pointer', flexShrink: 0 }}
+                    onClick={() => {
+                      Modal.confirm({
+                        title: 'Apply to All Lines?',
+                        icon: <AppstoreOutlined style={{ color: REDWOOD.info }} />,
+                        content: (
+                          <div style={{ fontSize: 13 }}>
+                            Set <Text code style={{ fontSize: 12 }}>{val}</Text> on all {lines.length} lines?
+                          </div>
+                        ),
+                        okText: 'Apply to All',
+                        cancelText: 'Cancel',
+                        onOk: () => {
+                          setLines((prev) =>
+                            prev.map((line) => ({ ...line, distributionCombination: val }))
+                          );
+                          message.success(`Distribution applied to all ${lines.length} lines`);
+                          setIsValidated(false);
+                        },
+                      });
+                    }}
+                  />
+                </Tooltip>
+              )}
+            </div>
+            {record.accountDescription && (
+              <div style={{ fontSize: 11, color: REDWOOD.neutral300, marginTop: 2, paddingLeft: 4 }}>
+                {record.accountDescription}
+              </div>
+            )}
         </div>
       ),
     },
