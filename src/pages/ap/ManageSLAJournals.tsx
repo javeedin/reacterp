@@ -1236,7 +1236,7 @@ const ManageSLAJournals: React.FC = () => {
                     { title: 'Line', dataIndex: 'lineNum', key: 'lineNum', width: 55 },
                     { title: 'Account', dataIndex: 'account', key: 'account', width: 180, render: (v: string) => <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{v || '—'}</span> },
                     { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true, render: (v: string) => <span style={{ fontSize: 11 }}>{v || '—'}</span> },
-                    { title: 'Currency', dataIndex: 'currency', key: 'currency', width: 70 },
+                    { title: 'Currency', dataIndex: 'currency', key: 'currency', width: 90 },
                     { title: 'Entered Dr', dataIndex: 'enteredDr', key: 'enteredDr', width: 120, align: 'right' as const, render: (v: number) => v > 0 ? <span style={{ color: REDWOOD.info, fontWeight: 600 }}>{formatAmount(v)}</span> : '—' },
                     { title: 'Entered Cr', dataIndex: 'enteredCr', key: 'enteredCr', width: 120, align: 'right' as const, render: (v: number) => v > 0 ? <span style={{ color: REDWOOD.error, fontWeight: 600 }}>{formatAmount(v)}</span> : '—' },
                     { title: 'Accounted Dr', dataIndex: 'accountedDr', key: 'accountedDr', width: 120, align: 'right' as const, render: (v: number) => v > 0 ? formatAmount(v) : '—' },
