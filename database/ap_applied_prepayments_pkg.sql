@@ -294,21 +294,38 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_APPLIED_PREPAYMENTS_PKG AS
             v_eff_currency  := NVL(v_currency, 'AED');
             v_eff_bu        := NVL(v_business_unit, '');
 
-            -- Look up supplier number and GL accounts via the prepayment invoice
+            -- Look up GL account IDs from supplier site via prepayment invoice, then resolve each separately
+            DECLARE
+                v_prepay_acct_id  NUMBER;
+                v_liab_acct_id    NUMBER;
             BEGIN
                 SELECT sm.SUPPLIER_NUMBER,
-                       NVL(gc_p.concatenated_segments, 'PREPAYMENT-ACCOUNT'),
-                       NVL(gc_l.concatenated_segments, 'LIABILITY-ACCOUNT')
-                INTO   v_supplier_num, v_prepay_account, v_liab_account
-                FROM   RR_AP_INVOICES_ALL   inv
-                JOIN   RR_SUPPLIER_MASTER   sm  ON sm.SUPPLIER_NUMBER = inv.supplier_number
-                JOIN   RR_SUPPLIER_SITES    ss  ON ss.SUPPLIER_ID     = sm.SUPPLIER_ID
-                LEFT JOIN reerp_gl_code_combinations gc_p
-                       ON gc_p.CODE_COMBINATION_ID = ss.PREPAYMENT_ACCOUNT_ID
-                LEFT JOIN reerp_gl_code_combinations gc_l
-                       ON gc_l.CODE_COMBINATION_ID = ss.LIABILITY_ACCOUNT_ID
+                       ss.PREPAYMENT_ACCOUNT_ID,
+                       ss.LIABILITY_ACCOUNT_ID
+                INTO   v_supplier_num, v_prepay_acct_id, v_liab_acct_id
+                FROM   RR_AP_INVOICES_ALL inv
+                JOIN   RR_SUPPLIER_MASTER sm ON sm.SUPPLIER_NUMBER = inv.supplier_number
+                JOIN   RR_SUPPLIER_SITES  ss ON ss.SUPPLIER_ID     = sm.SUPPLIER_ID
                 WHERE  inv.invoice_id = v_prepayment_invoice_id
                 AND    ROWNUM = 1;
+
+                BEGIN
+                    SELECT concatenated_segments
+                    INTO   v_prepay_account
+                    FROM   reerp_gl_code_combinations
+                    WHERE  code_combination_id = v_prepay_acct_id;
+                EXCEPTION WHEN OTHERS THEN
+                    v_prepay_account := 'PREPAYMENT-ACCOUNT';
+                END;
+
+                BEGIN
+                    SELECT concatenated_segments
+                    INTO   v_liab_account
+                    FROM   reerp_gl_code_combinations
+                    WHERE  code_combination_id = v_liab_acct_id;
+                EXCEPTION WHEN OTHERS THEN
+                    v_liab_account := 'LIABILITY-ACCOUNT';
+                END;
             EXCEPTION WHEN OTHERS THEN
                 v_prepay_account := 'PREPAYMENT-ACCOUNT';
                 v_liab_account   := 'LIABILITY-ACCOUNT';
