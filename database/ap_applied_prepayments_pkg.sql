@@ -310,7 +310,11 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_APPLIED_PREPAYMENTS_PKG AS
                 AND    ROWNUM = 1;
 
                 BEGIN
-                    SELECT concatenated_segments
+                    SELECT "buimercFinGlbCoaCo" || '-' || "buimercFinGlbCoaLob" || '-' ||
+                           "buimercFinGlbCoaDepartment" || '-' || "buimercFinGlbCoaAccount" || '-' ||
+                           "buimercFinGlbCoaSubAcc" || '-' || "buimercFinGlbCoaAlys" || '-' ||
+                           "buimercFinGlbCoaIc" || '-' || "buimercFinGlbCoaFut1" || '-' ||
+                           "buimercFinGlbCoaFut2"
                     INTO   v_prepay_account
                     FROM   reerp_gl_code_combinations
                     WHERE  "_CODE_COMBINATION_ID" = v_prepay_acct_id;
@@ -319,7 +323,11 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_APPLIED_PREPAYMENTS_PKG AS
                 END;
 
                 BEGIN
-                    SELECT concatenated_segments
+                    SELECT "buimercFinGlbCoaCo" || '-' || "buimercFinGlbCoaLob" || '-' ||
+                           "buimercFinGlbCoaDepartment" || '-' || "buimercFinGlbCoaAccount" || '-' ||
+                           "buimercFinGlbCoaSubAcc" || '-' || "buimercFinGlbCoaAlys" || '-' ||
+                           "buimercFinGlbCoaIc" || '-' || "buimercFinGlbCoaFut1" || '-' ||
+                           "buimercFinGlbCoaFut2"
                     INTO   v_liab_account
                     FROM   reerp_gl_code_combinations
                     WHERE  "_CODE_COMBINATION_ID" = v_liab_acct_id;
