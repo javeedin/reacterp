@@ -3452,6 +3452,7 @@ const ManagePayments: React.FC = () => {
         confirmLoading={slaActionLoading}
         okText="Post to GL"
         okButtonProps={{ type: 'primary' }}
+        width={560}
       >
         <Space direction="vertical" style={{ width: '100%' }}>
           <div>
@@ -3483,6 +3484,42 @@ const ManagePayments: React.FC = () => {
           <div style={{ color: REDWOOD.warning, fontSize: 12 }}>
             ⚠ Once posted, the accounting entry will be locked and cannot be modified.
           </div>
+
+          {/* Live API preview — same call used by AP Invoices posting */}
+          <Collapse
+            size="small"
+            items={[{
+              key: '1',
+              label: <span style={{ fontSize: 11, color: REDWOOD.info }}><ApiOutlined /> API Request Preview</span>,
+              children: (
+                <Space direction="vertical" style={{ width: '100%' }} size={4}>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <Tag color="blue" style={{ fontSize: 11, margin: 0 }}>POST</Tag>
+                    <span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.neutral900 }}>
+                      {`${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`}
+                    </span>
+                  </div>
+                  <pre style={{
+                    fontSize: 11,
+                    background: REDWOOD.neutral100,
+                    border: `1px solid ${REDWOOD.neutral200}`,
+                    borderRadius: 4,
+                    padding: '8px 10px',
+                    margin: 0,
+                    color: REDWOOD.neutral900,
+                  }}>
+                    {JSON.stringify({
+                      headerId:    postModalHeadId,
+                      glBatchId:   glBatchId ? Number(glBatchId) : '<required>',
+                      glBatchName: glBatchName || '<auto>',
+                      glHeaderId:  glHeaderId ? Number(glHeaderId) : '<required>',
+                      postedBy:    'SYSTEM',
+                    }, null, 2)}
+                  </pre>
+                </Space>
+              ),
+            }]}
+          />
         </Space>
       </Modal>
 
