@@ -891,6 +891,11 @@ const ManageInvoices: React.FC = () => {
       if (values.supplierNumber) params.append('supplier_number', values.supplierNumber);
       if (values.businessUnit) params.append('business_unit', values.businessUnit);
       if (values.invoiceNumber) params.append('invoice_number', values.invoiceNumber);
+      if (values.supplierOrParty) params.append('supplier', values.supplierOrParty);
+      if (values.invoiceDate) params.append('invoice_date', values.invoiceDate.format('YYYY-MM-DD'));
+      if (values.invoiceAmount != null && values.invoiceAmount !== '') params.append('invoice_amount', values.invoiceAmount);
+      if (values.supplierSite) params.append('supplier_site', values.supplierSite);
+      if (values.invoiceGroup) params.append('invoice_group', values.invoiceGroup);
 
       // Build URL - call APEX endpoint directly
       const queryString = params.toString();
