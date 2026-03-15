@@ -1112,6 +1112,54 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         // Close debug modal and show accounting lines modal
         setSlaDebugVisible(false);
         setSlaModalVisible(true);
+
+        // ── Auto-create SLA for any applied prepayments that don't have accounting yet ──
+        const pending = appliedPrepaymentsList.filter(r => !appSlaMap[r.applicationId]?.status);
+        if (pending.length > 0) {
+          const invoiceId     = savedInvoiceId || initialData?.invoiceId;
+          const invoiceNumber = form.getFieldValue('invoiceNumber');
+          const bu            = form.getFieldValue('businessUnit') || '';
+          let created = 0;
+          await Promise.all(pending.map(async (record) => {
+            try {
+              const appPayload = {
+                PrepaymentApplicationId:   record.applicationId,
+                InvoiceId:                 invoiceId,
+                InvoiceNumber:             invoiceNumber,
+                PrepaymentInvoiceId:       record.prepaymentInvoiceId,
+                PrepaymentNumber:          record.prepaymentNumber,
+                LineNumber:                record.lineNumber,
+                PrepaymentLineNumber:      record.prepaymentLineNumber,
+                Description:               record.description,
+                BusinessUnit:              bu,
+                SupplierSite:              record.supplierSite,
+                PurchaseOrder:             record.purchaseOrder,
+                Currency:                  record.currency,
+                AppliedAmount:             record.appliedAmount,
+                IncludedTax:               0,
+                IncludedonInvoiceFlag:     'N',
+                Status:                    'Applied',
+                ApplicationAccountingDate: record.applicationAccountingDate,
+                CreatedBy:                 'user',
+                LastUpdatedBy:             'user',
+              };
+              const appRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/invoices/appliedprepayments`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                body: JSON.stringify(appPayload),
+              });
+              if (appRes.ok) {
+                await new Promise(r => setTimeout(r, 500));
+                const r2 = await checkAccountingExists('RR_AP_APPLIED_PREPAYMENTS', record.applicationId, 'PREPAYMENT_APPLIED');
+                setAppSlaMap(prev => ({
+                  ...prev,
+                  [record.applicationId]: { headerId: r2.exists ? (r2.headerId ?? null) : null, status: r2.exists ? (r2.accountingStatus ?? 'DRAFT') : 'DRAFT' },
+                }));
+                created++;
+              }
+            } catch { /* non-fatal */ }
+          }));
+          if (created > 0) message.info(`Also created accounting for ${created} prepayment application(s).`);
+        }
       } else {
         message.error(`Create accounting failed: HTTP ${res.status}`);
       }
@@ -1121,7 +1169,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     } finally {
       setSlaDebugLoading(null);
     }
-  }, [slaDebugPayload]);
+  }, [slaDebugPayload, appliedPrepaymentsList, appSlaMap, savedInvoiceId, initialData, form, setAppSlaMap]);
 
   // ── SLA Debug: Execute GET ────────────────────────────────────────────────
   const handleDebugGet = useCallback(async () => {
@@ -1262,15 +1310,93 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       setSlaGlBatchId(glBatchId);
       setSlaGlBatchName(glBatchName);
       setSlaGlHeaderId(glHeaderId);
-      // Update local lines state with freshly fetched lines
       setSlaLines(fetchedLines);
       message.success('Posted to General Ledger successfully. Accounting is now locked.');
+
+      // ── Auto-post any applied prepayment SLAs that are in DRAFT ──
+      const draftApps = appliedPrepaymentsList.filter(r => appSlaMap[r.applicationId]?.status === 'DRAFT');
+      if (draftApps.length > 0) {
+        const bu = form.getFieldValue('businessUnit') || '';
+        let posted = 0;
+        await Promise.all(draftApps.map(async (record) => {
+          const appSlaInfo = appSlaMap[record.applicationId];
+          if (!appSlaInfo?.headerId) return;
+          try {
+            const currency   = record.currency;
+            const acctDate   = record.applicationAccountingDate
+              ? dayjs(record.applicationAccountingDate).format('YYYY-MM-DD')
+              : dayjs().format('YYYY-MM-DD');
+            const d          = record.applicationAccountingDate ? dayjs(record.applicationAccountingDate).toDate() : new Date();
+            const months_    = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            const periodName_ = `${months_[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
+
+            const fullData_    = await getAccounting('RR_AP_APPLIED_PREPAYMENTS', record.applicationId);
+            const appLines: any[] = fullData_.lines || [];
+            if (appLines.length === 0) return;
+
+            const ledger_    = await fetchLedgerByBusinessUnit(bu);
+            const ledgerName_ = ledger_?.ledgerName ?? 'BCL DIFC';
+            const ledgerId_   = ledger_?.ledgerId   ?? 0;
+            const totalDr_   = appLines.reduce((s: number, l: any) => s + (l.enteredDr || 0), 0);
+            const totalCr_   = appLines.reduce((s: number, l: any) => s + (l.enteredCr || 0), 0);
+            const batchName_ = `AP-PREP-${record.prepaymentNumber}-${dayjs().format('YYYYMMDD-HHmmss')}`;
+
+            const glPayload_ = {
+              batch: {
+                batchName: batchName_, batchDescription: `AP Prepayment Application ${record.prepaymentNumber} – Posted from SLA`,
+                ledgerName: ledgerName_, ledgerId: ledgerId_, status: 'NEW',
+                accountingPeriod: periodName_, controlTotal: totalDr_,
+                runningTotalDr: totalDr_, runningTotalCr: totalCr_, batchSource: 'Payables', createdBy: 'user',
+              },
+              header: {
+                ledgerId: ledgerId_, ledgerName: ledgerName_, jeCategory: 'Purchase Invoices', jeSource: 'Payables',
+                periodName: periodName_, journalName: `AP Prepayment ${record.prepaymentNumber}`,
+                description: `Subledger accounting – Prepayment Applied ${record.prepaymentNumber}`,
+                currencyCode: currency, currencyConversionType: 'User', currencyConversionDate: acctDate,
+                currencyConversionRate: 1, status: 'NEW', runningTotalDr: totalDr_, runningTotalCr: totalCr_, createdBy: 'user',
+              },
+              lines: appLines.map((l: any) => ({
+                enteredDr: l.lineType === 'DR' ? (l.enteredDr || null) : null,
+                enteredCr: l.lineType === 'CR' ? (l.enteredCr || null) : null,
+                accountedDr: l.accountedDr || null, accountedCr: l.accountedCr || null, statAmount: null,
+                description: l.description || '', currencyCode: l.currencyCode || currency,
+                currencyConversionDate: l.accountingDate || acctDate, currencyConversionRate: 1,
+                userCurrencyConversionType: 'User', accountCombination: l.accountCombination || '',
+                chartOfAccountsName: 'Chart of Accounts', reference1: record.prepaymentNumber,
+                reference2: String(record.applicationId), reference3: l.accountingClass || null,
+                reference4: l.legalEntity || bu || null, reference5: null, createdBy: 'user',
+              })),
+            };
+
+            const glRes_ = await fetch(`${APEX_DB_CONFIG.baseUrl}/journals/create`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+              body: JSON.stringify(glPayload_),
+            });
+            const glData_ = await glRes_.json();
+            if (!glRes_.ok) return;
+
+            const glBatchId_   = glData_.batchId   || glData_.batch_id   || null;
+            const glHeaderId_  = glData_.headerId  || glData_.header_id  || null;
+            const glBatchName_ = glData_.batchName || glData_.batch_name || batchName_;
+
+            if (glBatchId_ || glHeaderId_) {
+              await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                body: JSON.stringify({ headerId: appSlaInfo.headerId, postedBy: 'user', glBatchId: glBatchId_, glBatchName: glBatchName_, glHeaderId: glHeaderId_ }),
+              });
+            }
+            setAppSlaMap(prev => ({ ...prev, [record.applicationId]: { headerId: appSlaInfo.headerId, status: 'POSTED' } }));
+            posted++;
+          } catch { /* non-fatal — invoice post already succeeded */ }
+        }));
+        if (posted > 0) message.info(`Also posted ${posted} prepayment application accounting(s) to GL.`);
+      }
     } catch (err: any) {
       message.error(`Post to Ledger failed: ${err.message}`);
     } finally {
       setSlaPosting(false);
     }
-  }, [slaHeaderId, slaStatus, form, headerValues, savedInvoiceId, initialData]);
+  }, [slaHeaderId, slaStatus, form, headerValues, savedInvoiceId, initialData, appliedPrepaymentsList, appSlaMap, setAppSlaMap, fetchLedgerByBusinessUnit]);
 
   // ── Applied Prepayment SLA: Create Accounting ─────────────────────────────
   const handleAppCreateAccounting = useCallback(async (record: AppliedPrepayment) => {
