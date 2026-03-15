@@ -289,14 +289,14 @@ const ManageSLAJournals: React.FC = () => {
         }
         setGlJournalLines(rawItems.map((l: any, i: number) => ({
           key: i,
-          lineNum:     l.lineNum     ?? l.linenum     ?? l.JE_LINE_NUMBER,
-          account:     l.account     ?? l.ACCOUNT_COMBINATION,
+          lineNum:     l.lineNum     ?? l.linenum     ?? l.je_line_number  ?? l.JE_LINE_NUMBER,
+          account:     l.account     ?? l.accountcombination ?? l.account_combination ?? l.ACCOUNT_COMBINATION,
           description: l.description ?? l.DESCRIPTION,
-          currency:    l.currency    ?? l.currencyCode ?? l.currencycode ?? l.CURRENCY_CODE,
-          enteredDr:   l.enteredDr   ?? l.entereddr   ?? l.ENTERED_DR,
-          enteredCr:   l.enteredCr   ?? l.enteredcr   ?? l.ENTERED_CR,
-          accountedDr: l.accountedDr ?? l.accounteddr ?? l.ACCOUNTED_DR,
-          accountedCr: l.accountedCr ?? l.accountedcr ?? l.ACCOUNTED_CR,
+          currency:    l.currency    ?? l.currencyCode ?? l.currencycode ?? l.currency_code ?? l.CURRENCY_CODE,
+          enteredDr:   l.enteredDr   ?? l.entereddr   ?? l.entered_dr   ?? l.ENTERED_DR,
+          enteredCr:   l.enteredCr   ?? l.enteredcr   ?? l.entered_cr   ?? l.ENTERED_CR,
+          accountedDr: l.accountedDr ?? l.accounteddr ?? l.accounted_dr ?? l.ACCOUNTED_DR,
+          accountedCr: l.accountedCr ?? l.accountedcr ?? l.accounted_cr ?? l.ACCOUNTED_CR,
         })));
       }
     } catch (err: any) {

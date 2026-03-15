@@ -1,12 +1,19 @@
 -- ============================================================
 -- FIX: APEX REST Handler for GET /gl/journals/:id/lines
--- The previous handler was returning header data instead of
--- individual journal lines. This redefines it correctly.
+-- Uses plain column names (no quoted aliases) to avoid ORA-00907
+-- ORDS will return keys as lowercase with underscores, e.g. entered_dr
 -- ============================================================
--- Route: journals/:id/lines
--- Bind:  :id = JE_HEADER_ID (from URL path)
--- Table: RR_GL_LINES_ALL
--- ============================================================
+BEGIN
+    ORDS.DEFINE_TEMPLATE(
+        p_module_name => 'gl',
+        p_pattern     => 'journals/:id/lines',
+        p_priority    => 0,
+        p_etag_type   => 'HASH',
+        p_comments    => 'Get journal lines by header ID'
+    );
+    COMMIT;
+END;
+/
 
 BEGIN
     ORDS.DEFINE_HANDLER(
@@ -16,29 +23,9 @@ BEGIN
         p_source_type    => 'json/collection',
         p_items_per_page => 0,
         p_mimes_allowed  => NULL,
-        p_comments       => 'Get individual journal lines for a specific GL header ID',
-        p_source         => '
-            SELECT
-                l.LINE_ID               AS "lineId",
-                l.JE_LINE_NUMBER        AS "lineNum",
-                l.JE_HEADER_ID          AS "jeHeaderId",
-                l.ACCOUNT_COMBINATION   AS "account",
-                l.CHART_OF_ACCOUNTS_NAME AS "chartOfAccountsName",
-                l.DESCRIPTION           AS "description",
-                l.ENTERED_DR            AS "enteredDr",
-                l.ENTERED_CR            AS "enteredCr",
-                l.ACCOUNTED_DR          AS "accountedDr",
-                l.ACCOUNTED_CR          AS "accountedCr",
-                l.CURRENCY_CODE         AS "currency",
-                l.STAT_AMOUNT           AS "statAmount",
-                l.RECONCILIATION_REFERENCE AS "reconciliationReference"
-            FROM RR_GL_LINES_ALL l
-            WHERE l.JE_HEADER_ID = :id
-            ORDER BY l.JE_LINE_NUMBER
-        '
+        p_comments       => 'Get journal lines for a specific GL header',
+        p_source         => 'SELECT LINE_ID, JE_LINE_NUMBER, JE_HEADER_ID, ACCOUNT_COMBINATION, DESCRIPTION, ENTERED_DR, ENTERED_CR, ACCOUNTED_DR, ACCOUNTED_CR, CURRENCY_CODE FROM RR_GL_LINES_ALL WHERE JE_HEADER_ID = :id'
     );
     COMMIT;
 END;
 /
-
-COMMIT;
