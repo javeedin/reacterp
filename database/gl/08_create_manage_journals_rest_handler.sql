@@ -129,7 +129,7 @@ BEGIN
                 CURRENCY_CODE as "currency",
                 STAT_AMOUNT as "statAmount",
                 RECONCILIATION_REFERENCE as "reconciliationReference"
-            FROM RR_GL_LINES_ALL
+            FROM RR_GL_JE_LINES_ALL
             WHERE JE_HEADER_ID = :id
             ORDER BY JE_LINE_NUMBER
         '

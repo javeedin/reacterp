@@ -1,7 +1,6 @@
 -- ============================================================
 -- FIX: APEX REST Handler for GET /gl/journals/:id/lines
--- Uses plain column names (no quoted aliases) to avoid ORA-00907
--- ORDS will return keys as lowercase with underscores, e.g. entered_dr
+-- Correct table: RR_GL_JE_LINES_ALL
 -- ============================================================
 BEGIN
     ORDS.DEFINE_TEMPLATE(
@@ -24,7 +23,26 @@ BEGIN
         p_items_per_page => 0,
         p_mimes_allowed  => NULL,
         p_comments       => 'Get journal lines for a specific GL header',
-        p_source         => 'SELECT LINE_ID, JE_LINE_NUMBER, JE_HEADER_ID, ACCOUNT_COMBINATION, DESCRIPTION, ENTERED_DR, ENTERED_CR, ACCOUNTED_DR, ACCOUNTED_CR, CURRENCY_CODE FROM RR_GL_LINES_ALL WHERE JE_HEADER_ID = :id'
+        p_source         => '
+            SELECT
+                LINE_ID                    AS "lineId",
+                JE_LINE_NUMBER             AS "lineNum",
+                JE_HEADER_ID               AS "jeHeaderId",
+                BATCH_ID                   AS "batchId",
+                ACCOUNT_COMBINATION        AS "account",
+                CHART_OF_ACCOUNTS_NAME     AS "chartOfAccountsName",
+                DESCRIPTION                AS "description",
+                ENTERED_DR                 AS "enteredDr",
+                ENTERED_CR                 AS "enteredCr",
+                ACCOUNTED_DR               AS "accountedDr",
+                ACCOUNTED_CR               AS "accountedCr",
+                CURRENCY_CODE              AS "currency",
+                STAT_AMOUNT                AS "statAmount",
+                RECONCILIATION_REFERENCE   AS "reconciliationReference"
+            FROM RR_GL_JE_LINES_ALL
+            WHERE JE_HEADER_ID = :id
+            ORDER BY JE_LINE_NUMBER
+        '
     );
     COMMIT;
 END;
