@@ -1567,7 +1567,6 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
               </div>
             )}
           </div>
-        )}
       </Modal>
       {/* ─────────────────────────────────────────────────────────────────── */}
 
