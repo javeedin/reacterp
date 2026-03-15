@@ -1130,46 +1130,83 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           const invoiceId     = savedInvoiceId || initialData?.invoiceId;
           const invoiceNumber = form.getFieldValue('invoiceNumber');
           const bu            = form.getFieldValue('businessUnit') || '';
+          const liabilityDist = form.getFieldValue('liabilityDistribution') || '';
+          const firstSeg      = liabilityDist.split('-')[0] || '02';
+          const prepaymentDist = `${firstSeg}-00-00-1223108-0000-000-00-000-000`;
+          const currency      = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
+          const supplierId    = Number(form.getFieldValue('supplierId')) || null;
+          const ledgerInfo    = await fetchLedgerByBusinessUnit(bu);
           let created = 0;
           await Promise.all(pending.map(async (record) => {
             try {
-              const appPayload = {
-                PrepaymentApplicationId:   record.applicationId,
-                InvoiceId:                 invoiceId,
-                InvoiceNumber:             invoiceNumber,
-                PrepaymentInvoiceId:       record.prepaymentInvoiceId,
-                PrepaymentNumber:          record.prepaymentNumber,
-                LineNumber:                record.lineNumber,
-                PrepaymentLineNumber:      record.prepaymentLineNumber,
-                Description:               record.description,
-                BusinessUnit:              bu,
-                SupplierSite:              record.supplierSite,
-                PurchaseOrder:             record.purchaseOrder,
-                Currency:                  record.currency,
-                AppliedAmount:             record.appliedAmount,
-                IncludedTax:               0,
-                IncludedonInvoiceFlag:     'N',
-                Status:                    'Applied',
-                ApplicationAccountingDate: record.applicationAccountingDate,
-                CreatedBy:                 'user',
-                LastUpdatedBy:             'user',
+              const acctDate_  = record.applicationAccountingDate
+                ? dayjs(record.applicationAccountingDate).format('YYYY-MM-DD')
+                : dayjs().format('YYYY-MM-DD');
+              const d_         = record.applicationAccountingDate
+                ? dayjs(record.applicationAccountingDate).toDate()
+                : new Date();
+              const months_    = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+              const periodName_ = `${months_[d_.getMonth()]}-${String(d_.getFullYear()).slice(-2)}`;
+
+              const slaPayload = {
+                header: {
+                  moduleName:       'AP',
+                  sourceTable:      'RR_AP_APPLIED_PREPAYMENTS',
+                  sourceId:         record.applicationId,
+                  sourceNumber:     record.prepaymentNumber,
+                  sourceType:       'APPLIED',
+                  eventTypeCode:    'PREPAYMENT_APPLIED',
+                  eventDate:        acctDate_,
+                  accountingDate:   acctDate_,
+                  periodName:       periodName_,
+                  ledgerId:         ledgerInfo?.ledgerId  ?? 300000003259529,
+                  ledgerName:       ledgerInfo?.ledgerName ?? 'BCL DIFC',
+                  currencyCode:     record.currency || currency,
+                  ledgerCurrency:   'AED',
+                  exchangeRate:     1,
+                  exchangeRateType: 'Corporate',
+                  businessUnit:     bu,
+                  description:      `Prepayment Applied – ${record.prepaymentNumber} on Invoice ${invoiceNumber}`,
+                  createdBy:        'user',
+                },
+                lines: [
+                  {
+                    lineNumber: 1, lineType: 'DR', accountingClass: 'LIABILITY',
+                    accountCombination: liabilityDist,
+                    enteredDr: record.appliedAmount, enteredCr: 0,
+                    accountedDr: record.appliedAmount, accountedCr: 0,
+                    currencyCode: record.currency || currency, exchangeRate: 1,
+                    description: `AP Liability Reduced – Invoice ${invoiceNumber}`,
+                    partyId: supplierId, partyType: 'SUPPLIER',
+                  },
+                  {
+                    lineNumber: 2, lineType: 'CR', accountingClass: 'PREPAYMENT',
+                    accountCombination: prepaymentDist,
+                    enteredDr: 0, enteredCr: record.appliedAmount,
+                    accountedDr: 0, accountedCr: record.appliedAmount,
+                    currencyCode: record.currency || currency, exchangeRate: 1,
+                    description: `Prepayment Asset Cleared – ${record.prepaymentNumber}`,
+                    partyId: supplierId, partyType: 'SUPPLIER',
+                  },
+                ],
               };
-              const appRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/invoices/appliedprepayments`, {
+
+              const appRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/create`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-                body: JSON.stringify(appPayload),
+                body: JSON.stringify(slaPayload),
               });
               if (appRes.ok) {
-                await new Promise(r => setTimeout(r, 500));
-                const r2 = await checkAccountingExists('RR_AP_APPLIED_PREPAYMENTS', record.applicationId, 'PREPAYMENT_APPLIED');
+                const appData = await appRes.json();
+                const newHeaderId = appData.headerId || appData.header_id || null;
                 setAppSlaMap(prev => ({
                   ...prev,
-                  [record.applicationId]: { headerId: r2.exists ? (r2.headerId ?? null) : null, status: r2.exists ? (r2.accountingStatus ?? 'DRAFT') : 'DRAFT' },
+                  [record.applicationId]: { headerId: newHeaderId, status: 'DRAFT' },
                 }));
                 created++;
               }
             } catch { /* non-fatal */ }
           }));
-          if (created > 0) message.info(`Also created accounting for ${created} prepayment application(s).`);
+          if (created > 0) message.info(`Also created SLA journals for ${created} prepayment application(s).`);
         }
       } else {
         message.error(`Create accounting failed: HTTP ${res.status}`);
@@ -8964,48 +9001,56 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   {/* Info banner */}
                   <div style={{ marginBottom: 14, padding: '8px 12px', background: '#f9f0ff', borderRadius: 6, border: '1px solid #d3adf7', fontSize: 12 }}>
                     <Text style={{ color: '#531dab' }}>
-                      <strong>Auto-triggered on Execute POST:</strong> For each application below that has no accounting yet,
-                      the system re-calls <Text code style={{ fontSize: 11 }}>POST /ap/invoices/appliedprepayments</Text> which
-                      triggers <Text code style={{ fontSize: 11 }}>RR_AP_APPLIED_PREPAYMENTS_PKG.save_application</Text> →
-                      creates a separate SLA entry (sourceTable = RR_AP_APPLIED_PREPAYMENTS).
+                      <strong>Auto-triggered on Execute POST:</strong> For each application below with no accounting,
+                      the system calls <Text code style={{ fontSize: 11 }}>POST /sla/accounting/create</Text> with
+                      <Text code style={{ fontSize: 11 }}>sourceTable=RR_AP_APPLIED_PREPAYMENTS</Text> and builds
+                      DR LIABILITY / CR PREPAYMENT lines from the invoice's liability distribution account.
                     </Text>
                   </div>
 
                   {/* Endpoint */}
                   <div style={{ marginBottom: 14, padding: '8px 12px', background: '#f0f5ff', borderRadius: 6, border: '1px solid #adc6ff' }}>
                     <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>ENDPOINT (per application)</Text>
-                    <Text code style={{ fontSize: 12 }}>POST {APEX_DB_CONFIG.baseUrl}/ap/invoices/appliedprepayments</Text>
+                    <Text code style={{ fontSize: 12 }}>POST {APEX_DB_CONFIG.baseUrl}/sla/accounting/create</Text>
                   </div>
 
                   {/* Per-application cards */}
                   {appliedPrepaymentsList.map((record) => {
-                    const slaInfo   = appSlaMap[record.applicationId];
-                    const st        = slaInfo?.status ?? null;
-                    const tagColor  = st === 'POSTED' ? 'green' : st === 'DRAFT' ? '#1677ff' : st === 'ERROR' ? 'red' : 'default';
-                    const invoiceId     = savedInvoiceId || initialData?.invoiceId;
-                    const invoiceNumber = form.getFieldValue('invoiceNumber');
-                    const bu            = form.getFieldValue('businessUnit') || '';
+                    const slaInfo        = appSlaMap[record.applicationId];
+                    const st             = slaInfo?.status ?? null;
+                    const tagColor       = st === 'POSTED' ? 'green' : st === 'DRAFT' ? '#1677ff' : st === 'ERROR' ? 'red' : 'default';
+                    const invoiceNumber  = form.getFieldValue('invoiceNumber');
+                    const bu             = form.getFieldValue('businessUnit') || '';
+                    const liabilityDist_ = form.getFieldValue('liabilityDistribution') || '';
+                    const firstSeg_      = liabilityDist_.split('-')[0] || '02';
+                    const prepayDist_    = `${firstSeg_}-00-00-1223108-0000-000-00-000-000`;
+                    const currency_      = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
+                    const acctDate_      = record.applicationAccountingDate
+                      ? dayjs(record.applicationAccountingDate).format('YYYY-MM-DD')
+                      : dayjs().format('YYYY-MM-DD');
+                    const d_             = record.applicationAccountingDate ? dayjs(record.applicationAccountingDate).toDate() : new Date();
+                    const months__       = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                    const periodName__   = `${months__[d_.getMonth()]}-${String(d_.getFullYear()).slice(-2)}`;
 
                     const requestPayload = {
-                      PrepaymentApplicationId:   record.applicationId,
-                      InvoiceId:                 invoiceId,
-                      InvoiceNumber:             invoiceNumber,
-                      PrepaymentInvoiceId:       record.prepaymentInvoiceId,
-                      PrepaymentNumber:          record.prepaymentNumber,
-                      LineNumber:                record.lineNumber,
-                      PrepaymentLineNumber:      record.prepaymentLineNumber,
-                      Description:               record.description,
-                      BusinessUnit:              bu,
-                      SupplierSite:              record.supplierSite,
-                      PurchaseOrder:             record.purchaseOrder,
-                      Currency:                  record.currency,
-                      AppliedAmount:             record.appliedAmount,
-                      IncludedTax:               0,
-                      IncludedonInvoiceFlag:     'N',
-                      Status:                    'Applied',
-                      ApplicationAccountingDate: record.applicationAccountingDate,
-                      CreatedBy:                 'user',
-                      LastUpdatedBy:             'user',
+                      header: {
+                        moduleName: 'AP', sourceTable: 'RR_AP_APPLIED_PREPAYMENTS',
+                        sourceId: record.applicationId, sourceNumber: record.prepaymentNumber,
+                        sourceType: 'APPLIED', eventTypeCode: 'PREPAYMENT_APPLIED',
+                        eventDate: acctDate_, accountingDate: acctDate_, periodName: periodName__,
+                        ledgerId: '<ledgerId>', ledgerName: '<ledgerName>',
+                        currencyCode: record.currency || currency_, ledgerCurrency: 'AED', exchangeRate: 1,
+                        businessUnit: bu, description: `Prepayment Applied – ${record.prepaymentNumber} on Invoice ${invoiceNumber}`,
+                        createdBy: 'user',
+                      },
+                      lines: [
+                        { lineNumber: 1, lineType: 'DR', accountingClass: 'LIABILITY', accountCombination: liabilityDist_,
+                          enteredDr: record.appliedAmount, enteredCr: 0, accountedDr: record.appliedAmount, accountedCr: 0,
+                          currencyCode: record.currency || currency_, description: `AP Liability Reduced – Invoice ${invoiceNumber}` },
+                        { lineNumber: 2, lineType: 'CR', accountingClass: 'PREPAYMENT', accountCombination: prepayDist_,
+                          enteredDr: 0, enteredCr: record.appliedAmount, accountedDr: 0, accountedCr: record.appliedAmount,
+                          currencyCode: record.currency || currency_, description: `Prepayment Asset Cleared – ${record.prepaymentNumber}` },
+                      ],
                     };
 
                     return (
@@ -9022,15 +9067,15 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           </Tag>
                         </div>
 
-                        {/* Expected SLA journal entries */}
+                        {/* SLA journal entries that will be created */}
                         <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>
                           <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 6, fontWeight: 600 }}>
-                            EXPECTED SLA JOURNAL ENTRIES (sourceTable: RR_AP_APPLIED_PREPAYMENTS, eventType: PREPAYMENT_APPLIED)
+                            SLA JOURNAL LINES (sourceTable: RR_AP_APPLIED_PREPAYMENTS, eventType: PREPAYMENT_APPLIED)
                           </Text>
                           <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
                             <thead>
                               <tr style={{ background: '#f5f5f5' }}>
-                                {['#', 'Type', 'Class', 'Account (resolved by DB)', 'Debit', 'Credit', 'Description'].map(h => (
+                                {['#', 'Type', 'Class', 'Account Combination', 'Debit', 'Credit', 'Description'].map(h => (
                                   <th key={h} style={{ padding: '4px 8px', textAlign: 'left', border: '1px solid #e8e8e8', fontWeight: 600 }}>{h}</th>
                                 ))}
                               </tr>
@@ -9040,19 +9085,19 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                                 <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}>1</td>
                                 <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}><Tag color="blue" style={{ fontSize: 10, margin: 0 }}>DR</Tag></td>
                                 <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}>LIABILITY</td>
-                                <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}><Text type="secondary" italic>RR_SUPPLIER_SITES.LIABILITY_ACCOUNT_ID → GL code combination</Text></td>
+                                <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}><Text code style={{ fontSize: 10 }}>{liabilityDist_ || '—'}</Text></td>
                                 <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8', color: '#1677ff', fontWeight: 600 }}>{formatAmount(record.appliedAmount)}</td>
                                 <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}>—</td>
-                                <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}>AP Liability Reduced - Invoice {invoiceNumber}</td>
+                                <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}>AP Liability Reduced – Invoice {invoiceNumber}</td>
                               </tr>
                               <tr>
                                 <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}>2</td>
                                 <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}><Tag color="volcano" style={{ fontSize: 10, margin: 0 }}>CR</Tag></td>
                                 <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}>PREPAYMENT</td>
-                                <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}><Text type="secondary" italic>RR_SUPPLIER_SITES.PREPAYMENT_ACCOUNT_ID → GL code combination</Text></td>
+                                <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}><Text code style={{ fontSize: 10 }}>{prepayDist_}</Text></td>
                                 <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}>—</td>
                                 <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8', color: '#cf1322', fontWeight: 600 }}>{formatAmount(record.appliedAmount)}</td>
-                                <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}>Prepayment Asset Cleared - {record.prepaymentNumber}</td>
+                                <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}>Prepayment Asset Cleared – {record.prepaymentNumber}</td>
                               </tr>
                             </tbody>
                           </table>
