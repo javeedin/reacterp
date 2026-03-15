@@ -226,6 +226,8 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
   const [postGLPayload, setPostGLPayload] = useState<any>(null);
   const [postGLFetchingLines, setPostGLFetchingLines] = useState(false);
   const [postGLResult, setPostGLResult] = useState<{ success: boolean; data?: any; error?: string } | null>(null);
+  const [postGLLinesUrl, setPostGLLinesUrl] = useState('');
+  const [postGLRawCount, setPostGLRawCount] = useState(0);
   const [viewAcctOpen, setViewAcctOpen] = useState(false);
   const [viewAcctLoading, setViewAcctLoading] = useState(false);
   const [viewAcctData, setViewAcctData] = useState<SlaGetResult | null>(null);
@@ -490,17 +492,26 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
         return;
       }
       setPostModalHeadId(acctData.headerId);
+      setPostGLRawCount(0);
       setPostModalOpen(true);
 
-      // Fetch lines + ledger in parallel (same pattern as ManageSLAJournals / CreateInvoice)
+      // NOTE: sla/journals/lines backend ignores the headerId param (not in its SQL WHERE clause).
+      // We pass sourceNumber + moduleName (which ARE implemented) and then filter client-side by headerId.
+      const linesUrl = `${APEX_DB_CONFIG.baseUrl}/sla/journals/lines?sourceNumber=${encodeURIComponent(String(payment.paymentNumber))}&moduleName=AP_PAYMENTS&limit=500`;
+      setPostGLLinesUrl(linesUrl);
+
       setPostGLFetchingLines(true);
       const [linesRes, ledgerInfo] = await Promise.all([
-        fetch(`${APEX_DB_CONFIG.baseUrl}/sla/journals/lines?headerId=${acctData.headerId}&limit=500`, { headers: { Accept: 'application/json' } }),
+        fetch(linesUrl, { headers: { Accept: 'application/json' } }),
         fetchLedgerByBusinessUnit(payment.businessUnit || ''),
       ]);
       if (!linesRes.ok) throw new Error(`SLA lines fetch failed: HTTP ${linesRes.status}`);
       const linesData = await linesRes.json();
-      const lines: any[] = linesData.items || linesData || [];
+      const allLines: any[] = linesData.items || linesData || [];
+      setPostGLRawCount(allLines.length);
+
+      // Filter to only this SLA header's lines (backend returns lines from all headers for this payment)
+      const lines = allLines.filter((l: any) => l.headerId === acctData.headerId);
 
       const totalDr    = lines.reduce((s: number, l: any) => s + (l.enteredDr || 0), 0);
       const totalCr    = lines.reduce((s: number, l: any) => s + (l.enteredCr || 0), 0);
@@ -1857,8 +1868,29 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
         confirmLoading={slaActionLoading}
         okText="Post to GL"
         okButtonProps={{ type: 'primary', disabled: !postGLPayload || postGLFetchingLines || !!postGLResult?.success }}
-        width={700}
+        width={740}
       >
+        {/* SLA Lines API row — always visible so user can inspect */}
+        {postGLLinesUrl && (
+          <div style={{ marginBottom: 10, padding: '6px 10px', background: REDWOOD.neutral100, borderRadius: 6, border: `1px solid ${REDWOOD.neutral200}`, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <Tag color="green" style={{ fontSize: 11, margin: 0 }}>GET</Tag>
+            <code style={{ fontSize: 11, flex: 1, wordBreak: 'break-all', color: REDWOOD.neutral900 }}>{postGLLinesUrl}</code>
+            <Button
+              size="small"
+              icon={<ApiOutlined />}
+              onClick={() => window.open(postGLLinesUrl, '_blank')}
+              style={{ fontSize: 11, flexShrink: 0 }}
+            >
+              Open
+            </Button>
+            {postGLRawCount > 0 && (
+              <span style={{ fontSize: 11, color: REDWOOD.neutral600, flexShrink: 0 }}>
+                {postGLRawCount} raw lines → {postGLPayload?.lines?.length ?? 0} for header {postModalHeadId}
+              </span>
+            )}
+          </div>
+        )}
+
         {postGLFetchingLines ? (
           <div style={{ textAlign: 'center', padding: 32 }}><Spin tip="Loading SLA lines…" /></div>
         ) : postGLResult ? (
@@ -1873,6 +1905,9 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
           />
         ) : postGLPayload ? (
           <Space direction="vertical" style={{ width: '100%' }}>
+            {postGLPayload.lines?.length === 0 && (
+              <Alert type="warning" message={`No SLA lines found for header ${postModalHeadId}. The backend may be ignoring the headerId filter — check the GET endpoint above.`} />
+            )}
             <div style={{ color: REDWOOD.warning, fontSize: 12 }}>
               ⚠ Once posted, the accounting entry will be locked and cannot be modified.
             </div>
@@ -1895,7 +1930,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
             </div>
             {/* Step 2 note */}
             <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>
-              <ApiOutlined /> Step 2 (auto on success): <Tag color="blue" style={{ fontSize: 10 }}>POST</Tag>
+              <ApiOutlined /> Step 2 (auto): <Tag color="blue" style={{ fontSize: 10 }}>POST</Tag>
               <code style={{ fontSize: 11 }}>{`${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`}</code>
               {' '}— stamps returned GL IDs back on SLA header
             </div>
