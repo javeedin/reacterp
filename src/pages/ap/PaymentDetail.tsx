@@ -37,6 +37,7 @@ import {
   CheckCircleOutlined,
   ApiOutlined,
   PlayCircleOutlined,
+  AccountBookOutlined,
 } from '@ant-design/icons';
 
 const { Title, Text } = Typography;
@@ -138,6 +139,12 @@ const formatDate = (dateStr: string | null): string => {
 };
 
 import { ORACLE_FUSION_CONFIG, APEX_DB_CONFIG } from '../../config/api.config';
+import {
+  checkAccountingExists,
+  createAccounting,
+  fetchLedgerByBusinessUnit,
+  buildApPaymentSlaPayloads,
+} from '../../services/sla.service';
 
 // Fusion API config - direct URL
 const FUSION_CONFIG = {
@@ -167,6 +174,20 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
   const [voidStepStatus, setVoidStepStatus]       = useState<
     { step: number; label: string; status: 'idle' | 'running' | 'success' | 'error'; detail?: string }[]
   >([]);
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // ── Create Accounting state ───────────────────────────────────────────────
+  const [bankAccounts, setBankAccounts] = useState<{ bankAccountName: string; cashClearingAccountCombination: string; legalEntityName: string }[]>([]);
+  const [acctLoading, setAcctLoading] = useState(false);
+  const [acctResults, setAcctResults] = useState<{ invoiceNumber: string; status: string; headerId?: number; error?: string }[]>([]);
+  const [acctModalOpen, setAcctModalOpen] = useState(false);
+  const [showAcctApiSection, setShowAcctApiSection] = useState(false);
+  // API panel state
+  const [acctGetRelResult, setAcctGetRelResult] = useState<any>(null);
+  const [acctGetRelRunning, setAcctGetRelRunning] = useState(false);
+  const [acctPostPayload, setAcctPostPayload] = useState<any[]>([]);
+  const [acctPostResult, setAcctPostResult] = useState<any>(null);
+  const [acctPostRunning, setAcctPostRunning] = useState(false);
   // ─────────────────────────────────────────────────────────────────────────
 
   // Actions menu
@@ -380,6 +401,139 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
   useEffect(() => {
     fetchRelatedInvoices();
   }, [payment.checkId]);
+
+  // Fetch bank accounts on mount (needed for Create Accounting)
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/banks/bankaccounts`, { headers: { Accept: 'application/json' } });
+        if (!res.ok) return;
+        const data = await res.json();
+        setBankAccounts((data.items || []).map((item: any) => ({
+          bankAccountName: item.bank_account_name || '',
+          cashClearingAccountCombination: item.cash_clearing_account_combination || '',
+          legalEntityName: item.legal_entity_name || '',
+        })));
+      } catch { /* silent */ }
+    };
+    load();
+  }, []);
+
+  // Create Accounting handler
+  const handleCreateAccounting = async () => {
+    setAcctResults([]);
+    setAcctLoading(true);
+    setAcctModalOpen(true);
+    setAcctGetRelResult(null);
+    setAcctPostPayload([]);
+    setAcctPostResult(null);
+    try {
+      // 1. Check if already posted
+      const exists = await checkAccountingExists('AP_PAYMENTS', payment.checkId);
+      if (exists.exists && exists.accountingStatus === 'POSTED') {
+        setAcctResults([{ invoiceNumber: '—', status: 'ALREADY POSTED', headerId: (exists as any).headerId ?? undefined }]);
+        setAcctLoading(false);
+        return;
+      }
+
+      // 2. Find matching bank account
+      const bank = bankAccounts.find(b => b.bankAccountName === payment.disbursementBankAccount);
+      if (!bank) {
+        setAcctResults([{ invoiceNumber: '—', status: 'ERROR', error: `Bank account not found: "${payment.disbursementBankAccount}". Load bank accounts first.` }]);
+        setAcctLoading(false);
+        return;
+      }
+
+      // 3. Fetch related invoices (includes LiabilityDistribution)
+      const relUrl = `${APEX_DB_CONFIG.baseUrl}/ap/payments/${payment.checkId}/related-invoices`;
+      const relRes = await fetch(relUrl, { headers: { Accept: 'application/json' } });
+      if (!relRes.ok) throw new Error(`Failed to fetch related invoices: HTTP ${relRes.status}`);
+      const relData = await relRes.json();
+      setAcctGetRelResult(relData);
+      const relInvoices: any[] = relData.items || [];
+
+      if (relInvoices.length === 0) {
+        setAcctResults([{ invoiceNumber: '—', status: 'ERROR', error: 'No applied invoices found for this payment' }]);
+        setAcctLoading(false);
+        return;
+      }
+
+      // 4. Fetch ledger
+      const ledgerInfo = await fetchLedgerByBusinessUnit(payment.businessUnit || '');
+
+      // 5. Build journal payloads
+      const paymentDate = payment.paymentDate || new Date().toISOString().split('T')[0];
+      const payloads = buildApPaymentSlaPayloads({
+        checkId: payment.checkId,
+        paymentNumber: String(payment.paymentNumber || payment.checkId),
+        paymentDate,
+        currencyCode: payment.paymentCurrency || 'AED',
+        businessUnit: payment.businessUnit,
+        legalEntity: payment.legalEntity,
+        ledgerId: ledgerInfo?.ledgerId,
+        ledgerName: ledgerInfo?.ledgerName,
+        cashClearingAccount: bank.cashClearingAccountCombination,
+        appliedInvoices: relInvoices.map((inv: any) => ({
+          invoiceNumber: inv.InvoiceNumber || '',
+          invoiceId: inv.InvoiceId || 0,
+          amountPaid: inv.AmountPaidInvoiceCurrency || inv.InvoicePaymentAmount || 0,
+          liabilityDistribution: inv.LiabilityDistribution || '',
+        })),
+      });
+      setAcctPostPayload(payloads);
+
+      // 6. Post each journal
+      const results: typeof acctResults = [];
+      for (const payload of payloads) {
+        const invNum = payload.header.description?.split('Invoice ')[1] || '—';
+        try {
+          const result = await createAccounting(payload);
+          results.push({ invoiceNumber: invNum, status: 'DRAFT', headerId: result.headerId });
+        } catch (err: any) {
+          results.push({ invoiceNumber: invNum, status: 'ERROR', error: err.message });
+        }
+      }
+      setAcctResults(results);
+    } catch (err: any) {
+      setAcctResults([{ invoiceNumber: '—', status: 'ERROR', error: err.message }]);
+    } finally {
+      setAcctLoading(false);
+    }
+  };
+
+  // Manual GET related invoices API
+  const runGetRelatedInvoicesApi = async () => {
+    setAcctGetRelRunning(true);
+    try {
+      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/payments/${payment.checkId}/related-invoices`, { headers: { Accept: 'application/json' } });
+      const data = await res.json();
+      setAcctGetRelResult(data);
+    } catch (e: any) {
+      setAcctGetRelResult({ error: e?.message ?? 'Network error' });
+    } finally {
+      setAcctGetRelRunning(false);
+    }
+  };
+
+  // Manual POST journal API (runs first payload)
+  const runPostJournalApi = async () => {
+    if (!acctPostPayload.length) return;
+    setAcctPostRunning(true);
+    setAcctPostResult(null);
+    try {
+      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(acctPostPayload[0]),
+      });
+      const data = await res.json();
+      setAcctPostResult(data);
+    } catch (e: any) {
+      setAcctPostResult({ error: e?.message ?? 'Network error' });
+    } finally {
+      setAcctPostRunning(false);
+    }
+  };
 
   // Get status tag color
   const getStatusTag = (status: string) => {
@@ -850,6 +1004,11 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
             <Dropdown menu={{ items: actionsMenuItems, onClick: handleActionsClick }} trigger={['click']}>
               <Button>Actions <DownOutlined /></Button>
             </Dropdown>
+            <Tooltip title="Create Accounting">
+              <Button icon={<AccountBookOutlined />} onClick={handleCreateAccounting}>
+                Create Accounting
+              </Button>
+            </Tooltip>
             <Button type="primary" style={{ background: REDWOOD.primary }} onClick={onClose}>
               Done
             </Button>
@@ -1167,6 +1326,152 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
       </Modal>
       {/* ─────────────────────────────────────────────────────────────────── */}
 
+
+      {/* ── Create Accounting Modal ──────────────────────────────────────── */}
+      <Modal
+        open={acctModalOpen}
+        onCancel={() => { setAcctModalOpen(false); setShowAcctApiSection(false); }}
+        title={
+          <Space>
+            <AccountBookOutlined style={{ color: REDWOOD.info }} />
+            <span>Create Accounting — Payment {payment.paymentNumber || payment.checkId}</span>
+            <Tooltip title={showAcctApiSection ? 'Hide APIs' : 'Show API calls'}>
+              <Button
+                size="small"
+                type={showAcctApiSection ? 'primary' : 'text'}
+                icon={<ApiOutlined style={{ color: showAcctApiSection ? '#fff' : REDWOOD.info }} />}
+                onClick={() => setShowAcctApiSection(v => !v)}
+                style={{ marginLeft: 4 }}
+              />
+            </Tooltip>
+          </Space>
+        }
+        footer={<Button onClick={() => { setAcctModalOpen(false); setShowAcctApiSection(false); }}>Close</Button>}
+        width={showAcctApiSection ? 960 : 640}
+        destroyOnClose
+      >
+        {acctLoading ? (
+          <div style={{ textAlign: 'center', padding: 32 }}>
+            <LoadingOutlined style={{ fontSize: 28, color: REDWOOD.info }} />
+            <p style={{ marginTop: 12, color: '#666' }}>Creating accounting journals…</p>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 16 }}>
+            {/* Left: Results */}
+            <div style={{ flex: 1 }}>
+              <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>Results</Text>
+              <Table
+                size="small"
+                pagination={false}
+                dataSource={acctResults.map((r, i) => ({ ...r, key: i }))}
+                locale={{ emptyText: 'Run Create Accounting to see results' }}
+                columns={[
+                  { title: 'Invoice', dataIndex: 'invoiceNumber', key: 'invoiceNumber', width: 160, ellipsis: true },
+                  {
+                    title: 'Status',
+                    dataIndex: 'status',
+                    key: 'status',
+                    width: 110,
+                    render: (v: string) => (
+                      <Tag color={v === 'DRAFT' ? 'blue' : v === 'ALREADY POSTED' ? 'green' : 'red'}>{v}</Tag>
+                    ),
+                  },
+                  {
+                    title: 'Header ID',
+                    dataIndex: 'headerId',
+                    key: 'headerId',
+                    width: 90,
+                    render: (v?: number) => v ?? '—',
+                  },
+                  {
+                    title: 'Error',
+                    dataIndex: 'error',
+                    key: 'error',
+                    render: (v?: string) => v ? <span style={{ color: 'red', fontSize: 11 }}>{v}</span> : '—',
+                  },
+                ]}
+              />
+            </div>
+
+            {/* Right: API Panel */}
+            {showAcctApiSection && (
+              <div style={{ width: 380, borderLeft: `1px solid ${REDWOOD.neutral200}`, paddingLeft: 16 }}>
+                <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 10 }}>API Calls</Text>
+
+                {/* GET related invoices */}
+                <div style={{ border: '1px solid #d9d9d9', borderRadius: 6, padding: '10px 12px', marginBottom: 10, background: '#fafafa' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <Space size={6}>
+                      <Tag color="blue" style={{ margin: 0 }}>GET</Tag>
+                      <Text strong style={{ fontSize: 12 }}>Related Invoices</Text>
+                    </Space>
+                    <Button
+                      size="small"
+                      type="primary"
+                      icon={acctGetRelRunning ? <LoadingOutlined spin /> : <PlayCircleOutlined />}
+                      loading={acctGetRelRunning}
+                      onClick={runGetRelatedInvoicesApi}
+                    >
+                      Run
+                    </Button>
+                  </div>
+                  <code style={{ fontSize: 11, background: '#e3f2fd', padding: '3px 8px', borderRadius: 4, display: 'block', wordBreak: 'break-all', marginBottom: 6 }}>
+                    {APEX_DB_CONFIG.baseUrl}/ap/payments/{payment.checkId}/related-invoices
+                  </code>
+                  {acctGetRelResult && (
+                    <pre style={{ fontSize: 10, background: '#1e1e1e', color: '#d4d4d4', padding: 8, borderRadius: 4, maxHeight: 160, overflowY: 'auto', margin: 0 }}>
+                      {JSON.stringify(acctGetRelResult, null, 2)}
+                    </pre>
+                  )}
+                </div>
+
+                {/* POST create accounting */}
+                <div style={{ border: '1px solid #d9d9d9', borderRadius: 6, padding: '10px 12px', background: '#fafafa' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <Space size={6}>
+                      <Tag color="green" style={{ margin: 0 }}>POST</Tag>
+                      <Text strong style={{ fontSize: 12 }}>Create Journal</Text>
+                    </Space>
+                    <Button
+                      size="small"
+                      type="primary"
+                      icon={acctPostRunning ? <LoadingOutlined spin /> : <PlayCircleOutlined />}
+                      loading={acctPostRunning}
+                      disabled={!acctPostPayload.length}
+                      onClick={runPostJournalApi}
+                    >
+                      Run
+                    </Button>
+                  </div>
+                  <code style={{ fontSize: 11, background: '#e8f5e9', padding: '3px 8px', borderRadius: 4, display: 'block', wordBreak: 'break-all', marginBottom: 6 }}>
+                    {APEX_DB_CONFIG.baseUrl}/sla/accounting/create
+                  </code>
+                  {acctPostPayload.length > 0 && (
+                    <>
+                      <Text type="secondary" style={{ fontSize: 11 }}>Request body (payload 1 of {acctPostPayload.length}):</Text>
+                      <pre style={{ fontSize: 10, background: '#1e1e1e', color: '#d4d4d4', padding: 8, borderRadius: 4, maxHeight: 140, overflowY: 'auto', margin: '4px 0' }}>
+                        {JSON.stringify(acctPostPayload[0], null, 2)}
+                      </pre>
+                    </>
+                  )}
+                  {!acctPostPayload.length && (
+                    <Text type="secondary" style={{ fontSize: 11 }}>Run Create Accounting first to build payload</Text>
+                  )}
+                  {acctPostResult && (
+                    <>
+                      <Text type="secondary" style={{ fontSize: 11 }}>Response:</Text>
+                      <pre style={{ fontSize: 10, background: '#1e1e1e', color: '#d4d4d4', padding: 8, borderRadius: 4, margin: '4px 0 0', maxHeight: 120, overflowY: 'auto' }}>
+                        {JSON.stringify(acctPostResult, null, 2)}
+                      </pre>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
+      {/* ─────────────────────────────────────────────────────────────────── */}
 
       {/* Custom styles */}
       <style>{`
