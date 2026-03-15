@@ -596,7 +596,7 @@ const ManageSLAJournals: React.FC = () => {
       width: 200,
       fixed: 'right' as const,
       render: (_: any, r: SlaHeader) => (
-        <Space direction="vertical" size={4}>
+        <Space orientation="vertical" size={4}>
           <Button
             size="small"
             icon={<EyeOutlined />}
@@ -754,7 +754,7 @@ const ManageSLAJournals: React.FC = () => {
               <Statistic
                 title={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{s.label}</Text>}
                 value={s.value}
-                valueStyle={{ fontSize: 20, fontWeight: 700, color: s.color }}
+                styles={{ content: { fontSize: 20, fontWeight: 700, color: s.color } }}
                 prefix={s.icon}
               />
             </Card>
@@ -1166,7 +1166,7 @@ const ManageSLAJournals: React.FC = () => {
         width={1200}
         style={{ top: 16 }}
         styles={{ body: { padding: 0, maxHeight: 'calc(100vh - 180px)', overflowY: 'auto' } }}
-        destroyOnClose
+        destroyOnHidden
       >
         {glJournalLoading ? (
           <div style={{ textAlign: 'center', padding: 60 }}>
@@ -1182,7 +1182,7 @@ const ManageSLAJournals: React.FC = () => {
               styles={{ header: { background: REDWOOD.neutral100, fontSize: 13, fontWeight: 600 } }}
               title="Journal Header"
             >
-              <Descriptions size="small" column={3} bordered labelStyle={{ fontWeight: 500, width: 130, fontSize: 12 }} contentStyle={{ fontSize: 12 }}>
+              <Descriptions size="small" column={3} bordered styles={{ label: { fontWeight: 500, width: 130, fontSize: 12 }, content: { fontSize: 12 } }}>
                 <Descriptions.Item label="Journal Name">{glJournalData.journalName || glJournalData.batchName || '—'}</Descriptions.Item>
                 <Descriptions.Item label="Batch Name">{glJournalData.batchName || '—'}</Descriptions.Item>
                 <Descriptions.Item label="Period">{glJournalData.periodName || '—'}</Descriptions.Item>
