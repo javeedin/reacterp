@@ -254,34 +254,25 @@ const ManageSLAJournals: React.FC = () => {
     setGlJournalLoading(true);
     setGlJournalModalVisible(true);
     try {
-      // Fetch header
-      const headerUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/headers?jeHeaderId=${record.glHeaderId || ''}&limit=1`;
-      setGlLastHeaderUrl(headerUrl);
-      const headerRes = await fetch(headerUrl, { headers: { Accept: 'application/json' } });
-      if (!headerRes.ok) throw new Error(`Header request failed: ${headerRes.status} ${headerRes.statusText}`);
-      const headerData = await headerRes.json();
-      const items = headerData.items || (Array.isArray(headerData) ? headerData : []);
-      if (items.length > 0) {
-        setGlJournalData(items[0]);
-      } else {
-        // fallback: use the SLA header info we already have
-        setGlJournalData({
-          journalName: record.glBatchName || `GL Batch ${record.glBatchId}`,
-          batchName: record.glBatchName,
-          glBatchId: record.glBatchId,
-          glHeaderId: record.glHeaderId,
-          periodName: record.periodName,
-          ledgerName: record.ledgerName,
-          effectiveDate: record.accountingDate,
-          currencyCode: record.currencyCode,
-          statusMeaning: record.postingStatus,
-          source: 'Payables',
-          category: record.eventTypeCode,
-        });
-      }
-      // Fetch journal lines
+      // Use SLA record data we already have for the header
+      setGlJournalData({
+        journalName: record.glBatchName || `GL Batch ${record.glBatchId}`,
+        batchName:   record.glBatchName,
+        glBatchId:   record.glBatchId,
+        glHeaderId:  record.glHeaderId,
+        periodName:  record.periodName,
+        ledgerName:  record.ledgerName,
+        effectiveDate: record.accountingDate,
+        currencyCode:  record.currencyCode,
+        statusMeaning: record.postingStatus,
+        source:   'Payables',
+        category: record.eventTypeCode,
+        jeHeaderId: record.glHeaderId,
+      });
+
+      // Fetch journal lines using the correct ORDS path: journals/:id/lines
       if (record.glHeaderId) {
-        const linesUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?jeHeaderId=${record.glHeaderId}&limit=500`;
+        const linesUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/${record.glHeaderId}/lines`;
         setGlLastLinesUrl(linesUrl);
         const linesRes = await fetch(linesUrl, { headers: { Accept: 'application/json' } });
         if (!linesRes.ok) throw new Error(`Lines request failed: ${linesRes.status} ${linesRes.statusText}`);
@@ -289,9 +280,9 @@ const ManageSLAJournals: React.FC = () => {
         setGlJournalLines((linesData.items || linesData || []).map((l: any, i: number) => ({ ...l, key: i })));
       }
     } catch (err: any) {
-      const errMsg = err?.message || 'Failed to load GL journal entry';
+      const errMsg = err?.message || 'Failed to load GL journal lines';
       setGlLastError(errMsg);
-      message.error('Failed to load GL journal entry');
+      message.error('Failed to load GL journal lines');
     } finally {
       setGlJournalLoading(false);
     }
@@ -1286,10 +1277,31 @@ const ManageSLAJournals: React.FC = () => {
             </div>
           )}
 
-          {/* Header endpoint */}
+          {/* Header endpoint (info only — header data comes from SLA record) */}
+          <div style={{ padding: 12, background: REDWOOD.neutral100, borderRadius: 6 }}>
+            <Row align="middle" style={{ marginBottom: 8 }}>
+              <Space>
+                <Tag color="default">SLA</Tag>
+                <Text strong>Journal Header</Text>
+                <Tag color="blue">Loaded from SLA record — no separate API call</Tag>
+              </Space>
+            </Row>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              Header fields (batch name, period, ledger, currency, status) are sourced directly from the SLA journal record already fetched on this page.
+              To query GL headers independently, run:
+            </Text>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+              <code style={{ background: '#f5f5f5', padding: '4px 8px', borderRadius: 4, fontSize: 11, flex: 1, wordBreak: 'break-all' }}>
+                {`${APEX_DB_CONFIG.baseUrl}/gl/journals/headers?jeHeaderId={glHeaderId}`}
+              </code>
+              <Button size="small" icon={glCopiedUrl === `${APEX_DB_CONFIG.baseUrl}/gl/journals/headers?jeHeaderId={glHeaderId}` ? <CheckOutlined /> : <CopyOutlined />}
+                onClick={() => { const u = `${APEX_DB_CONFIG.baseUrl}/gl/journals/headers?jeHeaderId={glHeaderId}`; navigator.clipboard.writeText(u); setGlCopiedUrl(u); setTimeout(() => setGlCopiedUrl(null), 2000); }} />
+            </div>
+          </div>
+
+          {/* Lines endpoint */}
           {[
-            { label: 'Journal Header', url: glLastHeaderUrl, template: `${APEX_DB_CONFIG.baseUrl}/gl/journals/headers?jeHeaderId={glHeaderId}&limit=1` },
-            { label: 'Journal Lines', url: glLastLinesUrl,  template: `${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?jeHeaderId={glHeaderId}&limit=500` },
+            { label: 'Journal Lines', url: glLastLinesUrl, template: `${APEX_DB_CONFIG.baseUrl}/gl/journals/{glHeaderId}/lines` },
           ].map((api, idx) => (
             <div key={idx} style={{ padding: 12, background: REDWOOD.neutral100, borderRadius: 6 }}>
               <Row justify="space-between" align="middle" style={{ marginBottom: 8 }}>
