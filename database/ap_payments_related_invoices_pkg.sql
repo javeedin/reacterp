@@ -296,7 +296,7 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENT_REL_INVOICES_PKG AS
                     SELECT concatenated_segments
                     INTO   v_prepay_account
                     FROM   reerp_gl_code_combinations
-                    WHERE  "_code_combination_id" = v_prepay_acct_id;
+                    WHERE  code_combination_id = v_prepay_acct_id;
                 EXCEPTION WHEN OTHERS THEN
                     v_prepay_account := 'PREPAYMENT-ACCOUNT';
                 END;
@@ -305,7 +305,7 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENT_REL_INVOICES_PKG AS
                     SELECT concatenated_segments
                     INTO   v_liab_account
                     FROM   reerp_gl_code_combinations
-                    WHERE  "_code_combination_id" = v_liab_acct_id;
+                    WHERE  code_combination_id = v_liab_acct_id;
                 EXCEPTION WHEN OTHERS THEN
                     v_liab_account := 'LIABILITY-ACCOUNT';
                 END;
