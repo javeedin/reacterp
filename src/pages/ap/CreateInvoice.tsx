@@ -1155,14 +1155,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       const months        = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
       const periodName    = `${months[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
 
-      // Fetch lines fresh from DB (same as ManageSLAJournals handleOpenPostGL)
-      const linesRes = await fetch(
-        `${APEX_DB_CONFIG.baseUrl}/sla/journals/lines?headerId=${slaHeaderId}&limit=500`,
-        { headers: { Accept: 'application/json' } },
-      );
-      if (!linesRes.ok) throw new Error(`Failed to load SLA lines: HTTP ${linesRes.status}`);
-      const linesData  = await linesRes.json();
-      const fetchedLines: any[] = linesData.items || linesData || [];
+      // Fetch lines via sla/accounting (filtered by sourceId) — same approach as ManagePayments
+      const invoiceId = savedInvoiceId || initialData?.invoiceId;
+      const fullData  = await getAccounting('AP_INVOICES', invoiceId!);
+      const fetchedLines: any[] = fullData.lines || [];
       if (fetchedLines.length === 0) throw new Error('No SLA lines found for this accounting header.');
 
       const [ledgerInfo] = await Promise.all([fetchLedgerByBusinessUnit(bu)]);
@@ -1350,14 +1346,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       const months     = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
       const periodName = `${months[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
 
-      // Fetch SLA lines for this applied prepayment header
-      const linesRes = await fetch(
-        `${APEX_DB_CONFIG.baseUrl}/sla/journals/lines?headerId=${appSlaInfo.headerId}&limit=500`,
-        { headers: { Accept: 'application/json' } },
-      );
-      if (!linesRes.ok) throw new Error(`Failed to load SLA lines: HTTP ${linesRes.status}`);
-      const linesData    = await linesRes.json();
-      const fetchedLines: any[] = linesData.items || linesData || [];
+      // Fetch lines via sla/accounting (filtered by sourceId) — same approach as ManagePayments
+      const fullData     = await getAccounting('RR_AP_APPLIED_PREPAYMENTS', applicationId);
+      const fetchedLines: any[] = fullData.lines || [];
       if (fetchedLines.length === 0) throw new Error('No SLA lines found for this accounting header.');
 
       const ledgerInfo         = await fetchLedgerByBusinessUnit(bu);

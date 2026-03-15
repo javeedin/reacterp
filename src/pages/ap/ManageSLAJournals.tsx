@@ -14,7 +14,7 @@ import {
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../../config/api.config';
-import { fetchLedgerByBusinessUnit } from '../../services/sla.service';
+import { fetchLedgerByBusinessUnit, getAccounting } from '../../services/sla.service';
 
 const { Text, Title } = Typography;
 const { RangePicker } = DatePicker;
@@ -429,16 +429,14 @@ const ManageSLAJournals: React.FC = () => {
     setPostGLResult(null);
     setPostGLLedger(null);
     setPostGLModalVisible(true);
-    // Fetch SLA lines and resolve ledger in parallel
+    // Fetch SLA lines via sla/accounting (filtered by sourceId) — same approach as ManagePayments
     setPostGLFetchingLines(true);
     try {
-      const [linesRes, ledgerInfo] = await Promise.all([
-        fetch(`${APEX_DB_CONFIG.baseUrl}/sla/journals/lines?headerId=${record.headerId}&limit=500`, { headers: { Accept: 'application/json' } }),
+      const [fullData, ledgerInfo] = await Promise.all([
+        getAccounting(record.sourceTable, record.sourceId),
         fetchLedgerByBusinessUnit(record.businessUnit),
       ]);
-      if (!linesRes.ok) throw new Error(`HTTP ${linesRes.status}`);
-      const data = await linesRes.json();
-      const items: SlaLine[] = (data.items || data || []).map((r: any, i: number) => ({
+      const items: SlaLine[] = (fullData.lines || []).map((r: any, i: number) => ({
         ...r,
         key: r.lineId ? String(r.lineId) : `${r.headerId}-${r.lineNumber}-${i}`,
       }));
