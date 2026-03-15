@@ -44,9 +44,9 @@ CREATE OR REPLACE PACKAGE RR_AP_APPLIED_PREPAYMENTS_PKG AS
 
     -- Get prepayment balance for one or many prepayment invoices
     -- Returns: InvoiceAmount, TotalApplied, AvailableBalance per prepayment
-    -- p_prepayment_invoice_id  → single prepayment
-    -- p_supplier_number        → all prepayments for a supplier
-    -- Both NULL                → all prepayments in the system
+    -- p_prepayment_invoice_id  -> single prepayment
+    -- p_supplier_number        -> all prepayments for a supplier
+    -- Both NULL                -> all prepayments in the system
     FUNCTION get_prepayment_balances(
         p_prepayment_invoice_id IN NUMBER  DEFAULT NULL,
         p_supplier_number       IN VARCHAR2 DEFAULT NULL
@@ -269,7 +269,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_APPLIED_PREPAYMENTS_PKG AS
 
         COMMIT;
 
-        -- ── Scenario 2: Accounting for Prepayment Applied to Invoice ────────────
+        -- -- Scenario 2: Accounting for Prepayment Applied to Invoice ------------
         -- When a prepayment is applied to a standard invoice, generate SLA
         -- journal entries: DR AP Liability / CR Prepayment Asset.
         -- Non-fatal: accounting failure never rolls back the saved data.
@@ -389,7 +389,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_APPLIED_PREPAYMENTS_PKG AS
         EXCEPTION
             WHEN OTHERS THEN NULL;  -- Accounting failure is non-fatal
         END;
-        -- ── End Scenario 2 Accounting ────────────────────────────────────────────
+        -- -- End Scenario 2 Accounting --------------------------------------------
 
         p_result := '{"status":"success","message":"Prepayment application saved","applicationId":' || v_application_id || '}';
 

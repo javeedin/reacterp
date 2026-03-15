@@ -84,7 +84,7 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENT_REL_INVOICES_PKG AS
         -- Step 1: Read InvoicePaymentId (Fusion sync provides it; local payments send null)
         v_invoice_payment_id := JSON_VALUE(p_json_data, '$.InvoicePaymentId' RETURNING NUMBER);
 
-        -- Step 2: No InvoicePaymentId → auto-assign via sequence
+        -- Step 2: No InvoicePaymentId -> auto-assign via sequence
         IF v_invoice_payment_id IS NULL THEN
             SELECT RR_INVOICE_PAYMENT_ID.NEXTVAL INTO v_invoice_payment_id FROM DUAL;
         END IF;
@@ -235,7 +235,7 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENT_REL_INVOICES_PKG AS
 
         COMMIT;
 
-        -- ── Scenario 1: Accounting for Prepayment Invoice Funded ────────────────
+        -- -- Scenario 1: Accounting for Prepayment Invoice Funded ----------------
         -- When a payment is applied to a Prepayment-type invoice, generate SLA
         -- journal entries: DR Prepayment Asset / CR AP Liability.
         -- Non-fatal: accounting failure never rolls back the saved data.
@@ -373,7 +373,7 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENT_REL_INVOICES_PKG AS
             WHEN NO_DATA_FOUND THEN NULL;  -- Not a Prepayment invoice; skip silently
             WHEN OTHERS       THEN NULL;   -- Accounting failure is non-fatal
         END;
-        -- ── End Scenario 1 Accounting ────────────────────────────────────────────
+        -- -- End Scenario 1 Accounting --------------------------------------------
 
         p_result := '{"status":"success","message":"Related invoice saved","invoicePaymentId":' || v_invoice_payment_id || '}';
 
