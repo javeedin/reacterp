@@ -182,6 +182,9 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
   const [acctResults, setAcctResults] = useState<{ invoiceNumber: string; status: string; headerId?: number; error?: string }[]>([]);
   const [acctModalOpen, setAcctModalOpen] = useState(false);
   const [showAcctApiSection, setShowAcctApiSection] = useState(false);
+  const [acctStepStatus, setAcctStepStatus] = useState<
+    { step: number; label: string; status: 'idle' | 'running' | 'success' | 'error'; detail?: string }[]
+  >([]);
   // API panel state
   const [acctGetRelResult, setAcctGetRelResult] = useState<any>(null);
   const [acctGetRelRunning, setAcctGetRelRunning] = useState(false);
@@ -421,71 +424,121 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
 
   // Create Accounting handler
   const handleCreateAccounting = async () => {
+    // Reset and open modal immediately so user sees it right away
+    const steps = [
+      { step: 0, label: 'Check accounting exists', status: 'idle' as const },
+      { step: 1, label: 'Find bank account',        status: 'idle' as const },
+      { step: 2, label: 'Fetch related invoices',   status: 'idle' as const },
+      { step: 3, label: 'Fetch ledger info',         status: 'idle' as const },
+      { step: 4, label: 'Build SLA payloads',        status: 'idle' as const },
+      { step: 5, label: 'Post accounting entries',   status: 'idle' as const },
+    ];
     setAcctResults([]);
+    setAcctStepStatus(steps);
     setAcctLoading(true);
     setAcctModalOpen(true);
     setAcctGetRelResult(null);
     setAcctPostPayload([]);
     setAcctPostResult(null);
+
+    const setStep = (step: number, status: 'running' | 'success' | 'error', detail?: string) =>
+      setAcctStepStatus(prev => prev.map(s => s.step === step ? { ...s, status, detail } : s));
+
     try {
-      // 1. Check if already posted
-      const exists = await checkAccountingExists('AP_PAYMENTS', payment.checkId);
-      if (exists.exists && exists.accountingStatus === 'POSTED') {
-        setAcctResults([{ invoiceNumber: '—', status: 'ALREADY POSTED', headerId: (exists as any).headerId ?? undefined }]);
-        setAcctLoading(false);
+      // Step 0: Check if already posted
+      setStep(0, 'running');
+      let exists: any;
+      try {
+        exists = await checkAccountingExists('AP_PAYMENTS', payment.checkId);
+      } catch (e: any) {
+        exists = { exists: false };
+        setStep(0, 'error', e?.message ?? 'Check failed — proceeding anyway');
+      }
+      if (exists?.exists && exists?.accountingStatus === 'POSTED') {
+        setStep(0, 'success', 'Already posted');
+        setAcctResults([{ invoiceNumber: '—', status: 'ALREADY POSTED', headerId: exists.headerId ?? undefined }]);
         return;
       }
+      setStep(0, 'success', exists?.exists ? `Exists (${exists.accountingStatus})` : 'No existing accounting');
 
-      // 2. Find matching bank account
+      // Step 1: Find bank account
+      setStep(1, 'running');
       const bank = bankAccounts.find(b => b.bankAccountName === payment.disbursementBankAccount);
       if (!bank) {
-        setAcctResults([{ invoiceNumber: '—', status: 'ERROR', error: `Bank account not found: "${payment.disbursementBankAccount}". Load bank accounts first.` }]);
-        setAcctLoading(false);
+        setStep(1, 'error', `Not found: "${payment.disbursementBankAccount}"`);
+        setAcctResults([{ invoiceNumber: '—', status: 'ERROR', error: `Bank account "${payment.disbursementBankAccount}" not found in loaded list (${bankAccounts.length} accounts loaded)` }]);
         return;
       }
+      setStep(1, 'success', bank.bankAccountName);
 
-      // 3. Fetch related invoices (includes LiabilityDistribution)
+      // Step 2: Fetch related invoices
+      setStep(2, 'running');
       const relUrl = `${APEX_DB_CONFIG.baseUrl}/ap/payments/${payment.checkId}/related-invoices`;
-      const relRes = await fetch(relUrl, { headers: { Accept: 'application/json' } });
-      if (!relRes.ok) throw new Error(`Failed to fetch related invoices: HTTP ${relRes.status}`);
-      const relData = await relRes.json();
-      setAcctGetRelResult(relData);
-      const relInvoices: any[] = relData.items || [];
-
+      let relInvoices: any[] = [];
+      try {
+        const relRes = await fetch(relUrl, { headers: { Accept: 'application/json' } });
+        const relText = await relRes.text();
+        const relData = JSON.parse(relText);
+        setAcctGetRelResult(relData);
+        relInvoices = relData.items || [];
+        if (!relRes.ok) throw new Error(`HTTP ${relRes.status}: ${relData?.message || relText.slice(0, 100)}`);
+        setStep(2, 'success', `${relInvoices.length} invoice(s) found`);
+      } catch (e: any) {
+        setStep(2, 'error', e?.message ?? 'Fetch failed');
+        setAcctResults([{ invoiceNumber: '—', status: 'ERROR', error: `Failed to fetch related invoices: ${e?.message}` }]);
+        return;
+      }
       if (relInvoices.length === 0) {
+        setStep(2, 'error', 'No applied invoices');
         setAcctResults([{ invoiceNumber: '—', status: 'ERROR', error: 'No applied invoices found for this payment' }]);
-        setAcctLoading(false);
         return;
       }
 
-      // 4. Fetch ledger
-      const ledgerInfo = await fetchLedgerByBusinessUnit(payment.businessUnit || '');
+      // Step 3: Fetch ledger
+      setStep(3, 'running');
+      let ledgerInfo: any = null;
+      try {
+        ledgerInfo = await fetchLedgerByBusinessUnit(payment.businessUnit || '');
+        setStep(3, 'success', ledgerInfo?.ledgerName || 'Ledger loaded');
+      } catch (e: any) {
+        setStep(3, 'error', e?.message ?? 'Fetch failed — using null ledger');
+      }
 
-      // 5. Build journal payloads
-      const paymentDate = payment.paymentDate || new Date().toISOString().split('T')[0];
-      const payloads = buildApPaymentSlaPayloads({
-        checkId: payment.checkId,
-        paymentNumber: String(payment.paymentNumber || payment.checkId),
-        paymentDate,
-        currencyCode: payment.paymentCurrency || 'AED',
-        businessUnit: payment.businessUnit,
-        legalEntity: payment.legalEntity,
-        ledgerId: ledgerInfo?.ledgerId,
-        ledgerName: ledgerInfo?.ledgerName,
-        cashClearingAccount: bank.cashClearingAccountCombination,
-        appliedInvoices: relInvoices.map((inv: any) => ({
-          invoiceNumber: inv.InvoiceNumber || '',
-          invoiceId: inv.InvoiceId || 0,
-          amountPaid: inv.AmountPaidInvoiceCurrency || inv.InvoicePaymentAmount || 0,
-          liabilityDistribution: inv.LiabilityDistribution || '',
-        })),
-      });
-      setAcctPostPayload(payloads);
+      // Step 4: Build payloads
+      setStep(4, 'running');
+      let payloads: any[] = [];
+      try {
+        const paymentDate = payment.paymentDate || new Date().toISOString().split('T')[0];
+        payloads = buildApPaymentSlaPayloads({
+          checkId: payment.checkId,
+          paymentNumber: String(payment.paymentNumber || payment.checkId),
+          paymentDate,
+          currencyCode: payment.paymentCurrency || 'AED',
+          businessUnit: payment.businessUnit,
+          legalEntity: payment.legalEntity,
+          ledgerId: ledgerInfo?.ledgerId,
+          ledgerName: ledgerInfo?.ledgerName,
+          cashClearingAccount: bank.cashClearingAccountCombination,
+          appliedInvoices: relInvoices.map((inv: any) => ({
+            invoiceNumber: inv.InvoiceNumber || '',
+            invoiceId: inv.InvoiceId || 0,
+            amountPaid: inv.AmountPaidInvoiceCurrency || inv.InvoicePaymentAmount || 0,
+            liabilityDistribution: inv.LiabilityDistribution || '',
+          })),
+        });
+        setAcctPostPayload(payloads);
+        setStep(4, 'success', `${payloads.length} payload(s) built`);
+      } catch (e: any) {
+        setStep(4, 'error', e?.message ?? 'Build failed');
+        setAcctResults([{ invoiceNumber: '—', status: 'ERROR', error: `Payload build failed: ${e?.message}` }]);
+        return;
+      }
 
-      // 6. Post each journal
+      // Step 5: Post each journal
+      setStep(5, 'running');
       const results: typeof acctResults = [];
       for (const payload of payloads) {
-        const invNum = payload.header.description?.split('Invoice ')[1] || '—';
+        const invNum = payload.header?.description?.split('Invoice ')[1] || payload.header?.description || '—';
         try {
           const result = await createAccounting(payload);
           results.push({ invoiceNumber: invNum, status: 'DRAFT', headerId: result.headerId });
@@ -493,6 +546,10 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
           results.push({ invoiceNumber: invNum, status: 'ERROR', error: err.message });
         }
       }
+      const hasErrors = results.some(r => r.status === 'ERROR');
+      setStep(5, hasErrors ? 'error' : 'success',
+        hasErrors ? `${results.filter(r => r.status === 'ERROR').length} error(s)` : `${results.length} journal(s) created`
+      );
       setAcctResults(results);
     } catch (err: any) {
       setAcctResults([{ invoiceNumber: '—', status: 'ERROR', error: err.message }]);
@@ -1346,52 +1403,93 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
             </Tooltip>
           </Space>
         }
-        footer={<Button onClick={() => { setAcctModalOpen(false); setShowAcctApiSection(false); }}>Close</Button>}
+        footer={
+          <Space>
+            <Button
+              onClick={handleCreateAccounting}
+              disabled={acctLoading}
+              icon={<PlayCircleOutlined />}
+            >
+              Run Again
+            </Button>
+            <Button onClick={() => { setAcctModalOpen(false); setShowAcctApiSection(false); }}>Close</Button>
+          </Space>
+        }
         width={showAcctApiSection ? 960 : 640}
-        destroyOnClose
       >
-        {acctLoading ? (
-          <div style={{ textAlign: 'center', padding: 32 }}>
-            <LoadingOutlined style={{ fontSize: 28, color: REDWOOD.info }} />
-            <p style={{ marginTop: 12, color: '#666' }}>Creating accounting journals…</p>
+        <div style={{ display: 'flex', gap: 16 }}>
+          {/* Left: Steps + Results */}
+          <div style={{ flex: 1 }}>
+            {/* Step Status Panel */}
+            {acctStepStatus.length > 0 && (
+              <div style={{ marginBottom: 14, background: '#fafafa', border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, padding: '10px 14px' }}>
+                {acctStepStatus.map(s => {
+                  const icon =
+                    s.status === 'running' ? <LoadingOutlined style={{ color: REDWOOD.info }} spin /> :
+                    s.status === 'success' ? <CheckCircleOutlined style={{ color: REDWOOD.success }} /> :
+                    s.status === 'error'   ? <CloseCircleOutlined style={{ color: REDWOOD.error }} /> :
+                    <span style={{ display: 'inline-block', width: 14, height: 14, borderRadius: '50%', background: '#d9d9d9', verticalAlign: 'middle' }} />;
+                  const textColor =
+                    s.status === 'success' ? REDWOOD.success :
+                    s.status === 'error'   ? REDWOOD.error   :
+                    s.status === 'running' ? REDWOOD.info    : '#6B6B6B';
+                  return (
+                    <div key={s.step} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 4 }}>
+                      <span style={{ marginTop: 2 }}>{icon}</span>
+                      <div>
+                        <Text style={{ fontSize: 12, color: textColor }}>
+                          <strong>Step {s.step}:</strong> {s.label}
+                        </Text>
+                        {s.detail && <div><Text type="secondary" style={{ fontSize: 11 }}>{s.detail}</Text></div>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Loading indicator */}
+            {acctLoading && (
+              <div style={{ textAlign: 'center', padding: '8px 0 12px' }}>
+                <LoadingOutlined style={{ fontSize: 20, color: REDWOOD.info }} />
+                <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>Running…</Text>
+              </div>
+            )}
+
+            {/* Results table */}
+            <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>Results</Text>
+            <Table
+              size="small"
+              pagination={false}
+              dataSource={acctResults.map((r, i) => ({ ...r, key: i }))}
+              locale={{ emptyText: acctLoading ? 'Running…' : 'No results yet — click the button to create accounting' }}
+              columns={[
+                { title: 'Invoice', dataIndex: 'invoiceNumber', key: 'invoiceNumber', width: 160, ellipsis: true },
+                {
+                  title: 'Status',
+                  dataIndex: 'status',
+                  key: 'status',
+                  width: 120,
+                  render: (v: string) => (
+                    <Tag color={v === 'DRAFT' ? 'blue' : v === 'ALREADY POSTED' ? 'green' : 'red'}>{v}</Tag>
+                  ),
+                },
+                {
+                  title: 'Header ID',
+                  dataIndex: 'headerId',
+                  key: 'headerId',
+                  width: 90,
+                  render: (v?: number) => v ?? '—',
+                },
+                {
+                  title: 'Error',
+                  dataIndex: 'error',
+                  key: 'error',
+                  render: (v?: string) => v ? <span style={{ color: 'red', fontSize: 11 }}>{v}</span> : '—',
+                },
+              ]}
+            />
           </div>
-        ) : (
-          <div style={{ display: 'flex', gap: 16 }}>
-            {/* Left: Results */}
-            <div style={{ flex: 1 }}>
-              <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>Results</Text>
-              <Table
-                size="small"
-                pagination={false}
-                dataSource={acctResults.map((r, i) => ({ ...r, key: i }))}
-                locale={{ emptyText: 'Run Create Accounting to see results' }}
-                columns={[
-                  { title: 'Invoice', dataIndex: 'invoiceNumber', key: 'invoiceNumber', width: 160, ellipsis: true },
-                  {
-                    title: 'Status',
-                    dataIndex: 'status',
-                    key: 'status',
-                    width: 110,
-                    render: (v: string) => (
-                      <Tag color={v === 'DRAFT' ? 'blue' : v === 'ALREADY POSTED' ? 'green' : 'red'}>{v}</Tag>
-                    ),
-                  },
-                  {
-                    title: 'Header ID',
-                    dataIndex: 'headerId',
-                    key: 'headerId',
-                    width: 90,
-                    render: (v?: number) => v ?? '—',
-                  },
-                  {
-                    title: 'Error',
-                    dataIndex: 'error',
-                    key: 'error',
-                    render: (v?: string) => v ? <span style={{ color: 'red', fontSize: 11 }}>{v}</span> : '—',
-                  },
-                ]}
-              />
-            </div>
 
             {/* Right: API Panel */}
             {showAcctApiSection && (
