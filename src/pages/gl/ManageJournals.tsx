@@ -267,6 +267,8 @@ const ManageJournals: React.FC = () => {
   const [apTransactionLastUrl, setApTransactionLastUrl] = useState<string | null>(null);
   const [apTransactionCopied, setApTransactionCopied] = useState(false);
   const [apTransactionError, setApTransactionError] = useState<string | null>(null);
+  const [apTransactionLines, setApTransactionLines] = useState<any[]>([]);
+  const [apTransactionLinesLoading, setApTransactionLinesLoading] = useState(false);
 
   // Floating panel state
   const [activePanel, setActivePanel] = useState<'none' | 'tasks' | 'reports'>('none');
@@ -751,7 +753,29 @@ const ManageJournals: React.FC = () => {
       console.log('[View Transaction] API response:', { itemCount: items.length, firstItem: items[0] });
 
       if (items.length > 0) {
-        setApTransactionData(items[0]);
+        const header = items[0];
+        setApTransactionData(header);
+
+        // Fetch invoice lines if this is an invoice (not a payment)
+        if (transType === 'invoice') {
+          const invoiceId = header.invoice_id || header.invoiceId;
+          if (invoiceId) {
+            setApTransactionLinesLoading(true);
+            try {
+              const linesUrl = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoiceslines?P_INVOICE_ID=${invoiceId}`;
+              console.log('[View Transaction] Fetching lines:', linesUrl);
+              const linesRes = await fetch(linesUrl, { headers: { Accept: 'application/json' } });
+              const linesData = await linesRes.json();
+              const lineItems = linesData.items || (Array.isArray(linesData) ? linesData : []);
+              console.log('[View Transaction] Lines response:', { count: lineItems.length, sample: lineItems[0] });
+              setApTransactionLines(lineItems);
+            } catch (lineErr) {
+              console.error('[View Transaction] Lines fetch error:', lineErr);
+            } finally {
+              setApTransactionLinesLoading(false);
+            }
+          }
+        }
       } else {
         setApTransactionError(`No AP transaction found for reference: "${reference}"`);
       }
@@ -2308,7 +2332,7 @@ const ManageJournals: React.FC = () => {
           </Space>
         }
         open={apTransactionModalVisible}
-        onCancel={() => { setApTransactionModalVisible(false); setApTransactionData(null); setApTransactionError(null); }}
+        onCancel={() => { setApTransactionModalVisible(false); setApTransactionData(null); setApTransactionError(null); setApTransactionLines([]); }}
         footer={
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             {apTransactionLastUrl ? (
@@ -2329,7 +2353,7 @@ const ManageJournals: React.FC = () => {
                 />
               </div>
             ) : <span />}
-            <Button onClick={() => { setApTransactionModalVisible(false); setApTransactionData(null); setApTransactionError(null); }}>Close</Button>
+            <Button onClick={() => { setApTransactionModalVisible(false); setApTransactionData(null); setApTransactionError(null); setApTransactionLines([]); }}>Close</Button>
           </div>
         }
         width={900}
@@ -2412,6 +2436,38 @@ const ManageJournals: React.FC = () => {
                   <Descriptions.Item label="Unpaid Amount">{apTransactionData.unpaidAmount || apTransactionData.unpaid_amount || '-'}</Descriptions.Item>
                   <Descriptions.Item label="Invoice Type">{apTransactionData.invoiceType || apTransactionData.invoice_type || '-'}</Descriptions.Item>
                 </Descriptions>
+              </Card>
+
+              {/* Invoice Lines */}
+              <Card
+                size="small"
+                style={{ borderRadius: 6, borderColor: REDWOOD.neutral200 }}
+                headStyle={{ background: REDWOOD.neutral100, fontSize: 13, fontWeight: 600 }}
+                title={`Invoice Lines${apTransactionLines.length > 0 ? ` (${apTransactionLines.length})` : ''}`}
+              >
+                {apTransactionLinesLoading ? (
+                  <div style={{ textAlign: 'center', padding: 24 }}>
+                    <Spin size="small" />
+                    <span style={{ marginLeft: 8, color: REDWOOD.neutral600, fontSize: 12 }}>Loading lines…</span>
+                  </div>
+                ) : (
+                  <Table
+                    size="small"
+                    bordered
+                    pagination={false}
+                    scroll={{ x: 800 }}
+                    locale={{ emptyText: 'No invoice lines found' }}
+                    dataSource={apTransactionLines.map((l, i) => ({ ...l, key: l.line_id ?? i }))}
+                    columns={[
+                      { title: 'Line', dataIndex: 'line_number', key: 'line_number', width: 55 },
+                      { title: 'Type', dataIndex: 'line_type', key: 'line_type', width: 80 },
+                      { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
+                      { title: 'Account', dataIndex: 'distribution_combination', key: 'dist', width: 200, render: (v: string) => <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{v || '-'}</span> },
+                      { title: 'Amount', dataIndex: 'line_amount', key: 'line_amount', width: 110, align: 'right' as const, render: (v: number) => v != null ? <Text strong style={{ color: v >= 0 ? REDWOOD.info : REDWOOD.error }}>{Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 })}</Text> : '-' },
+                      { title: 'Tax', dataIndex: 'tax_classification_code', key: 'tax', width: 100, render: (v: string) => v || '-' },
+                    ]}
+                  />
+                )}
               </Card>
             </div>
           )
