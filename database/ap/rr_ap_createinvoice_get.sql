@@ -38,15 +38,15 @@ BEGIN
         p_method         => 'GET',
         p_source_type    => 'json/collection',
         p_comments       => 'Search AP Invoices with accounting status and applied prepayments',
-        p_source         => '
+        p_source         => q'[
 SELECT
     i.invoice_id,
     i.invoice_number,
     i.invoice_currency,
     i.payment_currency,
     i.invoice_amount,
-    TO_CHAR(i.invoice_date, ''YYYY-MM-DD'')        AS invoice_date,
-    TO_CHAR(i.creation_date, ''YYYY-MM-DD'')       AS creation_date,
+    TO_CHAR(i.invoice_date, 'YYYY-MM-DD')        AS invoice_date,
+    TO_CHAR(i.creation_date, 'YYYY-MM-DD')       AS creation_date,
     i.business_unit,
     i.legal_entity,
     i.supplier,
@@ -56,9 +56,9 @@ SELECT
     i.invoice_source,
     i.invoice_type,
     i.description,
-    TO_CHAR(i.accounting_date, ''YYYY-MM-DD'')     AS accounting_date,
-    TO_CHAR(i.terms_date, ''YYYY-MM-DD'')          AS terms_date,
-    TO_CHAR(i.goods_received_date, ''YYYY-MM-DD'') AS goods_received_date,
+    TO_CHAR(i.accounting_date, 'YYYY-MM-DD')     AS accounting_date,
+    TO_CHAR(i.terms_date, 'YYYY-MM-DD')          AS terms_date,
+    TO_CHAR(i.goods_received_date, 'YYYY-MM-DD') AS goods_received_date,
     i.pay_group,
     i.payment_terms,
     i.payment_method,
@@ -68,25 +68,25 @@ SELECT
     i.paid_status,
     (SELECT h.accounting_status
      FROM   RR_SLA_ACCOUNTING_HEADERS h
-     WHERE  h.source_table = ''AP_INVOICES''
+     WHERE  h.source_table = 'AP_INVOICES'
        AND  h.source_id    = i.invoice_id
      ORDER BY h.header_id DESC
      FETCH FIRST 1 ROWS ONLY)                      AS accounting_status,
-    TO_CHAR(i.apply_after_date, ''YYYY-MM-DD'')    AS apply_after_date,
+    TO_CHAR(i.apply_after_date, 'YYYY-MM-DD')    AS apply_after_date,
     NVL(
         (SELECT SUM(ap.applied_amount)
          FROM   RR_AP_APPLIED_PREPAYMENTS ap
          WHERE  ap.invoice_id = i.invoice_id
-         AND    ap.status     = ''Applied''),
+         AND    ap.status     = 'Applied'),
         0
     ) AS applied_prepayments
 FROM  RR_AP_INVOICES_ALL i
 WHERE (i.supplier_number  = :supplier_number  OR :supplier_number  IS NULL)
   AND (i.business_unit    = :business_unit    OR :business_unit    IS NULL)
-  AND (UPPER(i.invoice_number) LIKE ''%'' || UPPER(:invoice_number) || ''%''
+  AND (UPPER(i.invoice_number) LIKE '%' || UPPER(:invoice_number) || '%'
        OR :invoice_number IS NULL)
 ORDER BY i.invoice_date DESC, i.invoice_id DESC
-'
+]'
     );
     COMMIT;
 END;
