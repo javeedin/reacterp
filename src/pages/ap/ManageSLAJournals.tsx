@@ -1137,7 +1137,7 @@ const ManageSLAJournals: React.FC = () => {
         title={
           <Space>
             <AccountBookOutlined style={{ color: '#C74634' }} />
-            <span style={{ fontWeight: 600 }}>
+            <span style={{ fontWeight: 600, fontSize: 13 }}>
               GL Journal Entry — {glJournalData?.journalName || glJournalData?.batchName || 'Loading…'}
             </span>
             {glJournalData?.statusMeaning && (
