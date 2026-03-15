@@ -481,7 +481,9 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
     setSlaActionLoading(true);
     setPostGLPayload(null);
     setPostGLResult(null);
+    setPostGLFetchingLines(true);
     try {
+      // getAccounting already returns the header + lines — no second fetch needed
       const acctData = await getAccounting('AP_PAYMENTS', payment.checkId);
       if (!acctData.found || !acctData.headerId) {
         message.warning('No accounting entry found. Run "Create Accounting" first.');
@@ -492,29 +494,16 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
         return;
       }
       setPostModalHeadId(acctData.headerId);
-      setPostGLRawCount(0);
-      setPostModalOpen(true);
 
-      // NOTE: sla/journals/lines backend ignores the headerId param (not in its SQL WHERE clause).
-      // We pass sourceNumber + moduleName (which ARE implemented) and then filter client-side by headerId.
-      const linesUrl = `${APEX_DB_CONFIG.baseUrl}/sla/journals/lines?sourceNumber=${encodeURIComponent(String(payment.paymentNumber))}&moduleName=AP_PAYMENTS&limit=500`;
-      setPostGLLinesUrl(linesUrl);
+      const acctUrl = `${APEX_DB_CONFIG.baseUrl}/sla/accounting?sourceTable=AP_PAYMENTS&sourceId=${payment.checkId}`;
+      setPostGLLinesUrl(acctUrl);
 
-      setPostGLFetchingLines(true);
-      const [linesRes, ledgerInfo] = await Promise.all([
-        fetch(linesUrl, { headers: { Accept: 'application/json' } }),
-        fetchLedgerByBusinessUnit(payment.businessUnit || ''),
-      ]);
-      if (!linesRes.ok) throw new Error(`SLA lines fetch failed: HTTP ${linesRes.status}`);
-      const linesData = await linesRes.json();
-      const allLines: any[] = linesData.items || linesData || [];
-      setPostGLRawCount(allLines.length);
+      const lines = acctData.lines || [];
+      setPostGLRawCount(lines.length);
 
-      // Filter to only this SLA header's lines (backend returns lines from all headers for this payment)
-      const lines = allLines.filter((l: any) => l.headerId === acctData.headerId);
-
-      const totalDr    = lines.reduce((s: number, l: any) => s + (l.enteredDr || 0), 0);
-      const totalCr    = lines.reduce((s: number, l: any) => s + (l.enteredCr || 0), 0);
+      const ledgerInfo = await fetchLedgerByBusinessUnit(payment.businessUnit || '');
+      const totalDr    = lines.reduce((s, l) => s + (l.enteredDr || 0), 0);
+      const totalCr    = lines.reduce((s, l) => s + (l.enteredCr || 0), 0);
       const ledgerName = ledgerInfo?.ledgerName ?? 'BCL DIFC';
       const ledgerId   = ledgerInfo?.ledgerId   ?? 0;
       const batchName  = `SLA-AP_PAYMENTS-${acctData.periodName}-${acctData.headerId}`;
@@ -550,7 +539,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
           runningTotalCr:         totalCr,
           createdBy:              'SYSTEM',
         },
-        lines: lines.map((l: any) => ({
+        lines: lines.map((l) => ({
           enteredDr:                  l.lineType === 'DR' ? (l.enteredDr || null) : null,
           enteredCr:                  l.lineType === 'CR' ? (l.enteredCr || null) : null,
           accountedDr:                l.accountedDr || null,
@@ -558,7 +547,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
           statAmount:                 null,
           description:                l.description || acctData.description || '',
           currencyCode:               l.currencyCode || payment.paymentCurrency || 'AED',
-          currencyConversionDate:     l.accountingDate || acctData.accountingDate,
+          currencyConversionDate:     acctData.accountingDate,
           currencyConversionRate:     1,
           userCurrencyConversionType: 'User',
           accountCombination:         l.accountCombination || '',
@@ -566,14 +555,14 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
           reference1:                 String(payment.paymentNumber || ''),
           reference2:                 String(payment.checkId || ''),
           reference3:                 l.accountingClass || null,
-          reference4:                 l.legalEntity || payment.legalEntity || null,
+          reference4:                 payment.legalEntity || null,
           reference5:                 null,
           createdBy:                  'SYSTEM',
         })),
       });
+      setPostModalOpen(true);
     } catch (err: any) {
       message.error(`Failed to prepare posting: ${err.message}`);
-      setPostModalOpen(false);
     } finally {
       setSlaActionLoading(false);
       setPostGLFetchingLines(false);

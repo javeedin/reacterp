@@ -1480,30 +1480,19 @@ const ManagePayments: React.FC = () => {
     setSlaActionLoading(true);
     setPostGLPayload(null);
     setPostGLResult(null);
-    setPostGLRawCount(0);
-    setPostModalHeadId(viewAcctData.headerId);
-    setPostModalOpen(true);
-
-    // NOTE: backend sla/journals/lines ignores headerId param — use sourceNumber+moduleName instead, filter client-side
-    const linesUrl = `${APEX_DB_CONFIG.baseUrl}/sla/journals/lines?sourceNumber=${encodeURIComponent(String(viewAcctRecord.paymentNumber))}&moduleName=AP_PAYMENTS&limit=500`;
-    setPostGLLinesUrl(linesUrl);
-
     setPostGLFetchingLines(true);
     try {
-      const [linesRes, ledgerInfo] = await Promise.all([
-        fetch(linesUrl, { headers: { Accept: 'application/json' } }),
-        fetchLedgerByBusinessUnit(viewAcctRecord.businessUnit || ''),
-      ]);
-      if (!linesRes.ok) throw new Error(`SLA lines fetch failed: HTTP ${linesRes.status}`);
-      const linesData = await linesRes.json();
-      const allLines: any[] = linesData.items || linesData || [];
-      setPostGLRawCount(allLines.length);
+      // viewAcctData.lines already loaded by View Accounting — use directly, no second fetch needed
+      const lines = viewAcctData.lines || [];
+      setPostGLRawCount(lines.length);
+      setPostModalHeadId(viewAcctData.headerId);
 
-      // Filter to only this SLA header's lines (backend returns lines from all headers for this payment)
-      const lines = allLines.filter((l: any) => l.headerId === viewAcctData.headerId);
+      const acctUrl = `${APEX_DB_CONFIG.baseUrl}/sla/accounting?sourceTable=AP_PAYMENTS&sourceId=${viewAcctRecord.checkId}`;
+      setPostGLLinesUrl(acctUrl);
 
-      const totalDr    = lines.reduce((s: number, l: any) => s + (l.enteredDr || 0), 0);
-      const totalCr    = lines.reduce((s: number, l: any) => s + (l.enteredCr || 0), 0);
+      const ledgerInfo = await fetchLedgerByBusinessUnit(viewAcctRecord.businessUnit || '');
+      const totalDr    = lines.reduce((s, l) => s + (l.enteredDr || 0), 0);
+      const totalCr    = lines.reduce((s, l) => s + (l.enteredCr || 0), 0);
       const ledgerName = ledgerInfo?.ledgerName ?? 'BCL DIFC';
       const ledgerId   = ledgerInfo?.ledgerId   ?? 0;
       const batchName  = `SLA-AP_PAYMENTS-${viewAcctData.periodName}-${viewAcctData.headerId}`;
@@ -1534,7 +1523,7 @@ const ManagePayments: React.FC = () => {
           runningTotalDr:         totalDr, runningTotalCr: totalCr,
           createdBy:              'SYSTEM',
         },
-        lines: lines.map((l: any) => ({
+        lines: lines.map((l) => ({
           enteredDr:                  l.lineType === 'DR' ? (l.enteredDr || null) : null,
           enteredCr:                  l.lineType === 'CR' ? (l.enteredCr || null) : null,
           accountedDr:                l.accountedDr || null,
@@ -1542,7 +1531,7 @@ const ManagePayments: React.FC = () => {
           statAmount:                 null,
           description:                l.description || viewAcctData.description || '',
           currencyCode:               l.currencyCode || viewAcctRecord.currency || 'AED',
-          currencyConversionDate:     l.accountingDate || viewAcctData.accountingDate,
+          currencyConversionDate:     viewAcctData.accountingDate,
           currencyConversionRate:     1,
           userCurrencyConversionType: 'User',
           accountCombination:         l.accountCombination || '',
@@ -1550,14 +1539,14 @@ const ManagePayments: React.FC = () => {
           reference1:                 String(viewAcctRecord.paymentNumber || ''),
           reference2:                 String(viewAcctRecord.checkId || ''),
           reference3:                 l.accountingClass || null,
-          reference4:                 l.legalEntity || viewAcctRecord.legalEntity || null,
+          reference4:                 viewAcctRecord.legalEntity || null,
           reference5:                 null,
           createdBy:                  'SYSTEM',
         })),
       });
+      setPostModalOpen(true);
     } catch (err: any) {
       message.error(`Failed to prepare posting: ${err.message}`);
-      setPostModalOpen(false);
     } finally {
       setSlaActionLoading(false);
       setPostGLFetchingLines(false);
