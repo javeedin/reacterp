@@ -8364,23 +8364,63 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             </Tag>
             <Tooltip
               title={
-                <div style={{ fontSize: 11, fontFamily: 'monospace' }}>
+                <div style={{ fontSize: 11, fontFamily: 'monospace', lineHeight: 1.8 }}>
                   <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 12 }}>API Endpoints</div>
+
                   <div style={{ marginBottom: 4 }}>
                     <Tag color="blue" style={{ fontSize: 10 }}>GET</Tag>
                     <span style={{ wordBreak: 'break-all' }}>
                       {`${APEX_DB_CONFIG.baseUrl}/sla/accounting/exists?sourceTable=AP_INVOICES&sourceId=${savedInvoiceId || initialData?.invoiceId}&eventType=AP_INVOICE_CREATION`}
                     </span>
                   </div>
-                  <div>
-                    <Tag color="green" style={{ fontSize: 10 }}>GET</Tag>
+
+                  <div style={{ marginBottom: 4 }}>
+                    <Tag color="blue" style={{ fontSize: 10 }}>GET</Tag>
                     <span style={{ wordBreak: 'break-all' }}>
-                      {`${APEX_DB_CONFIG.baseUrl}/sla/accounting?sourceTable=AP_INVOICES&sourceId=${savedInvoiceId || initialData?.invoiceId}`}
+                      {`${APEX_DB_CONFIG.baseUrl}/sla/journals/lines?headerId=${slaHeaderId ?? '<headerId>'}&limit=500`}
                     </span>
                   </div>
+
+                  <div style={{ marginBottom: 4 }}>
+                    <Tag color="orange" style={{ fontSize: 10 }}>POST</Tag>
+                    <span>{`${APEX_DB_CONFIG.baseUrl}/sla/accounting/create`}</span>
+                  </div>
+                  <pre style={{ fontSize: 10, background: '#1a1a1a', color: '#e6e6e6', borderRadius: 4, padding: '4px 8px', margin: '2px 0 8px', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{
+`{ "header": { "moduleName":"AP", "sourceTable":"AP_INVOICES",
+  "sourceId":<invoiceId>, "sourceNumber":"<invoiceNumber>",
+  "sourceType":"STANDARD", "eventTypeCode":"AP_INVOICE_CREATION",
+  "accountingDate":"YYYY-MM-DD", "periodName":"Mon-YY",
+  "currencyCode":"<currency>", "businessUnit":"<bu>" },
+  "lines": [{ "lineType":"DR","accountingClass":"EXPENSE",
+  "accountCombination":"<acct>","enteredDr":<amount> }, ...] }`
+                  }</pre>
+
+                  <div style={{ marginBottom: 4 }}>
+                    <Tag color="orange" style={{ fontSize: 10 }}>POST</Tag>
+                    <span>{`${APEX_DB_CONFIG.baseUrl}/journals/create`}</span>
+                  </div>
+                  <pre style={{ fontSize: 10, background: '#1a1a1a', color: '#e6e6e6', borderRadius: 4, padding: '4px 8px', margin: '2px 0 8px', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{
+`{ "batch": { "batchName":"AP-<num>-<ts>", "ledgerName":"BCL DIFC",
+  "accountingPeriod":"Mon-YY", "batchSource":"Payables" },
+  "header": { "jeCategory":"Purchase Invoices","jeSource":"Payables",
+  "periodName":"Mon-YY","journalName":"AP Invoice <num>",
+  "currencyCode":"<currency>","status":"NEW" },
+  "lines": [{ "enteredDr":<dr>,"enteredCr":<cr>,
+  "accountCombination":"<acct>","reference1":"<invoiceNum>" }, ...] }`
+                  }</pre>
+
+                  <div>
+                    <Tag color="orange" style={{ fontSize: 10 }}>POST</Tag>
+                    <span>{`${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`}</span>
+                  </div>
+                  <pre style={{ fontSize: 10, background: '#1a1a1a', color: '#e6e6e6', borderRadius: 4, padding: '4px 8px', margin: '2px 0', whiteSpace: 'pre-wrap' }}>{
+`{ "headerId":<headerId>, "postedBy":"user",
+  "glBatchId":<batchId>, "glBatchName":"<name>",
+  "glHeaderId":<headerId> }`
+                  }</pre>
                 </div>
               }
-              overlayStyle={{ maxWidth: 700 }}
+              overlayStyle={{ maxWidth: 620 }}
             >
               <ApiOutlined style={{ fontSize: 14, color: REDWOOD.info, cursor: 'pointer' }} />
             </Tooltip>

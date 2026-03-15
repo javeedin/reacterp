@@ -29,6 +29,7 @@ CREATE OR REPLACE PACKAGE RR_SLA_JOURNALS_PKG AS
 
     -- Returns JSON {"items":[...]} for SLA accounting lines (joined to headers)
     FUNCTION get_lines(
+        p_header_id           NUMBER   DEFAULT NULL,
         p_accounting_status  VARCHAR2 DEFAULT NULL,
         p_module_name        VARCHAR2 DEFAULT NULL,
         p_line_type          VARCHAR2 DEFAULT NULL,
@@ -200,6 +201,7 @@ CREATE OR REPLACE PACKAGE BODY RR_SLA_JOURNALS_PKG AS
     -- get_lines
     -- -----------------------------------------------------------------------
     FUNCTION get_lines(
+        p_header_id           NUMBER   DEFAULT NULL,
         p_accounting_status   VARCHAR2 DEFAULT NULL,
         p_module_name         VARCHAR2 DEFAULT NULL,
         p_line_type           VARCHAR2 DEFAULT NULL,
@@ -240,6 +242,9 @@ CREATE OR REPLACE PACKAGE BODY RR_SLA_JOURNALS_PKG AS
             '  JOIN RR_SLA_ACCOUNTING_HEADERS h ON l.header_id = h.header_id' ||
             ' WHERE 1=1';
 
+        IF p_header_id IS NOT NULL THEN
+            v_sql := v_sql || ' AND l.header_id = ' || p_header_id;
+        END IF;
         IF p_accounting_status IS NOT NULL THEN
             v_sql := v_sql || ' AND h.accounting_status = ''' || p_accounting_status || '''';
         END IF;
@@ -408,6 +413,7 @@ BEGIN
   v_result CLOB;
 BEGIN
   v_result := RR_SLA_JOURNALS_PKG.get_lines(
+    p_header_id           => TO_NUMBER(:headerId),
     p_accounting_status   => :accountingStatus,
     p_module_name         => :moduleName,
     p_line_type           => :lineType,
