@@ -64,6 +64,7 @@ import {
 import { Link, useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 import Autopilot from '../../components/Autopilot';
+import { validateAccountCode } from '../../components/AccountSelector';
 
 const { Content } = Layout;
 const { Text } = Typography;
@@ -259,6 +260,8 @@ const ManageJournals: React.FC = () => {
   // Journal Entry view modal state
   const [journalViewModalVisible, setJournalViewModalVisible] = useState(false);
   const [selectedJournalForView, setSelectedJournalForView] = useState<JournalRecord | null>(null);
+  // account combo → natural account description (loaded when view modal opens)
+  const [accountDescMap, setAccountDescMap] = useState<Record<string, string>>({});
 
   // AP transaction drill-down modal state
   const [apTransactionModalVisible, setApTransactionModalVisible] = useState(false);
@@ -388,6 +391,29 @@ const ManageJournals: React.FC = () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [activePanel]);
+
+  // Load natural account descriptions when view modal opens
+  useEffect(() => {
+    if (!journalViewModalVisible || !selectedJournalForView) return;
+    const lines = selectedJournalForView.lines || [];
+    const uniqueAccounts = [...new Set(lines.map(l => l.account).filter(Boolean))];
+    if (uniqueAccounts.length === 0) return;
+
+    const newMap: Record<string, string> = {};
+    Promise.all(
+      uniqueAccounts.map(async (account) => {
+        try {
+          const result = await validateAccountCode(account);
+          // Natural account is segment index 3 — find by matching its value to parts[3]
+          const naturalValue = account.split('-')[3] || '';
+          const found = Object.values(result.segmentDetails).find(
+            s => s.value === naturalValue && s.name.toLowerCase().includes('account')
+          ) || Object.values(result.segmentDetails).find(s => s.value === naturalValue);
+          if (found?.description) newMap[account] = found.description;
+        } catch (_) { /* silent */ }
+      })
+    ).then(() => setAccountDescMap(prev => ({ ...prev, ...newMap })));
+  }, [journalViewModalVisible, selectedJournalForView]);
 
   const closePanel = () => {
     setIsClosing(true);
@@ -1489,7 +1515,7 @@ const ManageJournals: React.FC = () => {
                 key: 'account',
                 width: 220,
                 render: (account: string, line: JournalLine) => {
-                  const desc = line.accountDescription || (line as any).account_description || '';
+                  const desc = accountDescMap[account] || line.accountDescription || (line as any).account_description || '';
                   return (
                     <div>
                       <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{account || '-'}</span>
