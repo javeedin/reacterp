@@ -539,6 +539,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [slaDebugLoading, setSlaDebugLoading]       = useState<'get' | 'post' | null>(null);
   const [slaDebugTab, setSlaDebugTab]               = useState<string>('post');
 
+  // Applied prepayment SLA – per-row accounting state (keyed by applicationId)
+  const [appSlaMap, setAppSlaMap] = useState<Record<number, { headerId: number | null; status: string | null }>>({});
+  const [appSlaLoadingId, setAppSlaLoadingId] = useState<number | null>(null);
+
   // Import Lines modal
   const [importModalVisible, setImportModalVisible] = useState(false);
   // Pay in Full modal state
@@ -915,6 +919,26 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     }
   }, []);
 
+  // ── Applied Prepayment SLA: load per-row accounting status ───────────────
+  const loadAppSlaStatuses = useCallback(async (applications: AppliedPrepayment[]) => {
+    if (applications.length === 0) return;
+    const results = await Promise.all(
+      applications.map(async (a) => {
+        try {
+          const r = await checkAccountingExists('RR_AP_APPLIED_PREPAYMENTS', a.applicationId, 'PREPAYMENT_APPLIED');
+          return { id: a.applicationId, headerId: r.exists ? (r.headerId ?? null) : null, status: r.exists ? (r.accountingStatus ?? null) : null };
+        } catch {
+          return { id: a.applicationId, headerId: null, status: null };
+        }
+      })
+    );
+    setAppSlaMap(prev => {
+      const updated = { ...prev };
+      results.forEach(r => { updated[r.id] = { headerId: r.headerId, status: r.status }; });
+      return updated;
+    });
+  }, []);
+
   // ── SLA: build flat DR/CR lines from current invoice ────────────────────
   const buildSlaLines = useCallback(() => {
     const liabilityDist = form.getFieldValue('liabilityDistribution') || '';
@@ -1252,6 +1276,192 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     }
   }, [slaHeaderId, slaStatus, form, headerValues, savedInvoiceId, initialData]);
 
+  // ── Applied Prepayment SLA: Create Accounting ─────────────────────────────
+  const handleAppCreateAccounting = useCallback(async (record: AppliedPrepayment) => {
+    const { applicationId } = record;
+    const appSlaInfo = appSlaMap[applicationId];
+    if (appSlaInfo?.status === 'POSTED') { message.warning('Accounting is already posted and locked.'); return; }
+
+    setAppSlaLoadingId(applicationId);
+    try {
+      const invoiceId     = savedInvoiceId || initialData?.invoiceId;
+      const invoiceNumber = form.getFieldValue('invoiceNumber');
+      const bu            = form.getFieldValue('businessUnit') || '';
+
+      // Re-call save_application with the existing applicationId — DB handles account lookups
+      const payload = {
+        PrepaymentApplicationId:   applicationId,
+        InvoiceId:                 invoiceId,
+        InvoiceNumber:             invoiceNumber,
+        PrepaymentInvoiceId:       record.prepaymentInvoiceId,
+        PrepaymentNumber:          record.prepaymentNumber,
+        LineNumber:                record.lineNumber,
+        PrepaymentLineNumber:      record.prepaymentLineNumber,
+        Description:               record.description,
+        BusinessUnit:              bu,
+        SupplierSite:              record.supplierSite,
+        PurchaseOrder:             record.purchaseOrder,
+        Currency:                  record.currency,
+        AppliedAmount:             record.appliedAmount,
+        IncludedTax:               0,
+        IncludedonInvoiceFlag:     'N',
+        Status:                    'Applied',
+        ApplicationAccountingDate: record.applicationAccountingDate,
+        CreatedBy:                 'user',
+        LastUpdatedBy:             'user',
+      };
+
+      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/invoices/appliedprepayments`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body:    JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      // Re-check accounting status from DB after a short delay
+      await new Promise(r => setTimeout(r, 600));
+      const r2 = await checkAccountingExists('RR_AP_APPLIED_PREPAYMENTS', applicationId, 'PREPAYMENT_APPLIED');
+      const newStatus   = r2.exists ? (r2.accountingStatus ?? 'DRAFT') : 'DRAFT';
+      const newHeaderId = r2.exists ? (r2.headerId ?? null) : null;
+      setAppSlaMap(prev => ({ ...prev, [applicationId]: { headerId: newHeaderId, status: newStatus } }));
+      message.success(`Accounting created for prepayment application — ${record.prepaymentNumber}`);
+    } catch (err: any) {
+      message.error(`Create accounting failed: ${err.message}`);
+    } finally {
+      setAppSlaLoadingId(null);
+    }
+  }, [appSlaMap, form, savedInvoiceId, initialData]);
+
+  // ── Applied Prepayment SLA: Post to Ledger ────────────────────────────────
+  const handleAppPostToLedger = useCallback(async (record: AppliedPrepayment) => {
+    const { applicationId } = record;
+    const appSlaInfo = appSlaMap[applicationId];
+    if (!appSlaInfo?.headerId) { message.warning('Create Accounting first.'); return; }
+    if (appSlaInfo.status === 'POSTED') { message.warning('Already posted and locked.'); return; }
+
+    setAppSlaLoadingId(applicationId);
+    try {
+      const bu         = form.getFieldValue('businessUnit') || '';
+      const currency   = record.currency;
+      const acctDate   = record.applicationAccountingDate
+        ? dayjs(record.applicationAccountingDate).format('YYYY-MM-DD')
+        : dayjs().format('YYYY-MM-DD');
+      const d          = record.applicationAccountingDate ? dayjs(record.applicationAccountingDate).toDate() : new Date();
+      const months     = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const periodName = `${months[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
+
+      // Fetch SLA lines for this applied prepayment header
+      const linesRes = await fetch(
+        `${APEX_DB_CONFIG.baseUrl}/sla/journals/lines?headerId=${appSlaInfo.headerId}&limit=500`,
+        { headers: { Accept: 'application/json' } },
+      );
+      if (!linesRes.ok) throw new Error(`Failed to load SLA lines: HTTP ${linesRes.status}`);
+      const linesData    = await linesRes.json();
+      const fetchedLines: any[] = linesData.items || linesData || [];
+      if (fetchedLines.length === 0) throw new Error('No SLA lines found for this accounting header.');
+
+      const ledgerInfo         = await fetchLedgerByBusinessUnit(bu);
+      const resolvedLedgerName = ledgerInfo?.ledgerName ?? 'BCL DIFC';
+      const resolvedLedgerId   = ledgerInfo?.ledgerId   ?? 0;
+
+      const totalDr   = fetchedLines.reduce((s: number, l: any) => s + (l.enteredDr || 0), 0);
+      const totalCr   = fetchedLines.reduce((s: number, l: any) => s + (l.enteredCr || 0), 0);
+      const batchName = `AP-PREP-${record.prepaymentNumber}-${dayjs().format('YYYYMMDD-HHmmss')}`;
+
+      const journalPayload = {
+        batch: {
+          batchName,
+          batchDescription:  `AP Prepayment Application ${record.prepaymentNumber} – Posted from SLA`,
+          ledgerName:        resolvedLedgerName,
+          ledgerId:          resolvedLedgerId,
+          status:            'NEW',
+          accountingPeriod:  periodName,
+          controlTotal:      totalDr,
+          runningTotalDr:    totalDr,
+          runningTotalCr:    totalCr,
+          batchSource:       'Payables',
+          createdBy:         'user',
+        },
+        header: {
+          ledgerId:               resolvedLedgerId,
+          ledgerName:             resolvedLedgerName,
+          jeCategory:             'Purchase Invoices',
+          jeSource:               'Payables',
+          periodName,
+          journalName:            `AP Prepayment ${record.prepaymentNumber}`,
+          description:            `Subledger accounting – Prepayment Applied ${record.prepaymentNumber}`,
+          currencyCode:           currency,
+          currencyConversionType: 'User',
+          currencyConversionDate: acctDate,
+          currencyConversionRate: 1,
+          status:                 'NEW',
+          runningTotalDr:         totalDr,
+          runningTotalCr:         totalCr,
+          createdBy:              'user',
+        },
+        lines: fetchedLines.map((l: any) => ({
+          enteredDr:                  l.lineType === 'DR' ? (l.enteredDr || null) : null,
+          enteredCr:                  l.lineType === 'CR' ? (l.enteredCr || null) : null,
+          accountedDr:                l.accountedDr || null,
+          accountedCr:                l.accountedCr || null,
+          statAmount:                 null,
+          description:                l.description || '',
+          currencyCode:               l.currencyCode || currency,
+          currencyConversionDate:     l.accountingDate || acctDate,
+          currencyConversionRate:     1,
+          userCurrencyConversionType: 'User',
+          accountCombination:         l.accountCombination || '',
+          chartOfAccountsName:        'Chart of Accounts',
+          reference1:                 record.prepaymentNumber,
+          reference2:                 String(applicationId),
+          reference3:                 l.accountingClass || null,
+          reference4:                 l.legalEntity || bu || null,
+          reference5:                 null,
+          createdBy:                  'user',
+        })),
+      };
+
+      // Step 1 — POST to journals/create
+      const glRes  = await fetch(`${APEX_DB_CONFIG.baseUrl}/journals/create`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body:    JSON.stringify(journalPayload),
+      });
+      const glData = await glRes.json();
+
+      if (!glRes.ok) {
+        await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/error`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ headerId: appSlaInfo.headerId, errorMessage: `HTTP ${glRes.status}: ${glData?.message || ''}`, postedBy: 'user' }),
+        });
+        setAppSlaMap(prev => ({ ...prev, [applicationId]: { ...prev[applicationId], status: 'ERROR' } }));
+        throw new Error(`GL journal creation failed: HTTP ${glRes.status} – ${glData?.message || ''}`);
+      }
+
+      const glBatchId   = glData.batchId   || glData.batch_id   || null;
+      const glHeaderId  = glData.headerId  || glData.header_id  || null;
+      const glBatchName = glData.batchName || glData.batch_name || batchName;
+
+      // Step 2 — stamp GL IDs back on the SLA header
+      if (glBatchId || glHeaderId) {
+        const postRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body:    JSON.stringify({ headerId: appSlaInfo.headerId, postedBy: 'user', glBatchId, glBatchName, glHeaderId }),
+        });
+        if (!postRes.ok) { const t = await postRes.text(); throw new Error(`SLA post update failed: ${t}`); }
+      }
+
+      setAppSlaMap(prev => ({ ...prev, [applicationId]: { headerId: prev[applicationId]?.headerId ?? null, status: 'POSTED' } }));
+      message.success('Posted to General Ledger. Prepayment application accounting is now locked.');
+    } catch (err: any) {
+      message.error(`Post to Ledger failed: ${err.message}`);
+    } finally {
+      setAppSlaLoadingId(null);
+    }
+  }, [appSlaMap, form, fetchLedgerByBusinessUnit]);
+
   // Fetch invoice holds (edit mode)
   const fetchInvoiceHolds = useCallback(async (invoiceId: number) => {
     setInvoiceHoldsLoading(true);
@@ -1415,7 +1625,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         fetchInvoiceInstallments(initialData.invoiceId);
         fetchInvoiceBalance(initialData.invoiceId);
         fetchSlaHeader(initialData.invoiceId);
-        fetchAppliedPrepayments(initialData.invoiceId).then(setAppliedPrepaymentsList);
+        fetchAppliedPrepayments(initialData.invoiceId).then(list => {
+          setAppliedPrepaymentsList(list);
+          loadAppSlaStatuses(list);
+        });
         // When viewing a Prepayment invoice, also load balance + applied invoices
         if ((initialData.invoiceType || '').toLowerCase() === 'prepayment') {
           fetchPrepaymentBalance(initialData.invoiceId);
@@ -1687,11 +1900,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         toApply: remainingBalance > 0 ? Math.min(r.availableAmount, remainingBalance) : 0,
       })));
       setAppliedPrepaymentsList(applied);
+      loadAppSlaStatuses(applied);
       setSupplierHasPrepayments(avail.length > 0);
     } finally {
       setPrepaymentLoading(false);
     }
-  }, [form, savedInvoiceId, initialData, fetchAvailablePrepayments, fetchAppliedPrepayments, suppliers, invoiceBalance]);
+  }, [form, savedInvoiceId, initialData, fetchAvailablePrepayments, fetchAppliedPrepayments, suppliers, invoiceBalance, loadAppSlaStatuses]);
 
   const filteredSuppliers = useMemo(() => {
     if (!supplierSearchText) return suppliers;
@@ -4787,6 +5001,56 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                         ),
                       },
                       {
+                        title: 'Accounting',
+                        width: 180,
+                        align: 'center' as const,
+                        render: (_: any, record: AppliedPrepayment) => {
+                          const slaInfo   = appSlaMap[record.applicationId];
+                          const st        = slaInfo?.status ?? null;
+                          const isLoading = appSlaLoadingId === record.applicationId;
+                          const tagColor  = st === 'POSTED' ? 'green' : st === 'DRAFT' ? '#1677ff' : st === 'ERROR' ? 'red' : 'default';
+                          const tagLabel  = st === 'POSTED' ? 'Posted' : st === 'DRAFT' ? 'Draft' : st === 'ERROR' ? 'Error' : 'None';
+                          return (
+                            <Space direction="vertical" size={2} style={{ width: '100%', alignItems: 'center' }}>
+                              <Tag color={tagColor} style={{ fontSize: 11, margin: 0 }}>
+                                {st === 'POSTED' ? <CheckCircleOutlined /> : st === 'DRAFT' ? <AccountBookOutlined /> : null}
+                                {' '}{tagLabel}
+                              </Tag>
+                              <Dropdown
+                                disabled={isLoading}
+                                menu={{
+                                  items: [
+                                    ...(st !== 'POSTED' ? [{
+                                      key: 'create',
+                                      icon: <CheckSquareOutlined />,
+                                      label: st === 'DRAFT' ? 'Re-create Accounting' : 'Create Accounting',
+                                    }] : []),
+                                    ...(st === 'DRAFT' ? [{
+                                      key: 'post',
+                                      icon: <SendOutlined />,
+                                      label: 'Post to Ledger',
+                                    }] : []),
+                                  ],
+                                  onClick: ({ key }: { key: string }) => {
+                                    if (key === 'create') handleAppCreateAccounting(record);
+                                    else if (key === 'post') handleAppPostToLedger(record);
+                                  },
+                                }}
+                                trigger={['click']}
+                              >
+                                <Button
+                                  size="small"
+                                  loading={isLoading}
+                                  style={{ fontSize: 11, borderColor: REDWOOD.info, color: REDWOOD.info }}
+                                >
+                                  Accounting <DownOutlined style={{ fontSize: 9 }} />
+                                </Button>
+                              </Dropdown>
+                            </Space>
+                          );
+                        },
+                      },
+                      {
                         title: 'Action',
                         width: 90,
                         align: 'center' as const,
@@ -7715,6 +7979,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                         toApply: invoiceAmt > 0 ? Math.min(r.availableAmount, invoiceAmt) : 0,
                       })));
                       setAppliedPrepaymentsList(applied);
+                      loadAppSlaStatuses(applied);
                       setSupplierHasPrepayments(avail.length > 0);
                       setSelectedAvailKeys([]);
                       fetchInvoiceBalance(invoiceId);
@@ -8037,6 +8302,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     toApply: remainingBalance > 0 ? Math.min(r.availableAmount, remainingBalance) : 0,
                   })));
                   setAppliedPrepaymentsList(applied);
+                  loadAppSlaStatuses(applied);
                   setSupplierHasPrepayments(avail.length > 0);
                   fetchInvoiceBalance(invoiceId);
                 } catch (err: any) {
