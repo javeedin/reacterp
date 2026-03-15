@@ -277,7 +277,17 @@ const ManageSLAJournals: React.FC = () => {
         const linesRes = await fetch(linesUrl, { headers: { Accept: 'application/json' } });
         if (!linesRes.ok) throw new Error(`Lines request failed: ${linesRes.status} ${linesRes.statusText}`);
         const linesData = await linesRes.json();
-        setGlJournalLines((linesData.items || linesData || []).map((l: any, i: number) => ({ ...l, key: i })));
+        setGlJournalLines((linesData.items || linesData || []).map((l: any, i: number) => ({
+          key: i,
+          lineNum:     l.lineNum     ?? l.linenum     ?? l.JE_LINE_NUMBER,
+          account:     l.account     ?? l.ACCOUNT_COMBINATION,
+          description: l.description ?? l.DESCRIPTION,
+          currency:    l.currency    ?? l.currencyCode ?? l.currencycode ?? l.CURRENCY_CODE,
+          enteredDr:   l.enteredDr   ?? l.entereddr   ?? l.ENTERED_DR,
+          enteredCr:   l.enteredCr   ?? l.enteredcr   ?? l.ENTERED_CR,
+          accountedDr: l.accountedDr ?? l.accounteddr ?? l.ACCOUNTED_DR,
+          accountedCr: l.accountedCr ?? l.accountedcr ?? l.ACCOUNTED_CR,
+        })));
       }
     } catch (err: any) {
       const errMsg = err?.message || 'Failed to load GL journal lines';
