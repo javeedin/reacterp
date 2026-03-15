@@ -138,6 +138,26 @@ const formatDate = (dateStr: string | null): string => {
   }
 };
 
+// Convert any date representation (display "1 Mar 2024" OR ISO "2024-03-01") → "YYYY-MM-DD" for Oracle APIs
+const toApiDate = (s: string): string => {
+  if (!s) return new Date().toISOString().split('T')[0];
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const MONTHS: Record<string, string> = {
+    Jan:'01',Feb:'02',Mar:'03',Apr:'04',May:'05',Jun:'06',
+    Jul:'07',Aug:'08',Sep:'09',Oct:'10',Nov:'11',Dec:'12',
+  };
+  const m = s.match(/^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/);
+  if (m) {
+    const mo = MONTHS[m[2]];
+    if (mo) return `${m[3]}-${mo}-${m[1].padStart(2, '0')}`;
+  }
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) {
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+  return new Date().toISOString().split('T')[0];
+};
+
 import { ORACLE_FUSION_CONFIG, APEX_DB_CONFIG } from '../../config/api.config';
 import {
   checkAccountingExists,
@@ -508,7 +528,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
       setStep(4, 'running');
       let payloads: any[] = [];
       try {
-        const paymentDate = payment.paymentDate || new Date().toISOString().split('T')[0];
+        const paymentDate = toApiDate(payment.paymentDate || '');
         payloads = buildApPaymentSlaPayloads({
           checkId: payment.checkId,
           paymentNumber: String(payment.paymentNumber || payment.checkId),

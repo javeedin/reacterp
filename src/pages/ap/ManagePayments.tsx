@@ -247,6 +247,29 @@ const formatDate = (dateStr: string | null): string => {
   }
 };
 
+// Convert any date representation (display "1 Mar 2024" OR ISO "2024-03-01") → "YYYY-MM-DD" for Oracle APIs
+const toApiDate = (s: string): string => {
+  if (!s) return new Date().toISOString().split('T')[0];
+  // Already YYYY-MM-DD or ISO
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  // Display format "D MMM YYYY" e.g. "1 Mar 2024"
+  const MONTHS: Record<string, string> = {
+    Jan:'01',Feb:'02',Mar:'03',Apr:'04',May:'05',Jun:'06',
+    Jul:'07',Aug:'08',Sep:'09',Oct:'10',Nov:'11',Dec:'12',
+  };
+  const m = s.match(/^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/);
+  if (m) {
+    const mo = MONTHS[m[2]];
+    if (mo) return `${m[3]}-${mo}-${m[1].padStart(2, '0')}`;
+  }
+  // Fallback: let the JS engine parse it and extract local date parts
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) {
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+  return new Date().toISOString().split('T')[0];
+};
+
 // Map Fusion API response to PaymentRecord (PascalCase fields)
 const mapFusionToPaymentRecord = (item: any, index: number): PaymentRecord => ({
   key: item.CheckId?.toString() || index.toString(),
@@ -1446,7 +1469,7 @@ const ManagePayments: React.FC = () => {
       const ledgerInfo = await fetchLedgerByBusinessUnit(record.businessUnit || '');
 
       // 5. Build one journal payload per invoice and post
-      const paymentDate = record.paymentDate || record.checkDate || new Date().toISOString().split('T')[0];
+      const paymentDate = toApiDate(record.paymentDate || record.checkDate || '');
       const payloads = buildApPaymentSlaPayloads({
         checkId: record.checkId,
         paymentNumber: record.paymentNumber || record.checkId.toString(),
