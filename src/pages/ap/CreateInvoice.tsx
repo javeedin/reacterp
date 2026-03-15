@@ -8783,6 +8783,131 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 </div>
               ),
             },
+            // ── Prepayment Applications tab (only when applications exist) ──
+            ...(appliedPrepaymentsList.length > 0 ? [{
+              key: 'prepaymentApps',
+              label: (
+                <Space size={4}>
+                  <Tag color="purple" style={{ margin: 0, fontWeight: 700, fontSize: 11 }}>SLA</Tag>
+                  <span>Prepayment Applications</span>
+                  <Tag style={{ margin: 0, fontSize: 10 }}>{appliedPrepaymentsList.length}</Tag>
+                </Space>
+              ),
+              children: (
+                <div>
+                  {/* Info banner */}
+                  <div style={{ marginBottom: 14, padding: '8px 12px', background: '#f9f0ff', borderRadius: 6, border: '1px solid #d3adf7', fontSize: 12 }}>
+                    <Text style={{ color: '#531dab' }}>
+                      <strong>Auto-triggered on Execute POST:</strong> For each application below that has no accounting yet,
+                      the system re-calls <Text code style={{ fontSize: 11 }}>POST /ap/invoices/appliedprepayments</Text> which
+                      triggers <Text code style={{ fontSize: 11 }}>RR_AP_APPLIED_PREPAYMENTS_PKG.save_application</Text> →
+                      creates a separate SLA entry (sourceTable = RR_AP_APPLIED_PREPAYMENTS).
+                    </Text>
+                  </div>
+
+                  {/* Endpoint */}
+                  <div style={{ marginBottom: 14, padding: '8px 12px', background: '#f0f5ff', borderRadius: 6, border: '1px solid #adc6ff' }}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>ENDPOINT (per application)</Text>
+                    <Text code style={{ fontSize: 12 }}>POST {APEX_DB_CONFIG.baseUrl}/ap/invoices/appliedprepayments</Text>
+                  </div>
+
+                  {/* Per-application cards */}
+                  {appliedPrepaymentsList.map((record) => {
+                    const slaInfo   = appSlaMap[record.applicationId];
+                    const st        = slaInfo?.status ?? null;
+                    const tagColor  = st === 'POSTED' ? 'green' : st === 'DRAFT' ? '#1677ff' : st === 'ERROR' ? 'red' : 'default';
+                    const invoiceId     = savedInvoiceId || initialData?.invoiceId;
+                    const invoiceNumber = form.getFieldValue('invoiceNumber');
+                    const bu            = form.getFieldValue('businessUnit') || '';
+
+                    const requestPayload = {
+                      PrepaymentApplicationId:   record.applicationId,
+                      InvoiceId:                 invoiceId,
+                      InvoiceNumber:             invoiceNumber,
+                      PrepaymentInvoiceId:       record.prepaymentInvoiceId,
+                      PrepaymentNumber:          record.prepaymentNumber,
+                      LineNumber:                record.lineNumber,
+                      PrepaymentLineNumber:      record.prepaymentLineNumber,
+                      Description:               record.description,
+                      BusinessUnit:              bu,
+                      SupplierSite:              record.supplierSite,
+                      PurchaseOrder:             record.purchaseOrder,
+                      Currency:                  record.currency,
+                      AppliedAmount:             record.appliedAmount,
+                      IncludedTax:               0,
+                      IncludedonInvoiceFlag:     'N',
+                      Status:                    'Applied',
+                      ApplicationAccountingDate: record.applicationAccountingDate,
+                      CreatedBy:                 'user',
+                      LastUpdatedBy:             'user',
+                    };
+
+                    return (
+                      <div key={record.applicationId} style={{ marginBottom: 14, border: '1px solid #d9d9d9', borderRadius: 8, overflow: 'hidden' }}>
+                        {/* Card header */}
+                        <div style={{ padding: '8px 12px', background: '#fafafa', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Space>
+                            <Text strong style={{ fontSize: 12 }}>Application ID: {record.applicationId}</Text>
+                            <Text style={{ fontSize: 12, color: REDWOOD.info }}>{record.prepaymentNumber}</Text>
+                            <Text type="secondary" style={{ fontSize: 11 }}>Applied: {formatAmount(record.appliedAmount)} {record.currency}</Text>
+                          </Space>
+                          <Tag color={tagColor} style={{ fontSize: 11 }}>
+                            Accounting: {st ?? 'None'}
+                          </Tag>
+                        </div>
+
+                        {/* Expected SLA journal entries */}
+                        <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>
+                          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 6, fontWeight: 600 }}>
+                            EXPECTED SLA JOURNAL ENTRIES (sourceTable: RR_AP_APPLIED_PREPAYMENTS, eventType: PREPAYMENT_APPLIED)
+                          </Text>
+                          <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
+                            <thead>
+                              <tr style={{ background: '#f5f5f5' }}>
+                                {['#', 'Type', 'Class', 'Account (resolved by DB)', 'Debit', 'Credit', 'Description'].map(h => (
+                                  <th key={h} style={{ padding: '4px 8px', textAlign: 'left', border: '1px solid #e8e8e8', fontWeight: 600 }}>{h}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr>
+                                <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}>1</td>
+                                <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}><Tag color="blue" style={{ fontSize: 10, margin: 0 }}>DR</Tag></td>
+                                <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}>LIABILITY</td>
+                                <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}><Text type="secondary" italic>RR_SUPPLIER_SITES.LIABILITY_ACCOUNT_ID → GL code combination</Text></td>
+                                <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8', color: '#1677ff', fontWeight: 600 }}>{formatAmount(record.appliedAmount)}</td>
+                                <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}>—</td>
+                                <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}>AP Liability Reduced - Invoice {invoiceNumber}</td>
+                              </tr>
+                              <tr>
+                                <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}>2</td>
+                                <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}><Tag color="volcano" style={{ fontSize: 10, margin: 0 }}>CR</Tag></td>
+                                <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}>PREPAYMENT</td>
+                                <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}><Text type="secondary" italic>RR_SUPPLIER_SITES.PREPAYMENT_ACCOUNT_ID → GL code combination</Text></td>
+                                <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}>—</td>
+                                <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8', color: '#cf1322', fontWeight: 600 }}>{formatAmount(record.appliedAmount)}</td>
+                                <td style={{ padding: '4px 8px', border: '1px solid #e8e8e8' }}>Prepayment Asset Cleared - {record.prepaymentNumber}</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* Request payload */}
+                        <div style={{ padding: '8px 12px' }}>
+                          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4, fontWeight: 600 }}>REQUEST BODY</Text>
+                          <pre style={{
+                            background: '#1e1e1e', color: '#d4d4d4', padding: 10, borderRadius: 6,
+                            fontSize: 10, lineHeight: 1.5, overflow: 'auto', maxHeight: 180, margin: 0, fontFamily: 'monospace',
+                          }}>
+                            {JSON.stringify(requestPayload, null, 2)}
+                          </pre>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ),
+            }] : []),
             {
               key: 'get',
               label: (
