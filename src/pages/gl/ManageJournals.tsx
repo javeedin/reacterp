@@ -266,6 +266,7 @@ const ManageJournals: React.FC = () => {
   const [apTransactionType, setApTransactionType] = useState<'invoice' | 'payment' | null>(null);
   const [apTransactionLastUrl, setApTransactionLastUrl] = useState<string | null>(null);
   const [apTransactionCopied, setApTransactionCopied] = useState(false);
+  const [apTransactionError, setApTransactionError] = useState<string | null>(null);
 
   // Floating panel state
   const [activePanel, setActivePanel] = useState<'none' | 'tasks' | 'reports'>('none');
@@ -693,16 +694,39 @@ const ManageJournals: React.FC = () => {
   // AP transaction drill-down: fetch invoice or payment by reference
   const handleTransactionDrilldown = async (journal: JournalRecord, line: JournalLine) => {
     const category = (journal.category || '').toLowerCase();
-    const reference = journal.externalReference || line.description || '';
 
+    // Build reference: prefer externalReference, fall back to extracting from journalName, then line.description
+    let reference = journal.externalReference || '';
     if (!reference) {
-      message.info('No transaction reference available for this line');
-      return;
+      // Try to extract invoice number from journalName (format: "AP Invoice {number}")
+      const nameMatch = (journal.journalName || '').match(/^AP\s+(?:Invoice|Payment)\s+(.+)$/i);
+      if (nameMatch) reference = nameMatch[1].trim();
     }
+    if (!reference) reference = line.description || '';
 
+    console.log('[View Transaction] Debug info:', {
+      journalName: journal.journalName,
+      source: journal.source,
+      category: journal.category,
+      externalReference: journal.externalReference,
+      lineDescription: line.description,
+      resolvedReference: reference,
+    });
+
+    // Always open the modal so the user can see what's happening
     setApTransactionData(null);
+    setApTransactionError(null);
+    setApTransactionLastUrl(null);
     setApTransactionLoading(true);
     setApTransactionModalVisible(true);
+
+    if (!reference) {
+      setApTransactionLoading(false);
+      setApTransactionError(
+        `No reference found. Check: externalReference="${journal.externalReference}", journalName="${journal.journalName}", lineDescription="${line.description}"`
+      );
+      return;
+    }
 
     try {
       let url: string;
@@ -716,21 +740,24 @@ const ManageJournals: React.FC = () => {
         url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice?invoice_number=${encodeURIComponent(reference)}`;
       }
 
+      console.log('[View Transaction] API call:', { transType, url });
+
       setApTransactionType(transType);
       setApTransactionLastUrl(url);
       const response = await fetch(url, { headers: { Accept: 'application/json' } });
       const data = await response.json();
       const items = data.items || (Array.isArray(data) ? data : [data]);
 
+      console.log('[View Transaction] API response:', { itemCount: items.length, firstItem: items[0] });
+
       if (items.length > 0) {
         setApTransactionData(items[0]);
       } else {
-        message.warning('Transaction not found in AP');
-        setApTransactionModalVisible(false);
+        setApTransactionError(`No AP transaction found for reference: "${reference}"`);
       }
-    } catch {
-      message.error('Failed to load AP transaction details');
-      setApTransactionModalVisible(false);
+    } catch (err) {
+      console.error('[View Transaction] Fetch error:', err);
+      setApTransactionError(`Failed to load transaction: ${String(err)}`);
     } finally {
       setApTransactionLoading(false);
     }
@@ -2281,7 +2308,7 @@ const ManageJournals: React.FC = () => {
           </Space>
         }
         open={apTransactionModalVisible}
-        onCancel={() => { setApTransactionModalVisible(false); setApTransactionData(null); }}
+        onCancel={() => { setApTransactionModalVisible(false); setApTransactionData(null); setApTransactionError(null); }}
         footer={
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             {apTransactionLastUrl ? (
@@ -2302,7 +2329,7 @@ const ManageJournals: React.FC = () => {
                 />
               </div>
             ) : <span />}
-            <Button onClick={() => { setApTransactionModalVisible(false); setApTransactionData(null); }}>Close</Button>
+            <Button onClick={() => { setApTransactionModalVisible(false); setApTransactionData(null); setApTransactionError(null); }}>Close</Button>
           </div>
         }
         width={900}
@@ -2314,6 +2341,22 @@ const ManageJournals: React.FC = () => {
             <div style={{ marginTop: 16, color: REDWOOD.neutral600 }}>
               Loading {apTransactionType === 'payment' ? 'payment' : 'invoice'} details…
             </div>
+          </div>
+        ) : apTransactionError ? (
+          <div style={{ padding: '32px 16px' }}>
+            <div style={{ background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 6, padding: '16px 20px', marginBottom: 16 }}>
+              <Space direction="vertical" style={{ width: '100%' }}>
+                <Space>
+                  <CloseCircleOutlined style={{ color: REDWOOD.error, fontSize: 16 }} />
+                  <Text strong style={{ color: REDWOOD.error }}>Transaction Not Found</Text>
+                </Space>
+                <Text style={{ fontSize: 12 }}>{apTransactionError}</Text>
+              </Space>
+            </div>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              Check the browser console (F12) for detailed debug info including the exact API URL called.
+              The reference used to look up this transaction is shown in the API URL in the footer below.
+            </Text>
           </div>
         ) : apTransactionData ? (
           apTransactionType === 'payment' ? (
