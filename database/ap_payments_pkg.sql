@@ -867,7 +867,7 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
                         'VoidAccountingDate' VALUE TO_CHAR(VOID_ACCOUNTING_DATE, 'YYYY-MM-DD'),
                         'PaymentStatus' VALUE PAYMENT_STATUS,
                         'SeparateRemittanceAdviceCreated' VALUE SEPARATE_REMITTANCE_ADVICE_CREATED,
-                        'AccountingStatus' VALUE ACCOUNTING_STATUS,
+                        'AccountingStatus' VALUE SLA_ACCOUNTING_STATUS,
                         'ReconciledFlag' VALUE CASE WHEN RECONCILED_FLAG = 'Y' THEN 'true' ELSE 'false' END,
                         'PaymentType' VALUE PAYMENT_TYPE,
                         'PaymentCurrency' VALUE PAYMENT_CURRENCY,
@@ -924,16 +924,22 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
                     RETURNING CLOB
                 )
                 FROM (
-                    SELECT *
-                    FROM RR_AP_PAYMENTS_ALL
-                    WHERE (p_payment_number IS NULL OR PAYMENT_NUMBER = p_payment_number)
-                      AND (p_payment_status IS NULL OR PAYMENT_STATUS = p_payment_status)
-                      AND (p_payee IS NULL OR UPPER(PAYEE) LIKE '%' || UPPER(p_payee) || '%')
-                      AND (p_supplier_number IS NULL OR SUPPLIER_NUMBER = p_supplier_number)
-                      AND (p_business_unit IS NULL OR BUSINESS_UNIT = p_business_unit)
-                      AND (p_date_from IS NULL OR PAYMENT_DATE >= p_date_from)
-                      AND (p_date_to IS NULL OR PAYMENT_DATE <= p_date_to)
-                    ORDER BY PAYMENT_DATE DESC
+                    SELECT p.*,
+                        (SELECT sh.ACCOUNTING_STATUS
+                         FROM RR_SLA_ACCOUNTING_HEADERS sh
+                         WHERE sh.SOURCE_TABLE = 'AP_PAYMENTS'
+                           AND sh.SOURCE_ID = p.CHECK_ID
+                         ORDER BY sh.HEADER_ID DESC
+                         FETCH FIRST 1 ROW ONLY) AS SLA_ACCOUNTING_STATUS
+                    FROM RR_AP_PAYMENTS_ALL p
+                    WHERE (p_payment_number IS NULL OR p.PAYMENT_NUMBER = p_payment_number)
+                      AND (p_payment_status IS NULL OR p.PAYMENT_STATUS = p_payment_status)
+                      AND (p_payee IS NULL OR UPPER(p.PAYEE) LIKE '%' || UPPER(p_payee) || '%')
+                      AND (p_supplier_number IS NULL OR p.SUPPLIER_NUMBER = p_supplier_number)
+                      AND (p_business_unit IS NULL OR p.BUSINESS_UNIT = p_business_unit)
+                      AND (p_date_from IS NULL OR p.PAYMENT_DATE >= p_date_from)
+                      AND (p_date_to IS NULL OR p.PAYMENT_DATE <= p_date_to)
+                    ORDER BY p.PAYMENT_DATE DESC
                     OFFSET p_offset ROWS FETCH NEXT p_limit ROWS ONLY
                 )
             )
