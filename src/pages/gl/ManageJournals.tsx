@@ -158,6 +158,7 @@ interface JournalLine {
   accountedDr: number;
   accountedCr: number;
   currency: string;
+  accountDescription?: string;
 }
 
 interface JournalRecord {
@@ -1482,7 +1483,23 @@ const ManageJournals: React.FC = () => {
           <Table
             columns={[
               { title: 'Line', dataIndex: 'lineNum', key: 'lineNum', width: 60 },
-              { title: 'Account', dataIndex: 'account', key: 'account', width: 200 },
+              {
+                title: 'Account',
+                dataIndex: 'account',
+                key: 'account',
+                width: 220,
+                render: (account: string, line: JournalLine) => {
+                  const desc = line.accountDescription || (line as any).account_description || '';
+                  return (
+                    <div>
+                      <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{account || '-'}</span>
+                      {desc && (
+                        <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 2 }}>{desc}</div>
+                      )}
+                    </div>
+                  );
+                },
+              },
               {
                 title: 'Description',
                 dataIndex: 'description',
