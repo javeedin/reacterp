@@ -146,6 +146,7 @@ const ManageSLAJournals: React.FC = () => {
   const [glLastLinesUrl, setGlLastLinesUrl]                 = useState<string | null>(null);
   const [glLastError, setGlLastError]                       = useState<string | null>(null);
   const [glCopiedUrl, setGlCopiedUrl]                       = useState<string | null>(null);
+  const [glRawLinesData, setGlRawLinesData]                 = useState<any>(null);
 
   // ── AP Transaction drill-down modal ──────────────────────────────────────
   const [apTxnModalVisible, setApTxnModalVisible]   = useState(false);
@@ -251,6 +252,7 @@ const ManageSLAJournals: React.FC = () => {
     setGlLastHeaderUrl(null);
     setGlLastLinesUrl(null);
     setGlLastError(null);
+    setGlRawLinesData(null);
     setGlJournalLoading(true);
     setGlJournalModalVisible(true);
     try {
@@ -277,7 +279,15 @@ const ManageSLAJournals: React.FC = () => {
         const linesRes = await fetch(linesUrl, { headers: { Accept: 'application/json' } });
         if (!linesRes.ok) throw new Error(`Lines request failed: ${linesRes.status} ${linesRes.statusText}`);
         const linesData = await linesRes.json();
-        setGlJournalLines((linesData.items || linesData || []).map((l: any, i: number) => ({
+        console.log('[GL Lines] Raw API response:', JSON.stringify(linesData, null, 2));
+        setGlRawLinesData(linesData);
+        const rawItems = linesData.items || linesData || [];
+        console.log('[GL Lines] Items array:', rawItems);
+        if (rawItems.length > 0) {
+          console.log('[GL Lines] First item keys:', Object.keys(rawItems[0]));
+          console.log('[GL Lines] First item values:', rawItems[0]);
+        }
+        setGlJournalLines(rawItems.map((l: any, i: number) => ({
           key: i,
           lineNum:     l.lineNum     ?? l.linenum     ?? l.JE_LINE_NUMBER,
           account:     l.account     ?? l.ACCOUNT_COMBINATION,
@@ -1361,6 +1371,18 @@ const ManageSLAJournals: React.FC = () => {
               )}
             </div>
           ))}
+
+          {/* Raw lines response for debugging */}
+          {glRawLinesData && (
+            <div style={{ padding: 12, background: '#1e1e1e', borderRadius: 6 }}>
+              <Text strong style={{ color: '#fff', fontSize: 12, display: 'block', marginBottom: 6 }}>
+                Raw Lines API Response (for debugging field names):
+              </Text>
+              <pre style={{ color: '#d4d4d4', fontSize: 11, margin: 0, overflow: 'auto', maxHeight: 300 }}>
+                {JSON.stringify(glRawLinesData, null, 2)}
+              </pre>
+            </div>
+          )}
         </div>
       </Modal>
 
