@@ -115,6 +115,7 @@ interface InvoiceRecord {
   validationStatus: string;
   approvalStatus: string;
   holdPaidStatus: string;
+  accountingStatus: string;
   applyAfterDate: string;
   businessUnit: string;
   invoiceCurrency: string;
@@ -246,13 +247,14 @@ const mapApiToInvoiceRecord = (item: any, index: number): InvoiceRecord => ({
   supplierSite: item.supplier_site || '',
   unpaidAmount: (item.invoice_amount || 0) - (item.amount_paid || 0),
   invoiceAmount: item.invoice_amount || 0,
-  appliedPrepayments: 0, // Not in API response
+  appliedPrepayments: item.applied_prepayments || 0,
   invoiceType: item.invoice_type || 'Standard',
   attachments: 'None',
   notes: item.description || '',
   validationStatus: item.validation_status || 'Never validated',
   approvalStatus: item.approval_status || 'Not required',
   holdPaidStatus: item.paid_status || 'Not paid',
+  accountingStatus: item.accounting_status || 'Not Accounted',
   applyAfterDate: item.apply_after_date || '',
   businessUnit: item.business_unit || '',
   invoiceCurrency: item.invoice_currency || 'AED',
@@ -970,6 +972,18 @@ const ManageInvoices: React.FC = () => {
     return <Tag color={config.color}>{status}</Tag>;
   };
 
+  const getAccountingStatusTag = (status: string) => {
+    const statusConfig: Record<string, { color: string }> = {
+      'Accounted':       { color: 'green' },
+      'Draft Accounted': { color: 'cyan' },
+      'Not Accounted':   { color: 'default' },
+      'Partial':         { color: 'orange' },
+      'Error':           { color: 'red' },
+    };
+    const config = statusConfig[status] || { color: 'default' };
+    return <Tag color={config.color}>{status || 'Not Accounted'}</Tag>;
+  };
+
   // Action menu items
   const actionsMenuItems: MenuProps['items'] = [
     { key: 'edit', label: 'Edit', icon: <EditOutlined /> },
@@ -1146,6 +1160,20 @@ const ManageInvoices: React.FC = () => {
       key: 'approvalStatus',
       width: 140,
       render: (status: string) => getApprovalStatusTag(status),
+    },
+    {
+      title: 'Accounting Status',
+      dataIndex: 'accountingStatus',
+      key: 'accountingStatus',
+      width: 150,
+      render: (status: string) => getAccountingStatusTag(status),
+      filters: [
+        { text: 'Accounted',       value: 'Accounted' },
+        { text: 'Draft Accounted', value: 'Draft Accounted' },
+        { text: 'Not Accounted',   value: 'Not Accounted' },
+        { text: 'Error',           value: 'Error' },
+      ],
+      onFilter: (value, record) => record.accountingStatus === value,
     },
     {
       title: 'Hold Paid Status',
