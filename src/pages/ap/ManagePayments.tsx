@@ -512,9 +512,9 @@ const ManagePayments: React.FC = () => {
   const [viewAcctData, setViewAcctData] = useState<SlaGetResult | null>(null);
   const [postModalOpen, setPostModalOpen] = useState(false);
   const [postModalHeadId, setPostModalHeadId] = useState<number | null>(null);
-  const [glBatchId, setGlBatchId] = useState('');
-  const [glBatchName, setGlBatchName] = useState('');
-  const [glHeaderId, setGlHeaderId] = useState('');
+  const [postGLPayload, setPostGLPayload] = useState<any>(null);
+  const [postGLFetchingLines, setPostGLFetchingLines] = useState(false);
+  const [postGLResult, setPostGLResult] = useState<{ success: boolean; data?: any; error?: string } | null>(null);
   const [slaActionLoading, setSlaActionLoading] = useState(false);
 
   // Fetch bank accounts from APEX
@@ -1474,37 +1474,121 @@ const ManagePayments: React.FC = () => {
   };
 
   const handlePostToLedgerOpen = async () => {
-    if (!viewAcctData?.headerId) return;
+    if (!viewAcctData?.headerId || !viewAcctRecord) return;
+    setSlaActionLoading(true);
+    setPostGLPayload(null);
+    setPostGLResult(null);
     setPostModalHeadId(viewAcctData.headerId);
-    setGlBatchId('');
-    setGlBatchName(`AP_PMT_${viewAcctRecord?.paymentNumber || viewAcctRecord?.checkId}_BATCH`);
-    setGlHeaderId('');
     setPostModalOpen(true);
+
+    setPostGLFetchingLines(true);
+    try {
+      const [linesRes, ledgerInfo] = await Promise.all([
+        fetch(`${APEX_DB_CONFIG.baseUrl}/sla/journals/lines?headerId=${viewAcctData.headerId}&limit=500`, { headers: { Accept: 'application/json' } }),
+        fetchLedgerByBusinessUnit(viewAcctRecord.businessUnit || ''),
+      ]);
+      if (!linesRes.ok) throw new Error(`SLA lines fetch failed: HTTP ${linesRes.status}`);
+      const linesData = await linesRes.json();
+      const lines: any[] = linesData.items || linesData || [];
+
+      const totalDr    = lines.reduce((s: number, l: any) => s + (l.enteredDr || 0), 0);
+      const totalCr    = lines.reduce((s: number, l: any) => s + (l.enteredCr || 0), 0);
+      const ledgerName = ledgerInfo?.ledgerName ?? 'BCL DIFC';
+      const ledgerId   = ledgerInfo?.ledgerId   ?? 0;
+      const batchName  = `SLA-AP_PAYMENTS-${viewAcctData.periodName}-${viewAcctData.headerId}`;
+
+      setPostGLPayload({
+        batch: {
+          batchName,
+          batchDescription:  viewAcctData.description || '',
+          ledgerName, ledgerId,
+          status:            'NEW',
+          accountingPeriod:  viewAcctData.periodName,
+          controlTotal:      totalDr, runningTotalDr: totalDr, runningTotalCr: totalCr,
+          batchSource:       'Payables',
+          createdBy:         'SYSTEM',
+        },
+        header: {
+          ledgerId, ledgerName,
+          jeCategory:             viewAcctData.eventTypeCode || 'Payables',
+          jeSource:               'Payables',
+          periodName:             viewAcctData.periodName,
+          journalName:            `SLA-${viewAcctRecord.paymentNumber}-${viewAcctData.eventTypeCode}`,
+          description:            viewAcctData.description || '',
+          currencyCode:           viewAcctRecord.currency || viewAcctRecord.paymentCurrency || 'AED',
+          currencyConversionType: 'User',
+          currencyConversionDate: viewAcctData.accountingDate,
+          currencyConversionRate: 1,
+          status:                 'NEW',
+          runningTotalDr:         totalDr, runningTotalCr: totalCr,
+          createdBy:              'SYSTEM',
+        },
+        lines: lines.map((l: any) => ({
+          enteredDr:                  l.lineType === 'DR' ? (l.enteredDr || null) : null,
+          enteredCr:                  l.lineType === 'CR' ? (l.enteredCr || null) : null,
+          accountedDr:                l.accountedDr || null,
+          accountedCr:                l.accountedCr || null,
+          statAmount:                 null,
+          description:                l.description || viewAcctData.description || '',
+          currencyCode:               l.currencyCode || viewAcctRecord.currency || 'AED',
+          currencyConversionDate:     l.accountingDate || viewAcctData.accountingDate,
+          currencyConversionRate:     1,
+          userCurrencyConversionType: 'User',
+          accountCombination:         l.accountCombination || '',
+          chartOfAccountsName:        'Chart of Accounts',
+          reference1:                 String(viewAcctRecord.paymentNumber || ''),
+          reference2:                 String(viewAcctRecord.checkId || ''),
+          reference3:                 l.accountingClass || null,
+          reference4:                 l.legalEntity || viewAcctRecord.legalEntity || null,
+          reference5:                 null,
+          createdBy:                  'SYSTEM',
+        })),
+      });
+    } catch (err: any) {
+      message.error(`Failed to prepare posting: ${err.message}`);
+      setPostModalOpen(false);
+    } finally {
+      setSlaActionLoading(false);
+      setPostGLFetchingLines(false);
+    }
   };
 
   const handlePostToLedgerConfirm = async () => {
-    if (!postModalHeadId) return;
-    if (!glBatchId || !glHeaderId) {
-      message.warning('GL Batch ID and GL Header ID are required.');
-      return;
-    }
+    if (!postGLPayload || !postModalHeadId) return;
     setSlaActionLoading(true);
     try {
-      const result = await slaPostToLedger(
-        postModalHeadId,
-        Number(glBatchId),
-        glBatchName,
-        Number(glHeaderId),
-      );
-      message.success(`Posted to GL. Header ${result.headerId} is now POSTED and locked.`);
-      setPostModalOpen(false);
+      // Step 1 — POST to journals/create (same API as invoices / ManageSLAJournals)
+      const glRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/journals/create`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body:    JSON.stringify(postGLPayload),
+      });
+      const glData = await glRes.json();
+      if (!glRes.ok) throw new Error(glData?.message || `HTTP ${glRes.status}`);
+
+      const retBatchId   = glData.batchId   || glData.batch_id   || null;
+      const retHeaderId  = glData.headerId  || glData.header_id  || null;
+      const retBatchName = glData.batchName || glData.batch_name || postGLPayload.batch.batchName;
+
+      // Step 2 — stamp GL IDs back on the SLA header
+      if (retBatchId || retHeaderId) {
+        await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body:    JSON.stringify({ headerId: postModalHeadId, glBatchId: retBatchId, glBatchName: retBatchName, glHeaderId: retHeaderId, postedBy: 'SYSTEM' }),
+        });
+      }
+
+      setPostGLResult({ success: true, data: glData });
+      message.success(`Posted to GL. Header ${postModalHeadId} is now POSTED and locked.`);
       // Refresh view
       if (viewAcctRecord) {
         const refreshed = await getAccounting('AP_PAYMENTS', viewAcctRecord.checkId);
         setViewAcctData(refreshed);
       }
     } catch (err: any) {
-      message.error(`Post to ledger failed: ${err.message}`);
+      setPostGLResult({ success: false, error: err.message });
+      message.error(`Post to GL failed: ${err.message}`);
     } finally {
       setSlaActionLoading(false);
     }
@@ -3445,82 +3529,55 @@ const ManagePayments: React.FC = () => {
 
       {/* Post to Ledger Modal */}
       <Modal
-        title={`Post to Ledger — Header ID: ${postModalHeadId}`}
+        title={`Post to Ledger — Payment ${viewAcctRecord?.paymentNumber ?? ''} (SLA Header ${postModalHeadId})`}
         open={postModalOpen}
         onOk={handlePostToLedgerConfirm}
-        onCancel={() => setPostModalOpen(false)}
+        onCancel={() => { setPostModalOpen(false); setPostGLResult(null); }}
         confirmLoading={slaActionLoading}
         okText="Post to GL"
-        okButtonProps={{ type: 'primary' }}
-        width={560}
+        okButtonProps={{ type: 'primary', disabled: !postGLPayload || postGLFetchingLines || !!postGLResult?.success }}
+        width={700}
       >
-        <Space direction="vertical" style={{ width: '100%' }}>
-          <div>
-            <label style={{ fontSize: 12, color: REDWOOD.neutral600 }}>GL Batch ID *</label>
-            <Input
-              placeholder="e.g. 300000123456"
-              value={glBatchId}
-              onChange={e => setGlBatchId(e.target.value)}
-              type="number"
-            />
-          </div>
-          <div>
-            <label style={{ fontSize: 12, color: REDWOOD.neutral600 }}>GL Batch Name</label>
-            <Input
-              placeholder="e.g. AP_PMT_BATCH_001"
-              value={glBatchName}
-              onChange={e => setGlBatchName(e.target.value)}
-            />
-          </div>
-          <div>
-            <label style={{ fontSize: 12, color: REDWOOD.neutral600 }}>GL Header ID *</label>
-            <Input
-              placeholder="e.g. 300000123457"
-              value={glHeaderId}
-              onChange={e => setGlHeaderId(e.target.value)}
-              type="number"
-            />
-          </div>
-          <div style={{ color: REDWOOD.warning, fontSize: 12 }}>
-            ⚠ Once posted, the accounting entry will be locked and cannot be modified.
-          </div>
-
-          {/* Live API preview — same call used by AP Invoices posting */}
-          <Collapse
-            size="small"
-            items={[{
-              key: '1',
-              label: <span style={{ fontSize: 11, color: REDWOOD.info }}><ApiOutlined /> API Request Preview</span>,
-              children: (
-                <Space direction="vertical" style={{ width: '100%' }} size={4}>
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <Tag color="blue" style={{ fontSize: 11, margin: 0 }}>POST</Tag>
-                    <span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.neutral900 }}>
-                      {`${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`}
-                    </span>
-                  </div>
-                  <pre style={{
-                    fontSize: 11,
-                    background: REDWOOD.neutral100,
-                    border: `1px solid ${REDWOOD.neutral200}`,
-                    borderRadius: 4,
-                    padding: '8px 10px',
-                    margin: 0,
-                    color: REDWOOD.neutral900,
-                  }}>
-                    {JSON.stringify({
-                      headerId:    postModalHeadId,
-                      glBatchId:   glBatchId ? Number(glBatchId) : '<required>',
-                      glBatchName: glBatchName || '<auto>',
-                      glHeaderId:  glHeaderId ? Number(glHeaderId) : '<required>',
-                      postedBy:    'SYSTEM',
-                    }, null, 2)}
-                  </pre>
-                </Space>
-              ),
-            }]}
+        {postGLFetchingLines ? (
+          <div style={{ textAlign: 'center', padding: 32 }}><Spin tip="Loading SLA lines…" /></div>
+        ) : postGLResult ? (
+          <Alert
+            type={postGLResult.success ? 'success' : 'error'}
+            message={postGLResult.success ? 'Posted to GL successfully' : 'Post failed'}
+            description={
+              <pre style={{ fontSize: 11, margin: 0, whiteSpace: 'pre-wrap' }}>
+                {postGLResult.success ? JSON.stringify(postGLResult.data, null, 2) : postGLResult.error}
+              </pre>
+            }
           />
-        </Space>
+        ) : postGLPayload ? (
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <div style={{ color: REDWOOD.warning, fontSize: 12 }}>
+              ⚠ Once posted, the accounting entry will be locked and cannot be modified.
+            </div>
+            <div>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+                <Tag color="blue" style={{ fontSize: 11, margin: 0 }}>POST</Tag>
+                <span style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.neutral900 }}>
+                  {`${APEX_DB_CONFIG.baseUrl}/journals/create`}
+                </span>
+              </div>
+              <pre style={{
+                fontSize: 11, background: REDWOOD.neutral100,
+                border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 4,
+                padding: '8px 10px', margin: 0, color: REDWOOD.neutral900,
+                maxHeight: 360, overflowY: 'auto',
+              }}>
+                {JSON.stringify(postGLPayload, null, 2)}
+              </pre>
+            </div>
+            <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>
+              <ApiOutlined /> Step 2 (auto on success): <Tag color="blue" style={{ fontSize: 10 }}>POST</Tag>
+              <code style={{ fontSize: 11 }}>{`${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`}</code>
+              {' '}— stamps returned GL IDs back on SLA header
+            </div>
+          </Space>
+        ) : null}
       </Modal>
 
       <Autopilot module="ap" />
