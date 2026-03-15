@@ -735,7 +735,7 @@ const ManageInvoices: React.FC = () => {
         method: 'GET',
         proxyUrl: APEX_INVOICE_URL,
         actualUrl: APEX_INVOICE_URL,
-        params: 'supplier_number={supplierNumber}',
+        params: 'supplier_number={supplierNumber}&business_unit={businessUnit}&invoice_number={invoiceNumber}&supplier={supplierOrParty}&invoice_date={invoiceDate}&invoice_amount={invoiceAmount}&supplier_site={supplierSite}&invoice_group={invoiceGroup}',
         description: 'Fetches invoices from APEX database with optional filters',
       },
       {
