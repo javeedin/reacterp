@@ -543,6 +543,17 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [appSlaMap, setAppSlaMap] = useState<Record<number, { headerId: number | null; status: string | null }>>({});
   const [appSlaLoadingId, setAppSlaLoadingId] = useState<number | null>(null);
 
+  // SLA modal – tabs & per-section fetched lines
+  const [slaModalTab, setSlaModalTab]                   = useState<string>('invoice');
+  const [appSlaLines, setAppSlaLines]                   = useState<Record<number, any[]>>({});
+  const [paymentSlaLines, setPaymentSlaLines]           = useState<Record<number, any[]>>({});
+  const [slaModalPrepayLoading, setSlaModalPrepayLoading]   = useState(false);
+  const [slaModalPaymentLoading, setSlaModalPaymentLoading] = useState(false);
+  // Debug GET tab – per-application accounting check results
+  const [slaDebugGetPrepayResults, setSlaDebugGetPrepayResults] =
+    useState<Record<number, { status: number; ok: boolean; data?: any; error?: string }>>({});
+  const [slaDebugCheckingPrepay, setSlaDebugCheckingPrepay] = useState(false);
+
   // Import Lines modal
   const [importModalVisible, setImportModalVisible] = useState(false);
   // Pay in Full modal state
@@ -1186,6 +1197,37 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       setSlaDebugLoading(null);
     }
   }, [slaDebugSourceId]);
+
+  // ── SLA Modal: tab-change – lazy-load prepayment / payment accounting lines ──
+  const handleSlaModalTabChange = useCallback(async (key: string) => {
+    setSlaModalTab(key);
+
+    if (key === 'prepayments' && appliedPrepaymentsList.length > 0) {
+      const missing = appliedPrepaymentsList.filter(r => !appSlaLines[r.applicationId]);
+      if (missing.length === 0) return;
+      setSlaModalPrepayLoading(true);
+      await Promise.all(missing.map(async (record) => {
+        try {
+          const data = await getAccounting('RR_AP_APPLIED_PREPAYMENTS', record.applicationId);
+          setAppSlaLines(prev => ({ ...prev, [record.applicationId]: data.lines || [] }));
+        } catch { /* non-fatal */ }
+      }));
+      setSlaModalPrepayLoading(false);
+    }
+
+    if (key === 'payment' && invoicePayments.length > 0) {
+      const missing = invoicePayments.filter(p => !paymentSlaLines[p.checkId]);
+      if (missing.length === 0) return;
+      setSlaModalPaymentLoading(true);
+      await Promise.all(missing.map(async (p) => {
+        try {
+          const data = await getAccounting('AP_PAYMENTS', p.checkId);
+          setPaymentSlaLines(prev => ({ ...prev, [p.checkId]: data.lines || [] }));
+        } catch { /* non-fatal */ }
+      }));
+      setSlaModalPaymentLoading(false);
+    }
+  }, [appliedPrepaymentsList, invoicePayments, appSlaLines, paymentSlaLines]);
 
   // ── SLA: Post to Ledger ──────────────────────────────────────────────────
   const handlePostToLedger = useCallback(async () => {
@@ -8565,101 +8607,161 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         destroyOnClose
       >
         <Spin spinning={slaFetching} tip="Loading accounting data...">
-        {/* Header info */}
-        <Descriptions size="small" column={3} bordered style={{ marginBottom: 16 }}>
-          <Descriptions.Item label="Header ID">{slaHeaderId}</Descriptions.Item>
-          <Descriptions.Item label="Status">
-            <Tag color={slaStatus === 'POSTED' ? 'green' : slaStatus === 'ERROR' ? 'red' : 'orange'}>{slaStatus}</Tag>
-          </Descriptions.Item>
-          <Descriptions.Item label="Posting Status">
-            <Tag color={slaPostingStatus === 'POSTED' ? 'green' : 'default'}>{slaPostingStatus}</Tag>
-          </Descriptions.Item>
-          {slaGlBatchId && <Descriptions.Item label="GL Batch ID">{slaGlBatchId}</Descriptions.Item>}
-          {slaGlBatchName && <Descriptions.Item label="GL Batch Name" span={2}>{slaGlBatchName}</Descriptions.Item>}
-          {slaGlHeaderId && <Descriptions.Item label="GL Header ID">{slaGlHeaderId}</Descriptions.Item>}
-        </Descriptions>
+        {/* ── reusable column definition for SLA lines table ── */}
+        {(() => {
+          const slaLineColumns = [
+            { title: '#', dataIndex: 'lineNumber', width: 45, render: (v: number) => <Text style={{ fontSize: 11 }}>{v}</Text> },
+            { title: 'Type', dataIndex: 'lineType', width: 55, render: (v: string) => <Tag color={v === 'DR' ? 'blue' : 'red'} style={{ fontSize: 11, fontWeight: 700 }}>{v}</Tag> },
+            { title: 'Class', dataIndex: 'accountingClass', width: 110, render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
+            { title: 'Account Combination', dataIndex: 'accountCombination', ellipsis: true, render: (v: string) => <Text code style={{ fontSize: 11 }}>{v || '—'}</Text> },
+            { title: 'Debit', dataIndex: 'enteredDr', width: 120, align: 'right' as const, render: (v: number, r: any) => r.lineType === 'DR' ? <Text strong style={{ fontSize: 12, color: REDWOOD.info }}>{formatAmount(v)}</Text> : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text> },
+            { title: 'Credit', dataIndex: 'enteredCr', width: 120, align: 'right' as const, render: (v: number, r: any) => r.lineType === 'CR' ? <Text strong style={{ fontSize: 12, color: REDWOOD.error }}>{formatAmount(v)}</Text> : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text> },
+            { title: 'Description', dataIndex: 'description', ellipsis: true, render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
+          ];
 
-        {/* Lines table */}
-        <Table
-          dataSource={slaLines.map((l, i) => ({ ...l, key: l.lineId || i }))}
-          size="small"
-          pagination={false}
-          bordered
-          scroll={{ x: 900 }}
-          summary={(data) => {
-            const totalDr = data.filter(r => r.lineType === 'DR').reduce((s, r) => s + (r.enteredDr || 0), 0);
-            const totalCr = data.filter(r => r.lineType === 'CR').reduce((s, r) => s + (r.enteredCr || 0), 0);
-            return (
-              <Table.Summary.Row style={{ background: '#f5f5f5', fontWeight: 700 }}>
-                <Table.Summary.Cell index={0} colSpan={4}>Total</Table.Summary.Cell>
-                <Table.Summary.Cell index={4} align="right">
-                  <Text strong style={{ color: REDWOOD.info }}>{formatAmount(totalDr)}</Text>
-                </Table.Summary.Cell>
-                <Table.Summary.Cell index={5} align="right">
-                  <Text strong style={{ color: REDWOOD.error }}>{formatAmount(totalCr)}</Text>
-                </Table.Summary.Cell>
-              </Table.Summary.Row>
-            );
-          }}
-          columns={[
-            {
-              title: '#',
-              dataIndex: 'lineNumber',
-              width: 45,
-              render: (v: number) => <Text style={{ fontSize: 11 }}>{v}</Text>,
-            },
-            {
-              title: 'Type',
-              dataIndex: 'lineType',
-              width: 55,
-              render: (v: string) => (
-                <Tag color={v === 'DR' ? 'blue' : 'red'} style={{ fontSize: 11, fontWeight: 700 }}>{v}</Tag>
-              ),
-            },
-            {
-              title: 'Class',
-              dataIndex: 'accountingClass',
-              width: 110,
-              render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text>,
-            },
-            {
-              title: 'Account Combination',
-              dataIndex: 'accountCombination',
-              ellipsis: true,
-              render: (v: string) => <Text code style={{ fontSize: 11 }}>{v || '—'}</Text>,
-            },
-            {
-              title: 'Debit',
-              dataIndex: 'enteredDr',
-              width: 120,
-              align: 'right' as const,
-              render: (v: number, r: any) => r.lineType === 'DR'
-                ? <Text strong style={{ fontSize: 12, color: REDWOOD.info }}>{formatAmount(v)}</Text>
-                : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text>,
-            },
-            {
-              title: 'Credit',
-              dataIndex: 'enteredCr',
-              width: 120,
-              align: 'right' as const,
-              render: (v: number, r: any) => r.lineType === 'CR'
-                ? <Text strong style={{ fontSize: 12, color: REDWOOD.error }}>{formatAmount(v)}</Text>
-                : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text>,
-            },
-            {
-              title: 'Description',
-              dataIndex: 'description',
-              ellipsis: true,
-              render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text>,
-            },
-          ]}
-        />
-        {slaStatus === 'POSTED' && (
-          <div style={{ marginTop: 12, padding: '8px 12px', background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 6, fontSize: 12, color: '#52c41a' }}>
-            <CheckCircleOutlined style={{ marginRight: 6 }} />
-            This accounting is <strong>locked</strong> — posted to GL on {slaGlBatchName || `Batch ID ${slaGlBatchId}`}. No further changes are allowed.
-          </div>
-        )}
+          const renderLinesTable = (lines: any[]) => (
+            <Table
+              dataSource={lines.map((l, i) => ({ ...l, key: l.lineId || i }))}
+              size="small" pagination={false} bordered scroll={{ x: 800 }}
+              summary={(data) => {
+                const totalDr = data.filter(r => r.lineType === 'DR').reduce((s, r) => s + (r.enteredDr || 0), 0);
+                const totalCr = data.filter(r => r.lineType === 'CR').reduce((s, r) => s + (r.enteredCr || 0), 0);
+                return (
+                  <Table.Summary.Row style={{ background: '#f5f5f5', fontWeight: 700 }}>
+                    <Table.Summary.Cell index={0} colSpan={4}>Total</Table.Summary.Cell>
+                    <Table.Summary.Cell index={4} align="right"><Text strong style={{ color: REDWOOD.info }}>{formatAmount(totalDr)}</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={5} align="right"><Text strong style={{ color: REDWOOD.error }}>{formatAmount(totalCr)}</Text></Table.Summary.Cell>
+                  </Table.Summary.Row>
+                );
+              }}
+              columns={slaLineColumns}
+            />
+          );
+
+          return (
+            <Tabs
+              activeKey={slaModalTab}
+              onChange={handleSlaModalTabChange}
+              type="card"
+              items={[
+                {
+                  key: 'invoice',
+                  label: (
+                    <Space size={4}>
+                      <FileTextOutlined />
+                      <span>Invoice</span>
+                      <Tag color={slaStatus === 'POSTED' ? 'green' : slaStatus === 'ERROR' ? 'red' : 'orange'} style={{ margin: 0, fontSize: 10 }}>{slaStatus}</Tag>
+                    </Space>
+                  ),
+                  children: (
+                    <>
+                      {/* Header info */}
+                      <Descriptions size="small" column={3} bordered style={{ marginBottom: 16 }}>
+                        <Descriptions.Item label="Header ID">{slaHeaderId}</Descriptions.Item>
+                        <Descriptions.Item label="Status">
+                          <Tag color={slaStatus === 'POSTED' ? 'green' : slaStatus === 'ERROR' ? 'red' : 'orange'}>{slaStatus}</Tag>
+                        </Descriptions.Item>
+                        <Descriptions.Item label="Posting Status">
+                          <Tag color={slaPostingStatus === 'POSTED' ? 'green' : 'default'}>{slaPostingStatus}</Tag>
+                        </Descriptions.Item>
+                        {slaGlBatchId && <Descriptions.Item label="GL Batch ID">{slaGlBatchId}</Descriptions.Item>}
+                        {slaGlBatchName && <Descriptions.Item label="GL Batch Name" span={2}>{slaGlBatchName}</Descriptions.Item>}
+                        {slaGlHeaderId && <Descriptions.Item label="GL Header ID">{slaGlHeaderId}</Descriptions.Item>}
+                      </Descriptions>
+
+                      {renderLinesTable(slaLines)}
+
+                      {slaStatus === 'POSTED' && (
+                        <div style={{ marginTop: 12, padding: '8px 12px', background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 6, fontSize: 12, color: '#52c41a' }}>
+                          <CheckCircleOutlined style={{ marginRight: 6 }} />
+                          This accounting is <strong>locked</strong> — posted to GL on {slaGlBatchName || `Batch ID ${slaGlBatchId}`}. No further changes are allowed.
+                        </div>
+                      )}
+                    </>
+                  ),
+                },
+
+                // ── Prepayment Applications tab (only when applications exist) ──
+                ...(appliedPrepaymentsList.length > 0 ? [{
+                  key: 'prepayments',
+                  label: (
+                    <Space size={4}>
+                      <WalletOutlined />
+                      <span>Prepayment Applications</span>
+                      <Tag style={{ margin: 0, fontSize: 10 }}>{appliedPrepaymentsList.length}</Tag>
+                    </Space>
+                  ),
+                  children: (
+                    <Spin spinning={slaModalPrepayLoading} tip="Loading prepayment accounting...">
+                      {appliedPrepaymentsList.map((record) => {
+                        const slaInfo  = appSlaMap[record.applicationId];
+                        const st       = slaInfo?.status ?? 'None';
+                        const lines    = appSlaLines[record.applicationId] ?? [];
+                        const tagColor = st === 'POSTED' ? 'green' : st === 'DRAFT' ? 'blue' : st === 'ERROR' ? 'red' : 'default';
+                        return (
+                          <div key={record.applicationId} style={{ marginBottom: 14, border: '1px solid #d9d9d9', borderRadius: 8, overflow: 'hidden' }}>
+                            <div style={{ padding: '8px 12px', background: '#fafafa', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <Space>
+                                <Text strong style={{ fontSize: 12 }}>Application ID: {record.applicationId}</Text>
+                                <Text style={{ fontSize: 12, color: REDWOOD.info }}>{record.prepaymentNumber}</Text>
+                                <Text type="secondary" style={{ fontSize: 11 }}>Applied: {formatAmount(record.appliedAmount)} {record.currency}</Text>
+                              </Space>
+                              <Tag color={tagColor} style={{ fontSize: 11 }}>SLA: {st}</Tag>
+                            </div>
+                            <div style={{ padding: 12 }}>
+                              {lines.length > 0
+                                ? renderLinesTable(lines)
+                                : <Text type="secondary" style={{ fontSize: 12 }}>{slaInfo ? 'No accounting lines returned.' : 'Accounting not yet created.'}</Text>
+                              }
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </Spin>
+                  ),
+                }] : []),
+
+                // ── Payment tab (only when payments exist) ──
+                ...(invoicePayments.length > 0 ? [{
+                  key: 'payment',
+                  label: (
+                    <Space size={4}>
+                      <BankOutlined />
+                      <span>Payment</span>
+                      <Tag style={{ margin: 0, fontSize: 10 }}>{invoicePayments.length}</Tag>
+                    </Space>
+                  ),
+                  children: (
+                    <Spin spinning={slaModalPaymentLoading} tip="Loading payment accounting...">
+                      {invoicePayments.map((p) => {
+                        const lines = paymentSlaLines[p.checkId] ?? [];
+                        return (
+                          <div key={p.checkId} style={{ marginBottom: 14, border: '1px solid #d9d9d9', borderRadius: 8, overflow: 'hidden' }}>
+                            <div style={{ padding: '8px 12px', background: '#fafafa', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <Space>
+                                <Text strong style={{ fontSize: 12 }}>Check ID: {p.checkId}</Text>
+                                <Text style={{ fontSize: 12, color: REDWOOD.info }}>{p.number}</Text>
+                                <Text type="secondary" style={{ fontSize: 11 }}>Paid: {formatAmount(p.paidAmount)} {p.currency}</Text>
+                                <Text type="secondary" style={{ fontSize: 11 }}>{p.paymentDate}</Text>
+                              </Space>
+                              <Tag color={p.status === 'NEGOTIABLE' ? 'green' : 'default'} style={{ fontSize: 11 }}>{p.status}</Tag>
+                            </div>
+                            <div style={{ padding: 12 }}>
+                              {lines.length > 0
+                                ? renderLinesTable(lines)
+                                : <Text type="secondary" style={{ fontSize: 12 }}>No accounting lines found for this payment.</Text>
+                              }
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </Spin>
+                  ),
+                }] : []),
+              ]}
+            />
+          );
+        })()}
         </Spin>
       </Modal>
       {/* ── End SLA Modal ─────────────────────────────────────────────────── */}
@@ -8942,29 +9044,89 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     Execute GET
                   </Button>
 
-                  {/* Response */}
+                  {/* Response — Invoice */}
                   {slaDebugGetResult && (
-                    <div>
+                    <div style={{ marginBottom: appliedPrepaymentsList.length > 0 ? 20 : 0 }}>
                       <div style={{ marginBottom: 6 }}>
                         <Tag color={slaDebugGetResult.ok ? 'success' : 'error'} style={{ fontWeight: 700 }}>
                           HTTP {slaDebugGetResult.status}
                         </Tag>
-                        <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>RESPONSE</Text>
+                        <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>RESPONSE — Invoice (AP_INVOICES)</Text>
                       </div>
                       <pre style={{
-                        background: '#001529',
-                        color: '#52c41a',
-                        padding: 14,
-                        borderRadius: 6,
-                        fontSize: 11,
-                        lineHeight: 1.6,
-                        overflow: 'auto',
-                        maxHeight: 300,
-                        margin: 0,
-                        fontFamily: 'monospace',
+                        background: '#001529', color: '#52c41a', padding: 14, borderRadius: 6,
+                        fontSize: 11, lineHeight: 1.6, overflow: 'auto', maxHeight: 220, margin: 0, fontFamily: 'monospace',
                       }}>
                         {JSON.stringify(slaDebugGetResult.data ?? slaDebugGetResult.error, null, 2)}
                       </pre>
+                    </div>
+                  )}
+
+                  {/* ── Prepayment Accounting Check (shown only when applications exist) ── */}
+                  {appliedPrepaymentsList.length > 0 && (
+                    <div style={{ marginTop: 16 }}>
+                      <Divider style={{ margin: '8px 0 12px' }} />
+                      <div style={{ marginBottom: 10, padding: '8px 12px', background: '#f9f0ff', borderRadius: 6, border: '1px solid #d3adf7' }}>
+                        <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>ENDPOINT (per application)</Text>
+                        <Text code style={{ fontSize: 11, wordBreak: 'break-all' }}>
+                          GET {APEX_DB_CONFIG.baseUrl}/sla/accounting/exists?sourceTable=RR_AP_APPLIED_PREPAYMENTS&sourceId=&#123;applicationId&#125;
+                        </Text>
+                      </div>
+
+                      <Button
+                        icon={<ReloadOutlined />}
+                        loading={slaDebugCheckingPrepay}
+                        style={{ marginBottom: 12, borderColor: '#722ed1', color: '#722ed1' }}
+                        onClick={async () => {
+                          setSlaDebugCheckingPrepay(true);
+                          const results: Record<number, any> = {};
+                          await Promise.all(appliedPrepaymentsList.map(async (record) => {
+                            try {
+                              const url = `${APEX_DB_CONFIG.baseUrl}/sla/accounting/exists?sourceTable=RR_AP_APPLIED_PREPAYMENTS&sourceId=${record.applicationId}`;
+                              const res = await fetch(url, { headers: { Accept: 'application/json' } });
+                              const data = await res.json();
+                              results[record.applicationId] = { status: res.status, ok: res.ok, data };
+                            } catch (err: any) {
+                              results[record.applicationId] = { status: 0, ok: false, error: err.message };
+                            }
+                          }));
+                          setSlaDebugGetPrepayResults(results);
+                          setSlaDebugCheckingPrepay(false);
+                        }}
+                      >
+                        Check Prepayment Accounting ({appliedPrepaymentsList.length})
+                      </Button>
+
+                      {appliedPrepaymentsList.map((record) => {
+                        const result = slaDebugGetPrepayResults[record.applicationId];
+                        return (
+                          <div key={record.applicationId} style={{ marginBottom: 10, border: '1px solid #e8e8e8', borderRadius: 6, overflow: 'hidden' }}>
+                            <div style={{ padding: '6px 10px', background: '#f9f0ff', borderBottom: '1px solid #e8e8e8', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <Space size={4}>
+                                <Text strong style={{ fontSize: 11 }}>App ID: {record.applicationId}</Text>
+                                <Text style={{ fontSize: 11, color: REDWOOD.info }}>{record.prepaymentNumber}</Text>
+                                <Text type="secondary" style={{ fontSize: 10 }}>{formatAmount(record.appliedAmount)} {record.currency}</Text>
+                              </Space>
+                              {result && (
+                                <Tag color={result.ok ? 'success' : 'error'} style={{ fontSize: 10 }}>HTTP {result.status}</Tag>
+                              )}
+                            </div>
+                            {result && (
+                              <pre style={{
+                                background: result.ok ? '#001529' : '#2b0000', color: result.ok ? '#52c41a' : '#ff7875',
+                                padding: 10, margin: 0, fontSize: 10, lineHeight: 1.5, overflow: 'auto', maxHeight: 140, fontFamily: 'monospace',
+                              }}>
+                                {JSON.stringify(result.data ?? result.error, null, 2)}
+                              </pre>
+                            )}
+                            {!result && (
+                              <div style={{ padding: '6px 10px' }}>
+                                <Text type="secondary" style={{ fontSize: 11 }}>Not checked yet — click the button above</Text>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
