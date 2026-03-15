@@ -2420,21 +2420,21 @@ const ManageJournals: React.FC = () => {
                 title="Invoice Information"
               >
                 <Descriptions size="small" column={2} bordered labelStyle={{ fontWeight: 500, width: 160 }}>
-                  <Descriptions.Item label="Invoice Number">{apTransactionData.invoiceNumber || apTransactionData.invoice_number || '-'}</Descriptions.Item>
-                  <Descriptions.Item label="Invoice Date">{apTransactionData.invoiceDate || apTransactionData.invoice_date || '-'}</Descriptions.Item>
-                  <Descriptions.Item label="Supplier">{apTransactionData.supplierOrParty || apTransactionData.supplier_name || apTransactionData.party_name || '-'}</Descriptions.Item>
-                  <Descriptions.Item label="Supplier Site">{apTransactionData.supplierSite || apTransactionData.supplier_site || '-'}</Descriptions.Item>
-                  <Descriptions.Item label="Invoice Amount">{apTransactionData.invoiceAmount || apTransactionData.invoice_amount || '-'}</Descriptions.Item>
-                  <Descriptions.Item label="Currency">{apTransactionData.invoiceCurrency || apTransactionData.currency_code || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Invoice Number">{apTransactionData.invoice_number || apTransactionData.invoiceNumber || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Invoice Date">{apTransactionData.invoice_date || apTransactionData.invoiceDate || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Supplier">{apTransactionData.supplier || apTransactionData.party || apTransactionData.supplierOrParty || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Supplier Site">{apTransactionData.supplier_site || apTransactionData.supplierSite || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Invoice Amount">{apTransactionData.invoice_amount || apTransactionData.invoiceAmount || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Currency">{apTransactionData.invoice_currency || apTransactionData.invoiceCurrency || apTransactionData.currency_code || '-'}</Descriptions.Item>
                   <Descriptions.Item label="Status">
-                    <Tag color={REDWOOD.info}>{apTransactionData.validationStatus || apTransactionData.validation_status || '-'}</Tag>
+                    <Tag color={REDWOOD.info}>{apTransactionData.validation_status || apTransactionData.validationStatus || '-'}</Tag>
                   </Descriptions.Item>
                   <Descriptions.Item label="Approval Status">
-                    <Tag color={REDWOOD.success}>{apTransactionData.approvalStatus || apTransactionData.approval_status || 'N/A'}</Tag>
+                    <Tag color={REDWOOD.success}>{apTransactionData.approval_status || apTransactionData.approvalStatus || 'N/A'}</Tag>
                   </Descriptions.Item>
-                  <Descriptions.Item label="Business Unit" span={2}>{apTransactionData.businessUnit || apTransactionData.business_unit || '-'}</Descriptions.Item>
-                  <Descriptions.Item label="Unpaid Amount">{apTransactionData.unpaidAmount || apTransactionData.unpaid_amount || '-'}</Descriptions.Item>
-                  <Descriptions.Item label="Invoice Type">{apTransactionData.invoiceType || apTransactionData.invoice_type || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Business Unit" span={2}>{apTransactionData.business_unit || apTransactionData.businessUnit || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Unpaid Amount">{apTransactionData.unpaid_amount != null ? apTransactionData.unpaid_amount : (apTransactionData.unpaidAmount ?? '-')}</Descriptions.Item>
+                  <Descriptions.Item label="Invoice Type">{apTransactionData.invoice_type || apTransactionData.invoiceType || '-'}</Descriptions.Item>
                 </Descriptions>
               </Card>
 
