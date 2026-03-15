@@ -56,6 +56,10 @@ import {
   FundOutlined,
   CloseOutlined,
   BugOutlined,
+  CopyOutlined,
+  ApiOutlined,
+  CheckOutlined,
+  CloudOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -260,6 +264,8 @@ const ManageJournals: React.FC = () => {
   const [apTransactionLoading, setApTransactionLoading] = useState(false);
   const [apTransactionData, setApTransactionData] = useState<any>(null);
   const [apTransactionType, setApTransactionType] = useState<'invoice' | 'payment' | null>(null);
+  const [apTransactionLastUrl, setApTransactionLastUrl] = useState<string | null>(null);
+  const [apTransactionCopied, setApTransactionCopied] = useState(false);
 
   // Floating panel state
   const [activePanel, setActivePanel] = useState<'none' | 'tasks' | 'reports'>('none');
@@ -687,7 +693,7 @@ const ManageJournals: React.FC = () => {
   // AP transaction drill-down: fetch invoice or payment by reference
   const handleTransactionDrilldown = async (journal: JournalRecord, line: JournalLine) => {
     const category = (journal.category || '').toLowerCase();
-    const reference = line.description || journal.externalReference || '';
+    const reference = journal.externalReference || line.description || '';
 
     if (!reference) {
       message.info('No transaction reference available for this line');
@@ -711,6 +717,7 @@ const ManageJournals: React.FC = () => {
       }
 
       setApTransactionType(transType);
+      setApTransactionLastUrl(url);
       const response = await fetch(url, { headers: { Accept: 'application/json' } });
       const data = await response.json();
       const items = data.items || (Array.isArray(data) ? data : [data]);
@@ -2275,7 +2282,29 @@ const ManageJournals: React.FC = () => {
         }
         open={apTransactionModalVisible}
         onCancel={() => { setApTransactionModalVisible(false); setApTransactionData(null); }}
-        footer={<Button onClick={() => { setApTransactionModalVisible(false); setApTransactionData(null); }}>Close</Button>}
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            {apTransactionLastUrl ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
+                <ApiOutlined style={{ color: REDWOOD.info, flexShrink: 0 }} />
+                <Tag color="blue" style={{ flexShrink: 0 }}>GET</Tag>
+                <code style={{ background: '#f5f5f5', padding: '2px 6px', borderRadius: 4, fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 480 }}>
+                  {apTransactionLastUrl}
+                </code>
+                <Button
+                  size="small"
+                  icon={apTransactionCopied ? <CheckOutlined /> : <CopyOutlined />}
+                  onClick={() => {
+                    navigator.clipboard.writeText(apTransactionLastUrl);
+                    setApTransactionCopied(true);
+                    setTimeout(() => setApTransactionCopied(false), 2000);
+                  }}
+                />
+              </div>
+            ) : <span />}
+            <Button onClick={() => { setApTransactionModalVisible(false); setApTransactionData(null); }}>Close</Button>
+          </div>
+        }
         width={900}
         destroyOnClose
       >
