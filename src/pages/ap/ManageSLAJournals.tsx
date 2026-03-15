@@ -10,7 +10,7 @@ import {
   AccountBookOutlined, UnorderedListOutlined, FileSearchOutlined,
   CheckCircleOutlined, ClockCircleOutlined, WarningOutlined,
   DollarOutlined, CalendarOutlined, EyeOutlined, FileTextOutlined,
-  SendOutlined, CopyOutlined,
+  SendOutlined, CopyOutlined, ApiOutlined, CheckOutlined, CloudOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../../config/api.config';
@@ -140,6 +140,13 @@ const ManageSLAJournals: React.FC = () => {
   const [glJournalData, setGlJournalData]                   = useState<any>(null);
   const [glJournalLines, setGlJournalLines]                 = useState<any[]>([]);
 
+  // ── GL Journal API info modal ─────────────────────────────────────────────
+  const [glApiModalVisible, setGlApiModalVisible]           = useState(false);
+  const [glLastHeaderUrl, setGlLastHeaderUrl]               = useState<string | null>(null);
+  const [glLastLinesUrl, setGlLastLinesUrl]                 = useState<string | null>(null);
+  const [glLastError, setGlLastError]                       = useState<string | null>(null);
+  const [glCopiedUrl, setGlCopiedUrl]                       = useState<string | null>(null);
+
   // ── AP Transaction drill-down modal ──────────────────────────────────────
   const [apTxnModalVisible, setApTxnModalVisible]   = useState(false);
   const [apTxnLoading, setApTxnLoading]             = useState(false);
@@ -241,12 +248,17 @@ const ManageSLAJournals: React.FC = () => {
     }
     setGlJournalData(null);
     setGlJournalLines([]);
+    setGlLastHeaderUrl(null);
+    setGlLastLinesUrl(null);
+    setGlLastError(null);
     setGlJournalLoading(true);
     setGlJournalModalVisible(true);
     try {
       // Fetch header
       const headerUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/headers?jeHeaderId=${record.glHeaderId || ''}&limit=1`;
+      setGlLastHeaderUrl(headerUrl);
       const headerRes = await fetch(headerUrl, { headers: { Accept: 'application/json' } });
+      if (!headerRes.ok) throw new Error(`Header request failed: ${headerRes.status} ${headerRes.statusText}`);
       const headerData = await headerRes.json();
       const items = headerData.items || (Array.isArray(headerData) ? headerData : []);
       if (items.length > 0) {
@@ -270,11 +282,15 @@ const ManageSLAJournals: React.FC = () => {
       // Fetch journal lines
       if (record.glHeaderId) {
         const linesUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?jeHeaderId=${record.glHeaderId}&limit=500`;
+        setGlLastLinesUrl(linesUrl);
         const linesRes = await fetch(linesUrl, { headers: { Accept: 'application/json' } });
+        if (!linesRes.ok) throw new Error(`Lines request failed: ${linesRes.status} ${linesRes.statusText}`);
         const linesData = await linesRes.json();
         setGlJournalLines((linesData.items || linesData || []).map((l: any, i: number) => ({ ...l, key: i })));
       }
-    } catch {
+    } catch (err: any) {
+      const errMsg = err?.message || 'Failed to load GL journal entry';
+      setGlLastError(errMsg);
       message.error('Failed to load GL journal entry');
     } finally {
       setGlJournalLoading(false);
@@ -1122,7 +1138,20 @@ const ManageSLAJournals: React.FC = () => {
         }
         open={glJournalModalVisible}
         onCancel={() => { setGlJournalModalVisible(false); setGlJournalData(null); setGlJournalLines([]); }}
-        footer={<Button onClick={() => setGlJournalModalVisible(false)}>Close</Button>}
+        footer={
+          <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+            <Tooltip title="View API details for this request">
+              <Button
+                icon={<ApiOutlined />}
+                onClick={() => setGlApiModalVisible(true)}
+                style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
+              >
+                API Info
+              </Button>
+            </Tooltip>
+            <Button onClick={() => setGlJournalModalVisible(false)}>Close</Button>
+          </Space>
+        }
         width={1200}
         style={{ top: 16 }}
         styles={{ body: { padding: 0, maxHeight: 'calc(100vh - 180px)', overflowY: 'auto' } }}
@@ -1230,6 +1259,87 @@ const ManageSLAJournals: React.FC = () => {
             </Card>
           </div>
         ) : null}
+      </Modal>
+
+      {/* ── GL Journal API Info Modal ─────────────────────────────────────── */}
+      <Modal
+        title={
+          <Space>
+            <ApiOutlined style={{ color: REDWOOD.info }} />
+            <span style={{ fontWeight: 600 }}>GL Journal — API Details</span>
+          </Space>
+        }
+        open={glApiModalVisible}
+        onCancel={() => setGlApiModalVisible(false)}
+        footer={<Button onClick={() => setGlApiModalVisible(false)}>Close</Button>}
+        width={760}
+        destroyOnClose
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Last error banner */}
+          {glLastError && (
+            <div style={{ background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 6, padding: '10px 14px' }}>
+              <Space>
+                <WarningOutlined style={{ color: REDWOOD.error }} />
+                <Text style={{ color: REDWOOD.error, fontWeight: 500 }}>Error: {glLastError}</Text>
+              </Space>
+            </div>
+          )}
+
+          {/* Header endpoint */}
+          {[
+            { label: 'Journal Header', url: glLastHeaderUrl, template: `${APEX_DB_CONFIG.baseUrl}/gl/journals/headers?jeHeaderId={glHeaderId}&limit=1` },
+            { label: 'Journal Lines', url: glLastLinesUrl,  template: `${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?jeHeaderId={glHeaderId}&limit=500` },
+          ].map((api, idx) => (
+            <div key={idx} style={{ padding: 12, background: REDWOOD.neutral100, borderRadius: 6 }}>
+              <Row justify="space-between" align="middle" style={{ marginBottom: 8 }}>
+                <Col>
+                  <Space>
+                    <Tag color="blue">GET</Tag>
+                    <Text strong>{api.label}</Text>
+                  </Space>
+                </Col>
+                {api.url && (
+                  <Col>
+                    <Tag color={glLastError ? 'red' : 'green'} icon={<CloudOutlined />}>
+                      {glLastError ? 'Failed' : 'Success'}
+                    </Tag>
+                  </Col>
+                )}
+              </Row>
+
+              <div style={{ marginBottom: 8 }}>
+                <Text type="secondary" style={{ fontSize: 12 }}>Template:</Text>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
+                  <code style={{ background: '#f5f5f5', padding: '4px 8px', borderRadius: 4, fontSize: 11, flex: 1, wordBreak: 'break-all' }}>
+                    {api.template}
+                  </code>
+                  <Button size="small" icon={glCopiedUrl === api.template ? <CheckOutlined /> : <CopyOutlined />}
+                    onClick={() => { navigator.clipboard.writeText(api.template); setGlCopiedUrl(api.template); setTimeout(() => setGlCopiedUrl(null), 2000); }} />
+                </div>
+              </div>
+
+              {api.url && (
+                <div>
+                  <Text type="secondary" style={{ fontSize: 12 }}>Last Called URL:</Text>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
+                    <code style={{ background: '#e8f5e9', padding: '4px 8px', borderRadius: 4, fontSize: 11, flex: 1, wordBreak: 'break-all' }}>
+                      {api.url}
+                    </code>
+                    <Button size="small" icon={glCopiedUrl === api.url ? <CheckOutlined /> : <CopyOutlined />}
+                      onClick={() => { navigator.clipboard.writeText(api.url!); setGlCopiedUrl(api.url!); setTimeout(() => setGlCopiedUrl(null), 2000); }} />
+                  </div>
+                </div>
+              )}
+
+              {!api.url && (
+                <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>
+                  No request made yet — open a GL Journal entry to populate.
+                </Text>
+              )}
+            </div>
+          ))}
+        </div>
       </Modal>
 
       {/* ── Post to GL Modal ──────────────────────────────────────────────── */}
