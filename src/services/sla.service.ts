@@ -339,3 +339,100 @@ export function buildApInvoiceSlaPayload(opts: ApInvoiceSlaOptions): SlaCreatePa
     lines: slaLines,
   };
 }
+
+// ── Payload builder for AP Payments ───────────────────────────────────────
+
+export interface ApPaymentInvoiceLine {
+  invoiceNumber: string;
+  invoiceId: number;
+  /** Amount paid against this invoice in the invoice currency */
+  amountPaid: number;
+  /** AP Liability account from the invoice's liability_distribution */
+  liabilityDistribution: string;
+}
+
+export interface ApPaymentSlaOptions {
+  checkId: number;
+  paymentNumber: string;
+  paymentDate: string;           // YYYY-MM-DD
+  currencyCode: string;
+  businessUnit?: string;
+  legalEntity?: string;
+  ledgerId?: number;
+  ledgerName?: string;
+  ledgerCurrency?: string;
+  exchangeRate?: number;
+  createdBy?: string;
+  /** Cash Clearing account from the bank account record */
+  cashClearingAccount: string;
+  /** One entry per applied invoice */
+  appliedInvoices: ApPaymentInvoiceLine[];
+}
+
+/**
+ * Build one SLA payload per applied invoice for a payment.
+ * Pattern per invoice: DR AP Liability / CR Cash Clearing.
+ */
+export function buildApPaymentSlaPayloads(opts: ApPaymentSlaOptions): SlaCreatePayload[] {
+  const today      = new Date();
+  const acctDate   = opts.paymentDate || today.toISOString().split('T')[0];
+  const d          = new Date(acctDate);
+  const periodName = derivePeriodName(d);
+  const currency   = opts.currencyCode || 'AED';
+  const exRate     = opts.exchangeRate  ?? 1;
+
+  return opts.appliedInvoices.map((inv) => {
+    const amt = inv.amountPaid;
+    return {
+      header: {
+        moduleName:       'AP',
+        sourceTable:      'AP_PAYMENTS',
+        sourceId:         opts.checkId,
+        sourceNumber:     opts.paymentNumber,
+        sourceType:       'PAYMENT',
+        eventTypeCode:    'AP_PAYMENT_CREATED',
+        eventDate:        acctDate,
+        accountingDate:   acctDate,
+        periodName,
+        ledgerId:         opts.ledgerId   ?? 300000003259529,
+        ledgerName:       opts.ledgerName ?? 'BCL DIFC',
+        currencyCode:     currency,
+        ledgerCurrency:   opts.ledgerCurrency ?? 'AED',
+        exchangeRate:     exRate,
+        exchangeRateType: 'Corporate',
+        businessUnit:     opts.businessUnit,
+        legalEntity:      opts.legalEntity,
+        description:      `AP Payment ${opts.paymentNumber} – Invoice ${inv.invoiceNumber}`,
+        createdBy:        opts.createdBy ?? 'SYSTEM',
+      },
+      lines: [
+        {
+          lineNumber:         1,
+          lineType:           'DR',
+          accountingClass:    'LIABILITY',
+          accountCombination: inv.liabilityDistribution,
+          enteredDr:          amt,
+          enteredCr:          0,
+          accountedDr:        Math.round(amt * exRate * 100) / 100,
+          accountedCr:        0,
+          currencyCode:       currency,
+          exchangeRate:       exRate,
+          description:        `AP Liability – Invoice ${inv.invoiceNumber}`,
+        },
+        {
+          lineNumber:         2,
+          lineType:           'CR',
+          accountingClass:    'CASH_CLEARING',
+          accountCombination: opts.cashClearingAccount,
+          enteredDr:          0,
+          enteredCr:          amt,
+          accountedDr:        0,
+          accountedCr:        Math.round(amt * exRate * 100) / 100,
+          currencyCode:       currency,
+          exchangeRate:       exRate,
+          description:        `Cash Clearing – Payment ${opts.paymentNumber}`,
+        },
+      ],
+    };
+  });
+}

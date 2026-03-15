@@ -60,6 +60,7 @@ import {
   PlayCircleOutlined,
   LoadingOutlined,
   CheckCircleOutlined,
+  AccountBookOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -67,6 +68,12 @@ import FloatingMenu from '../../components/FloatingMenu';
 import Autopilot from '../../components/Autopilot';
 import PaymentDetail from './PaymentDetail';
 import { ORACLE_FUSION_CONFIG, APEX_DB_CONFIG } from '../../config/api.config';
+import {
+  checkAccountingExists,
+  createAccounting,
+  fetchLedgerByBusinessUnit,
+  buildApPaymentSlaPayloads,
+} from '../../services/sla.service';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -463,6 +470,12 @@ const ManagePayments: React.FC = () => {
   const [bankAccountsLoading, setBankAccountsLoading] = useState(false);
   const [selectedBankAccount, setSelectedBankAccount] = useState<BankAccountRecord | null>(null);
 
+  // Payment accounting state
+  const [acctPayment, setAcctPayment] = useState<PaymentRecord | null>(null);
+  const [acctLoading, setAcctLoading] = useState(false);
+  const [acctResults, setAcctResults] = useState<{ invoiceNumber: string; status: string; headerId?: number; error?: string }[]>([]);
+  const [acctModalOpen, setAcctModalOpen] = useState(false);
+
   // Fetch bank accounts from APEX
   const fetchBankAccounts = async () => {
     setBankAccountsLoading(true);
@@ -492,9 +505,10 @@ const ManagePayments: React.FC = () => {
     }
   };
 
-  // Pre-load Business Units on mount (needed for Search form too)
+  // Pre-load Business Units and Bank Accounts on mount
   useEffect(() => {
     fetchBusinessUnits();
+    fetchBankAccounts();
   }, []);
 
   // Load remaining LOV data when Create Payment tab opens
@@ -1224,6 +1238,14 @@ const ManagePayments: React.FC = () => {
                 onClick={() => openVoidModal(record)}
               />
             </Tooltip>
+            <Tooltip title="Create Accounting">
+              <Button
+                type="link"
+                size="small"
+                icon={<AccountBookOutlined />}
+                onClick={() => handleCreateAccounting(record)}
+              />
+            </Tooltip>
             <Tooltip title="View Details">
               <Button
                 type="link"
@@ -1379,6 +1401,86 @@ const ManagePayments: React.FC = () => {
 
     } finally {
       setVoidSubmitting(false);
+    }
+  };
+  // ────────────────────────────────────────────────────────────────────────
+
+  // ── Create Accounting for Payment ────────────────────────────────────────
+  const handleCreateAccounting = async (record: PaymentRecord) => {
+    setAcctPayment(record);
+    setAcctResults([]);
+    setAcctLoading(true);
+    setAcctModalOpen(true);
+
+    try {
+      // 1. Check if accounting already exists
+      const exists = await checkAccountingExists('AP_PAYMENTS', record.checkId);
+      if (exists.exists && exists.accountingStatus === 'POSTED') {
+        setAcctResults([{ invoiceNumber: '—', status: 'ALREADY POSTED', headerId: exists.headerId ?? undefined }]);
+        setAcctLoading(false);
+        return;
+      }
+
+      // 2. Find matching bank account by name
+      const bank = bankAccounts.find(b => b.bankAccountName === record.disbursementBankAccount);
+      if (!bank) {
+        setAcctResults([{ invoiceNumber: '—', status: 'ERROR', error: `Bank account not found: ${record.disbursementBankAccount}` }]);
+        setAcctLoading(false);
+        return;
+      }
+
+      // 3. Fetch related invoices (includes LiabilityDistribution via updated SQL)
+      const relUrl = `${APEX_DB_CONFIG.baseUrl}/ap/payments/${record.checkId}/related-invoices`;
+      const relRes = await fetch(relUrl, { headers: { Accept: 'application/json' } });
+      if (!relRes.ok) throw new Error(`Failed to fetch related invoices: HTTP ${relRes.status}`);
+      const relData = await relRes.json();
+      const relInvoices: any[] = relData.items || [];
+
+      if (relInvoices.length === 0) {
+        setAcctResults([{ invoiceNumber: '—', status: 'ERROR', error: 'No applied invoices found for this payment' }]);
+        setAcctLoading(false);
+        return;
+      }
+
+      // 4. Fetch ledger
+      const ledgerInfo = await fetchLedgerByBusinessUnit(record.businessUnit || '');
+
+      // 5. Build one journal payload per invoice and post
+      const paymentDate = record.paymentDate || record.checkDate || new Date().toISOString().split('T')[0];
+      const payloads = buildApPaymentSlaPayloads({
+        checkId: record.checkId,
+        paymentNumber: record.paymentNumber || record.checkId.toString(),
+        paymentDate,
+        currencyCode: record.currency || 'AED',
+        businessUnit: record.businessUnit,
+        legalEntity: record.legalEntityName,
+        ledgerId: ledgerInfo?.ledgerId,
+        ledgerName: ledgerInfo?.ledgerName,
+        cashClearingAccount: bank.cashClearingAccountCombination,
+        appliedInvoices: relInvoices.map((inv: any) => ({
+          invoiceNumber: inv.InvoiceNumber || '',
+          invoiceId: inv.InvoiceId || 0,
+          amountPaid: inv.AmountPaidInvoiceCurrency || inv.InvoicePaymentAmount || 0,
+          liabilityDistribution: inv.LiabilityDistribution || '',
+        })),
+      });
+
+      // 6. Post each journal and collect results
+      const results: typeof acctResults = [];
+      for (const payload of payloads) {
+        const invNum = payload.header.description?.split('Invoice ')[1] || '—';
+        try {
+          const result = await createAccounting(payload);
+          results.push({ invoiceNumber: invNum, status: 'DRAFT', headerId: result.headerId });
+        } catch (err: any) {
+          results.push({ invoiceNumber: invNum, status: 'ERROR', error: err.message });
+        }
+      }
+      setAcctResults(results);
+    } catch (err: any) {
+      setAcctResults([{ invoiceNumber: '—', status: 'ERROR', error: err.message }]);
+    } finally {
+      setAcctLoading(false);
     }
   };
   // ────────────────────────────────────────────────────────────────────────
@@ -3130,6 +3232,52 @@ const ManagePayments: React.FC = () => {
         </Drawer>
 
       </Content>
+
+      {/* ── Payment Accounting Results Modal ─────────────────────────────── */}
+      <Modal
+        open={acctModalOpen}
+        onCancel={() => setAcctModalOpen(false)}
+        title={`Create Accounting — Payment ${acctPayment?.paymentNumber || acctPayment?.checkId || ''}`}
+        footer={<Button onClick={() => setAcctModalOpen(false)}>Close</Button>}
+        width={620}
+      >
+        {acctLoading ? (
+          <div style={{ textAlign: 'center', padding: 32 }}>
+            <LoadingOutlined style={{ fontSize: 28 }} />
+            <p style={{ marginTop: 12, color: '#666' }}>Creating accounting journals…</p>
+          </div>
+        ) : (
+          <Table
+            size="small"
+            pagination={false}
+            dataSource={acctResults.map((r, i) => ({ ...r, key: i }))}
+            columns={[
+              { title: 'Invoice', dataIndex: 'invoiceNumber', key: 'invoiceNumber' },
+              {
+                title: 'Status',
+                dataIndex: 'status',
+                key: 'status',
+                render: (v: string) => (
+                  <Tag color={v === 'DRAFT' ? 'blue' : v === 'ALREADY POSTED' ? 'green' : 'red'}>{v}</Tag>
+                ),
+              },
+              {
+                title: 'Header ID',
+                dataIndex: 'headerId',
+                key: 'headerId',
+                render: (v?: number) => v ?? '—',
+              },
+              {
+                title: 'Error',
+                dataIndex: 'error',
+                key: 'error',
+                render: (v?: string) => v ? <span style={{ color: 'red', fontSize: 11 }}>{v}</span> : '—',
+              },
+            ]}
+          />
+        )}
+      </Modal>
+
       <Autopilot module="ap" />
       <FloatingMenu />
     </Layout>

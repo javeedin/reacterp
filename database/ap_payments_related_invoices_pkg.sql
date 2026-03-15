@@ -321,25 +321,27 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENT_REL_INVOICES_PKG AS
             'items' VALUE (
                 SELECT JSON_ARRAYAGG(
                     JSON_OBJECT(
-                        'InvoicePaymentId' VALUE INVOICE_PAYMENT_ID,
-                        'CheckId' VALUE CHECK_ID,
-                        'InvoiceId' VALUE INVOICE_ID,
-                        'InvoiceBusinessUnit' VALUE INVOICE_BUSINESS_UNIT,
-                        'InvoiceNumber' VALUE INVOICE_NUMBER,
-                        'InstallmentNumber' VALUE INSTALLMENT_NUMBER,
-                        'AmountPaidPaymentCurrency' VALUE AMOUNT_PAID_PAYMENT_CURRENCY,
-                        'AmountPaidInvoiceCurrency' VALUE AMOUNT_PAID_INVOICE_CURRENCY,
-                        'InvoicePaymentAmount' VALUE INVOICE_PAYMENT_AMOUNT,
-                        'InvoiceAmount' VALUE INVOICE_AMOUNT,
-                        'DiscountLost' VALUE DISCOUNT_LOST,
-                        'DiscountTaken' VALUE DISCOUNT_TAKEN,
-                        'InvoiceCurrency' VALUE INVOICE_CURRENCY,
-                        'InvoicePaymentStatus' VALUE INVOICE_PAYMENT_STATUS
-                    ) ORDER BY INVOICE_NUMBER
+                        'InvoicePaymentId' VALUE r.INVOICE_PAYMENT_ID,
+                        'CheckId' VALUE r.CHECK_ID,
+                        'InvoiceId' VALUE r.INVOICE_ID,
+                        'InvoiceBusinessUnit' VALUE r.INVOICE_BUSINESS_UNIT,
+                        'InvoiceNumber' VALUE r.INVOICE_NUMBER,
+                        'InstallmentNumber' VALUE r.INSTALLMENT_NUMBER,
+                        'AmountPaidPaymentCurrency' VALUE r.AMOUNT_PAID_PAYMENT_CURRENCY,
+                        'AmountPaidInvoiceCurrency' VALUE r.AMOUNT_PAID_INVOICE_CURRENCY,
+                        'InvoicePaymentAmount' VALUE r.INVOICE_PAYMENT_AMOUNT,
+                        'InvoiceAmount' VALUE r.INVOICE_AMOUNT,
+                        'DiscountLost' VALUE r.DISCOUNT_LOST,
+                        'DiscountTaken' VALUE r.DISCOUNT_TAKEN,
+                        'InvoiceCurrency' VALUE r.INVOICE_CURRENCY,
+                        'InvoicePaymentStatus' VALUE r.INVOICE_PAYMENT_STATUS,
+                        'LiabilityDistribution' VALUE i.LIABILITY_DISTRIBUTION
+                    ) ORDER BY r.INVOICE_NUMBER
                     RETURNING CLOB
                 )
-                FROM RR_AP_PAYMENTS_RELATED_INVOICES
-                WHERE CHECK_ID = p_check_id
+                FROM RR_AP_PAYMENTS_RELATED_INVOICES r
+                LEFT JOIN RR_AP_INVOICES_ALL i ON i.INVOICE_ID = r.INVOICE_ID
+                WHERE r.CHECK_ID = p_check_id
             )
             RETURNING CLOB
         )
@@ -440,6 +442,7 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENT_REL_INVOICES_PKG AS
                         'InvoiceCurrency' VALUE INVOICE_CURRENCY,
                         'CrossCurrencyRate' VALUE CROSS_CURRENCY_RATE,
                         'InvoicePaymentStatus' VALUE INVOICE_PAYMENT_STATUS,
+                        'LiabilityDistribution' VALUE LIABILITY_DISTRIBUTION,
                         'CreatedBy' VALUE CREATED_BY,
                         'CreationDate' VALUE TO_CHAR(CREATION_DATE, 'YYYY-MM-DD"T"HH24:MI:SS.FF3TZH:TZM'),
                         'LastUpdatedBy' VALUE LAST_UPDATED_BY,
@@ -451,17 +454,18 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENT_REL_INVOICES_PKG AS
                     RETURNING CLOB
                 )
                 FROM (
-                    SELECT *
-                    FROM RR_AP_PAYMENTS_RELATED_INVOICES
-                    WHERE (p_check_id IS NULL OR CHECK_ID = p_check_id)
-                      AND (p_invoice_number IS NULL OR UPPER(INVOICE_NUMBER) LIKE '%' || UPPER(p_invoice_number) || '%')
-                      AND (p_invoice_id IS NULL OR INVOICE_ID = p_invoice_id)
-                      AND (p_invoice_business_unit IS NULL OR INVOICE_BUSINESS_UNIT = p_invoice_business_unit)
-                      AND (p_invoice_payment_status IS NULL OR INVOICE_PAYMENT_STATUS = p_invoice_payment_status)
-                      AND (p_invoice_currency IS NULL OR INVOICE_CURRENCY = p_invoice_currency)
-                    ORDER BY INVOICE_NUMBER
+                    SELECT r.*, i.LIABILITY_DISTRIBUTION
+                    FROM RR_AP_PAYMENTS_RELATED_INVOICES r
+                    LEFT JOIN RR_AP_INVOICES_ALL i ON i.INVOICE_ID = r.INVOICE_ID
+                    WHERE (p_check_id IS NULL OR r.CHECK_ID = p_check_id)
+                      AND (p_invoice_number IS NULL OR UPPER(r.INVOICE_NUMBER) LIKE '%' || UPPER(p_invoice_number) || '%')
+                      AND (p_invoice_id IS NULL OR r.INVOICE_ID = p_invoice_id)
+                      AND (p_invoice_business_unit IS NULL OR r.INVOICE_BUSINESS_UNIT = p_invoice_business_unit)
+                      AND (p_invoice_payment_status IS NULL OR r.INVOICE_PAYMENT_STATUS = p_invoice_payment_status)
+                      AND (p_invoice_currency IS NULL OR r.INVOICE_CURRENCY = p_invoice_currency)
+                    ORDER BY r.INVOICE_NUMBER
                     OFFSET p_offset ROWS FETCH NEXT p_limit ROWS ONLY
-                )
+                ) r
             )
             RETURNING CLOB
         )
