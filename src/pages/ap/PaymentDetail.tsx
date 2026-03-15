@@ -38,6 +38,8 @@ import {
   ApiOutlined,
   PlayCircleOutlined,
   AccountBookOutlined,
+  FormOutlined,
+  SendOutlined,
 } from '@ant-design/icons';
 
 const { Title, Text } = Typography;
@@ -164,7 +166,10 @@ import {
   createAccounting,
   fetchLedgerByBusinessUnit,
   buildApPaymentSlaPayloads,
+  getAccounting,
+  postToLedger as slaPostToLedger,
 } from '../../services/sla.service';
+import type { SlaExistsResult, SlaGetResult } from '../../services/sla.service';
 
 // Fusion API config - direct URL
 const FUSION_CONFIG = {
@@ -211,6 +216,20 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
   const [acctPostPayload, setAcctPostPayload] = useState<any[]>([]);
   const [acctPostResult, setAcctPostResult] = useState<any>(null);
   const [acctPostRunning, setAcctPostRunning] = useState(false);
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // ── SLA Status / Post to Ledger / View Accounting state ──────────────────
+  const [slaStatus, setSlaStatus] = useState<SlaExistsResult | null>(null);
+  const [slaLoading, setSlaLoading] = useState(false);
+  const [slaActionLoading, setSlaActionLoading] = useState(false);
+  const [postModalOpen, setPostModalOpen] = useState(false);
+  const [postModalHeadId, setPostModalHeadId] = useState<number | null>(null);
+  const [glBatchId, setGlBatchId] = useState('');
+  const [glBatchName, setGlBatchName] = useState('');
+  const [glHeaderId, setGlHeaderId] = useState('');
+  const [viewAcctOpen, setViewAcctOpen] = useState(false);
+  const [viewAcctLoading, setViewAcctLoading] = useState(false);
+  const [viewAcctData, setViewAcctData] = useState<SlaGetResult | null>(null);
   // ─────────────────────────────────────────────────────────────────────────
 
   // Actions menu
@@ -423,6 +442,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
 
   useEffect(() => {
     fetchRelatedInvoices();
+    fetchSlaStatus();
   }, [payment.checkId]);
 
   // Fetch bank accounts on mount (needed for Create Accounting)
@@ -441,6 +461,118 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
     };
     load();
   }, []);
+
+  // ── SLA helpers ──────────────────────────────────────────────────────────
+
+  const fetchSlaStatus = async () => {
+    setSlaLoading(true);
+    try {
+      const result = await checkAccountingExists('AP_PAYMENTS', payment.checkId);
+      setSlaStatus(result);
+    } catch (err) {
+      console.error('SLA status check failed:', err);
+    } finally {
+      setSlaLoading(false);
+    }
+  };
+
+  const handlePostToLedgerOpen = async () => {
+    setSlaActionLoading(true);
+    try {
+      const result = await getAccounting('AP_PAYMENTS', payment.checkId);
+      if (!result.found || !result.headerId) {
+        message.warning('No accounting entry found. Run "Create Accounting" first.');
+        return;
+      }
+      if (result.accountingStatus === 'POSTED') {
+        message.error(`Header ${result.headerId} is already POSTED and locked.`);
+        return;
+      }
+      if (result.accountingStatus === 'ERROR') {
+        message.error(`Header ${result.headerId} is in ERROR. Re-create accounting first.`);
+        return;
+      }
+      setPostModalHeadId(result.headerId);
+      setGlBatchId('');
+      setGlBatchName(`AP_PMT_${payment.paymentNumber}_BATCH`);
+      setGlHeaderId('');
+      setPostModalOpen(true);
+    } catch (err: any) {
+      message.error(`Failed to fetch accounting: ${err.message}`);
+    } finally {
+      setSlaActionLoading(false);
+    }
+  };
+
+  const handlePostToLedgerConfirm = async () => {
+    if (!postModalHeadId) return;
+    if (!glBatchId || !glHeaderId) {
+      message.warning('GL Batch ID and GL Header ID are required.');
+      return;
+    }
+    setSlaActionLoading(true);
+    try {
+      const result = await slaPostToLedger(
+        postModalHeadId,
+        Number(glBatchId),
+        glBatchName,
+        Number(glHeaderId),
+      );
+      message.success(`Posted to GL. Header ${result.headerId} is now POSTED and locked.`);
+      setPostModalOpen(false);
+      await fetchSlaStatus();
+    } catch (err: any) {
+      message.error(`Post to ledger failed: ${err.message}`);
+    } finally {
+      setSlaActionLoading(false);
+    }
+  };
+
+  const handleViewAccounting = async () => {
+    setViewAcctOpen(true);
+    setViewAcctLoading(true);
+    setViewAcctData(null);
+    try {
+      const result = await getAccounting('AP_PAYMENTS', payment.checkId);
+      setViewAcctData(result);
+    } catch (err: any) {
+      message.error(`Failed to fetch accounting: ${err.message}`);
+      setViewAcctOpen(false);
+    } finally {
+      setViewAcctLoading(false);
+    }
+  };
+
+  const getAccountingStatusDisplay = () => {
+    if (slaLoading) return <Spin size="small" />;
+    if (!slaStatus?.exists) {
+      return <Tag color="default" style={{ fontSize: 12, padding: '2px 8px' }}>Accounting: None</Tag>;
+    }
+    const status = slaStatus.accountingStatus || '';
+    const colorMap: Record<string, string> = {
+      DRAFT: '#1677ff', FINAL: '#52c41a', POSTED: '#52c41a', ERROR: '#ff4d4f',
+    };
+    const labelMap: Record<string, string> = {
+      DRAFT: 'Draft', FINAL: 'Final', POSTED: 'Posted', ERROR: 'Error',
+    };
+    const iconMap: Record<string, React.ReactNode> = {
+      DRAFT: <FormOutlined />, FINAL: <CheckCircleOutlined />,
+      POSTED: <CheckCircleOutlined />, ERROR: <StopOutlined />,
+    };
+    return (
+      <Tooltip title={slaStatus.message}>
+        <Tag
+          color={colorMap[status] || 'default'}
+          icon={iconMap[status]}
+          style={{ fontSize: 12, padding: '2px 8px', cursor: 'help', fontWeight: 600 }}
+        >
+          {labelMap[status] || status}
+        </Tag>
+      </Tooltip>
+    );
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────
 
   // Create Accounting handler
   const handleCreateAccounting = async () => {
@@ -571,6 +703,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
         hasErrors ? `${results.filter(r => r.status === 'ERROR').length} error(s)` : `${results.length} journal(s) created`
       );
       setAcctResults(results);
+      fetchSlaStatus(); // refresh accounting status badge
     } catch (err: any) {
       setAcctResults([{ invoiceNumber: '—', status: 'ERROR', error: err.message }]);
     } finally {
@@ -1081,11 +1214,35 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
             <Dropdown menu={{ items: actionsMenuItems, onClick: handleActionsClick }} trigger={['click']}>
               <Button>Actions <DownOutlined /></Button>
             </Dropdown>
-            <Tooltip title="Create Accounting">
-              <Button icon={<AccountBookOutlined />} onClick={handleCreateAccounting}>
-                Create Accounting
+            {getAccountingStatusDisplay()}
+            <Tooltip title={slaStatus?.accountingStatus === 'POSTED' ? 'Accounting is locked (POSTED)' : 'Create accounting entries in DRAFT'}>
+              <Button
+                icon={<AccountBookOutlined />}
+                onClick={handleCreateAccounting}
+                disabled={slaStatus?.accountingStatus === 'POSTED'}
+              >
+                {slaStatus?.accountingStatus === 'DRAFT' ? 'Re-create Accounting' : 'Create Accounting'}
               </Button>
             </Tooltip>
+            {slaStatus?.exists && slaStatus.accountingStatus === 'DRAFT' && (
+              <Tooltip title="Post accounting to General Ledger and lock">
+                <Button
+                  icon={<SendOutlined />}
+                  loading={slaActionLoading}
+                  style={{ borderColor: REDWOOD.info, color: REDWOOD.info }}
+                  onClick={handlePostToLedgerOpen}
+                >
+                  Post Accounting
+                </Button>
+              </Tooltip>
+            )}
+            {slaStatus?.exists && (
+              <Tooltip title="View accounting journal entries">
+                <Button icon={<FormOutlined />} onClick={handleViewAccounting}>
+                  View Account
+                </Button>
+              </Tooltip>
+            )}
             <Button type="primary" style={{ background: REDWOOD.primary }} onClick={onClose}>
               Done
             </Button>
@@ -1612,6 +1769,107 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
           font-size: 13px;
         }
       `}</style>
+
+      {/* Post to Ledger Modal */}
+      <Modal
+        title={`Post to Ledger — Header ID: ${postModalHeadId}`}
+        open={postModalOpen}
+        onOk={handlePostToLedgerConfirm}
+        onCancel={() => setPostModalOpen(false)}
+        confirmLoading={slaActionLoading}
+        okText="Post to GL"
+        okButtonProps={{ type: 'primary' }}
+      >
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <div>
+            <label style={{ fontSize: 12, color: REDWOOD.neutral600 }}>GL Batch ID *</label>
+            <Input
+              placeholder="e.g. 300000123456"
+              value={glBatchId}
+              onChange={e => setGlBatchId(e.target.value)}
+              type="number"
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: REDWOOD.neutral600 }}>GL Batch Name</label>
+            <Input
+              placeholder="e.g. AP_PMT_BATCH_001"
+              value={glBatchName}
+              onChange={e => setGlBatchName(e.target.value)}
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: REDWOOD.neutral600 }}>GL Header ID *</label>
+            <Input
+              placeholder="e.g. 300000123457"
+              value={glHeaderId}
+              onChange={e => setGlHeaderId(e.target.value)}
+              type="number"
+            />
+          </div>
+          <div style={{ color: REDWOOD.warning, fontSize: 12 }}>
+            ⚠ Once posted, the accounting entry will be locked and cannot be modified.
+          </div>
+        </Space>
+      </Modal>
+
+      {/* View Accounting Modal */}
+      <Modal
+        title={`Accounting Entries — Payment ${payment.paymentNumber}`}
+        open={viewAcctOpen}
+        onCancel={() => setViewAcctOpen(false)}
+        footer={
+          viewAcctData?.found && viewAcctData.accountingStatus === 'DRAFT' ? (
+            <Button
+              type="primary"
+              icon={<SendOutlined />}
+              loading={slaActionLoading}
+              onClick={() => { setViewAcctOpen(false); handlePostToLedgerOpen(); }}
+            >
+              Post Accounting
+            </Button>
+          ) : null
+        }
+        width={960}
+      >
+        {viewAcctLoading ? (
+          <div style={{ textAlign: 'center', padding: 32 }}><Spin /></div>
+        ) : viewAcctData?.found ? (
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <Descriptions size="small" column={3} bordered>
+              <Descriptions.Item label="Header ID">{viewAcctData.headerId}</Descriptions.Item>
+              <Descriptions.Item label="Status">
+                <Tag color={viewAcctData.accountingStatus === 'POSTED' ? 'green' : viewAcctData.accountingStatus === 'DRAFT' ? 'blue' : 'default'}>
+                  {viewAcctData.accountingStatus}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="Period">{viewAcctData.periodName}</Descriptions.Item>
+              <Descriptions.Item label="Accounting Date">{viewAcctData.accountingDate}</Descriptions.Item>
+              <Descriptions.Item label="Description" span={2}>{viewAcctData.description}</Descriptions.Item>
+              {viewAcctData.postedDate && (
+                <Descriptions.Item label="Posted Date">{viewAcctData.postedDate}</Descriptions.Item>
+              )}
+            </Descriptions>
+            <Table
+              size="small"
+              pagination={false}
+              dataSource={(viewAcctData.lines || []).map((l, i) => ({ ...l, key: i }))}
+              columns={[
+                { title: '#', dataIndex: 'lineNumber', width: 45 },
+                { title: 'Type', dataIndex: 'lineType', width: 55, render: (v: string) => <Tag color={v === 'DR' ? 'blue' : 'green'}>{v}</Tag> },
+                { title: 'Class', dataIndex: 'accountingClass', width: 130 },
+                { title: 'Account', dataIndex: 'accountCombination', width: 190 },
+                { title: 'Description', dataIndex: 'description', ellipsis: true },
+                { title: 'Dr', dataIndex: 'enteredDr', width: 120, align: 'right' as const, render: (v: number) => v ? v.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—' },
+                { title: 'Cr', dataIndex: 'enteredCr', width: 120, align: 'right' as const, render: (v: number) => v ? v.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—' },
+                { title: 'CCY', dataIndex: 'currencyCode', width: 60 },
+              ]}
+            />
+          </Space>
+        ) : (
+          <Alert message="No accounting entries found for this payment." type="info" />
+        )}
+      </Modal>
     </div>
   );
 };

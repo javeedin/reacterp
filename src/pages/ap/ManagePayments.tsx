@@ -27,6 +27,7 @@ import {
   Spin,
   Alert,
   Drawer,
+  Descriptions,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -61,6 +62,8 @@ import {
   LoadingOutlined,
   CheckCircleOutlined,
   AccountBookOutlined,
+  FormOutlined,
+  SendOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -73,7 +76,10 @@ import {
   createAccounting,
   fetchLedgerByBusinessUnit,
   buildApPaymentSlaPayloads,
+  getAccounting,
+  postToLedger as slaPostToLedger,
 } from '../../services/sla.service';
+import type { SlaGetResult } from '../../services/sla.service';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -498,6 +504,18 @@ const ManagePayments: React.FC = () => {
   const [acctLoading, setAcctLoading] = useState(false);
   const [acctResults, setAcctResults] = useState<{ invoiceNumber: string; status: string; headerId?: number; error?: string }[]>([]);
   const [acctModalOpen, setAcctModalOpen] = useState(false);
+
+  // View / Post Accounting modal state
+  const [viewAcctRecord, setViewAcctRecord] = useState<PaymentRecord | null>(null);
+  const [viewAcctOpen, setViewAcctOpen] = useState(false);
+  const [viewAcctLoading, setViewAcctLoading] = useState(false);
+  const [viewAcctData, setViewAcctData] = useState<SlaGetResult | null>(null);
+  const [postModalOpen, setPostModalOpen] = useState(false);
+  const [postModalHeadId, setPostModalHeadId] = useState<number | null>(null);
+  const [glBatchId, setGlBatchId] = useState('');
+  const [glBatchName, setGlBatchName] = useState('');
+  const [glHeaderId, setGlHeaderId] = useState('');
+  const [slaActionLoading, setSlaActionLoading] = useState(false);
 
   // Fetch bank accounts from APEX
   const fetchBankAccounts = async () => {
@@ -1261,12 +1279,21 @@ const ManagePayments: React.FC = () => {
                 onClick={() => openVoidModal(record)}
               />
             </Tooltip>
-            <Tooltip title="Create Accounting">
+            <Tooltip title={record.accountingStatus === 'Accounted' ? 'Accounting locked (Posted)' : 'Create Accounting'}>
               <Button
                 type="link"
                 size="small"
                 icon={<AccountBookOutlined />}
+                disabled={record.accountingStatus === 'Accounted'}
                 onClick={() => handleCreateAccounting(record)}
+              />
+            </Tooltip>
+            <Tooltip title="View / Post Accounting">
+              <Button
+                type="link"
+                size="small"
+                icon={<FormOutlined />}
+                onClick={() => handleViewAccounting(record)}
               />
             </Tooltip>
             <Tooltip title="View Details">
@@ -1427,6 +1454,63 @@ const ManagePayments: React.FC = () => {
     }
   };
   // ────────────────────────────────────────────────────────────────────────
+
+  // ── View / Post Accounting handlers ──────────────────────────────────────
+
+  const handleViewAccounting = async (record: PaymentRecord) => {
+    setViewAcctRecord(record);
+    setViewAcctOpen(true);
+    setViewAcctLoading(true);
+    setViewAcctData(null);
+    try {
+      const result = await getAccounting('AP_PAYMENTS', record.checkId);
+      setViewAcctData(result);
+    } catch (err: any) {
+      message.error(`Failed to fetch accounting: ${err.message}`);
+      setViewAcctOpen(false);
+    } finally {
+      setViewAcctLoading(false);
+    }
+  };
+
+  const handlePostToLedgerOpen = async () => {
+    if (!viewAcctData?.headerId) return;
+    setPostModalHeadId(viewAcctData.headerId);
+    setGlBatchId('');
+    setGlBatchName(`AP_PMT_${viewAcctRecord?.paymentNumber || viewAcctRecord?.checkId}_BATCH`);
+    setGlHeaderId('');
+    setPostModalOpen(true);
+  };
+
+  const handlePostToLedgerConfirm = async () => {
+    if (!postModalHeadId) return;
+    if (!glBatchId || !glHeaderId) {
+      message.warning('GL Batch ID and GL Header ID are required.');
+      return;
+    }
+    setSlaActionLoading(true);
+    try {
+      const result = await slaPostToLedger(
+        postModalHeadId,
+        Number(glBatchId),
+        glBatchName,
+        Number(glHeaderId),
+      );
+      message.success(`Posted to GL. Header ${result.headerId} is now POSTED and locked.`);
+      setPostModalOpen(false);
+      // Refresh view
+      if (viewAcctRecord) {
+        const refreshed = await getAccounting('AP_PAYMENTS', viewAcctRecord.checkId);
+        setViewAcctData(refreshed);
+      }
+    } catch (err: any) {
+      message.error(`Post to ledger failed: ${err.message}`);
+    } finally {
+      setSlaActionLoading(false);
+    }
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────
 
   // ── Create Accounting for Payment ────────────────────────────────────────
   const handleCreateAccounting = async (record: PaymentRecord) => {
@@ -3299,6 +3383,107 @@ const ManagePayments: React.FC = () => {
             ]}
           />
         )}
+      </Modal>
+
+      {/* View Accounting Modal */}
+      <Modal
+        title={`Accounting Entries — Payment ${viewAcctRecord?.paymentNumber ?? ''}`}
+        open={viewAcctOpen}
+        onCancel={() => setViewAcctOpen(false)}
+        footer={
+          viewAcctData?.found && viewAcctData.accountingStatus === 'DRAFT' ? (
+            <Button
+              type="primary"
+              icon={<SendOutlined />}
+              loading={slaActionLoading}
+              onClick={handlePostToLedgerOpen}
+            >
+              Post Accounting
+            </Button>
+          ) : null
+        }
+        width={960}
+      >
+        {viewAcctLoading ? (
+          <div style={{ textAlign: 'center', padding: 32 }}><Spin /></div>
+        ) : viewAcctData?.found ? (
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <Descriptions size="small" column={3} bordered>
+              <Descriptions.Item label="Header ID">{viewAcctData.headerId}</Descriptions.Item>
+              <Descriptions.Item label="Status">
+                <Tag color={viewAcctData.accountingStatus === 'POSTED' ? 'green' : viewAcctData.accountingStatus === 'DRAFT' ? 'blue' : 'default'}>
+                  {viewAcctData.accountingStatus}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="Period">{viewAcctData.periodName}</Descriptions.Item>
+              <Descriptions.Item label="Accounting Date">{viewAcctData.accountingDate}</Descriptions.Item>
+              <Descriptions.Item label="Description" span={2}>{viewAcctData.description}</Descriptions.Item>
+              {viewAcctData.postedDate && (
+                <Descriptions.Item label="Posted Date">{viewAcctData.postedDate}</Descriptions.Item>
+              )}
+            </Descriptions>
+            <Table
+              size="small"
+              pagination={false}
+              dataSource={(viewAcctData.lines || []).map((l, i) => ({ ...l, key: i }))}
+              columns={[
+                { title: '#', dataIndex: 'lineNumber', width: 45 },
+                { title: 'Type', dataIndex: 'lineType', width: 55, render: (v: string) => <Tag color={v === 'DR' ? 'blue' : 'green'}>{v}</Tag> },
+                { title: 'Class', dataIndex: 'accountingClass', width: 130 },
+                { title: 'Account', dataIndex: 'accountCombination', width: 190 },
+                { title: 'Description', dataIndex: 'description', ellipsis: true },
+                { title: 'Dr', dataIndex: 'enteredDr', width: 120, align: 'right' as const, render: (v: number) => v ? v.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—' },
+                { title: 'Cr', dataIndex: 'enteredCr', width: 120, align: 'right' as const, render: (v: number) => v ? v.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—' },
+                { title: 'CCY', dataIndex: 'currencyCode', width: 60 },
+              ]}
+            />
+          </Space>
+        ) : (
+          <Alert message="No accounting entries found for this payment." type="info" />
+        )}
+      </Modal>
+
+      {/* Post to Ledger Modal */}
+      <Modal
+        title={`Post to Ledger — Header ID: ${postModalHeadId}`}
+        open={postModalOpen}
+        onOk={handlePostToLedgerConfirm}
+        onCancel={() => setPostModalOpen(false)}
+        confirmLoading={slaActionLoading}
+        okText="Post to GL"
+        okButtonProps={{ type: 'primary' }}
+      >
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <div>
+            <label style={{ fontSize: 12, color: REDWOOD.neutral600 }}>GL Batch ID *</label>
+            <Input
+              placeholder="e.g. 300000123456"
+              value={glBatchId}
+              onChange={e => setGlBatchId(e.target.value)}
+              type="number"
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: REDWOOD.neutral600 }}>GL Batch Name</label>
+            <Input
+              placeholder="e.g. AP_PMT_BATCH_001"
+              value={glBatchName}
+              onChange={e => setGlBatchName(e.target.value)}
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: REDWOOD.neutral600 }}>GL Header ID *</label>
+            <Input
+              placeholder="e.g. 300000123457"
+              value={glHeaderId}
+              onChange={e => setGlHeaderId(e.target.value)}
+              type="number"
+            />
+          </div>
+          <div style={{ color: REDWOOD.warning, fontSize: 12 }}>
+            ⚠ Once posted, the accounting entry will be locked and cannot be modified.
+          </div>
+        </Space>
       </Modal>
 
       <Autopilot module="ap" />
