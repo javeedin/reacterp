@@ -57,7 +57,7 @@ END RR_AP_RECON_PKG;
 -- ---------------------------------------------------------------------------
 -- Package body
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE PACKAGE BODY RR_AP_RECON_PKG AS
+create or replace PACKAGE BODY RR_AP_RECON_PKG AS
 
     -- -----------------------------------------------------------------------
     -- JSON helpers (same pattern used across all RR packages)
@@ -235,14 +235,14 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_RECON_PKG AS
             ' LEFT JOIN RR_SLA_ACCOUNTING_LINES sl' ||
             '        ON sl.HEADER_ID = h.HEADER_ID' ||
             -- GL header — matched via SLA's GL_HEADER_ID
-            ' LEFT JOIN RR_GL_HEADERS gh' ||
+            ' LEFT JOIN RR_GL_JE_HEADERS gh' ||
             '        ON gh.JE_HEADER_ID = h.GL_HEADER_ID' ||
             -- GL batch — for category, source, posting status
             ' LEFT JOIN RR_GL_JOURNAL_BATCHES gb' ||
             '        ON gb.JE_BATCH_ID = gh.BATCH_ID' ||
             -- GL line count subquery (lightweight — just COUNT)
             ' LEFT JOIN (SELECT JE_HEADER_ID, COUNT(*) GL_LINE_COUNT' ||
-            '              FROM RR_GL_LINES_ALL' ||
+            '              FROM RR_GL_JE_LINES_ALL' ||
             '             GROUP BY JE_HEADER_ID) gll' ||
             '        ON gll.JE_HEADER_ID = gh.JE_HEADER_ID' ||
             v_where ||
