@@ -798,22 +798,16 @@ const CreateAccounting: React.FC = () => {
       const slaLineParams = new URLSearchParams({ moduleName: 'AP', limit: '2000' });
       if (vals.period) slaLineParams.append('periodName', vals.period);
 
-      const glParams = new URLSearchParams({ limit: '500' });
-      if (vals.ledger) glParams.append('ledger', vals.ledger);
-      if (vals.period) glParams.append('period', vals.period);
-      glParams.append('source', 'Payables');
-
-      const [slaHdrRes, slaLineRes, glRes] = await Promise.all([
-        loggedFetch(`${BASE}/sla/journals?${slaHdrParams}`,         { headers: { Accept: 'application/json' } }),
-        loggedFetch(`${BASE}/sla/journals/lines?${slaLineParams}`,  { headers: { Accept: 'application/json' } }),
-        loggedFetch(`${BASE}/gl/journals/headers?${glParams}`,      { headers: { Accept: 'application/json' } }),
+      // Step 1: fetch SLA headers + lines in parallel
+      const [slaHdrRes, slaLineRes] = await Promise.all([
+        loggedFetch(`${BASE}/sla/journals?${slaHdrParams}`,        { headers: { Accept: 'application/json' } }),
+        loggedFetch(`${BASE}/sla/journals/lines?${slaLineParams}`, { headers: { Accept: 'application/json' } }),
       ]);
 
-      const slaItems:  any[] = slaHdrRes.ok  ? ((await slaHdrRes.json()).items  || []) : [];
-      const slaLines:  any[] = slaLineRes.ok ? ((await slaLineRes.json()).items || []) : [];
-      const glItems:   any[] = glRes.ok      ? ((await glRes.json()).items       || []) : [];
+      const slaItems: any[] = slaHdrRes.ok  ? ((await slaHdrRes.json()).items  || []) : [];
+      const slaLines: any[] = slaLineRes.ok ? ((await slaLineRes.json()).items || []) : [];
 
-      // Aggregate SLA lines by headerId to get DR / CR totals
+      // Aggregate SLA lines by headerId → DR / CR totals
       const slaAmounts: Record<number, { dr: number; cr: number }> = {};
       for (const l of slaLines) {
         const hid = Number(l.headerId || l.header_id || 0);
@@ -823,32 +817,45 @@ const CreateAccounting: React.FC = () => {
         slaAmounts[hid].cr += Number(l.enteredCr ?? l.entered_cr ?? l.ENTERED_CR ?? 0);
       }
 
-      // Build GL lookup by headerId / jeHeaderId (direct ID match is reliable)
-      const glById: Record<number, any> = {};
-      glItems.forEach((g: any) => {
-        const id = Number(g.headerId || g.jeHeaderId || g.je_header_id || 0);
-        if (id) glById[id] = g;
-      });
-      // Also build by batchName as a fallback
-      const glByBatch: Record<string, any> = {};
-      glItems.forEach((g: any) => {
-        const key = g.batchName || g.batch_name || g.je_batch_name || '';
-        if (key) glByBatch[key] = g;
-      });
+      // Step 2: collect unique glHeaderId values from SLA records
+      const glHeaderIds: number[] = [
+        ...new Set(
+          slaItems
+            .map((s: any) => Number(s.glHeaderId || s.gl_header_id || 0))
+            .filter(id => id > 0)
+        ),
+      ];
 
+      // Step 3: fetch each GL journal header by its specific jeHeaderId
+      const glById: Record<number, any> = {};
+      if (glHeaderIds.length > 0) {
+        const glResponses = await Promise.all(
+          glHeaderIds.map(id =>
+            loggedFetch(`${BASE}/gl/journals/headers?jeHeaderId=${id}`, { headers: { Accept: 'application/json' } })
+              .then(r => r.ok ? r.json() : { items: [] })
+              .catch(() => ({ items: [] }))
+          )
+        );
+        glResponses.forEach(d => {
+          const items: any[] = Array.isArray(d) ? d : (d.items || []);
+          items.forEach((g: any) => {
+            const id = Number(g.jeHeaderId || g.headerId || g.je_header_id || 0);
+            if (id) glById[id] = g;
+          });
+        });
+      }
+
+      // Step 4: build reconciliation rows
       const rows: ReconcileRow[] = slaItems.map((s: any, i: number) => {
-        const hid       = Number(s.headerId || s.header_id || 0);
-        const slaGlHid  = Number(s.glHeaderId || s.gl_header_id || 0);
-        const slaBatch  = s.glBatchName || s.gl_batch_name || '';
-        // Match GL journal: prefer direct ID lookup, fall back to batch name
-        const glMatch   = (slaGlHid && glById[slaGlHid]) ? glById[slaGlHid]
-                        : (slaBatch && glByBatch[slaBatch]) ? glByBatch[slaBatch]
-                        : null;
-        const slaDr   = slaAmounts[hid]?.dr ?? 0;
-        const slaCr   = slaAmounts[hid]?.cr ?? 0;
-        // GL amounts: enteredDebit / enteredCredit (camelCase from ORDS; journalEnteredDebit for service interface)
-        const glDr    = glMatch ? Number(glMatch.enteredDebit ?? glMatch.journalEnteredDebit ?? glMatch.entered_debit ?? 0) : 0;
-        const glCr    = glMatch ? Number(glMatch.enteredCredit ?? glMatch.journalEnteredCredit ?? glMatch.entered_credit ?? 0) : 0;
+        const hid      = Number(s.headerId || s.header_id || 0);
+        const slaGlHid = Number(s.glHeaderId || s.gl_header_id || 0);
+        const glMatch  = slaGlHid ? glById[slaGlHid] ?? null : null;
+
+        const slaDr = slaAmounts[hid]?.dr ?? 0;
+        const slaCr = slaAmounts[hid]?.cr ?? 0;
+        const glDr  = glMatch ? Number(glMatch.enteredDebit  ?? glMatch.journalEnteredDebit  ?? glMatch.entered_debit  ?? 0) : 0;
+        const glCr  = glMatch ? Number(glMatch.enteredCredit ?? glMatch.journalEnteredCredit ?? glMatch.entered_credit ?? 0) : 0;
+
         const isPayment = (s.sourceTable || s.source_table || '').toUpperCase().includes('PAYMENT');
         return {
           key:          String(hid || i),
@@ -858,7 +865,7 @@ const CreateAccounting: React.FC = () => {
           slaHeaderId:  hid || null,
           slaStatus:    s.accountingStatus || s.accounting_status || '',
           slaDr, slaCr,
-          glBatchName:  slaBatch || null,
+          glBatchName:  glMatch ? (glMatch.batchName || glMatch.batch_name || null) : (s.glBatchName || s.gl_batch_name || null),
           glHeaderId:   slaGlHid || null,
           glCategory:   glMatch ? (glMatch.category || glMatch.je_category || null) : null,
           glDr, glCr,
