@@ -991,13 +991,18 @@ const CreateAccounting: React.FC = () => {
             const totDiff   = data.reduce((s, r) => s + r.difference, 0);
             return (
               <Table.Summary.Row style={{ background: '#f5f5f5', fontWeight: 700 }}>
-                <Table.Summary.Cell index={0} colSpan={3}><Text strong>Total</Text></Table.Summary.Cell>
-                <Table.Summary.Cell index={3} align="right"><Text strong style={{ color: REDWOOD.info }}>{fmt(totSlaDr)}</Text></Table.Summary.Cell>
-                <Table.Summary.Cell index={4} align="right"><Text strong style={{ color: REDWOOD.error }}>{fmt(totSlaCr)}</Text></Table.Summary.Cell>
-                <Table.Summary.Cell index={5} colSpan={1} />
-                <Table.Summary.Cell index={6} align="right"><Text strong style={{ color: REDWOOD.info }}>{fmt(totGlDr)}</Text></Table.Summary.Cell>
-                <Table.Summary.Cell index={7} align="right"><Text strong style={{ color: REDWOOD.error }}>{fmt(totGlCr)}</Text></Table.Summary.Cell>
-                <Table.Summary.Cell index={8} align="right">
+                {/* colSpan=4 absorbs: Type(0) + Source#(1) + SLA-HeaderID(2) + SLA-Status(3) */}
+                <Table.Summary.Cell index={0} colSpan={4}><Text strong>Total</Text></Table.Summary.Cell>
+                {/* index 4 = SLA Debit, index 5 = SLA Credit */}
+                <Table.Summary.Cell index={4} align="right"><Text strong style={{ color: REDWOOD.info }}>{fmt(totSlaDr)}</Text></Table.Summary.Cell>
+                <Table.Summary.Cell index={5} align="right"><Text strong style={{ color: REDWOOD.error }}>{fmt(totSlaCr)}</Text></Table.Summary.Cell>
+                {/* index 6 = GL Batch Name (no total) */}
+                <Table.Summary.Cell index={6} />
+                {/* index 7 = GL Debit, index 8 = GL Credit */}
+                <Table.Summary.Cell index={7} align="right"><Text strong style={{ color: REDWOOD.info }}>{totGlDr > 0 ? fmt(totGlDr) : '—'}</Text></Table.Summary.Cell>
+                <Table.Summary.Cell index={8} align="right"><Text strong style={{ color: REDWOOD.error }}>{totGlCr > 0 ? fmt(totGlCr) : '—'}</Text></Table.Summary.Cell>
+                {/* index 9 = Difference */}
+                <Table.Summary.Cell index={9} align="right">
                   {totDiff > 0.01 ? <Text strong style={{ color: REDWOOD.error }}>{fmt(totDiff)}</Text> : <Tag color="green">Balanced</Tag>}
                 </Table.Summary.Cell>
               </Table.Summary.Row>
