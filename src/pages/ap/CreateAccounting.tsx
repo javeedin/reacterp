@@ -1,9 +1,10 @@
 import React, { useState, useCallback, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import dayjs, { Dayjs } from 'dayjs';
 import {
   Layout, Card, Form, Select, Button, Space, Table, Tag, Typography, Row, Col,
   Tabs, Statistic, Progress, Modal, Descriptions, DatePicker, Divider,
-  Tooltip, Badge, Spin, Alert, Dropdown, message, Empty,
+  Tooltip, Badge, Spin, Alert, Dropdown, message, Empty, Breadcrumb,
 } from 'antd';
 import {
   SearchOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined,
@@ -139,6 +140,7 @@ interface ReconcileRow {
 
 // ── Component ────────────────────────────────────────────────────────────────
 const CreateAccounting: React.FC = () => {
+  const navigate = useNavigate();
   const [headerForm] = Form.useForm();
 
   // ── Lookup data ──
@@ -829,7 +831,10 @@ const CreateAccounting: React.FC = () => {
       });
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      // Oracle NUMBER serializes integers as "28." — invalid JSON; strip trailing dots
+      const rawText = await res.text();
+      const cleanedText = rawText.replace(/(\d)\.(?=[,\}\]\s\n\r])/g, '$1');
+      const data = JSON.parse(cleanedText);
 
       if (data.error) throw new Error(data.message || 'Package error');
 
@@ -1469,7 +1474,23 @@ const CreateAccounting: React.FC = () => {
   return (
     <Layout style={{ minHeight: '100vh', background: '#f5f5f5' }}>
       {/* Page header */}
-      <div style={{ background: REDWOOD.headerBg, padding: '12px 24px' }}>
+      <div style={{ background: REDWOOD.headerBg, padding: '10px 24px' }}>
+        <Breadcrumb
+          style={{ marginBottom: 4 }}
+          items={[
+            {
+              title: (
+                <span
+                  style={{ color: 'rgba(255,255,255,0.75)', cursor: 'pointer', fontSize: 12 }}
+                  onClick={() => navigate('/ap')}
+                >
+                  Payables
+                </span>
+              ),
+            },
+            { title: <span style={{ color: '#fff', fontSize: 12 }}>Create Accounting</span> },
+          ]}
+        />
         <Space>
           <BookOutlined style={{ color: '#fff', fontSize: 18 }} />
           <Title level={4} style={{ color: '#fff', margin: 0 }}>Create Accounting</Title>
