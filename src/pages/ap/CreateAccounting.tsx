@@ -110,6 +110,7 @@ interface ReconcileRow {
   slaCr: number;
   glBatchName: string | null;
   glHeaderId: number | null;
+  glCategory: string | null;
   glDr: number;
   glCr: number;
   difference: number;
@@ -822,21 +823,32 @@ const CreateAccounting: React.FC = () => {
         slaAmounts[hid].cr += Number(l.enteredCr ?? l.entered_cr ?? l.ENTERED_CR ?? 0);
       }
 
-      // Build GL lookup by batchName (which = SLA glBatchName)
+      // Build GL lookup by headerId / jeHeaderId (direct ID match is reliable)
+      const glById: Record<number, any> = {};
+      glItems.forEach((g: any) => {
+        const id = Number(g.headerId || g.jeHeaderId || g.je_header_id || 0);
+        if (id) glById[id] = g;
+      });
+      // Also build by batchName as a fallback
       const glByBatch: Record<string, any> = {};
       glItems.forEach((g: any) => {
-        const key = g.batch_name || g.batchName || g.je_batch_name || '';
+        const key = g.batchName || g.batch_name || g.je_batch_name || '';
         if (key) glByBatch[key] = g;
       });
 
       const rows: ReconcileRow[] = slaItems.map((s: any, i: number) => {
-        const hid     = Number(s.headerId || s.header_id || 0);
-        const glMatch = (s.gl_batch_name || s.glBatchName) ? glByBatch[s.gl_batch_name || s.glBatchName] : null;
+        const hid       = Number(s.headerId || s.header_id || 0);
+        const slaGlHid  = Number(s.glHeaderId || s.gl_header_id || 0);
+        const slaBatch  = s.glBatchName || s.gl_batch_name || '';
+        // Match GL journal: prefer direct ID lookup, fall back to batch name
+        const glMatch   = (slaGlHid && glById[slaGlHid]) ? glById[slaGlHid]
+                        : (slaBatch && glByBatch[slaBatch]) ? glByBatch[slaBatch]
+                        : null;
         const slaDr   = slaAmounts[hid]?.dr ?? 0;
         const slaCr   = slaAmounts[hid]?.cr ?? 0;
-        // GL header amounts: enteredDebit / enteredCredit (from JournalRecord interface)
-        const glDr    = glMatch ? Number(glMatch.enteredDebit  ?? glMatch.entered_debit  ?? glMatch.running_total_dr ?? 0) : 0;
-        const glCr    = glMatch ? Number(glMatch.enteredCredit ?? glMatch.entered_credit ?? glMatch.running_total_cr ?? 0) : 0;
+        // GL amounts: enteredDebit / enteredCredit (camelCase from ORDS; journalEnteredDebit for service interface)
+        const glDr    = glMatch ? Number(glMatch.enteredDebit ?? glMatch.journalEnteredDebit ?? glMatch.entered_debit ?? 0) : 0;
+        const glCr    = glMatch ? Number(glMatch.enteredCredit ?? glMatch.journalEnteredCredit ?? glMatch.entered_credit ?? 0) : 0;
         const isPayment = (s.sourceTable || s.source_table || '').toUpperCase().includes('PAYMENT');
         return {
           key:          String(hid || i),
@@ -846,8 +858,9 @@ const CreateAccounting: React.FC = () => {
           slaHeaderId:  hid || null,
           slaStatus:    s.accountingStatus || s.accounting_status || '',
           slaDr, slaCr,
-          glBatchName:  s.gl_batch_name || s.glBatchName || null,
-          glHeaderId:   s.gl_header_id  || s.glHeaderId  || null,
+          glBatchName:  slaBatch || null,
+          glHeaderId:   slaGlHid || null,
+          glCategory:   glMatch ? (glMatch.category || glMatch.je_category || null) : null,
           glDr, glCr,
           difference:   Math.abs(slaDr - glDr),
         };
@@ -1344,7 +1357,8 @@ const CreateAccounting: React.FC = () => {
             {
               title: 'GL Journal',
               children: [
-                { title: 'Batch Name', dataIndex: 'glBatchName', ellipsis: true, width: 160, render: (v: string | null) => <Text style={{ fontSize: 11 }}>{v ?? <Text type="secondary">Not in GL</Text>}</Text> },
+                { title: 'Category', dataIndex: 'glCategory', width: 120, render: (v: string | null) => v ? <Tag style={{ fontSize: 10 }}>{v}</Tag> : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
+                { title: 'Batch Name', dataIndex: 'glBatchName', ellipsis: true, width: 160, render: (v: string | null) => v ? <Text style={{ fontSize: 11 }}>{v}</Text> : <Text type="secondary" style={{ fontSize: 11 }}>Not in GL</Text> },
                 { title: 'Debit', dataIndex: 'glDr', width: 110, align: 'right' as const, render: (v: number) => <Text style={{ fontSize: 11, color: REDWOOD.info }}>{v ? fmt(v) : '—'}</Text> },
                 { title: 'Credit', dataIndex: 'glCr', width: 110, align: 'right' as const, render: (v: number) => <Text style={{ fontSize: 11, color: REDWOOD.error }}>{v ? fmt(v) : '—'}</Text> },
               ],
@@ -1370,13 +1384,14 @@ const CreateAccounting: React.FC = () => {
                 {/* index 4 = SLA Debit, index 5 = SLA Credit */}
                 <Table.Summary.Cell index={4} align="right"><Text strong style={{ color: REDWOOD.info }}>{fmt(totSlaDr)}</Text></Table.Summary.Cell>
                 <Table.Summary.Cell index={5} align="right"><Text strong style={{ color: REDWOOD.error }}>{fmt(totSlaCr)}</Text></Table.Summary.Cell>
-                {/* index 6 = GL Batch Name (no total) */}
+                {/* index 6 = GL Category (no total), index 7 = GL Batch Name (no total) */}
                 <Table.Summary.Cell index={6} />
-                {/* index 7 = GL Debit, index 8 = GL Credit */}
-                <Table.Summary.Cell index={7} align="right"><Text strong style={{ color: REDWOOD.info }}>{totGlDr > 0 ? fmt(totGlDr) : '—'}</Text></Table.Summary.Cell>
-                <Table.Summary.Cell index={8} align="right"><Text strong style={{ color: REDWOOD.error }}>{totGlCr > 0 ? fmt(totGlCr) : '—'}</Text></Table.Summary.Cell>
-                {/* index 9 = Difference */}
-                <Table.Summary.Cell index={9} align="right">
+                <Table.Summary.Cell index={7} />
+                {/* index 8 = GL Debit, index 9 = GL Credit */}
+                <Table.Summary.Cell index={8} align="right"><Text strong style={{ color: REDWOOD.info }}>{totGlDr > 0 ? fmt(totGlDr) : '—'}</Text></Table.Summary.Cell>
+                <Table.Summary.Cell index={9} align="right"><Text strong style={{ color: REDWOOD.error }}>{totGlCr > 0 ? fmt(totGlCr) : '—'}</Text></Table.Summary.Cell>
+                {/* index 10 = Difference */}
+                <Table.Summary.Cell index={10} align="right">
                   {totDiff > 0.01 ? <Text strong style={{ color: REDWOOD.error }}>{fmt(totDiff)}</Text> : <Tag color="green">Balanced</Tag>}
                 </Table.Summary.Cell>
               </Table.Summary.Row>
