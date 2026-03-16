@@ -89,7 +89,7 @@ const invoiceTaskItems: MenuItemType[] = [
 
 // Accounting task items
 const accountingTaskItems: MenuItemType[] = [
-  { key: 'create-accounting', icon: <BookOutlined />, label: 'Create Accounting', description: 'Generate accounting entries', color: REDWOOD.taskBlue },
+  { key: 'create-accounting', icon: <BookOutlined />, label: 'Create Accounting', description: 'Generate accounting entries', color: REDWOOD.taskBlue, path: '/ap/create-accounting' },
   { key: 'sla-journals', icon: <FileSearchOutlined />, label: 'Manage Subledger Journals', description: 'Review SLA journal entries and lines', color: REDWOOD.success, path: '/ap/sla-journals' },
   { key: 'create-adjustment', icon: <ReconciliationOutlined />, label: 'Create Adjustment Journal', description: 'Create adjustments', color: REDWOOD.info },
   { key: 'review-journal-entries', icon: <FileSearchOutlined />, label: 'Review Journal Entries', description: 'Review posted journals', color: REDWOOD.success },

@@ -26,6 +26,7 @@ import ManagePayments from './pages/ap/ManagePayments';
 import Banks from './pages/ap/Banks';
 import InvoiceHolds from './pages/ap/InvoiceHolds';
 import ManageSLAJournals from './pages/ap/ManageSLAJournals';
+import CreateAccounting from './pages/ap/CreateAccounting';
 import ManageSuppliers from './pages/suppliers/ManageSuppliers';
 import SupplierBalance from './pages/suppliers/SupplierBalance';
 import SyncData from './pages/sync/SyncData';
@@ -102,6 +103,7 @@ function App() {
               <Route path="ap/banks" element={<Banks />} />
               <Route path="ap/invoice-holds" element={<InvoiceHolds />} />
               <Route path="ap/sla-journals" element={<ManageSLAJournals />} />
+              <Route path="ap/create-accounting" element={<CreateAccounting />} />
               <Route path="ap/*" element={<APModule />} />
               <Route path="ar/*" element={<ComingSoon moduleName="Accounts Receivable" />} />
               <Route path="inventory/*" element={<ComingSoon moduleName="Inventory" />} />
