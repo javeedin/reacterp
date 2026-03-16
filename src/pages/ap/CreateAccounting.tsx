@@ -10,7 +10,7 @@ import {
   SyncOutlined, ExclamationCircleOutlined, FileTextOutlined, CreditCardOutlined,
   BarChartOutlined, ReloadOutlined, CaretDownOutlined, EyeOutlined,
   ThunderboltOutlined, DiffOutlined, InfoCircleOutlined, ApiOutlined,
-  LoadingOutlined, CodeOutlined,
+  LoadingOutlined, CodeOutlined, SwapOutlined,
 } from '@ant-design/icons';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import {
@@ -74,6 +74,23 @@ interface PaymentRow {
   disbursementBankAccount: string;
 }
 
+interface PrepayAppRow {
+  key: string;
+  applicationId: number;
+  invoiceId: number;
+  invoiceNumber: string;
+  prepayInvoiceId: number;
+  prepayNumber: string;
+  appliedAmount: number;
+  currency: string;
+  accountingDate: string;
+  businessUnit: string;
+  supplierSite: string;
+  liabilityDistribution: string;
+  accountingStatus: string;   // derived from SLA lookup
+  slaHeaderId?: number;
+}
+
 interface ProgressRow {
   id: string;                // invoiceNumber or paymentNumber
   label: string;
@@ -114,6 +131,10 @@ const CreateAccounting: React.FC = () => {
   const [reconcileRows, setReconcileRows]       = useState<ReconcileRow[]>([]);
   const [dataLoading, setDataLoading]           = useState(false);
   const [reconcileLoading, setReconcileLoading] = useState(false);
+
+  // ── Prepayment applications ──
+  const [prepayApps, setPrepayApps]               = useState<PrepayAppRow[]>([]);
+  const [selectedPrepayAppKeys, setSelectedPrepayAppKeys] = useState<React.Key[]>([]);
 
   // ── Selection ──
   const [selectedInvoiceKeys, setSelectedInvoiceKeys] = useState<React.Key[]>([]);
@@ -231,8 +252,8 @@ const CreateAccounting: React.FC = () => {
     const vals = headerForm.getFieldsValue();
     if (!vals.businessUnit) { message.warning('Select a Business Unit first.'); return; }
     setDataLoading(true);
-    setInvoices([]); setPayments([]);
-    setSelectedInvoiceKeys([]); setSelectedPaymentKeys([]);
+    setInvoices([]); setPayments([]); setPrepayApps([]);
+    setSelectedInvoiceKeys([]); setSelectedPaymentKeys([]); setSelectedPrepayAppKeys([]);
 
     const fromDate = vals.dateRange?.[0] ? toApiDate(vals.dateRange[0]) : null;
     const toDate   = vals.dateRange?.[1] ? toApiDate(vals.dateRange[1])   : null;
@@ -246,9 +267,14 @@ const CreateAccounting: React.FC = () => {
       if (fromDate) pmtParams.append('date_from', fromDate);
       if (toDate)   pmtParams.append('date_to',   toDate);
 
-      const [invRes, pmtRes] = await Promise.all([
-        loggedFetch(`${BASE}/ap/createinvoice?${invParams}`,  { headers: { Accept: 'application/json' } }),
-        loggedFetch(`${BASE}/ap/payments?${pmtParams}`,       { headers: { Accept: 'application/json' } }),
+      const appParams = new URLSearchParams({ business_unit: vals.businessUnit, status: 'Applied', limit: '500' });
+      const slaAppParams = new URLSearchParams({ sourceTable: 'RR_AP_APPLIED_PREPAYMENTS', limit: '1000' });
+
+      const [invRes, pmtRes, appRes, slaAppRes] = await Promise.all([
+        loggedFetch(`${BASE}/ap/createinvoice?${invParams}`,    { headers: { Accept: 'application/json' } }),
+        loggedFetch(`${BASE}/ap/payments?${pmtParams}`,         { headers: { Accept: 'application/json' } }),
+        loggedFetch(`${BASE}/ap/applied-prepayments?${appParams}`, { headers: { Accept: 'application/json' } }),
+        loggedFetch(`${BASE}/sla/journals?${slaAppParams}`,     { headers: { Accept: 'application/json' } }),
       ]);
 
       if (invRes.ok) {
@@ -299,12 +325,57 @@ const CreateAccounting: React.FC = () => {
         });
         setPayments(filtered);
       }
+
+      // ── Prepayment applications + their SLA accounting status ──
+      // Build SLA map: applicationId → { headerId, accountingStatus }
+      const slaAppMap: Record<number, { headerId: number; status: string }> = {};
+      if (slaAppRes.ok) {
+        const d = await slaAppRes.json();
+        (d.items || d || []).forEach((s: any) => {
+          const sid = Number(s.sourceId || s.source_id || 0);
+          if (sid) slaAppMap[sid] = { headerId: s.headerId || 0, status: s.accountingStatus || s.accounting_status || 'DRAFT' };
+        });
+      }
+
+      if (appRes.ok) {
+        const d = await appRes.json();
+        const rawApps: any[] = d.items || (Array.isArray(d) ? d : []);
+        const rows: PrepayAppRow[] = rawApps.map((a: any, idx: number) => {
+          const appId = Number(a.application_id ?? 0);
+          const slaEntry = slaAppMap[appId];
+          return {
+            key:                  String(appId || `pa-${idx}`),
+            applicationId:        appId,
+            invoiceId:            Number(a.invoice_id ?? 0),
+            invoiceNumber:        a.invoice_number ?? '',
+            prepayInvoiceId:      Number(a.prepayment_invoice_id ?? 0),
+            prepayNumber:         a.prepayment_number ?? '',
+            appliedAmount:        Number(a.applied_amount ?? 0),
+            currency:             a.currency ?? 'AED',
+            accountingDate:       a.application_accounting_date ?? a.creation_date ?? '',
+            businessUnit:         a.business_unit ?? vals.businessUnit,
+            supplierSite:         a.supplier_site ?? '',
+            liabilityDistribution: a.liability_distribution ?? a.LiabilityDistribution ?? '',
+            accountingStatus:     slaEntry ? slaEntry.status : 'Not Accounted',
+            slaHeaderId:          slaEntry?.headerId,
+          };
+        });
+        // Apply date filter
+        const filteredApps = rows.filter(r => {
+          if (!fromDate && !toDate) return true;
+          const d_ = dayjs(r.accountingDate);
+          if (fromDate && d_.isBefore(dayjs(fromDate), 'day')) return false;
+          if (toDate   && d_.isAfter(dayjs(toDate),   'day')) return false;
+          return true;
+        });
+        setPrepayApps(filteredApps);
+      }
     } catch (err: any) {
       message.error(`Search failed: ${err.message}`);
     } finally {
       setDataLoading(false);
     }
-  }, [headerForm]);
+  }, [headerForm, loggedFetch]);
 
   // ── Computed stats ───────────────────────────────────────────────────────────
   const invStats = {
@@ -547,6 +618,156 @@ const CreateAccounting: React.FC = () => {
     const succeeded = done.filter(r => r.status === 'success').length;
     message.success(`Accounting complete — ${succeeded} / ${rows.length} processed.`);
   }, [selectedInvoiceKeys, selectedPaymentKeys, invoices, payments, headerForm, bankAccounts, progressRows]);
+
+  // ── Bulk prepayment-application accounting ───────────────────────────────
+  const handleRunPrepayAccounting = useCallback(async (mode: 'DRAFT' | 'FINAL') => {
+    const rows = prepayApps.filter(r => selectedPrepayAppKeys.includes(r.key));
+    if (rows.length === 0) { message.warning('Select at least one application.'); return; }
+
+    const vals       = headerForm.getFieldsValue();
+    const ledgerInfo = await fetchLedgerByBusinessUnit(vals.businessUnit || '');
+
+    // Build invoice liabilityDistribution lookup from already-loaded invoices state
+    const liabMap: Record<number, string> = {};
+    invoices.forEach(inv => { if (inv.liabilityDistribution) liabMap[inv.invoiceId] = inv.liabilityDistribution; });
+
+    const initRows: ProgressRow[] = rows.map(r => ({
+      id: r.key, label: `${r.prepayNumber} → ${r.invoiceNumber}`,
+      status: ['POSTED', 'Posted'].includes(r.accountingStatus) ? 'skipped' : 'pending',
+      message: ['POSTED', 'Posted'].includes(r.accountingStatus) ? 'Already posted — skipped' : undefined,
+    }));
+    setProgressRows(initRows);
+    setProgressMode(mode);
+    setProgressTarget('invoices');   // reuse progress modal
+    setProgressVisible(true);
+    setProgressRunning(true);
+
+    const update = (id: string, partial: Partial<ProgressRow>) =>
+      setProgressRows(prev => prev.map(r => r.id === id ? { ...r, ...partial } : r));
+
+    for (const row of rows) {
+      if (['POSTED', 'Posted'].includes(row.accountingStatus)) continue;
+      update(row.key, { status: 'running' });
+      try {
+        // Resolve liabilityDistribution — use from invoice if available
+        let liabilityDist = row.liabilityDistribution || liabMap[row.invoiceId] || '';
+        if (!liabilityDist) {
+          // Last resort: fetch from API
+          const invRes = await loggedFetch(`${BASE}/ap/createinvoice?invoice_id=${row.invoiceId}`, { headers: { Accept: 'application/json' } });
+          if (invRes.ok) {
+            const d = await invRes.json();
+            liabilityDist = (d.items || d || [])[0]?.liability_distribution || '02-00-00-2313101-0000-000-00-000-000';
+          } else {
+            liabilityDist = '02-00-00-2313101-0000-000-00-000-000';
+          }
+        }
+        const firstSeg       = liabilityDist.split('-')[0] || '02';
+        const prepaymentDist = `${firstSeg}-00-00-1223108-0000-000-00-000-000`;
+
+        const acctDateD  = row.accountingDate ? dayjs(row.accountingDate) : dayjs();
+        const acctDate   = acctDateD.format('YYYY-MM-DD');
+        const months     = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        const periodName = `${months[acctDateD.month()]}-${String(acctDateD.year()).slice(-2)}`;
+
+        const slaPayload = {
+          header: {
+            moduleName: 'AP', sourceTable: 'RR_AP_APPLIED_PREPAYMENTS',
+            sourceId: row.applicationId, sourceNumber: row.prepayNumber,
+            sourceType: 'APPLIED', eventTypeCode: 'PREPAYMENT_APPLIED',
+            eventDate: acctDate, accountingDate: acctDate, periodName,
+            ledgerId: ledgerInfo?.ledgerId ?? 300000003259529,
+            ledgerName: ledgerInfo?.ledgerName ?? 'BCL DIFC',
+            currencyCode: row.currency, ledgerCurrency: 'AED',
+            exchangeRate: 1, exchangeRateType: 'Corporate',
+            businessUnit: row.businessUnit,
+            description: `Prepayment Applied – ${row.prepayNumber} on Invoice ${row.invoiceNumber}`,
+            createdBy: 'user',
+          },
+          lines: [
+            {
+              lineNumber: 1, lineType: 'DR', accountingClass: 'LIABILITY',
+              accountCombination: liabilityDist,
+              enteredDr: row.appliedAmount, enteredCr: 0,
+              accountedDr: row.appliedAmount, accountedCr: 0,
+              currencyCode: row.currency, exchangeRate: 1,
+              description: `AP Liability Reduced – Invoice ${row.invoiceNumber}`,
+            },
+            {
+              lineNumber: 2, lineType: 'CR', accountingClass: 'PREPAYMENT',
+              accountCombination: prepaymentDist,
+              enteredDr: 0, enteredCr: row.appliedAmount,
+              accountedDr: 0, accountedCr: row.appliedAmount,
+              currencyCode: row.currency, exchangeRate: 1,
+              description: `Prepayment Asset Cleared – ${row.prepayNumber}`,
+            },
+          ],
+        };
+
+        const createRes = await loggedFetch(`${BASE}/sla/accounting/create`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify(slaPayload),
+        });
+        if (!createRes.ok) { const t = await createRes.text(); throw new Error(`HTTP ${createRes.status}: ${t}`); }
+        const createData = await createRes.json();
+        const newHeaderId = createData.headerId || createData.header_id;
+
+        if (mode === 'FINAL' && newHeaderId) {
+          const glPayload = {
+            batch: {
+              batchName: `AP-PREP-${row.prepayNumber}-${dayjs().format('YYYYMMDDHHmmss')}`,
+              batchDescription: `Prepayment Applied – ${row.prepayNumber} on Invoice ${row.invoiceNumber}`,
+              ledgerName: ledgerInfo?.ledgerName ?? 'BCL DIFC', ledgerId: ledgerInfo?.ledgerId ?? 0,
+              status: 'NEW', accountingPeriod: periodName,
+              controlTotal: row.appliedAmount, runningTotalDr: row.appliedAmount, runningTotalCr: row.appliedAmount,
+              batchSource: 'Payables', createdBy: 'user',
+            },
+            header: {
+              ledgerId: ledgerInfo?.ledgerId ?? 0, ledgerName: ledgerInfo?.ledgerName ?? 'BCL DIFC',
+              jeCategory: 'Purchase Invoices', jeSource: 'Payables', periodName,
+              journalName: `Prepayment Applied – ${row.prepayNumber}`,
+              description: `Prepayment Applied – ${row.prepayNumber} on Invoice ${row.invoiceNumber}`,
+              currencyCode: row.currency, currencyConversionType: 'User',
+              currencyConversionDate: acctDate, currencyConversionRate: 1,
+              status: 'NEW', runningTotalDr: row.appliedAmount, runningTotalCr: row.appliedAmount, createdBy: 'user',
+            },
+            lines: slaPayload.lines.map(l => ({
+              enteredDr: l.lineType === 'DR' ? l.enteredDr : null,
+              enteredCr: l.lineType === 'CR' ? l.enteredCr : null,
+              accountedDr: l.accountedDr || null, accountedCr: l.accountedCr || null,
+              statAmount: null, description: l.description, currencyCode: l.currencyCode,
+              currencyConversionDate: acctDate, currencyConversionRate: 1,
+              userCurrencyConversionType: 'User', accountCombination: l.accountCombination,
+              chartOfAccountsName: 'Chart of Accounts',
+              reference1: row.prepayNumber, reference2: String(row.applicationId),
+              reference3: l.accountingClass, reference4: row.businessUnit, reference5: null, createdBy: 'user',
+            })),
+          };
+          const glRes = await loggedFetch(`${BASE}/journals/create`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify(glPayload),
+          });
+          if (glRes.ok) {
+            const glData = await glRes.json();
+            await loggedFetch(`${BASE}/sla/accounting/post`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+              body: JSON.stringify({ headerId: newHeaderId, glBatchId: glData.batchId || 0, glBatchName: glPayload.batch.batchName, glHeaderId: glData.headerId || 0, postedBy: 'user' }),
+            });
+            update(row.key, { status: 'success', message: `Posted — GL Batch: ${glPayload.batch.batchName}`, headerId: newHeaderId });
+            setPrepayApps(prev => prev.map(r => r.key === row.key ? { ...r, accountingStatus: 'POSTED', slaHeaderId: newHeaderId } : r));
+          } else {
+            update(row.key, { status: 'success', message: `Draft created (SLA ${newHeaderId}) — GL post failed`, headerId: newHeaderId });
+            setPrepayApps(prev => prev.map(r => r.key === row.key ? { ...r, accountingStatus: 'DRAFT', slaHeaderId: newHeaderId } : r));
+          }
+        } else {
+          update(row.key, { status: 'success', message: `Draft accounting created — SLA ID ${newHeaderId}`, headerId: newHeaderId });
+          setPrepayApps(prev => prev.map(r => r.key === row.key ? { ...r, accountingStatus: 'DRAFT', slaHeaderId: newHeaderId } : r));
+        }
+      } catch (err: any) {
+        update(row.key, { status: 'error', message: err.message });
+      }
+    }
+    setProgressRunning(false);
+  }, [prepayApps, selectedPrepayAppKeys, headerForm, invoices, loggedFetch]);
 
   // ── Reconciliation fetch ──────────────────────────────────────────────────
   const handleLoadReconciliation = useCallback(async () => {
@@ -909,6 +1130,144 @@ const CreateAccounting: React.FC = () => {
     </div>
   );
 
+  // ── Tab: Prepayment Applications ─────────────────────────────────────────
+  const prepayStats = {
+    total:        prepayApps.length,
+    notAccounted: prepayApps.filter(r => r.accountingStatus === 'Not Accounted').length,
+    draft:        prepayApps.filter(r => ['DRAFT', 'Draft'].includes(r.accountingStatus)).length,
+    posted:       prepayApps.filter(r => ['POSTED', 'Posted'].includes(r.accountingStatus)).length,
+    error:        prepayApps.filter(r => ['ERROR', 'Error'].includes(r.accountingStatus)).length,
+    totalAmount:  prepayApps.reduce((s, r) => s + r.appliedAmount, 0),
+  };
+
+  const PrepayAppTab = () => (
+    <div>
+      {/* Explanation banner */}
+      <Alert
+        type="info" showIcon style={{ marginBottom: 12, fontSize: 12 }}
+        message="Prepayment application accounting creates journal entries for each applied prepayment: DR AP Liability / CR Prepayment Asset. This is separate from the invoice accounting."
+      />
+
+      {/* Mini KPI row */}
+      <Row gutter={[8, 8]} style={{ marginBottom: 12 }}>
+        {[
+          { label: 'Not Accounted', value: prepayStats.notAccounted, color: REDWOOD.neutral400 },
+          { label: 'Draft',         value: prepayStats.draft,        color: REDWOOD.warning },
+          { label: 'Posted',        value: prepayStats.posted,       color: REDWOOD.success },
+          { label: 'Error',         value: prepayStats.error,        color: REDWOOD.error },
+        ].map(({ label, value, color }) => (
+          <Col key={label} xs={12} sm={6}>
+            <Card size="small" style={{ borderRadius: 8, textAlign: 'center', border: `1px solid ${color}30` }}>
+              <Text strong style={{ fontSize: 20, color, display: 'block' }}>{value}</Text>
+              <Text type="secondary" style={{ fontSize: 11 }}>{label}</Text>
+            </Card>
+          </Col>
+        ))}
+      </Row>
+
+      {/* Action bar */}
+      <Row justify="space-between" align="middle" style={{ marginBottom: 10 }}>
+        <Col>
+          <Space>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {prepayApps.length} prepayment applications
+              {selectedPrepayAppKeys.length > 0 && <> | <Text strong style={{ color: REDWOOD.taskBlue }}>{selectedPrepayAppKeys.length} selected</Text></>}
+            </Text>
+            {selectedPrepayAppKeys.length > 0 && (
+              <Button size="small" onClick={() => setSelectedPrepayAppKeys([])} type="link">Clear selection</Button>
+            )}
+          </Space>
+        </Col>
+        <Col>
+          <Space>
+            <Button size="small" onClick={() => setSelectedPrepayAppKeys(
+              prepayApps.filter(r => !['POSTED', 'Posted'].includes(r.accountingStatus)).map(r => r.key)
+            )}>
+              Select Unaccounted
+            </Button>
+            <Dropdown
+              disabled={selectedPrepayAppKeys.length === 0}
+              trigger={['click']}
+              menu={{
+                items: [
+                  { key: 'draft', label: <Space><BookOutlined />Create Draft Accounting</Space>, onClick: () => handleRunPrepayAccounting('DRAFT') },
+                  { key: 'final', label: <Space><ThunderboltOutlined style={{ color: REDWOOD.success }} />Create &amp; Post to GL (Final)</Space>, onClick: () => handleRunPrepayAccounting('FINAL') },
+                ],
+              }}
+            >
+              <Button type="primary" style={{ background: REDWOOD.taskBlue, borderColor: REDWOOD.taskBlue }}
+                disabled={selectedPrepayAppKeys.length === 0}>
+                <Space size={4}><SwapOutlined />Create Prepay Accounting ({selectedPrepayAppKeys.length})<CaretDownOutlined /></Space>
+              </Button>
+            </Dropdown>
+          </Space>
+        </Col>
+      </Row>
+
+      <Table
+        rowSelection={{ selectedRowKeys: selectedPrepayAppKeys, onChange: (keys) => setSelectedPrepayAppKeys(keys) }}
+        dataSource={prepayApps}
+        size="small"
+        pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `${t} applications` }}
+        scroll={{ x: 900 }}
+        loading={dataLoading}
+        summary={(data) => {
+          const totApplied = (data as PrepayAppRow[]).reduce((s, r) => s + r.appliedAmount, 0);
+          return (
+            <Table.Summary.Row style={{ background: '#f5f5f5', fontWeight: 700 }}>
+              <Table.Summary.Cell index={0} colSpan={4}><Text strong>Total Applied</Text></Table.Summary.Cell>
+              <Table.Summary.Cell index={4} align="right"><Text strong style={{ color: REDWOOD.info }}>{fmt(totApplied)}</Text></Table.Summary.Cell>
+              <Table.Summary.Cell index={5} colSpan={3} />
+            </Table.Summary.Row>
+          );
+        }}
+        columns={[
+          {
+            title: 'App. Date', dataIndex: 'accountingDate', width: 105,
+            sorter: (a: PrepayAppRow, b: PrepayAppRow) => a.accountingDate.localeCompare(b.accountingDate),
+            render: (v: string) => <Text style={{ fontSize: 12 }}>{v ? dayjs(v).format('D-MMM-YY') : '—'}</Text>,
+          },
+          {
+            title: 'Prepayment #', dataIndex: 'prepayNumber', width: 150,
+            render: (v: string) => <Text strong style={{ fontSize: 12, color: REDWOOD.taskBlue }}>{v}</Text>,
+          },
+          {
+            title: 'Invoice # (Target)', dataIndex: 'invoiceNumber', width: 160,
+            render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text>,
+          },
+          {
+            title: 'Supplier Site', dataIndex: 'supplierSite', width: 130, ellipsis: true,
+            render: (v: string) => <Text type="secondary" style={{ fontSize: 11 }}>{v || '—'}</Text>,
+          },
+          {
+            title: 'Applied Amt', dataIndex: 'appliedAmount', width: 120, align: 'right' as const,
+            sorter: (a: PrepayAppRow, b: PrepayAppRow) => a.appliedAmount - b.appliedAmount,
+            render: (v: number, r: PrepayAppRow) => <Text style={{ fontSize: 12 }}>{fmt(v)} <Text type="secondary" style={{ fontSize: 10 }}>{r.currency}</Text></Text>,
+          },
+          {
+            title: 'Liability Acct', dataIndex: 'liabilityDistribution', width: 190, ellipsis: true,
+            render: (v: string) => v
+              ? <Text code style={{ fontSize: 10 }}>{v}</Text>
+              : <Tooltip title="Liability distribution not available — a default will be used when creating accounting">
+                  <Tag color="orange" style={{ fontSize: 10 }}>Not set</Tag>
+                </Tooltip>,
+          },
+          acctStatusCol,
+          {
+            title: '', key: 'action', width: 50, align: 'center' as const,
+            render: (_: any, r: PrepayAppRow) => (
+              <Tooltip title="View Accounting Entries">
+                <Button size="small" type="text" icon={<EyeOutlined style={{ color: REDWOOD.taskBlue }} />}
+                  disabled={r.accountingStatus === 'Not Accounted'}
+                  onClick={() => handleViewAccounting('RR_AP_APPLIED_PREPAYMENTS', r.applicationId, `Prepay App ${r.prepayNumber} → ${r.invoiceNumber}`)} />
+              </Tooltip>
+            ),
+          },
+        ]}
+      />
+    </div>
+  );
+
   // ── Tab: Reconciliation ───────────────────────────────────────────────────
   const ReconcileTab = () => {
     const matched   = reconcileRows.filter(r => r.glHeaderId !== null);
@@ -1104,6 +1463,17 @@ const CreateAccounting: React.FC = () => {
                   </Space>
                 ),
                 children: <PaymentsTab />,
+              },
+              {
+                key: 'prepayments',
+                label: (
+                  <Space size={4}>
+                    <SwapOutlined />
+                    <span>Prepayment Applications</span>
+                    {prepayApps.length > 0 && <Badge count={prepayStats.notAccounted + prepayStats.draft} style={{ backgroundColor: REDWOOD.warning, fontSize: 10 }} overflowCount={999} />}
+                  </Space>
+                ),
+                children: <PrepayAppTab />,
               },
               {
                 key: 'reconcile',
