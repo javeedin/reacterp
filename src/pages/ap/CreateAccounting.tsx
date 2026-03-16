@@ -101,19 +101,40 @@ interface ProgressRow {
 
 interface ReconcileRow {
   key: string;
-  sourceType: 'Invoice' | 'Payment';
+  // SLA
+  slaHeaderId: number | null;
+  sourceType: 'Invoice' | 'Payment' | 'Prepayment';
+  sourceTable: string;
   sourceNumber: string;
   sourceId: number;
-  slaHeaderId: number | null;
+  eventTypeCode: string;
+  accountingDate: string;
+  periodName: string;
   slaStatus: string;
+  postingStatus: string;
+  // SLA amounts (from lines)
   slaDr: number;
   slaCr: number;
-  glBatchName: string | null;
+  slaAccountedDr: number;
+  slaAccountedCr: number;
+  slaLineCount: number;
+  // GL link
   glHeaderId: number | null;
+  glBatchId: number | null;
+  glBatchName: string | null;
+  glJournalName: string | null;
   glCategory: string | null;
+  glSource: string | null;
+  glBatchStatus: string | null;
+  // GL amounts (from header running totals)
   glDr: number;
   glCr: number;
+  glAccountedDr: number;
+  glAccountedCr: number;
+  glLineCount: number;
+  // Comparison
   difference: number;
+  isBalanced: boolean;
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -786,90 +807,69 @@ const CreateAccounting: React.FC = () => {
   }, [prepayApps, selectedPrepayAppKeys, headerForm, invoices, loggedFetch]);
 
   // ── Reconciliation fetch ──────────────────────────────────────────────────
+  // Single call to RR_AP_RECON_PKG.get_recon() via GET /ap/reconciliation.
+  // The DB package performs one SQL query joining SLA headers + lines + GL
+  // headers + GL batches — no N+1 round trips.
   const handleLoadReconciliation = useCallback(async () => {
     const vals = headerForm.getFieldsValue();
-    if (!vals.ledger && !vals.businessUnit) { message.warning('Select a Ledger or Business Unit first.'); return; }
+    if (!vals.period && !vals.businessUnit) {
+      message.warning('Select a Period or Business Unit first.');
+      return;
+    }
     setReconcileLoading(true);
     setReconcileRows([]);
     try {
-      const slaHdrParams = new URLSearchParams({ moduleName: 'AP', limit: '500' });
-      if (vals.period) slaHdrParams.append('periodName', vals.period);
+      const params = new URLSearchParams({ moduleName: 'AP', limit: '1000' });
+      if (vals.period)       params.append('periodName',   vals.period);
+      if (vals.businessUnit) params.append('businessUnit', vals.businessUnit);
+      if (vals.ledger)       params.append('ledgerName',   vals.ledger);
 
-      const slaLineParams = new URLSearchParams({ moduleName: 'AP', limit: '2000' });
-      if (vals.period) slaLineParams.append('periodName', vals.period);
+      const res = await loggedFetch(`${BASE}/ap/reconciliation?${params}`, {
+        headers: { Accept: 'application/json' },
+      });
 
-      // Step 1: fetch SLA headers + lines in parallel
-      const [slaHdrRes, slaLineRes] = await Promise.all([
-        loggedFetch(`${BASE}/sla/journals?${slaHdrParams}`,        { headers: { Accept: 'application/json' } }),
-        loggedFetch(`${BASE}/sla/journals/lines?${slaLineParams}`, { headers: { Accept: 'application/json' } }),
-      ]);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
 
-      const slaItems: any[] = slaHdrRes.ok  ? ((await slaHdrRes.json()).items  || []) : [];
-      const slaLines: any[] = slaLineRes.ok ? ((await slaLineRes.json()).items || []) : [];
+      if (data.error) throw new Error(data.message || 'Package error');
 
-      // Aggregate SLA lines by headerId → DR / CR totals
-      const slaAmounts: Record<number, { dr: number; cr: number }> = {};
-      for (const l of slaLines) {
-        const hid = Number(l.headerId || l.header_id || 0);
-        if (!hid) continue;
-        if (!slaAmounts[hid]) slaAmounts[hid] = { dr: 0, cr: 0 };
-        slaAmounts[hid].dr += Number(l.enteredDr ?? l.entered_dr ?? l.ENTERED_DR ?? 0);
-        slaAmounts[hid].cr += Number(l.enteredCr ?? l.entered_cr ?? l.ENTERED_CR ?? 0);
-      }
-
-      // Step 2: collect unique glHeaderId values from SLA records
-      const glHeaderIds: number[] = [
-        ...new Set(
-          slaItems
-            .map((s: any) => Number(s.glHeaderId || s.gl_header_id || 0))
-            .filter(id => id > 0)
-        ),
-      ];
-
-      // Step 3: fetch each GL journal header by its specific jeHeaderId
-      const glById: Record<number, any> = {};
-      if (glHeaderIds.length > 0) {
-        const glResponses = await Promise.all(
-          glHeaderIds.map(id =>
-            loggedFetch(`${BASE}/gl/journals/headers?jeHeaderId=${id}`, { headers: { Accept: 'application/json' } })
-              .then(r => r.ok ? r.json() : { items: [] })
-              .catch(() => ({ items: [] }))
-          )
-        );
-        glResponses.forEach(d => {
-          const items: any[] = Array.isArray(d) ? d : (d.items || []);
-          items.forEach((g: any) => {
-            const id = Number(g.jeHeaderId || g.headerId || g.je_header_id || 0);
-            if (id) glById[id] = g;
-          });
-        });
-      }
-
-      // Step 4: build reconciliation rows
-      const rows: ReconcileRow[] = slaItems.map((s: any, i: number) => {
-        const hid      = Number(s.headerId || s.header_id || 0);
-        const slaGlHid = Number(s.glHeaderId || s.gl_header_id || 0);
-        const glMatch  = slaGlHid ? glById[slaGlHid] ?? null : null;
-
-        const slaDr = slaAmounts[hid]?.dr ?? 0;
-        const slaCr = slaAmounts[hid]?.cr ?? 0;
-        const glDr  = glMatch ? Number(glMatch.enteredDebit  ?? glMatch.journalEnteredDebit  ?? glMatch.entered_debit  ?? 0) : 0;
-        const glCr  = glMatch ? Number(glMatch.enteredCredit ?? glMatch.journalEnteredCredit ?? glMatch.entered_credit ?? 0) : 0;
-
-        const isPayment = (s.sourceTable || s.source_table || '').toUpperCase().includes('PAYMENT');
+      const items: any[] = data.items || [];
+      const rows: ReconcileRow[] = items.map((r: any, i: number) => {
+        const st = (r.sourceTable || '').toUpperCase();
+        const sourceType: ReconcileRow['sourceType'] =
+          st.includes('PAYMENT')   ? 'Payment'    :
+          st.includes('PREPAYMENT') ? 'Prepayment' : 'Invoice';
         return {
-          key:          String(hid || i),
-          sourceType:   isPayment ? 'Payment' : 'Invoice',
-          sourceNumber: s.sourceNumber || s.source_number || '',
-          sourceId:     s.sourceId     || s.source_id     || 0,
-          slaHeaderId:  hid || null,
-          slaStatus:    s.accountingStatus || s.accounting_status || '',
-          slaDr, slaCr,
-          glBatchName:  glMatch ? (glMatch.batchName || glMatch.batch_name || null) : (s.glBatchName || s.gl_batch_name || null),
-          glHeaderId:   slaGlHid || null,
-          glCategory:   glMatch ? (glMatch.category || glMatch.je_category || null) : null,
-          glDr, glCr,
-          difference:   Math.abs(slaDr - glDr),
+          key:            String(r.slaHeaderId || i),
+          slaHeaderId:    r.slaHeaderId    ?? null,
+          sourceType,
+          sourceTable:    r.sourceTable    ?? '',
+          sourceNumber:   r.sourceNumber   ?? '',
+          sourceId:       r.sourceId       ?? 0,
+          eventTypeCode:  r.eventTypeCode  ?? '',
+          accountingDate: r.accountingDate ?? '',
+          periodName:     r.periodName     ?? '',
+          slaStatus:      r.accountingStatus ?? '',
+          postingStatus:  r.postingStatus  ?? '',
+          slaDr:          Number(r.slaEnteredDr   ?? 0),
+          slaCr:          Number(r.slaEnteredCr   ?? 0),
+          slaAccountedDr: Number(r.slaAccountedDr ?? 0),
+          slaAccountedCr: Number(r.slaAccountedCr ?? 0),
+          slaLineCount:   Number(r.slaLineCount    ?? 0),
+          glHeaderId:     r.glHeaderId   ?? null,
+          glBatchId:      r.glBatchId    ?? null,
+          glBatchName:    r.glBatchName  ?? null,
+          glJournalName:  r.glJournalName ?? null,
+          glCategory:     r.glCategory   ?? null,
+          glSource:       r.glSource     ?? null,
+          glBatchStatus:  r.glBatchStatus ?? null,
+          glDr:           Number(r.glEnteredDr   ?? 0),
+          glCr:           Number(r.glEnteredCr   ?? 0),
+          glAccountedDr:  Number(r.glAccountedDr ?? 0),
+          glAccountedCr:  Number(r.glAccountedCr ?? 0),
+          glLineCount:    Number(r.glLineCount    ?? 0),
+          difference:     Number(r.difference     ?? 0),
+          isBalanced:     r.isBalanced === true || r.isBalanced === 'true',
         };
       });
       setReconcileRows(rows);
@@ -1347,59 +1347,109 @@ const CreateAccounting: React.FC = () => {
           size="small"
           loading={reconcileLoading}
           pagination={{ pageSize: 100, showSizeChanger: true }}
-          scroll={{ x: 1000 }}
-          rowClassName={(r) => r.difference > 0.01 ? 'ant-table-row-error' : ''}
+          scroll={{ x: 1400 }}
+          rowClassName={(r) => !r.isBalanced && r.glHeaderId ? 'ant-table-row-error' : ''}
           columns={[
-            { title: 'Type', dataIndex: 'sourceType', width: 80, render: (v: string) => <Tag color={v === 'Invoice' ? 'blue' : 'purple'} style={{ fontSize: 10 }}>{v}</Tag> },
-            { title: 'Source #', dataIndex: 'sourceNumber', width: 140, render: (v: string) => <Text strong style={{ fontSize: 12, color: REDWOOD.taskBlue }}>{v}</Text> },
             {
-              title: 'SLA',
+              title: 'Type', dataIndex: 'sourceType', width: 90, fixed: 'left',
+              filters: [
+                { text: 'Invoice', value: 'Invoice' },
+                { text: 'Payment', value: 'Payment' },
+                { text: 'Prepayment', value: 'Prepayment' },
+              ],
+              onFilter: (v: any, r) => r.sourceType === v,
+              render: (v: string) => {
+                const color = v === 'Invoice' ? 'blue' : v === 'Payment' ? 'purple' : 'gold';
+                return <Tag color={color} style={{ fontSize: 10 }}>{v}</Tag>;
+              },
+            },
+            {
+              title: 'Source #', dataIndex: 'sourceNumber', width: 150, fixed: 'left',
+              render: (v: string) => <Text strong style={{ fontSize: 12, color: REDWOOD.taskBlue }}>{v || '—'}</Text>,
+            },
+            { title: 'Acct Date', dataIndex: 'accountingDate', width: 100, render: (v: string) => <Text style={{ fontSize: 11 }}>{v || '—'}</Text> },
+            {
+              title: 'SLA Subledger',
               children: [
-                { title: 'Header ID', dataIndex: 'slaHeaderId', width: 80, render: (v: number | null) => <Text style={{ fontSize: 11 }}>{v ?? '—'}</Text> },
-                { title: 'Status', dataIndex: 'slaStatus', width: 90, render: (v: string) => <Tag color={STATUS_COLOR[v] ?? 'default'} style={{ fontSize: 10 }}>{STATUS_LABEL[v] ?? v}</Tag> },
-                { title: 'Debit', dataIndex: 'slaDr', width: 110, align: 'right' as const, render: (v: number) => <Text style={{ fontSize: 11, color: REDWOOD.info }}>{fmt(v)}</Text> },
-                { title: 'Credit', dataIndex: 'slaCr', width: 110, align: 'right' as const, render: (v: number) => <Text style={{ fontSize: 11, color: REDWOOD.error }}>{fmt(v)}</Text> },
+                { title: 'Header ID', dataIndex: 'slaHeaderId', width: 85, render: (v: number | null) => <Text code style={{ fontSize: 10 }}>{v ?? '—'}</Text> },
+                {
+                  title: 'Status', dataIndex: 'slaStatus', width: 90,
+                  filters: [
+                    { text: 'Draft', value: 'DRAFT' }, { text: 'Posted', value: 'POSTED' },
+                    { text: 'Final', value: 'FINAL' }, { text: 'Error',  value: 'ERROR'  },
+                  ],
+                  onFilter: (v: any, r) => r.slaStatus === v,
+                  render: (v: string) => <Tag color={STATUS_COLOR[v] ?? 'default'} style={{ fontSize: 10 }}>{STATUS_LABEL[v] ?? v}</Tag>,
+                },
+                { title: 'Lines', dataIndex: 'slaLineCount', width: 55, align: 'right' as const, render: (v: number) => <Text style={{ fontSize: 11 }}>{v}</Text> },
+                { title: 'Debit',  dataIndex: 'slaDr', width: 120, align: 'right' as const, render: (v: number) => <Text style={{ fontSize: 11, color: REDWOOD.info  }}>{fmt(v)}</Text> },
+                { title: 'Credit', dataIndex: 'slaCr', width: 120, align: 'right' as const, render: (v: number) => <Text style={{ fontSize: 11, color: REDWOOD.error }}>{fmt(v)}</Text> },
               ],
             },
             {
               title: 'GL Journal',
               children: [
-                { title: 'Category', dataIndex: 'glCategory', width: 120, render: (v: string | null) => v ? <Tag style={{ fontSize: 10 }}>{v}</Tag> : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
-                { title: 'Batch Name', dataIndex: 'glBatchName', ellipsis: true, width: 160, render: (v: string | null) => v ? <Text style={{ fontSize: 11 }}>{v}</Text> : <Text type="secondary" style={{ fontSize: 11 }}>Not in GL</Text> },
-                { title: 'Debit', dataIndex: 'glDr', width: 110, align: 'right' as const, render: (v: number) => <Text style={{ fontSize: 11, color: REDWOOD.info }}>{v ? fmt(v) : '—'}</Text> },
-                { title: 'Credit', dataIndex: 'glCr', width: 110, align: 'right' as const, render: (v: number) => <Text style={{ fontSize: 11, color: REDWOOD.error }}>{v ? fmt(v) : '—'}</Text> },
+                {
+                  title: 'Category', dataIndex: 'glCategory', width: 130,
+                  render: (v: string | null) => v
+                    ? <Tag style={{ fontSize: 10 }}>{v}</Tag>
+                    : <Text type="secondary" style={{ fontSize: 11 }}>—</Text>,
+                },
+                {
+                  title: 'Journal / Batch', dataIndex: 'glJournalName', ellipsis: true, width: 180,
+                  render: (v: string | null, r: ReconcileRow) => r.glHeaderId
+                    ? <Tooltip title={r.glBatchName || ''}><Text style={{ fontSize: 11 }}>{v || r.glBatchName || '—'}</Text></Tooltip>
+                    : <Text type="secondary" style={{ fontSize: 11 }}>Not transferred to GL</Text>,
+                },
+                {
+                  title: 'GL Status', dataIndex: 'glBatchStatus', width: 85,
+                  render: (v: string | null) => v
+                    ? <Tag color={v === 'Posted' ? 'green' : v === 'Unposted' ? 'orange' : 'default'} style={{ fontSize: 10 }}>{v}</Tag>
+                    : <Text type="secondary" style={{ fontSize: 11 }}>—</Text>,
+                },
+                { title: 'Lines', dataIndex: 'glLineCount', width: 55, align: 'right' as const, render: (v: number) => <Text style={{ fontSize: 11 }}>{v || '—'}</Text> },
+                { title: 'Debit',  dataIndex: 'glDr', width: 120, align: 'right' as const, render: (v: number) => <Text style={{ fontSize: 11, color: REDWOOD.info  }}>{v ? fmt(v) : '—'}</Text> },
+                { title: 'Credit', dataIndex: 'glCr', width: 120, align: 'right' as const, render: (v: number) => <Text style={{ fontSize: 11, color: REDWOOD.error }}>{v ? fmt(v) : '—'}</Text> },
               ],
             },
             {
-              title: 'Difference', dataIndex: 'difference', width: 100, align: 'right' as const,
-              sorter: (a, b) => b.difference - a.difference,
-              render: (v: number) => v > 0.01
-                ? <Text strong style={{ fontSize: 12, color: REDWOOD.error }}>{fmt(v)}</Text>
-                : <Tag color="green" style={{ fontSize: 10 }}>OK</Tag>,
+              title: 'Match',
+              children: [
+                {
+                  title: 'Difference', dataIndex: 'difference', width: 110, align: 'right' as const,
+                  sorter: (a, b) => b.difference - a.difference,
+                  render: (v: number, r: ReconcileRow) => {
+                    if (!r.glHeaderId) return <Tag color="default" style={{ fontSize: 10 }}>No GL</Tag>;
+                    return v > 0.01
+                      ? <Text strong style={{ fontSize: 12, color: REDWOOD.error }}>{fmt(v)}</Text>
+                      : <Tag color="green" style={{ fontSize: 10 }}>Balanced</Tag>;
+                  },
+                },
+              ],
             },
           ]}
           summary={(data) => {
-            const totSlaDr  = data.reduce((s, r) => s + r.slaDr, 0);
-            const totSlaCr  = data.reduce((s, r) => s + r.slaCr, 0);
-            const totGlDr   = data.reduce((s, r) => s + r.glDr, 0);
-            const totGlCr   = data.reduce((s, r) => s + r.glCr, 0);
-            const totDiff   = data.reduce((s, r) => s + r.difference, 0);
+            const totSlaDr = data.reduce((s, r) => s + r.slaDr, 0);
+            const totSlaCr = data.reduce((s, r) => s + r.slaCr, 0);
+            const totGlDr  = data.reduce((s, r) => s + r.glDr,  0);
+            const totGlCr  = data.reduce((s, r) => s + r.glCr,  0);
+            const totDiff  = data.reduce((s, r) => s + r.difference, 0);
+            // Leaf column indices:
+            // 0=Type 1=Source# 2=AcctDate 3=SLA-HeaderID 4=SLA-Status 5=SLA-Lines
+            // 6=SLA-Dr 7=SLA-Cr 8=GL-Category 9=GL-Journal 10=GL-Status
+            // 11=GL-Lines 12=GL-Dr 13=GL-Cr 14=Difference
             return (
               <Table.Summary.Row style={{ background: '#f5f5f5', fontWeight: 700 }}>
-                {/* colSpan=4 absorbs: Type(0) + Source#(1) + SLA-HeaderID(2) + SLA-Status(3) */}
-                <Table.Summary.Cell index={0} colSpan={4}><Text strong>Total</Text></Table.Summary.Cell>
-                {/* index 4 = SLA Debit, index 5 = SLA Credit */}
-                <Table.Summary.Cell index={4} align="right"><Text strong style={{ color: REDWOOD.info }}>{fmt(totSlaDr)}</Text></Table.Summary.Cell>
-                <Table.Summary.Cell index={5} align="right"><Text strong style={{ color: REDWOOD.error }}>{fmt(totSlaCr)}</Text></Table.Summary.Cell>
-                {/* index 6 = GL Category (no total), index 7 = GL Batch Name (no total) */}
-                <Table.Summary.Cell index={6} />
-                <Table.Summary.Cell index={7} />
-                {/* index 8 = GL Debit, index 9 = GL Credit */}
-                <Table.Summary.Cell index={8} align="right"><Text strong style={{ color: REDWOOD.info }}>{totGlDr > 0 ? fmt(totGlDr) : '—'}</Text></Table.Summary.Cell>
-                <Table.Summary.Cell index={9} align="right"><Text strong style={{ color: REDWOOD.error }}>{totGlCr > 0 ? fmt(totGlCr) : '—'}</Text></Table.Summary.Cell>
-                {/* index 10 = Difference */}
-                <Table.Summary.Cell index={10} align="right">
-                  {totDiff > 0.01 ? <Text strong style={{ color: REDWOOD.error }}>{fmt(totDiff)}</Text> : <Tag color="green">Balanced</Tag>}
+                <Table.Summary.Cell index={0} colSpan={6}><Text strong>Total</Text></Table.Summary.Cell>
+                <Table.Summary.Cell index={6}  align="right"><Text strong style={{ color: REDWOOD.info  }}>{fmt(totSlaDr)}</Text></Table.Summary.Cell>
+                <Table.Summary.Cell index={7}  align="right"><Text strong style={{ color: REDWOOD.error }}>{fmt(totSlaCr)}</Text></Table.Summary.Cell>
+                <Table.Summary.Cell index={8}  colSpan={4} />
+                <Table.Summary.Cell index={12} align="right"><Text strong style={{ color: REDWOOD.info  }}>{totGlDr > 0 ? fmt(totGlDr) : '—'}</Text></Table.Summary.Cell>
+                <Table.Summary.Cell index={13} align="right"><Text strong style={{ color: REDWOOD.error }}>{totGlCr > 0 ? fmt(totGlCr) : '—'}</Text></Table.Summary.Cell>
+                <Table.Summary.Cell index={14} align="right">
+                  {totDiff > 0.01
+                    ? <Text strong style={{ color: REDWOOD.error }}>{fmt(totDiff)}</Text>
+                    : <Tag color="green">Balanced</Tag>}
                 </Table.Summary.Cell>
               </Table.Summary.Row>
             );
