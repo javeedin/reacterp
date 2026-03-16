@@ -8,9 +8,9 @@ import {
 import {
   SearchOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined,
   SyncOutlined, ExclamationCircleOutlined, FileTextOutlined, CreditCardOutlined,
-  BarChartOutlined, SwapOutlined, ReloadOutlined, CaretDownOutlined,
-  ThunderboltOutlined, DiffOutlined, InfoCircleOutlined,
-  ArrowUpOutlined, ArrowDownOutlined,
+  BarChartOutlined, ReloadOutlined, CaretDownOutlined, EyeOutlined,
+  ThunderboltOutlined, DiffOutlined, InfoCircleOutlined, ApiOutlined,
+  LoadingOutlined, CodeOutlined,
 } from '@ant-design/icons';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import {
@@ -18,6 +18,7 @@ import {
   buildApInvoiceSlaPayload,
   buildApPaymentSlaPayloads,
   createAccounting,
+  getAccounting,
 } from '../../services/sla.service';
 
 const { Content } = Layout;
@@ -128,6 +129,53 @@ const CreateAccounting: React.FC = () => {
   const [progressRunning, setProgressRunning]   = useState(false);
   const [progressTarget, setProgressTarget]     = useState<'invoices' | 'payments'>('invoices');
 
+  // ── View Accounting modal ──
+  const [viewAcctVisible, setViewAcctVisible]   = useState(false);
+  const [viewAcctLoading, setViewAcctLoading]   = useState(false);
+  const [viewAcctLabel, setViewAcctLabel]       = useState('');
+  const [viewAcctHeader, setViewAcctHeader]     = useState<any>(null);
+  const [viewAcctLines, setViewAcctLines]       = useState<any[]>([]);
+
+  // ── API log modal ──
+  const [apiLogVisible, setApiLogVisible]       = useState(false);
+  const [apiLogs, setApiLogs]                   = useState<{ method: string; url: string; status: number | string; body?: string; response?: string; ts: string }[]>([]);
+
+  // ── Logged fetch helper ──────────────────────────────────────────────────
+  const loggedFetch = useCallback(async (url: string, options?: RequestInit): Promise<Response> => {
+    const ts     = dayjs().format('HH:mm:ss.SSS');
+    const method = options?.method || 'GET';
+    const body   = options?.body ? String(options.body).slice(0, 300) : undefined;
+    try {
+      const res      = await fetch(url, options);
+      const cloned   = res.clone();
+      cloned.text().then(txt => {
+        setApiLogs(prev => [{ method, url, status: res.status, body, response: txt.slice(0, 400), ts }, ...prev.slice(0, 49)]);
+      });
+      return res;
+    } catch (err: any) {
+      setApiLogs(prev => [{ method, url, status: 'ERR', body, response: err.message, ts }, ...prev.slice(0, 49)]);
+      throw err;
+    }
+  }, []);
+
+  // ── View Accounting handler ───────────────────────────────────────────────
+  const handleViewAccounting = useCallback(async (sourceTable: string, sourceId: number, label: string) => {
+    setViewAcctLabel(label);
+    setViewAcctHeader(null);
+    setViewAcctLines([]);
+    setViewAcctVisible(true);
+    setViewAcctLoading(true);
+    try {
+      const result = await getAccounting(sourceTable, sourceId);
+      setViewAcctHeader((result as any).header ?? (result as any) ?? null);
+      setViewAcctLines((result as any).lines ?? []);
+    } catch (err: any) {
+      message.error(`Could not load accounting: ${err.message}`);
+    } finally {
+      setViewAcctLoading(false);
+    }
+  }, []);
+
   // ── On mount: load BU + ledgers + bank accounts ──
   useEffect(() => {
     (async () => {
@@ -199,8 +247,8 @@ const CreateAccounting: React.FC = () => {
       if (toDate)   pmtParams.append('date_to',   toDate);
 
       const [invRes, pmtRes] = await Promise.all([
-        fetch(`${BASE}/ap/createinvoice?${invParams}`,  { headers: { Accept: 'application/json' } }),
-        fetch(`${BASE}/ap/payments?${pmtParams}`,       { headers: { Accept: 'application/json' } }),
+        loggedFetch(`${BASE}/ap/createinvoice?${invParams}`,  { headers: { Accept: 'application/json' } }),
+        loggedFetch(`${BASE}/ap/payments?${pmtParams}`,       { headers: { Accept: 'application/json' } }),
       ]);
 
       if (invRes.ok) {
@@ -503,48 +551,67 @@ const CreateAccounting: React.FC = () => {
   // ── Reconciliation fetch ──────────────────────────────────────────────────
   const handleLoadReconciliation = useCallback(async () => {
     const vals = headerForm.getFieldsValue();
-    if (!vals.ledger) { message.warning('Select a Ledger first.'); return; }
+    if (!vals.ledger && !vals.businessUnit) { message.warning('Select a Ledger or Business Unit first.'); return; }
     setReconcileLoading(true);
     setReconcileRows([]);
     try {
-      const slaParams = new URLSearchParams({ moduleName: 'AP', limit: '500' });
-      if (vals.period) slaParams.append('periodName', vals.period);
+      const slaHdrParams = new URLSearchParams({ moduleName: 'AP', limit: '500' });
+      if (vals.period) slaHdrParams.append('periodName', vals.period);
 
-      const glParams = new URLSearchParams({ ledger: vals.ledger, source: 'Payables', limit: '500' });
+      const slaLineParams = new URLSearchParams({ moduleName: 'AP', limit: '2000' });
+      if (vals.period) slaLineParams.append('periodName', vals.period);
+
+      const glParams = new URLSearchParams({ limit: '500' });
+      if (vals.ledger) glParams.append('ledger', vals.ledger);
       if (vals.period) glParams.append('period', vals.period);
+      glParams.append('source', 'Payables');
 
-      const [slaRes, glRes] = await Promise.all([
-        fetch(`${BASE}/sla/journals?${slaParams}`,           { headers: { Accept: 'application/json' } }),
-        fetch(`${BASE}/gl/journals/headers?${glParams}`,     { headers: { Accept: 'application/json' } }),
+      const [slaHdrRes, slaLineRes, glRes] = await Promise.all([
+        loggedFetch(`${BASE}/sla/journals?${slaHdrParams}`,         { headers: { Accept: 'application/json' } }),
+        loggedFetch(`${BASE}/sla/journals/lines?${slaLineParams}`,  { headers: { Accept: 'application/json' } }),
+        loggedFetch(`${BASE}/gl/journals/headers?${glParams}`,      { headers: { Accept: 'application/json' } }),
       ]);
 
-      const slaItems: any[] = slaRes.ok  ? ((await slaRes.json()).items  || []) : [];
-      const glItems:  any[] = glRes.ok   ? ((await glRes.json()).items   || []) : [];
+      const slaItems:  any[] = slaHdrRes.ok  ? ((await slaHdrRes.json()).items  || []) : [];
+      const slaLines:  any[] = slaLineRes.ok ? ((await slaLineRes.json()).items || []) : [];
+      const glItems:   any[] = glRes.ok      ? ((await glRes.json()).items       || []) : [];
+
+      // Aggregate SLA lines by headerId to get DR / CR totals
+      const slaAmounts: Record<number, { dr: number; cr: number }> = {};
+      for (const l of slaLines) {
+        const hid = Number(l.headerId || l.header_id || 0);
+        if (!hid) continue;
+        if (!slaAmounts[hid]) slaAmounts[hid] = { dr: 0, cr: 0 };
+        slaAmounts[hid].dr += Number(l.enteredDr ?? l.entered_dr ?? l.ENTERED_DR ?? 0);
+        slaAmounts[hid].cr += Number(l.enteredCr ?? l.entered_cr ?? l.ENTERED_CR ?? 0);
+      }
 
       // Build GL lookup by batchName (which = SLA glBatchName)
       const glByBatch: Record<string, any> = {};
       glItems.forEach((g: any) => {
-        const key = g.batch_name || g.batchName || '';
+        const key = g.batch_name || g.batchName || g.je_batch_name || '';
         if (key) glByBatch[key] = g;
       });
 
       const rows: ReconcileRow[] = slaItems.map((s: any, i: number) => {
-        const glMatch = s.gl_batch_name ? glByBatch[s.gl_batch_name] : null;
-        const slaDr  = Number(s.totalEnteredDr || s.total_dr || 0);
-        const slaCr  = Number(s.totalEnteredCr || s.total_cr || 0);
-        const glDr   = glMatch ? Number(glMatch.running_total_dr || glMatch.runningTotalDr || 0) : 0;
-        const glCr   = glMatch ? Number(glMatch.running_total_cr || glMatch.runningTotalCr || 0) : 0;
-        const isPayment = (s.sourceTable || '').toUpperCase().includes('PAYMENT');
+        const hid     = Number(s.headerId || s.header_id || 0);
+        const glMatch = (s.gl_batch_name || s.glBatchName) ? glByBatch[s.gl_batch_name || s.glBatchName] : null;
+        const slaDr   = slaAmounts[hid]?.dr ?? 0;
+        const slaCr   = slaAmounts[hid]?.cr ?? 0;
+        // GL header amounts: enteredDebit / enteredCredit (from JournalRecord interface)
+        const glDr    = glMatch ? Number(glMatch.enteredDebit  ?? glMatch.entered_debit  ?? glMatch.running_total_dr ?? 0) : 0;
+        const glCr    = glMatch ? Number(glMatch.enteredCredit ?? glMatch.entered_credit ?? glMatch.running_total_cr ?? 0) : 0;
+        const isPayment = (s.sourceTable || s.source_table || '').toUpperCase().includes('PAYMENT');
         return {
-          key:          String(s.headerId || i),
+          key:          String(hid || i),
           sourceType:   isPayment ? 'Payment' : 'Invoice',
           sourceNumber: s.sourceNumber || s.source_number || '',
-          sourceId:     s.sourceId || s.source_id || 0,
-          slaHeaderId:  s.headerId || null,
+          sourceId:     s.sourceId     || s.source_id     || 0,
+          slaHeaderId:  hid || null,
           slaStatus:    s.accountingStatus || s.accounting_status || '',
           slaDr, slaCr,
           glBatchName:  s.gl_batch_name || s.glBatchName || null,
-          glHeaderId:   s.gl_header_id || s.glHeaderId || null,
+          glHeaderId:   s.gl_header_id  || s.glHeaderId  || null,
           glDr, glCr,
           difference:   Math.abs(slaDr - glDr),
         };
@@ -555,7 +622,7 @@ const CreateAccounting: React.FC = () => {
     } finally {
       setReconcileLoading(false);
     }
-  }, [headerForm]);
+  }, [headerForm, loggedFetch]);
 
   // ── KPI card helper ───────────────────────────────────────────────────────
   const KpiCard = ({ title, value, color, icon, sub }: { title: string; value: number | string; color: string; icon: React.ReactNode; sub?: string }) => (
@@ -590,6 +657,7 @@ const CreateAccounting: React.FC = () => {
   const AccountingButton = ({ target, count }: { target: 'invoices' | 'payments'; count: number }) => (
     <Dropdown
       disabled={count === 0}
+      trigger={['click']}
       menu={{
         items: [
           { key: 'draft', label: <Space><BookOutlined />Create Draft Accounting</Space>, onClick: () => handleRunAccounting(target, 'DRAFT') },
@@ -748,11 +816,21 @@ const CreateAccounting: React.FC = () => {
         scroll={{ x: 800 }}
         loading={dataLoading}
         columns={[
-          { title: 'Invoice Date', dataIndex: 'invoiceDate', width: 110, sorter: (a, b) => a.invoiceDate.localeCompare(b.invoiceDate), render: (v: string) => <Text style={{ fontSize: 12 }}>{v ? dayjs(v).format('D-MMM-YY') : '—'}</Text> },
+          { title: 'Invoice Date', dataIndex: 'invoiceDate', width: 110, sorter: (a: InvoiceRow, b: InvoiceRow) => a.invoiceDate.localeCompare(b.invoiceDate), render: (v: string) => <Text style={{ fontSize: 12 }}>{v ? dayjs(v).format('D-MMM-YY') : '—'}</Text> },
           { title: 'Invoice #', dataIndex: 'invoiceNumber', width: 140, render: (v: string) => <Text strong style={{ fontSize: 12, color: REDWOOD.taskBlue }}>{v}</Text> },
           { title: 'Supplier', dataIndex: 'supplier', ellipsis: true, render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text> },
-          { title: 'Amount', dataIndex: 'invoiceAmount', width: 120, align: 'right' as const, sorter: (a, b) => a.invoiceAmount - b.invoiceAmount, render: (v: number, r: InvoiceRow) => <Text style={{ fontSize: 12 }}>{fmt(v)} <Text type="secondary" style={{ fontSize: 10 }}>{r.currency}</Text></Text> },
+          { title: 'Amount', dataIndex: 'invoiceAmount', width: 120, align: 'right' as const, sorter: (a: InvoiceRow, b: InvoiceRow) => a.invoiceAmount - b.invoiceAmount, render: (v: number, r: InvoiceRow) => <Text style={{ fontSize: 12 }}>{fmt(v)} <Text type="secondary" style={{ fontSize: 10 }}>{r.currency}</Text></Text> },
           acctStatusCol,
+          {
+            title: '', key: 'action', width: 50, align: 'center' as const,
+            render: (_: any, r: InvoiceRow) => (
+              <Tooltip title="View Accounting Entries">
+                <Button size="small" type="text" icon={<EyeOutlined style={{ color: REDWOOD.taskBlue }} />}
+                  disabled={r.accountingStatus === 'Not Accounted'}
+                  onClick={() => handleViewAccounting('AP_INVOICES', r.invoiceId, `Invoice ${r.invoiceNumber}`)} />
+              </Tooltip>
+            ),
+          },
         ]}
       />
     </div>
@@ -811,11 +889,21 @@ const CreateAccounting: React.FC = () => {
         scroll={{ x: 800 }}
         loading={dataLoading}
         columns={[
-          { title: 'Payment Date', dataIndex: 'paymentDate', width: 110, sorter: (a, b) => a.paymentDate.localeCompare(b.paymentDate), render: (v: string) => <Text style={{ fontSize: 12 }}>{v ? dayjs(v).format('D-MMM-YY') : '—'}</Text> },
+          { title: 'Payment Date', dataIndex: 'paymentDate', width: 110, sorter: (a: PaymentRow, b: PaymentRow) => a.paymentDate.localeCompare(b.paymentDate), render: (v: string) => <Text style={{ fontSize: 12 }}>{v ? dayjs(v).format('D-MMM-YY') : '—'}</Text> },
           { title: 'Payment #', dataIndex: 'paymentNumber', width: 130, render: (v: string) => <Text strong style={{ fontSize: 12, color: REDWOOD.taskBlue }}>{v}</Text> },
           { title: 'Payee / Supplier', dataIndex: 'supplier', ellipsis: true, render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text> },
-          { title: 'Amount', dataIndex: 'paymentAmount', width: 120, align: 'right' as const, sorter: (a, b) => a.paymentAmount - b.paymentAmount, render: (v: number, r: PaymentRow) => <Text style={{ fontSize: 12 }}>{fmt(v)} <Text type="secondary" style={{ fontSize: 10 }}>{r.currency}</Text></Text> },
+          { title: 'Amount', dataIndex: 'paymentAmount', width: 120, align: 'right' as const, sorter: (a: PaymentRow, b: PaymentRow) => a.paymentAmount - b.paymentAmount, render: (v: number, r: PaymentRow) => <Text style={{ fontSize: 12 }}>{fmt(v)} <Text type="secondary" style={{ fontSize: 10 }}>{r.currency}</Text></Text> },
           acctStatusCol,
+          {
+            title: '', key: 'action', width: 50, align: 'center' as const,
+            render: (_: any, r: PaymentRow) => (
+              <Tooltip title="View Accounting Entries">
+                <Button size="small" type="text" icon={<EyeOutlined style={{ color: REDWOOD.taskBlue }} />}
+                  disabled={r.accountingStatus === 'Not Accounted'}
+                  onClick={() => handleViewAccounting('AP_PAYMENTS', r.checkId, `Payment ${r.paymentNumber}`)} />
+              </Tooltip>
+            ),
+          },
         ]}
       />
     </div>
@@ -940,7 +1028,16 @@ const CreateAccounting: React.FC = () => {
 
       <Content style={{ padding: '16px 24px' }}>
         {/* ── Search header ──────────────────────────────────────────────── */}
-        <Card style={{ marginBottom: 16, borderRadius: 8, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+        <Card
+          style={{ marginBottom: 16, borderRadius: 8, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}
+          extra={
+            <Tooltip title={`API Log (${apiLogs.length} calls)`}>
+              <Button size="small" type="text" icon={<ApiOutlined />} onClick={() => setApiLogVisible(true)}>
+                <Badge count={apiLogs.length} size="small" style={{ backgroundColor: REDWOOD.taskBlue }} overflowCount={99} />
+              </Button>
+            </Tooltip>
+          }
+        >
           <Form form={headerForm} layout="inline" onFinish={handleSearch} size="small">
             <Form.Item label="Business Unit" name="businessUnit" style={{ marginBottom: 8 }}>
               <Select style={{ width: 200 }} placeholder="Select BU" showSearch allowClear onChange={handleBuChange}>
@@ -1085,6 +1182,140 @@ const CreateAccounting: React.FC = () => {
             </div>
           ))}
         </div>
+      </Modal>
+
+      {/* ── View Accounting Modal ──────────────────────────────────────────── */}
+      <Modal
+        title={
+          <Space>
+            <EyeOutlined style={{ color: REDWOOD.taskBlue }} />
+            <span>Accounting Entries — {viewAcctLabel}</span>
+          </Space>
+        }
+        open={viewAcctVisible}
+        onCancel={() => setViewAcctVisible(false)}
+        footer={<Button onClick={() => setViewAcctVisible(false)}>Close</Button>}
+        width={820}
+        destroyOnClose
+      >
+        {viewAcctLoading ? (
+          <div style={{ textAlign: 'center', padding: 40 }}>
+            <Spin indicator={<LoadingOutlined style={{ fontSize: 28, color: REDWOOD.taskBlue }} spin />} />
+            <div style={{ marginTop: 12 }}><Text type="secondary">Loading accounting entries…</Text></div>
+          </div>
+        ) : viewAcctHeader || viewAcctLines.length > 0 ? (
+          <>
+            {viewAcctHeader && (
+              <Descriptions size="small" bordered column={3} style={{ marginBottom: 16 }}>
+                <Descriptions.Item label="SLA Header ID">{viewAcctHeader.headerId ?? '—'}</Descriptions.Item>
+                <Descriptions.Item label="Status">
+                  <Tag color={STATUS_COLOR[viewAcctHeader.accountingStatus] ?? 'default'}>{STATUS_LABEL[viewAcctHeader.accountingStatus] ?? viewAcctHeader.accountingStatus}</Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label="Period">{viewAcctHeader.periodName ?? '—'}</Descriptions.Item>
+                <Descriptions.Item label="Ledger">{viewAcctHeader.ledgerName ?? '—'}</Descriptions.Item>
+                <Descriptions.Item label="Event Type">{viewAcctHeader.eventTypeCode ?? '—'}</Descriptions.Item>
+                <Descriptions.Item label="Accounting Date">{viewAcctHeader.accountingDate ?? '—'}</Descriptions.Item>
+                {viewAcctHeader.glBatchName && (
+                  <Descriptions.Item label="GL Batch" span={3}>
+                    <Text code style={{ fontSize: 11 }}>{viewAcctHeader.glBatchName}</Text>
+                    {viewAcctHeader.glHeaderId && <Text type="secondary" style={{ marginLeft: 8, fontSize: 11 }}>Header ID: {viewAcctHeader.glHeaderId}</Text>}
+                  </Descriptions.Item>
+                )}
+              </Descriptions>
+            )}
+            <Table
+              dataSource={viewAcctLines.map((l: any, i: number) => ({ ...l, key: l.lineId ?? l.lineNumber ?? i }))}
+              size="small"
+              pagination={false}
+              scroll={{ x: 700 }}
+              summary={(data) => {
+                const totDr = data.reduce((s, l) => s + Number(l.enteredDr ?? l.entered_dr ?? 0), 0);
+                const totCr = data.reduce((s, l) => s + Number(l.enteredCr ?? l.entered_cr ?? 0), 0);
+                return (
+                  <Table.Summary.Row style={{ background: '#f5f5f5', fontWeight: 700 }}>
+                    <Table.Summary.Cell index={0} colSpan={3}><Text strong>Total</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={3} align="right"><Text strong style={{ color: REDWOOD.info }}>{fmt(totDr)}</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={4} align="right"><Text strong style={{ color: REDWOOD.error }}>{fmt(totCr)}</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={5}>
+                      {Math.abs(totDr - totCr) < 0.01 ? <Tag color="green" style={{ fontSize: 10 }}>Balanced</Tag> : <Tag color="red" style={{ fontSize: 10 }}>Out of balance by {fmt(Math.abs(totDr - totCr))}</Tag>}
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                );
+              }}
+              columns={[
+                { title: '#', dataIndex: 'lineNumber', width: 40, render: (v: any) => <Text style={{ fontSize: 11 }}>{v}</Text> },
+                {
+                  title: 'Type', dataIndex: 'lineType', width: 50,
+                  render: (v: string) => <Tag color={v === 'DR' ? 'blue' : 'red'} style={{ fontSize: 10, minWidth: 28, textAlign: 'center' }}>{v}</Tag>,
+                },
+                { title: 'Account', dataIndex: 'accountCombination', ellipsis: true, render: (v: string) => <Text code style={{ fontSize: 11 }}>{v}</Text> },
+                { title: 'Debit', dataIndex: 'enteredDr', width: 110, align: 'right' as const, render: (v: any) => <Text style={{ fontSize: 11, color: REDWOOD.info }}>{Number(v ?? 0) ? fmt(Number(v)) : '—'}</Text> },
+                { title: 'Credit', dataIndex: 'enteredCr', width: 110, align: 'right' as const, render: (v: any) => <Text style={{ fontSize: 11, color: REDWOOD.error }}>{Number(v ?? 0) ? fmt(Number(v)) : '—'}</Text> },
+                { title: 'Description', dataIndex: 'description', ellipsis: true, render: (v: string) => <Text type="secondary" style={{ fontSize: 11 }}>{v}</Text> },
+              ]}
+            />
+          </>
+        ) : (
+          <Empty description="No accounting entries found for this transaction." image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ padding: '30px 0' }} />
+        )}
+      </Modal>
+
+      {/* ── API Log Modal ─────────────────────────────────────────────────── */}
+      <Modal
+        title={
+          <Space>
+            <ApiOutlined style={{ color: REDWOOD.taskBlue }} />
+            <span>API Request Log</span>
+            <Tag>{apiLogs.length} calls</Tag>
+          </Space>
+        }
+        open={apiLogVisible}
+        onCancel={() => setApiLogVisible(false)}
+        footer={
+          <Space>
+            <Button size="small" danger onClick={() => setApiLogs([])}>Clear Log</Button>
+            <Button onClick={() => setApiLogVisible(false)}>Close</Button>
+          </Space>
+        }
+        width={780}
+        destroyOnClose={false}
+      >
+        {apiLogs.length === 0 ? (
+          <Empty description="No API calls recorded yet. Run a search first." image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ padding: '20px 0' }} />
+        ) : (
+          <div style={{ maxHeight: 520, overflowY: 'auto' }}>
+            {apiLogs.map((log, i) => (
+              <div key={i} style={{
+                marginBottom: 8, padding: '8px 10px', borderRadius: 6,
+                background: log.status === 200 ? '#f6ffed' : typeof log.status === 'string' || log.status >= 400 ? '#fff2f0' : '#e6f4ff',
+                border: `1px solid ${log.status === 200 ? '#b7eb8f' : typeof log.status === 'string' || log.status >= 400 ? '#ffccc7' : '#91d5ff'}`,
+              }}>
+                <Row justify="space-between" align="middle" style={{ marginBottom: 4 }}>
+                  <Space size={6}>
+                    <Tag color={log.method === 'GET' ? 'blue' : 'purple'} style={{ fontSize: 10 }}>{log.method}</Tag>
+                    <Tag color={log.status === 200 ? 'green' : typeof log.status === 'string' ? 'red' : log.status >= 400 ? 'red' : 'orange'} style={{ fontSize: 10 }}>{log.status}</Tag>
+                    <Text type="secondary" style={{ fontSize: 10 }}>{log.ts}</Text>
+                  </Space>
+                </Row>
+                <Text code style={{ fontSize: 10, display: 'block', wordBreak: 'break-all', marginBottom: log.response ? 4 : 0 }}>
+                  {log.url}
+                </Text>
+                {log.body && (
+                  <details style={{ marginTop: 4 }}>
+                    <summary style={{ fontSize: 10, cursor: 'pointer', color: REDWOOD.neutral600 }}>Request body</summary>
+                    <pre style={{ fontSize: 10, margin: '4px 0 0', background: '#f5f5f5', padding: 6, borderRadius: 4, maxHeight: 100, overflow: 'auto' }}>{log.body}</pre>
+                  </details>
+                )}
+                {log.response && (
+                  <details style={{ marginTop: 4 }}>
+                    <summary style={{ fontSize: 10, cursor: 'pointer', color: REDWOOD.neutral600 }}>Response preview</summary>
+                    <pre style={{ fontSize: 10, margin: '4px 0 0', background: '#f5f5f5', padding: 6, borderRadius: 4, maxHeight: 100, overflow: 'auto' }}>{log.response}</pre>
+                  </details>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </Modal>
     </Layout>
   );
