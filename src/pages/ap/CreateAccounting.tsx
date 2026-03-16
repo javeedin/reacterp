@@ -267,16 +267,26 @@ const CreateAccounting: React.FC = () => {
       if (fromDate) pmtParams.append('date_from', fromDate);
       if (toDate)   pmtParams.append('date_to',   toDate);
 
-      const appParams = new URLSearchParams({ business_unit: vals.businessUnit, status: 'Applied', limit: '500' });
       const slaAppParams = new URLSearchParams({ sourceTable: 'RR_AP_APPLIED_PREPAYMENTS', limit: '1000' });
 
-      const [invRes, pmtRes, appRes, slaAppRes] = await Promise.all([
+      const [invRes, pmtRes, slaAppRes] = await Promise.all([
         loggedFetch(`${BASE}/ap/createinvoice?${invParams}`,    { headers: { Accept: 'application/json' } }),
         loggedFetch(`${BASE}/ap/payments?${pmtParams}`,         { headers: { Accept: 'application/json' } }),
-        loggedFetch(`${BASE}/ap/applied-prepayments?${appParams}`, { headers: { Accept: 'application/json' } }),
         loggedFetch(`${BASE}/sla/journals?${slaAppParams}`,     { headers: { Accept: 'application/json' } }),
       ]);
 
+      // ── Build SLA status map for prepayment applications ──
+      const slaAppMap: Record<number, { headerId: number; status: string }> = {};
+      if (slaAppRes.ok) {
+        const d = await slaAppRes.json();
+        (d.items || d || []).forEach((s: any) => {
+          const sid = Number(s.sourceId || s.source_id || 0);
+          if (sid) slaAppMap[sid] = { headerId: s.headerId || 0, status: s.accountingStatus || s.accounting_status || 'DRAFT' };
+        });
+      }
+
+      // ── Process invoices ──
+      let prepayInvoiceIds: number[] = [];
       if (invRes.ok) {
         const d = await invRes.json();
         const items: InvoiceRow[] = (d.items || d || []).map((i: any) => ({
@@ -300,6 +310,11 @@ const CreateAccounting: React.FC = () => {
           return true;
         });
         setInvoices(filtered);
+
+        // Collect prepayment invoice IDs to fetch their applications
+        prepayInvoiceIds = (d.items || d || [])
+          .filter((i: any) => (i.invoice_type || '').toLowerCase() === 'prepayment')
+          .map((i: any) => Number(i.invoice_id));
       }
 
       if (pmtRes.ok) {
@@ -326,41 +341,41 @@ const CreateAccounting: React.FC = () => {
         setPayments(filtered);
       }
 
-      // ── Prepayment applications + their SLA accounting status ──
-      // Build SLA map: applicationId → { headerId, accountingStatus }
-      const slaAppMap: Record<number, { headerId: number; status: string }> = {};
-      if (slaAppRes.ok) {
-        const d = await slaAppRes.json();
-        (d.items || d || []).forEach((s: any) => {
-          const sid = Number(s.sourceId || s.source_id || 0);
-          if (sid) slaAppMap[sid] = { headerId: s.headerId || 0, status: s.accountingStatus || s.accounting_status || 'DRAFT' };
-        });
-      }
+      // ── Fetch prepayment applications via by-prepayment/{id} per prepayment invoice ──
+      if (prepayInvoiceIds.length > 0) {
+        const appResponses = await Promise.all(
+          prepayInvoiceIds.map(pid =>
+            loggedFetch(`${BASE}/ap/applied-prepayments/by-prepayment/${pid}`, { headers: { Accept: 'application/json' } })
+              .then(r => r.ok ? r.json() : { items: [] })
+              .catch(() => ({ items: [] }))
+          )
+        );
 
-      if (appRes.ok) {
-        const d = await appRes.json();
-        const rawApps: any[] = d.items || (Array.isArray(d) ? d : []);
+        const rawApps: any[] = appResponses.flatMap(d =>
+          Array.isArray(d) ? d : (Array.isArray(d?.items) ? d.items : [])
+        );
+
         const rows: PrepayAppRow[] = rawApps.map((a: any, idx: number) => {
-          const appId = Number(a.application_id ?? 0);
+          const appId = Number(a.ApplicationId ?? a.application_id ?? 0);
           const slaEntry = slaAppMap[appId];
           return {
             key:                  String(appId || `pa-${idx}`),
             applicationId:        appId,
-            invoiceId:            Number(a.invoice_id ?? 0),
-            invoiceNumber:        a.invoice_number ?? '',
-            prepayInvoiceId:      Number(a.prepayment_invoice_id ?? 0),
-            prepayNumber:         a.prepayment_number ?? '',
-            appliedAmount:        Number(a.applied_amount ?? 0),
-            currency:             a.currency ?? 'AED',
-            accountingDate:       a.application_accounting_date ?? a.creation_date ?? '',
-            businessUnit:         a.business_unit ?? vals.businessUnit,
-            supplierSite:         a.supplier_site ?? '',
-            liabilityDistribution: a.liability_distribution ?? a.LiabilityDistribution ?? '',
+            invoiceId:            Number(a.InvoiceId ?? a.invoice_id ?? 0),
+            invoiceNumber:        a.InvoiceNumber ?? a.invoice_number ?? '',
+            prepayInvoiceId:      Number(a.PrepaymentInvoiceId ?? a.prepayment_invoice_id ?? 0),
+            prepayNumber:         a.PrepaymentNumber ?? a.prepayment_number ?? '',
+            appliedAmount:        Number(a.AppliedAmount ?? a.applied_amount ?? 0),
+            currency:             a.Currency ?? a.currency ?? 'AED',
+            accountingDate:       a.ApplicationAccountingDate ?? a.application_accounting_date ?? a.creation_date ?? '',
+            businessUnit:         a.BusinessUnit ?? a.business_unit ?? vals.businessUnit,
+            supplierSite:         a.SupplierSite ?? a.supplier_site ?? '',
+            liabilityDistribution: a.LiabilityDistribution ?? a.liability_distribution ?? '',
             accountingStatus:     slaEntry ? slaEntry.status : 'Not Accounted',
             slaHeaderId:          slaEntry?.headerId,
           };
         });
-        // Apply date filter
+
         const filteredApps = rows.filter(r => {
           if (!fromDate && !toDate) return true;
           const d_ = dayjs(r.accountingDate);
