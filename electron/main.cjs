@@ -2,6 +2,7 @@ const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, Notification, nativeIma
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
+const { autoUpdater } = require('electron-updater');
 
 let mainWindow;
 let tray = null;
@@ -422,6 +423,21 @@ function createTray() {
     },
     { type: 'separator' },
     {
+      label: 'Check for Updates',
+      click: () => {
+        if (app.isPackaged) {
+          autoUpdater.checkForUpdates();
+        } else {
+          dialog.showMessageBox(mainWindow, {
+            type: 'info',
+            title: 'Dev Mode',
+            message: 'Auto-update is only available in the packaged app.',
+          });
+        }
+      },
+    },
+    { type: 'separator' },
+    {
       label: 'Quit',
       click: () => {
         isQuitting = true;
@@ -567,6 +583,74 @@ ipcMain.on('show-notification', (event, title, body) => {
   showNotification(title, body);
 });
 
+// ── Auto-update ────────────────────────────────────────────────────────────
+function setupAutoUpdater() {
+  // Only run in production
+  if (!app.isPackaged) return;
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('checking-for-update', () => {
+    console.log('Checking for updates...');
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    console.log('Update available:', info.version);
+    dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Update Available',
+      message: `Version ${info.version} is available.`,
+      detail: 'Downloading update in the background. You will be notified when it is ready to install.',
+      buttons: ['OK'],
+    });
+  });
+
+  autoUpdater.on('update-not-available', () => {
+    console.log('App is up to date.');
+  });
+
+  autoUpdater.on('download-progress', (progress) => {
+    const percent = Math.round(progress.percent);
+    console.log(`Downloading update: ${percent}%`);
+    if (mainWindow) {
+      mainWindow.setProgressBar(progress.percent / 100);
+    }
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    console.log('Update downloaded:', info.version);
+    if (mainWindow) mainWindow.setProgressBar(-1);
+
+    dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Update Ready',
+      message: `Version ${info.version} has been downloaded.`,
+      detail: 'Restart the app now to apply the update, or it will be applied on next launch.',
+      buttons: ['Restart Now', 'Later'],
+      defaultId: 0,
+    }).then(({ response }) => {
+      if (response === 0) {
+        autoUpdater.quitAndInstall();
+      }
+    });
+  });
+
+  autoUpdater.on('error', (err) => {
+    console.error('Auto-updater error:', err.message);
+  });
+
+  // Check for updates after app starts (delay to not slow startup)
+  setTimeout(() => {
+    autoUpdater.checkForUpdates();
+  }, 5000);
+
+  // Check again every 4 hours
+  setInterval(() => {
+    autoUpdater.checkForUpdates();
+  }, 4 * 60 * 60 * 1000);
+}
+
 // App lifecycle
 app.whenReady().then(() => {
   // Start proxy server first
@@ -576,6 +660,7 @@ app.whenReady().then(() => {
   setTimeout(() => {
     createWindow();
     createTray();
+    setupAutoUpdater();
   }, 1000);
 
   app.on('activate', () => {
