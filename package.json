@@ -63,7 +63,10 @@
       "dist/**/*",
       "electron/**/*",
       "public/**/*",
-      "server/**/*"
+      "server/**/*",
+      "node_modules/electron-updater/**/*",
+      "node_modules/electron-log/**/*",
+      "node_modules/builder-util-runtime/**/*"
     ],
     "win": {
       "target": [
