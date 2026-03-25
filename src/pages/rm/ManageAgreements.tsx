@@ -439,11 +439,11 @@ const ManageAgreements: React.FC = () => {
       <Content style={{ padding: '20px 28px' }}>
 
         {/* Breadcrumb */}
-        <Breadcrumb style={{ marginBottom: 16 }}>
-          <Breadcrumb.Item><Link to="/home"><HomeOutlined /></Link></Breadcrumb.Item>
-          <Breadcrumb.Item><Link to="/rm">Rental Management</Link></Breadcrumb.Item>
-          <Breadcrumb.Item>Manage Agreements</Breadcrumb.Item>
-        </Breadcrumb>
+        <Breadcrumb style={{ marginBottom: 16 }} items={[
+          { title: <Link to="/home"><HomeOutlined /></Link> },
+          { title: <Link to="/rm">Rental Management</Link> },
+          { title: 'Manage Agreements' },
+        ]} />
 
         {/* Page header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
@@ -491,7 +491,6 @@ const ManageAgreements: React.FC = () => {
         </Card>
 
         {/* Agreements table */}
-        {console.log('[RM] rendering table — agreements.length =', agreements.length, 'loading =', loading)}
         <Card style={{ borderRadius: 8 }}>
           <Table
             columns={columns}

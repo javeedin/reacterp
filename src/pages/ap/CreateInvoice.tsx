@@ -100,7 +100,9 @@ const REDWOOD = {
   neutral100: '#F7F7F7',
   neutral200: '#E5E5E5',
   neutral300: '#C7C7C7',
+  neutral400: '#A0A0A0',
   neutral600: '#6B6B6B',
+  neutral700: '#4A4A4A',
   neutral900: '#1A1A1A',
   surface: '#FFFFFF',
 };
@@ -205,6 +207,7 @@ const getAgingColor = (bucket: string): string => {
 // Unified Invoice Line - same data, different column views per tab
 interface InvoiceLine {
   key: string;
+  id?: number;
   lineNumber: number;
   // Distribution columns (matching Fusion Payables)
   type: string;
@@ -2658,7 +2661,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // Run all validations and show checklist
   const runValidation = () => {
     const values = form.getFieldsValue();
-    const results: { label: string; passed: boolean; detail?: string }[] = [];
+    const results: { label: string; passed: boolean; detail?: string; subItems?: any[]; action?: any }[] = [];
 
     // 1. Required header fields
     const requiredFields = ['businessUnit', 'invoiceNumber', 'invoiceCurrency', 'invoiceAmount', 'invoiceDate', 'supplier', 'invoiceType', 'paymentTerms'];

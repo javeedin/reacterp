@@ -169,7 +169,7 @@ const SyncData: React.FC = () => {
   // Electron notifications and background sync
   const {
     isElectron: isRunningInElectron,
-    isBackgroundSyncSupported: isElectronBgSyncSupported,
+    isBackgroundSyncSupported: _isElectronBgSyncSupported,
     notifySyncStarted,
     notifySyncCompleted,
     notifySyncError,
@@ -254,7 +254,7 @@ const SyncData: React.FC = () => {
   });
 
   // Code Combination payload state (for debug)
-  const [codeCombPayloads, setCodeCombPayloads] = useState<Array<{
+  const [_codeCombPayloads, setCodeCombPayloads] = useState<Array<{
     ccId: number;
     concatenatedSegments: string;
     payload: any;
@@ -278,7 +278,7 @@ const SyncData: React.FC = () => {
   });
 
   // Period Status payload state (for debug)
-  const [periodStatusPayloads, setPeriodStatusPayloads] = useState<Array<{
+  const [_periodStatusPayloads, setPeriodStatusPayloads] = useState<Array<{
     periodNameId: string;
     ledgerId: number;
     payload: any;
@@ -302,7 +302,7 @@ const SyncData: React.FC = () => {
   });
 
   // Banks payload state (for debug)
-  const [banksPayloads, setBanksPayloads] = useState<Array<{
+  const [_banksPayloads, setBanksPayloads] = useState<Array<{
     bankPartyId: number;
     bankName: string;
     payload: any;
@@ -326,7 +326,7 @@ const SyncData: React.FC = () => {
   });
 
   // Bank Branches payload state (for debug)
-  const [bankBranchesPayloads, setBankBranchesPayloads] = useState<Array<{
+  const [_bankBranchesPayloads, setBankBranchesPayloads] = useState<Array<{
     branchPartyId: number;
     branchName: string;
     payload: any;
@@ -350,7 +350,7 @@ const SyncData: React.FC = () => {
   });
 
   // Bank Accounts payload state (for debug)
-  const [bankAccountsPayloads, setBankAccountsPayloads] = useState<Array<{
+  const [_bankAccountsPayloads, setBankAccountsPayloads] = useState<Array<{
     bankAccountId: number;
     accountName: string;
     payload: any;
@@ -388,7 +388,7 @@ const SyncData: React.FC = () => {
   });
 
   // Legal Entities payload state (for debug)
-  const [legalEntitiesPayloads, setLegalEntitiesPayloads] = useState<Array<{
+  const [_legalEntitiesPayloads, setLegalEntitiesPayloads] = useState<Array<{
     legalEntityId: number;
     name: string;
     payload: any;
@@ -412,7 +412,7 @@ const SyncData: React.FC = () => {
   });
 
   // User Accounts payload state (for debug)
-  const [userAccountsPayloads, setUserAccountsPayloads] = useState<Array<{
+  const [_userAccountsPayloads, setUserAccountsPayloads] = useState<Array<{
     userId: number;
     username: string;
     payload: any;
@@ -437,7 +437,7 @@ const SyncData: React.FC = () => {
   });
 
   // User Account Roles payload state (for debug)
-  const [userAccountRolesPayloads, setUserAccountRolesPayloads] = useState<Array<{
+  const [_userAccountRolesPayloads, setUserAccountRolesPayloads] = useState<Array<{
     userId: number;
     username: string;
     rolesCount: number;
@@ -462,7 +462,7 @@ const SyncData: React.FC = () => {
   });
 
   // Roles payload state (for debug)
-  const [rolesPayloads, setRolesPayloads] = useState<Array<{
+  const [_rolesPayloads, setRolesPayloads] = useState<Array<{
     roleId: number;
     roleName: string;
     payload: any;
@@ -486,7 +486,7 @@ const SyncData: React.FC = () => {
   });
 
   // Suppliers payload state (for debug)
-  const [suppliersPayloads, setSuppliersPayloads] = useState<Array<{
+  const [_suppliersPayloads, setSuppliersPayloads] = useState<Array<{
     supplierId: number;
     supplierName: string;
     payload: any;
@@ -511,7 +511,7 @@ const SyncData: React.FC = () => {
   });
 
   // Supplier Address payload state (for debug)
-  const [supplierAddressPayloads, setSupplierAddressPayloads] = useState<Array<{
+  const [_supplierAddressPayloads, setSupplierAddressPayloads] = useState<Array<{
     supplierId: number;
     supplierName: string;
     addressCount: number;
@@ -537,7 +537,7 @@ const SyncData: React.FC = () => {
   });
 
   // Supplier Sites payload state (for debug)
-  const [supplierSitesPayloads, setSupplierSitesPayloads] = useState<Array<{
+  const [_supplierSitesPayloads, setSupplierSitesPayloads] = useState<Array<{
     supplierId: number;
     supplierName: string;
     siteCount: number;
@@ -563,7 +563,7 @@ const SyncData: React.FC = () => {
   });
 
   // Site Assignments payload state (for debug)
-  const [siteAssignmentsPayloads, setSiteAssignmentsPayloads] = useState<Array<{
+  const [_siteAssignmentsPayloads, setSiteAssignmentsPayloads] = useState<Array<{
     siteId: number;
     siteName: string;
     assignmentCount: number;
@@ -630,7 +630,7 @@ const SyncData: React.FC = () => {
   });
 
   // GL Balances payload state (for debug)
-  const [glBalancesPayloads, setGLBalancesPayloads] = useState<Array<{
+  const [_glBalancesPayloads, setGLBalancesPayloads] = useState<Array<{
     batchNum: number;
     recordCount: number;
     payload: GLBalanceRecord[];
@@ -2187,7 +2187,7 @@ const SyncData: React.FC = () => {
             recordCount: payload.length,
             payload,
             postResult: result,
-            status: error ? 'error' : (result ? 'success' : 'pending'),
+            status: (error ? 'error' : (result ? 'success' : 'pending')) as 'error' | 'success' | 'pending',
             errorMessage: error,
           },
         ].slice(-100)); // Keep last 100 batches

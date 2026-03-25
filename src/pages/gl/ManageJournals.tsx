@@ -82,6 +82,7 @@ const REDWOOD = {
   neutral100: '#F7F7F7',
   neutral200: '#E5E5E5',
   neutral300: '#C7C7C7',
+  error: '#D93025',
   neutral600: '#6B6B6B',
   neutral900: '#1A1A1A',
   surface: '#FFFFFF',

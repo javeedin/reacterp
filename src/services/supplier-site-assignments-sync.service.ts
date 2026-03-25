@@ -188,7 +188,7 @@ export const testSiteAssignmentsConnection = async (
 
 // Main sync function
 export const syncSiteAssignments = async (
-  parameters: Record<string, string>,
+  _parameters: Record<string, string>,
   testMode: boolean | 'single',
   log: LogCallback,
   onProgress: ProgressCallback,

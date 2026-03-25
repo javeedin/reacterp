@@ -22,10 +22,8 @@ import {
   InputNumber,
   Tabs,
   Modal,
-  Switch,
   Checkbox,
   Statistic,
-  Descriptions,
   Progress,
   Spin,
 } from 'antd';
@@ -1584,7 +1582,7 @@ const ManageInvoices: React.FC = () => {
               <Button
                 type="primary"
                 icon={<FileTextOutlined />}
-                onClick={openCreateInvoiceTab}
+                onClick={() => openCreateInvoiceTab()}
                 style={{
                   background: REDWOOD.primary,
                   borderColor: REDWOOD.primary,

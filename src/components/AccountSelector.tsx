@@ -118,8 +118,8 @@ export const validateAccountCode = async (code: string): Promise<ValidationResul
             Description: item.description,
             EnabledFlag: item.enabled_flag,
           }));
-          valuesCache.set(segment.segment_code, values);
-          console.log(`Loaded ${values.length} values for ${segment.segment_code}`);
+          valuesCache.set(segment.segment_code, values!);
+          console.log(`Loaded ${values!.length} values for ${segment.segment_code}`);
         } else {
           console.error(`Failed to fetch values for ${segment.segment_code}: ${response.status}`);
         }

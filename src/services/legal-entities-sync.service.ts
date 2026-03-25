@@ -122,7 +122,7 @@ export const testLegalEntitiesConnection = async (log: LogCallback): Promise<boo
 
 // Main sync function for Legal Entities
 export const syncLegalEntities = async (
-  parameters: Record<string, string>,
+  _parameters: Record<string, string>,
   testMode: boolean | 'single',
   log: LogCallback,
   onProgress: ProgressCallback,

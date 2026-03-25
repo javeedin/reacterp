@@ -102,6 +102,7 @@ interface PaymentRecord {
   city: string;
   country: string;
   relatedInvoicesHref: string;
+  accountingDate?: string;
 }
 
 // Related invoice interface
@@ -166,7 +167,6 @@ import {
   fetchLedgerByBusinessUnit,
   buildApPaymentSlaPayloads,
   getAccounting,
-  postToLedger as slaPostToLedger,
 } from '../../services/sla.service';
 import type { SlaExistsResult, SlaGetResult } from '../../services/sla.service';
 
@@ -1485,7 +1485,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
             </Row>
 
             {/* Related Invoices */}
-            <Divider orientation="left" style={{ fontSize: 12, margin: '4px 0 10px' }}>
+            <Divider style={{ fontSize: 12, margin: '4px 0 10px' }}>
               Related Invoices
             </Divider>
             <Table
@@ -1546,7 +1546,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
             {/* ── Inline API Reference Panel ─────────────────────────────── */}
             {showApiSection && (
               <div style={{ marginBottom: 16 }}>
-                <Divider orientation="left" style={{ fontSize: 12, margin: '8px 0 10px' }}>
+                <Divider style={{ fontSize: 12, margin: '8px 0 10px' }}>
                   API Reference
                 </Divider>
 

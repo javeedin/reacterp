@@ -47,7 +47,8 @@ import autoTable from 'jspdf-autotable';
 import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
 
 const { Content } = Layout;
-const { Title, Text, TextArea } = Typography;
+const { Title, Text } = Typography;
+const { TextArea } = Input;
 const { Option } = Select;
 
 // Oracle Redwood Color Palette

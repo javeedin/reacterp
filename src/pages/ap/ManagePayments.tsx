@@ -57,7 +57,6 @@ import {
   ClearOutlined,
   CloseCircleOutlined,
   StopOutlined,
-  ExclamationCircleOutlined,
   PlayCircleOutlined,
   LoadingOutlined,
   CheckCircleOutlined,
@@ -77,7 +76,6 @@ import {
   fetchLedgerByBusinessUnit,
   buildApPaymentSlaPayloads,
   getAccounting,
-  postToLedger as slaPostToLedger,
 } from '../../services/sla.service';
 import type { SlaGetResult } from '../../services/sla.service';
 
@@ -171,6 +169,9 @@ interface PaymentRecord {
   city: string;
   country: string;
   relatedInvoicesHref: string;
+  currency?: string;
+  checkDate?: string;
+  legalEntityName?: string;
 }
 
 // Tab item interface
@@ -1640,7 +1641,7 @@ const ManagePayments: React.FC = () => {
       const paymentDate = toApiDate(record.paymentDate || record.checkDate || '');
       const payloads = buildApPaymentSlaPayloads({
         checkId: record.checkId,
-        paymentNumber: record.paymentNumber || record.checkId.toString(),
+        paymentNumber: String(record.paymentNumber || record.checkId),
         paymentDate,
         currencyCode: record.currency || 'AED',
         businessUnit: record.businessUnit,
@@ -1747,10 +1748,10 @@ const ManagePayments: React.FC = () => {
                               suffix={
                                 <SearchOutlined
                                   style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 14 }}
-                                  onClick={openSupplierModal}
+                                  onClick={() => openSupplierModal()}
                                 />
                               }
-                              onClick={openSupplierModal}
+                              onClick={() => openSupplierModal()}
                               style={{ cursor: 'pointer' }}
                             />
                           </Form.Item>
@@ -2144,7 +2145,7 @@ const ManagePayments: React.FC = () => {
                           {/* Supplier Due Balance */}
                           <Col span={6} style={{ textAlign: 'center', padding: '6px 8px', borderRight: `1px solid ${REDWOOD.neutral200}` }}>
                             <div style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>Supplier Due Balance</div>
-                            <div style={{ fontSize: 14, fontWeight: 600, color: REDWOOD.neutral800 }}>
+                            <div style={{ fontSize: 14, fontWeight: 600, color: REDWOOD.neutral900 }}>
                               {supplierBalanceLoading
                                 ? <span style={{ fontSize: 12, color: '#aaa' }}>Loading…</span>
                                 : supplierTotalBalance !== null
@@ -2155,19 +2156,19 @@ const ManagePayments: React.FC = () => {
                           {/* Selected Invoices */}
                           <Col span={6} style={{ textAlign: 'center', padding: '6px 8px', borderRight: `1px solid ${REDWOOD.neutral200}` }}>
                             <div style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>Selected Invoices</div>
-                            <div style={{ fontSize: 14, fontWeight: 600, color: REDWOOD.neutral800 }}>{invoicesToPay.length}</div>
+                            <div style={{ fontSize: 14, fontWeight: 600, color: REDWOOD.neutral900 }}>{invoicesToPay.length}</div>
                           </Col>
                           {/* Applied Amount */}
                           <Col span={6} style={{ textAlign: 'center', padding: '6px 8px', borderRight: `1px solid ${REDWOOD.neutral200}` }}>
                             <div style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>Applied Amount</div>
-                            <div style={{ fontSize: 14, fontWeight: 600, color: REDWOOD.neutral800 }}>
+                            <div style={{ fontSize: 14, fontWeight: 600, color: REDWOOD.neutral900 }}>
                               {totalAppliedAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </div>
                           </Col>
                           {/* Balance After Application */}
                           <Col span={6} style={{ textAlign: 'center', padding: '6px 8px' }}>
                             <div style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>Balance After Application</div>
-                            <div style={{ fontSize: 14, fontWeight: 600, color: balanceAfterApplication !== null && balanceAfterApplication < 0 ? REDWOOD.warning : REDWOOD.neutral800 }}>
+                            <div style={{ fontSize: 14, fontWeight: 600, color: balanceAfterApplication !== null && balanceAfterApplication < 0 ? REDWOOD.warning : REDWOOD.neutral900 }}>
                               {supplierBalanceLoading
                                 ? <span style={{ fontSize: 12, color: '#aaa' }}>Loading…</span>
                                 : balanceAfterApplication !== null
@@ -2184,7 +2185,7 @@ const ManagePayments: React.FC = () => {
                     label: 'Bank Details',
                     children: (
                       <div style={{ padding: '12px 0' }}>
-                        <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, color: '#666', marginTop: 0 }}>Disbursement Bank Account</Divider>
+                        <Divider orientationMargin={0} style={{ fontSize: 12, color: '#666', marginTop: 0 }}>Disbursement Bank Account</Divider>
                         {selectedBankAccount ? (
                           <Row gutter={32}>
                             <Col span={12}>
@@ -2219,7 +2220,7 @@ const ManagePayments: React.FC = () => {
                           </div>
                         )}
 
-                        <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, color: '#666' }}>Remittance</Divider>
+                        <Divider orientationMargin={0} style={{ fontSize: 12, color: '#666' }}>Remittance</Divider>
                         <Row gutter={32}>
                           <Col span={12}>
                             <Form.Item label="Payment Process Profile" name="paymentProcessProfile">
@@ -2248,7 +2249,7 @@ const ManagePayments: React.FC = () => {
                       <div style={{ padding: '12px 0' }}>
 
                         {/* ── Options ── */}
-                        <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, color: '#666', marginTop: 0 }}>Options</Divider>
+                        <Divider orientationMargin={0} style={{ fontSize: 12, color: '#666', marginTop: 0 }}>Options</Divider>
                         <Row gutter={32}>
                           <Col span={12}>
                             <Form.Item name="accrueToLedger" valuePropName="checked">
@@ -2282,7 +2283,7 @@ const ManagePayments: React.FC = () => {
                         </Row>
 
                         {/* ── Conversion ── */}
-                        <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, color: '#666' }}>Conversion</Divider>
+                        <Divider orientationMargin={0} style={{ fontSize: 12, color: '#666' }}>Conversion</Divider>
                         <Row gutter={32}>
                           <Col span={12}>
                             <Form.Item
@@ -2321,7 +2322,7 @@ const ManagePayments: React.FC = () => {
                         </Row>
 
                         {/* ── Bills Payable ── */}
-                        <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, color: '#666' }}>Bills Payable</Divider>
+                        <Divider orientationMargin={0} style={{ fontSize: 12, color: '#666' }}>Bills Payable</Divider>
                         <Row gutter={32}>
                           <Col span={12}>
                             <Form.Item label="Bills Payable" name="billsPayable">
@@ -3261,7 +3262,7 @@ const ManagePayments: React.FC = () => {
               </Row>
 
               {/* Related Invoices */}
-              <Divider orientation="left" style={{ fontSize: 12, margin: '4px 0 10px' }}>
+              <Divider style={{ fontSize: 12, margin: '4px 0 10px' }}>
                 Related Invoices
               </Divider>
               <Table

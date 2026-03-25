@@ -596,7 +596,7 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
         </Space>
       );
     }
-    const status = slaStatus.accountingStatus;
+    const status = slaStatus.accountingStatus as string | null;
     const colorMap: Record<string, string> = {
       DRAFT: '#1677ff',
       FINAL: '#52c41a',
@@ -618,11 +618,11 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
     return (
       <Tooltip title={slaStatus.message}>
         <Tag
-          color={colorMap[status] || 'default'}
-          icon={iconMap[status]}
+          color={(status && colorMap[status]) || 'default'}
+          icon={status ? iconMap[status] : undefined}
           style={{ fontSize: 12, padding: '2px 8px', cursor: 'help', fontWeight: 600 }}
         >
-          {labelMap[status] || status}
+          {(status && labelMap[status]) || status}
         </Tag>
       </Tooltip>
     );

@@ -124,7 +124,7 @@ export const testUserAccountsConnection = async (log: LogCallback): Promise<bool
 
 // Main sync function for User Accounts
 export const syncUserAccounts = async (
-  parameters: Record<string, string>,
+  _parameters: Record<string, string>,
   testMode: boolean | 'single',
   log: LogCallback,
   onProgress: ProgressCallback,

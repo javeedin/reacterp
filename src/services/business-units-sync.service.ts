@@ -120,7 +120,7 @@ export const testBusinessUnitsConnection = async (log: LogCallback): Promise<boo
 
 // Main sync: GET finBusinessUnitsLOV → POST gl/businessunits
 export const syncBusinessUnits = async (
-  parameters: Record<string, string>,
+  _parameters: Record<string, string>,
   testMode: boolean | 'single',
   log: LogCallback,
   onProgress: ProgressCallback,

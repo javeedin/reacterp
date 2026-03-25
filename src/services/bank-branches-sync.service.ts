@@ -122,7 +122,7 @@ export const testBankBranchesConnection = async (log: LogCallback): Promise<bool
 
 // Main sync function for Bank Branches
 export const syncBankBranches = async (
-  parameters: Record<string, string>,
+  _parameters: Record<string, string>,
   testMode: boolean | 'single',
   log: LogCallback,
   onProgress: ProgressCallback,

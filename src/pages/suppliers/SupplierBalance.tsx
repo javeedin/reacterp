@@ -28,7 +28,6 @@ import {
   UserOutlined,
   EnvironmentOutlined,
   PhoneOutlined,
-  MailOutlined,
   CalendarOutlined,
   BankOutlined,
   ReloadOutlined,

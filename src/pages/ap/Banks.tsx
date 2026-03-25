@@ -1357,7 +1357,7 @@ const Banks: React.FC = () => {
                       <Col span={12}><Form.Item name="ReconStartDate" label="Reconciliation Start Date" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
                       <Col span={12}><Form.Item name="Description" label="Description" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
                     </Row>
-                    <Divider style={{ margin: '8px 0' }} orientation="left" orientationMargin={0}><Text type="secondary" style={{ fontSize: 11 }}>Audit Information</Text></Divider>
+                    <Divider style={{ margin: '8px 0' }} orientationMargin={0}><Text type="secondary" style={{ fontSize: 11 }}>Audit Information</Text></Divider>
                     <Row gutter={12}>
                       <Col span={12}><Form.Item name="CreatedBy" label="Created By" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
                       <Col span={12}><Form.Item name="CreationDate" label="Creation Date" style={{ marginBottom: 8 }}><Input disabled size="small" /></Form.Item></Col>
