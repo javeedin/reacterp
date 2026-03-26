@@ -7,10 +7,19 @@ let nodemailer = null;
 try { nodemailer = require('nodemailer'); } catch (_) {}
 
 function loadEmailConfig() {
-  try {
-    const cfgPath = path.join(__dirname, '..', 'electron', 'email.config.json');
-    return JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-  } catch (_) { return null; }
+  const attempts = [
+    path.join(__dirname, '..', 'electron', 'email.config.json'),
+    path.join(process.cwd(), 'electron', 'email.config.json'),
+  ];
+  for (const cfgPath of attempts) {
+    try {
+      const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+      console.log('[email] Config loaded from:', cfgPath);
+      return cfg;
+    } catch (_) {}
+  }
+  console.error('[email] email.config.json not found. Tried:', attempts);
+  return null;
 }
 
 const app = express();
