@@ -76,7 +76,7 @@ const ForgotPasswordModal: React.FC<{ open: boolean; onClose: () => void }> = ({
       title={null}
       width={440}
       centered
-      destroyOnClose
+      destroyOnHidden
     >
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
         <KeyOutlined style={{ fontSize: 36, color: '#1677ff', marginBottom: 8 }} />
@@ -97,7 +97,7 @@ const ForgotPasswordModal: React.FC<{ open: boolean; onClose: () => void }> = ({
       />
 
       {error && (
-        <Alert message={error} type="error" showIcon style={{ marginBottom: 16 }} />
+        <Alert title={error} type="error" showIcon style={{ marginBottom: 16 }} />
       )}
 
       {/* ── Step 0: Enter email ── */}
@@ -131,7 +131,7 @@ const ForgotPasswordModal: React.FC<{ open: boolean; onClose: () => void }> = ({
       {step === 1 && (
         <Form form={form} layout="vertical" onFinish={handleSetPassword} requiredMark={false}>
           <Alert
-            message={`OTP sent to ${username}`}
+            title={`OTP sent to ${username}`}
             type="info"
             showIcon
             style={{ marginBottom: 16 }}
@@ -278,7 +278,7 @@ const Login: React.FC = () => {
 
           {/* Error alert */}
           {error && (
-            <Alert message={error} type="error" showIcon style={{ marginBottom: 20 }} />
+            <Alert title={error} type="error" showIcon style={{ marginBottom: 20 }} />
           )}
 
           {/* Login form */}
