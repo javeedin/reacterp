@@ -17,7 +17,6 @@ import {
 import { Outlet, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import type { MenuProps } from 'antd';
-import APIEndpointBar from '../components/APIEndpointBar';
 
 // Type for BeforeInstallPromptEvent
 interface BeforeInstallPromptEvent extends Event {
