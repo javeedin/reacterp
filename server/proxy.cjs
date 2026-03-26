@@ -681,39 +681,49 @@ app.post('/api/send-email', async (req, res) => {
   if (!cfg) return res.status(500).json({ success: false, error: 'email.config.json not found' });
   if (!cfg.pass) return res.status(500).json({ success: false, error: 'Brevo API key not configured in email.config.json' });
 
+  console.log(`[send-email] Sending OTP to: ${to}`);
+  console.log(`[send-email] Using sender: ${cfg.user}`);
+  console.log(`[send-email] API key length: ${cfg.pass.length}`);
+
   try {
+    const payload = {
+      sender: { name: 'ReactERP', email: cfg.user },
+      to: [{ email: to }],
+      subject: 'ReactERP — Your One-Time Password (OTP)',
+      htmlContent: `
+        <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;border:1px solid #e0e0e0;border-radius:8px">
+          <h2 style="color:#1677ff;margin-bottom:8px">ReactERP</h2>
+          <p>Your one-time password (OTP) is:</p>
+          <div style="font-size:36px;font-weight:bold;letter-spacing:8px;color:#1a1a2e;padding:16px;background:#f5f5f5;border-radius:6px;text-align:center">
+            ${otp}
+          </div>
+          <p style="margin-top:16px;color:#666;font-size:13px">Valid for 15 minutes. Do not share this code.</p>
+        </div>`,
+    };
+
+    console.log(`[send-email] Calling Brevo API...`);
     const response = await fetch('https://api.brevo.com/v3/smtp/email', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'api-key': cfg.pass,
       },
-      body: JSON.stringify({
-        sender: { name: 'ReactERP', email: cfg.user },
-        to: [{ email: to }],
-        subject: 'ReactERP — Your One-Time Password (OTP)',
-        htmlContent: `
-          <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;border:1px solid #e0e0e0;border-radius:8px">
-            <h2 style="color:#1677ff;margin-bottom:8px">ReactERP</h2>
-            <p>Your one-time password (OTP) is:</p>
-            <div style="font-size:36px;font-weight:bold;letter-spacing:8px;color:#1a1a2e;padding:16px;background:#f5f5f5;border-radius:6px;text-align:center">
-              ${otp}
-            </div>
-            <p style="margin-top:16px;color:#666;font-size:13px">Valid for 15 minutes. Do not share this code.</p>
-          </div>`,
-      }),
+      body: JSON.stringify(payload),
     });
 
     const data = await response.json();
+    console.log(`[send-email] Brevo response status: ${response.status}`);
+    console.log(`[send-email] Brevo response body:`, JSON.stringify(data));
+
     if (!response.ok) {
       console.error('[send-email] Brevo error:', data);
       return res.status(500).json({ success: false, error: data.message || 'Brevo API error' });
     }
 
-    console.log(`[send-email] OTP sent to ${to}`);
+    console.log(`[send-email] SUCCESS — OTP sent to ${to}, messageId: ${data.messageId}`);
     res.json({ success: true });
   } catch (err) {
-    console.error('[send-email] Error:', err.message);
+    console.error('[send-email] EXCEPTION:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
