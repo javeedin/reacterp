@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 import type { User, AuthContextType, LoginResult } from '../types';
-import { BREVO_API_KEY, BREVO_SENDER } from '../config/email.secret';
+const BREVO_API_KEY: string = import.meta.env.VITE_BREVO_API_KEY ?? '';
+const BREVO_SENDER: string  = import.meta.env.VITE_BREVO_SENDER  ?? '';
 
 const APEX_AUTH_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/auth';
 
