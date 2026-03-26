@@ -217,9 +217,6 @@ const MainLayout: React.FC = () => {
         </Space>
       </div>
 
-      {/* API Endpoint Status Bar */}
-      <APIEndpointBar />
-
       <Content>
         <Outlet />
       </Content>
