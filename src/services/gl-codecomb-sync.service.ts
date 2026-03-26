@@ -1,4 +1,4 @@
-import { PROXY_CONFIG, ORACLE_FUSION_CONFIG, APEX_DB_CONFIG } from '../config/api.config';
+import { fetchFromOracle, insertToApex } from './sync-http';
 
 // Types
 export interface CodeCombSyncProgress {
@@ -23,78 +23,6 @@ export type CodeCombPayloadCallback = (
   result?: any,
   error?: string
 ) => void;
-
-// Fetch from Oracle endpoint via proxy
-const fetchFromOracle = async (
-  endpoint: string,
-  params: Record<string, string> = {},
-  log?: LogCallback,
-  verbose = true
-): Promise<any> => {
-  try {
-    const queryParams = new URLSearchParams(params);
-    const proxyUrl = `${PROXY_CONFIG.baseUrl}/oracle/${endpoint}?${queryParams.toString()}`;
-    const oracleUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/${endpoint}?${queryParams.toString()}`;
-
-    if (verbose) {
-      log?.('step', '──── [GET] Oracle Fusion ────');
-      log?.('info', `Oracle URL: ${oracleUrl}`);
-      log?.('info', `Proxy URL: ${proxyUrl}`);
-    }
-
-    const response = await fetch(proxyUrl);
-    const data = await response.json();
-
-    if (!data.success) {
-      throw new Error(data.error || 'Fetch failed');
-    }
-
-    if (verbose) {
-      log?.('success', `GET Response: ${data.items?.length || 0} records fetched`);
-    }
-    return data;
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    log?.('error', `GET Error: ${errorMsg}`);
-    throw error;
-  }
-};
-
-// Insert to APEX via proxy
-const insertToApex = async (
-  endpoint: string,
-  payload: any,
-  log?: LogCallback,
-  verbose = true
-): Promise<any> => {
-  try {
-    const url = `${PROXY_CONFIG.baseUrl}/apex/${endpoint}`;
-    const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${endpoint}`;
-
-    if (verbose) {
-      log?.('step', '──── [POST] APEX Database ────');
-      log?.('info', `APEX URL: ${apexUrl}`);
-      log?.('info', `Payload: ${JSON.stringify(payload).substring(0, 200)}...`);
-    }
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    const data = await response.json();
-
-    if (verbose) {
-      log?.('success', `POST Response: ${JSON.stringify(data)}`);
-    }
-    return data;
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    log?.('error', `POST Error: ${errorMsg}`);
-    throw error;
-  }
-};
 
 // Test connection to Oracle Fusion accountCombinationsLOV endpoint
 export const testGLCodeCombConnection = async (log: LogCallback): Promise<boolean> => {

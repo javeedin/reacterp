@@ -1,4 +1,5 @@
-import { PROXY_CONFIG, ORACLE_FUSION_CONFIG, APEX_DB_CONFIG } from '../config/api.config';
+import { ORACLE_FUSION_CONFIG } from '../config/api.config';
+import { fetchFromOracle, fetchFromOracleUrl, insertToApex, fetchFromApex } from './sync-http';
 
 // Types
 export interface SyncProgress {
@@ -68,35 +69,7 @@ const findChildLink = (links: any[], linkName: string): string | null => {
   return link?.href || null;
 };
 
-// Fetch from Oracle via proxy
-const fetchFromOracleUrl = async (url: string, log?: LogCallback, verbose = true): Promise<any> => {
-  try {
-    // Build proxy URL
-    const proxyUrl = `${PROXY_CONFIG.baseUrl}/oracle-url?url=${encodeURIComponent(url)}`;
 
-    if (verbose) {
-      log?.('step', '──── [GET] Oracle Fusion ────');
-      log?.('info', `GET URL: ${url}`);
-      log?.('info', `Proxy URL: ${proxyUrl}`);
-    }
-
-    const response = await fetch(proxyUrl);
-    const data = await response.json();
-
-    if (!data.success) {
-      throw new Error(data.error || 'Fetch failed');
-    }
-
-    if (verbose) {
-      log?.('success', `GET Response: ${JSON.stringify(data)}`);
-    }
-    return data;
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    log?.('error', `GET Error: ${errorMsg}`);
-    throw error;
-  }
-};
 
 // Fetch from Oracle endpoint via proxy
 const fetchFromOracle = async (

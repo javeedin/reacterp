@@ -1,4 +1,5 @@
-import { PROXY_CONFIG, ORACLE_SOAP_CONFIG, APEX_DB_CONFIG } from '../config/api.config';
+import { ORACLE_SOAP_CONFIG, APEX_DB_CONFIG } from '../config/api.config';
+import { callSoapBip } from './sync-http';
 
 // Types
 export interface GLBalancesSyncProgress {
@@ -165,20 +166,9 @@ export const testGLBalancesConnection = async (
       config.password
     );
 
-    log?.('info', 'Testing via proxy server...');
+    log?.('info', 'Testing direct SOAP connection...');
 
-    const response = await fetch(`${PROXY_CONFIG.baseUrl}/soap/test`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        url: config.baseUrl,
-        envelope: soapEnvelope,
-      }),
-    });
-
-    const result = await response.json();
+    const result = await callSoapBip(config.baseUrl, soapEnvelope, log);
 
     if (result.success) {
       log?.('success', 'SOAP connection successful!');
@@ -263,8 +253,7 @@ export const syncGLBalances = async (
     log?.('step', '  STEP 2: Sending SOAP Request to Oracle BI Publisher');
     log?.('step', '═══════════════════════════════════════════════════════════');
 
-    const proxyUrl = `${PROXY_CONFIG.baseUrl}/soap/bip-report`;
-    log?.('info', `Proxy URL: ${proxyUrl}`);
+    log?.('info', `SOAP URL: ${config.baseUrl}`);
     log?.('info', 'Sending request...');
 
     if (abortSignal?.aborted) {
@@ -273,22 +262,9 @@ export const syncGLBalances = async (
       return progress;
     }
 
-    const startTime = Date.now();
-    const response = await fetch(proxyUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        url: config.baseUrl,
-        envelope: soapEnvelope,
-      }),
-    });
+    const result = await callSoapBip(config.baseUrl, soapEnvelope, log);
 
-    const duration = Date.now() - startTime;
-    const result = await response.json();
-
-    log?.('info', `Response received in ${duration}ms`);
+    log?.('info', `Response received in ${result.duration ?? 0}ms`);
 
     if (!result.success) {
       log?.('error', `SOAP request failed: ${result.error}`);
