@@ -5,6 +5,59 @@ const { spawn } = require('child_process');
 let autoUpdater = null;
 try { autoUpdater = require('electron-updater').autoUpdater; } catch (_) { /* not available in portable build */ }
 
+let nodemailer = null;
+try { nodemailer = require('nodemailer'); } catch (_) { /* optional */ }
+
+// ── Email sender (IPC) ──────────────────────────────────────────────────────
+ipcMain.handle('send-otp-email', async (_event, { to, otp, smtpConfig }) => {
+  if (!nodemailer) return { success: false, error: 'nodemailer not available' };
+  try {
+    const transporter = nodemailer.createTransport({
+      host: smtpConfig.host,
+      port: smtpConfig.port || 587,
+      secure: smtpConfig.secure || false,
+      auth: { user: smtpConfig.user, pass: smtpConfig.pass },
+      tls: { rejectUnauthorized: false },
+    });
+    await transporter.sendMail({
+      from: `"ReactERP" <${smtpConfig.user}>`,
+      to,
+      subject: 'ReactERP — Your One-Time Password (OTP)',
+      text: [
+        'Hello,',
+        '',
+        'Your ReactERP one-time password is:',
+        '',
+        '        ' + otp,
+        '',
+        'This OTP is valid for 15 minutes.',
+        'Enter it on the password setup screen together with your new password.',
+        '',
+        'If you did not request this, please ignore this email.',
+        '',
+        'ReactERP System',
+      ].join('\n'),
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:32px;border:1px solid #e0e0e0;border-radius:8px">
+          <h2 style="color:#1a1a2e;margin-top:0">ReactERP</h2>
+          <p>Hello,</p>
+          <p>Your one-time password (OTP) is:</p>
+          <div style="font-size:32px;font-weight:bold;letter-spacing:8px;color:#1677ff;background:#f0f5ff;padding:16px 24px;border-radius:6px;text-align:center;margin:24px 0">
+            ${otp}
+          </div>
+          <p style="color:#666;font-size:13px">Valid for <strong>15 minutes</strong>. Enter this code along with your new password.</p>
+          <p style="color:#999;font-size:12px">If you did not request this, please ignore this email.</p>
+          <hr style="border:none;border-top:1px solid #eee;margin:24px 0"/>
+          <p style="color:#aaa;font-size:11px;margin:0">ReactERP System</p>
+        </div>
+      `,
+    });
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 let mainWindow;
 let tray = null;
 let isQuitting = false;

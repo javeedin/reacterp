@@ -1,7 +1,18 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 import type { User, AuthContextType, LoginResult } from '../types';
+import { SMTP_CONFIG } from '../config/email.config';
 
 const APEX_AUTH_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/auth';
+
+// Electron API (available only in desktop app)
+declare global {
+  interface Window {
+    electronAPI?: {
+      isElectron: boolean;
+      sendOtpEmail: (to: string, otp: string, smtpConfig: typeof SMTP_CONFIG) => Promise<{ success: boolean; error?: string }>;
+    };
+  }
+}
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -48,12 +59,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const sendOtp = useCallback(async (username: string) => {
     try {
+      // Step 1: Ask APEX to generate & store OTP — returns the OTP value
       const res = await fetch(`${APEX_AUTH_BASE}/send-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username }),
       });
-      return await res.json();
+      const data = await res.json();
+
+      if (data.status !== 'OK') {
+        return { status: data.status, message: data.message || 'Failed to generate OTP.' };
+      }
+
+      // Step 2: Send the email from Electron (Node.js / nodemailer)
+      if (window.electronAPI?.isElectron && window.electronAPI.sendOtpEmail) {
+        const emailResult = await window.electronAPI.sendOtpEmail(data.email, data.otp, SMTP_CONFIG);
+        if (!emailResult.success) {
+          return { status: 'EMAIL_ERROR', message: `OTP generated but email failed: ${emailResult.error}` };
+        }
+        return { status: 'SENT', message: `OTP sent to ${data.email}. Valid for 15 minutes.` };
+      }
+
+      // Fallback for browser (non-Electron): OTP was generated but can't email from browser
+      return { status: 'SENT', message: `OTP generated for ${data.email}. (Non-Electron: configure email service)` };
+
     } catch {
       return { status: 'ERROR', message: 'Unable to connect. Please try again.' };
     }
