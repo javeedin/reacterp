@@ -366,7 +366,7 @@ function createWindow() {
 // Create system tray icon
 function createTray() {
   // Create tray icon
-  const iconPath = path.join(__dirname, '../public/icon-512.png');
+  const iconPath = path.join(__dirname, '../public/icons/icon-512.png');
   let trayIcon;
 
   try {
