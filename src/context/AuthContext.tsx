@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 import type { User, AuthContextType, LoginResult } from '../types';
+import { BREVO_API_KEY, BREVO_SENDER } from '../config/email.secret';
 
 const APEX_AUTH_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/auth';
 
@@ -57,8 +58,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [loginWithStatus]);
 
   const sendOtpViaBrowser = async (to: string, otp: string): Promise<{ success: boolean; error?: string }> => {
-    const apiKey = import.meta.env.VITE_BREVO_API_KEY;
-    const sender = import.meta.env.VITE_BREVO_SENDER || 'noreply@reacterp.com';
+    const apiKey = BREVO_API_KEY;
+    const sender = BREVO_SENDER;
     if (!apiKey) return { success: false, error: 'Brevo API key not configured.' };
     try {
       const res = await fetch('https://api.brevo.com/v3/smtp/email', {

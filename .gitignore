@@ -15,6 +15,7 @@ dist-electron
 
 # Secrets — never commit
 electron/email.config.json
+src/config/email.secret.ts
 
 # Editor directories and files
 .vscode/*
