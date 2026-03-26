@@ -661,40 +661,44 @@ app.post('/api/soap/bip-report', async (req, res) => {
   }
 });
 
-// ─── Send OTP Email ───────────────────────────────────────────────────────────
+// ─── Send OTP Email via Brevo HTTP API ───────────────────────────────────────
 // POST /api/send-email   { "to": "user@example.com", "otp": "123456" }
 app.post('/api/send-email', async (req, res) => {
   const { to, otp } = req.body || {};
   if (!to || !otp) return res.status(400).json({ success: false, error: 'to and otp are required' });
 
-  if (!nodemailer) return res.status(500).json({ success: false, error: 'nodemailer not installed' });
-
   const cfg = loadEmailConfig();
   if (!cfg) return res.status(500).json({ success: false, error: 'email.config.json not found' });
+  if (!cfg.pass) return res.status(500).json({ success: false, error: 'Brevo API key not configured in email.config.json' });
 
   try {
-    const transporter = nodemailer.createTransport({
-      host: cfg.host,
-      port: cfg.port || 587,
-      secure: cfg.secure || false,
-      auth: { user: cfg.user, pass: cfg.pass },
-      tls: { rejectUnauthorized: false },
+    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'api-key': cfg.pass,
+      },
+      body: JSON.stringify({
+        sender: { name: 'ReactERP', email: cfg.user },
+        to: [{ email: to }],
+        subject: 'ReactERP — Your One-Time Password (OTP)',
+        htmlContent: `
+          <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;border:1px solid #e0e0e0;border-radius:8px">
+            <h2 style="color:#1677ff;margin-bottom:8px">ReactERP</h2>
+            <p>Your one-time password (OTP) is:</p>
+            <div style="font-size:36px;font-weight:bold;letter-spacing:8px;color:#1a1a2e;padding:16px;background:#f5f5f5;border-radius:6px;text-align:center">
+              ${otp}
+            </div>
+            <p style="margin-top:16px;color:#666;font-size:13px">Valid for 15 minutes. Do not share this code.</p>
+          </div>`,
+      }),
     });
 
-    await transporter.sendMail({
-      from: `"ReactERP" <${cfg.user}>`,
-      to,
-      subject: 'ReactERP — Your One-Time Password (OTP)',
-      html: `
-        <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;border:1px solid #e0e0e0;border-radius:8px">
-          <h2 style="color:#1677ff;margin-bottom:8px">ReactERP</h2>
-          <p>Your one-time password (OTP) is:</p>
-          <div style="font-size:36px;font-weight:bold;letter-spacing:8px;color:#1a1a2e;padding:16px;background:#f5f5f5;border-radius:6px;text-align:center">
-            ${otp}
-          </div>
-          <p style="margin-top:16px;color:#666;font-size:13px">Valid for 15 minutes. Do not share this code.</p>
-        </div>`,
-    });
+    const data = await response.json();
+    if (!response.ok) {
+      console.error('[send-email] Brevo error:', data);
+      return res.status(500).json({ success: false, error: data.message || 'Brevo API error' });
+    }
 
     console.log(`[send-email] OTP sent to ${to}`);
     res.json({ success: true });
