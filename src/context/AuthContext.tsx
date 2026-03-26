@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 import type { User, AuthContextType, LoginResult } from '../types';
-import { SMTP_CONFIG } from '../config/email.config';
 
 const APEX_AUTH_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/auth';
 
@@ -9,7 +8,7 @@ declare global {
   interface Window {
     electronAPI?: {
       isElectron: boolean;
-      sendOtpEmail: (to: string, otp: string, smtpConfig: typeof SMTP_CONFIG) => Promise<{ success: boolean; error?: string }>;
+      sendOtpEmail: (to: string, otp: string) => Promise<{ success: boolean; error?: string }>;
     };
   }
 }
@@ -73,7 +72,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // Step 2: Send the email from Electron (Node.js / nodemailer)
       if (window.electronAPI?.isElectron && window.electronAPI.sendOtpEmail) {
-        const emailResult = await window.electronAPI.sendOtpEmail(data.email, data.otp, SMTP_CONFIG);
+        const emailResult = await window.electronAPI.sendOtpEmail(data.email, data.otp);
         if (!emailResult.success) {
           return { status: 'EMAIL_ERROR', message: `OTP generated but email failed: ${emailResult.error}` };
         }

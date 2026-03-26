@@ -27,6 +27,7 @@
     "file-saver": "^2.0.5",
     "jspdf": "^3.0.4",
     "jspdf-autotable": "^5.0.2",
+    "nodemailer": "^8.0.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.10.1",
@@ -64,6 +65,12 @@
       "electron/**/*",
       "public/**/*",
       "server/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "electron/email.config.json",
+        "to": "app/electron/email.config.json"
+      }
     ],
     "asar": false,
     "win": {

@@ -20,8 +20,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   removeStopSyncListener: () => ipcRenderer.removeAllListeners('stop-sync'),
 
   // Send OTP email via nodemailer (main process)
-  sendOtpEmail: (to, otp, smtpConfig) =>
-    ipcRenderer.invoke('send-otp-email', { to, otp, smtpConfig }),
+  sendOtpEmail: (to, otp) =>
+    ipcRenderer.invoke('send-otp-email', { to, otp }),
 
   // Check if running in Electron
   isElectron: true,

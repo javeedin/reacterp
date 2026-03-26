@@ -9,8 +9,23 @@ let nodemailer = null;
 try { nodemailer = require('nodemailer'); } catch (_) { /* optional */ }
 
 // ── Email sender (IPC) ──────────────────────────────────────────────────────
-ipcMain.handle('send-otp-email', async (_event, { to, otp, smtpConfig }) => {
+// Credentials are read from electron/email.config.json (gitignored)
+function loadSmtpConfig() {
+  try {
+    const configPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'app', 'electron', 'email.config.json')
+      : path.join(__dirname, 'email.config.json');
+    return JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  } catch (e) {
+    console.error('email.config.json not found:', e.message);
+    return null;
+  }
+}
+
+ipcMain.handle('send-otp-email', async (_event, { to, otp }) => {
   if (!nodemailer) return { success: false, error: 'nodemailer not available' };
+  const smtpConfig = loadSmtpConfig();
+  if (!smtpConfig) return { success: false, error: 'Email config not found. Please set up electron/email.config.json.' };
   try {
     const transporter = nodemailer.createTransport({
       host: smtpConfig.host,
