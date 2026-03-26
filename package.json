@@ -63,13 +63,9 @@
       "dist/**/*",
       "electron/**/*",
       "public/**/*",
-      "server/**/*",
-      "node_modules/**/*"
+      "server/**/*"
     ],
     "asar": true,
-    "asarUnpack": [
-      "node_modules/electron-updater/**/*"
-    ],
     "win": {
       "target": [
         "nsis"
