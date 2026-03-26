@@ -56,6 +56,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return result.status === 'SUCCESS';
   }, [loginWithStatus]);
 
+  const sendOtpViaBrowser = async (to: string, otp: string): Promise<{ success: boolean; error?: string }> => {
+    const apiKey = import.meta.env.VITE_BREVO_API_KEY;
+    const sender = import.meta.env.VITE_BREVO_SENDER || 'noreply@reacterp.com';
+    if (!apiKey) return { success: false, error: 'Brevo API key not configured.' };
+    try {
+      const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'api-key': apiKey,
+        },
+        body: JSON.stringify({
+          sender: { name: 'ReactERP', email: sender },
+          to: [{ email: to }],
+          subject: 'ReactERP — Your One-Time Password (OTP)',
+          htmlContent: `
+            <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;border:1px solid #e0e0e0;border-radius:8px">
+              <h2 style="color:#1677ff;margin-bottom:8px">ReactERP</h2>
+              <p>Your one-time password (OTP) is:</p>
+              <div style="font-size:36px;font-weight:bold;letter-spacing:8px;color:#1a1a2e;padding:16px;background:#f5f5f5;border-radius:6px;text-align:center">
+                ${otp}
+              </div>
+              <p style="margin-top:16px;color:#666;font-size:13px">Valid for 15 minutes. Do not share this code.</p>
+            </div>`,
+        }),
+      });
+      if (res.ok) return { success: true };
+      const err = await res.json();
+      return { success: false, error: err.message || 'Email send failed.' };
+    } catch (e: unknown) {
+      return { success: false, error: e instanceof Error ? e.message : 'Email send failed.' };
+    }
+  };
+
   const sendOtp = useCallback(async (username: string) => {
     try {
       // Step 1: Ask APEX to generate & store OTP — returns the OTP value
@@ -70,7 +104,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { status: data.status, message: data.message || 'Failed to generate OTP.' };
       }
 
-      // Step 2: Send the email from Electron (Node.js / nodemailer)
+      // Step 2a: Electron — send via nodemailer
       if (window.electronAPI?.isElectron && window.electronAPI.sendOtpEmail) {
         const emailResult = await window.electronAPI.sendOtpEmail(data.email, data.otp);
         if (!emailResult.success) {
@@ -79,8 +113,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { status: 'SENT', message: `OTP sent to ${data.email}. Valid for 15 minutes.` };
       }
 
-      // Fallback for browser (non-Electron): OTP was generated but can't email from browser
-      return { status: 'SENT', message: `OTP generated for ${data.email}. (Non-Electron: configure email service)` };
+      // Step 2b: Browser — send via Brevo HTTP API
+      const emailResult = await sendOtpViaBrowser(data.email, data.otp);
+      if (!emailResult.success) {
+        return { status: 'EMAIL_ERROR', message: `OTP generated but email failed: ${emailResult.error}` };
+      }
+      return { status: 'SENT', message: `OTP sent to ${data.email}. Valid for 15 minutes.` };
 
     } catch {
       return { status: 'ERROR', message: 'Unable to connect. Please try again.' };
