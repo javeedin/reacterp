@@ -6,11 +6,23 @@ export interface User {
   role: string;
 }
 
+export type LoginStatus =
+  | 'SUCCESS' | 'INVALID_USER' | 'WRONG_PASSWORD'
+  | 'LOCKED'  | 'SUSPENDED'   | 'NO_PASSWORD' | 'ERROR';
+
+export interface LoginResult {
+  status: LoginStatus;
+  message: string;
+}
+
 export interface AuthContextType {
   user: User | null;
-  login: (username: string, password: string) => Promise<boolean>;
-  logout: () => void;
   isAuthenticated: boolean;
+  login: (username: string, password: string) => Promise<boolean>;
+  loginWithStatus: (username: string, password: string) => Promise<LoginResult>;
+  sendOtp: (username: string) => Promise<{ status: string; message: string }>;
+  setPassword: (username: string, otp: string, newPassword: string) => Promise<{ status: string; message: string }>;
+  logout: () => void;
 }
 
 export interface Module {
