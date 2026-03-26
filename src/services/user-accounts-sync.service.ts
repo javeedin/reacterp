@@ -1,4 +1,4 @@
-import { PROXY_CONFIG, APEX_DB_CONFIG } from '../config/api.config';
+import { fetchFromHcm, insertToApex } from './sync-http';
 
 // Types
 export interface UserAccountsSyncProgress {
@@ -24,84 +24,12 @@ export type UserAccountsPayloadCallback = (
   error?: string
 ) => void;
 
-// Fetch from Oracle HCM REST API via proxy (Test environment)
-const fetchFromOracle = async (
-  endpoint: string,
-  params: Record<string, string> = {},
-  log?: LogCallback,
-  verbose = true
-): Promise<any> => {
-  try {
-    const queryParams = new URLSearchParams(params);
-    // User Accounts uses HCM REST API on test environment via /api/hcm/
-    const proxyUrl = `${PROXY_CONFIG.baseUrl}/hcm/${endpoint}?${queryParams.toString()}`;
-
-    if (verbose) {
-      log?.('step', '──── [GET] Oracle HCM (Test) ────');
-      log?.('info', `Proxy URL: ${proxyUrl}`);
-    }
-
-    const response = await fetch(proxyUrl);
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.error || `Fetch failed: ${response.status}`);
-    }
-
-    if (verbose) {
-      log?.('success', `GET Response: ${data.items?.length || 0} records fetched`);
-    }
-    // Wrap response to match expected format
-    return { success: true, items: data.items || [], hasMore: data.hasMore, count: data.count };
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    log?.('error', `GET Error: ${errorMsg}`);
-    throw error;
-  }
-};
-
-// Insert to APEX via proxy
-const insertToApex = async (
-  endpoint: string,
-  payload: any,
-  log?: LogCallback,
-  verbose = true
-): Promise<any> => {
-  try {
-    const url = `${PROXY_CONFIG.baseUrl}/apex/${endpoint}`;
-    const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${endpoint}`;
-
-    if (verbose) {
-      log?.('step', '──── [POST] APEX Database ────');
-      log?.('info', `APEX URL: ${apexUrl}`);
-      log?.('info', `Payload: ${JSON.stringify(payload).substring(0, 200)}...`);
-    }
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    const data = await response.json();
-
-    if (verbose) {
-      log?.('success', `POST Response: ${JSON.stringify(data)}`);
-    }
-    return data;
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    log?.('error', `POST Error: ${errorMsg}`);
-    throw error;
-  }
-};
-
 // Test connection to Oracle Fusion user accounts endpoint
 export const testUserAccountsConnection = async (log: LogCallback): Promise<boolean> => {
   try {
     log('info', 'Testing User Accounts endpoint...');
 
-    const result = await fetchFromOracle(
+    const result = await fetchFromHcm(
       'userAccounts',
       { limit: '1' },
       log,
@@ -194,7 +122,7 @@ export const syncUserAccounts = async (
         offset: String(offset),
       };
 
-      const result = await fetchFromOracle('userAccounts', queryParams, log, true);
+      const result = await fetchFromHcm('userAccounts', queryParams, log, true);
 
       if (!result.success || !result.items) {
         throw new Error(result.error || 'Failed to fetch user accounts');

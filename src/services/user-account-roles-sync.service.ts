@@ -1,4 +1,4 @@
-import { PROXY_CONFIG, APEX_DB_CONFIG } from '../config/api.config';
+import { fetchFromHcm, fetchFromOracleUrl, insertToApex } from './sync-http';
 
 // Types
 export interface UserAccountRolesSyncProgress {
@@ -37,106 +37,6 @@ interface UserAccount {
   }>;
 }
 
-// Fetch from Oracle HCM REST API via proxy (Test environment)
-const fetchFromHcm = async (
-  endpoint: string,
-  params: Record<string, string> = {},
-  log?: LogCallback,
-  verbose = true
-): Promise<any> => {
-  try {
-    const queryParams = new URLSearchParams(params);
-    const proxyUrl = `${PROXY_CONFIG.baseUrl}/hcm/${endpoint}?${queryParams.toString()}`;
-
-    if (verbose) {
-      log?.('step', '──── [GET] Oracle HCM (Test) ────');
-      log?.('info', `Proxy URL: ${proxyUrl}`);
-    }
-
-    const response = await fetch(proxyUrl);
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.error || `Fetch failed: ${response.status}`);
-    }
-
-    if (verbose) {
-      log?.('success', `GET Response: ${data.items?.length || 0} records fetched`);
-    }
-    return { success: true, items: data.items || [], hasMore: data.hasMore, count: data.count };
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    log?.('error', `GET Error: ${errorMsg}`);
-    throw error;
-  }
-};
-
-// Fetch from a full URL (for child resources)
-const fetchFromUrl = async (
-  url: string,
-  log?: LogCallback,
-  verbose = true
-): Promise<any> => {
-  try {
-    // Use the oracle-url proxy endpoint for full URLs
-    const proxyUrl = `${PROXY_CONFIG.baseUrl}/hcm-url?url=${encodeURIComponent(url)}`;
-
-    if (verbose) {
-      log?.('info', `Fetching roles from: ${url}`);
-    }
-
-    const response = await fetch(proxyUrl);
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.error || `Fetch failed: ${response.status}`);
-    }
-
-    return { success: true, items: data.items || [], hasMore: data.hasMore };
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    log?.('error', `Fetch URL Error: ${errorMsg}`);
-    throw error;
-  }
-};
-
-// Insert to APEX via proxy
-const insertToApex = async (
-  endpoint: string,
-  payload: any,
-  log?: LogCallback,
-  verbose = true
-): Promise<any> => {
-  try {
-    const url = `${PROXY_CONFIG.baseUrl}/apex/${endpoint}`;
-    const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${endpoint}`;
-
-    if (verbose) {
-      log?.('step', '──── [POST] APEX Database ────');
-      log?.('info', `APEX URL: ${apexUrl}`);
-      log?.('info', `Payload: ${JSON.stringify(payload).substring(0, 200)}...`);
-    }
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    const data = await response.json();
-
-    if (verbose) {
-      log?.('success', `POST Response: ${JSON.stringify(data)}`);
-    }
-
-    return data;
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    log?.('error', `POST Error: ${errorMsg}`);
-    throw error;
-  }
-};
-
 // Test connection to User Account Roles endpoint
 export const testUserAccountRolesConnection = async (
   log: LogCallback
@@ -171,7 +71,7 @@ export const testUserAccountRolesConnection = async (
     log('info', `Found roles link: ${rolesLink.href}`);
 
     // Fetch roles for this user
-    const rolesResult = await fetchFromUrl(rolesLink.href, log, true);
+    const rolesResult = await fetchFromOracleUrl(rolesLink.href, log, true);
 
     return {
       success: true,
@@ -274,7 +174,7 @@ export const syncUserAccountRoles = async (
 
         try {
           // Fetch roles for this user
-          const rolesResult = await fetchFromUrl(rolesLink.href, log, false);
+          const rolesResult = await fetchFromOracleUrl(rolesLink.href, log, false);
           const roles = rolesResult.items || [];
 
           if (roles.length === 0) {

@@ -1,4 +1,4 @@
-import { PROXY_CONFIG, APEX_DB_CONFIG } from '../config/api.config';
+import { fetchFromFusion, insertToApex } from './sync-http';
 
 // Types
 export interface SupplierAddressSyncProgress {
@@ -26,42 +26,6 @@ export type SupplierAddressPayloadCallback = (
   error?: string
 ) => void;
 
-// Fetch from Oracle Fusion REST API via proxy
-const fetchFromFusion = async (
-  endpoint: string,
-  params: Record<string, string> = {},
-  log?: LogCallback,
-  verbose = true
-): Promise<any> => {
-  try {
-    const queryParams = new URLSearchParams(params);
-    // Suppliers uses fscmRestApi (main Fusion API)
-    const fusionPath = `fscmRestApi/resources/11.13.18.05/${endpoint}`;
-    const proxyUrl = `${PROXY_CONFIG.baseUrl}/fusion/${fusionPath}?${queryParams.toString()}`;
-
-    if (verbose) {
-      log?.('step', '──── [GET] Oracle Fusion ────');
-      log?.('info', `Proxy URL: ${proxyUrl}`);
-    }
-
-    const response = await fetch(proxyUrl);
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.error || `Fetch failed: ${response.status}`);
-    }
-
-    if (verbose) {
-      log?.('success', `GET Response: ${data.items?.length || 0} records fetched`);
-    }
-    return { success: true, items: data.items || [], hasMore: data.hasMore, count: data.count };
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    log?.('error', `GET Error: ${errorMsg}`);
-    throw error;
-  }
-};
-
 // Fetch supplier addresses from Oracle Fusion
 const fetchSupplierAddresses = async (
   supplierId: number,
@@ -69,69 +33,15 @@ const fetchSupplierAddresses = async (
   log?: LogCallback,
   verbose = true
 ): Promise<any> => {
-  try {
-    const queryParams = new URLSearchParams(params);
-    // Addresses are under suppliers/{id}/child/addresses
-    const fusionPath = `fscmRestApi/resources/11.13.18.05/suppliers/${supplierId}/child/addresses`;
-    const proxyUrl = `${PROXY_CONFIG.baseUrl}/fusion/${fusionPath}?${queryParams.toString()}`;
-
-    if (verbose) {
-      log?.('info', `Fetching addresses for supplier ${supplierId}...`);
-    }
-
-    const response = await fetch(proxyUrl);
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.error || `Fetch failed: ${response.status}`);
-    }
-
-    if (verbose) {
-      log?.('success', `Found ${data.items?.length || 0} addresses`);
-    }
-    return { success: true, items: data.items || [], hasMore: data.hasMore };
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    log?.('error', `Error fetching addresses: ${errorMsg}`);
-    return { success: false, items: [], error: errorMsg };
+  if (verbose) {
+    log?.('info', `Fetching addresses for supplier ${supplierId}...`);
   }
-};
-
-// Insert to APEX via proxy
-const insertToApex = async (
-  endpoint: string,
-  payload: any,
-  log?: LogCallback,
-  verbose = true
-): Promise<any> => {
-  try {
-    const url = `${PROXY_CONFIG.baseUrl}/apex/${endpoint}`;
-    const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${endpoint}`;
-
-    if (verbose) {
-      log?.('step', '──── [POST] APEX Database ────');
-      log?.('info', `APEX URL: ${apexUrl}`);
-      log?.('info', `Payload: ${JSON.stringify(payload).substring(0, 200)}...`);
-    }
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    const data = await response.json();
-
-    if (verbose) {
-      log?.('success', `POST Response: ${JSON.stringify(data)}`);
-    }
-
-    return data;
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    log?.('error', `POST Error: ${errorMsg}`);
-    throw error;
-  }
+  return fetchFromFusion(
+    `fscmRestApi/resources/11.13.18.05/suppliers/${supplierId}/child/addresses`,
+    params,
+    log,
+    verbose
+  );
 };
 
 // Test connection to Supplier Address endpoint
@@ -144,7 +54,7 @@ export const testSupplierAddressConnection = async (
 
     // First get a supplier
     const suppliersResult = await fetchFromFusion(
-      'suppliers',
+      'fscmRestApi/resources/11.13.18.05/suppliers',
       { limit: '1' },
       log,
       true
@@ -247,7 +157,7 @@ export const syncSupplierAddresses = async (
         ...parameters,
       };
 
-      const result = await fetchFromFusion('suppliers', queryParams, log, true);
+      const result = await fetchFromFusion('fscmRestApi/resources/11.13.18.05/suppliers', queryParams, log, true);
 
       if (!result.success || !result.items) {
         throw new Error('Failed to fetch suppliers');

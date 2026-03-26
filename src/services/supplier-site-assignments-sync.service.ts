@@ -1,4 +1,4 @@
-import { PROXY_CONFIG, APEX_DB_CONFIG } from '../config/api.config';
+import { fetchFromFusion, fetchFromApex, insertToApex } from './sync-http';
 
 // Types
 export interface SiteAssignmentsSyncProgress {
@@ -31,31 +31,11 @@ const fetchSitesFromApex = async (
   log?: LogCallback,
   verbose = true
 ): Promise<any> => {
-  try {
-    const url = `${PROXY_CONFIG.baseUrl}/apex/suppliers/sites`;
-    const apexUrl = `${APEX_DB_CONFIG.baseUrl}/suppliers/sites`;
-
-    if (verbose) {
-      log?.('step', '──── [GET] APEX Database - Sites ────');
-      log?.('info', `APEX URL: ${apexUrl}`);
-    }
-
-    const response = await fetch(url);
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.error || `Fetch failed: ${response.status}`);
-    }
-
-    if (verbose) {
-      log?.('success', `GET Response: ${data.items?.length || 0} sites fetched from APEX`);
-    }
-    return { success: true, items: data.items || [] };
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    log?.('error', `GET Error: ${errorMsg}`);
-    throw error;
+  if (verbose) {
+    log?.('step', '──── [GET] APEX Database - Sites ────');
   }
+  const data = await fetchFromApex('suppliers/sites', {}, log, verbose);
+  return { success: true, items: data.items || [] };
 };
 
 // Fetch site assignments from Oracle Fusion
@@ -66,69 +46,15 @@ const fetchSiteAssignments = async (
   log?: LogCallback,
   verbose = true
 ): Promise<any> => {
-  try {
-    const queryParams = new URLSearchParams(params);
-    // Assignments are under suppliers/{supplierId}/child/sites/{siteId}/child/assignments
-    const fusionPath = `fscmRestApi/resources/11.13.18.05/suppliers/${supplierId}/child/sites/${siteId}/child/assignments`;
-    const proxyUrl = `${PROXY_CONFIG.baseUrl}/fusion/${fusionPath}?${queryParams.toString()}`;
-
-    if (verbose) {
-      log?.('info', `Fetching assignments for site ${siteId}...`);
-    }
-
-    const response = await fetch(proxyUrl);
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.error || `Fetch failed: ${response.status}`);
-    }
-
-    if (verbose) {
-      log?.('success', `Found ${data.items?.length || 0} assignments`);
-    }
-    return { success: true, items: data.items || [], hasMore: data.hasMore };
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    log?.('error', `Error fetching assignments: ${errorMsg}`);
-    return { success: false, items: [], error: errorMsg };
+  if (verbose) {
+    log?.('info', `Fetching assignments for site ${siteId}...`);
   }
-};
-
-// Insert to APEX via proxy
-const insertToApex = async (
-  endpoint: string,
-  payload: any,
-  log?: LogCallback,
-  verbose = true
-): Promise<any> => {
-  try {
-    const url = `${PROXY_CONFIG.baseUrl}/apex/${endpoint}`;
-    const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${endpoint}`;
-
-    if (verbose) {
-      log?.('step', '──── [POST] APEX Database ────');
-      log?.('info', `APEX URL: ${apexUrl}`);
-      log?.('info', `Payload: ${JSON.stringify(payload).substring(0, 200)}...`);
-    }
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    const data = await response.json();
-
-    if (verbose) {
-      log?.('success', `POST Response: ${JSON.stringify(data)}`);
-    }
-
-    return data;
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    log?.('error', `POST Error: ${errorMsg}`);
-    throw error;
-  }
+  return fetchFromFusion(
+    `fscmRestApi/resources/11.13.18.05/suppliers/${supplierId}/child/sites/${siteId}/child/assignments`,
+    params,
+    log,
+    verbose
+  );
 };
 
 // Test connection to Site Assignments endpoint

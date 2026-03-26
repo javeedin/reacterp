@@ -1,4 +1,5 @@
-import { PROXY_CONFIG, ORACLE_FUSION_CONFIG, APEX_DB_CONFIG } from '../config/api.config';
+import { ORACLE_FUSION_CONFIG, APEX_DB_CONFIG } from '../config/api.config';
+import { fetchFromOracleUrl, insertToApex, fetchFromApex } from './sync-http';
 
 // Types
 export interface APPayment {
@@ -99,7 +100,7 @@ export type PaymentPayloadCallback = (
 const APEX_PAYMENTS_ENDPOINT = 'ap/payments';
 const APEX_RELATED_INVOICES_ENDPOINT = 'ap/payments/related-invoices';
 
-// Fetch related invoices for a payment from Oracle Fusion via proxy
+// Fetch related invoices for a payment from Oracle Fusion
 const fetchRelatedInvoicesFromOracle = async (
   checkId: number,
   relatedInvoicesLink?: string,
@@ -111,31 +112,21 @@ const fetchRelatedInvoicesFromOracle = async (
     const oracleUrl = relatedInvoicesLink ||
       `${ORACLE_FUSION_CONFIG.baseUrl}/payablesPayments/${checkId}/child/relatedInvoices`;
 
-    // Use oracle-url endpoint for child resources (nested paths)
-    const proxyUrl = `${PROXY_CONFIG.baseUrl}/oracle-url?url=${encodeURIComponent(oracleUrl)}`;
-
     if (verbose) {
       log?.('info', `Fetching related invoices for Payment ${checkId}...`);
       log?.('info', `Oracle URL: ${oracleUrl}`);
     }
 
-    const response = await fetch(proxyUrl);
-    const data = await response.json();
+    const data = await fetchFromOracleUrl(oracleUrl, log, verbose);
 
     if (verbose) {
       log?.('step', `──── [GET] Related Invoices Response for Payment ${checkId} ────`);
-      log?.('info', `HTTP Status: ${response.status}`);
     }
 
-    if (!data.success && !data.items) {
-      throw new Error(data.error || 'Fetch related invoices failed');
-    }
-
-    const items = data.items || data || [];
+    const items = data.items || [];
 
     if (verbose) {
       log?.('success', `Fetched ${items.length} related invoices for Payment ${checkId}`);
-      // Log each invoice summary (limit to first 5 in verbose mode)
       items.slice(0, 5).forEach((inv: any, idx: number) => {
         log?.('info', `  Invoice ${idx + 1}: ${inv.InvoiceNumber}, Amount=${inv.AmountPaidPaymentCurrency}`);
       });
@@ -155,7 +146,7 @@ const fetchRelatedInvoicesFromOracle = async (
   }
 };
 
-// Insert related invoices to APEX via proxy
+// Insert related invoices to APEX
 const insertRelatedInvoicesToApex = async (
   checkId: number,
   invoices: APPaymentRelatedInvoice[],
@@ -166,9 +157,6 @@ const insertRelatedInvoicesToApex = async (
     if (invoices.length === 0) {
       return { success: true, successCount: 0 };
     }
-
-    const url = `${PROXY_CONFIG.baseUrl}/apex/${APEX_RELATED_INVOICES_ENDPOINT}`;
-    const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_RELATED_INVOICES_ENDPOINT}`;
 
     // Remove links from each invoice and ensure CheckId is set
     const invoicesWithCheckId = invoices.map(inv => {
@@ -185,24 +173,15 @@ const insertRelatedInvoicesToApex = async (
 
     if (verbose) {
       log?.('step', `──── [POST] APEX - Related Invoices for Payment ${checkId} (${invoices.length} invoices) ────`);
-      log?.('info', `APEX URL: ${apexUrl}`);
-      log?.('info', `Proxy URL: ${url}`);
       log?.('info', `Invoices count: ${invoices.length}`);
       log?.('step', `──── POST PAYLOAD ────`);
       log?.('info', JSON.stringify(payload, null, 2));
     }
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    const data = await response.json();
+    const data = await insertToApex(APEX_RELATED_INVOICES_ENDPOINT, payload, log, verbose);
 
     if (verbose) {
       log?.('step', `──── POST RESPONSE ────`);
-      log?.('info', `HTTP Status: ${response.status}`);
       log?.('success', `Response: ${JSON.stringify(data, null, 2)}`);
     }
 
@@ -222,7 +201,7 @@ const insertRelatedInvoicesToApex = async (
   }
 };
 
-// Fetch payments from Oracle Fusion via proxy
+// Fetch payments from Oracle Fusion
 const fetchPaymentsFromOracle = async (
   params: Record<string, string> = {},
   log?: LogCallback,
@@ -231,21 +210,13 @@ const fetchPaymentsFromOracle = async (
   try {
     const queryParams = new URLSearchParams(params);
     const oracleUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/payablesPayments?${queryParams.toString()}`;
-    const proxyUrl = `${PROXY_CONFIG.baseUrl}/oracle-url?url=${encodeURIComponent(oracleUrl)}`;
 
     if (verbose) {
       log?.('step', '──── [GET] Oracle Fusion AP Payments ────');
       log?.('info', `Oracle URL: ${oracleUrl}`);
-      log?.('info', `Proxy URL: ${proxyUrl}`);
     }
 
-    const response = await fetch(proxyUrl);
-    const data = await response.json();
-
-    if (!data.success && !data.items) {
-      throw new Error(data.error || 'Fetch failed');
-    }
-
+    const data = await fetchFromOracleUrl(oracleUrl, log, verbose);
     const items = data.items || [];
 
     if (verbose) {
@@ -265,16 +236,13 @@ const fetchPaymentsFromOracle = async (
   }
 };
 
-// Insert single payment to APEX via proxy
+// Insert single payment to APEX
 const insertPaymentToApex = async (
   payment: APPayment,
   log?: LogCallback,
   verbose = true
 ): Promise<{ success: boolean; error?: string; response?: any; payload?: any }> => {
   try {
-    const url = `${PROXY_CONFIG.baseUrl}/apex/${APEX_PAYMENTS_ENDPOINT}`;
-    const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_PAYMENTS_ENDPOINT}`;
-
     // Remove links property from payment (not needed for insert)
     const { links, ...paymentWithoutLinks } = payment as any;
 
@@ -283,12 +251,10 @@ const insertPaymentToApex = async (
       items: [paymentWithoutLinks]
     };
 
-    // ALWAYS log the URLs being called (for debugging 404 issues)
+    // ALWAYS log the payment being posted (for debugging)
     log?.('step', `════════════════════════════════════════════════════════════`);
     log?.('step', `  POSTING PAYMENT: ${payment.PaymentNumber || payment.CheckNumber} (ID: ${payment.CheckId})`);
     log?.('step', `════════════════════════════════════════════════════════════`);
-    log?.('info', `FULL APEX URL: ${apexUrl}`);
-    log?.('info', `FULL PROXY URL: ${url}`);
     log?.('info', `Check ID: ${payment.CheckId}`);
     log?.('info', `Payment Number: ${payment.PaymentNumber || payment.CheckNumber}`);
     log?.('info', `Payee: ${payment.Payee}`);
@@ -305,17 +271,10 @@ const insertPaymentToApex = async (
 
     log?.('info', `Sending POST request...`);
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    const data = await response.json();
+    const data = await insertToApex(APEX_PAYMENTS_ENDPOINT, payload, log, verbose);
 
     log?.('step', `──── POST RESPONSE ────`);
-    log?.('info', `HTTP Status: ${response.status}`);
-    log?.(response.status === 200 || response.status === 201 ? 'success' : 'error', `Response: ${JSON.stringify(data, null, 2)}`);
+    log?.('success', `Response: ${JSON.stringify(data, null, 2)}`);
 
     // Check for success
     const isSuccess = data.status === 'success' || data.status === 'SUCCESS' ||
@@ -324,7 +283,7 @@ const insertPaymentToApex = async (
 
     return {
       success: isSuccess,
-      error: isSuccess ? undefined : (data.message || data.error || data.details || `HTTP ${response.status}: No payments inserted`),
+      error: isSuccess ? undefined : (data.message || data.error || data.details || 'No payments inserted'),
       response: data,
       payload: payload,
     };
@@ -402,10 +361,6 @@ export const syncAPPayments = async (
     log?.('info', '  │ APEX POST (Target):');
     log?.('info', `  │   Payments:         ${APEX_DB_CONFIG.baseUrl}/${APEX_PAYMENTS_ENDPOINT}`);
     log?.('info', `  │   Related Invoices: ${APEX_DB_CONFIG.baseUrl}/${APEX_RELATED_INVOICES_ENDPOINT}`);
-    log?.('info', '  │');
-    log?.('info', '  │ PROXY URLs:');
-    log?.('info', `  │   Payments:         ${PROXY_CONFIG.baseUrl}/apex/${APEX_PAYMENTS_ENDPOINT}`);
-    log?.('info', `  │   Related Invoices: ${PROXY_CONFIG.baseUrl}/apex/${APEX_RELATED_INVOICES_ENDPOINT}`);
     log?.('info', '  └─────────────────────────────────────────────────────────');
     log?.('step', '═══════════════════════════════════════════════════════════');
 
@@ -706,12 +661,9 @@ export const getAPPaymentsStats = async (log?: LogCallback): Promise<{
   lastSyncDate: string;
 } | null> => {
   try {
-    const url = `${PROXY_CONFIG.baseUrl}/apex/ap/payments/stats`;
-
     log?.('info', 'Fetching AP Payments statistics...');
 
-    const response = await fetch(url);
-    const data = await response.json();
+    const data = await fetchFromApex('ap/payments/stats', {}, log, false);
 
     if (data.success || data.items) {
       log?.('success', 'Statistics retrieved successfully');

@@ -1,4 +1,5 @@
-import { PROXY_CONFIG, ORACLE_FUSION_CONFIG, APEX_DB_CONFIG } from '../config/api.config';
+import { ORACLE_FUSION_CONFIG, APEX_DB_CONFIG } from '../config/api.config';
+import { fetchFromOracle, fetchFromOracleUrl, insertToApex, fetchFromApex } from './sync-http';
 
 // Types
 export interface APInvoice {
@@ -129,41 +130,32 @@ export interface APInvoiceInstallment {
   [key: string]: any;
 }
 
-// Fetch invoice lines from Oracle Fusion via proxy
+// Fetch invoice lines from Oracle Fusion
 const fetchInvoiceLinesFromOracle = async (
   invoiceId: number,
   log?: LogCallback,
   verbose = true
 ): Promise<{ success: boolean; items: APInvoiceLine[]; error?: string }> => {
   try {
-    const oracleUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/invoices/${invoiceId}/child/invoiceLines`;
-    // Use oracle-url endpoint for child resources (nested paths)
-    const proxyUrl = `${PROXY_CONFIG.baseUrl}/oracle-url?url=${encodeURIComponent(oracleUrl)}`;
-
     if (verbose) {
       log?.('info', `Fetching lines for Invoice ${invoiceId}...`);
-      log?.('info', `Oracle URL: ${oracleUrl}`);
-      log?.('info', `Proxy URL: ${proxyUrl}`);
     }
 
-    const response = await fetch(proxyUrl);
-    const data = await response.json();
+    const data = await fetchFromOracleUrl(
+      `${ORACLE_FUSION_CONFIG.baseUrl}/invoices/${invoiceId}/child/invoiceLines`,
+      log,
+      verbose
+    );
 
     if (verbose) {
       log?.('step', `──── [GET] Invoice Lines Response for Invoice ${invoiceId} ────`);
-      log?.('info', `HTTP Status: ${response.status}`);
       log?.('info', `GET Response: ${JSON.stringify(data, null, 2)}`);
     }
 
-    if (!data.success && !data.items) {
-      throw new Error(data.error || 'Fetch lines failed');
-    }
-
-    const items = data.items || data || [];
+    const items = data.items || [];
 
     if (verbose) {
       log?.('success', `Fetched ${items.length} lines for Invoice ${invoiceId}`);
-      // Log each line summary
       items.forEach((line: any, idx: number) => {
         log?.('info', `  Line ${idx + 1}: LineNumber=${line.LineNumber}, Amount=${line.LineAmount}, Type=${line.LineTypeLookupCode || line.LineType}`);
       });
@@ -180,7 +172,7 @@ const fetchInvoiceLinesFromOracle = async (
   }
 };
 
-// Insert invoice lines to APEX via proxy
+// Insert invoice lines to APEX
 const insertInvoiceLinesToApex = async (
   invoiceId: number,
   invoiceNumber: string,
@@ -192,9 +184,6 @@ const insertInvoiceLinesToApex = async (
     if (lines.length === 0) {
       return { success: true, successCount: 0 };
     }
-
-    const url = `${PROXY_CONFIG.baseUrl}/apex/${APEX_CREATE_INVOICE_LINES_ENDPOINT}`;
-    const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_CREATE_INVOICE_LINES_ENDPOINT}`;
 
     // Add InvoiceId and InvoiceNumber FIRST to each line, then rest of properties, remove links
     const linesWithInvoiceInfo = lines.map(line => {
@@ -212,24 +201,15 @@ const insertInvoiceLinesToApex = async (
 
     if (verbose) {
       log?.('step', `──── [POST] APEX - Invoice Lines for ${invoiceNumber} (${lines.length} lines) ────`);
-      log?.('info', `APEX URL: ${apexUrl}`);
-      log?.('info', `Proxy URL: ${url}`);
       log?.('info', `Lines count: ${lines.length}`);
       log?.('step', `──── POST PAYLOAD ────`);
       log?.('info', JSON.stringify(payload, null, 2));
     }
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    const data = await response.json();
+    const data = await insertToApex(APEX_CREATE_INVOICE_LINES_ENDPOINT, payload, log, verbose);
 
     if (verbose) {
       log?.('step', `──── POST RESPONSE ────`);
-      log?.('info', `HTTP Status: ${response.status}`);
       log?.('success', `Response: ${JSON.stringify(data, null, 2)}`);
     }
 
@@ -248,36 +228,29 @@ const insertInvoiceLinesToApex = async (
   }
 };
 
-// Fetch invoice installments from Oracle Fusion via proxy
+// Fetch invoice installments from Oracle Fusion
 const fetchInvoiceInstallmentsFromOracle = async (
   invoiceId: number,
   log?: LogCallback,
   verbose = true
 ): Promise<{ success: boolean; items: APInvoiceInstallment[]; error?: string }> => {
   try {
-    const oracleUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/invoices/${invoiceId}/child/invoiceInstallments`;
-    const proxyUrl = `${PROXY_CONFIG.baseUrl}/oracle-url?url=${encodeURIComponent(oracleUrl)}`;
-
     if (verbose) {
       log?.('info', `Fetching installments for Invoice ${invoiceId}...`);
-      log?.('info', `Oracle URL: ${oracleUrl}`);
-      log?.('info', `Proxy URL: ${proxyUrl}`);
     }
 
-    const response = await fetch(proxyUrl);
-    const data = await response.json();
+    const data = await fetchFromOracleUrl(
+      `${ORACLE_FUSION_CONFIG.baseUrl}/invoices/${invoiceId}/child/invoiceInstallments`,
+      log,
+      verbose
+    );
 
     if (verbose) {
       log?.('step', `──── [GET] Invoice Installments Response for Invoice ${invoiceId} ────`);
-      log?.('info', `HTTP Status: ${response.status}`);
       log?.('info', `GET Response: ${JSON.stringify(data, null, 2)}`);
     }
 
-    if (!data.success && !data.items) {
-      throw new Error(data.error || 'Fetch installments failed');
-    }
-
-    const items = data.items || data || [];
+    const items = data.items || [];
 
     if (verbose) {
       log?.('success', `Fetched ${items.length} installments for Invoice ${invoiceId}`);
@@ -297,7 +270,7 @@ const fetchInvoiceInstallmentsFromOracle = async (
   }
 };
 
-// Insert invoice installments to APEX via proxy
+// Insert invoice installments to APEX
 const insertInvoiceInstallmentsToApex = async (
   invoiceId: number,
   invoiceNumber: string,
@@ -309,9 +282,6 @@ const insertInvoiceInstallmentsToApex = async (
     if (installments.length === 0) {
       return { success: true, successCount: 0 };
     }
-
-    const url = `${PROXY_CONFIG.baseUrl}/apex/${APEX_CREATE_INVOICE_INSTALLMENTS_ENDPOINT}`;
-    const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_CREATE_INVOICE_INSTALLMENTS_ENDPOINT}`;
 
     // Add InvoiceId and InvoiceNumber to each installment, remove links
     const installmentsWithInvoiceInfo = installments.map(inst => {
@@ -329,24 +299,15 @@ const insertInvoiceInstallmentsToApex = async (
 
     if (verbose) {
       log?.('step', `──── [POST] APEX - Invoice Installments for ${invoiceNumber} (${installments.length} installments) ────`);
-      log?.('info', `APEX URL: ${apexUrl}`);
-      log?.('info', `Proxy URL: ${url}`);
       log?.('info', `Installments count: ${installments.length}`);
       log?.('step', `──── POST PAYLOAD ────`);
       log?.('info', JSON.stringify(payload, null, 2));
     }
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    const data = await response.json();
+    const data = await insertToApex(APEX_CREATE_INVOICE_INSTALLMENTS_ENDPOINT, payload, log, verbose);
 
     if (verbose) {
       log?.('step', `──── POST RESPONSE ────`);
-      log?.('info', `HTTP Status: ${response.status}`);
       log?.('success', `Response: ${JSON.stringify(data, null, 2)}`);
     }
 
@@ -365,33 +326,18 @@ const insertInvoiceInstallmentsToApex = async (
   }
 };
 
-// Fetch invoices from Oracle Fusion via proxy
+// Fetch invoices from Oracle Fusion
 const fetchInvoicesFromOracle = async (
   params: Record<string, string> = {},
   log?: LogCallback,
   verbose = true
 ): Promise<{ success: boolean; items: APInvoice[]; hasMore: boolean; totalResults?: number; error?: string }> => {
   try {
-    const queryParams = new URLSearchParams(params);
-    const proxyUrl = `${PROXY_CONFIG.baseUrl}/oracle/invoices?${queryParams.toString()}`;
-    const oracleUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/invoices?${queryParams.toString()}`;
-
     if (verbose) {
       log?.('step', '──── [GET] Oracle Fusion AP Invoices ────');
-      log?.('info', `Oracle URL: ${oracleUrl}`);
-      log?.('info', `Proxy URL: ${proxyUrl}`);
     }
 
-    const response = await fetch(proxyUrl);
-    const data = await response.json();
-
-    if (!data.success) {
-      throw new Error(data.error || 'Fetch failed');
-    }
-
-    if (verbose) {
-      log?.('success', `Fetched ${data.items?.length || 0} invoices`);
-    }
+    const data = await fetchFromOracle('invoices', params, log, verbose);
 
     return {
       success: true,
@@ -406,16 +352,13 @@ const fetchInvoicesFromOracle = async (
   }
 };
 
-// Insert single invoice to APEX via proxy
+// Insert single invoice to APEX
 const insertInvoiceToApex = async (
   invoice: APInvoice,
   log?: LogCallback,
   verbose = true
 ): Promise<{ success: boolean; error?: string; response?: any; payload?: any }> => {
   try {
-    const url = `${PROXY_CONFIG.baseUrl}/apex/${APEX_CREATE_INVOICE_ENDPOINT}`;
-    const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_CREATE_INVOICE_ENDPOINT}`;
-
     // Remove links property from invoice (not needed for insert)
     const { links, ...invoiceWithoutLinks } = invoice as any;
 
@@ -426,8 +369,6 @@ const insertInvoiceToApex = async (
 
     if (verbose) {
       log?.('step', `──── [POST] APEX - Invoice ${invoice.InvoiceNumber} (ID: ${invoice.InvoiceId}) ────`);
-      log?.('info', `APEX URL: ${apexUrl}`);
-      log?.('info', `Proxy URL: ${url}`);
       log?.('info', `Invoice ID: ${invoice.InvoiceId}`);
       log?.('info', `Invoice Number: ${invoice.InvoiceNumber}`);
       log?.('info', `Supplier: ${invoice.Supplier}`);
@@ -436,17 +377,10 @@ const insertInvoiceToApex = async (
       log?.('info', JSON.stringify(payload, null, 2));
     }
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    const data = await response.json();
+    const data = await insertToApex(APEX_CREATE_INVOICE_ENDPOINT, payload, log, verbose);
 
     if (verbose) {
       log?.('step', `──── POST RESPONSE ────`);
-      log?.('info', `HTTP Status: ${response.status}`);
       log?.('success', JSON.stringify(data, null, 2));
     }
 
@@ -541,11 +475,6 @@ export const syncAPInvoices = async (
     log?.('info', `  │   Invoices:       ${APEX_DB_CONFIG.baseUrl}/${APEX_CREATE_INVOICE_ENDPOINT}`);
     log?.('info', `  │   Invoice Lines:  ${APEX_DB_CONFIG.baseUrl}/${APEX_CREATE_INVOICE_LINES_ENDPOINT}`);
     log?.('info', `  │   Installments:   ${APEX_DB_CONFIG.baseUrl}/${APEX_CREATE_INVOICE_INSTALLMENTS_ENDPOINT}`);
-    log?.('info', '  │');
-    log?.('info', '  │ PROXY URLs:');
-    log?.('info', `  │   Invoices:       ${PROXY_CONFIG.baseUrl}/apex/${APEX_CREATE_INVOICE_ENDPOINT}`);
-    log?.('info', `  │   Invoice Lines:  ${PROXY_CONFIG.baseUrl}/apex/${APEX_CREATE_INVOICE_LINES_ENDPOINT}`);
-    log?.('info', `  │   Installments:   ${PROXY_CONFIG.baseUrl}/apex/${APEX_CREATE_INVOICE_INSTALLMENTS_ENDPOINT}`);
     log?.('info', '  └─────────────────────────────────────────────────────────');
     log?.('step', '═══════════════════════════════════════════════════════════');
 
@@ -908,12 +837,9 @@ export const getAPInvoiceStats = async (log?: LogCallback): Promise<{
   lastSyncDate: string;
 } | null> => {
   try {
-    const url = `${PROXY_CONFIG.baseUrl}/apex/${APEX_DB_CONFIG.endpoints.apInvoicesStats}`;
-
     log?.('info', 'Fetching AP Invoice statistics...');
 
-    const response = await fetch(url);
-    const data = await response.json();
+    const data = await fetchFromApex(APEX_DB_CONFIG.endpoints.apInvoicesStats, {}, log, false);
 
     if (data.success) {
       log?.('success', 'Statistics retrieved successfully');

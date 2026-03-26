@@ -3,7 +3,7 @@
  * Service for querying journals from APEX REST API
  */
 
-import { PROXY_CONFIG } from '../config/api.config';
+import { fetchFromApex } from './sync-http';
 
 // Types
 export interface JournalSearchParams {
@@ -86,9 +86,6 @@ export interface LookupResponse {
   items: LookupItem[];
 }
 
-// APEX API Configuration - Update with your APEX instance
-const APEX_BASE_URL = 'https://your-apex-instance.com/ords/your_schema';
-
 /**
  * Build query string from search parameters
  */
@@ -115,37 +112,13 @@ const buildQueryString = (params: JournalSearchParams): string => {
  */
 export const searchJournals = async (
   params: JournalSearchParams,
-  useProxy: boolean = true
+  _useProxy: boolean = true
 ): Promise<JournalSearchResponse> => {
   const queryString = buildQueryString(params);
-  const apiUrl = `${APEX_BASE_URL}/gl/journals${queryString ? '?' + queryString : ''}`;
+  const endpoint = `gl/journals${queryString ? '?' + queryString : ''}`;
 
   try {
-    let response: Response;
-
-    if (useProxy) {
-      // Use proxy server
-      response = await fetch(`${PROXY_CONFIG.baseUrl}/apex/gl/journals${queryString ? '?' + queryString : ''}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-    } else {
-      // Direct call (requires CORS to be enabled)
-      response = await fetch(apiUrl, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-    }
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const data = await response.json();
+    const data = await fetchFromApex(endpoint);
     return data;
   } catch (error) {
     console.error('Error searching journals:', error);
@@ -165,34 +138,10 @@ export const searchJournals = async (
  */
 export const getJournalLines = async (
   jeHeaderId: number,
-  useProxy: boolean = true
+  _useProxy: boolean = true
 ): Promise<JournalLinesResponse> => {
-  const apiUrl = `${APEX_BASE_URL}/gl/journals/${jeHeaderId}/lines`;
-
   try {
-    let response: Response;
-
-    if (useProxy) {
-      response = await fetch(`${PROXY_CONFIG.baseUrl}/apex/gl/journals/${jeHeaderId}/lines`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-    } else {
-      response = await fetch(apiUrl, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-    }
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const data = await response.json();
+    const data = await fetchFromApex(`gl/journals/${jeHeaderId}/lines`);
     return data;
   } catch (error) {
     console.error('Error fetching journal lines:', error);
@@ -210,34 +159,10 @@ export const getJournalLines = async (
  */
 export const getLookupValues = async (
   lookupType: 'periods' | 'sources' | 'categories' | 'ledgers' | 'batch-statuses',
-  useProxy: boolean = true
+  _useProxy: boolean = true
 ): Promise<LookupItem[]> => {
-  const apiUrl = `${APEX_BASE_URL}/gl/lookups/${lookupType}`;
-
   try {
-    let response: Response;
-
-    if (useProxy) {
-      response = await fetch(`${PROXY_CONFIG.baseUrl}/apex/gl/lookups/${lookupType}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-    } else {
-      response = await fetch(apiUrl, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-    }
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const data: LookupResponse = await response.json();
+    const data: LookupResponse = await fetchFromApex(`gl/lookups/${lookupType}`);
     return data.items || [];
   } catch (error) {
     console.error(`Error fetching ${lookupType} lookup:`, error);

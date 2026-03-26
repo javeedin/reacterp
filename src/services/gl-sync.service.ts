@@ -1,5 +1,6 @@
-import { ORACLE_FUSION_CONFIG } from '../config/api.config';
+import { ORACLE_FUSION_CONFIG, APEX_DB_CONFIG } from '../config/api.config';
 import { fetchFromOracle, fetchFromOracleUrl, insertToApex, fetchFromApex } from './sync-http';
+
 
 // Types
 export interface SyncProgress {
@@ -69,114 +70,6 @@ const findChildLink = (links: any[], linkName: string): string | null => {
   return link?.href || null;
 };
 
-
-
-// Fetch from Oracle endpoint via proxy
-const fetchFromOracle = async (
-  endpoint: string,
-  params: Record<string, string> = {},
-  log?: LogCallback,
-  verbose = true
-): Promise<any> => {
-  try {
-    const queryParams = new URLSearchParams(params);
-    const proxyUrl = `${PROXY_CONFIG.baseUrl}/oracle/${endpoint}?${queryParams.toString()}`;
-    const oracleUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/${endpoint}?${queryParams.toString()}`;
-
-    if (verbose) {
-      log?.('step', '──── [GET] Oracle Fusion ────');
-      log?.('info', `Oracle URL: ${oracleUrl}`);
-      log?.('info', `Proxy URL: ${proxyUrl}`);
-    }
-
-    const response = await fetch(proxyUrl);
-    const data = await response.json();
-
-    if (!data.success) {
-      throw new Error(data.error || 'Fetch failed');
-    }
-
-    if (verbose) {
-      log?.('success', `GET Response: ${JSON.stringify(data)}`);
-    }
-    return data;
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    log?.('error', `GET Error: ${errorMsg}`);
-    throw error;
-  }
-};
-
-// Insert to APEX via proxy
-const insertToApex = async (
-  endpoint: string,
-  payload: any,
-  log?: LogCallback,
-  verbose = true
-): Promise<any> => {
-  try {
-    const url = `${PROXY_CONFIG.baseUrl}/apex/${endpoint}`;
-    const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${endpoint}`;
-
-    if (verbose) {
-      log?.('step', '──── [POST] APEX Database ────');
-      log?.('info', `APEX URL: ${apexUrl}`);
-      log?.('info', `Proxy URL: ${url}`);
-      log?.('info', `POST Payload: ${JSON.stringify(payload)}`);
-    }
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    const data = await response.json();
-
-    if (verbose) {
-      log?.('success', `POST Response: ${JSON.stringify(data)}`);
-    }
-
-    return data;
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    log?.('error', `POST Error: ${errorMsg}`);
-    throw error;
-  }
-};
-
-// Fetch from APEX via proxy (GET)
-const fetchFromApex = async (
-  endpoint: string,
-  params: Record<string, string> = {},
-  log?: LogCallback,
-  verbose = true
-): Promise<any> => {
-  try {
-    const queryParams = new URLSearchParams(params);
-    const url = `${PROXY_CONFIG.baseUrl}/apex/${endpoint}?${queryParams.toString()}`;
-    const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${endpoint}?${queryParams.toString()}`;
-
-    if (verbose) {
-      log?.('step', '──── [GET] APEX Database ────');
-      log?.('info', `APEX URL: ${apexUrl}`);
-      log?.('info', `Proxy URL: ${url}`);
-    }
-
-    const response = await fetch(url);
-    const data = await response.json();
-
-    if (verbose) {
-      log?.('success', `GET Response: ${data.items?.length || 0} items`);
-    }
-
-    return data;
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    log?.('error', `APEX GET Error: ${errorMsg}`);
-    throw error;
-  }
-};
 
 // Main GL Journal Sync Function
 export const syncGLJournals = async (
