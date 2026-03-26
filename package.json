@@ -64,9 +64,11 @@
       "electron/**/*",
       "public/**/*",
       "server/**/*",
-      "node_modules/electron-updater/**/*",
-      "node_modules/electron-log/**/*",
-      "node_modules/builder-util-runtime/**/*"
+      "node_modules/**/*"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/electron-updater/**/*"
     ],
     "win": {
       "target": [
