@@ -13,7 +13,8 @@ function loadEmailConfig() {
   ];
   for (const cfgPath of attempts) {
     try {
-      const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+      const raw = fs.readFileSync(cfgPath, 'utf8').replace(/^\uFEFF/, ''); // strip BOM
+      const cfg = JSON.parse(raw);
       console.log('[email] Config loaded from:', cfgPath);
       return cfg;
     } catch (_) {}
