@@ -65,7 +65,7 @@
       "public/**/*",
       "server/**/*"
     ],
-    "asar": true,
+    "asar": false,
     "win": {
       "target": [
         "portable"
