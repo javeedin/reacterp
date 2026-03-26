@@ -1,9 +1,5 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 import type { User, AuthContextType, LoginResult } from '../types';
-declare const __BREVO_API_KEY__: string;
-declare const __BREVO_SENDER__: string;
-const BREVO_API_KEY: string = __BREVO_API_KEY__;
-const BREVO_SENDER: string  = __BREVO_SENDER__;
 
 const APEX_AUTH_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/auth';
 
@@ -61,34 +57,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [loginWithStatus]);
 
   const sendOtpViaBrowser = async (to: string, otp: string): Promise<{ success: boolean; error?: string }> => {
-    const apiKey = BREVO_API_KEY;
-    const sender = BREVO_SENDER;
-    if (!apiKey) return { success: false, error: 'Brevo API key not configured.' };
     try {
-      const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+      const res = await fetch('http://localhost:3001/api/send-email', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'api-key': apiKey,
-        },
-        body: JSON.stringify({
-          sender: { name: 'ReactERP', email: sender },
-          to: [{ email: to }],
-          subject: 'ReactERP — Your One-Time Password (OTP)',
-          htmlContent: `
-            <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;border:1px solid #e0e0e0;border-radius:8px">
-              <h2 style="color:#1677ff;margin-bottom:8px">ReactERP</h2>
-              <p>Your one-time password (OTP) is:</p>
-              <div style="font-size:36px;font-weight:bold;letter-spacing:8px;color:#1a1a2e;padding:16px;background:#f5f5f5;border-radius:6px;text-align:center">
-                ${otp}
-              </div>
-              <p style="margin-top:16px;color:#666;font-size:13px">Valid for 15 minutes. Do not share this code.</p>
-            </div>`,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to, otp }),
       });
-      if (res.ok) return { success: true };
-      const err = await res.json();
-      return { success: false, error: err.message || 'Email send failed.' };
+      const data = await res.json();
+      return data;
     } catch (e: unknown) {
       return { success: false, error: e instanceof Error ? e.message : 'Email send failed.' };
     }
