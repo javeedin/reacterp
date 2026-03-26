@@ -68,7 +68,7 @@
     "asar": true,
     "win": {
       "target": [
-        "nsis"
+        "portable"
       ],
       "icon": "public/icons/icon-512.png"
     },

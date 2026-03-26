@@ -2,7 +2,8 @@ const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, Notification, nativeIma
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
-const { autoUpdater } = require('electron-updater');
+let autoUpdater = null;
+try { autoUpdater = require('electron-updater').autoUpdater; } catch (_) { /* not available in portable build */ }
 
 let mainWindow;
 let tray = null;
@@ -425,14 +426,10 @@ function createTray() {
     {
       label: 'Check for Updates',
       click: () => {
-        if (app.isPackaged) {
+        if (autoUpdater && app.isPackaged) {
           autoUpdater.checkForUpdates();
         } else {
-          dialog.showMessageBox(mainWindow, {
-            type: 'info',
-            title: 'Dev Mode',
-            message: 'Auto-update is only available in the packaged app.',
-          });
+          require('electron').shell.openExternal('https://github.com/javeedin/reacterp/releases');
         }
       },
     },
@@ -585,8 +582,8 @@ ipcMain.on('show-notification', (event, title, body) => {
 
 // ── Auto-update ────────────────────────────────────────────────────────────
 function setupAutoUpdater() {
-  // Only run in production
-  if (!app.isPackaged) return;
+  // Only run in production with autoUpdater available
+  if (!app.isPackaged || !autoUpdater) return;
 
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
