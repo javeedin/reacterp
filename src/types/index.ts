@@ -4,6 +4,7 @@ export interface User {
   name: string;
   email: string;
   role: string;
+  photo?: string; // base64 data URL
 }
 
 export type LoginStatus =
@@ -22,6 +23,7 @@ export interface AuthContextType {
   loginWithStatus: (username: string, password: string) => Promise<LoginResult>;
   sendOtp: (username: string) => Promise<{ status: string; message: string }>;
   setPassword: (username: string, otp: string, newPassword: string) => Promise<{ status: string; message: string }>;
+  uploadPhoto: (username: string, base64: string, mimeType: string) => Promise<{ status: string; message: string }>;
   logout: () => void;
 }
 

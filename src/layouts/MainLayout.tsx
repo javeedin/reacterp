@@ -16,6 +16,7 @@ import {
 } from '@ant-design/icons';
 import { Outlet, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import ProfileModal from '../components/ProfileModal';
 import type { MenuProps } from 'antd';
 
 // Type for BeforeInstallPromptEvent
@@ -49,6 +50,7 @@ const MainLayout: React.FC = () => {
   const [isInstalled, setIsInstalled] = useState(false);
   const [showIOSModal, setShowIOSModal] = useState(false);
   const [showInstallButton, setShowInstallButton] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
 
   // Listen for PWA install prompt
   useEffect(() => {
@@ -114,6 +116,7 @@ const MainLayout: React.FC = () => {
       key: 'profile',
       icon: <UserOutlined />,
       label: 'My Profile',
+      onClick: () => setShowProfile(true),
     },
     {
       key: 'settings',
@@ -208,8 +211,9 @@ const MainLayout: React.FC = () => {
             <Dropdown menu={{ items: userMenuItems }} placement="bottomRight" trigger={['click']}>
               <Avatar
                 size={32}
-                src="https://randomuser.me/api/portraits/men/32.jpg"
-                style={{ cursor: 'pointer', marginLeft: 8, border: '2px solid rgba(255,255,255,0.3)' }}
+                src={user?.photo}
+                icon={!user?.photo && <UserOutlined />}
+                style={{ cursor: 'pointer', marginLeft: 8, border: '2px solid rgba(255,255,255,0.3)', background: !user?.photo ? '#1677ff' : undefined }}
               />
             </Dropdown>
           </Tooltip>
@@ -301,6 +305,8 @@ const MainLayout: React.FC = () => {
           </div>
         </div>
       </Modal>
+
+      <ProfileModal open={showProfile} onClose={() => setShowProfile(false)} />
     </Layout>
   );
 };

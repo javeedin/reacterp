@@ -33,13 +33,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const data = await res.json();
 
       if (data.status === 'SUCCESS') {
+        const uname = data.user?.username || username;
         const userData: User = {
-          id: data.user?.username || username,
-          username: data.user?.username || username,
+          id: uname,
+          username: uname,
           name: data.user?.name || username,
           email: data.user?.email || username,
           role: 'User',
         };
+        // Load profile photo
+        try {
+          const photoRes = await fetch(`${APEX_AUTH_BASE}/profile-photo/${encodeURIComponent(uname)}`);
+          const photoData = await photoRes.json();
+          if (photoData.status === 'OK' && photoData.photo) {
+            userData.photo = `data:${photoData.mime_type};base64,${photoData.photo}`;
+          }
+        } catch { /* photo is optional */ }
         setUser(userData);
         localStorage.setItem('erp_user', JSON.stringify(userData));
         localStorage.setItem('erp_token', data.token || '');
@@ -117,6 +126,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
+  const uploadPhoto = useCallback(async (username: string, base64: string, mimeType: string) => {
+    try {
+      const res = await fetch(`${APEX_AUTH_BASE}/upload-photo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, photo: base64, mime_type: mimeType }),
+      });
+      const data = await res.json();
+      if (data.status === 'OK') {
+        const photoUrl = `data:${mimeType};base64,${base64}`;
+        setUser(prev => {
+          if (!prev) return prev;
+          const updated = { ...prev, photo: photoUrl };
+          localStorage.setItem('erp_user', JSON.stringify(updated));
+          return updated;
+        });
+      }
+      return { status: data.status, message: data.message || '' };
+    } catch {
+      return { status: 'ERROR', message: 'Unable to upload photo.' };
+    }
+  }, []);
+
   const logout = useCallback(() => {
     setUser(null);
     localStorage.removeItem('erp_user');
@@ -124,7 +156,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, login, loginWithStatus, sendOtp, setPassword, logout }}>
+    <AuthContext.Provider value={{ user, isAuthenticated: !!user, login, loginWithStatus, sendOtp, setPassword, uploadPhoto, logout }}>
       {children}
     </AuthContext.Provider>
   );
