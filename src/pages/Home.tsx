@@ -185,7 +185,7 @@ const KPICard = ({
       border: `1px solid ${REDWOOD.neutral200}`,
       height: '100%',
     }}
-    bodyStyle={{ padding: 20 }}
+    styles={{ body: { padding: 20 } }}
   >
     <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
       <div>
@@ -402,7 +402,7 @@ const Home: React.FC = () => {
           border: `1px solid ${REDWOOD.neutral200}`,
           marginBottom: 24,
         }}
-        bodyStyle={{ padding: 20 }}
+        styles={{ body: { padding: 20 } }}
       >
         <Text
           strong
@@ -465,7 +465,7 @@ const Home: React.FC = () => {
               border: `1px solid ${REDWOOD.neutral200}`,
               height: '100%',
             }}
-            bodyStyle={{ padding: 20 }}
+            styles={{ body: { padding: 20 } }}
           >
             <Text
               strong
@@ -508,7 +508,7 @@ const Home: React.FC = () => {
               border: `1px solid ${REDWOOD.neutral200}`,
               height: '100%',
             }}
-            bodyStyle={{ padding: 20 }}
+            styles={{ body: { padding: 20 } }}
           >
             <Text
               strong
@@ -540,7 +540,7 @@ const Home: React.FC = () => {
           borderRadius: 12,
           border: `1px solid ${REDWOOD.neutral200}`,
         }}
-        bodyStyle={{ padding: 20 }}
+        styles={{ body: { padding: 20 } }}
       >
         <Text
           strong
