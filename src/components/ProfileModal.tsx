@@ -1,11 +1,12 @@
 import React, { useRef, useState } from 'react';
 import {
   Modal, Avatar, Button, Progress, Typography, Space, Divider,
-  Tabs, Form, Input, message, Tag, Empty, Spin,
+  Tabs, Form, Input, message, Tag, Empty, Tooltip,
 } from 'antd';
 import {
   UserOutlined, CameraOutlined, LockOutlined, AppstoreOutlined,
   CheckCircleOutlined, EyeInvisibleOutlined, EyeTwoTone,
+  ReloadOutlined, ApiOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../context/AuthContext';
 
@@ -317,40 +318,125 @@ const ChangePasswordTab: React.FC = () => {
 /* ─────────────────────────────────────────────
    Tab 3 — My Access
 ───────────────────────────────────────────── */
+const PROXY_ADMIN = 'http://localhost:3001/api/apex/admin';
+
+const moduleLabel: Record<string, string> = {
+  GL: 'General Ledger', AP: 'Accounts Payable', AR: 'Accounts Receivable',
+  PMS: 'Portfolio Management', RM: 'Rental Management', HR: 'Human Resources',
+  PROCUREMENT: 'Procurement', INVENTORY: 'Inventory', PROJECTS: 'Projects',
+  MANUFACTURING: 'Manufacturing', REPORTS: 'Reports & Analytics', ADMIN: 'Administration',
+  SYNC: 'Data Sync',
+};
+
 const MyAccessTab: React.FC = () => {
-  const { user } = useAuth();
+  const { user, setUser } = useAuth() as any;
+  const [loading, setLoading] = useState(false);
+  const [apiResult, setApiResult] = useState<string | null>(null);
+  const [showRaw, setShowRaw] = useState(false);
+
+  const apiUrl = `${PROXY_ADMIN}/user-access/${encodeURIComponent(user?.username ?? '')}`;
 
   const modules = user?.modules ?? [];
-  const bus = user?.bus ?? [];
+  const bus     = user?.bus     ?? [];
 
-  const moduleLabel: Record<string, string> = {
-    GL: 'General Ledger',
-    AP: 'Accounts Payable',
-    AR: 'Accounts Receivable',
-    PMS: 'Portfolio Management',
-    RM: 'Rental Management',
-    HR: 'Human Resources',
-    PROCUREMENT: 'Procurement',
-    INVENTORY: 'Inventory',
-    PROJECTS: 'Projects',
-    MANUFACTURING: 'Manufacturing',
-    REPORTS: 'Reports & Analytics',
-    ADMIN: 'Administration',
+  const refresh = async () => {
+    if (!user?.username) return;
+    setLoading(true);
+    setApiResult(null);
+    try {
+      const res  = await fetch(apiUrl);
+      const data = await res.json();
+      setApiResult(JSON.stringify(data, null, 2));
+      if (data.status === 'SUCCESS' && setUser) {
+        setUser((prev: any) => {
+          const updated = {
+            ...prev,
+            isAdmin: data.data?.is_admin === 'Y',
+            modules: data.data?.modules  || [],
+            bus:     data.data?.bus      || [],
+          };
+          localStorage.setItem('erp_user', JSON.stringify(updated));
+          return updated;
+        });
+        message.success('Access refreshed.');
+      } else {
+        message.warning(data.message || 'No access data returned.');
+      }
+    } catch (e: any) {
+      setApiResult(`Error: ${e.message}`);
+      message.error('Failed to fetch access data.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <div style={{ padding: '4px 0' }}>
+
+      {/* API info bar */}
+      <div style={{
+        background: REDWOOD.neutral100,
+        border: `1px solid ${REDWOOD.neutral200}`,
+        borderRadius: 8,
+        padding: '8px 12px',
+        marginBottom: 16,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        flexWrap: 'wrap',
+      }}>
+        <ApiOutlined style={{ color: REDWOOD.info, fontSize: 14 }} />
+        <Text style={{ fontSize: 11, color: REDWOOD.neutral600, flex: 1, wordBreak: 'break-all' }}>
+          {apiUrl}
+        </Text>
+        <Tooltip title={showRaw ? 'Hide response' : 'Show raw response'}>
+          <Button
+            size="small"
+            type={showRaw ? 'primary' : 'default'}
+            onClick={() => setShowRaw(p => !p)}
+            style={{ fontSize: 11 }}
+          >
+            {showRaw ? 'Hide' : 'Raw'}
+          </Button>
+        </Tooltip>
+        <Button
+          size="small"
+          icon={<ReloadOutlined />}
+          loading={loading}
+          onClick={refresh}
+          style={{ borderColor: REDWOOD.info, color: REDWOOD.info }}
+        >
+          Refresh
+        </Button>
+      </div>
+
+      {/* Raw API response */}
+      {showRaw && apiResult && (
+        <pre style={{
+          background: '#1a1a2e',
+          color: '#a8ff78',
+          fontSize: 11,
+          padding: 12,
+          borderRadius: 8,
+          overflowX: 'auto',
+          maxHeight: 180,
+          marginBottom: 16,
+        }}>
+          {apiResult}
+        </pre>
+      )}
+
       {/* Modules */}
       <div style={{ marginBottom: 24 }}>
         <Text type="secondary" style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-          Assigned Modules
+          Assigned Modules ({modules.length})
         </Text>
         <Divider style={{ margin: '8px 0 12px' }} />
         {modules.length === 0 ? (
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No modules assigned" />
         ) : (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {modules.map((code) => (
+            {modules.map((code: string) => (
               <Tag
                 key={code}
                 icon={<CheckCircleOutlined />}
@@ -373,14 +459,14 @@ const MyAccessTab: React.FC = () => {
       {/* Business Units */}
       <div>
         <Text type="secondary" style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-          Assigned Business Units
+          Assigned Business Units ({bus.length})
         </Text>
         <Divider style={{ margin: '8px 0 12px' }} />
         {bus.length === 0 ? (
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No business units assigned" />
         ) : (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {bus.map((bu) => (
+            {bus.map((bu: { id: number; name: string }) => (
               <Tag
                 key={bu.id}
                 style={{

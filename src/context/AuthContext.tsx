@@ -55,10 +55,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
           const accessRes = await fetch(`${APEX_ADMIN_BASE}/user-access/${encodeURIComponent(uname)}`);
           const accessData = await accessRes.json();
-          if (accessData.status === 'OK') {
-            userData.isAdmin = accessData.is_admin === 'Y';
-            userData.modules = accessData.modules || [];
-            userData.bus = accessData.bus || [];
+          if (accessData.status === 'SUCCESS') {
+            userData.isAdmin  = accessData.data?.is_admin === 'Y';
+            userData.modules  = accessData.data?.modules  || [];
+            userData.bus      = accessData.data?.bus       || [];
           }
         } catch { /* access is optional */ }
 
@@ -182,7 +182,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, login, loginWithStatus, sendOtp, setPassword, uploadPhoto, changePassword, logout }}>
+    <AuthContext.Provider value={{ user, setUser, isAuthenticated: !!user, login, loginWithStatus, sendOtp, setPassword, uploadPhoto, changePassword, logout }}>
       {children}
     </AuthContext.Provider>
   );
