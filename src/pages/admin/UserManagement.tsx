@@ -1,14 +1,14 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   Layout, Breadcrumb, Typography, Table, Button, Input, Tag, Space,
-  Modal, Form, Switch, Drawer, Tabs, Checkbox, Avatar, Tooltip,
+  Modal, Form, Switch, Drawer, Tabs, Avatar, Tooltip,
   Popconfirm, message, Spin, Empty, Divider, Row, Col, Badge,
 } from 'antd';
 import {
   HomeOutlined, TeamOutlined, PlusOutlined, SearchOutlined,
   EditOutlined, LockOutlined, StopOutlined, CheckOutlined,
   AppstoreOutlined, BankOutlined, ReloadOutlined, UserOutlined,
-  EyeInvisibleOutlined, EyeTwoTone,
+  EyeInvisibleOutlined, EyeTwoTone, ApiOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -78,6 +78,17 @@ const apiFetch = async (path: string, options?: RequestInit) => {
   return res.json();
 };
 
+// ─── API log entry ─────────────────────────────────────────────────────────
+interface ApiLog {
+  method: string;
+  url: string;
+  body?: object;
+  status?: number;
+  response?: object;
+  error?: string;
+  ts: string;
+}
+
 // ─── Sub-components ────────────────────────────────────────────────────────
 
 /** Manage Access Drawer — Modules + Business Units tabs */
@@ -93,46 +104,77 @@ const ManageAccessDrawer: React.FC<{
   const [assignedBUs, setAssignedBUs]         = useState<number[]>([]);
   const [savingModules, setSavingModules] = useState(false);
   const [savingBUs, setSavingBUs]         = useState(false);
+  const [apiLogs, setApiLogs]             = useState<ApiLog[]>([]);
+  const [showLogs, setShowLogs]           = useState(false);
+
+  const logApi = useCallback((entry: Omit<ApiLog, 'ts'>) => {
+    setApiLogs(prev => [{ ...entry, ts: new Date().toLocaleTimeString() }, ...prev].slice(0, 20));
+  }, []);
+
+  // ── tracked fetch ──────────────────────────────────────────────────────
+  const apiFetchLogged = useCallback(async (
+    path: string,
+    options?: RequestInit,
+    bodyObj?: object,
+  ) => {
+    const url = `${APEX_ADMIN_BASE}${path}`;
+    const method = options?.method ?? 'GET';
+    logApi({ method, url, body: bodyObj });
+    const res = await fetch(url, {
+      headers: { 'Content-Type': 'application/json' },
+      ...options,
+    });
+    let data: any = {};
+    try { data = await res.json(); } catch { data = { error: 'non-JSON response' }; }
+    logApi({ method, url, body: bodyObj, status: res.status, response: data });
+    return data;
+  }, [logApi]);
 
   const load = useCallback(async () => {
     if (!username) return;
     setLoadingAccess(true);
     try {
       const [modsRes, busRes, accessRes] = await Promise.all([
-        apiFetch('/modules'),
-        apiFetch('/bus'),
-        apiFetch(`/user-access/${encodeURIComponent(username)}`),
+        apiFetchLogged('/modules'),
+        apiFetchLogged('/bus'),
+        apiFetchLogged(`/user-access/${encodeURIComponent(username)}`),
       ]);
       setAllModules(modsRes.data ?? []);
       setAllBUs(busRes.data ?? []);
       if (accessRes.status === 'SUCCESS') {
         setAssignedModules(accessRes.data?.modules ?? []);
         setAssignedBUs((accessRes.data?.bus ?? []).map((b: { id: number }) => b.id));
+      } else {
+        message.warning('Could not load current access: ' + (accessRes.message ?? accessRes.status));
       }
-    } catch {
-      message.error('Failed to load access data.');
+    } catch (e: any) {
+      message.error('Failed to load access data: ' + e.message);
     } finally {
       setLoadingAccess(false);
     }
-  }, [username]);
+  }, [username, apiFetchLogged]);
 
   useEffect(() => {
     if (open && username) load();
   }, [open, username, load]);
 
-  // ── Module toggle ──────────────────────────────────────────────────────
+  // ── Module toggle — uses POST for both assign and remove ───────────────
   const handleModuleToggle = async (code: string, checked: boolean) => {
     if (!username) return;
     setSavingModules(true);
+    const endpoint = checked ? '/assign-module' : '/remove-module';
+    const body = { username, module_code: code };
     try {
-      const endpoint = checked ? '/assign-module' : '/remove-module';
-      const method  = checked ? 'POST' : 'DELETE';
-      const body = { username, module_code: code };
-      const res = await apiFetch(endpoint, { method, body: JSON.stringify(body) });
-      if (res.status === 'OK' || res.status === 'SUCCESS') {
+      const res = await apiFetchLogged(
+        endpoint,
+        { method: 'POST', body: JSON.stringify(body) },
+        body,
+      );
+      if (res.status === 'SUCCESS') {
         setAssignedModules(prev =>
-          checked ? [...prev, code] : prev.filter(m => m !== code)
+          checked ? [...prev, code] : prev.filter(m => m !== code),
         );
+        message.success(checked ? `${code} assigned.` : `${code} removed.`);
       } else {
         message.error(res.message || 'Operation failed.');
       }
@@ -143,31 +185,27 @@ const ManageAccessDrawer: React.FC<{
     }
   };
 
-  // ── BU toggle ─────────────────────────────────────────────────────────
+  // ── BU toggle — uses POST for both assign and remove ──────────────────
   const handleBUToggle = async (bu: BURecord, checked: boolean) => {
     if (!username) return;
     setSavingBUs(true);
+    const endpoint = checked ? '/assign-bu' : '/remove-bu';
+    const body = checked
+      ? { username, bu_id: bu.bu_id }
+      : { username, bu_id: bu.bu_id };
     try {
-      if (checked) {
-        const res = await apiFetch('/assign-bu', {
-          method: 'POST',
-          body: JSON.stringify({ username, bu_id: bu.bu_id }),
-        });
-        if (res.status === 'OK' || res.status === 'SUCCESS') {
-          setAssignedBUs(prev => [...prev, bu.bu_id]);
-        } else {
-          message.error(res.message || 'Operation failed.');
-        }
+      const res = await apiFetchLogged(
+        endpoint,
+        { method: 'POST', body: JSON.stringify(body) },
+        body,
+      );
+      if (res.status === 'SUCCESS') {
+        setAssignedBUs(prev =>
+          checked ? [...prev, bu.bu_id] : prev.filter(id => id !== bu.bu_id),
+        );
+        message.success(checked ? `${bu.bu_name} assigned.` : `${bu.bu_name} removed.`);
       } else {
-        const res = await apiFetch('/remove-bu', {
-          method: 'DELETE',
-          body: JSON.stringify({ username, bu_id: bu.bu_id }),
-        });
-        if (res.status === 'OK' || res.status === 'SUCCESS') {
-          setAssignedBUs(prev => prev.filter(id => id !== bu.bu_id));
-        } else {
-          message.error(res.message || 'Operation failed.');
-        }
+        message.error(res.message || 'Operation failed.');
       }
     } catch {
       message.error('Network error.');
@@ -176,52 +214,128 @@ const ManageAccessDrawer: React.FC<{
     }
   };
 
+  // ── API log panel ──────────────────────────────────────────────────────
+  const apiLogPanel = (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '6px 10px',
+        background: REDWOOD.neutral100,
+        border: `1px solid ${REDWOOD.neutral200}`,
+        borderRadius: 8,
+      }}>
+        <ApiOutlined style={{ color: REDWOOD.info }} />
+        <Text style={{ fontSize: 11, color: REDWOOD.neutral600, flex: 1 }}>
+          Base: <code style={{ fontSize: 10 }}>{APEX_ADMIN_BASE}</code>
+        </Text>
+        <Button
+          size="small"
+          type={showLogs ? 'primary' : 'default'}
+          onClick={() => setShowLogs(p => !p)}
+          style={{ fontSize: 11 }}
+        >
+          {showLogs ? 'Hide Logs' : `Logs${apiLogs.length ? ` (${apiLogs.length})` : ''}`}
+        </Button>
+      </div>
+
+      {showLogs && (
+        <div style={{
+          marginTop: 8, maxHeight: 220, overflowY: 'auto',
+          background: '#0d1117', borderRadius: 8, padding: 10,
+        }}>
+          {apiLogs.length === 0 && (
+            <Text style={{ color: '#666', fontSize: 11 }}>No API calls yet.</Text>
+          )}
+          {apiLogs.map((log, i) => (
+            <div key={i} style={{ marginBottom: 8, borderBottom: '1px solid #1e2a3a', paddingBottom: 6 }}>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 2 }}>
+                <Tag
+                  color={log.method === 'POST' ? 'blue' : log.method === 'DELETE' ? 'red' : 'green'}
+                  style={{ fontSize: 10, padding: '0 4px', margin: 0 }}
+                >
+                  {log.method}
+                </Tag>
+                {log.status && (
+                  <Tag
+                    color={log.status < 300 ? 'success' : 'error'}
+                    style={{ fontSize: 10, padding: '0 4px', margin: 0 }}
+                  >
+                    {log.status}
+                  </Tag>
+                )}
+                <Text style={{ fontSize: 10, color: '#8b949e' }}>{log.ts}</Text>
+              </div>
+              <Text style={{ fontSize: 10, color: '#58a6ff', wordBreak: 'break-all', display: 'block' }}>
+                {log.url}
+              </Text>
+              {log.body && (
+                <Text style={{ fontSize: 10, color: '#e6c07b', display: 'block' }}>
+                  → {JSON.stringify(log.body)}
+                </Text>
+              )}
+              {log.response && (
+                <Text style={{ fontSize: 10, color: log.response && (log.response as any).status === 'SUCCESS' ? '#98c379' : '#e06c75', display: 'block' }}>
+                  ← {JSON.stringify(log.response)}
+                </Text>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
   const drawerTabs = [
     {
       key: 'modules',
       label: (
         <span>
           <AppstoreOutlined style={{ marginRight: 6 }} />
-          Modules
+          Modules {assignedModules.length > 0 && <Tag color="red" style={{ fontSize: 10, padding: '0 4px' }}>{assignedModules.length}</Tag>}
         </span>
       ),
       children: (
-        <Spin spinning={loadingAccess || savingModules}>
-          {allModules.length === 0 && !loadingAccess ? (
-            <Empty description="No modules found" />
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {allModules.map(mod => {
-                const checked = assignedModules.includes(mod.module_code);
-                return (
-                  <div
-                    key={mod.module_code}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '10px 14px',
-                      borderRadius: 8,
-                      border: `1px solid ${checked ? REDWOOD.primary + '40' : REDWOOD.neutral200}`,
-                      background: checked ? `${REDWOOD.primary}08` : REDWOOD.surface,
-                      transition: 'all 0.2s',
-                    }}
-                  >
-                    <Text style={{ fontSize: 14, color: REDWOOD.neutral900 }}>
-                      {mod.module_name}
-                    </Text>
-                    <Switch
-                      checked={checked}
-                      size="small"
-                      onChange={(val) => handleModuleToggle(mod.module_code, val)}
-                      style={{ background: checked ? REDWOOD.primary : undefined }}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Spin>
+        <>
+          {apiLogPanel}
+          <Spin spinning={loadingAccess || savingModules}>
+            {allModules.length === 0 && !loadingAccess ? (
+              <Empty description="No modules found" />
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {allModules.map(mod => {
+                  const checked = assignedModules.includes(mod.module_code);
+                  return (
+                    <div
+                      key={mod.module_code}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '10px 14px',
+                        borderRadius: 8,
+                        border: `1px solid ${checked ? REDWOOD.primary + '40' : REDWOOD.neutral200}`,
+                        background: checked ? `${REDWOOD.primary}08` : REDWOOD.surface,
+                        transition: 'all 0.2s',
+                      }}
+                    >
+                      <div>
+                        <Text style={{ fontSize: 14, color: REDWOOD.neutral900 }}>{mod.module_name}</Text>
+                        <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block' }}>{mod.module_code}</Text>
+                      </div>
+                      <Switch
+                        checked={checked}
+                        size="small"
+                        loading={savingModules}
+                        onChange={(val) => handleModuleToggle(mod.module_code, val)}
+                        style={{ background: checked ? REDWOOD.primary : undefined }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Spin>
+        </>
       ),
     },
     {
@@ -229,53 +343,57 @@ const ManageAccessDrawer: React.FC<{
       label: (
         <span>
           <BankOutlined style={{ marginRight: 6 }} />
-          Business Units
+          Business Units {assignedBUs.length > 0 && <Tag color="blue" style={{ fontSize: 10, padding: '0 4px' }}>{assignedBUs.length}</Tag>}
         </span>
       ),
       children: (
-        <Spin spinning={loadingAccess || savingBUs}>
-          {allBUs.length === 0 && !loadingAccess ? (
-            <Empty description="No business units found" />
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {allBUs.map(bu => {
-                const checked = assignedBUs.includes(bu.bu_id);
-                return (
-                  <div
-                    key={bu.bu_id}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '10px 14px',
-                      borderRadius: 8,
-                      border: `1px solid ${checked ? REDWOOD.info + '40' : REDWOOD.neutral200}`,
-                      background: checked ? `${REDWOOD.info}08` : REDWOOD.surface,
-                      transition: 'all 0.2s',
-                    }}
-                  >
-                    <Text style={{ fontSize: 14, color: REDWOOD.neutral900 }}>
-                      {bu.bu_name}
-                    </Text>
-                    <Switch
-                      checked={checked}
-                      size="small"
-                      onChange={(val) => handleBUToggle(bu, val)}
-                      style={{ background: checked ? REDWOOD.info : undefined }}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Spin>
+        <>
+          {apiLogPanel}
+          <Spin spinning={loadingAccess || savingBUs}>
+            {allBUs.length === 0 && !loadingAccess ? (
+              <Empty description="No business units found" />
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {allBUs.map(bu => {
+                  const checked = assignedBUs.includes(bu.bu_id);
+                  return (
+                    <div
+                      key={bu.bu_id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '10px 14px',
+                        borderRadius: 8,
+                        border: `1px solid ${checked ? REDWOOD.info + '40' : REDWOOD.neutral200}`,
+                        background: checked ? `${REDWOOD.info}08` : REDWOOD.surface,
+                        transition: 'all 0.2s',
+                      }}
+                    >
+                      <div>
+                        <Text style={{ fontSize: 14, color: REDWOOD.neutral900 }}>{bu.bu_name}</Text>
+                        <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block' }}>ID: {bu.bu_id}</Text>
+                      </div>
+                      <Switch
+                        checked={checked}
+                        size="small"
+                        loading={savingBUs}
+                        onChange={(val) => handleBUToggle(bu, val)}
+                        style={{ background: checked ? REDWOOD.info : undefined }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Spin>
+        </>
       ),
     },
   ];
 
   return (
     <Drawer
-      size="large"
       title={
         <Space>
           <div style={{
@@ -291,10 +409,10 @@ const ManageAccessDrawer: React.FC<{
       }
       open={open}
       onClose={onClose}
-      width={440}
+      width={500}
       destroyOnHidden
       extra={
-        <Button icon={<ReloadOutlined />} onClick={load} size="small">
+        <Button icon={<ReloadOutlined />} onClick={load} size="small" loading={loadingAccess}>
           Refresh
         </Button>
       }
