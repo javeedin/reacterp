@@ -166,7 +166,7 @@ const ProfileTab: React.FC = () => {
 
       {/* User info */}
       <div style={{ padding: '0 8px' }}>
-        <Space direction="vertical" style={{ width: '100%' }} size={10}>
+        <Space vertical={true} style={{ width: '100%' }} size={10}>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <Text type="secondary">Name</Text>
             <Text strong>{user?.name}</Text>

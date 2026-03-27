@@ -441,6 +441,48 @@ app.post(/^\/api\/apex\/(.+)$/, async (req, res) => {
   }
 });
 
+// Proxy: PUT to APEX Database
+app.put(/^\/api\/apex\/(.+)$/, async (req, res) => {
+  const apexPath = req.params[0];
+  const url = `${APEX_CONFIG.baseUrl}/${apexPath}`;
+  if (VERBOSE) console.log('=== APEX PUT ===', url);
+  try {
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(req.body),
+    });
+    const text = await response.text();
+    let data;
+    try { data = JSON.parse(text); } catch { data = { rawResponse: text.substring(0, 500) }; }
+    if (!response.ok) return res.status(response.status).json({ success: false, error: `APEX API Error: ${response.status}`, details: text.substring(0, 500) });
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Proxy: DELETE to APEX Database
+app.delete(/^\/api\/apex\/(.+)$/, async (req, res) => {
+  const apexPath = req.params[0];
+  const url = `${APEX_CONFIG.baseUrl}/${apexPath}`;
+  if (VERBOSE) console.log('=== APEX DELETE ===', url);
+  try {
+    const response = await fetch(url, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(req.body),
+    });
+    const text = await response.text();
+    let data;
+    try { data = JSON.parse(text); } catch { data = { rawResponse: text.substring(0, 500) }; }
+    if (!response.ok) return res.status(response.status).json({ success: false, error: `APEX API Error: ${response.status}`, details: text.substring(0, 500) });
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Test Oracle connection
 app.get('/api/test/oracle', async (req, res) => {
   const url = `${ORACLE_CONFIG.baseUrl}/journalBatches?offset=0&limit=1`;

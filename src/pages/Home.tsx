@@ -249,7 +249,7 @@ const QuickActionCard = ({
       border: `1px solid ${REDWOOD.neutral200}`,
       cursor: 'pointer',
     }}
-    bodyStyle={{ padding: 16 }}
+    styles={{ body: { padding: 16 } }}
   >
     <Space>
       <div
@@ -567,7 +567,7 @@ const Home: React.FC = () => {
                   border: `1px solid ${REDWOOD.neutral200}`,
                   transition: 'all 0.3s ease',
                 }}
-                bodyStyle={{ padding: 16 }}
+                styles={{ body: { padding: 16 } }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.borderColor = module.color;
                   e.currentTarget.style.transform = 'translateY(-2px)';

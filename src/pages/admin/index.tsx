@@ -147,7 +147,7 @@ const AdminModule: React.FC = () => {
                     transition: 'all 0.2s ease',
                     opacity: card.path ? 1 : 0.75,
                   }}
-                  bodyStyle={{ padding: 24 }}
+                  styles={{ body: { padding: 24 } }}
                 >
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
                     <div style={{

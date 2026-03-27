@@ -32,8 +32,7 @@ const REDWOOD = {
   surface: '#FFFFFF',
 };
 
-const APEX_ADMIN_BASE =
-  'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/admin';
+const APEX_ADMIN_BASE = 'http://localhost:3001/api/apex/admin';
 
 // ─── API types ─────────────────────────────────────────────────────────────
 interface UserRecord {
@@ -104,11 +103,11 @@ const ManageAccessDrawer: React.FC<{
         apiFetch('/bus'),
         apiFetch(`/user-access/${encodeURIComponent(username)}`),
       ]);
-      setAllModules(modsRes.modules ?? []);
-      setAllBUs(busRes.bus ?? []);
-      if (accessRes.status === 'OK') {
-        setAssignedModules(accessRes.modules ?? []);
-        setAssignedBUs((accessRes.bus ?? []).map((b: { id: number }) => b.id));
+      setAllModules(modsRes.data ?? []);
+      setAllBUs(busRes.data ?? []);
+      if (accessRes.status === 'SUCCESS') {
+        setAssignedModules(accessRes.data?.modules ?? []);
+        setAssignedBUs((accessRes.data?.bus ?? []).map((b: { id: number }) => b.id));
       }
     } catch {
       message.error('Failed to load access data.');
@@ -126,9 +125,10 @@ const ManageAccessDrawer: React.FC<{
     if (!username) return;
     setSavingModules(true);
     try {
-      const endpoint = checked ? '/user-access/assign-module' : '/user-access/remove-module';
+      const endpoint = checked ? '/assign-module' : '/remove-module';
+      const method  = checked ? 'POST' : 'DELETE';
       const body = { username, module_code: code };
-      const res = await apiFetch(endpoint, { method: 'POST', body: JSON.stringify(body) });
+      const res = await apiFetch(endpoint, { method, body: JSON.stringify(body) });
       if (res.status === 'OK' || res.status === 'SUCCESS') {
         setAssignedModules(prev =>
           checked ? [...prev, code] : prev.filter(m => m !== code)
@@ -149,9 +149,9 @@ const ManageAccessDrawer: React.FC<{
     setSavingBUs(true);
     try {
       if (checked) {
-        const res = await apiFetch('/user-access/assign-bu', {
+        const res = await apiFetch('/assign-bu', {
           method: 'POST',
-          body: JSON.stringify({ username, bu_id: bu.bu_id, bu_name: bu.bu_name }),
+          body: JSON.stringify({ username, bu_id: bu.bu_id }),
         });
         if (res.status === 'OK' || res.status === 'SUCCESS') {
           setAssignedBUs(prev => [...prev, bu.bu_id]);
@@ -159,8 +159,8 @@ const ManageAccessDrawer: React.FC<{
           message.error(res.message || 'Operation failed.');
         }
       } else {
-        const res = await apiFetch('/user-access/remove-bu', {
-          method: 'POST',
+        const res = await apiFetch('/remove-bu', {
+          method: 'DELETE',
           body: JSON.stringify({ username, bu_id: bu.bu_id }),
         });
         if (res.status === 'OK' || res.status === 'SUCCESS') {
@@ -275,6 +275,7 @@ const ManageAccessDrawer: React.FC<{
 
   return (
     <Drawer
+      size="large"
       title={
         <Space>
           <div style={{
@@ -330,7 +331,7 @@ const UserManagement: React.FC = () => {
     setLoading(true);
     try {
       const data = await apiFetch('/users');
-      setUsers(data.users ?? []);
+      setUsers(data.data ?? []);
     } catch {
       message.error('Failed to load users.');
     } finally {
@@ -373,12 +374,14 @@ const UserManagement: React.FC = () => {
     try {
       if (editingUser) {
         // Update
-        const res = await apiFetch('/users/update', {
-          method: 'POST',
+        const res = await apiFetch('/users', {
+          method: 'PUT',
           body: JSON.stringify({
             username: values.username,
+            name: values.username,
+            email: values.username,
             is_admin: values.is_admin ? 'Y' : 'N',
-            suspended_flag: values.suspended_flag ? 'Y' : 'N',
+            suspended: values.suspended_flag ? 'Y' : 'N',
           }),
         });
         if (res.status === 'OK' || res.status === 'SUCCESS') {
@@ -416,12 +419,14 @@ const UserManagement: React.FC = () => {
   const handleToggleStatus = async (record: UserRecord) => {
     const newFlag = record.suspended_flag === 'Y' ? 'N' : 'Y';
     try {
-      const res = await apiFetch('/users/update', {
-        method: 'POST',
+      const res = await apiFetch('/users', {
+        method: 'PUT',
         body: JSON.stringify({
           username: record.username,
+          name: record.username,
+          email: record.username,
           is_admin: record.is_admin,
-          suspended_flag: newFlag,
+          suspended: newFlag,
         }),
       });
       if (res.status === 'OK' || res.status === 'SUCCESS') {
@@ -455,7 +460,7 @@ const UserManagement: React.FC = () => {
 
     setSavingReset(true);
     try {
-      const res = await apiFetch('/users/reset-password', {
+      const res = await apiFetch('/reset-password', {
         method: 'POST',
         body: JSON.stringify({ username: resetTarget, new_password: values.new_password }),
       });
@@ -771,7 +776,6 @@ const UserManagement: React.FC = () => {
                 <Switch
                   checkedChildren="Yes"
                   unCheckedChildren="No"
-                  style={{ background: editForm.getFieldValue('is_admin') ? REDWOOD.primary : undefined }}
                 />
               </Form.Item>
             </Col>
@@ -785,7 +789,6 @@ const UserManagement: React.FC = () => {
                   <Switch
                     checkedChildren="Yes"
                     unCheckedChildren="No"
-                    style={{ background: editForm.getFieldValue('suspended_flag') ? '#CF1322' : undefined }}
                   />
                 </Form.Item>
               </Col>

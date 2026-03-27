@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useCallback } from 'react';
 import type { User, AuthContextType, LoginResult } from '../types';
 
 const APEX_AUTH_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/auth';
-const APEX_ADMIN_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/admin';
+const APEX_ADMIN_BASE = 'http://localhost:3001/api/apex/admin';
 
 // Electron API (available only in desktop app)
 declare global {
@@ -164,7 +164,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const changePassword = useCallback(async (username: string, currentPassword: string, newPassword: string) => {
     try {
-      const res = await fetch(`${APEX_AUTH_BASE}/change-password`, {
+      const res = await fetch(`http://localhost:3001/api/apex/auth/change-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, current_password: currentPassword, new_password: newPassword }),
