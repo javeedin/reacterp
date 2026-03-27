@@ -37,6 +37,8 @@ const APEX_ADMIN_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecl
 // ─── API types ─────────────────────────────────────────────────────────────
 interface UserRecord {
   username: string;
+  user_id: number;
+  person_number: string;
   suspended_flag: string;   // 'Y' | 'N'
   is_admin: string;         // 'Y' | 'N'
   created_date: string;
@@ -427,6 +429,23 @@ const UserManagement: React.FC = () => {
   const [users, setUsers]           = useState<UserRecord[]>([]);
   const [loading, setLoading]       = useState(false);
   const [search, setSearch]         = useState('');
+  const [pageLogs, setPageLogs]     = useState<ApiLog[]>([]);
+  const [showPageLogs, setShowPageLogs] = useState(false);
+
+  const logPage = useCallback((entry: Omit<ApiLog, 'ts'>) => {
+    setPageLogs(prev => [{ ...entry, ts: new Date().toLocaleTimeString() }, ...prev].slice(0, 30));
+  }, []);
+
+  const apiFetchPage = useCallback(async (path: string, options?: RequestInit, bodyObj?: object) => {
+    const url = `${APEX_ADMIN_BASE}${path}`;
+    const method = options?.method ?? 'GET';
+    logPage({ method, url, body: bodyObj });
+    const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...options });
+    let data: any = {};
+    try { data = await res.json(); } catch { data = { error: 'non-JSON response' }; }
+    logPage({ method, url, body: bodyObj, status: res.status, response: data });
+    return data;
+  }, [logPage]);
 
   // Create / Edit modal
   const [editModalOpen, setEditModalOpen]   = useState(false);
@@ -448,20 +467,22 @@ const UserManagement: React.FC = () => {
   const loadUsers = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await apiFetch('/users');
+      const data = await apiFetchPage('/users');
       setUsers(data.data ?? []);
     } catch {
       message.error('Failed to load users.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [apiFetchPage]);
 
   useEffect(() => { loadUsers(); }, [loadUsers]);
 
   // ── Filtered rows ──────────────────────────────────────────────────────
   const filteredUsers = users.filter(u =>
-    u.username.toLowerCase().includes(search.toLowerCase())
+    u.username.toLowerCase().includes(search.toLowerCase()) ||
+    String(u.user_id ?? '').includes(search) ||
+    (u.person_number ?? '').toLowerCase().includes(search.toLowerCase())
   );
 
   // ── Create / Edit modal ────────────────────────────────────────────────
@@ -489,42 +510,21 @@ const UserManagement: React.FC = () => {
     } catch { return; }
 
     setSavingUser(true);
+    const updateBody = {
+      username: values.username, name: values.username, email: values.username,
+      is_admin: values.is_admin ? 'Y' : 'N', suspended: values.suspended_flag ? 'Y' : 'N',
+    };
+    const createBody = { username: values.username, name: values.username, email: values.username,
+      password: 'Welcome@1', is_admin: values.is_admin ? 'Y' : 'N' };
     try {
       if (editingUser) {
-        // Update
-        const res = await apiFetch('/users', {
-          method: 'PUT',
-          body: JSON.stringify({
-            username: values.username,
-            name: values.username,
-            email: values.username,
-            is_admin: values.is_admin ? 'Y' : 'N',
-            suspended: values.suspended_flag ? 'Y' : 'N',
-          }),
-        });
-        if (res.status === 'OK' || res.status === 'SUCCESS') {
-          message.success('User updated.');
-          setEditModalOpen(false);
-          loadUsers();
-        } else {
-          message.error(res.message || 'Update failed.');
-        }
+        const res = await apiFetchPage('/users', { method: 'PUT', body: JSON.stringify(updateBody) }, updateBody);
+        if (res.status === 'SUCCESS') { message.success('User updated.'); setEditModalOpen(false); loadUsers(); }
+        else message.error(res.message || 'Update failed.');
       } else {
-        // Create
-        const res = await apiFetch('/users', {
-          method: 'POST',
-          body: JSON.stringify({
-            username: values.username,
-            is_admin: values.is_admin ? 'Y' : 'N',
-          }),
-        });
-        if (res.status === 'OK' || res.status === 'SUCCESS') {
-          message.success('User created.');
-          setEditModalOpen(false);
-          loadUsers();
-        } else {
-          message.error(res.message || 'Create failed.');
-        }
+        const res = await apiFetchPage('/users', { method: 'POST', body: JSON.stringify(createBody) }, createBody);
+        if (res.status === 'SUCCESS') { message.success('User created.'); setEditModalOpen(false); loadUsers(); }
+        else message.error(res.message || 'Create failed.');
       }
     } catch {
       message.error('Network error.');
@@ -536,17 +536,10 @@ const UserManagement: React.FC = () => {
   // ── Toggle Status ──────────────────────────────────────────────────────
   const handleToggleStatus = async (record: UserRecord) => {
     const newFlag = record.suspended_flag === 'Y' ? 'N' : 'Y';
+    const body = { username: record.username, name: record.username, email: record.username,
+      is_admin: record.is_admin, suspended: newFlag };
     try {
-      const res = await apiFetch('/users', {
-        method: 'PUT',
-        body: JSON.stringify({
-          username: record.username,
-          name: record.username,
-          email: record.username,
-          is_admin: record.is_admin,
-          suspended: newFlag,
-        }),
-      });
+      const res = await apiFetchPage('/users', { method: 'PUT', body: JSON.stringify(body) }, body);
       if (res.status === 'OK' || res.status === 'SUCCESS') {
         message.success(newFlag === 'Y' ? 'User suspended.' : 'User activated.');
         loadUsers();
@@ -578,11 +571,9 @@ const UserManagement: React.FC = () => {
 
     setSavingReset(true);
     try {
-      const res = await apiFetch('/reset-password', {
-        method: 'POST',
-        body: JSON.stringify({ username: resetTarget, new_password: values.new_password }),
-      });
-      if (res.status === 'OK' || res.status === 'SUCCESS') {
+      const resetBody = { username: resetTarget, new_password: values.new_password, admin_user: 'ADMIN' };
+      const res = await apiFetchPage('/reset-password', { method: 'POST', body: JSON.stringify(resetBody) }, resetBody);
+      if (res.status === 'SUCCESS') {
         message.success(`Password reset for ${resetTarget}.`);
         setResetModalOpen(false);
       } else {
@@ -600,31 +591,31 @@ const UserManagement: React.FC = () => {
     {
       title: 'User',
       key: 'user',
-      width: 260,
+      width: 240,
       render: (_, record) => (
         <Space>
-          <Avatar
-            size={36}
-            style={{
-              background: avatarColor(record.username),
-              color: '#fff',
-              fontWeight: 600,
-              fontSize: 15,
-              flexShrink: 0,
-            }}
-          >
+          <Avatar size={36} style={{ background: avatarColor(record.username), color: '#fff', fontWeight: 600, fontSize: 15, flexShrink: 0 }}>
             {record.username.charAt(0).toUpperCase()}
           </Avatar>
           <div>
-            <div style={{ fontWeight: 500, color: REDWOOD.neutral900, lineHeight: 1.3 }}>
+            <div style={{ fontWeight: 500, color: REDWOOD.neutral900, lineHeight: 1.3, fontSize: 13 }}>
               {record.username}
             </div>
-            <div style={{ fontSize: 12, color: REDWOOD.neutral600 }}>
-              {record.username}
+            <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>
+              ID: {record.user_id ?? '—'}
             </div>
           </div>
         </Space>
       ),
+    },
+    {
+      title: 'Person No.',
+      dataIndex: 'person_number',
+      key: 'person_number',
+      width: 120,
+      render: (val: string) => val
+        ? <Text style={{ fontSize: 12 }}>{val}</Text>
+        : <Text type="secondary" style={{ fontSize: 12 }}>—</Text>,
     },
     {
       title: 'Status',
@@ -806,16 +797,58 @@ const UserManagement: React.FC = () => {
             </Space>
           </div>
 
-          {/* Search */}
-          <div style={{ marginBottom: 16 }}>
+          {/* Search + API Log bar */}
+          <div style={{ marginBottom: 16, display: 'flex', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
             <Input
               prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
-              placeholder="Search by username…"
+              placeholder="Search username / user ID / person no…"
               value={search}
               onChange={e => setSearch(e.target.value)}
               allowClear
-              style={{ maxWidth: 320, borderRadius: 6 }}
+              style={{ maxWidth: 340, borderRadius: 6 }}
             />
+            <div style={{ flex: 1, minWidth: 260 }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '5px 10px',
+                background: REDWOOD.neutral100,
+                border: `1px solid ${REDWOOD.neutral200}`,
+                borderRadius: 6,
+              }}>
+                <ApiOutlined style={{ color: REDWOOD.info, fontSize: 13 }} />
+                <Text style={{ fontSize: 11, color: REDWOOD.neutral600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {APEX_ADMIN_BASE}
+                </Text>
+                <Button
+                  size="small"
+                  type={showPageLogs ? 'primary' : 'default'}
+                  onClick={() => setShowPageLogs(p => !p)}
+                  style={{ fontSize: 11, flexShrink: 0 }}
+                >
+                  {showPageLogs ? 'Hide Logs' : `Logs${pageLogs.length ? ` (${pageLogs.length})` : ''}`}
+                </Button>
+              </div>
+              {showPageLogs && (
+                <div style={{
+                  marginTop: 6, maxHeight: 240, overflowY: 'auto',
+                  background: '#0d1117', borderRadius: 8, padding: 10,
+                }}>
+                  {pageLogs.length === 0 && <Text style={{ color: '#666', fontSize: 11 }}>No API calls yet.</Text>}
+                  {pageLogs.map((log, i) => (
+                    <div key={i} style={{ marginBottom: 7, borderBottom: '1px solid #1e2a3a', paddingBottom: 5 }}>
+                      <div style={{ display: 'flex', gap: 5, alignItems: 'center', marginBottom: 2 }}>
+                        <Tag color={log.method === 'GET' ? 'green' : log.method === 'PUT' ? 'orange' : 'blue'} style={{ fontSize: 10, padding: '0 4px', margin: 0 }}>{log.method}</Tag>
+                        {log.status && <Tag color={log.status < 300 ? 'success' : 'error'} style={{ fontSize: 10, padding: '0 4px', margin: 0 }}>{log.status}</Tag>}
+                        <Text style={{ fontSize: 10, color: '#8b949e' }}>{log.ts}</Text>
+                      </div>
+                      <Text style={{ fontSize: 10, color: '#58a6ff', wordBreak: 'break-all', display: 'block' }}>{log.url}</Text>
+                      {log.body && <Text style={{ fontSize: 10, color: '#e6c07b', display: 'block' }}>→ {JSON.stringify(log.body)}</Text>}
+                      {log.response && <Text style={{ fontSize: 10, color: (log.response as any).status === 'SUCCESS' ? '#98c379' : '#e06c75', display: 'block' }}>← {JSON.stringify(log.response)}</Text>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Table */}

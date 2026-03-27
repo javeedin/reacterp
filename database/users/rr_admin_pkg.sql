@@ -125,11 +125,11 @@ CREATE OR REPLACE PACKAGE BODY RR_ADMIN_PKG AS
 
     FOR r IN (
       SELECT a.USERNAME,
-             NVL(a.FULL_NAME, a.USERNAME)  AS FULL_NAME,
-             a.EMAIL,
-             NVL(p.SUSPENDED_FLAG, 'N')    AS SUSPENDED_FLAG,
-             NVL(p.IS_ADMIN, 'N')          AS IS_ADMIN,
-             TO_CHAR(a.CREATED_DATE, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_DATE
+             a.USER_ID,
+             a.PERSON_NUMBER,
+             NVL(a.SUSPENDED_FLAG, 'N')               AS SUSPENDED_FLAG,
+             NVL(p.IS_ADMIN, 'N')                     AS IS_ADMIN,
+             TO_CHAR(a.CREATION_DATE, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_DATE
         FROM RR_USER_ACCOUNTS a
         LEFT JOIN RR_USER_PASSWORDS p ON p.USERNAME = a.USERNAME
        ORDER BY a.USERNAME
@@ -139,12 +139,12 @@ CREATE OR REPLACE PACKAGE BODY RR_ADMIN_PKG AS
       END IF;
       v_first := FALSE;
       DBMS_LOB.APPEND(v_clob,
-        TO_CLOB('{"username":"' || REPLACE(r.USERNAME,   '"','\"') || '",'
-             || '"name":"'      || REPLACE(r.FULL_NAME,  '"','\"') || '",'
-             || '"email":"'     || REPLACE(NVL(r.EMAIL,''), '"','\"') || '",'
-             || '"suspended_flag":"' || r.SUSPENDED_FLAG || '",'
-             || '"is_admin":"'  || r.IS_ADMIN || '",'
-             || '"created_date":"' || r.CREATED_DATE || '"}')
+        TO_CLOB('{"username":"'     || REPLACE(r.USERNAME, '"','\"') || '",'
+             || '"user_id":'        || NVL(TO_CHAR(r.USER_ID), 'null') || ','
+             || '"person_number":"' || NVL(REPLACE(r.PERSON_NUMBER,'"','\"'),'') || '",'
+             || '"suspended_flag":"'|| r.SUSPENDED_FLAG || '",'
+             || '"is_admin":"'      || r.IS_ADMIN || '",'
+             || '"created_date":"'  || r.CREATED_DATE || '"}')
       );
     END LOOP;
 
@@ -175,8 +175,8 @@ CREATE OR REPLACE PACKAGE BODY RR_ADMIN_PKG AS
       RETURN;
     END IF;
 
-    INSERT INTO RR_USER_ACCOUNTS (USERNAME, FULL_NAME, EMAIL, CREATED_DATE)
-    VALUES (UPPER(p_username), p_name, p_email, SYSDATE);
+    INSERT INTO RR_USER_ACCOUNTS (USERNAME)
+    VALUES (UPPER(p_username));
 
     INSERT INTO RR_USER_PASSWORDS (USERNAME, PASSWORD_HASH, IS_ADMIN)
     VALUES (UPPER(p_username), HASH_PASSWORD(p_password), NVL(p_is_admin,'N'));
@@ -200,13 +200,11 @@ CREATE OR REPLACE PACKAGE BODY RR_ADMIN_PKG AS
   ) IS
   BEGIN
     UPDATE RR_USER_ACCOUNTS
-       SET FULL_NAME = p_name,
-           EMAIL     = p_email
-     WHERE USERNAME  = UPPER(p_username);
+       SET SUSPENDED_FLAG = NVL(p_suspended, 'N')
+     WHERE USERNAME       = UPPER(p_username);
 
     UPDATE RR_USER_PASSWORDS
-       SET IS_ADMIN       = NVL(p_is_admin, 'N'),
-           SUSPENDED_FLAG = NVL(p_suspended, 'N')
+       SET IS_ADMIN = NVL(p_is_admin, 'N')
      WHERE USERNAME = UPPER(p_username);
 
     COMMIT;
