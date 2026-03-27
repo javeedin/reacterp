@@ -5,6 +5,9 @@ export interface User {
   email: string;
   role: string;
   photo?: string; // base64 data URL
+  isAdmin?: boolean;
+  modules?: string[];  // module codes assigned
+  bus?: Array<{ id: number; name: string }>;
 }
 
 export type LoginStatus =
@@ -24,6 +27,7 @@ export interface AuthContextType {
   sendOtp: (username: string) => Promise<{ status: string; message: string }>;
   setPassword: (username: string, otp: string, newPassword: string) => Promise<{ status: string; message: string }>;
   uploadPhoto: (username: string, base64: string, mimeType: string) => Promise<{ status: string; message: string }>;
+  changePassword: (username: string, currentPassword: string, newPassword: string) => Promise<{ status: string; message: string }>;
   logout: () => void;
 }
 

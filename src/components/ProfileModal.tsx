@@ -1,13 +1,47 @@
 import React, { useRef, useState } from 'react';
-import { Modal, Avatar, Button, Upload, Progress, Typography, Space, Divider } from 'antd';
-import { UserOutlined, CameraOutlined, DeleteOutlined } from '@ant-design/icons';
+import {
+  Modal, Avatar, Button, Progress, Typography, Space, Divider,
+  Tabs, Form, Input, message, Tag, Empty, Spin,
+} from 'antd';
+import {
+  UserOutlined, CameraOutlined, LockOutlined, AppstoreOutlined,
+  CheckCircleOutlined, EyeInvisibleOutlined, EyeTwoTone,
+} from '@ant-design/icons';
 import { useAuth } from '../context/AuthContext';
 
 const { Text, Title } = Typography;
 
 const MAX_SIZE_MB = 2;
 
-function resizeImage(file: File, maxPx = 400): Promise<{ base64: string; mimeType: string }> {
+// Oracle Redwood palette
+const REDWOOD = {
+  primary: '#C74634',
+  primaryLight: '#E85D4A',
+  success: '#1D7B4D',
+  info: '#0572CE',
+  neutral100: '#F7F7F7',
+  neutral200: '#E5E5E5',
+  neutral600: '#6B6B6B',
+  neutral900: '#1A1A1A',
+};
+
+// Module colour map — consistent with Home.tsx
+const MODULE_COLORS: Record<string, string> = {
+  GL: REDWOOD.primary,
+  AP: REDWOOD.success,
+  AR: '#FA8C16',
+  PMS: '#7B68EE',
+  RM: '#13C2C2',
+  HR: '#EB2F96',
+  PROCUREMENT: '#52C41A',
+  INVENTORY: '#722ED1',
+  PROJECTS: '#1890FF',
+  MANUFACTURING: '#FA541C',
+  REPORTS: '#2F54EB',
+  ADMIN: REDWOOD.primary,
+};
+
+function resizeImage(file: File, maxPx = 250): Promise<{ base64: string; mimeType: string }> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
@@ -35,7 +69,10 @@ interface ProfileModalProps {
   onClose: () => void;
 }
 
-const ProfileModal: React.FC<ProfileModalProps> = ({ open, onClose }) => {
+/* ─────────────────────────────────────────────
+   Tab 1 — Profile
+───────────────────────────────────────────── */
+const ProfileTab: React.FC = () => {
   const { user, uploadPhoto } = useAuth();
   const [loading, setLoading]   = useState(false);
   const [progress, setProgress] = useState(0);
@@ -57,7 +94,11 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ open, onClose }) => {
       setProgress(60);
       const result = await uploadPhoto(user!.username, base64, mimeType);
       setProgress(100);
-      if (result.status !== 'OK') setError(result.message || 'Upload failed.');
+      if (result.status !== 'OK') {
+        setError(result.message || 'Upload failed.');
+      } else {
+        message.success('Profile photo updated.');
+      }
     } catch {
       setError('Failed to process image.');
     } finally {
@@ -68,20 +109,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ open, onClose }) => {
   };
 
   return (
-    <Modal
-      open={open}
-      onCancel={onClose}
-      footer={null}
-      title={null}
-      width={400}
-      centered
-      destroyOnHidden
-    >
-      <div style={{ textAlign: 'center', padding: '8px 0 24px' }}>
-        <Title level={4} style={{ marginBottom: 4 }}>My Profile</Title>
-        <Text type="secondary" style={{ fontSize: 13 }}>{user?.email}</Text>
-      </div>
-
+    <>
       {/* Avatar */}
       <div style={{ textAlign: 'center', marginBottom: 24, position: 'relative', display: 'inline-block', width: '100%' }}>
         <div style={{ position: 'relative', display: 'inline-block' }}>
@@ -89,8 +117,15 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ open, onClose }) => {
             size={120}
             src={user?.photo}
             icon={!user?.photo && <UserOutlined />}
-            style={{ border: '3px solid #1677ff', boxShadow: '0 4px 16px rgba(22,119,255,0.2)' }}
-          />
+            style={{
+              border: `3px solid ${REDWOOD.primary}`,
+              boxShadow: `0 4px 16px ${REDWOOD.primary}33`,
+              background: !user?.photo ? REDWOOD.primary : undefined,
+              fontSize: !user?.photo ? 48 : undefined,
+            }}
+          >
+            {!user?.photo && user?.name?.charAt(0).toUpperCase()}
+          </Avatar>
           <Button
             type="primary"
             shape="circle"
@@ -101,6 +136,8 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ open, onClose }) => {
             style={{
               position: 'absolute', bottom: 4, right: 4,
               width: 32, height: 32, minWidth: 32,
+              background: REDWOOD.primary,
+              borderColor: REDWOOD.primary,
               boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
             }}
           />
@@ -117,9 +154,8 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ open, onClose }) => {
       />
 
       {progress > 0 && (
-        <Progress percent={progress} size="small" style={{ marginBottom: 12 }} />
+        <Progress percent={progress} size="small" strokeColor={REDWOOD.primary} style={{ marginBottom: 12 }} />
       )}
-
       {error && (
         <Text type="danger" style={{ display: 'block', textAlign: 'center', marginBottom: 12 }}>
           {error}
@@ -130,7 +166,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ open, onClose }) => {
 
       {/* User info */}
       <div style={{ padding: '0 8px' }}>
-        <Space orientation="vertical" style={{ width: '100%' }} size={8}>
+        <Space direction="vertical" style={{ width: '100%' }} size={10}>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <Text type="secondary">Name</Text>
             <Text strong>{user?.name}</Text>
@@ -140,20 +176,293 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ open, onClose }) => {
             <Text strong>{user?.username}</Text>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <Text type="secondary">Email</Text>
+            <Text strong>{user?.email}</Text>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <Text type="secondary">Role</Text>
             <Text strong>{user?.role}</Text>
           </div>
+          {user?.isAdmin && (
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <Text type="secondary">Admin</Text>
+              <Tag color="red" style={{ margin: 0 }}>Administrator</Tag>
+            </div>
+          )}
         </Space>
       </div>
 
       <div style={{ textAlign: 'center', marginTop: 20 }}>
-        <Button block onClick={() => fileRef.current?.click()} loading={loading} icon={<CameraOutlined />}>
+        <Button
+          block
+          onClick={() => fileRef.current?.click()}
+          loading={loading}
+          icon={<CameraOutlined />}
+          style={{ borderColor: REDWOOD.primary, color: REDWOOD.primary }}
+        >
           {user?.photo ? 'Change Photo' : 'Upload Photo'}
         </Button>
         <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 6 }}>
-          JPG, PNG or WebP · Max {MAX_SIZE_MB}MB · Auto-resized to 400px
+          JPG, PNG or WebP · Max {MAX_SIZE_MB}MB · Auto-resized to 250px
         </Text>
       </div>
+    </>
+  );
+};
+
+/* ─────────────────────────────────────────────
+   Tab 2 — Change Password
+───────────────────────────────────────────── */
+const ChangePasswordTab: React.FC = () => {
+  const { user, changePassword } = useAuth();
+  const [form] = Form.useForm();
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (values: {
+    current_password: string;
+    new_password: string;
+    confirm_password: string;
+  }) => {
+    if (!user) return;
+    if (values.new_password !== values.confirm_password) {
+      form.setFields([{ name: 'confirm_password', errors: ['Passwords do not match.'] }]);
+      return;
+    }
+    setLoading(true);
+    try {
+      const result = await changePassword(user.username, values.current_password, values.new_password);
+      if (result.status === 'OK' || result.status === 'SUCCESS') {
+        message.success('Password changed successfully.');
+        form.resetFields();
+      } else {
+        message.error(result.message || 'Failed to change password.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Form
+      form={form}
+      layout="vertical"
+      onFinish={handleSubmit}
+      style={{ padding: '8px 0' }}
+    >
+      <Form.Item
+        label="Current Password"
+        name="current_password"
+        rules={[{ required: true, message: 'Please enter your current password.' }]}
+      >
+        <Input.Password
+          prefix={<LockOutlined style={{ color: REDWOOD.neutral600 }} />}
+          iconRender={(visible) => (visible ? <EyeTwoTone /> : <EyeInvisibleOutlined />)}
+          placeholder="Current password"
+        />
+      </Form.Item>
+
+      <Form.Item
+        label="New Password"
+        name="new_password"
+        rules={[
+          { required: true, message: 'Please enter a new password.' },
+          { min: 8, message: 'Password must be at least 8 characters.' },
+        ]}
+      >
+        <Input.Password
+          prefix={<LockOutlined style={{ color: REDWOOD.neutral600 }} />}
+          iconRender={(visible) => (visible ? <EyeTwoTone /> : <EyeInvisibleOutlined />)}
+          placeholder="New password (min. 8 chars)"
+        />
+      </Form.Item>
+
+      <Form.Item
+        label="Confirm New Password"
+        name="confirm_password"
+        dependencies={['new_password']}
+        rules={[
+          { required: true, message: 'Please confirm your new password.' },
+          ({ getFieldValue }) => ({
+            validator(_, value) {
+              if (!value || getFieldValue('new_password') === value) {
+                return Promise.resolve();
+              }
+              return Promise.reject(new Error('Passwords do not match.'));
+            },
+          }),
+        ]}
+      >
+        <Input.Password
+          prefix={<LockOutlined style={{ color: REDWOOD.neutral600 }} />}
+          iconRender={(visible) => (visible ? <EyeTwoTone /> : <EyeInvisibleOutlined />)}
+          placeholder="Confirm new password"
+        />
+      </Form.Item>
+
+      <Form.Item style={{ marginBottom: 0, marginTop: 8 }}>
+        <Button
+          type="primary"
+          htmlType="submit"
+          block
+          loading={loading}
+          style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+        >
+          Change Password
+        </Button>
+      </Form.Item>
+    </Form>
+  );
+};
+
+/* ─────────────────────────────────────────────
+   Tab 3 — My Access
+───────────────────────────────────────────── */
+const MyAccessTab: React.FC = () => {
+  const { user } = useAuth();
+
+  const modules = user?.modules ?? [];
+  const bus = user?.bus ?? [];
+
+  const moduleLabel: Record<string, string> = {
+    GL: 'General Ledger',
+    AP: 'Accounts Payable',
+    AR: 'Accounts Receivable',
+    PMS: 'Portfolio Management',
+    RM: 'Rental Management',
+    HR: 'Human Resources',
+    PROCUREMENT: 'Procurement',
+    INVENTORY: 'Inventory',
+    PROJECTS: 'Projects',
+    MANUFACTURING: 'Manufacturing',
+    REPORTS: 'Reports & Analytics',
+    ADMIN: 'Administration',
+  };
+
+  return (
+    <div style={{ padding: '4px 0' }}>
+      {/* Modules */}
+      <div style={{ marginBottom: 24 }}>
+        <Text type="secondary" style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+          Assigned Modules
+        </Text>
+        <Divider style={{ margin: '8px 0 12px' }} />
+        {modules.length === 0 ? (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No modules assigned" />
+        ) : (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {modules.map((code) => (
+              <Tag
+                key={code}
+                icon={<CheckCircleOutlined />}
+                style={{
+                  background: `${MODULE_COLORS[code] ?? REDWOOD.primary}15`,
+                  color: MODULE_COLORS[code] ?? REDWOOD.primary,
+                  borderColor: `${MODULE_COLORS[code] ?? REDWOOD.primary}40`,
+                  borderRadius: 6,
+                  padding: '4px 10px',
+                  fontSize: 13,
+                }}
+              >
+                {moduleLabel[code] ?? code}
+              </Tag>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Business Units */}
+      <div>
+        <Text type="secondary" style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+          Assigned Business Units
+        </Text>
+        <Divider style={{ margin: '8px 0 12px' }} />
+        {bus.length === 0 ? (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No business units assigned" />
+        ) : (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {bus.map((bu) => (
+              <Tag
+                key={bu.id}
+                style={{
+                  background: `${REDWOOD.info}15`,
+                  color: REDWOOD.info,
+                  borderColor: `${REDWOOD.info}40`,
+                  borderRadius: 6,
+                  padding: '4px 10px',
+                  fontSize: 13,
+                }}
+              >
+                {bu.name}
+              </Tag>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/* ─────────────────────────────────────────────
+   Root Modal
+───────────────────────────────────────────── */
+const ProfileModal: React.FC<ProfileModalProps> = ({ open, onClose }) => {
+  const { user } = useAuth();
+
+  const tabItems = [
+    {
+      key: 'profile',
+      label: (
+        <span>
+          <UserOutlined style={{ marginRight: 6 }} />
+          Profile
+        </span>
+      ),
+      children: <ProfileTab />,
+    },
+    {
+      key: 'password',
+      label: (
+        <span>
+          <LockOutlined style={{ marginRight: 6 }} />
+          Change Password
+        </span>
+      ),
+      children: <ChangePasswordTab />,
+    },
+    {
+      key: 'access',
+      label: (
+        <span>
+          <AppstoreOutlined style={{ marginRight: 6 }} />
+          My Access
+        </span>
+      ),
+      children: <MyAccessTab />,
+    },
+  ];
+
+  return (
+    <Modal
+      open={open}
+      onCancel={onClose}
+      footer={null}
+      title={null}
+      width={440}
+      centered
+      destroyOnHidden
+    >
+      {/* Header */}
+      <div style={{ textAlign: 'center', padding: '8px 0 16px' }}>
+        <Title level={4} style={{ marginBottom: 2, color: REDWOOD.neutral900 }}>My Profile</Title>
+        <Text type="secondary" style={{ fontSize: 13 }}>{user?.email}</Text>
+      </div>
+
+      <Tabs
+        defaultActiveKey="profile"
+        items={tabItems}
+        tabBarStyle={{ marginBottom: 20 }}
+        style={{ minHeight: 320 }}
+      />
     </Modal>
   );
 };

@@ -39,6 +39,8 @@ import {
 import PMSWatchlist from './pages/pms/Watchlist';
 import PMSPortfolio from './pages/pms/Portfolio';
 import { RMModule, ManageAgreements, ManageProperties, ManageCustomers, ManageExpenses } from './pages/rm';
+import AdminModule from './pages/admin/index';
+import UserManagement from './pages/admin/UserManagement';
 
 // Placeholder component for modules under development
 const ComingSoon = ({ moduleName }: { moduleName: string }) => (
@@ -140,7 +142,8 @@ function App() {
               <Route path="projects/*" element={<ComingSoon moduleName="Projects" />} />
               <Route path="manufacturing/*" element={<ComingSoon moduleName="Manufacturing" />} />
               <Route path="reports/*" element={<ComingSoon moduleName="Reports & Analytics" />} />
-              <Route path="admin/*" element={<ComingSoon moduleName="Administration" />} />
+              <Route path="admin" element={<AdminModule />} />
+              <Route path="admin/users" element={<UserManagement />} />
               <Route path="sync/*" element={<SyncData />} />
             </Route>
 

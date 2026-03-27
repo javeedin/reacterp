@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useCallback } from 'react';
 import type { User, AuthContextType, LoginResult } from '../types';
 
 const APEX_AUTH_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/auth';
+const APEX_ADMIN_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/admin';
 
 // Electron API (available only in desktop app)
 declare global {
@@ -49,6 +50,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             userData.photo = `data:${photoData.mime_type};base64,${photoData.photo}`;
           }
         } catch { /* photo is optional */ }
+
+        // Load user access (isAdmin, modules, bus)
+        try {
+          const accessRes = await fetch(`${APEX_ADMIN_BASE}/user-access/${encodeURIComponent(uname)}`);
+          const accessData = await accessRes.json();
+          if (accessData.status === 'OK') {
+            userData.isAdmin = accessData.is_admin === 'Y';
+            userData.modules = accessData.modules || [];
+            userData.bus = accessData.bus || [];
+          }
+        } catch { /* access is optional */ }
+
         setUser(userData);
         localStorage.setItem('erp_user', JSON.stringify(userData));
         localStorage.setItem('erp_token', data.token || '');
@@ -149,6 +162,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
+  const changePassword = useCallback(async (username: string, currentPassword: string, newPassword: string) => {
+    try {
+      const res = await fetch(`${APEX_AUTH_BASE}/change-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, current_password: currentPassword, new_password: newPassword }),
+      });
+      return await res.json();
+    } catch {
+      return { status: 'ERROR', message: 'Unable to connect.' };
+    }
+  }, []);
+
   const logout = useCallback(() => {
     setUser(null);
     localStorage.removeItem('erp_user');
@@ -156,7 +182,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, login, loginWithStatus, sendOtp, setPassword, uploadPhoto, logout }}>
+    <AuthContext.Provider value={{ user, isAuthenticated: !!user, login, loginWithStatus, sendOtp, setPassword, uploadPhoto, changePassword, logout }}>
       {children}
     </AuthContext.Provider>
   );
