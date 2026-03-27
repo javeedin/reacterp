@@ -21,7 +21,7 @@ function resizeImage(file: File, maxPx = 400): Promise<{ base64: string; mimeTyp
       canvas.height = h;
       canvas.getContext('2d')!.drawImage(img, 0, 0, w, h);
       const mimeType = 'image/jpeg';
-      const dataUrl = canvas.toDataURL(mimeType, 0.85);
+      const dataUrl = canvas.toDataURL(mimeType, 0.75);
       const base64 = dataUrl.split(',')[1];
       resolve({ base64, mimeType });
     };
@@ -53,7 +53,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ open, onClose }) => {
     setLoading(true);
     setProgress(30);
     try {
-      const { base64, mimeType } = await resizeImage(file);
+      const { base64, mimeType } = await resizeImage(file, 250);
       setProgress(60);
       const result = await uploadPhoto(user!.username, base64, mimeType);
       setProgress(100);
