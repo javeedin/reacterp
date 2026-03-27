@@ -32,7 +32,7 @@ const REDWOOD = {
   surface: '#FFFFFF',
 };
 
-const APEX_ADMIN_BASE = 'http://localhost:3001/api/apex/admin';
+const APEX_ADMIN_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/admin';
 
 // ─── API types ─────────────────────────────────────────────────────────────
 interface UserRecord {

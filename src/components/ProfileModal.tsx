@@ -318,7 +318,7 @@ const ChangePasswordTab: React.FC = () => {
 /* ─────────────────────────────────────────────
    Tab 3 — My Access
 ───────────────────────────────────────────── */
-const PROXY_ADMIN = 'http://localhost:3001/api/apex/admin';
+const APEX_ADMIN = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/admin';
 
 const moduleLabel: Record<string, string> = {
   GL: 'General Ledger', AP: 'Accounts Payable', AR: 'Accounts Receivable',
@@ -334,7 +334,7 @@ const MyAccessTab: React.FC = () => {
   const [apiResult, setApiResult] = useState<string | null>(null);
   const [showRaw, setShowRaw] = useState(false);
 
-  const apiUrl = `${PROXY_ADMIN}/user-access/${encodeURIComponent(user?.username ?? '')}`;
+  const apiUrl = `${APEX_ADMIN}/user-access/${encodeURIComponent(user?.username ?? '')}`;
 
   const modules = user?.modules ?? [];
   const bus     = user?.bus     ?? [];
