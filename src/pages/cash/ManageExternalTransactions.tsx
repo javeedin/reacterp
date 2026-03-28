@@ -2,8 +2,8 @@ import React, { useState, useCallback, useEffect } from 'react';
 import dayjs, { type Dayjs } from 'dayjs';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input, Select,
-  DatePicker, InputNumber, Row, Col, Space, Tag, Tooltip, Tabs,
-  message, Spin, Empty, Divider, Badge, Modal,
+  DatePicker, InputNumber, Row, Col, Space, Tag, Tooltip, Tabs, Collapse,
+  message, Empty, Divider, Badge, Modal,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -481,6 +481,14 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     { title: 'Reference', dataIndex: 'referenceText', ellipsis: true, width: 140,
       render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     {
+      title: 'Cash Account', dataIndex: 'assetAccountCombination', ellipsis: true, width: 180,
+      render: v => <Tooltip title={v}><Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{v || '—'}</Text></Tooltip>,
+    },
+    {
+      title: 'Offset Account', dataIndex: 'offsetAccountCombination', ellipsis: true, width: 180,
+      render: v => <Tooltip title={v}><Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{v || '—'}</Text></Tooltip>,
+    },
+    {
       title: 'Status', dataIndex: 'status', width: 110,
       render: v => <Badge status={statusColor(v) as any} text={<Text style={{ fontSize: 12 }}>{statusLabel(v)}</Text>} />,
     },
@@ -496,12 +504,30 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     },
   ];
 
+  const [searchOpen, setSearchOpen] = useState(true);
+
   // ── Tab items ─────────────────────────────────────────────────────────────
   const searchPane = (
     <div style={{ padding: '16px 0' }}>
-      {/* Search Form */}
-      <Card style={{ marginBottom: 16, borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
-        styles={{ body: { padding: '16px 20px 8px' } }}>
+      {/* Collapsible Search Form */}
+      <Collapse
+        activeKey={searchOpen ? ['search'] : []}
+        onChange={(keys: string | string[]) => setSearchOpen((Array.isArray(keys) ? keys : [keys]).includes('search'))}
+        style={{ marginBottom: 16, borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, background: REDWOOD.surface }}
+        items={[{
+          key: 'search',
+          label: <Text strong style={{ fontSize: 13 }}>Search</Text>,
+          extra: (
+            <Space size={8} onClick={e => e.stopPropagation()}>
+              <Button size="small" onClick={e => { e.stopPropagation(); handleReset(); }} icon={<ReloadOutlined />}>Reset</Button>
+              <Button size="small" icon={<ApiOutlined />} onClick={e => { e.stopPropagation(); setShowApiModal(true); }} style={{ color: REDWOOD.neutral600 }}>API</Button>
+              <Button size="small" type="primary" icon={<SearchOutlined />} loading={loading} onClick={e => { e.stopPropagation(); handleSearch(); }}
+                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
+                Search
+              </Button>
+            </Space>
+          ),
+          children: (
         <Form form={searchForm} layout="horizontal" labelCol={{ span: 8 }} wrapperCol={{ span: 16 }}>
           <Row gutter={[24, 4]}>
             <Col xs={24} md={12}>
@@ -583,19 +609,11 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
               </Form.Item>
             </Col>
           </Row>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text type="secondary" style={{ fontSize: 11 }}>** At least one filter recommended</Text>
-            <Space>
-              <Button onClick={handleReset} icon={<ReloadOutlined />}>Reset</Button>
-              <Button icon={<ApiOutlined />} onClick={() => setShowApiModal(true)} style={{ color: REDWOOD.neutral600 }}>API</Button>
-              <Button type="primary" icon={<SearchOutlined />} loading={loading} onClick={handleSearch}
-                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
-                Search
-              </Button>
-            </Space>
-          </div>
+          <Text type="secondary" style={{ fontSize: 11 }}>** At least one filter recommended</Text>
         </Form>
-      </Card>
+          ),
+        }]}
+      />
 
       {/* Results */}
       {hasSearched && (
@@ -611,7 +629,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
             dataSource={transactions} columns={columns} rowKey="externalTransactionId"
             loading={loading} size="small" pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `${t} transactions` }}
             locale={{ emptyText: <Empty description="No transactions found" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
-            scroll={{ x: 1100 }}
+            scroll={{ x: 1500 }}
           />
         </Card>
       )}
