@@ -72,6 +72,14 @@ const modules: Module[] = [
     color: REDWOOD.success,
   },
   {
+    id: 'cash',
+    name: 'Cash Management',
+    description: 'Bank Transfers, Reconciliation, Cash Position',
+    icon: <BankOutlined style={{ fontSize: 32 }} />,
+    path: '/cash',
+    color: '#0572CE',
+  },
+  {
     id: 'ar',
     name: 'Accounts Receivable',
     description: 'Customer Management, Billing, Collections',

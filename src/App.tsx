@@ -41,6 +41,8 @@ import PMSPortfolio from './pages/pms/Portfolio';
 import { RMModule, ManageAgreements, ManageProperties, ManageCustomers, ManageExpenses } from './pages/rm';
 import AdminModule from './pages/admin/index';
 import UserManagement from './pages/admin/UserManagement';
+import CashModule from './pages/cash/CashModule';
+import ManageBankTransfers from './pages/cash/ManageBankTransfers';
 
 // Placeholder component for modules under development
 const ComingSoon = ({ moduleName }: { moduleName: string }) => (
@@ -144,6 +146,11 @@ function App() {
               <Route path="reports/*" element={<ComingSoon moduleName="Reports & Analytics" />} />
               <Route path="admin" element={<AdminModule />} />
               <Route path="admin/users" element={<UserManagement />} />
+              {/* Cash Management */}
+              <Route path="cash" element={<CashModule />} />
+              <Route path="cash/bank-transfers" element={<ManageBankTransfers module="cash" />} />
+              {/* AP Bank Transfers (same page, AP context) */}
+              <Route path="ap/bank-transfers" element={<ManageBankTransfers module="ap" />} />
               <Route path="sync/*" element={<SyncData />} />
             </Route>
 
