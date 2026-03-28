@@ -46,6 +46,7 @@ export const APEX_DB_CONFIG = {
     rmInstallments:'rm/installments',
     // Cash Endpoints
     bankAccountTransfers: 'cash/banktransfers',
+    externalCashTransactions: 'cash/externaltransactions',
   },
 };
 
@@ -480,6 +481,31 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
         label: 'Payment Date To',
         type: 'date',
         required: false,
+      },
+    ],
+  },
+  {
+    id: 'external-cash-transactions',
+    name: 'External Cash Transactions',
+    description: 'Sync External Cash Transactions from Oracle Fusion',
+    oracleEndpoint: 'cashExternalTransactions',
+    apexEndpoint: 'cash/externaltransactions',
+    parameters: [
+      { key: 'TransactionDateFrom', label: 'Date From',       type: 'date',   required: false },
+      { key: 'TransactionDateTo',   label: 'Date To',         type: 'date',   required: false },
+      { key: 'Status',              label: 'Status',          type: 'select', required: false,
+        options: [
+          { label: 'All', value: '' }, { label: 'Reconciled', value: 'REC' },
+          { label: 'Unreconciled', value: 'UNR' }, { label: 'Cleared', value: 'CLR' },
+        ],
+      },
+      { key: 'BusinessUnit', label: 'Business Unit', type: 'text', required: false },
+      { key: 'BankAccountName', label: 'Bank Account', type: 'text', required: false },
+      { key: 'TransactionType', label: 'Transaction Type', type: 'select', required: false,
+        options: [
+          { label: 'All', value: '' }, { label: 'EFT', value: 'EFT' },
+          { label: 'WIRE', value: 'WIRE' }, { label: 'CHECK', value: 'CHECK' },
+        ],
       },
     ],
   },

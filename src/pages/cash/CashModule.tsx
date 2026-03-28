@@ -25,8 +25,9 @@ interface MenuItemType {
 }
 
 const transferItems: MenuItemType[] = [
-  { key: 'manage-transfers', icon: <SwapOutlined />, label: 'Manage Bank Account Transfers', description: 'Search, create and manage interbank fund transfers', color: REDWOOD.info, path: '/cash/bank-transfers' },
-  { key: 'manage-banks',     icon: <BankOutlined />,  label: 'Banks & Accounts',             description: 'View banks, branches and bank accounts',          color: REDWOOD.success },
+  { key: 'manage-transfers',    icon: <SwapOutlined />,    label: 'Manage Bank Account Transfers', description: 'Search, create and manage interbank fund transfers', color: REDWOOD.info,    path: '/cash/bank-transfers' },
+  { key: 'external-txns',       icon: <FileTextOutlined />, label: 'Manage External Transactions',  description: 'Search and create external cash transactions',       color: REDWOOD.success, path: '/cash/external-transactions' },
+  { key: 'manage-banks',        icon: <BankOutlined />,     label: 'Banks & Accounts',              description: 'View banks, branches and bank accounts',             color: REDWOOD.info },
 ];
 
 const reconItems: MenuItemType[] = [

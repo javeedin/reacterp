@@ -119,7 +119,8 @@ const setupItems: MenuItemType[] = [
 // Payment task items
 const paymentTaskItems: MenuItemType[] = [
   { key: 'manage-payments', icon: <DollarOutlined />, label: 'Manage Payments', description: 'Search and manage payments', color: REDWOOD.taskBlue, path: '/ap/manage-payments' },
-  { key: 'manage-bank-transfers', icon: <SwapOutlined />, label: 'Manage Bank Account Transfers', description: 'Create and manage interbank fund transfers', color: REDWOOD.info, path: '/ap/bank-transfers' },
+  { key: 'manage-bank-transfers',    icon: <SwapOutlined />,    label: 'Manage Bank Account Transfers', description: 'Create and manage interbank fund transfers',    color: REDWOOD.info,    path: '/ap/bank-transfers' },
+  { key: 'manage-external-txns',    icon: <FileTextOutlined />, label: 'Manage External Transactions',  description: 'Search and create external cash transactions',  color: REDWOOD.success, path: '/ap/external-transactions' },
   { key: 'submit-payment-request', icon: <SendOutlined />, label: 'Submit Payment Process Request', description: 'Initiate payment run', color: REDWOOD.info, path: '/ap/submit-payment' },
   { key: 'manage-payment-templates', icon: <SettingOutlined />, label: 'Manage Payment Process Request Templates', description: 'Configure templates', color: REDWOOD.success },
   { key: 'create-payment', icon: <CreditCardOutlined />, label: 'Create Payment', description: 'Create single payment', color: REDWOOD.primary, path: '/ap/create-payment' },
