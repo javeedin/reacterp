@@ -215,40 +215,71 @@ const TransferForm: React.FC<{
     }
   };
 
-  const fieldStyle = { marginBottom: 16 };
-  const labelCol = { span: 8 };
-  const wrapperCol = { span: 16 };
+  const [selectedBu, setSelectedBu] = useState<string | undefined>(
+    initialValues?.businessUnit ?? undefined
+  );
+  const buSelected = !!selectedBu;
+
+  // sync selectedBu when initialValues changes (edit mode)
+  useEffect(() => { setSelectedBu(initialValues?.businessUnit ?? undefined); }, [initialValues]);
+
+  const fs = { marginBottom: 14 };
+  const lc = { span: 8 };
+  const wc = { span: 16 };
 
   return (
-    <div style={{ maxWidth: 960, margin: '0 auto', padding: '16px 24px' }}>
-      <Title level={4} style={{ color: REDWOOD.neutral900, marginBottom: 24 }}>
+    <div style={{ maxWidth: 960, margin: '0 auto', padding: '12px 24px' }}>
+      <Text style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 16 }}>
         {isEdit ? 'Edit Bank Account Transfer' : 'Create Bank Account Transfer'}
-      </Title>
+      </Text>
 
-      <Form form={form} layout="horizontal" labelCol={labelCol} wrapperCol={wrapperCol}>
+      <Form form={form} layout="horizontal" labelCol={lc} wrapperCol={wc}>
+
+        {/* ── Business Unit — must be selected first ── */}
+        <Row gutter={40}>
+          <Col xs={24} lg={12}>
+            <Form.Item label="Business Unit" name="businessUnit" rules={[{ required: true, message: 'Business Unit is required' }]} style={fs}>
+              <Select
+                showSearch placeholder="Select business unit" optionFilterProp="label" options={businessUnits}
+                style={{ width: '100%' }}
+                onChange={(v) => setSelectedBu(v ?? undefined)}
+                allowClear
+                onClear={() => setSelectedBu(undefined)}
+              />
+            </Form.Item>
+          </Col>
+          {!buSelected && (
+            <Col xs={24} lg={12} style={{ display: 'flex', alignItems: 'center', paddingBottom: 14 }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>Select a Business Unit to continue</Text>
+            </Col>
+          )}
+        </Row>
+
         <Row gutter={40}>
           {/* Left column */}
           <Col xs={24} lg={12}>
-            <Form.Item label="From Account" name="fromBankAccountName" rules={[{ required: true, message: 'From Account is required' }]} style={fieldStyle}>
+            <Form.Item label="From Account" name="fromBankAccountName" rules={[{ required: true, message: 'From Account is required' }]} style={fs}>
               <Select showSearch placeholder="Select bank account" optionFilterProp="label" options={bankAccounts}
-                style={{ width: '100%' }} notFoundContent={<Text type="secondary">No accounts loaded</Text>} />
+                style={{ width: '100%' }} disabled={!buSelected}
+                notFoundContent={<Text type="secondary">No accounts loaded</Text>} />
             </Form.Item>
 
-            <Form.Item label="To Account" name="toBankAccountName" rules={[{ required: true, message: 'To Account is required' }]} style={fieldStyle}>
+            <Form.Item label="To Account" name="toBankAccountName" rules={[{ required: true, message: 'To Account is required' }]} style={fs}>
               <Select showSearch placeholder="Select bank account" optionFilterProp="label" options={bankAccounts}
-                style={{ width: '100%' }} notFoundContent={<Text type="secondary">No accounts loaded</Text>} />
+                style={{ width: '100%' }} disabled={!buSelected}
+                notFoundContent={<Text type="secondary">No accounts loaded</Text>} />
             </Form.Item>
 
-            <Form.Item label="Transfer Date" name="transactionDate" rules={[{ required: true, message: 'Transfer Date is required' }]} style={fieldStyle}>
-              <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
+            <Form.Item label="Transfer Date" name="transactionDate" rules={[{ required: true, message: 'Transfer Date is required' }]} style={fs}>
+              <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={!buSelected} />
             </Form.Item>
 
-            <Form.Item label="Transfer Amount" name="paymentAmount" rules={[{ required: true, message: 'Amount is required' }]} style={fieldStyle}>
-              <InputNumber style={{ width: '100%' }} min={0} precision={2} />
+            <Form.Item label="Transfer Amount" name="paymentAmount" rules={[{ required: true, message: 'Amount is required' }]} style={fs}>
+              <InputNumber style={{ width: '100%' }} min={0} precision={2} disabled={!buSelected} />
             </Form.Item>
 
-            <Form.Item label="Conversion Rate Type" name="conversionRateType" style={fieldStyle}>
-              <Select placeholder="Select type" allowClear>
+            <Form.Item label="Conversion Rate Type" name="conversionRateType" style={fs}>
+              <Select placeholder="Select type" allowClear disabled={!buSelected}>
                 <Option value="User">User</Option>
                 <Option value="Corporate">Corporate</Option>
                 <Option value="Spot">Spot</Option>
@@ -256,26 +287,21 @@ const TransferForm: React.FC<{
               </Select>
             </Form.Item>
 
-            <Form.Item label="Conversion Rate" name="conversionRate" style={fieldStyle}>
-              <InputNumber style={{ width: '100%' }} min={0} precision={6} />
+            <Form.Item label="Conversion Rate" name="conversionRate" style={fs}>
+              <InputNumber style={{ width: '100%' }} min={0} precision={6} disabled={!buSelected} />
             </Form.Item>
           </Col>
 
           {/* Right column */}
           <Col xs={24} lg={12}>
-            <Form.Item label=" " colon={false} name="isSettledWithIbyFlag" valuePropName="checked" style={fieldStyle}>
-              <Checkbox style={{ color: REDWOOD.info, fontWeight: 500 }}>
+            <Form.Item label=" " colon={false} name="isSettledWithIbyFlag" valuePropName="checked" style={fs}>
+              <Checkbox style={{ color: REDWOOD.info, fontWeight: 500 }} disabled={!buSelected}>
                 Settle transaction through Payments
               </Checkbox>
             </Form.Item>
 
-            <Form.Item label="Business Unit" name="businessUnit" style={fieldStyle}>
-              <Select showSearch placeholder="Select business unit" optionFilterProp="label" options={businessUnits} allowClear
-                style={{ width: '100%' }} />
-            </Form.Item>
-
-            <Form.Item label="Payment Method" name="paymentMethod" rules={[{ required: true, message: 'Payment Method is required' }]} style={fieldStyle}>
-              <Select placeholder="Select method">
+            <Form.Item label="Payment Method" name="paymentMethod" rules={[{ required: true, message: 'Payment Method is required' }]} style={fs}>
+              <Select placeholder="Select method" disabled={!buSelected}>
                 <Option value="Electronic">Electronic</Option>
                 <Option value="Check">Check</Option>
                 <Option value="Wire">Wire</Option>
@@ -283,19 +309,19 @@ const TransferForm: React.FC<{
               </Select>
             </Form.Item>
 
-            <Form.Item label="Payment Profile" name="paymentProfileName" rules={[{ required: true, message: 'Payment Profile is required' }]} style={fieldStyle}>
-              <Select placeholder="Select profile" showSearch optionFilterProp="children">
+            <Form.Item label="Payment Profile" name="paymentProfileName" rules={[{ required: true, message: 'Payment Profile is required' }]} style={fs}>
+              <Select placeholder="Select profile" showSearch optionFilterProp="children" disabled={!buSelected}>
                 {['BOB BCL EFT', 'BOB BCL WIRE', 'ADIB EFT', 'ADCB EFT', 'FAB EFT'].map(p => (
                   <Option key={p} value={p}>{p}</Option>
                 ))}
               </Select>
             </Form.Item>
 
-            <Form.Item label="Memo" name="memo" style={fieldStyle}>
-              <Input.TextArea rows={3} placeholder="Enter memo / description" />
+            <Form.Item label="Memo" name="memo" style={fs}>
+              <Input.TextArea rows={3} placeholder="Enter memo / description" disabled={!buSelected} />
             </Form.Item>
 
-            <Form.Item label="Attachments" style={fieldStyle}>
+            <Form.Item label="Attachments" style={fs}>
               <Text type="secondary">None</Text>
               <Button size="small" icon={<PlusOutlined />} style={{ marginLeft: 8 }} disabled>Add</Button>
             </Form.Item>
