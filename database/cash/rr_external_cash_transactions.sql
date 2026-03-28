@@ -73,6 +73,7 @@ CREATE OR REPLACE PROCEDURE RR_SYNC_EXTERNAL_CASH_TRANSACTIONS (
     p_count OUT NUMBER,
     p_error OUT VARCHAR2
 ) AS
+    l_ext_id  NUMBER;   -- resolved ExternalTransactionId (sequence fallback for manual)
 BEGIN
     p_count := 0;
     p_error := NULL;
@@ -107,7 +108,7 @@ BEGIN
                 check_number                 VARCHAR2(100)   PATH '$.CheckNumber',
                 clearing_system_reference    VARCHAR2(200)   PATH '$.ClearingSystemReference',
                 customer_reference           VARCHAR2(200)   PATH '$.CustomerReference',
-                end_to_end_id               VARCHAR2(200)   PATH '$.EndToEndId',
+                end_to_end_id                VARCHAR2(200)   PATH '$.EndToEndId',
                 instruction_identification   VARCHAR2(200)   PATH '$.InstructionIdentification',
                 recon_reference              VARCHAR2(200)   PATH '$.ReconReference',
                 structured_payment_reference VARCHAR2(200)   PATH '$.StructuredPaymentReference',
@@ -120,11 +121,17 @@ BEGIN
             )
         )
     ) LOOP
+        -- Resolve ExternalTransactionId outside MERGE (NEXTVAL not allowed in USING subquery)
+        IF rec.external_transaction_id IS NULL THEN
+            SELECT RR_ECT_MANUAL_SEQ.NEXTVAL INTO l_ext_id FROM DUAL;
+        ELSE
+            l_ext_id := rec.external_transaction_id;
+        END IF;
+
         MERGE INTO RR_EXTERNAL_CASH_TRANSACTIONS tgt
         USING (
             SELECT
-                -- Use sequence for manual transactions that have no Fusion ExternalTransactionId
-                NVL(rec.external_transaction_id, RR_ECT_MANUAL_SEQ.NEXTVAL) AS external_transaction_id,
+                l_ext_id                                        AS external_transaction_id,
                 rec.transaction_id                              AS transaction_id,
                 -- SUBSTR(,1,10) safely handles both 'YYYY-MM-DD' and 'YYYY-MM-DDTHH:...' from Fusion
                 TO_DATE(SUBSTR(rec.transaction_date, 1, 10), 'YYYY-MM-DD')  AS transaction_date,
