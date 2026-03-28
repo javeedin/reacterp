@@ -62,6 +62,15 @@ interface BankAccountOption { label: string; value: string; }
 interface BUOption { label: string; value: string; }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+// Oracle TO_CHAR omits leading zeros for decimals < 1 (e.g. .0428 → invalid JSON).
+// Fix by inserting a 0 before any bare leading decimal point in JSON number values.
+const parseApexJson = async (res: Response) => {
+  const text = await res.text();
+  const fixed = text.replace(/:(-?)\.(\d)/g, ':$10.$2');
+  return JSON.parse(fixed);
+};
+
 const fmtAmount = (val?: number, ccy?: string) => {
   if (val == null) return '—';
   const s = new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
@@ -302,7 +311,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
   const loadLovs = useCallback(async () => {
     try {
       const res = await fetch(`${APEX_BASE}/cash/banktransfers?row_limit=500`);
-      const data = await res.json();
+      const data = await parseApexJson(res);
       if (data.status === 'success' && data.items) {
         const items: TransferRecord[] = data.items;
 
@@ -339,7 +348,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
     setHasSearched(true);
     try {
       const res  = await fetch(url);
-      const data = await res.json();
+      const data = await parseApexJson(res);
       if (data.status === 'success') {
         setTransfers(data.items ?? []);
         if ((data.items ?? []).length === 0) message.info('No transfers found for the selected criteria.');
