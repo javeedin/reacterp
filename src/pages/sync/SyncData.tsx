@@ -52,6 +52,7 @@ import { syncGLPeriodStatus, testGLPeriodStatusConnection, type PeriodStatusSync
 import { syncBanks, testBanksConnection, type BanksSyncProgress, type BanksPayloadCallback } from '../../services/banks-sync.service';
 import { syncBankBranches, testBankBranchesConnection, type BankBranchesSyncProgress, type BankBranchesPayloadCallback } from '../../services/bank-branches-sync.service';
 import { syncBankAccounts, testBankAccountsConnection, type BankAccountsSyncProgress, type BankAccountsPayloadCallback } from '../../services/bank-accounts-sync.service';
+import { syncBankAccountTransfers, testBankAccountTransfersConnection, type BankAccountTransfersSyncProgress, type BankAccountTransfersPayloadCallback } from '../../services/bank-account-transfers-sync.service';
 import { syncLegalEntities, testLegalEntitiesConnection, type LegalEntitiesSyncProgress, type LegalEntitiesPayloadCallback } from '../../services/legal-entities-sync.service';
 import { syncBusinessUnits, testBusinessUnitsConnection, type BusinessUnitsSyncProgress } from '../../services/business-units-sync.service';
 import { syncUserAccounts, testUserAccountsConnection, type UserAccountsSyncProgress, type UserAccountsPayloadCallback } from '../../services/user-accounts-sync.service';
@@ -359,6 +360,29 @@ const SyncData: React.FC = () => {
     errorMessage?: string;
   }>>([]);
 
+  // Bank Account Transfers Progress State
+  const [bankAccountTransfersProgress, setBankAccountTransfersProgress] = useState<BankAccountTransfersSyncProgress>({
+    status: 'idle',
+    totalRecords: 0,
+    processedRecords: 0,
+    insertedRecords: 0,
+    currentPage: 0,
+    totalPages: 0,
+    errors: 0,
+    lastError: '',
+    startTime: null,
+    endTime: null,
+  });
+
+  const [_bankAccountTransfersPayloads, setBankAccountTransfersPayloads] = useState<Array<{
+    transferId: number;
+    transferNumber: number;
+    payload: any;
+    postResult?: any;
+    status: 'pending' | 'success' | 'error';
+    errorMessage?: string;
+  }>>([]);
+
   // Legal Entities Progress State
   const [legalEntitiesProgress, setLegalEntitiesProgress] = useState<LegalEntitiesSyncProgress>({
     status: 'idle',
@@ -647,6 +671,7 @@ const SyncData: React.FC = () => {
   const isBanks = selectedObject?.id === 'banks';
   const isBankBranches = selectedObject?.id === 'bank-branches';
   const isBankAccounts = selectedObject?.id === 'bank-accounts';
+  const isBankAccountTransfers = selectedObject?.id === 'bank-account-transfers';
   const isLegalEntities = selectedObject?.id === 'legal-entities';
   const isBusinessUnits = selectedObject?.id === 'business-units';
   const isUserAccounts = selectedObject?.id === 'user-accounts';
@@ -1163,6 +1188,22 @@ const SyncData: React.FC = () => {
     });
   }, []);
 
+  // Bank Account Transfers payload callback handler
+  const handleBankAccountTransfersPayload: BankAccountTransfersPayloadCallback = useCallback((transferId, transferNumber, payload, result, error) => {
+    setBankAccountTransfersPayloads((prev) => {
+      const existing = prev.find((t) => t.transferId === transferId);
+      if (existing) {
+        return prev.map((t) =>
+          t.transferId === transferId
+            ? { ...t, postResult: result, status: error ? 'error' : (result ? 'success' : 'pending'), errorMessage: error }
+            : t
+        );
+      } else {
+        return [...prev, { transferId, transferNumber, payload, postResult: result, status: error ? 'error' : (result ? 'success' : 'pending'), errorMessage: error }];
+      }
+    });
+  }, []);
+
   // Legal Entities payload callback handler
   const handleLegalEntitiesPayload: LegalEntitiesPayloadCallback = useCallback((legalEntityId, name, payload, result, error) => {
     setLegalEntitiesPayloads((prev) => {
@@ -1529,6 +1570,9 @@ const SyncData: React.FC = () => {
     } else if (isBankAccounts) {
       addLog('info', 'Testing Bank Accounts endpoint...');
       success = await testBankAccountsConnection(addLog);
+    } else if (isBankAccountTransfers) {
+      addLog('info', 'Testing Bank Account Transfers endpoint...');
+      success = await testBankAccountTransfersConnection(addLog);
     } else if (isLegalEntities) {
       addLog('info', 'Testing Legal Entities endpoint...');
       success = await testLegalEntitiesConnection(addLog);
@@ -1869,6 +1913,35 @@ const SyncData: React.FC = () => {
         handleBankAccountsPayload
       );
       syncResult = { inserted: result.insertedRecords, errors: result.errors, type: 'bank accounts' };
+    } else if (isBankAccountTransfers) {
+      // Bank Account Transfers Sync
+      setBankAccountTransfersProgress({
+        status: 'fetching',
+        totalRecords: 0,
+        processedRecords: 0,
+        insertedRecords: 0,
+        currentPage: 0,
+        totalPages: 0,
+        errors: 0,
+        lastError: '',
+        startTime: new Date(),
+        endTime: null,
+      });
+
+      const result = await syncBankAccountTransfers(
+        parameters,
+        testMode,
+        addLog,
+        (newProgress) => {
+          setBankAccountTransfersProgress((prev) => ({ ...prev, ...newProgress }));
+          if (newProgress.processedRecords !== undefined && newProgress.totalRecords) {
+            notifySyncProgress(`${newProgress.processedRecords}/${newProgress.totalRecords} bank account transfers`);
+          }
+        },
+        abortControllerRef.current.signal,
+        handleBankAccountTransfersPayload
+      );
+      syncResult = { inserted: result.insertedRecords, errors: result.errors, type: 'bank account transfers' };
     } else if (isLegalEntities) {
       // Legal Entities Sync
       setLegalEntitiesProgress({
@@ -2531,6 +2604,8 @@ const SyncData: React.FC = () => {
     ? bankBranchesProgress.status
     : isBankAccounts
     ? bankAccountsProgress.status
+    : isBankAccountTransfers
+    ? bankAccountTransfersProgress.status
     : isLegalEntities
     ? legalEntitiesProgress.status
     : isBusinessUnits
@@ -3908,6 +3983,81 @@ const SyncData: React.FC = () => {
                     </Card>
                   </Col>
                 </Row>
+              ) : isBankAccountTransfers ? (
+                /* Bank Account Transfers KPI Cards */
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{ borderRadius: 12, border: `1px solid ${REDWOOD.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <BankOutlined style={{ fontSize: 20, color: REDWOOD.primary, marginRight: 8 }} />
+                        <Text strong>Transfers</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {bankAccountTransfersProgress.insertedRecords} / {bankAccountTransfersProgress.totalRecords}
+                      </div>
+                      <Progress
+                        percent={bankAccountTransfersProgress.totalRecords > 0 ? Math.round((bankAccountTransfersProgress.insertedRecords / bankAccountTransfersProgress.totalRecords) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.primary}
+                        style={{ marginTop: 8 }}
+                      />
+                      {bankAccountTransfersProgress.currentPage > 0 && (
+                        <Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 4 }}>
+                          Page {bankAccountTransfersProgress.currentPage}/{bankAccountTransfersProgress.totalPages}
+                        </Text>
+                      )}
+                    </Card>
+                  </Col>
+
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{ borderRadius: 12, border: `1px solid ${REDWOOD.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <FileTextOutlined style={{ fontSize: 20, color: REDWOOD.success, marginRight: 8 }} />
+                        <Text strong>Processed</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {bankAccountTransfersProgress.processedRecords}
+                        <Text type="secondary" style={{ fontSize: 14, marginLeft: 8 }}>
+                          / {bankAccountTransfersProgress.totalRecords}
+                        </Text>
+                      </div>
+                      <Progress
+                        percent={bankAccountTransfersProgress.totalRecords > 0 ? Math.round((bankAccountTransfersProgress.processedRecords / bankAccountTransfersProgress.totalRecords) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.success}
+                        style={{ marginTop: 8 }}
+                      />
+                    </Card>
+                  </Col>
+
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{ borderRadius: 12, border: `1px solid ${REDWOOD.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <WarningOutlined style={{ fontSize: 20, color: bankAccountTransfersProgress.errors > 0 ? REDWOOD.error : REDWOOD.textSecondary, marginRight: 8 }} />
+                        <Text strong>Errors</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: bankAccountTransfersProgress.errors > 0 ? REDWOOD.error : REDWOOD.textPrimary }}>
+                        {bankAccountTransfersProgress.errors}
+                      </div>
+                      {bankAccountTransfersProgress.lastError && (
+                        <Tooltip title={bankAccountTransfersProgress.lastError}>
+                          <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 8 }} ellipsis>
+                            {bankAccountTransfersProgress.lastError}
+                          </Text>
+                        </Tooltip>
+                      )}
+                    </Card>
+                  </Col>
+                </Row>
               ) : isLegalEntities ? (
                 /* Legal Entities KPI Cards */
                 <Row gutter={16} style={{ marginBottom: 16 }}>
@@ -4937,14 +5087,14 @@ const SyncData: React.FC = () => {
                           {getStatusText(currentStatus)}
                         </Tag>
                       </div>
-                      {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : isGLCodeComb ? codeCombProgress.startTime : isGLPeriodStatus ? periodStatusProgress.startTime : isBanks ? banksProgress.startTime : isBankBranches ? bankBranchesProgress.startTime : isBankAccounts ? bankAccountsProgress.startTime : isLegalEntities ? legalEntitiesProgress.startTime : isUserAccounts ? userAccountsProgress.startTime : isUserAccountRoles ? userAccountRolesProgress.startTime : isRoles ? rolesProgress.startTime : isSuppliers ? suppliersProgress.startTime : isSupplierAddresses ? supplierAddressProgress.startTime : progress.startTime) && (
+                      {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : isGLCodeComb ? codeCombProgress.startTime : isGLPeriodStatus ? periodStatusProgress.startTime : isBanks ? banksProgress.startTime : isBankBranches ? bankBranchesProgress.startTime : isBankAccounts ? bankAccountsProgress.startTime : isBankAccountTransfers ? bankAccountTransfersProgress.startTime : isLegalEntities ? legalEntitiesProgress.startTime : isUserAccounts ? userAccountsProgress.startTime : isUserAccountRoles ? userAccountRolesProgress.startTime : isRoles ? rolesProgress.startTime : isSuppliers ? suppliersProgress.startTime : isSupplierAddresses ? supplierAddressProgress.startTime : progress.startTime) && (
                         <Text type="secondary" style={{ fontSize: 12 }}>
-                          Started: {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : isGLCodeComb ? codeCombProgress.startTime : isGLPeriodStatus ? periodStatusProgress.startTime : isBanks ? banksProgress.startTime : isBankBranches ? bankBranchesProgress.startTime : isBankAccounts ? bankAccountsProgress.startTime : isLegalEntities ? legalEntitiesProgress.startTime : isUserAccounts ? userAccountsProgress.startTime : isUserAccountRoles ? userAccountRolesProgress.startTime : isRoles ? rolesProgress.startTime : isSuppliers ? suppliersProgress.startTime : isSupplierAddresses ? supplierAddressProgress.startTime : progress.startTime)?.toLocaleTimeString()}
+                          Started: {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : isGLCodeComb ? codeCombProgress.startTime : isGLPeriodStatus ? periodStatusProgress.startTime : isBanks ? banksProgress.startTime : isBankBranches ? bankBranchesProgress.startTime : isBankAccounts ? bankAccountsProgress.startTime : isBankAccountTransfers ? bankAccountTransfersProgress.startTime : isLegalEntities ? legalEntitiesProgress.startTime : isUserAccounts ? userAccountsProgress.startTime : isUserAccountRoles ? userAccountRolesProgress.startTime : isRoles ? rolesProgress.startTime : isSuppliers ? suppliersProgress.startTime : isSupplierAddresses ? supplierAddressProgress.startTime : progress.startTime)?.toLocaleTimeString()}
                         </Text>
                       )}
-                      {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : isGLCodeComb ? codeCombProgress.endTime : isGLPeriodStatus ? periodStatusProgress.endTime : isBanks ? banksProgress.endTime : isBankBranches ? bankBranchesProgress.endTime : isBankAccounts ? bankAccountsProgress.endTime : isLegalEntities ? legalEntitiesProgress.endTime : isUserAccounts ? userAccountsProgress.endTime : isUserAccountRoles ? userAccountRolesProgress.endTime : isRoles ? rolesProgress.endTime : isSuppliers ? suppliersProgress.endTime : isSupplierAddresses ? supplierAddressProgress.endTime : progress.endTime) && (
+                      {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : isGLCodeComb ? codeCombProgress.endTime : isGLPeriodStatus ? periodStatusProgress.endTime : isBanks ? banksProgress.endTime : isBankBranches ? bankBranchesProgress.endTime : isBankAccounts ? bankAccountsProgress.endTime : isBankAccountTransfers ? bankAccountTransfersProgress.endTime : isLegalEntities ? legalEntitiesProgress.endTime : isUserAccounts ? userAccountsProgress.endTime : isUserAccountRoles ? userAccountRolesProgress.endTime : isRoles ? rolesProgress.endTime : isSuppliers ? suppliersProgress.endTime : isSupplierAddresses ? supplierAddressProgress.endTime : progress.endTime) && (
                         <Text type="secondary" style={{ fontSize: 12 }}>
-                          Ended: {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : isGLCodeComb ? codeCombProgress.endTime : isGLPeriodStatus ? periodStatusProgress.endTime : isBanks ? banksProgress.endTime : isBankBranches ? bankBranchesProgress.endTime : isBankAccounts ? bankAccountsProgress.endTime : isLegalEntities ? legalEntitiesProgress.endTime : isUserAccounts ? userAccountsProgress.endTime : isUserAccountRoles ? userAccountRolesProgress.endTime : isRoles ? rolesProgress.endTime : isSuppliers ? suppliersProgress.endTime : isSupplierAddresses ? supplierAddressProgress.endTime : progress.endTime)?.toLocaleTimeString()}
+                          Ended: {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : isGLCodeComb ? codeCombProgress.endTime : isGLPeriodStatus ? periodStatusProgress.endTime : isBanks ? banksProgress.endTime : isBankBranches ? bankBranchesProgress.endTime : isBankAccounts ? bankAccountsProgress.endTime : isBankAccountTransfers ? bankAccountTransfersProgress.endTime : isLegalEntities ? legalEntitiesProgress.endTime : isUserAccounts ? userAccountsProgress.endTime : isUserAccountRoles ? userAccountRolesProgress.endTime : isRoles ? rolesProgress.endTime : isSuppliers ? suppliersProgress.endTime : isSupplierAddresses ? supplierAddressProgress.endTime : progress.endTime)?.toLocaleTimeString()}
                         </Text>
                       )}
                     </Space>
@@ -4973,6 +5123,8 @@ const SyncData: React.FC = () => {
                           ? `${bankBranchesProgress.insertedRecords} bank branches inserted`
                           : isBankAccounts
                           ? `${bankAccountsProgress.insertedRecords} bank accounts inserted`
+                          : isBankAccountTransfers
+                          ? `${bankAccountTransfersProgress.insertedRecords} bank account transfers inserted`
                           : isLegalEntities
                           ? `${legalEntitiesProgress.insertedRecords} legal entities inserted`
                           : isBusinessUnits
@@ -4992,10 +5144,10 @@ const SyncData: React.FC = () => {
                           : `${progress.totalBatchesInserted + progress.totalHeadersInserted + progress.totalLinesInserted} inserted`
                         }
                       </Text>
-                      {(isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLBatchesOnly ? glBatchesOnlyProgress.errors : isGLHeadersOnly ? glHeadersOnlyProgress.errors : isGLLinesOnly ? glLinesOnlyProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : isRoles ? rolesProgress.errors : isSuppliers ? suppliersProgress.errors : isSupplierAddresses ? supplierAddressProgress.errors : isSupplierSites ? supplierSitesProgress.errors : progress.errors) > 0 && (
+                      {(isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLBatchesOnly ? glBatchesOnlyProgress.errors : isGLHeadersOnly ? glHeadersOnlyProgress.errors : isGLLinesOnly ? glLinesOnlyProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isBankAccountTransfers ? bankAccountTransfersProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : isRoles ? rolesProgress.errors : isSuppliers ? suppliersProgress.errors : isSupplierAddresses ? supplierAddressProgress.errors : isSupplierSites ? supplierSitesProgress.errors : progress.errors) > 0 && (
                         <Text type="danger">
                           <CloseCircleOutlined style={{ marginRight: 4 }} />
-                          {isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLBatchesOnly ? glBatchesOnlyProgress.errors : isGLHeadersOnly ? glHeadersOnlyProgress.errors : isGLLinesOnly ? glLinesOnlyProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : isRoles ? rolesProgress.errors : isSuppliers ? suppliersProgress.errors : isSupplierAddresses ? supplierAddressProgress.errors : isSupplierSites ? supplierSitesProgress.errors : progress.errors} errors
+                          {isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLBatchesOnly ? glBatchesOnlyProgress.errors : isGLHeadersOnly ? glHeadersOnlyProgress.errors : isGLLinesOnly ? glLinesOnlyProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isBankAccountTransfers ? bankAccountTransfersProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : isRoles ? rolesProgress.errors : isSuppliers ? suppliersProgress.errors : isSupplierAddresses ? supplierAddressProgress.errors : isSupplierSites ? supplierSitesProgress.errors : progress.errors} errors
                         </Text>
                       )}
                     </Space>

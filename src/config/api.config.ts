@@ -44,6 +44,8 @@ export const APEX_DB_CONFIG = {
     rmCustomers:   'rm/customers',
     rmExpenses:    'rm/expenses',
     rmInstallments:'rm/installments',
+    // Cash Endpoints
+    bankAccountTransfers: 'cash/banktransfers',
   },
 };
 
@@ -387,6 +389,45 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
     oracleEndpoint: 'suppliers/{supplierId}/child/sites/{siteId}/child/assignments',
     apexEndpoint: 'suppliers/sites/assignments',
     parameters: [],
+  },
+  {
+    id: 'bank-account-transfers',
+    name: 'Bank Account Transfers',
+    description: 'Sync Bank Account Transfers from Oracle Fusion',
+    oracleEndpoint: 'cashBankAccountTransfers',
+    apexEndpoint: 'cash/banktransfers',
+    parameters: [
+      {
+        key: 'TransactionDateFrom',
+        label: 'Transaction Date From',
+        type: 'date',
+        required: false,
+      },
+      {
+        key: 'TransactionDateTo',
+        label: 'Transaction Date To',
+        type: 'date',
+        required: false,
+      },
+      {
+        key: 'Status',
+        label: 'Status',
+        type: 'select',
+        required: false,
+        options: [
+          { label: 'All', value: '' },
+          { label: 'Completed', value: 'Completed' },
+          { label: 'Cancelled', value: 'Cancelled' },
+          { label: 'Terminated', value: 'Terminated' },
+        ],
+      },
+      {
+        key: 'BusinessUnit',
+        label: 'Business Unit',
+        type: 'text',
+        required: false,
+      },
+    ],
   },
   {
     id: 'ap-payments',
