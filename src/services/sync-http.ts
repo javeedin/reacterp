@@ -1,26 +1,19 @@
 /**
  * sync-http.ts
- * Direct HTTP helpers for Sync services — no local proxy server required.
- * All calls go directly to Oracle Fusion and APEX cloud APIs.
+ * HTTP helpers for Sync services.
+ * Oracle Fusion calls are routed through the local proxy server (localhost:3001)
+ * to avoid CORS restrictions. APEX calls go directly (APEX has CORS configured).
  */
 
-import { ORACLE_FUSION_CONFIG, ORACLE_SOAP_CONFIG, APEX_DB_CONFIG } from '../config/api.config';
+import { APEX_DB_CONFIG } from '../config/api.config';
 
 export type LogCallback = (type: 'info' | 'success' | 'error' | 'warning' | 'step', message: string) => void;
 
-// ── Auth headers ──────────────────────────────────────────────────────────────
-
-const oracleAuth = () =>
-  `Basic ${btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`)}`;
-
-// HCM uses test environment credentials
-const hcmAuth = () =>
-  `Basic ${btoa('javeedindia@gmail.com:Bumeric2026')}`;
-
-const HCM_BASE_URL = 'https://iaaobn-test.fa.ocs.oraclecloud.com/hcmRestApi/resources/11.13.18.05';
-const FUSION_HOST   = 'https://iaaobn.fa.ocs.oraclecloud.com';
+// ── Proxy base (Oracle Fusion calls must go through here to avoid CORS) ───────
+const PROXY_BASE = 'http://localhost:3001/api';
 
 // ── Oracle Fusion (standard endpoint) ────────────────────────────────────────
+// Proxied via GET /api/oracle/:endpoint — proxy adds auth header server-side
 
 export const fetchFromOracle = async (
   endpoint: string,
@@ -30,20 +23,14 @@ export const fetchFromOracle = async (
 ): Promise<any> => {
   try {
     const queryParams = new URLSearchParams(params);
-    const url = `${ORACLE_FUSION_CONFIG.baseUrl}/${endpoint}?${queryParams.toString()}`;
+    const proxyUrl = `${PROXY_BASE}/oracle/${endpoint}?${queryParams.toString()}`;
 
     if (verbose) {
-      log?.('step', '──── [GET] Oracle Fusion ────');
-      log?.('info', `GET URL: ${url}`);
+      log?.('step', '──── [GET] Oracle Fusion (via proxy) ────');
+      log?.('info', `GET URL: ${proxyUrl}`);
     }
 
-    const response = await fetch(url, {
-      headers: {
-        'Authorization': oracleAuth(),
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-    });
+    const response = await fetch(proxyUrl);
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -61,6 +48,7 @@ export const fetchFromOracle = async (
 };
 
 // ── Oracle Fusion (full URL) ──────────────────────────────────────────────────
+// Proxied via GET /api/oracle-url?url=<encoded> — proxy adds auth header
 
 export const fetchFromOracleUrl = async (
   url: string,
@@ -68,18 +56,14 @@ export const fetchFromOracleUrl = async (
   verbose = true
 ): Promise<any> => {
   try {
+    const proxyUrl = `${PROXY_BASE}/oracle-url?url=${encodeURIComponent(url)}`;
+
     if (verbose) {
-      log?.('step', '──── [GET] Oracle Fusion ────');
-      log?.('info', `GET URL: ${url}`);
+      log?.('step', '──── [GET] Oracle Fusion URL (via proxy) ────');
+      log?.('info', `Original URL: ${url}`);
     }
 
-    const response = await fetch(url, {
-      headers: {
-        'Authorization': oracleAuth(),
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-    });
+    const response = await fetch(proxyUrl);
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -97,6 +81,7 @@ export const fetchFromOracleUrl = async (
 };
 
 // ── Oracle Fusion (full path, e.g. fscmRestApi/resources/.../suppliers) ───────
+// Proxied via GET /api/fusion/<path> — proxy adds auth header
 
 export const fetchFromFusion = async (
   fusionPath: string,
@@ -106,20 +91,14 @@ export const fetchFromFusion = async (
 ): Promise<any> => {
   try {
     const queryParams = new URLSearchParams(params);
-    const url = `${FUSION_HOST}/${fusionPath}?${queryParams.toString()}`;
+    const proxyUrl = `${PROXY_BASE}/fusion/${fusionPath}?${queryParams.toString()}`;
 
     if (verbose) {
-      log?.('step', '──── [GET] Oracle Fusion ────');
-      log?.('info', `GET URL: ${url}`);
+      log?.('step', '──── [GET] Oracle Fusion (via proxy) ────');
+      log?.('info', `GET URL: ${proxyUrl}`);
     }
 
-    const response = await fetch(url, {
-      headers: {
-        'Authorization': oracleAuth(),
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-    });
+    const response = await fetch(proxyUrl);
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -137,6 +116,7 @@ export const fetchFromFusion = async (
 };
 
 // ── Oracle HCM (test environment) ────────────────────────────────────────────
+// Proxied via GET /api/hcm/<endpoint> — proxy adds HCM auth header
 
 export const fetchFromHcm = async (
   endpoint: string,
@@ -146,20 +126,14 @@ export const fetchFromHcm = async (
 ): Promise<any> => {
   try {
     const queryParams = new URLSearchParams(params);
-    const url = `${HCM_BASE_URL}/${endpoint}?${queryParams.toString()}`;
+    const proxyUrl = `${PROXY_BASE}/hcm/${endpoint}?${queryParams.toString()}`;
 
     if (verbose) {
-      log?.('step', '──── [GET] Oracle HCM (Test) ────');
-      log?.('info', `GET URL: ${url}`);
+      log?.('step', '──── [GET] Oracle HCM (via proxy) ────');
+      log?.('info', `GET URL: ${proxyUrl}`);
     }
 
-    const response = await fetch(url, {
-      headers: {
-        'Authorization': hcmAuth(),
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-    });
+    const response = await fetch(proxyUrl);
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -238,6 +212,7 @@ export const fetchFromApex = async (
 };
 
 // ── SOAP — Oracle BI Publisher ────────────────────────────────────────────────
+// Proxied via POST /api/soap/bip-report — proxy handles auth and Base64 decode
 
 export const callSoapBip = async (
   url: string,
@@ -245,47 +220,22 @@ export const callSoapBip = async (
   log?: LogCallback
 ): Promise<{ success: boolean; decodedXml?: string; recordCount?: number; duration?: number; error?: string; details?: string }> => {
   try {
-    const startTime = Date.now();
-    log?.('info', 'Sending SOAP request...');
+    log?.('info', 'Sending SOAP request via proxy...');
 
-    const response = await fetch(url, {
+    const response = await fetch(`${PROXY_BASE}/soap/bip-report`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'text/xml; charset=utf-8',
-        'SOAPAction': '"runReport"',
-      },
-      body: envelope,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, envelope }),
     });
 
-    const duration = Date.now() - startTime;
-    log?.('info', `Response received in ${duration}ms`);
+    const data = await response.json();
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      return { success: false, error: `SOAP Error: ${response.status} ${response.statusText}`, details: errorText.substring(0, 500) };
+    if (!data.success) {
+      return { success: false, error: data.error || 'SOAP request failed', details: data.details };
     }
 
-    const soapResponse = await response.text();
-
-    const reportBytesMatch = soapResponse.match(/<reportBytes[^>]*>([^<]+)<\/reportBytes>/);
-    if (!reportBytesMatch || !reportBytesMatch[1]) {
-      return { success: false, error: 'No reportBytes found in SOAP response' };
-    }
-
-    const base64Content = reportBytesMatch[1].trim();
-
-    // Browser-safe Base64 decode (equivalent to Node Buffer.from(b64,'base64').toString('utf-8'))
-    const binaryString = atob(base64Content);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    const decodedXml = new TextDecoder('utf-8').decode(bytes);
-
-    const recordCount = (decodedXml.match(/<G_1>/g) || []).length;
-    log?.('success', `SOAP decoded — records: ${recordCount}`);
-
-    return { success: true, duration, decodedXml, recordCount };
+    log?.('success', `SOAP decoded — records: ${data.recordCount}`);
+    return { success: true, duration: data.duration, decodedXml: data.decodedXml, recordCount: data.recordCount };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
     log?.('error', `SOAP Error: ${errorMsg}`);
