@@ -12,6 +12,7 @@ import {
   SwapOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
+import AccountSelector from '../../components/AccountSelector';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -110,16 +111,19 @@ const ExternalTxnForm: React.FC<{
   initialValues?: Partial<ExternalTxnRecord>;
   bankAccounts: BankAccountOption[];
   businessUnits: BUOption[];
+  bankAccountMap: Record<string, string>;   // bankAccountName → assetAccountCombination
   onSave: () => void;
   onCancel: () => void;
-}> = ({ initialValues, bankAccounts, businessUnits, onSave, onCancel }) => {
+}> = ({ initialValues, bankAccounts, businessUnits, bankAccountMap, onSave, onCancel }) => {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const [selectedBu, setSelectedBu] = useState<string | undefined>(initialValues?.businessUnitName);
-  const [apiModal, setApiModal]       = useState(false);
-  const [apiPayload, setApiPayload]   = useState('');
-  const [apiPosting, setApiPosting]   = useState(false);
-  const [apiResponse, setApiResponse] = useState<{ status: number; body: string } | null>(null);
+  const [apiModal, setApiModal]           = useState(false);
+  const [apiPayload, setApiPayload]       = useState('');
+  const [apiPosting, setApiPosting]       = useState(false);
+  const [apiResponse, setApiResponse]     = useState<{ status: number; body: string } | null>(null);
+  const [cashAcctOpen, setCashAcctOpen]   = useState(false);
+  const [offsetAcctOpen, setOffsetAcctOpen] = useState(false);
   const isEdit = !!initialValues?.externalTransactionId;
   const buSelected = !!selectedBu;
 
@@ -128,15 +132,17 @@ const ExternalTxnForm: React.FC<{
   useEffect(() => {
     if (initialValues) {
       form.setFieldsValue({
-        bankAccountName:   initialValues.bankAccountName,
-        businessUnitName:  initialValues.businessUnitName,
-        amount:            initialValues.amount,
-        transactionDate:   initialValues.transactionDate ? dayjs(initialValues.transactionDate) : dayjs(),
-        valueDate:         initialValues.valueDate ? dayjs(initialValues.valueDate) : undefined,
-        referenceText:     initialValues.referenceText,
-        transactionType:   initialValues.transactionType,
-        description:       initialValues.description,
-        currencyCode:      initialValues.currencyCode,
+        bankAccountName:           initialValues.bankAccountName,
+        businessUnitName:          initialValues.businessUnitName,
+        amount:                    initialValues.amount,
+        transactionDate:           initialValues.transactionDate ? dayjs(initialValues.transactionDate) : dayjs(),
+        valueDate:                 initialValues.valueDate ? dayjs(initialValues.valueDate) : undefined,
+        referenceText:             initialValues.referenceText,
+        transactionType:           initialValues.transactionType,
+        description:               initialValues.description,
+        currencyCode:              initialValues.currencyCode,
+        assetAccountCombination:   initialValues.assetAccountCombination,
+        offsetAccountCombination:  initialValues.offsetAccountCombination,
       });
     } else {
       form.resetFields();
@@ -165,6 +171,8 @@ const ExternalTxnForm: React.FC<{
       LastUpdatedBy:         'ERP_USER',
       LastUpdateDate:        new Date().toISOString(),
       LastUpdateLogin:       '',
+      AssetAccountCombination:  values.assetAccountCombination ?? '',
+      OffsetAccountCombination: values.offsetAccountCombination ?? '',
     }],
   });
 
@@ -237,7 +245,12 @@ const ExternalTxnForm: React.FC<{
           <Col xs={24} lg={12}>
             <Form.Item label="Bank Account" name="bankAccountName" rules={[{ required: true, message: 'Bank Account is required' }]} style={fs}>
               <Select showSearch placeholder="Select bank account" optionFilterProp="label" options={bankAccounts}
-                style={{ width: '100%' }} notFoundContent={<Text type="secondary">No accounts loaded</Text>} />
+                style={{ width: '100%' }} notFoundContent={<Text type="secondary">No accounts loaded</Text>}
+                onChange={v => {
+                  if (!isEdit) {
+                    form.setFieldValue('assetAccountCombination', bankAccountMap[v] ?? '');
+                  }
+                }} />
             </Form.Item>
           </Col>
           <Col xs={24} lg={12}>
@@ -297,6 +310,58 @@ const ExternalTxnForm: React.FC<{
           </Col>
         </Row>
 
+        {/* ── Account Combinations ── */}
+        <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, color: REDWOOD.neutral600, margin: '8px 0 14px' }}>
+          Account Coding
+        </Divider>
+
+        <Row gutter={40}>
+          <Col xs={24} lg={12}>
+            <Form.Item label="Cash Account" name="assetAccountCombination" style={fs}>
+              <Input.Group compact style={{ display: 'flex' }}>
+                <Form.Item name="assetAccountCombination" noStyle>
+                  <Input
+                    readOnly
+                    disabled={isEdit}
+                    placeholder={isEdit ? '—' : 'Auto-populated from bank account'}
+                    style={{ flex: 1, fontFamily: 'monospace', fontSize: 12 }}
+                  />
+                </Form.Item>
+                {!isEdit && (
+                  <Button
+                    icon={<SearchOutlined />}
+                    disabled={!buSelected}
+                    onClick={() => setCashAcctOpen(true)}
+                    title="Select account"
+                  />
+                )}
+              </Input.Group>
+            </Form.Item>
+          </Col>
+          <Col xs={24} lg={12}>
+            <Form.Item label="Offset Account" name="offsetAccountCombination" style={fs}>
+              <Input.Group compact style={{ display: 'flex' }}>
+                <Form.Item name="offsetAccountCombination" noStyle>
+                  <Input
+                    readOnly
+                    disabled={isEdit}
+                    placeholder={isEdit ? '—' : 'Select offset account'}
+                    style={{ flex: 1, fontFamily: 'monospace', fontSize: 12 }}
+                  />
+                </Form.Item>
+                {!isEdit && (
+                  <Button
+                    icon={<SearchOutlined />}
+                    disabled={!buSelected}
+                    onClick={() => setOffsetAcctOpen(true)}
+                    title="Select account"
+                  />
+                )}
+              </Input.Group>
+            </Form.Item>
+          </Col>
+        </Row>
+
         <Divider />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Button icon={<ApiOutlined />} onClick={handleApiOpen} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>
@@ -311,6 +376,18 @@ const ExternalTxnForm: React.FC<{
           </Space>
         </div>
       </Form>
+
+      {/* ── Account Selector Modals ── */}
+      <AccountSelector
+        visible={cashAcctOpen}
+        onCancel={() => setCashAcctOpen(false)}
+        onSelect={(code: string) => { form.setFieldValue('assetAccountCombination', code); setCashAcctOpen(false); }}
+      />
+      <AccountSelector
+        visible={offsetAcctOpen}
+        onCancel={() => setOffsetAcctOpen(false)}
+        onSelect={(code: string) => { form.setFieldValue('offsetAccountCombination', code); setOffsetAcctOpen(false); }}
+      />
 
       {/* ── API Inspector Modal ── */}
       <Modal
@@ -364,6 +441,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   const [hasSearched, setHasSearched]     = useState(false);
   const [bankAccounts, setBankAccounts]   = useState<BankAccountOption[]>([]);
   const [businessUnits, setBusinessUnits] = useState<BUOption[]>([]);
+  const [bankAccountMap, setBankAccountMap] = useState<Record<string, string>>({});
   const [activeTabKey, setActiveTabKey]   = useState('search');
   const [tabs, setTabs]                   = useState<{ key: string; label: string; record?: ExternalTxnRecord }[]>([]);
   const [lastApiUrl, setLastApiUrl]       = useState('');
@@ -381,12 +459,17 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
         const items: ExternalTxnRecord[] = data.items;
         const acctSet = new Set<string>();
         const buSet   = new Set<string>();
+        const acctMap: Record<string, string> = {};
         items.forEach(i => {
           if (i.bankAccountName)   acctSet.add(i.bankAccountName);
           if (i.businessUnitName)  buSet.add(i.businessUnitName);
+          if (i.bankAccountName && i.assetAccountCombination) {
+            acctMap[i.bankAccountName] = i.assetAccountCombination;
+          }
         });
         setBankAccounts([...acctSet].sort().map(n => ({ label: n, value: n })));
         setBusinessUnits([...buSet].sort().map(n => ({ label: n, value: n })));
+        setBankAccountMap(acctMap);
       }
     } catch { /* silently skip */ }
   }, []);
@@ -652,6 +735,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
           initialValues={t.record}
           bankAccounts={bankAccounts}
           businessUnits={businessUnits}
+          bankAccountMap={bankAccountMap}
           onSave={() => { closeTab(t.key); handleSearch(); loadLovs(); }}
           onCancel={() => closeTab(t.key)}
         />
