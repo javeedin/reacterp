@@ -64,7 +64,9 @@ interface BUOption          { label: string; value: string; }
 
 const parseApexJson = async (res: Response) => {
   const text = await res.text();
-  const fixed = text.replace(/:(-?)\.(\d)/g, ':$10.$2');
+  const fixed = text
+    .replace(/:(-?)\.(\d)/g, ':$10.$2')   // .428 → 0.428  (missing leading zero)
+    .replace(/(\d)\.([,}\]])/g, '$1$2');  // 100., → 100,  (trailing dot on integers)
   return JSON.parse(fixed);
 };
 
@@ -500,42 +502,68 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       {/* Search Form */}
       <Card style={{ marginBottom: 16, borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
         styles={{ body: { padding: '16px 20px 8px' } }}>
-        <Form form={searchForm} layout="vertical">
-          <Row gutter={16}>
-            <Col xs={24} sm={12} md={8} lg={6}>
-              <Form.Item label="Transaction Number" name="transactionNumber" style={{ marginBottom: 12 }}>
-                <Input placeholder="Enter transaction number" />
+        <Form form={searchForm} layout="horizontal" labelCol={{ span: 8 }} wrapperCol={{ span: 16 }}>
+          <Row gutter={[24, 4]}>
+            <Col xs={24} md={12}>
+              <Form.Item label="Transaction #" name="transactionNumber" style={{ marginBottom: 10 }}>
+                <Input placeholder="Transaction number" />
               </Form.Item>
             </Col>
-            <Col xs={24} sm={12} md={8} lg={6}>
-              <Form.Item label="Bank Account" name="bankAccount" style={{ marginBottom: 12 }}>
+            <Col xs={24} md={12}>
+              <Form.Item label="Date From" name="dateFrom" style={{ marginBottom: 10 }}>
+                <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={12}>
+              <Form.Item label="Bank Account" name="bankAccount" style={{ marginBottom: 10 }}>
                 <Select showSearch placeholder="Select account" optionFilterProp="label" options={bankAccounts} allowClear style={{ width: '100%' }} />
               </Form.Item>
             </Col>
-            <Col xs={24} sm={12} md={8} lg={6}>
-              <Form.Item label="Currency" name="currencyCode" style={{ marginBottom: 12 }}>
+            <Col xs={24} md={12}>
+              <Form.Item label="Date To" name="dateTo" style={{ marginBottom: 10 }}>
+                <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={12}>
+              <Form.Item label="Currency" name="currencyCode" style={{ marginBottom: 10 }}>
                 <Select placeholder="Select currency" allowClear>
                   {['AED','USD','EUR','GBP','SAR','QAR','KWD','BHD','OMR'].map(c => <Option key={c} value={c}>{c}</Option>)}
                 </Select>
               </Form.Item>
             </Col>
-            <Col xs={24} sm={12} md={8} lg={6}>
-              <Form.Item label="Business Unit" name="businessUnit" style={{ marginBottom: 12 }}>
+            <Col xs={24} md={12}>
+              <Form.Item label="Amount From" name="amountFrom" style={{ marginBottom: 10 }}>
+                <InputNumber style={{ width: '100%' }} placeholder="Min amount" precision={2} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={12}>
+              <Form.Item label="Business Unit" name="businessUnit" style={{ marginBottom: 10 }}>
                 <Select showSearch placeholder="Select BU" optionFilterProp="label" options={businessUnits} allowClear style={{ width: '100%' }} />
               </Form.Item>
             </Col>
-            <Col xs={24} sm={12} md={8} lg={6}>
-              <Form.Item label="Transaction Type" name="transactionType" style={{ marginBottom: 12 }}>
+            <Col xs={24} md={12}>
+              <Form.Item label="Amount To" name="amountTo" style={{ marginBottom: 10 }}>
+                <InputNumber style={{ width: '100%' }} placeholder="Max amount" precision={2} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={12}>
+              <Form.Item label="Transaction Type" name="transactionType" style={{ marginBottom: 10 }}>
                 <Select placeholder="Select type" allowClear>
                   <Option value="EFT">EFT</Option>
                   <Option value="WIRE">WIRE</Option>
                   <Option value="CHECK">CHECK</Option>
                   <Option value="MISC">MISC</Option>
+                  <Option value="BKF">BKF</Option>
                 </Select>
               </Form.Item>
             </Col>
-            <Col xs={24} sm={12} md={8} lg={6}>
-              <Form.Item label="Status" name="status" style={{ marginBottom: 12 }}>
+            <Col xs={24} md={12}>
+              <Form.Item label="Reference" name="reference" style={{ marginBottom: 10 }}>
+                <Input placeholder="Reference text" />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={12}>
+              <Form.Item label="Status" name="status" style={{ marginBottom: 10 }}>
                 <Select placeholder="Select status" allowClear>
                   <Option value="REC">Reconciled</Option>
                   <Option value="UNR">Unreconciled</Option>
@@ -544,38 +572,14 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
                 </Select>
               </Form.Item>
             </Col>
-            <Col xs={24} sm={12} md={8} lg={6}>
-              <Form.Item label="Origin" name="source" style={{ marginBottom: 12 }}>
+            <Col xs={24} md={12}>
+              <Form.Item label="Origin" name="source" style={{ marginBottom: 10 }}>
                 <Select placeholder="Select origin" allowClear>
                   <Option value="ORA_BAT">Bank</Option>
                   <Option value="ORA_MAN">Manual</Option>
                   <Option value="ORA_STA">Statement</Option>
+                  <Option value="MANUAL">Manual (Legacy)</Option>
                 </Select>
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={12} md={8} lg={6}>
-              <Form.Item label="Reference" name="reference" style={{ marginBottom: 12 }}>
-                <Input placeholder="Reference text" />
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={12} md={8} lg={6}>
-              <Form.Item label="Date From" name="dateFrom" style={{ marginBottom: 12 }}>
-                <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={12} md={8} lg={6}>
-              <Form.Item label="Date To" name="dateTo" style={{ marginBottom: 12 }}>
-                <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={12} md={8} lg={6}>
-              <Form.Item label="Amount From" name="amountFrom" style={{ marginBottom: 12 }}>
-                <InputNumber style={{ width: '100%' }} placeholder="Min amount" precision={2} />
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={12} md={8} lg={6}>
-              <Form.Item label="Amount To" name="amountTo" style={{ marginBottom: 12 }}>
-                <InputNumber style={{ width: '100%' }} placeholder="Max amount" precision={2} />
               </Form.Item>
             </Col>
           </Row>

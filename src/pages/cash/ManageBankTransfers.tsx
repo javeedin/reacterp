@@ -67,7 +67,9 @@ interface BUOption { label: string; value: string; }
 // Fix by inserting a 0 before any bare leading decimal point in JSON number values.
 const parseApexJson = async (res: Response) => {
   const text = await res.text();
-  const fixed = text.replace(/:(-?)\.(\d)/g, ':$10.$2');
+  const fixed = text
+    .replace(/:(-?)\.(\d)/g, ':$10.$2')   // .428 → 0.428  (missing leading zero)
+    .replace(/(\d)\.([,}\]])/g, '$1$2');  // 100., → 100,  (trailing dot on integers)
   return JSON.parse(fixed);
 };
 
