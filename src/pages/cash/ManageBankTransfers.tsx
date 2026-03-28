@@ -105,6 +105,10 @@ const TransferForm: React.FC<{
 }> = ({ initialValues, bankAccounts, businessUnits, onSave, onCancel }) => {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
+  const [apiModal, setApiModal]       = useState(false);
+  const [apiPayload, setApiPayload]   = useState('');
+  const [apiPosting, setApiPosting]   = useState(false);
+  const [apiResponse, setApiResponse] = useState<{ status: number; body: string } | null>(null);
   const isEdit = !!initialValues?.bankAccountTransferId;
 
   useEffect(() => {
@@ -134,34 +138,7 @@ const TransferForm: React.FC<{
 
     setSaving(true);
     try {
-      const payload = {
-        items: [{
-          BankAccountTransferId:     initialValues?.bankAccountTransferId ?? undefined,
-          BankAccountTransferNumber: initialValues?.bankAccountTransferNumber ?? undefined,
-          TransactionDate:           values.transactionDate?.format('YYYY-MM-DD'),
-          Memo:                      values.memo ?? '',
-          PaymentAmount:             values.paymentAmount,
-          FromAmount:                values.paymentAmount,
-          FromBankAccountName:       values.fromBankAccountName,
-          ToBankAccountName:         values.toBankAccountName,
-          FromCurrencyCode:          '',
-          ToCurrencyCode:            '',
-          PaymentCurrencyCode:       '',
-          ConversionRateType:        values.conversionRateType ?? '',
-          ConversionRate:            values.conversionRate ?? null,
-          Status:                    initialValues?.status ?? 'Pending',
-          PaymentStatus:             initialValues?.paymentStatus ?? '',
-          PaymentMethod:             values.paymentMethod ?? '',
-          PaymentProfileName:        values.paymentProfileName ?? '',
-          Businessunit:              values.businessUnit ?? '',
-          IsSettledWithIbyFlag:      values.isSettledWithIbyFlag ? 'true' : 'false',
-          CreatedBy:                 'ERP_USER',
-          CreationDate:              new Date().toISOString(),
-          LastUpdatedBy:             'ERP_USER',
-          LastUpdateDate:            new Date().toISOString(),
-          LastUpdateLogin:           '',
-        }],
-      };
+      const payload = buildPayload(values);
 
       const res = await fetch(`${APEX_BASE}/cash/banktransfers`, {
         method: 'POST',
@@ -180,6 +157,61 @@ const TransferForm: React.FC<{
       message.error('Network error: ' + e.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const buildPayload = (values: any) => ({
+    items: [{
+      BankAccountTransferId:     initialValues?.bankAccountTransferId ?? undefined,
+      BankAccountTransferNumber: initialValues?.bankAccountTransferNumber ?? undefined,
+      TransactionDate:           values.transactionDate?.format('YYYY-MM-DD'),
+      Memo:                      values.memo ?? '',
+      PaymentAmount:             values.paymentAmount,
+      FromAmount:                values.paymentAmount,
+      FromBankAccountName:       values.fromBankAccountName,
+      ToBankAccountName:         values.toBankAccountName,
+      FromCurrencyCode:          '',
+      ToCurrencyCode:            '',
+      PaymentCurrencyCode:       '',
+      ConversionRateType:        values.conversionRateType ?? '',
+      ConversionRate:            values.conversionRate ?? null,
+      Status:                    initialValues?.status ?? 'Pending',
+      PaymentStatus:             initialValues?.paymentStatus ?? '',
+      PaymentMethod:             values.paymentMethod ?? '',
+      PaymentProfileName:        values.paymentProfileName ?? '',
+      Businessunit:              values.businessUnit ?? '',
+      IsSettledWithIbyFlag:      values.isSettledWithIbyFlag ? 'true' : 'false',
+      CreatedBy:                 'ERP_USER',
+      CreationDate:              new Date().toISOString(),
+      LastUpdatedBy:             'ERP_USER',
+      LastUpdateDate:            new Date().toISOString(),
+      LastUpdateLogin:           '',
+    }],
+  });
+
+  const handleApiOpen = async () => {
+    let values: any;
+    try { values = await form.validateFields(); } catch { return; }
+    setApiPayload(JSON.stringify(buildPayload(values), null, 2));
+    setApiResponse(null);
+    setApiModal(true);
+  };
+
+  const handleApiPost = async () => {
+    setApiPosting(true);
+    setApiResponse(null);
+    try {
+      const res = await fetch(`${APEX_BASE}/cash/banktransfers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: apiPayload,
+      });
+      const text = await res.text();
+      setApiResponse({ status: res.status, body: (() => { try { return JSON.stringify(JSON.parse(text), null, 2); } catch { return text; } })() });
+    } catch (e: any) {
+      setApiResponse({ status: 0, body: 'Network error: ' + e.message });
+    } finally {
+      setApiPosting(false);
     }
   };
 
@@ -271,18 +303,81 @@ const TransferForm: React.FC<{
         </Row>
 
         <Divider />
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
-          <Button onClick={onCancel}>Cancel</Button>
-          <Button
-            type="primary"
-            loading={saving}
-            onClick={handleSubmit}
-            style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
-          >
-            {isEdit ? 'Save Changes' : 'Create Transfer'}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Button icon={<ApiOutlined />} onClick={handleApiOpen} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>
+            API
           </Button>
+          <Space>
+            <Button onClick={onCancel}>Cancel</Button>
+            <Button
+              type="primary"
+              loading={saving}
+              onClick={handleSubmit}
+              style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+            >
+              {isEdit ? 'Save Changes' : 'Create Transfer'}
+            </Button>
+          </Space>
         </div>
       </Form>
+
+      {/* ── API Inspector Modal ── */}
+      <Modal
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>API Inspector — POST /cash/banktransfers</span></Space>}
+        open={apiModal}
+        onCancel={() => setApiModal(false)}
+        width={780}
+        footer={null}
+        styles={{ body: { padding: '16px 24px' } }}
+      >
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          Endpoint: <Text code copyable style={{ fontSize: 12 }}>{APEX_BASE}/cash/banktransfers</Text>
+        </Text>
+
+        <div style={{ marginTop: 12, marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text strong>Request Body (JSON)</Text>
+        </div>
+        <pre style={{
+          background: '#1e1e2e', color: '#cdd6f4', padding: 16, borderRadius: 6,
+          fontSize: 12, overflowX: 'auto', maxHeight: 320, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+          margin: 0,
+        }}>
+          {apiPayload}
+        </pre>
+
+        <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
+          <Button
+            type="primary"
+            icon={<ApiOutlined />}
+            loading={apiPosting}
+            onClick={handleApiPost}
+            style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+          >
+            POST Request
+          </Button>
+        </div>
+
+        {apiResponse && (
+          <>
+            <Divider style={{ margin: '16px 0 12px' }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              <Text strong>Response</Text>
+              <Tag color={apiResponse.status >= 200 && apiResponse.status < 300 ? 'success' : 'error'}>
+                HTTP {apiResponse.status || 'Error'}
+              </Tag>
+            </div>
+            <pre style={{
+              background: apiResponse.status >= 200 && apiResponse.status < 300 ? '#f6ffed' : '#fff2f0',
+              border: `1px solid ${apiResponse.status >= 200 && apiResponse.status < 300 ? '#b7eb8f' : '#ffccc7'}`,
+              color: REDWOOD.neutral900, padding: 16, borderRadius: 6,
+              fontSize: 12, overflowX: 'auto', maxHeight: 240, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+              margin: 0,
+            }}>
+              {apiResponse.body}
+            </pre>
+          </>
+        )}
+      </Modal>
     </div>
   );
 };
