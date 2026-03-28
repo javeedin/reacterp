@@ -60,6 +60,8 @@ COMMENT ON COLUMN RR_EXTERNAL_CASH_TRANSACTIONS.EXTERNAL_TRANSACTION_ID IS 'Uniq
 COMMENT ON COLUMN RR_EXTERNAL_CASH_TRANSACTIONS.STATUS IS 'REC=Reconciled, UNR=Unreconciled, etc.';
 COMMENT ON COLUMN RR_EXTERNAL_CASH_TRANSACTIONS.ACCOUNTING_FLAG IS 'Y=Accounted, N=Not Accounted';
 
+-- Sequence for manually-created transactions (no Fusion ExternalTransactionId)
+CREATE SEQUENCE RR_ECT_MANUAL_SEQ START WITH 1000000000 INCREMENT BY 1 NOCACHE;
 
 -- ============================================================
 -- Procedure: RR_SYNC_EXTERNAL_CASH_TRANSACTIONS
@@ -121,11 +123,13 @@ BEGIN
         MERGE INTO RR_EXTERNAL_CASH_TRANSACTIONS tgt
         USING (
             SELECT
-                rec.external_transaction_id                     AS external_transaction_id,
+                -- Use sequence for manual transactions that have no Fusion ExternalTransactionId
+                NVL(rec.external_transaction_id, RR_ECT_MANUAL_SEQ.NEXTVAL) AS external_transaction_id,
                 rec.transaction_id                              AS transaction_id,
-                TO_DATE(rec.transaction_date, 'YYYY-MM-DD')    AS transaction_date,
-                TO_DATE(rec.value_date,       'YYYY-MM-DD')    AS value_date,
-                TO_DATE(rec.cleared_date,     'YYYY-MM-DD')    AS cleared_date,
+                -- SUBSTR(,1,10) safely handles both 'YYYY-MM-DD' and 'YYYY-MM-DDTHH:...' from Fusion
+                TO_DATE(SUBSTR(rec.transaction_date, 1, 10), 'YYYY-MM-DD')  AS transaction_date,
+                TO_DATE(SUBSTR(rec.value_date,        1, 10), 'YYYY-MM-DD') AS value_date,
+                TO_DATE(SUBSTR(rec.cleared_date,      1, 10), 'YYYY-MM-DD') AS cleared_date,
                 rec.amount                                      AS amount,
                 rec.currency_code                               AS currency_code,
                 rec.description                                 AS description,
@@ -153,9 +157,16 @@ BEGIN
                 rec.structured_payment_reference                AS structured_payment_reference,
                 rec.bank_transaction_id                         AS bank_transaction_id,
                 rec.created_by                                  AS created_by,
-                TO_TIMESTAMP(REGEXP_REPLACE(rec.creation_date,  '[+-]\d\d:\d\d$', ''), 'YYYY-MM-DD"T"HH24:MI:SS.FF3') AS creation_date,
+                -- Strip Z or ±HH:MI timezone suffix before TO_TIMESTAMP parse
+                TO_TIMESTAMP(
+                    REGEXP_REPLACE(rec.creation_date,  '(Z|[+-]\d{2}:\d{2})$', ''),
+                    'YYYY-MM-DD"T"HH24:MI:SS.FF3'
+                ) AS creation_date,
                 rec.last_updated_by                             AS last_updated_by,
-                TO_TIMESTAMP(REGEXP_REPLACE(rec.last_update_date, '[+-]\d\d:\d\d$', ''), 'YYYY-MM-DD"T"HH24:MI:SS.FF3') AS last_update_date,
+                TO_TIMESTAMP(
+                    REGEXP_REPLACE(rec.last_update_date, '(Z|[+-]\d{2}:\d{2})$', ''),
+                    'YYYY-MM-DD"T"HH24:MI:SS.FF3'
+                ) AS last_update_date,
                 rec.last_update_login                           AS last_update_login
             FROM DUAL
         ) src
