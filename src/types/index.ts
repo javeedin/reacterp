@@ -21,6 +21,7 @@ export interface LoginResult {
 
 export interface AuthContextType {
   user: User | null;
+  setUser: (user: User | null) => void;
   isAuthenticated: boolean;
   login: (username: string, password: string) => Promise<boolean>;
   loginWithStatus: (username: string, password: string) => Promise<LoginResult>;

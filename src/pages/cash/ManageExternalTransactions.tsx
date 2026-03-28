@@ -311,7 +311,7 @@ const ExternalTxnForm: React.FC<{
         </Row>
 
         {/* ── Account Combinations ── */}
-        <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, color: REDWOOD.neutral600, margin: '8px 0 14px' }}>
+        <Divider style={{ fontSize: 12, color: REDWOOD.neutral600, margin: '8px 0 14px' }}>
           Account Coding
         </Divider>
 

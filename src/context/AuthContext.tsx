@@ -4,15 +4,6 @@ import type { User, AuthContextType, LoginResult } from '../types';
 const APEX_AUTH_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/auth';
 const APEX_ADMIN_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/admin';
 
-// Electron API (available only in desktop app)
-declare global {
-  interface Window {
-    electronAPI?: {
-      isElectron: boolean;
-      sendOtpEmail: (to: string, otp: string) => Promise<{ success: boolean; error?: string }>;
-    };
-  }
-}
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 

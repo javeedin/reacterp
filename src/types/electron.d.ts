@@ -9,6 +9,9 @@ export interface ElectronAPI {
   // General notifications
   showNotification: (title: string, body: string) => void;
 
+  // Email (used by AuthContext for OTP)
+  sendOtpEmail: (to: string, otp: string) => Promise<{ success: boolean; error?: string }>;
+
   // Listen for commands from main process
   onStartSync: (callback: () => void) => void;
   onStopSync: (callback: () => void) => void;
