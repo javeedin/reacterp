@@ -349,13 +349,13 @@ BEGIN
         v_first := FALSE;
 
         DBMS_LOB.APPEND(v_clob, TO_CLOB(
-            '{"bankAccountTransferId":'   || r.BANK_ACCOUNT_TRANSFER_ID   || ','
-         || '"bankAccountTransferNumber":' || NVL(TO_CHAR(r.BANK_ACCOUNT_TRANSFER_NUMBER),'null') || ','
+            '{"bankAccountTransferId":'   || TO_CHAR(r.BANK_ACCOUNT_TRANSFER_ID, 'FM99999999999999990') || ','
+         || '"bankAccountTransferNumber":' || NVL(TO_CHAR(r.BANK_ACCOUNT_TRANSFER_NUMBER, 'FM99999999999999990'),'null') || ','
          || '"transactionDate":"'          || NVL(r.TRANSACTION_DATE,'')   || '",'
          || '"memo":"'                     || REPLACE(NVL(r.MEMO,''), '"','\"') || '",'
-         || '"paymentAmount":'             || NVL(TO_CHAR(r.PAYMENT_AMOUNT),'null') || ','
-         || '"fromAmount":'                || NVL(TO_CHAR(r.FROM_AMOUNT),'null') || ','
-         || '"conversionRate":'            || NVL(TO_CHAR(r.CONVERSION_RATE),'null') || ','
+         || '"paymentAmount":'             || NVL(TO_CHAR(r.PAYMENT_AMOUNT,    'FM99999999999999990.9999999999'),'null') || ','
+         || '"fromAmount":'                || NVL(TO_CHAR(r.FROM_AMOUNT,       'FM99999999999999990.9999999999'),'null') || ','
+         || '"conversionRate":'            || NVL(TO_CHAR(r.CONVERSION_RATE,   'FM99999999999999990.9999999999'),'null') || ','
          || '"fromBankAccountName":"'      || REPLACE(NVL(r.FROM_BANK_ACCOUNT_NAME,''),'"','\"') || '",'
          || '"toBankAccountName":"'        || REPLACE(NVL(r.TO_BANK_ACCOUNT_NAME,''),'"','\"')   || '",'
          || '"fromCurrencyCode":"'         || NVL(r.FROM_CURRENCY_CODE,'')   || '",'
