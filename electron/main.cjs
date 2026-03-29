@@ -20,7 +20,8 @@ function loadSmtpConfig() {
   for (const p of candidates) {
     try {
       if (fs.existsSync(p)) {
-        const cfg = JSON.parse(fs.readFileSync(p, 'utf8'));
+        const raw = fs.readFileSync(p, 'utf8').replace(/^\uFEFF/, ''); // strip UTF-8 BOM (PowerShell 5.x)
+        const cfg = JSON.parse(raw);
         console.log('[email] Loaded config from:', p);
         return cfg;
       }
