@@ -66,7 +66,7 @@ interface StatementLine {
   reconBy?:           string;
 }
 
-interface BankAcctOption { label: string; value: string; currencyCode?: string; legalEntityName?: string; cashAccountCombination?: string; }
+interface BankAcctOption { label: string; value: string; bankAccountNumber?: string; currencyCode?: string; legalEntityName?: string; cashAccountCombination?: string; }
 interface BUOption       { label: string; value: string; }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -158,8 +158,14 @@ const StatementForm: React.FC<{
   const [csvText, setCsvText]   = useState('');
   const [csvPreview, setCsvPreview] = useState<StatementLine[]>([]);
   const [csvErrors, setCsvErrors]   = useState<string[]>([]);
+  const [selectedBu, setSelectedBu] = useState<string | undefined>(initialHeader?.businessUnitName);
   const fileRef = useRef<HTMLInputElement>(null);
   const isEdit  = !!initialHeader?.statementId;
+
+  // Bank accounts filtered to selected BU
+  const filteredBankAccounts = selectedBu
+    ? bankAccounts.filter(a => a.legalEntityName === selectedBu)
+    : [];
 
   useEffect(() => {
     if (initialHeader) {
@@ -175,6 +181,7 @@ const StatementForm: React.FC<{
         description:       initialHeader.description,
         status:            initialHeader.status ?? 'DRAFT',
       });
+      if (initialHeader.businessUnitName) setSelectedBu(initialHeader.businessUnitName);
     } else {
       form.setFieldsValue({ statementDate: dayjs(), status: 'DRAFT' });
     }
@@ -382,25 +389,35 @@ const StatementForm: React.FC<{
       <Form form={form} layout="horizontal" labelCol={lc} wrapperCol={wc}>
         <Row gutter={40}>
           <Col xs={24} lg={12}>
+            <Form.Item label="Business Unit" name="businessUnitName"
+              rules={[{ required: true, message: 'Required' }]} style={fs}>
+              <Select showSearch placeholder="Select BU" optionFilterProp="label"
+                options={businessUnits} allowClear style={{ width: '100%' }}
+                disabled={isEdit}
+                onChange={(v: string) => {
+                  setSelectedBu(v ?? undefined);
+                  form.setFieldsValue({ bankAccountName: undefined, bankAccountNumber: undefined, currencyCode: undefined });
+                }} />
+            </Form.Item>
+            <Form.Item label="Bank Account" name="bankAccountName"
+              rules={[{ required: true, message: 'Required' }]} style={fs}>
+              <Select showSearch placeholder={selectedBu ? 'Select bank account' : 'Select BU first'}
+                optionFilterProp="label" options={filteredBankAccounts}
+                style={{ width: '100%' }} allowClear
+                disabled={isEdit || !selectedBu}
+                onChange={(v: string) => {
+                  const acct = bankAccounts.find(a => a.value === v);
+                  if (acct?.currencyCode)    form.setFieldValue('currencyCode',      acct.currencyCode);
+                  if (acct?.bankAccountNumber) form.setFieldValue('bankAccountNumber', acct.bankAccountNumber);
+                }} />
+            </Form.Item>
             <Form.Item label="Statement Number" name="statementNumber"
               rules={[{ required: true, message: 'Required' }]} style={fs}>
               <Input placeholder="e.g. STMT-2026-001" />
             </Form.Item>
-            <Form.Item label="Bank Account" name="bankAccountName"
-              rules={[{ required: true, message: 'Required' }]} style={fs}>
-              <Select showSearch placeholder="Select bank account" optionFilterProp="label"
-                options={bankAccounts} style={{ width: '100%' }} allowClear />
-            </Form.Item>
             <Form.Item label="Statement Date" name="statementDate"
               rules={[{ required: true, message: 'Required' }]} style={fs}>
               <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
-            </Form.Item>
-            <Form.Item label="Currency" name="currencyCode" style={fs}>
-              <Select placeholder="Select currency" allowClear>
-                {['AED','USD','EUR','GBP','SAR','QAR','KWD','BHD','OMR','INR'].map(c => (
-                  <Option key={c} value={c}>{c}</Option>
-                ))}
-              </Select>
             </Form.Item>
             <Form.Item label="Status" name="status" style={fs}>
               <Select>
@@ -411,15 +428,18 @@ const StatementForm: React.FC<{
             </Form.Item>
           </Col>
           <Col xs={24} lg={12}>
+            <Form.Item label="Currency" name="currencyCode" style={fs}>
+              <Select placeholder="Select currency" allowClear>
+                {['AED','USD','EUR','GBP','SAR','QAR','KWD','BHD','OMR','INR'].map(c => (
+                  <Option key={c} value={c}>{c}</Option>
+                ))}
+              </Select>
+            </Form.Item>
             <Form.Item label="Opening Balance" name="openingBalance" style={fs}>
               <InputNumber style={{ width: '100%' }} precision={2} placeholder="0.00" />
             </Form.Item>
             <Form.Item label="Closing Balance" name="closingBalance" style={fs}>
               <InputNumber style={{ width: '100%' }} precision={2} placeholder="0.00" />
-            </Form.Item>
-            <Form.Item label="Business Unit" name="businessUnitName" style={fs}>
-              <Select showSearch placeholder="Select BU" optionFilterProp="label"
-                options={businessUnits} allowClear style={{ width: '100%' }} />
             </Form.Item>
             <Form.Item label="Description" name="description" style={fs}>
               <Input.TextArea rows={3} placeholder="Optional description" />
@@ -575,6 +595,7 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
         const accts: BankAcctOption[] = baData.items.map((i: any) => ({
           label: i.bankAccountName,
           value: i.bankAccountName,
+          bankAccountNumber: i.bankAccountNumber,
           currencyCode: i.currencyCode,
           legalEntityName: i.legalEntityName,
           cashAccountCombination: i.cashAccountCombination,
