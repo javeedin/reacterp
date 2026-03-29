@@ -66,7 +66,7 @@ interface StatementLine {
   reconBy?:           string;
 }
 
-interface BankAcctOption { label: string; value: string; }
+interface BankAcctOption { label: string; value: string; currencyCode?: string; legalEntityName?: string; cashAccountCombination?: string; }
 interface BUOption       { label: string; value: string; }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -568,17 +568,22 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
   // Load LOVs
   const loadLovs = useCallback(async () => {
     try {
-      const res  = await fetch(`${APEX_BASE}/cash/bankstatements?row_limit=1000`);
-      const data = await parseApexJson(res);
-      if (data.status === 'success' && data.items) {
-        const items: StatementHeader[] = data.items;
-        const acctSet = new Set<string>();
-        const buSet   = new Set<string>();
-        items.forEach(i => {
-          if (i.bankAccountName)  acctSet.add(i.bankAccountName);
-          if (i.businessUnitName) buSet.add(i.businessUnitName);
-        });
-        setBankAccounts([...acctSet].sort().map(n => ({ label: n, value: n })));
+      // Bank accounts from dedicated endpoint
+      const baRes  = await fetch(`${APEX_BASE}/banks/bankaccounts`);
+      const baData = await parseApexJson(baRes);
+      if (baData.status === 'success' && baData.items) {
+        const accts: BankAcctOption[] = baData.items.map((i: any) => ({
+          label: i.bankAccountName,
+          value: i.bankAccountName,
+          currencyCode: i.currencyCode,
+          legalEntityName: i.legalEntityName,
+          cashAccountCombination: i.cashAccountCombination,
+        }));
+        setBankAccounts(accts);
+
+        // Derive BUs from legal entity names on bank accounts
+        const buSet = new Set<string>();
+        baData.items.forEach((i: any) => { if (i.legalEntityName) buSet.add(i.legalEntityName); });
         setBusinessUnits([...buSet].sort().map(n => ({ label: n, value: n })));
       }
     } catch { /* silent */ }
@@ -590,8 +595,9 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
   const handleSearch = useCallback(async () => {
     const v = searchForm.getFieldsValue();
     const p = new URLSearchParams();
-    if (v.statementNumber) p.set('statement_number', v.statementNumber);
+    if (v.businessUnit)    p.set('business_unit',    v.businessUnit);
     if (v.bankAccount)     p.set('bank_account',     v.bankAccount);
+    if (v.statementNumber) p.set('statement_number', v.statementNumber);
     if (v.status)          p.set('status',           v.status);
     if (v.dateFrom)        p.set('date_from', (v.dateFrom as Dayjs).format('YYYY-MM-DD'));
     if (v.dateTo)          p.set('date_to',   (v.dateTo   as Dayjs).format('YYYY-MM-DD'));
@@ -638,6 +644,10 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
 
   // Table columns
   const columns: ColumnsType<StatementHeader> = [
+    { title: 'Business Unit', dataIndex: 'businessUnitName', width: 180, ellipsis: true,
+      render: v => <Tooltip title={v}><Text style={{ fontSize: 12 }}>{v || '—'}</Text></Tooltip> },
+    { title: 'Bank Account', dataIndex: 'bankAccountName', ellipsis: true,
+      render: v => <Tooltip title={v}><Text style={{ fontSize: 12 }}>{v || '—'}</Text></Tooltip> },
     {
       title: 'Statement #', dataIndex: 'statementNumber', width: 150,
       render: (v, r) => (
@@ -645,8 +655,6 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
           onClick={() => openEditTab(r)}>{v}</Button>
       ),
     },
-    { title: 'Bank Account', dataIndex: 'bankAccountName', ellipsis: true,
-      render: v => <Tooltip title={v}><Text style={{ fontSize: 12 }}>{v || '—'}</Text></Tooltip> },
     { title: 'Date', dataIndex: 'statementDate', width: 110, render: fmtDate },
     { title: 'CCY', dataIndex: 'currencyCode', width: 60,
       render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
@@ -692,8 +700,9 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
             <Form form={searchForm} layout="horizontal" labelCol={{ span: 8 }} wrapperCol={{ span: 16 }}>
               <Row gutter={[24, 4]}>
                 <Col xs={24} md={12}>
-                  <Form.Item label="Statement #" name="statementNumber" style={{ marginBottom: 10 }}>
-                    <Input placeholder="Statement number" />
+                  <Form.Item label="Business Unit" name="businessUnit" style={{ marginBottom: 10 }}>
+                    <Select showSearch placeholder="Select BU" optionFilterProp="label"
+                      options={businessUnits} allowClear style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
                 <Col xs={24} md={12}>
@@ -710,6 +719,11 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
                 <Col xs={24} md={12}>
                   <Form.Item label="Date To" name="dateTo" style={{ marginBottom: 10 }}>
                     <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} md={12}>
+                  <Form.Item label="Statement #" name="statementNumber" style={{ marginBottom: 10 }}>
+                    <Input placeholder="Statement number" />
                   </Form.Item>
                 </Col>
                 <Col xs={24} md={12}>

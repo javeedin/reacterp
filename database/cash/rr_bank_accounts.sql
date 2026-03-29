@@ -367,6 +367,46 @@ BEGIN
         p_comments       => 'Bank accounts sync endpoint'
     );
 
+    -- Define GET handler (LOV)
+    ORDS.DEFINE_HANDLER(
+        p_module_name    => 'reerp',
+        p_pattern        => 'banks/bankaccounts',
+        p_method         => 'GET',
+        p_source_type    => 'plsql/block',
+        p_items_per_page => 0,
+        p_mimes_allowed  => '',
+        p_comments       => 'Get bank accounts list for LOV',
+        p_source         => q'[
+DECLARE
+    l_json CLOB := '{"status":"success","items":[';
+    l_first BOOLEAN := TRUE;
+BEGIN
+    FOR r IN (
+        SELECT BANK_ACCOUNT_NAME,
+               BANK_ACCOUNT_NUMBER,
+               CURRENCY_CODE,
+               LEGAL_ENTITY_NAME,
+               CASH_ACCOUNT_COMBINATION
+          FROM RR_BANK_ACCOUNTS
+         WHERE ACTIVE_FLAG = 'Y'
+         ORDER BY BANK_ACCOUNT_NAME
+    ) LOOP
+        IF NOT l_first THEN l_json := l_json || ','; END IF;
+        l_first := FALSE;
+        l_json := l_json || '{'
+            || '"bankAccountName":'  || '"' || REPLACE(r.BANK_ACCOUNT_NAME, '"', '\"') || '",'
+            || '"bankAccountNumber":' || '"' || NVL(r.BANK_ACCOUNT_NUMBER, '') || '",'
+            || '"currencyCode":'     || '"' || NVL(r.CURRENCY_CODE, '') || '",'
+            || '"legalEntityName":'  || '"' || NVL(REPLACE(r.LEGAL_ENTITY_NAME, '"', '\"'), '') || '",'
+            || '"cashAccountCombination":' || '"' || NVL(r.CASH_ACCOUNT_COMBINATION, '') || '"'
+            || '}';
+    END LOOP;
+    l_json := l_json || ']}';
+    HTP.P(l_json);
+END;
+]'
+    );
+
     -- Define POST handler
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'reerp',

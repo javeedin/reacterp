@@ -585,6 +585,7 @@ DECLARE
         WHERE  (:statement_number IS NULL OR UPPER(h.STATEMENT_NUMBER)    LIKE '%' || UPPER(:statement_number) || '%')
         AND    (:bank_account     IS NULL OR UPPER(h.BANK_ACCOUNT_NUMBER) LIKE '%' || UPPER(:bank_account)     || '%'
                                          OR UPPER(h.BANK_ACCOUNT_NAME)   LIKE '%' || UPPER(:bank_account)     || '%')
+        AND    (:business_unit    IS NULL OR UPPER(h.BUSINESS_UNIT_NAME)  LIKE '%' || UPPER(:business_unit)    || '%')
         AND    (:status           IS NULL OR h.STATUS = :status)
         AND    (:date_from        IS NULL OR h.STATEMENT_DATE >= TO_DATE(:date_from, 'YYYY-MM-DD'))
         AND    (:date_to          IS NULL OR h.STATEMENT_DATE <= TO_DATE(:date_to,   'YYYY-MM-DD'))
