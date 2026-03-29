@@ -588,6 +588,14 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
   // Load LOVs
   const loadLovs = useCallback(async () => {
     try {
+      // Business units from dedicated endpoint
+      const buRes  = await fetch(`${APEX_BASE}/gl/businessunits`);
+      const buData = await buRes.json();
+      const buItems: string[] = (buData?.items ?? []).map((i: any) => i.business_unit_name).filter(Boolean);
+      setBusinessUnits(buItems.sort().map(n => ({ label: n, value: n })));
+    } catch { /* silent */ }
+
+    try {
       // Bank accounts from dedicated endpoint
       const baRes  = await fetch(`${APEX_BASE}/banks/bankaccounts`);
       const baData = await parseApexJson(baRes);
@@ -601,11 +609,6 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
           cashAccountCombination: i.cashAccountCombination,
         }));
         setBankAccounts(accts);
-
-        // Derive BUs from legal entity names on bank accounts
-        const buSet = new Set<string>();
-        baData.items.forEach((i: any) => { if (i.legalEntityName) buSet.add(i.legalEntityName); });
-        setBusinessUnits([...buSet].sort().map(n => ({ label: n, value: n })));
       }
     } catch { /* silent */ }
   }, []);
