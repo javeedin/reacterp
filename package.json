@@ -69,7 +69,7 @@
     "extraResources": [
       {
         "from": "electron/email.config.json",
-        "to": "app/electron/email.config.json"
+        "to": "email.config.json"
       }
     ],
     "asar": false,

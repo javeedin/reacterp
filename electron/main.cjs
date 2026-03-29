@@ -9,17 +9,28 @@ let nodemailer = null;
 try { nodemailer = require('nodemailer'); } catch (_) { /* optional */ }
 
 // ── Email sender (IPC) ──────────────────────────────────────────────────────
-// Credentials are read from electron/email.config.json (gitignored)
+// Credentials are read from electron/email.config.json
 function loadSmtpConfig() {
-  try {
-    const configPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'app', 'electron', 'email.config.json')
-      : path.join(__dirname, 'email.config.json');
-    return JSON.parse(fs.readFileSync(configPath, 'utf8'));
-  } catch (e) {
-    console.error('email.config.json not found:', e.message);
-    return null;
+  // Try all candidate paths — covers dev, packaged (asar:false), and portable exe
+  const candidates = [
+    path.join(__dirname, 'email.config.json'),                                          // dev: electron/email.config.json
+    path.join(process.resourcesPath, 'email.config.json'),                             // packaged: extraResources copies here
+    path.join(app.getAppPath(), 'electron', 'email.config.json'),                      // packaged asar:false: {resources}/app/electron/
+    path.join(process.resourcesPath, 'app', 'electron', 'email.config.json'),          // fallback
+  ];
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) {
+        const cfg = JSON.parse(fs.readFileSync(p, 'utf8'));
+        console.log('Loaded email config from:', p);
+        return cfg;
+      }
+    } catch (e) {
+      console.error('Failed to read config at', p, ':', e.message);
+    }
   }
+  console.error('email.config.json not found. Tried:\n' + candidates.join('\n'));
+  return null;
 }
 
 ipcMain.handle('send-otp-email', async (_event, { to, otp }) => {
