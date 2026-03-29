@@ -11,32 +11,31 @@ try { nodemailer = require('nodemailer'); } catch (_) { /* optional */ }
 // ── Email sender (IPC) ──────────────────────────────────────────────────────
 // Credentials are read from electron/email.config.json
 function loadSmtpConfig() {
-  // Try all candidate paths — covers dev, packaged (asar:false), and portable exe
-  const candidates = [
-    path.join(__dirname, 'email.config.json'),                                          // dev: electron/email.config.json
-    path.join(process.resourcesPath, 'email.config.json'),                             // packaged: extraResources copies here
-    path.join(app.getAppPath(), 'electron', 'email.config.json'),                      // packaged asar:false: {resources}/app/electron/
-    path.join(process.resourcesPath, 'app', 'electron', 'email.config.json'),          // fallback
-  ];
+  // Build candidates safely — process.resourcesPath / app.getAppPath() may throw before app ready
+  const candidates = [path.join(__dirname, 'email.config.json')];
+  try { candidates.push(path.join(process.resourcesPath, 'email.config.json')); } catch (_) {}
+  try { candidates.push(path.join(app.getAppPath(), 'electron', 'email.config.json')); } catch (_) {}
+  try { candidates.push(path.join(process.resourcesPath, 'app', 'electron', 'email.config.json')); } catch (_) {}
+
   for (const p of candidates) {
     try {
       if (fs.existsSync(p)) {
         const cfg = JSON.parse(fs.readFileSync(p, 'utf8'));
-        console.log('Loaded email config from:', p);
+        console.log('[email] Loaded config from:', p);
         return cfg;
       }
     } catch (e) {
-      console.error('Failed to read config at', p, ':', e.message);
+      console.error('[email] Error reading', p, ':', e.message);
     }
   }
-  console.error('email.config.json not found. Tried:\n' + candidates.join('\n'));
+  console.error('[email] Config not found. Tried:\n  ' + candidates.join('\n  '));
   return null;
 }
 
 ipcMain.handle('send-otp-email', async (_event, { to, otp }) => {
   if (!nodemailer) return { success: false, error: 'nodemailer not available' };
   const smtpConfig = loadSmtpConfig();
-  if (!smtpConfig) return { success: false, error: 'Email config not found. Please set up electron/email.config.json.' };
+  if (!smtpConfig) return { success: false, error: `Email config not found. Expected at: ${path.join(__dirname, 'email.config.json')}` };
   try {
     const transporter = nodemailer.createTransport({
       host: smtpConfig.host,
