@@ -9,34 +9,60 @@ let nodemailer = null;
 try { nodemailer = require('nodemailer'); } catch (_) { /* optional */ }
 
 // ── Email sender (IPC) ──────────────────────────────────────────────────────
-// Credentials are read from electron/email.config.json
-function loadSmtpConfig() {
-  // Build candidates safely — process.resourcesPath / app.getAppPath() may throw before app ready
+const APEX_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp';
+
+// In-memory cache so we don't hit APEX on every OTP request
+let _smtpCache = null;
+let _smtpCacheAt = 0;
+const SMTP_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
+// 1. Try APEX DB  2. Fall back to local file
+async function loadSmtpConfig() {
+  // Return cached value if still fresh
+  if (_smtpCache && (Date.now() - _smtpCacheAt) < SMTP_CACHE_TTL) {
+    return _smtpCache;
+  }
+
+  // ── Primary: fetch from APEX DB ──
+  try {
+    const res = await fetch(`${APEX_BASE}/config/emailsettings`);
+    const data = await res.json();
+    if (data.status === 'success') {
+      console.log('[email] Config loaded from APEX DB');
+      _smtpCache = { host: data.host, port: data.port, secure: data.secure === true || data.secure === 'true', user: data.user, pass: data.pass, fromName: data.fromName };
+      _smtpCacheAt = Date.now();
+      return _smtpCache;
+    }
+  } catch (e) {
+    console.warn('[email] APEX fetch failed, trying local file:', e.message);
+  }
+
+  // ── Fallback: local email.config.json ──
   const candidates = [path.join(__dirname, 'email.config.json')];
   try { candidates.push(path.join(process.resourcesPath, 'email.config.json')); } catch (_) {}
   try { candidates.push(path.join(app.getAppPath(), 'electron', 'email.config.json')); } catch (_) {}
-  try { candidates.push(path.join(process.resourcesPath, 'app', 'electron', 'email.config.json')); } catch (_) {}
 
   for (const p of candidates) {
     try {
       if (fs.existsSync(p)) {
-        const raw = fs.readFileSync(p, 'utf8').replace(/^\uFEFF/, ''); // strip UTF-8 BOM (PowerShell 5.x)
+        const raw = fs.readFileSync(p, 'utf8').replace(/^\uFEFF/, '');
         const cfg = JSON.parse(raw);
-        console.log('[email] Loaded config from:', p);
+        console.log('[email] Config loaded from local file:', p);
         return cfg;
       }
     } catch (e) {
       console.error('[email] Error reading', p, ':', e.message);
     }
   }
-  console.error('[email] Config not found. Tried:\n  ' + candidates.join('\n  '));
+
+  console.error('[email] No config found in APEX DB or local file.');
   return null;
 }
 
 ipcMain.handle('send-otp-email', async (_event, { to, otp }) => {
   if (!nodemailer) return { success: false, error: 'nodemailer not available' };
-  const smtpConfig = loadSmtpConfig();
-  if (!smtpConfig) return { success: false, error: `Email config not found. Expected at: ${path.join(__dirname, 'email.config.json')}` };
+  const smtpConfig = await loadSmtpConfig();
+  if (!smtpConfig) return { success: false, error: 'Email config not found. Please add SMTP settings to RR_EMAIL_CONFIG table in APEX.' };
   try {
     const transporter = nodemailer.createTransport({
       host: smtpConfig.host,
@@ -46,7 +72,7 @@ ipcMain.handle('send-otp-email', async (_event, { to, otp }) => {
       tls: { rejectUnauthorized: false },
     });
     await transporter.sendMail({
-      from: `"ReactERP" <${smtpConfig.user}>`,
+      from: `"${smtpConfig.fromName || 'ReactERP'}" <${smtpConfig.user}>`,
       to,
       subject: 'ReactERP — Your One-Time Password (OTP)',
       text: [
