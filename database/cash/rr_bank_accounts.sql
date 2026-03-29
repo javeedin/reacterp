@@ -388,7 +388,7 @@ BEGIN
                LEGAL_ENTITY_NAME,
                CASH_ACCOUNT_COMBINATION
           FROM RR_BANK_ACCOUNTS
-         WHERE ACTIVE_FLAG = 'Y'
+         WHERE (END_DATE IS NULL OR END_DATE >= SYSDATE)
          ORDER BY BANK_ACCOUNT_NAME
     ) LOOP
         IF NOT l_first THEN l_json := l_json || ','; END IF;
