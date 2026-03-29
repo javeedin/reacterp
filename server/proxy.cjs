@@ -6,20 +6,45 @@ const path    = require('path');
 let nodemailer = null;
 try { nodemailer = require('nodemailer'); } catch (_) {}
 
-function loadEmailConfig() {
+const APEX_BASE_URL = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp';
+
+// In-memory cache — avoids hitting APEX on every OTP request
+let _smtpCache = null;
+let _smtpCacheAt = 0;
+const SMTP_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
+// 1. Fetch from APEX DB  2. Fall back to local file
+async function loadEmailConfig() {
+  if (_smtpCache && (Date.now() - _smtpCacheAt) < SMTP_CACHE_TTL) return _smtpCache;
+
+  // ── Primary: APEX DB ──
+  try {
+    const res  = await fetch(`${APEX_BASE_URL}/config/emailsettings`);
+    const data = await res.json();
+    if (data.status === 'success') {
+      console.log('[email] Config loaded from APEX DB');
+      _smtpCache  = { host: data.host, port: data.port, secure: data.secure === true || data.secure === 'true', user: data.user, pass: data.pass, fromName: data.fromName };
+      _smtpCacheAt = Date.now();
+      return _smtpCache;
+    }
+  } catch (e) {
+    console.warn('[email] APEX fetch failed, trying local file:', e.message);
+  }
+
+  // ── Fallback: local file ──
   const attempts = [
     path.join(__dirname, '..', 'electron', 'email.config.json'),
     path.join(process.cwd(), 'electron', 'email.config.json'),
   ];
   for (const cfgPath of attempts) {
     try {
-      const raw = fs.readFileSync(cfgPath, 'utf8').replace(/^\uFEFF/, ''); // strip BOM
+      const raw = fs.readFileSync(cfgPath, 'utf8').replace(/^\uFEFF/, '');
       const cfg = JSON.parse(raw);
-      console.log('[email] Config loaded from:', cfgPath);
+      console.log('[email] Config loaded from local file:', cfgPath);
       return cfg;
     } catch (_) {}
   }
-  console.error('[email] email.config.json not found. Tried:', attempts);
+  console.error('[email] No config found in APEX DB or local file.');
   return null;
 }
 
@@ -719,9 +744,9 @@ app.post('/api/send-email', async (req, res) => {
   const { to, otp } = req.body || {};
   if (!to || !otp) return res.status(400).json({ success: false, error: 'to and otp are required' });
 
-  const cfg = loadEmailConfig();
-  if (!cfg) return res.status(500).json({ success: false, error: 'email.config.json not found' });
-  if (!cfg.pass) return res.status(500).json({ success: false, error: 'Brevo API key not configured in email.config.json' });
+  const cfg = await loadEmailConfig();
+  if (!cfg) return res.status(500).json({ success: false, error: 'Email config not found in APEX DB or local file' });
+  if (!cfg.pass) return res.status(500).json({ success: false, error: 'Brevo API key not configured' });
 
   console.log(`[send-email] Sending OTP to: ${to}`);
   console.log(`[send-email] Using sender: ${cfg.user}`);
@@ -729,7 +754,7 @@ app.post('/api/send-email', async (req, res) => {
 
   try {
     const payload = {
-      sender: { name: 'ReactERP', email: cfg.user },
+      sender: { name: cfg.fromName || 'ReactERP', email: cfg.user },
       to: [{ email: to }],
       subject: 'ReactERP — Your One-Time Password (OTP)',
       htmlContent: `
