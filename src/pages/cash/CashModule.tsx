@@ -31,8 +31,8 @@ const transferItems: MenuItemType[] = [
 ];
 
 const reconItems: MenuItemType[] = [
-  { key: 'bank-statements',  icon: <FileTextOutlined />,       label: 'Bank Statements',            description: 'Import and review bank statements',         color: REDWOOD.info },
-  { key: 'reconciliation',   icon: <ReconciliationOutlined />, label: 'Bank Reconciliation',        description: 'Reconcile bank statements with system',     color: REDWOOD.primary },
+  { key: 'bank-statements',  icon: <FileTextOutlined />,       label: 'Manage Bank Statements',     description: 'Import, create and review bank statements',  color: REDWOOD.info,    path: '/cash/bank-statements' },
+  { key: 'reconciliation',   icon: <ReconciliationOutlined />, label: 'Bank Reconciliation',        description: 'Reconcile bank statements with system',       color: REDWOOD.primary },
 ];
 
 const reportItems: MenuItemType[] = [
