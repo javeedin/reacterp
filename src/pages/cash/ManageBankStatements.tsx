@@ -144,14 +144,14 @@ function csvRowToLine(row: Record<string, string>): StatementLine {
 
 // ── StatementForm ─────────────────────────────────────────────────────────────
 const StatementForm: React.FC<{
-  initialHeader?: Partial<StatementHeader>;
-  initialLines?:  StatementLine[];
-  bankAccounts:   BankAcctOption[];
-  businessUnits:  BUOption[];
-  buLeMap:        Record<string, string>;
-  onSave:         () => void;
-  onCancel:       () => void;
-}> = ({ initialHeader, initialLines, bankAccounts, businessUnits, buLeMap, onSave, onCancel }) => {
+  initialHeader?:  Partial<StatementHeader>;
+  initialLines?:   StatementLine[];
+  bankAccounts:    BankAcctOption[];
+  businessUnits:   BUOption[];
+  buAccountsMap:   Record<string, string[]>;
+  onSave:          () => void;
+  onCancel:        () => void;
+}> = ({ initialHeader, initialLines, bankAccounts, businessUnits, buAccountsMap, onSave, onCancel }) => {
   const [form]    = Form.useForm();
   const [lines, setLines]       = useState<StatementLine[]>(initialLines ?? []);
   const [saving, setSaving]     = useState(false);
@@ -163,13 +163,12 @@ const StatementForm: React.FC<{
   const fileRef = useRef<HTMLInputElement>(null);
   const isEdit  = !!initialHeader?.statementId;
 
-  // Bank accounts filtered to selected BU (match via legal entity name from BU map, or fall back to all accounts)
+  // Bank accounts filtered to selected BU
   const filteredBankAccounts = selectedBu
     ? (() => {
-        const le = buLeMap[selectedBu];
-        // try matching by legal entity name first; fall back to showing all if no match found
-        const byLe = le ? bankAccounts.filter(a => a.legalEntityName === le) : [];
-        return byLe.length > 0 ? byLe : bankAccounts;
+        const names = buAccountsMap[selectedBu];
+        if (names && names.length > 0) return names.map(n => ({ label: n, value: n }));
+        return bankAccounts; // fall back to all if no BU→account mapping found
       })()
     : [];
 
@@ -591,36 +590,37 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
   const [searchForm] = Form.useForm();
   const modulePrefix = module === 'ap' ? '/ap' : '/cash';
 
-  // BU name → legal entity name map (for filtering bank accounts)
-  const [buLeMap, setBuLeMap] = useState<Record<string, string>>({});
+  // BU name → bank account names map (for filtering bank accounts by BU)
+  const [buAccountsMap, setBuAccountsMap] = useState<Record<string, string[]>>({});
 
   // Load LOVs
   const loadLovs = useCallback(async () => {
     try {
+      // BUs from dedicated endpoint
       const buRes  = await fetch(`${APEX_BASE}/gl/businessunits`);
       const buData = await buRes.json();
-      const items  = buData?.items ?? [];
-      const buItems: string[] = items.map((i: any) => i.business_unit_name).filter(Boolean);
+      const buItems: string[] = (buData?.items ?? []).map((i: any) => i.business_unit_name).filter(Boolean);
       setBusinessUnits(buItems.sort().map(n => ({ label: n, value: n })));
-      // build BU → legal entity map
-      const map: Record<string, string> = {};
-      items.forEach((i: any) => { if (i.business_unit_name) map[i.business_unit_name] = i.legal_entity_name ?? ''; });
-      setBuLeMap(map);
     } catch { /* silent */ }
 
     try {
-      const baRes  = await fetch(`${APEX_BASE}/banks/bankaccounts`);
-      const baData = await parseApexJson(baRes);
-      if (baData.status === 'success' && baData.items) {
-        const accts: BankAcctOption[] = baData.items.map((i: any) => ({
-          label: i.bankAccountName,
-          value: i.bankAccountName,
-          bankAccountNumber: i.bankAccountNumber,
-          currencyCode: i.currencyCode,
-          legalEntityName: i.legalEntityName,
-          cashAccountCombination: i.cashAccountCombination,
-        }));
-        setBankAccounts(accts);
+      // Bank accounts from external transactions — same source that works in other screens
+      const res  = await fetch(`${APEX_BASE}/cash/externaltransactions?row_limit=1000`);
+      const data = await parseApexJson(res);
+      if (data.status === 'success' && data.items) {
+        const acctSet = new Set<string>();
+        const buMap: Record<string, Set<string>> = {};
+        data.items.forEach((i: any) => {
+          if (i.bankAccountName) acctSet.add(i.bankAccountName);
+          if (i.businessUnitName && i.bankAccountName) {
+            if (!buMap[i.businessUnitName]) buMap[i.businessUnitName] = new Set();
+            buMap[i.businessUnitName].add(i.bankAccountName);
+          }
+        });
+        setBankAccounts([...acctSet].sort().map(n => ({ label: n, value: n })));
+        const flatMap: Record<string, string[]> = {};
+        Object.entries(buMap).forEach(([bu, set]) => { flatMap[bu] = [...set].sort(); });
+        setBuAccountsMap(flatMap);
       }
     } catch { /* silent */ }
   }, []);
@@ -817,7 +817,7 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
           initialLines={t.lines}
           bankAccounts={bankAccounts}
           businessUnits={businessUnits}
-          buLeMap={buLeMap}
+          buAccountsMap={buAccountsMap}
           onSave={() => { closeTab(t.key); handleSearch(); loadLovs(); }}
           onCancel={() => closeTab(t.key)}
         />
