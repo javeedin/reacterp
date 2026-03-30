@@ -266,13 +266,20 @@ const StatementForm: React.FC<{
     setLines(prev => prev.map(l => l._key === key ? { ...l, [field]: value } : l));
 
   const deleteLine = async (line: StatementLine) => {
+    const recon = line.reconStatus ?? 'UNRECONCILED';
+    if (recon === 'RECONCILED' || recon === 'PARTIALLY_RECONCILED') {
+      message.warning('Cannot delete a reconciled line.');
+      return;
+    }
     if (line.lineId) {
       try {
-        await fetch(`${APEX_BASE}/cash/bankstatements/${initialHeader?.statementId}/deleteline`, {
+        const res  = await fetch(`${APEX_BASE}/cash/bankstatements/${initialHeader?.statementId}/deleteline`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ lineId: line.lineId }),
         });
-      } catch { /* ignore */ }
+        const data = await res.json();
+        if (data.status === 'error') { message.error(data.message || 'Delete failed.'); return; }
+      } catch (e: any) { message.error('Network error: ' + e.message); return; }
     }
     setLines(prev => prev.filter(l => l._key !== line._key));
   };
@@ -401,10 +408,16 @@ const StatementForm: React.FC<{
     }] : []),
     {
       title: '', width: 40, align: 'center' as const,
-      render: (_, r) => (
-        <Button type="text" size="small" danger icon={<DeleteOutlined />}
-          onClick={() => deleteLine(r)} />
-      ),
+      render: (_, r) => {
+        const isReconciled = r.reconStatus === 'RECONCILED' || r.reconStatus === 'PARTIALLY_RECONCILED';
+        return (
+          <Tooltip title={isReconciled ? 'Cannot delete a reconciled line' : 'Delete line'}>
+            <Button type="text" size="small" danger icon={<DeleteOutlined />}
+              disabled={isReconciled}
+              onClick={() => deleteLine(r)} />
+          </Tooltip>
+        );
+      },
     },
   ];
 
@@ -784,8 +797,8 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
           ? { ...t, label: header.statementNumber ?? `Stmt #${statementId}`, header, lines }
           : t
       ));
-    } catch { message.warning('Statement saved. Reload to edit lines.'); }
-    handleSearch();
+      if (hasSearched) handleSearch();
+    } catch { message.warning('Statement saved. Refresh the page to continue editing.'); }
   };
 
   // Table columns
@@ -928,7 +941,7 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
           bankAccounts={bankAccounts}
           businessUnits={businessUnits}
           buAccountsMap={buAccountsMap}
-          onSave={() => { closeTab(t.key); handleSearch(); loadLovs(); }}
+          onSave={() => reloadTabAsEdit(t.key, t.header!.statementId!)}
           onCreated={(stmtId) => reloadTabAsEdit(t.key, stmtId)}
           onCancel={() => closeTab(t.key)}
         />
