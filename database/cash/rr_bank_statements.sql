@@ -659,8 +659,8 @@ BEGIN
     v_body := :body;
 
     -- Extract header and lines sub-objects
-    SELECT JSON_QUERY(v_body, '$.header'),
-           JSON_QUERY(v_body, '$.lines')
+    SELECT JSON_QUERY(v_body, '$.header' RETURNING CLOB),
+           JSON_QUERY(v_body, '$.lines'  RETURNING CLOB)
     INTO   v_header_json, v_lines_json
     FROM   DUAL;
 
