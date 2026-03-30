@@ -151,8 +151,9 @@ const StatementForm: React.FC<{
   businessUnits:   BUOption[];
   buAccountsMap:   Record<string, string[]>;
   onSave:          () => void;
+  onCreated:       (statementId: number) => void;
   onCancel:        () => void;
-}> = ({ initialHeader, initialLines, bankAccounts, businessUnits, buAccountsMap, onSave, onCancel }) => {
+}> = ({ initialHeader, initialLines, bankAccounts, businessUnits, buAccountsMap, onSave, onCreated, onCancel }) => {
   const [form]    = Form.useForm();
   const [lines, setLines]       = useState<StatementLine[]>(initialLines ?? []);
   const [saving, setSaving]     = useState(false);
@@ -313,8 +314,13 @@ const StatementForm: React.FC<{
       });
       const data = await res.json();
       if (data.status === 'success') {
-        message.success(isEdit ? 'Statement updated.' : 'Statement created.');
-        onSave();
+        if (isEdit) {
+          message.success('Statement updated.');
+          onSave();
+        } else {
+          message.success('Statement created. You can now add lines.');
+          onCreated(data.statementId);
+        }
       } else {
         message.error(data.message || 'Save failed.');
       }
@@ -766,6 +772,22 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
     if (activeTabKey === key) setActiveTabKey('search');
   };
 
+  // After creating a new statement, reload the same tab as edit so lines can be added immediately
+  const reloadTabAsEdit = async (tabKey: string, statementId: number) => {
+    try {
+      const res  = await fetch(`${APEX_BASE}/cash/bankstatements/${statementId}`);
+      const data = await parseApexJson(res);
+      const header: StatementHeader = data.header ?? data;
+      const lines: StatementLine[]  = (data.lines ?? []).map((l: any) => ({ ...l, _key: newKey() }));
+      setTabs(prev => prev.map(t =>
+        t.key === tabKey
+          ? { ...t, label: header.statementNumber ?? `Stmt #${statementId}`, header, lines }
+          : t
+      ));
+    } catch { message.warning('Statement saved. Reload to edit lines.'); }
+    handleSearch();
+  };
+
   // Table columns
   const columns: ColumnsType<StatementHeader> = [
     { title: 'Business Unit', dataIndex: 'businessUnitName', width: 180, ellipsis: true,
@@ -907,6 +929,7 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
           businessUnits={businessUnits}
           buAccountsMap={buAccountsMap}
           onSave={() => { closeTab(t.key); handleSearch(); loadLovs(); }}
+          onCreated={(stmtId) => reloadTabAsEdit(t.key, stmtId)}
           onCancel={() => closeTab(t.key)}
         />
       ),
