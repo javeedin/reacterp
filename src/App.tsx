@@ -45,6 +45,7 @@ import CashModule from './pages/cash/CashModule';
 import ManageBankTransfers from './pages/cash/ManageBankTransfers';
 import ManageExternalTransactions from './pages/cash/ManageExternalTransactions';
 import ManageBankStatements from './pages/cash/ManageBankStatements';
+import BankReconciliation from './pages/cash/BankReconciliation';
 
 // Placeholder component for modules under development
 const ComingSoon = ({ moduleName }: { moduleName: string }) => (
@@ -157,6 +158,8 @@ function App() {
               <Route path="cash/external-transactions" element={<ManageExternalTransactions module="cash" />} />
               {/* Bank Statements */}
               <Route path="cash/bank-statements" element={<ManageBankStatements module="cash" />} />
+              {/* Bank Reconciliation */}
+              <Route path="cash/bank-reconciliation" element={<BankReconciliation />} />
               <Route path="ap/external-transactions"   element={<ManageExternalTransactions module="ap" />} />
               <Route path="sync/*" element={<SyncData />} />
             </Route>
