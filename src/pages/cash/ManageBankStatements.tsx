@@ -9,6 +9,7 @@ import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, BankOutlined, PlusOutlined, SearchOutlined, ReloadOutlined,
   EditOutlined, CloseOutlined, DeleteOutlined, UploadOutlined, DownloadOutlined,
+  ApiOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 
@@ -160,8 +161,67 @@ const StatementForm: React.FC<{
   const [csvPreview, setCsvPreview] = useState<StatementLine[]>([]);
   const [csvErrors, setCsvErrors]   = useState<string[]>([]);
   const [selectedBu, setSelectedBu] = useState<string | undefined>(initialHeader?.businessUnitName);
+  const [apiModal, setApiModal]       = useState(false);
+  const [apiPayload, setApiPayload]   = useState('');
+  const [apiPosting, setApiPosting]   = useState(false);
+  const [apiResponse, setApiResponse] = useState<{ status: number; body: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const isEdit  = !!initialHeader?.statementId;
+
+  const buildPayload = (hdrValues: any) => ({
+    header: {
+      statementId:      initialHeader?.statementId,
+      statementNumber:  hdrValues.statementNumber,
+      bankAccountName:  hdrValues.bankAccountName,
+      bankAccountNumber: hdrValues.bankAccountNumber ?? '',
+      statementDate:    (hdrValues.statementDate as Dayjs).format('YYYY-MM-DD'),
+      currencyCode:     hdrValues.currencyCode ?? '',
+      openingBalance:   hdrValues.openingBalance ?? 0,
+      closingBalance:   hdrValues.closingBalance ?? 0,
+      businessUnitName: hdrValues.businessUnitName ?? '',
+      description:      hdrValues.description ?? '',
+      status:           hdrValues.status ?? 'DRAFT',
+      createdBy:        'ERP_USER',
+      lastUpdatedBy:    'ERP_USER',
+    },
+    lines: lines.map(l => ({
+      lineId:              l.lineId,
+      transactionDate:     l.transactionDate,
+      valueDate:           l.valueDate || null,
+      amount:              l.amount,
+      transactionCode:     l.transactionCode,
+      description:         l.description ?? '',
+      reference:           l.reference ?? '',
+      bankTxnReference:    l.bankTxnReference ?? '',
+      counterpartyName:    l.counterpartyName ?? '',
+      counterpartyAccount: l.counterpartyAccount ?? '',
+      createdBy:           'ERP_USER',
+      lastUpdatedBy:       'ERP_USER',
+    })),
+  });
+
+  const handleApiOpen = async () => {
+    let hdrValues: any;
+    try { hdrValues = await form.validateFields(); } catch { return; }
+    setApiPayload(JSON.stringify(buildPayload(hdrValues), null, 2));
+    setApiResponse(null);
+    setApiModal(true);
+  };
+
+  const handleApiPost = async () => {
+    setApiPosting(true);
+    setApiResponse(null);
+    try {
+      const res = await fetch(`${APEX_BASE}/cash/bankstatements`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: apiPayload,
+      });
+      const text = await res.text();
+      setApiResponse({ status: res.status, body: (() => { try { return JSON.stringify(JSON.parse(text), null, 2); } catch { return text; } })() });
+    } catch (e: any) {
+      setApiResponse({ status: 0, body: 'Network error: ' + e.message });
+    } finally { setApiPosting(false); }
+  };
 
   // Bank accounts filtered to selected BU
   const filteredBankAccounts = selectedBu
@@ -245,37 +305,7 @@ const StatementForm: React.FC<{
 
     setSaving(true);
     try {
-      const payload = {
-        header: {
-          statementId:     initialHeader?.statementId,
-          statementNumber: hdrValues.statementNumber,
-          bankAccountName: hdrValues.bankAccountName,
-          bankAccountNumber: hdrValues.bankAccountNumber ?? '',
-          statementDate:   (hdrValues.statementDate as Dayjs).format('YYYY-MM-DD'),
-          currencyCode:    hdrValues.currencyCode ?? '',
-          openingBalance:  hdrValues.openingBalance ?? 0,
-          closingBalance:  hdrValues.closingBalance ?? 0,
-          businessUnitName: hdrValues.businessUnitName ?? '',
-          description:     hdrValues.description ?? '',
-          status:          hdrValues.status ?? 'DRAFT',
-          createdBy:       'ERP_USER',
-          lastUpdatedBy:   'ERP_USER',
-        },
-        lines: lines.map(l => ({
-          lineId:             l.lineId,
-          transactionDate:    l.transactionDate,
-          valueDate:          l.valueDate || null,
-          amount:             l.amount,
-          transactionCode:    l.transactionCode,
-          description:        l.description ?? '',
-          reference:          l.reference ?? '',
-          bankTxnReference:   l.bankTxnReference ?? '',
-          counterpartyName:   l.counterpartyName ?? '',
-          counterpartyAccount: l.counterpartyAccount ?? '',
-          createdBy:          'ERP_USER',
-          lastUpdatedBy:      'ERP_USER',
-        })),
-      };
+      const payload = buildPayload(hdrValues);
 
       const res  = await fetch(`${APEX_BASE}/cash/bankstatements`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -497,13 +527,71 @@ const StatementForm: React.FC<{
       />
 
       <Divider />
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-        <Button onClick={onCancel}>Cancel</Button>
-        <Button type="primary" loading={saving} onClick={handleSave}
-          style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
-          {isEdit ? 'Save Changes' : 'Create Statement'}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Button icon={<ApiOutlined />} onClick={handleApiOpen} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>
+          API
         </Button>
+        <Space>
+          <Button onClick={onCancel}>Cancel</Button>
+          <Button type="primary" loading={saving} onClick={handleSave}
+            style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
+            {isEdit ? 'Save Changes' : 'Create Statement'}
+          </Button>
+        </Space>
       </div>
+
+      {/* ── API Inspector Modal ── */}
+      <Modal
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>API Inspector — POST /cash/bankstatements</span></Space>}
+        open={apiModal}
+        onCancel={() => setApiModal(false)}
+        width={820}
+        footer={null}
+        styles={{ body: { padding: '16px 24px' } }}
+      >
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          Endpoint: <Text code copyable style={{ fontSize: 12 }}>{APEX_BASE}/cash/bankstatements</Text>
+        </Text>
+
+        <Divider style={{ margin: '12px 0 8px' }} />
+
+        <Text strong style={{ fontSize: 13 }}>Request Body (JSON)</Text>
+        <pre style={{
+          background: '#1e1e2e', color: '#cdd6f4', padding: 16, borderRadius: 6,
+          fontSize: 12, overflowX: 'auto', maxHeight: 360, whiteSpace: 'pre-wrap',
+          wordBreak: 'break-all', margin: '8px 0 0',
+        }}>
+          {apiPayload}
+        </pre>
+
+        <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end' }}>
+          <Button type="primary" icon={<ApiOutlined />} loading={apiPosting} onClick={handleApiPost}
+            style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}>
+            POST Request
+          </Button>
+        </div>
+
+        {apiResponse && (
+          <>
+            <Divider style={{ margin: '16px 0 10px' }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              <Text strong>Response</Text>
+              <Tag color={apiResponse.status >= 200 && apiResponse.status < 300 ? 'success' : 'error'}>
+                HTTP {apiResponse.status || 'Error'}
+              </Tag>
+            </div>
+            <pre style={{
+              background: apiResponse.status >= 200 && apiResponse.status < 300 ? '#f6ffed' : '#fff2f0',
+              border: `1px solid ${apiResponse.status >= 200 && apiResponse.status < 300 ? '#b7eb8f' : '#ffccc7'}`,
+              color: REDWOOD.neutral900, padding: 16, borderRadius: 6,
+              fontSize: 12, overflowX: 'auto', maxHeight: 240, whiteSpace: 'pre-wrap',
+              wordBreak: 'break-all', margin: 0,
+            }}>
+              {apiResponse.body}
+            </pre>
+          </>
+        )}
+      </Modal>
 
       {/* ── CSV Import Modal ── */}
       <Modal
