@@ -656,7 +656,7 @@ DECLARE
     v_error      VARCHAR2(4000);
 BEGIN
     -- Read request body
-    v_body := :body;
+    v_body := :body_text;
 
     -- Extract header and lines sub-objects
     SELECT JSON_QUERY(v_body, '$.header' RETURNING CLOB),
@@ -869,7 +869,7 @@ DECLARE
 BEGIN
     SELECT jt.line_id
     INTO   v_line_id
-    FROM   JSON_TABLE(:body, '$'
+    FROM   JSON_TABLE(:body_text, '$'
              COLUMNS (line_id NUMBER PATH '$.lineId')
            ) jt;
 
@@ -923,7 +923,7 @@ BEGIN
            jt.recon_amount,
            jt.notes
     INTO   v_line_id, v_txn_type, v_txn_id, v_txn_number, v_recon_amt, v_notes
-    FROM   JSON_TABLE(:body, '$'
+    FROM   JSON_TABLE(:body_text, '$'
              COLUMNS (
                line_id     NUMBER        PATH '$.lineId',
                txn_type    VARCHAR2(30)  PATH '$.txnType',
