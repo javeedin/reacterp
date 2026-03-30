@@ -3,7 +3,7 @@ import dayjs, { type Dayjs } from 'dayjs';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input, Select,
   DatePicker, InputNumber, Row, Col, Space, Tag, Tooltip, Tabs, Collapse,
-  message, Empty, Divider, Badge,
+  message, Empty, Divider, Badge, Segmented,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { TableRowSelection } from 'antd/es/table/interface';
@@ -66,14 +66,26 @@ interface SysTxn {
   txnDate: string;
   amount: number;
   currencyCode?: string;
-  payee?: string;
-  supplierNumber?: string;
   businessUnit?: string;
-  paymentStatus?: string;
-  paymentType?: string;
   bankAccountName?: string;
   reconciledFlag?: string;
-  source: string; // 'AP_PAYMENT'
+  txnStatus?: string;
+  source: 'AP_PAYMENT' | 'AR_RECEIPT' | 'GL_JOURNAL' | string;
+  // AP Payment
+  payee?: string;
+  supplierNumber?: string;
+  paymentMethod?: string;
+  paymentType?: string;
+  clearingDate?: string;
+  // AR Receipt
+  customerName?: string;
+  customerNumber?: string;
+  receiptMethod?: string;
+  // GL Journal
+  accountCode?: string;
+  accountDescription?: string;
+  journalCategory?: string;
+  lineDescription?: string;
 }
 
 interface BankAcctOption {
@@ -374,6 +386,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, loading
   const [loadingStmt, setLoadingStmt]         = useState(false);
   const [loadingSys, setLoadingSys]           = useState(false);
   const [reconciling, setReconciling]         = useState(false);
+  const [txnSourceFilter, setTxnSourceFilter] = useState<string>('ALL');
   const [selectedStmtKeys, setSelectedStmtKeys] = useState<React.Key[]>([]);
   const [selectedSysKeys, setSelectedSysKeys]   = useState<React.Key[]>([]);
   const [lastParams, setLastParams]           = useState<SearchParams | null>(null);
@@ -432,7 +445,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, loading
     }
   }, [msgApi]);
 
-  const fetchSysTxns = useCallback(async (params: SearchParams) => {
+  const fetchSysTxns = useCallback(async (params: SearchParams, txnType?: string) => {
     const q = new URLSearchParams();
     if (params.bankAccount) q.set('bank_account', params.bankAccount);
     if (params.dateFrom)   q.set('date_from',    params.dateFrom.format('YYYY-MM-DD'));
@@ -440,6 +453,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, loading
     if (params.amountMin != null) q.set('amount_min', String(params.amountMin));
     if (params.amountMax != null) q.set('amount_max', String(params.amountMax));
     if (params.reference) q.set('reference', params.reference);
+    if (txnType && txnType !== 'ALL') q.set('txn_type', txnType);
     q.set('reconciled', 'N');
     q.set('row_limit', '500');
 
@@ -489,8 +503,8 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, loading
       dateTo:   lastParams?.dateTo   ?? stmtDate,
     };
     fetchStmtLines(lineParams);
-    fetchSysTxns(txnParams);
-  }, [lastParams, fetchStmtLines, fetchSysTxns]);
+    fetchSysTxns(txnParams, txnSourceFilter);
+  }, [lastParams, fetchStmtLines, fetchSysTxns, txnSourceFilter]);
 
   const handleReset = useCallback(() => {
     setStatements([]);
@@ -508,7 +522,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, loading
     const selectedLines = stmtLines.filter((l) =>
       selectedStmtKeys.includes(l.lineId)
     );
-    const selectedTxns = sysTxns.filter((t) =>
+    const selectedTxns = filteredSysTxns.filter((t) =>
       selectedSysKeys.includes(t.txnId)
     );
 
@@ -523,7 +537,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, loading
 
       const body = {
         lineId:      line.lineId,
-        txnType:     'AP_PAYMENT',
+        txnType:     sysTxn.source,
         txnId:       sysTxn.txnId,
         txnNumber:   sysTxn.txnNumber,
         reconAmount: line.amount,
@@ -569,7 +583,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, loading
       fetchStmtLines(lastParams);
       fetchSysTxns(lastParams);
     }
-  }, [selectedStmtKeys, selectedSysKeys, stmtLines, sysTxns, lastParams, selectedStatement, handleSelectStatement, fetchStmtLines, fetchSysTxns, msgApi]);
+  }, [selectedStmtKeys, selectedSysKeys, stmtLines, filteredSysTxns, lastParams, selectedStatement, handleSelectStatement, fetchStmtLines, fetchSysTxns, msgApi]);
 
   // ── Column definitions ────────────────────────────────────────────────────
   const stmtColumns: ColumnsType<StmtLine> = [
@@ -640,35 +654,147 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, loading
     },
   ];
 
-  const sysColumns: ColumnsType<SysTxn> = [
+  const SOURCE_COLORS: Record<string, string> = {
+    AP_PAYMENT: 'geekblue',
+    AR_RECEIPT: 'green',
+    GL_JOURNAL: 'purple',
+  };
+
+  const colTxnNumber: ColumnsType<SysTxn>[number] = {
+    title: 'Txn #',
+    dataIndex: 'txnNumber',
+    key: 'txnNumber',
+    width: 130,
+    ellipsis: true,
+  };
+  const colDate: ColumnsType<SysTxn>[number] = {
+    title: 'Date',
+    dataIndex: 'txnDate',
+    key: 'txnDate',
+    width: 100,
+    render: (v: string) => fmtDate(v),
+  };
+  const colAmount: ColumnsType<SysTxn>[number] = {
+    title: 'Amount',
+    dataIndex: 'amount',
+    key: 'amount',
+    width: 110,
+    align: 'right',
+    render: (v: number) => <span style={{ fontWeight: 500 }}>{fmtAmount(v)}</span>,
+  };
+  const colCurrency: ColumnsType<SysTxn>[number] = {
+    title: 'CCY',
+    dataIndex: 'currencyCode',
+    key: 'currencyCode',
+    width: 55,
+    render: (v: string) => v || '—',
+  };
+  const colBU: ColumnsType<SysTxn>[number] = {
+    title: 'Business Unit',
+    dataIndex: 'businessUnit',
+    key: 'businessUnit',
+    width: 120,
+    ellipsis: true,
+    render: (v: string) => v || '—',
+  };
+  const colStatus: ColumnsType<SysTxn>[number] = {
+    title: 'Status',
+    dataIndex: 'txnStatus',
+    key: 'txnStatus',
+    width: 100,
+    render: (v: string) =>
+      v ? <Tag color={v === 'Cleared' || v === 'Applied' ? 'green' : 'blue'} style={{ margin: 0 }}>{v}</Tag> : <span>—</span>,
+  };
+
+  const sysColumnsAP: ColumnsType<SysTxn> = [
+    colTxnNumber,
+    colDate,
+    colAmount,
+    colCurrency,
     {
-      title: 'Payment #',
-      dataIndex: 'txnNumber',
-      key: 'txnNumber',
-      width: 120,
+      title: 'Supplier / Payee',
+      dataIndex: 'payee',
+      key: 'payee',
       ellipsis: true,
-    },
-    {
-      title: 'Date',
-      dataIndex: 'txnDate',
-      key: 'txnDate',
-      width: 100,
-      render: (v: string) => fmtDate(v),
-    },
-    {
-      title: 'Amount',
-      dataIndex: 'amount',
-      key: 'amount',
-      width: 110,
-      align: 'right',
-      render: (v: number) => (
-        <span style={{ fontWeight: 500 }}>{fmtAmount(v)}</span>
+      render: (v: string, r) => (
+        <Tooltip title={r.supplierNumber ? `${v} (${r.supplierNumber})` : v}>
+          <span>{v || '—'}</span>
+        </Tooltip>
       ),
     },
     {
-      title: 'Payee',
-      dataIndex: 'payee',
-      key: 'payee',
+      title: 'Payment Method',
+      dataIndex: 'paymentMethod',
+      key: 'paymentMethod',
+      width: 130,
+      render: (v: string) => v || '—',
+    },
+    {
+      title: 'Clearing Date',
+      dataIndex: 'clearingDate',
+      key: 'clearingDate',
+      width: 110,
+      render: (v: string) => fmtDate(v),
+    },
+    colStatus,
+    colBU,
+  ];
+
+  const sysColumnsAR: ColumnsType<SysTxn> = [
+    colTxnNumber,
+    colDate,
+    colAmount,
+    colCurrency,
+    {
+      title: 'Customer',
+      dataIndex: 'customerName',
+      key: 'customerName',
+      ellipsis: true,
+      render: (v: string, r) => (
+        <Tooltip title={r.customerNumber ? `${v} (${r.customerNumber})` : v}>
+          <span>{v || '—'}</span>
+        </Tooltip>
+      ),
+    },
+    {
+      title: 'Receipt Method',
+      dataIndex: 'receiptMethod',
+      key: 'receiptMethod',
+      width: 130,
+      render: (v: string) => v || '—',
+    },
+    colStatus,
+    colBU,
+  ];
+
+  const sysColumnsGL: ColumnsType<SysTxn> = [
+    colTxnNumber,
+    colDate,
+    colAmount,
+    colCurrency,
+    {
+      title: 'Account',
+      dataIndex: 'accountCode',
+      key: 'accountCode',
+      width: 140,
+      ellipsis: true,
+      render: (v: string, r) => (
+        <Tooltip title={r.accountDescription || v}>
+          <span>{v || '—'}</span>
+        </Tooltip>
+      ),
+    },
+    {
+      title: 'Category',
+      dataIndex: 'journalCategory',
+      key: 'journalCategory',
+      width: 110,
+      render: (v: string) => v || '—',
+    },
+    {
+      title: 'Description',
+      dataIndex: 'lineDescription',
+      key: 'lineDescription',
       ellipsis: true,
       render: (v: string) => (
         <Tooltip title={v}>
@@ -676,29 +802,60 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, loading
         </Tooltip>
       ),
     },
-    {
-      title: 'Status',
-      dataIndex: 'paymentStatus',
-      key: 'paymentStatus',
-      width: 100,
-      render: (v: string) => (
-        <Tag color={v === 'Cleared' ? 'green' : 'blue'} style={{ margin: 0 }}>
-          {v || '—'}
-        </Tag>
-      ),
-    },
+    colBU,
+  ];
+
+  const sysColumnsAll: ColumnsType<SysTxn> = [
     {
       title: 'Source',
       dataIndex: 'source',
       key: 'source',
-      width: 100,
+      width: 105,
       render: (v: string) => (
-        <Tag color="geekblue" style={{ margin: 0 }}>
-          {v}
+        <Tag color={SOURCE_COLORS[v] ?? 'default'} style={{ margin: 0, fontSize: 11 }}>
+          {v === 'AP_PAYMENT' ? 'AP Payment' : v === 'AR_RECEIPT' ? 'AR Receipt' : v === 'GL_JOURNAL' ? 'GL Journal' : v}
         </Tag>
       ),
     },
+    colTxnNumber,
+    colDate,
+    colAmount,
+    colCurrency,
+    {
+      title: 'Party / Account',
+      key: 'party',
+      ellipsis: true,
+      render: (_: unknown, r: SysTxn) => {
+        const val = r.payee || r.customerName || r.accountCode || '—';
+        const sub = r.supplierNumber || r.customerNumber || r.accountDescription;
+        return (
+          <Tooltip title={sub ? `${val} (${sub})` : val}>
+            <span>{val}</span>
+          </Tooltip>
+        );
+      },
+    },
+    {
+      title: 'Method / Category',
+      key: 'method',
+      width: 130,
+      ellipsis: true,
+      render: (_: unknown, r: SysTxn) =>
+        r.paymentMethod || r.receiptMethod || r.journalCategory || '—',
+    },
+    colStatus,
+    colBU,
   ];
+
+  const sysColumns =
+    txnSourceFilter === 'AP_PAYMENT' ? sysColumnsAP :
+    txnSourceFilter === 'AR_RECEIPT' ? sysColumnsAR :
+    txnSourceFilter === 'GL_JOURNAL' ? sysColumnsGL :
+    sysColumnsAll;
+
+  const filteredSysTxns = txnSourceFilter === 'ALL'
+    ? sysTxns
+    : sysTxns.filter((t) => t.source === txnSourceFilter);
 
   const stmtRowSelection: TableRowSelection<StmtLine> = {
     type: 'checkbox',
@@ -713,7 +870,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, loading
   };
 
   const stmtSelectedAmount = sumSelected(stmtLines, selectedStmtKeys);
-  const sysSelectedAmount  = sumSelected(sysTxns,  selectedSysKeys);
+  const sysSelectedAmount  = sumSelected(filteredSysTxns, selectedSysKeys);
   const difference         = stmtSelectedAmount - sysSelectedAmount;
 
   const canReconcile = selectedStmtKeys.length > 0 && selectedSysKeys.length > 0;
@@ -848,11 +1005,24 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, loading
           <Card
             size="small"
             title={
-              <Space>
+              <Space wrap>
                 <ReconciliationOutlined style={{ color: REDWOOD.primary }} />
-                <span style={{ fontWeight: 600 }}>System Transactions (AP)</span>
-                <Badge count={sysTxns.length} style={{ backgroundColor: REDWOOD.info }} showZero />
+                <span style={{ fontWeight: 600 }}>System Transactions</span>
+                <Badge count={filteredSysTxns.length} style={{ backgroundColor: REDWOOD.info }} showZero />
               </Space>
+            }
+            extra={
+              <Segmented
+                size="small"
+                value={txnSourceFilter}
+                onChange={(v) => setTxnSourceFilter(v as string)}
+                options={[
+                  { label: 'All', value: 'ALL' },
+                  { label: 'AP', value: 'AP_PAYMENT' },
+                  { label: 'AR', value: 'AR_RECEIPT' },
+                  { label: 'GL', value: 'GL_JOURNAL' },
+                ]}
+              />
             }
             styles={{ body: { padding: 0 } }}
           >
@@ -861,7 +1031,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, loading
               size="small"
               loading={loadingSys}
               columns={sysColumns}
-              dataSource={sysTxns}
+              dataSource={filteredSysTxns}
               rowSelection={sysRowSelection}
               pagination={false}
               scroll={{ x: 560, y: 420 }}
