@@ -648,19 +648,15 @@ BEGIN
         p_source_type    => ORDS.source_type_plsql,
         p_source         => q'[
 DECLARE
-    v_body       CLOB;
     v_header_json CLOB;
     v_lines_json  CLOB;
     v_stmt_id    NUMBER;
     v_count      NUMBER := 0;
     v_error      VARCHAR2(4000);
 BEGIN
-    -- Read request body
-    v_body := :body_text;
-
-    -- Extract header and lines sub-objects
-    SELECT JSON_QUERY(v_body, '$.header' RETURNING CLOB),
-           JSON_QUERY(v_body, '$.lines'  RETURNING CLOB)
+    -- Extract header and lines directly from request body
+    SELECT JSON_QUERY(:body_text, '$.header'),
+           JSON_QUERY(:body_text, '$.lines')
     INTO   v_header_json, v_lines_json
     FROM   DUAL;
 
