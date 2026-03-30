@@ -648,15 +648,29 @@ BEGIN
         p_source_type    => ORDS.source_type_plsql,
         p_source         => q'[
 DECLARE
-    v_body        VARCHAR2(32767);
+    v_body        CLOB;
     v_header_json CLOB;
     v_lines_json  CLOB;
-    v_stmt_id    NUMBER;
-    v_count      NUMBER := 0;
-    v_error      VARCHAR2(4000);
+    v_stmt_id     NUMBER;
+    v_count       NUMBER := 0;
+    v_error       VARCHAR2(4000);
+    v_dest_off    INTEGER := 1;
+    v_src_off     INTEGER := 1;
+    v_lang        INTEGER := DBMS_LOB.DEFAULT_LANG_CTX;
+    v_warn        INTEGER;
 BEGIN
-    -- Read stream once into local variable
-    v_body := :body_text;
+    -- Convert BLOB body to CLOB (reads :body once, types match)
+    DBMS_LOB.CREATETEMPORARY(v_body, TRUE);
+    DBMS_LOB.CONVERTTOCLOB(
+        dest_lob     => v_body,
+        src_blob     => :body,
+        amount       => DBMS_LOB.LOBMAXSIZE,
+        dest_offset  => v_dest_off,
+        src_offset   => v_src_off,
+        blob_csid    => NLS_CHARSET_ID('AL32UTF8'),
+        lang_context => v_lang,
+        warning      => v_warn
+    );
 
     -- Extract header and lines sub-objects
     SELECT JSON_QUERY(v_body, '$.header'),
@@ -696,6 +710,7 @@ BEGIN
           ',"linesProcessed":'                 || v_count   || '}');
 EXCEPTION
     WHEN OTHERS THEN
+        DBMS_LOB.FREETEMPORARY(v_body);
         HTP.P('{"status":"error","message":' || APEX_JSON.STRINGIFY(SQLERRM) || '}');
 END;
 ]',
