@@ -9,7 +9,7 @@ import type { ColumnsType } from 'antd/es/table';
 import type { TableRowSelection } from 'antd/es/table/interface';
 import {
   HomeOutlined, BankOutlined, SearchOutlined, ReloadOutlined,
-  CheckOutlined, CloseOutlined, ReconciliationOutlined,
+  CheckOutlined, CloseOutlined, ReconciliationOutlined, FileTextOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 
@@ -80,6 +80,18 @@ interface BankAcctOption {
   label: string;
   value: string;
   bankAccountNumber?: string;
+  currencyCode?: string;
+}
+
+interface BankStatement {
+  statementId: number;
+  statementNumber: string;
+  statementDate: string;
+  bankAccountName: string;
+  openingBalance?: number;
+  closingBalance?: number;
+  status?: string;
+  lineCount?: number;
   currencyCode?: string;
 }
 
@@ -172,7 +184,7 @@ const SearchPanel: React.FC<SearchPanelProps> = ({
           children: (
             <Form form={form} layout="vertical" size="small">
               <Row gutter={[12, 0]}>
-                <Col xs={24} sm={12} lg={6}>
+                <Col xs={24} sm={12} lg={7}>
                   <Form.Item
                     name="bankAccount"
                     label={<Text style={{ fontWeight: 600 }}>Bank Account</Text>}
@@ -210,12 +222,7 @@ const SearchPanel: React.FC<SearchPanelProps> = ({
                     <InputNumber style={{ width: '100%' }} min={0} placeholder="0.00" />
                   </Form.Item>
                 </Col>
-                <Col xs={24} sm={12} lg={2}>
-                  <Form.Item name="statementId" label="Statement #">
-                    <Input placeholder="Stmt #" />
-                  </Form.Item>
-                </Col>
-                <Col xs={24} sm={12} lg={2}>
+                <Col xs={24} sm={12} lg={3}>
                   <Form.Item name="reference" label="Reference">
                     <Input placeholder="Reference" />
                   </Form.Item>
@@ -244,6 +251,114 @@ const SearchPanel: React.FC<SearchPanelProps> = ({
   );
 };
 
+// ── Statement Selector ────────────────────────────────────────────────────────
+interface StatementSelectorProps {
+  statements: BankStatement[];
+  loading: boolean;
+  selectedId: number | null;
+  onSelect: (stmt: BankStatement) => void;
+}
+
+const StatementSelector: React.FC<StatementSelectorProps> = ({
+  statements, loading, selectedId, onSelect,
+}) => {
+  const columns: ColumnsType<BankStatement> = [
+    {
+      title: 'Statement #',
+      dataIndex: 'statementNumber',
+      key: 'statementNumber',
+      width: 140,
+      ellipsis: true,
+    },
+    {
+      title: 'Date',
+      dataIndex: 'statementDate',
+      key: 'statementDate',
+      width: 110,
+      render: (v: string) => fmtDate(v),
+    },
+    {
+      title: 'Status',
+      dataIndex: 'status',
+      key: 'status',
+      width: 130,
+      render: (v: string) => {
+        const color = v === 'RECONCILED' ? 'green' : v === 'PARTIALLY_RECONCILED' ? 'orange' : 'blue';
+        return v ? <Tag color={color} style={{ margin: 0 }}>{v.replace(/_/g, ' ')}</Tag> : '—';
+      },
+    },
+    {
+      title: 'Opening Bal',
+      dataIndex: 'openingBalance',
+      key: 'openingBalance',
+      width: 120,
+      align: 'right',
+      render: (v: number) => fmtAmount(v),
+    },
+    {
+      title: 'Closing Bal',
+      dataIndex: 'closingBalance',
+      key: 'closingBalance',
+      width: 120,
+      align: 'right',
+      render: (v: number) => fmtAmount(v),
+    },
+    {
+      title: 'Lines',
+      dataIndex: 'lineCount',
+      key: 'lineCount',
+      width: 70,
+      align: 'center',
+      render: (v: number) => v ?? '—',
+    },
+  ];
+
+  return (
+    <Card
+      size="small"
+      title={
+        <Space>
+          <FileTextOutlined style={{ color: REDWOOD.info }} />
+          <span style={{ fontWeight: 600 }}>Select a Bank Statement</span>
+          <Badge count={statements.length} style={{ backgroundColor: REDWOOD.info }} showZero />
+        </Space>
+      }
+      style={{ marginBottom: 16, border: `1px solid ${REDWOOD.neutral200}` }}
+      styles={{ body: { padding: 0 } }}
+    >
+      <Table<BankStatement>
+        rowKey="statementId"
+        size="small"
+        loading={loading}
+        columns={columns}
+        dataSource={statements}
+        rowSelection={{
+          type: 'radio',
+          selectedRowKeys: selectedId != null ? [selectedId] : [],
+          onChange: (_, rows) => rows[0] && onSelect(rows[0]),
+        }}
+        onRow={(record) => ({
+          onClick:  () => onSelect(record),
+          style:    {
+            cursor:          'pointer',
+            backgroundColor: record.statementId === selectedId ? REDWOOD.info + '12' : undefined,
+          },
+        })}
+        pagination={false}
+        scroll={{ x: 700, y: 200 }}
+        locale={{
+          emptyText: (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description="No statements found — select a bank account and search"
+            />
+          ),
+        }}
+      />
+    </Card>
+  );
+};
+
 // ── Unreconciled Tab ──────────────────────────────────────────────────────────
 interface UnreconciledTabProps {
   bankAccounts: BankAcctOption[];
@@ -251,6 +366,9 @@ interface UnreconciledTabProps {
 }
 
 const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, loadingAccounts }) => {
+  const [statements, setStatements]             = useState<BankStatement[]>([]);
+  const [loadingStmts, setLoadingStmts]         = useState(false);
+  const [selectedStatement, setSelectedStatement] = useState<BankStatement | null>(null);
   const [stmtLines, setStmtLines]             = useState<StmtLine[]>([]);
   const [sysTxns, setSysTxns]                 = useState<SysTxn[]>([]);
   const [loadingStmt, setLoadingStmt]         = useState(false);
@@ -260,6 +378,30 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, loading
   const [selectedSysKeys, setSelectedSysKeys]   = useState<React.Key[]>([]);
   const [lastParams, setLastParams]           = useState<SearchParams | null>(null);
   const [msgApi, contextHolder]               = message.useMessage();
+
+  const fetchStatements = useCallback(async (params: SearchParams) => {
+    const q = new URLSearchParams();
+    if (params.bankAccount) q.set('bank_account', params.bankAccount);
+    if (params.dateFrom)    q.set('date_from',    params.dateFrom.format('YYYY-MM-DD'));
+    if (params.dateTo)      q.set('date_to',      params.dateTo.format('YYYY-MM-DD'));
+    q.set('row_limit', '200');
+
+    setLoadingStmts(true);
+    try {
+      const res  = await fetch(`${APEX_BASE}/cash/bankstatements?${q.toString()}`);
+      const data = await parseApexJson(res);
+      if (data.status === 'success') {
+        setStatements((data.items ?? []) as BankStatement[]);
+      } else {
+        msgApi.error(data.message ?? 'Failed to load statements');
+      }
+    } catch (err) {
+      msgApi.error('Network error loading statements');
+      console.error(err);
+    } finally {
+      setLoadingStmts(false);
+    }
+  }, [msgApi]);
 
   const fetchStmtLines = useCallback(async (params: SearchParams) => {
     const q = new URLSearchParams();
@@ -324,13 +466,35 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, loading
       return;
     }
     setLastParams(params);
+    setSelectedStatement(null);
     setSelectedStmtKeys([]);
     setSelectedSysKeys([]);
-    fetchStmtLines(params);
-    fetchSysTxns(params);
-  }, [fetchStmtLines, fetchSysTxns, msgApi]);
+    setStmtLines([]);
+    setSysTxns([]);
+    fetchStatements(params);
+  }, [fetchStatements, msgApi]);
+
+  const handleSelectStatement = useCallback((stmt: BankStatement) => {
+    setSelectedStatement(stmt);
+    setSelectedStmtKeys([]);
+    setSelectedSysKeys([]);
+    const stmtDate = stmt.statementDate ? dayjs(stmt.statementDate) : null;
+    const lineParams: SearchParams = {
+      ...(lastParams ?? {}),
+      statementId: String(stmt.statementId),
+    };
+    const txnParams: SearchParams = {
+      ...(lastParams ?? {}),
+      dateFrom: lastParams?.dateFrom ?? stmtDate,
+      dateTo:   lastParams?.dateTo   ?? stmtDate,
+    };
+    fetchStmtLines(lineParams);
+    fetchSysTxns(txnParams);
+  }, [lastParams, fetchStmtLines, fetchSysTxns]);
 
   const handleReset = useCallback(() => {
+    setStatements([]);
+    setSelectedStatement(null);
     setStmtLines([]);
     setSysTxns([]);
     setSelectedStmtKeys([]);
@@ -397,13 +561,15 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, loading
       msgApi.error(`${errorCount} line(s) failed to reconcile`);
     }
 
-    if (lastParams) {
-      setSelectedStmtKeys([]);
-      setSelectedSysKeys([]);
+    setSelectedStmtKeys([]);
+    setSelectedSysKeys([]);
+    if (selectedStatement) {
+      handleSelectStatement(selectedStatement);
+    } else if (lastParams) {
       fetchStmtLines(lastParams);
       fetchSysTxns(lastParams);
     }
-  }, [selectedStmtKeys, selectedSysKeys, stmtLines, sysTxns, lastParams, fetchStmtLines, fetchSysTxns, msgApi]);
+  }, [selectedStmtKeys, selectedSysKeys, stmtLines, sysTxns, lastParams, selectedStatement, handleSelectStatement, fetchStmtLines, fetchSysTxns, msgApi]);
 
   // ── Column definitions ────────────────────────────────────────────────────
   const stmtColumns: ColumnsType<StmtLine> = [
@@ -561,6 +727,66 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, loading
         onSearch={handleSearch}
         onReset={handleReset}
       />
+
+      <StatementSelector
+        statements={statements}
+        loading={loadingStmts}
+        selectedId={selectedStatement?.statementId ?? null}
+        onSelect={handleSelectStatement}
+      />
+
+      {selectedStatement && (
+        <div
+          style={{
+            background:   REDWOOD.info + '12',
+            border:       `1px solid ${REDWOOD.info}40`,
+            borderRadius: 6,
+            padding:      '8px 14px',
+            marginBottom: 12,
+            display:      'flex',
+            gap:          20,
+            flexWrap:     'wrap',
+            alignItems:   'center',
+          }}
+        >
+          <Text style={{ fontSize: 12, color: REDWOOD.info, fontWeight: 600 }}>
+            Selected Statement:
+          </Text>
+          <Text style={{ fontSize: 12 }}>
+            <strong>{selectedStatement.statementNumber}</strong>
+          </Text>
+          <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>
+            {fmtDate(selectedStatement.statementDate)}
+          </Text>
+          <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>
+            {selectedStatement.bankAccountName}
+          </Text>
+          {selectedStatement.status && (
+            <Tag
+              color={
+                selectedStatement.status === 'RECONCILED'
+                  ? 'green'
+                  : selectedStatement.status === 'PARTIALLY_RECONCILED'
+                  ? 'orange'
+                  : 'blue'
+              }
+              style={{ margin: 0, fontSize: 11 }}
+            >
+              {selectedStatement.status.replace(/_/g, ' ')}
+            </Tag>
+          )}
+          {selectedStatement.openingBalance != null && (
+            <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>
+              Opening: <strong>{fmtAmount(selectedStatement.openingBalance)}</strong>
+            </Text>
+          )}
+          {selectedStatement.closingBalance != null && (
+            <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>
+              Closing: <strong>{fmtAmount(selectedStatement.closingBalance)}</strong>
+            </Text>
+          )}
+        </div>
+      )}
 
       <Row gutter={[16, 16]}>
         {/* ── LEFT: Bank Statement Lines ─────────────────────────────── */}
