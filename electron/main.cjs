@@ -3,7 +3,9 @@ const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 let autoUpdater = null;
-try { autoUpdater = require('electron-updater').autoUpdater; } catch (_) { /* not available in portable build */ }
+// Disabled: electron-updater runs synchronously at require() time before app.whenReady(),
+// blocking startup and making network calls to GitHub (via publish config in package.json).
+// try { autoUpdater = require('electron-updater').autoUpdater; } catch (_) { /* not available in portable build */ }
 
 let nodemailer = null;
 try { nodemailer = require('nodemailer'); } catch (_) { /* optional */ }
