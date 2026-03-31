@@ -735,18 +735,34 @@ export const syncGLBatchesOnly = async (
 
       // Insert batches to APEX
       updateProgress({ status: 'inserting' });
+
+      // Track per-batch results for test-mode summary
+      type BatchResult = { index: number; batchId: number | string; name: string; status: 'ok' | 'fail'; detail: string };
+      const batchResults: BatchResult[] = [];
+
       for (let i = 0; i < batches.length; i++) {
         if (abortSignal?.aborted) break;
 
         const batch = batches[i];
         const batchId = extractBatchIdFromHref(findChildLink(batch.links, 'journalHeaders') || '') || (offset + i + 1);
+        const batchName = batch.JournalBatchName || batch.JournalName || `Batch ${batchId}`;
+        const globalIndex = offset + i + 1;
+
+        // ── Per-batch fetch log (test mode only) ──────────────────────
+        if (testMode === true) {
+          log?.('info',
+            `[${globalIndex}/${totalCount}] FETCH → ID: ${batchId} | "${batchName}" | ` +
+            `Period: ${batch.DefaultPeriodName || '—'} | Status: ${batch.StatusMeaning || batch.Status || '—'} | ` +
+            `Source: ${batch.UserJeSourceName || '—'}`
+          );
+        }
 
         const batchPayload = {
           items: [{
             JeBatchId: batchId,
             AccountedPeriodType: batch.AccountedPeriodType,
             DefaultPeriodName: batch.DefaultPeriodName,
-            BatchName: batch.JournalBatchName || batch.JournalName,
+            BatchName: batchName,
             Status: batch.Status,
             ControlTotal: batch.ControlTotal,
             BatchDescription: batch.Description || batch.BatchDescription,
@@ -786,18 +802,56 @@ export const syncGLBatchesOnly = async (
           const insertResult = await insertToApex(APEX_DB_CONFIG.endpoints.journalBatches, batchPayload, log, false);
           if (apexOk(insertResult)) {
             updateProgress({ insertedBatches: progress.insertedBatches + 1 });
+            if (testMode === true) {
+              const n = insertResult.inserted ?? insertResult.syncedCount ?? insertResult.successCount ?? 1;
+              log?.('success', `[${globalIndex}/${totalCount}] ✓ INSERTED — ID: ${batchId} "${batchName}" (synced: ${n})`);
+              batchResults.push({ index: globalIndex, batchId, name: batchName, status: 'ok', detail: `synced: ${n}` });
+            }
           } else {
-            updateProgress({ errors: progress.errors + 1, lastError: apexErr(insertResult) });
-            log?.('error', `Batch ${batchId} insert failed: ${apexErr(insertResult)}`);
+            const err = apexErr(insertResult);
+            updateProgress({ errors: progress.errors + 1, lastError: err });
+            if (testMode === true) {
+              log?.('error', `[${globalIndex}/${totalCount}] ✗ FAILED   — ID: ${batchId} "${batchName}" → ${err}`);
+              log?.('warning', `    APEX Response: ${JSON.stringify(insertResult)}`);
+              batchResults.push({ index: globalIndex, batchId, name: batchName, status: 'fail', detail: err });
+            } else {
+              log?.('error', `Batch ${batchId} insert failed: ${err}`);
+            }
           }
         } catch (error) {
-          updateProgress({ errors: progress.errors + 1, lastError: String(error) });
-          log?.('error', `Batch ${batchId} error: ${error}`);
+          const err = String(error);
+          updateProgress({ errors: progress.errors + 1, lastError: err });
+          if (testMode === true) {
+            log?.('error', `[${globalIndex}/${totalCount}] ✗ ERROR    — ID: ${batchId} "${batchName}" → ${err}`);
+            batchResults.push({ index: globalIndex, batchId, name: batchName, status: 'fail', detail: err });
+          } else {
+            log?.('error', `Batch ${batchId} error: ${error}`);
+          }
         }
 
-        // Log progress every 50 batches
-        if ((progress.insertedBatches + progress.errors) % 50 === 0) {
+        // Log progress every 50 batches (non-test mode)
+        if (testMode !== true && (progress.insertedBatches + progress.errors) % 50 === 0) {
           log?.('info', `Progress: ${progress.insertedBatches} inserted, ${progress.errors} errors`);
+        }
+
+        // ── End-of-page summary (test mode, after all batches on this page) ──
+        if (testMode === true && i === batches.length - 1 && batchResults.length > 0) {
+          const failed = batchResults.filter((r) => r.status === 'fail');
+          log?.('step', '══════════════════════════════════════════════════════════');
+          log?.('step', `  BATCH SYNC SUMMARY — TEST MODE (${totalCount} records)`);
+          log?.('step', '══════════════════════════════════════════════════════════');
+          log?.('success', `  Fetched : ${batchResults.length}`);
+          log?.('success', `  Inserted: ${batchResults.filter((r) => r.status === 'ok').length}`);
+          if (failed.length > 0) {
+            log?.('error',   `  Failed  : ${failed.length}`);
+            log?.('step', '──── Failed Batches ────');
+            failed.forEach((r) => {
+              log?.('error', `  [${r.index}] ID: ${r.batchId}  "${r.name}"  →  ${r.detail}`);
+            });
+          } else {
+            log?.('success', `  Failed  : 0  — all batches synced successfully!`);
+          }
+          log?.('step', '══════════════════════════════════════════════════════════');
         }
       }
 
