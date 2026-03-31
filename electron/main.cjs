@@ -744,15 +744,15 @@ function setupAutoUpdater() {
     console.error('Auto-updater error:', err.message);
   });
 
-  // Check for updates after app starts (delay to not slow startup)
-  setTimeout(() => {
-    autoUpdater.checkForUpdates();
-  }, 5000);
+  // Check for updates after app starts (disabled — was slowing startup due to background auto-download)
+  // setTimeout(() => {
+  //   autoUpdater.checkForUpdates();
+  // }, 5000);
 
-  // Check again every 4 hours
-  setInterval(() => {
-    autoUpdater.checkForUpdates();
-  }, 4 * 60 * 60 * 1000);
+  // Check again every 4 hours (disabled)
+  // setInterval(() => {
+  //   autoUpdater.checkForUpdates();
+  // }, 4 * 60 * 60 * 1000);
 }
 
 // App lifecycle
@@ -764,7 +764,7 @@ app.whenReady().then(() => {
   // Defer non-critical startup to after window is painted (keeps open time fast)
   mainWindow.webContents.once('did-finish-load', () => {
     createTray();
-    setupAutoUpdater();
+    // setupAutoUpdater(); // Disabled: auto-update check was slowing down startup (auto-downloads in background)
   });
 
   app.on('activate', () => {
