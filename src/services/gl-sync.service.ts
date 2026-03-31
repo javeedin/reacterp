@@ -1,6 +1,19 @@
 import { ORACLE_FUSION_CONFIG, APEX_DB_CONFIG } from '../config/api.config';
 import { fetchFromOracle, fetchFromOracleUrl, insertToApex, fetchFromApex } from './sync-http';
 
+// Handles multiple APEX response formats:
+//   {success:true, inserted:N}           — new handlers (11_fix_gl_sync_rest_handlers.sql)
+//   {status:"SUCCESS", syncedCount:N}    — currently deployed handler
+//   {success:true, successCount:N}       — old HTP.P handler
+const apexOk = (r: any): boolean =>
+  r?.success === true ||
+  r?.inserted > 0 ||
+  r?.syncedCount > 0 ||
+  r?.successCount > 0 ||
+  r?.status === 'SUCCESS';
+
+const apexErr = (r: any): string =>
+  r?.error || r?.lastError || r?.message || (r?.errorCount > 0 ? `${r.errorCount} errors` : 'Insert failed');
 
 // Types
 export interface SyncProgress {
@@ -381,14 +394,14 @@ export const syncGLJournals = async (
 
         try {
           const headerInsertResult = await insertToApex(APEX_DB_CONFIG.endpoints.journalHeaders, headerPayload, log, verbose);
-          if (headerInsertResult.success || headerInsertResult.inserted > 0) {
+          if (apexOk(headerInsertResult)) {
             updateProgress({ totalHeadersInserted: progress.totalHeadersInserted + 1 });
             if (verbose) {
               log?.('success', `    ✓ Header inserted`);
             }
           } else {
-            updateProgress({ errors: progress.errors + 1, lastError: headerInsertResult.error || 'Header insert failed' });
-            log?.('error', `    ✗ Header insert failed: ${headerInsertResult.lastError || headerInsertResult.error}`);
+            updateProgress({ errors: progress.errors + 1, lastError: apexErr(headerInsertResult) });
+            log?.('error', `    ✗ Header insert failed: ${apexErr(headerInsertResult)}`);
           }
         } catch (error) {
           updateProgress({ errors: progress.errors + 1, lastError: String(error) });
@@ -406,15 +419,15 @@ export const syncGLJournals = async (
 
           try {
             const linesInsertResult = await insertToApex(APEX_DB_CONFIG.endpoints.journalLines, linesPayload, log, verbose);
-            if (linesInsertResult.success || linesInsertResult.inserted > 0) {
-              const insertedCount = linesInsertResult.inserted || lines.length;
+            if (apexOk(linesInsertResult)) {
+              const insertedCount = linesInsertResult.inserted ?? linesInsertResult.syncedCount ?? lines.length;
               updateProgress({ totalLinesInserted: progress.totalLinesInserted + insertedCount });
               if (verbose) {
                 log?.('success', `    ✓ ${insertedCount} lines inserted`);
               }
             } else {
-              updateProgress({ errors: progress.errors + 1, lastError: linesInsertResult.error || 'Lines insert failed' });
-              log?.('error', `    ✗ Lines insert failed: ${linesInsertResult.lastError || linesInsertResult.error}`);
+              updateProgress({ errors: progress.errors + 1, lastError: apexErr(linesInsertResult) });
+              log?.('error', `    ✗ Lines insert failed: ${apexErr(linesInsertResult)}`);
             }
           } catch (error) {
             updateProgress({ errors: progress.errors + 1, lastError: String(error) });
@@ -486,16 +499,16 @@ export const syncGLJournals = async (
         }
 
         const batchInsertResult = await insertToApex(APEX_DB_CONFIG.endpoints.journalBatches, batchPayload, log, verbose);
-        if (batchInsertResult.success || batchInsertResult.inserted > 0) {
+        if (apexOk(batchInsertResult)) {
           updateProgress({ totalBatchesInserted: progress.totalBatchesInserted + 1 });
           if (verbose) {
             log?.('success', `  ✓ Batch inserted to APEX`);
             onBatchPayload?.(batchId, batchName, batchPayload, batchInsertResult);
           }
         } else {
-          const errorMsg = batchInsertResult.lastError || batchInsertResult.error || 'Unknown error';
-          updateProgress({ errors: progress.errors + 1, lastError: batchInsertResult.error || 'Batch insert failed' });
-          log?.('error', `  ✗ Batch insert failed: ${errorMsg || JSON.stringify(batchInsertResult)}`);
+          const errorMsg = apexErr(batchInsertResult);
+          updateProgress({ errors: progress.errors + 1, lastError: errorMsg });
+          log?.('error', `  ✗ Batch insert failed: ${errorMsg}`);
           if (verbose) {
             onBatchPayload?.(batchId, batchName, batchPayload, batchInsertResult, errorMsg);
           }
@@ -771,11 +784,11 @@ export const syncGLBatchesOnly = async (
 
         try {
           const insertResult = await insertToApex(APEX_DB_CONFIG.endpoints.journalBatches, batchPayload, log, false);
-          if (insertResult.success || insertResult.inserted > 0) {
+          if (apexOk(insertResult)) {
             updateProgress({ insertedBatches: progress.insertedBatches + 1 });
           } else {
-            updateProgress({ errors: progress.errors + 1, lastError: insertResult.error || 'Insert failed' });
-            log?.('error', `Batch ${batchId} insert failed: ${insertResult.lastError || insertResult.error}`);
+            updateProgress({ errors: progress.errors + 1, lastError: apexErr(insertResult) });
+            log?.('error', `Batch ${batchId} insert failed: ${apexErr(insertResult)}`);
           }
         } catch (error) {
           updateProgress({ errors: progress.errors + 1, lastError: String(error) });
@@ -962,11 +975,11 @@ export const syncGLHeadersOnly = async (
 
           try {
             const insertResult = await insertToApex(APEX_DB_CONFIG.endpoints.journalHeaders, headerPayload, log, false);
-            if (insertResult.success || insertResult.inserted > 0) {
+            if (apexOk(insertResult)) {
               updateProgress({ insertedHeaders: progress.insertedHeaders + 1 });
             } else {
-              updateProgress({ errors: progress.errors + 1, lastError: insertResult.error || 'Insert failed' });
-              log?.('error', `  Header ${headerId} insert failed: ${insertResult.lastError || insertResult.error}`);
+              updateProgress({ errors: progress.errors + 1, lastError: apexErr(insertResult) });
+              log?.('error', `  Header ${headerId} insert failed: ${apexErr(insertResult)}`);
             }
           } catch (error) {
             updateProgress({ errors: progress.errors + 1, lastError: String(error) });
@@ -1153,13 +1166,13 @@ export const syncGLLinesOnly = async (
 
         try {
           const insertResult = await insertToApex(APEX_DB_CONFIG.endpoints.journalLines, linesPayload, log, false);
-          if (insertResult.success || insertResult.inserted > 0) {
-            const insertedCount = insertResult.inserted || lines.length;
+          if (apexOk(insertResult)) {
+            const insertedCount = insertResult.inserted ?? insertResult.syncedCount ?? lines.length;
             updateProgress({ insertedLines: progress.insertedLines + insertedCount });
             log?.('success', `  ✓ Header ${headerId}: ${insertedCount} lines inserted`);
           } else {
-            updateProgress({ errors: progress.errors + 1, lastError: insertResult.error || 'Insert failed' });
-            log?.('error', `  Lines insert failed: ${insertResult.lastError || insertResult.error}`);
+            updateProgress({ errors: progress.errors + 1, lastError: apexErr(insertResult) });
+            log?.('error', `  Lines insert failed: ${apexErr(insertResult)}`);
           }
         } catch (error) {
           updateProgress({ errors: progress.errors + 1, lastError: String(error) });

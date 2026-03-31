@@ -891,16 +891,14 @@ const SyncData: React.FC = () => {
       try { data = JSON.parse(responseText); } catch { data = { raw: responseText.substring(0, 300) }; }
 
       addLog('success', `POST Response (HTTP ${response.status}): ${JSON.stringify(data)}`);
-      updateBatchPayloadStatus(
-        batchPayload.batchId,
-        (data.success || data.inserted > 0) ? 'success' : 'error',
-        data,
-        (!data.success && !data.inserted) ? (data.error || data.lastError || `HTTP ${response.status}`) : undefined,
-      );
-      if (data.success || data.inserted > 0) {
-        addLog('success', `✓ Batch ${batchPayload.batchId} posted — inserted: ${data.inserted ?? data.successCount ?? '?'}`);
+      const ok = data.success === true || data.inserted > 0 || data.syncedCount > 0 || data.successCount > 0 || data.status === 'SUCCESS';
+      const errMsg = data.error || data.lastError || (data.errorCount > 0 ? `${data.errorCount} errors` : undefined);
+      updateBatchPayloadStatus(batchPayload.batchId, ok ? 'success' : 'error', data, ok ? undefined : (errMsg || `HTTP ${response.status}`));
+      if (ok) {
+        const n = data.inserted ?? data.syncedCount ?? data.successCount ?? '?';
+        addLog('success', `✓ Batch ${batchPayload.batchId} posted — synced: ${n}`);
       } else {
-        addLog('error', `✗ Batch ${batchPayload.batchId} failed: ${data.error || data.lastError || JSON.stringify(data)}`);
+        addLog('error', `✗ Batch ${batchPayload.batchId} failed: ${errMsg || JSON.stringify(data)}`);
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
