@@ -1,7 +1,6 @@
-const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, Notification, nativeImage } = require('electron');
+const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, Notification, nativeImage, utilityProcess } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { spawn } = require('child_process');
 let autoUpdater = null;
 try { autoUpdater = require('electron-updater').autoUpdater; } catch (_) { /* not available in portable build */ }
 
@@ -99,47 +98,45 @@ let isQuitting = false;
 let isSyncing = false;
 let proxyServer = null;
 
-// Start the proxy server
+// Start the proxy server using Electron's built-in utilityProcess
+// (does NOT require Node.js installed on the target machine)
 function startProxyServer() {
   const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
-  let serverPath;
-  if (isDev) {
-    serverPath = path.join(__dirname, '../server/proxy.cjs');
-  } else {
-    // In production, server is in the app resources
-    serverPath = path.join(app.getAppPath(), 'server', 'proxy.cjs');
-  }
+  const serverPath = isDev
+    ? path.join(__dirname, '../server/proxy.cjs')
+    : path.join(app.getAppPath(), 'server', 'proxy.cjs');
 
   console.log('Starting proxy server from:', serverPath);
 
-  if (fs.existsSync(serverPath)) {
-    proxyServer = spawn('node', [serverPath], {
+  if (!fs.existsSync(serverPath)) {
+    console.error('Proxy server not found at:', serverPath);
+    return;
+  }
+
+  try {
+    proxyServer = utilityProcess.fork(serverPath, [], {
       cwd: isDev ? path.join(__dirname, '..') : app.getAppPath(),
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: 'pipe',
     });
 
-    proxyServer.stdout.on('data', (data) => {
+    proxyServer.stdout?.on('data', (data) => {
       console.log('Proxy:', data.toString().trim());
     });
 
-    proxyServer.stderr.on('data', (data) => {
+    proxyServer.stderr?.on('data', (data) => {
       console.error('Proxy Error:', data.toString().trim());
     });
 
-    proxyServer.on('close', (code) => {
+    proxyServer.on('exit', (code) => {
       console.log('Proxy server exited with code:', code);
       proxyServer = null;
     });
 
-    proxyServer.on('error', (err) => {
-      console.error('Failed to start proxy server:', err);
-      proxyServer = null;
-    });
-
-    console.log('Proxy server started');
-  } else {
-    console.error('Proxy server not found at:', serverPath);
+    console.log('Proxy server started (utilityProcess)');
+  } catch (err) {
+    console.error('Failed to start proxy server:', err);
+    proxyServer = null;
   }
 }
 
@@ -738,17 +735,16 @@ function setupAutoUpdater() {
   }, 4 * 60 * 60 * 1000);
 }
 
+// Prevent GPU process crash on some Windows machines (speeds up cold start)
+app.disableHardwareAcceleration();
+
 // App lifecycle
 app.whenReady().then(() => {
-  // Start proxy server first
+  // Start proxy server and create window in parallel — no delay
   startProxyServer();
-
-  // Give proxy server a moment to start, then create window
-  setTimeout(() => {
-    createWindow();
-    createTray();
-    setupAutoUpdater();
-  }, 1000);
+  createWindow();
+  createTray();
+  setupAutoUpdater();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

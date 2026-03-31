@@ -75,7 +75,14 @@
     "asar": false,
     "win": {
       "target": [
-        "portable"
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        },
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
       ],
       "icon": "public/icons/icon-512.png"
     },
