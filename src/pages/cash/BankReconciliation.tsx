@@ -519,10 +519,14 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, loading
   const handleReconcile = useCallback(async () => {
     if (selectedStmtKeys.length === 0 || selectedSysKeys.length === 0) return;
 
+    const visibleSysTxns = txnSourceFilter === 'ALL'
+      ? sysTxns
+      : sysTxns.filter((t) => t.source === txnSourceFilter);
+
     const selectedLines = stmtLines.filter((l) =>
       selectedStmtKeys.includes(l.lineId)
     );
-    const selectedTxns = filteredSysTxns.filter((t) =>
+    const selectedTxns = visibleSysTxns.filter((t) =>
       selectedSysKeys.includes(t.txnId)
     );
 
@@ -583,7 +587,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, loading
       fetchStmtLines(lastParams);
       fetchSysTxns(lastParams);
     }
-  }, [selectedStmtKeys, selectedSysKeys, stmtLines, filteredSysTxns, lastParams, selectedStatement, handleSelectStatement, fetchStmtLines, fetchSysTxns, msgApi]);
+  }, [selectedStmtKeys, selectedSysKeys, stmtLines, sysTxns, txnSourceFilter, lastParams, selectedStatement, handleSelectStatement, fetchStmtLines, fetchSysTxns, msgApi]);
 
   // ── Column definitions ────────────────────────────────────────────────────
   const stmtColumns: ColumnsType<StmtLine> = [
