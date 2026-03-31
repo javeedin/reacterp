@@ -47,8 +47,8 @@ export const syncExternalCashTransactions = async (
   signal?: AbortSignal,
   onPayload?: ExternalTxnPayloadCallback
 ): Promise<ExternalCashTransactionsSyncProgress> => {
-  const BATCH_SIZE   = 50;
-  const FETCH_LIMIT  = testMode === 'single' ? 1 : testMode ? 25 : 500;
+  const BATCH_SIZE  = 50;
+  const FETCH_LIMIT = testMode === 'single' ? 1 : testMode ? 25 : 500;
 
   const progress: ExternalCashTransactionsSyncProgress = {
     status: 'fetching', totalRecords: 0, processedRecords: 0,
@@ -70,116 +70,132 @@ export const syncExternalCashTransactions = async (
     return p;
   };
 
-  try {
-    // First page to get total count
-    log('step', '──── Fetching External Cash Transactions ────');
-    const firstPage = await fetchFromOracle('cashExternalTransactions', buildQueryParams(FETCH_LIMIT, 0), log, true);
-
-    if (!firstPage.success || !firstPage.items) {
-      throw new Error('No items returned from Oracle');
-    }
-
-    const totalCount = firstPage.count ?? firstPage.items.length;
-    const totalPages = Math.ceil(totalCount / FETCH_LIMIT);
-    progress.totalRecords = totalCount;
-    progress.totalPages   = totalPages;
-    onProgress({ totalRecords: totalCount, totalPages });
-
-    log('info', `Total external transactions: ${totalCount} | Pages: ${totalPages}`);
-
-    const processPage = async (items: any[]) => {
-      if (signal?.aborted) return;
-      for (let i = 0; i < items.length; i += BATCH_SIZE) {
-        if (signal?.aborted) break;
-        const batch = items.slice(i, i + BATCH_SIZE);
-        const payload = {
-          items: batch.map(item => ({
-            ExternalTransactionId:      item.ExternalTransactionId,
-            TransactionId:              item.TransactionId,
-            TransactionDate:            item.TransactionDate,
-            ValueDate:                  item.ValueDate,
-            ClearedDate:                item.ClearedDate,
-            Amount:                     item.Amount,
-            CurrencyCode:               item.CurrencyCode,
-            Description:                item.Description,
-            ReferenceText:              item.ReferenceText,
-            Source:                     item.Source,
-            Status:                     item.Status,
-            TransactionType:            item.TransactionType,
-            AccountingFlag:             item.AccountingFlag,
-            BankAccountName:            item.BankAccountName,
-            BusinessUnitName:           item.BusinessUnitName,
-            LegalEntityName:            item.LegalEntityName,
-            AssetAccountCombination:    item.AssetAccountCombination,
-            OffsetAccountCombination:   item.OffsetAccountCombination,
-            BankConversionRate:         item.BankConversionRate,
-            BankConversionRateType:     item.BankConversionRateType,
-            TransferId:                 item.TransferId,
-            AccntServicerReference:     item.AccntServicerReference,
-            AddendaTxt:                 item.AddendaTxt,
-            CheckNumber:                item.CheckNumber,
-            ClearingSystemReference:    item.ClearingSystemReference,
-            CustomerReference:          item.CustomerReference,
-            EndToEndId:                 item.EndToEndId,
-            InstructionIdentification:  item.InstructionIdentification,
-            ReconReference:             item.ReconReference,
-            StructuredPaymentReference: item.StructuredPaymentReference,
-            BankTransactionId:          item.BankTransactionId,
-            CreatedBy:                  item.CreatedBy,
-            CreationDate:               item.CreationDate,
-            LastUpdatedBy:              item.LastUpdatedBy,
-            LastUpdateDate:             item.LastUpdateDate,
-            LastUpdateLogin:            item.LastUpdateLogin,
-          })),
-        };
-
-        try {
-          const result = await insertToApex('cash/externaltransactions', payload, log);
-          progress.insertedRecords += batch.length;
-          onPayload?.(
-            batch[0].ExternalTransactionId,
-            batch[0].TransactionId,
-            payload,
-            result
-          );
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          progress.errors++;
-          progress.lastError = msg;
-          log('error', `Batch insert failed: ${msg}`);
-          onPayload?.(batch[0].ExternalTransactionId, batch[0].TransactionId, payload, undefined, msg);
-        }
-
-        progress.processedRecords += batch.length;
-        onProgress({ ...progress });
-      }
-    };
-
-    await processPage(firstPage.items);
-    if (signal?.aborted) { progress.status = 'stopped'; progress.endTime = new Date(); onProgress({ ...progress }); return progress; }
-    if (testMode) { progress.status = 'completed'; progress.endTime = new Date(); onProgress({ ...progress }); return progress; }
-
-    // Remaining pages
-    for (let page = 1; page < totalPages; page++) {
+  const processPage = async (items: any[]) => {
+    for (let i = 0; i < items.length; i += BATCH_SIZE) {
       if (signal?.aborted) break;
-      progress.currentPage = page + 1;
-      onProgress({ currentPage: page + 1 });
-      log('step', `──── Page ${page + 1} / ${totalPages} ────`);
-      const pageData = await fetchFromOracle('cashExternalTransactions', buildQueryParams(FETCH_LIMIT, page * FETCH_LIMIT), log, false);
-      if (pageData.items) await processPage(pageData.items);
+      const batch = items.slice(i, i + BATCH_SIZE);
+      const payload = {
+        items: batch.map(item => ({
+          ExternalTransactionId:      item.ExternalTransactionId,
+          TransactionId:              item.TransactionId,
+          TransactionDate:            item.TransactionDate,
+          ValueDate:                  item.ValueDate,
+          ClearedDate:                item.ClearedDate,
+          Amount:                     item.Amount,
+          CurrencyCode:               item.CurrencyCode,
+          Description:                item.Description,
+          ReferenceText:              item.ReferenceText,
+          Source:                     item.Source,
+          Status:                     item.Status,
+          TransactionType:            item.TransactionType,
+          AccountingFlag:             item.AccountingFlag,
+          BankAccountName:            item.BankAccountName,
+          BusinessUnitName:           item.BusinessUnitName,
+          LegalEntityName:            item.LegalEntityName,
+          AssetAccountCombination:    item.AssetAccountCombination,
+          OffsetAccountCombination:   item.OffsetAccountCombination,
+          BankConversionRate:         item.BankConversionRate,
+          BankConversionRateType:     item.BankConversionRateType,
+          TransferId:                 item.TransferId,
+          AccntServicerReference:     item.AccntServicerReference,
+          AddendaTxt:                 item.AddendaTxt,
+          CheckNumber:                item.CheckNumber,
+          ClearingSystemReference:    item.ClearingSystemReference,
+          CustomerReference:          item.CustomerReference,
+          EndToEndId:                 item.EndToEndId,
+          InstructionIdentification:  item.InstructionIdentification,
+          ReconReference:             item.ReconReference,
+          StructuredPaymentReference: item.StructuredPaymentReference,
+          BankTransactionId:          item.BankTransactionId,
+          CreatedBy:                  item.CreatedBy,
+          CreationDate:               item.CreationDate,
+          LastUpdatedBy:              item.LastUpdatedBy,
+          LastUpdateDate:             item.LastUpdateDate,
+          LastUpdateLogin:            item.LastUpdateLogin,
+        })),
+      };
+
+      try {
+        const result = await insertToApex('cash/externaltransactions', payload, log);
+        progress.insertedRecords += batch.length;
+        onPayload?.(batch[0].ExternalTransactionId, batch[0].TransactionId, payload, result);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        progress.errors++;
+        progress.lastError = msg;
+        log('error', `Batch insert failed: ${msg}`);
+        onPayload?.(batch[0].ExternalTransactionId, batch[0].TransactionId, payload, undefined, msg);
+      }
+
+      progress.processedRecords += batch.length;
+      onProgress({ ...progress });
+    }
+  };
+
+  try {
+    log('step', '═══════════════════════════════════════════════════════════');
+    log('step', `  EXTERNAL CASH TRANSACTIONS SYNC — ${testMode === 'single' ? 'SINGLE RECORD' : testMode ? 'TEST (25 records)' : 'FULL SYNC'}`);
+    log('step', '═══════════════════════════════════════════════════════════');
+
+    let offset  = 0;
+    let pageNum = 0;
+    let hasMore = true;
+
+    while (hasMore) {
+      if (signal?.aborted) break;
+
+      pageNum++;
+      progress.currentPage = pageNum;
+      onProgress({ currentPage: pageNum });
+
+      log('step', `──── Fetching Page ${pageNum} (offset: ${offset}, limit: ${FETCH_LIMIT}) ────`);
+
+      const pageData = await fetchFromOracle(
+        'cashExternalTransactions',
+        buildQueryParams(FETCH_LIMIT, offset),
+        log,
+        true
+      );
+
+      if (!pageData.success || !pageData.items) {
+        throw new Error(pageData.error || 'No items returned from Oracle');
+      }
+
+      const items: any[] = pageData.items;
+      log('success', `Page ${pageNum}: ${items.length} records fetched`);
+
+      progress.totalRecords += items.length;
+      onProgress({ totalRecords: progress.totalRecords });
+
+      await processPage(items);
+
+      if (signal?.aborted) break;
+
+      // Oracle returns hasMore=true when more pages exist;
+      // fall back to checking if we got a full page
+      hasMore = pageData.hasMore === true || items.length === FETCH_LIMIT;
+      offset += items.length;
+
+      // In test mode only fetch one page
+      if (testMode) hasMore = false;
     }
 
-    progress.status  = signal?.aborted ? 'stopped' : 'completed';
-    progress.endTime = new Date();
+    progress.totalPages = pageNum;
+    progress.status     = signal?.aborted ? 'stopped' : 'completed';
+    progress.endTime    = new Date();
     onProgress({ ...progress });
-    log('success', `Sync complete — ${progress.insertedRecords} records inserted, ${progress.errors} errors`);
+
+    log('step', '═══════════════════════════════════════════════════════════');
+    log('success', `  SYNC COMPLETE — ${pageNum} page(s), ${progress.totalRecords} records, ${progress.insertedRecords} inserted, ${progress.errors} errors`);
+    log('step', '═══════════════════════════════════════════════════════════');
+
     return progress;
 
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Unknown error';
-    progress.status   = 'error';
+    progress.status    = 'error';
     progress.lastError = msg;
-    progress.endTime  = new Date();
+    progress.endTime   = new Date();
     onProgress({ ...progress });
     log('error', `Sync failed: ${msg}`);
     return progress;
