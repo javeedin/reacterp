@@ -195,7 +195,15 @@ export const insertToApex = async (
       body: JSON.stringify(payload),
     });
 
-    const data = await response.json();
+    const responseText = await response.text();
+    let data: any;
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      // APEX returned non-JSON (e.g. 404 HTML when endpoint doesn't exist)
+      log?.('error', `POST non-JSON response (HTTP ${response.status}): ${responseText.substring(0, 300)}`);
+      return { success: false, error: `HTTP ${response.status}: ${responseText.substring(0, 200)}` };
+    }
     if (verbose) log?.('success', `POST Response: ${JSON.stringify(data).substring(0, 200)}`);
     return data;
   } catch (error) {
