@@ -865,15 +865,20 @@ const SyncData: React.FC = () => {
     URL.revokeObjectURL(url);
   }, [batchPayloads]);
 
-  // POST a single batch manually
+  // Build the direct APEX URL for a given endpoint key
+  const buildApexUrl = useCallback((endpointKey: keyof typeof APEX_DB_CONFIG.endpoints) => {
+    return `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints[endpointKey]}`;
+  }, []);
+
+  // POST a single batch manually (direct to APEX — no proxy)
   const postSingleBatch = useCallback(async (batchPayload: BatchPayloadLog) => {
     setIsPostingBatch(true);
     addLog('step', `──── Manual POST for Batch ${batchPayload.batchId} ────`);
 
     try {
-      const url = `${PROXY_CONFIG.baseUrl}/apex/${APEX_DB_CONFIG.endpoints.journalBatches}`;
+      const url = buildApexUrl('journalBatches');
       addLog('info', `POST URL: ${url}`);
-      addLog('info', `POST Payload: ${JSON.stringify(batchPayload.payload)}`);
+      addLog('info', `POST Payload: ${JSON.stringify(batchPayload.payload).substring(0, 300)}`);
 
       const response = await fetch(url, {
         method: 'POST',
@@ -881,14 +886,20 @@ const SyncData: React.FC = () => {
         body: JSON.stringify(batchPayload.payload),
       });
 
-      const data = await response.json();
-      addLog('success', `POST Response: ${JSON.stringify(data)}`);
+      const responseText = await response.text();
+      let data: any;
+      try { data = JSON.parse(responseText); } catch { data = { raw: responseText.substring(0, 300) }; }
 
+      addLog('success', `POST Response (HTTP ${response.status}): ${JSON.stringify(data)}`);
+      updateBatchPayloadStatus(
+        batchPayload.batchId,
+        (data.success || data.inserted > 0) ? 'success' : 'error',
+        data,
+        (!data.success && !data.inserted) ? (data.error || data.lastError || `HTTP ${response.status}`) : undefined,
+      );
       if (data.success || data.inserted > 0) {
-        updateBatchPayloadStatus(batchPayload.batchId, 'success', data);
-        addLog('success', `✓ Batch ${batchPayload.batchId} posted successfully!`);
+        addLog('success', `✓ Batch ${batchPayload.batchId} posted — inserted: ${data.inserted ?? data.successCount ?? '?'}`);
       } else {
-        updateBatchPayloadStatus(batchPayload.batchId, 'error', data, data.error || data.lastError || 'Unknown error');
         addLog('error', `✗ Batch ${batchPayload.batchId} failed: ${data.error || data.lastError || JSON.stringify(data)}`);
       }
     } catch (error) {
@@ -898,7 +909,7 @@ const SyncData: React.FC = () => {
     }
 
     setIsPostingBatch(false);
-  }, [addLog, updateBatchPayloadStatus]);
+  }, [addLog, buildApexUrl, updateBatchPayloadStatus]);
 
   // Update invoice payload status after POST
   const updateInvoicePayloadStatus = useCallback((invoiceId: number, status: 'success' | 'error', postResult?: any, errorMessage?: string) => {
@@ -950,7 +961,7 @@ const SyncData: React.FC = () => {
     addLog('step', `──── Manual POST for Invoice ${invoicePayload.invoiceNumber} (ID: ${invoicePayload.invoiceId}) ────`);
 
     try {
-      const url = `${PROXY_CONFIG.baseUrl}/apex/ap/createinvoice`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/bulk`;
 
       // Remove links property and wrap in expected format (items array)
       const { links, ...invoiceWithoutLinks } = invoicePayload.payload as any;
@@ -5609,12 +5620,12 @@ const SyncData: React.FC = () => {
         )}
       </Modal>
 
-      {/* Batch Debug Modal */}
+      {/* Batch API Inspector Modal */}
       <Modal
         title={
           <Space>
-            <BugOutlined style={{ color: REDWOOD.warning }} />
-            <span>Batch Payload Debug</span>
+            <ApiOutlined style={{ color: REDWOOD.info }} />
+            <span>API Inspector — GL Journal Batch</span>
             {selectedBatchPayload && (
               <Tag
                 color={
@@ -5631,97 +5642,114 @@ const SyncData: React.FC = () => {
         onCancel={() => setBatchDebugVisible(false)}
         footer={[
           <Button
-            key="copy"
+            key="copyUrl"
+            onClick={() => navigator.clipboard.writeText(buildApexUrl('journalBatches'))}
+          >
+            Copy URL
+          </Button>,
+          <Button
+            key="copyBody"
             onClick={() => {
               if (selectedBatchPayload) {
                 navigator.clipboard.writeText(JSON.stringify(selectedBatchPayload.payload, null, 2));
               }
             }}
           >
-            Copy Payload
+            Copy Body
           </Button>,
           <Button
             key="post"
             type="primary"
             icon={<SendOutlined />}
             loading={isPostingBatch}
-            onClick={() => {
-              if (selectedBatchPayload) {
-                postSingleBatch(selectedBatchPayload);
-              }
-            }}
+            disabled={!selectedBatchPayload}
+            onClick={() => { if (selectedBatchPayload) postSingleBatch(selectedBatchPayload); }}
             style={{ background: REDWOOD.primary }}
           >
-            POST This Batch
+            POST to APEX
           </Button>,
           <Button key="close" onClick={() => setBatchDebugVisible(false)}>
             Close
           </Button>,
         ]}
-        width={800}
+        width={860}
       >
         {selectedBatchPayload && (
           <div>
-            <Row gutter={16} style={{ marginBottom: 16 }}>
-              <Col span={12}>
-                <div style={{
-                  padding: '8px 12px',
-                  background: REDWOOD.surfaceSecondary,
-                  borderRadius: 6,
-                  fontSize: 12,
-                }}>
-                  <Text type="secondary">Batch ID: </Text>
-                  <Text strong code>{selectedBatchPayload.batchId}</Text>
+            {/* Batch Info */}
+            <Row gutter={12} style={{ marginBottom: 12 }}>
+              <Col span={8}>
+                <div style={{ padding: '6px 10px', background: REDWOOD.surfaceSecondary, borderRadius: 6, fontSize: 12 }}>
+                  <Text type="secondary">Batch ID: </Text><Text strong code>{selectedBatchPayload.batchId}</Text>
                 </div>
               </Col>
-              <Col span={12}>
-                <div style={{
-                  padding: '8px 12px',
-                  background: REDWOOD.surfaceSecondary,
-                  borderRadius: 6,
-                  fontSize: 12,
-                }}>
-                  <Text type="secondary">Batch Name: </Text>
-                  <Text strong>{selectedBatchPayload.batchName}</Text>
+              <Col span={16}>
+                <div style={{ padding: '6px 10px', background: REDWOOD.surfaceSecondary, borderRadius: 6, fontSize: 12 }}>
+                  <Text type="secondary">Batch Name: </Text><Text strong>{selectedBatchPayload.batchName}</Text>
                 </div>
               </Col>
             </Row>
 
+            {/* Full Endpoint URL */}
+            <div style={{
+              background: '#0f1117',
+              borderRadius: 8,
+              padding: '10px 14px',
+              marginBottom: 14,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              border: '1px solid #2a2d3a',
+            }}>
+              <Tag color="blue" style={{ fontWeight: 700, fontSize: 12, letterSpacing: 1, margin: 0 }}>POST</Tag>
+              <Text style={{ color: '#e2e8f0', fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all', flex: 1 }}>
+                {buildApexUrl('journalBatches')}
+              </Text>
+            </div>
+
             {selectedBatchPayload.errorMessage && (
-              <Alert
-                type="error"
-                message="Error"
-                description={selectedBatchPayload.errorMessage}
-                style={{ marginBottom: 16 }}
-              />
+              <Alert type="error" message="Last Error" description={selectedBatchPayload.errorMessage} style={{ marginBottom: 12 }} showIcon />
             )}
 
-            <Divider style={{ margin: '12px 0' }}>POST Payload</Divider>
+            {/* JSON Body */}
+            <div style={{ marginBottom: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>Request Body (JSON)</Text>
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                {selectedBatchPayload.payload?.items?.length ?? 0} item(s)
+              </Text>
+            </div>
             <pre style={{
               background: '#fafafa',
-              padding: 16,
+              padding: 14,
               borderRadius: 8,
               border: `1px solid ${REDWOOD.border}`,
-              maxHeight: 300,
+              maxHeight: 280,
               overflow: 'auto',
               fontSize: 12,
               fontFamily: 'monospace',
+              marginBottom: 0,
             }}>
               {JSON.stringify(selectedBatchPayload.payload, null, 2)}
             </pre>
 
+            {/* POST Response */}
             {selectedBatchPayload.postResult && (
               <>
-                <Divider style={{ margin: '12px 0' }}>POST Response</Divider>
+                <Divider style={{ margin: '12px 0' }}>
+                  <Tag color={selectedBatchPayload.status === 'success' ? 'success' : 'error'}>
+                    Response
+                  </Tag>
+                </Divider>
                 <pre style={{
                   background: selectedBatchPayload.status === 'success' ? '#f6ffed' : '#fff2f0',
-                  padding: 16,
+                  padding: 14,
                   borderRadius: 8,
                   border: `1px solid ${selectedBatchPayload.status === 'success' ? '#b7eb8f' : '#ffccc7'}`,
-                  maxHeight: 200,
+                  maxHeight: 160,
                   overflow: 'auto',
                   fontSize: 12,
                   fontFamily: 'monospace',
+                  marginBottom: 0,
                 }}>
                   {JSON.stringify(selectedBatchPayload.postResult, null, 2)}
                 </pre>
