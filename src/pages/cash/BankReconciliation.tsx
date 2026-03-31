@@ -518,15 +518,16 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, loading
     setSelectedStatement(stmt);
     setSelectedStmtKeys([]);
     setSelectedSysKeys([]);
-    const stmtDate = stmt.statementDate ? dayjs(stmt.statementDate) : null;
     const lineParams: SearchParams = {
       ...(lastParams ?? {}),
       statementId: String(stmt.statementId),
     };
+    // For sys txns: only apply dates if the user explicitly set them in the search panel.
+    // Do NOT fall back to stmtDate — that would restrict to a single day and hide most transactions.
     const txnParams: SearchParams = {
       ...(lastParams ?? {}),
-      dateFrom: lastParams?.dateFrom ?? stmtDate,
-      dateTo:   lastParams?.dateTo   ?? stmtDate,
+      dateFrom: lastParams?.dateFrom ?? null,
+      dateTo:   lastParams?.dateTo   ?? null,
     };
     fetchStmtLines(lineParams);
     fetchSysTxns(txnParams, txnSourceFilter);
