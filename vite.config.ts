@@ -22,5 +22,42 @@ export default defineConfig(() => {
       __BREVO_API_KEY__: JSON.stringify(emailCfg.pass ?? ''),
       __BREVO_SENDER__:  JSON.stringify(emailCfg.user ?? ''),
     },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            // React core — loaded first, smallest
+            'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+            // Ant Design — large but needed for layout
+            'vendor-antd': ['antd', '@ant-design/icons'],
+            // Sync services — only needed on the Sync page
+            'chunk-sync': [
+              './src/services/gl-sync.service.ts',
+              './src/services/ap-sync.service.ts',
+              './src/services/ap-payments-sync.service.ts',
+              './src/services/gl-balances-sync.service.ts',
+              './src/services/gl-codecomb-sync.service.ts',
+              './src/services/gl-periodstatus-sync.service.ts',
+              './src/services/banks-sync.service.ts',
+              './src/services/bank-branches-sync.service.ts',
+              './src/services/bank-accounts-sync.service.ts',
+              './src/services/bank-account-transfers-sync.service.ts',
+              './src/services/external-cash-transactions-sync.service.ts',
+              './src/services/legal-entities-sync.service.ts',
+              './src/services/business-units-sync.service.ts',
+              './src/services/user-accounts-sync.service.ts',
+              './src/services/user-account-roles-sync.service.ts',
+              './src/services/roles-sync.service.ts',
+              './src/services/suppliers-sync.service.ts',
+              './src/services/supplier-address-sync.service.ts',
+              './src/services/supplier-sites-sync.service.ts',
+              './src/services/supplier-site-assignments-sync.service.ts',
+              './src/services/sync-http.ts',
+            ],
+          },
+        },
+      },
+    },
   };
 });
+

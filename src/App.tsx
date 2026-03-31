@@ -1,51 +1,66 @@
+import { lazy, Suspense } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { ConfigProvider } from 'antd';
+import { ConfigProvider, Spin } from 'antd';
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import MainLayout from './layouts/MainLayout';
+
+// These two load immediately (login + home are always needed)
 import Login from './pages/Login';
 import Home from './pages/Home';
-import GLModule from './pages/gl/GLModule';
-import ManageJournals from './pages/gl/ManageJournals';
-import EditJournal from './pages/gl/EditJournal';
-import CreateJournal from './pages/gl/CreateJournal';
-import AccountAnalysis from './pages/gl/AccountAnalysis';
-import ChartOfAccounts from './pages/gl/ChartOfAccounts';
-import ChartOfAccountsEdit from './pages/gl/ChartOfAccountsEdit';
-import ManageStructures from './pages/gl/ManageStructures';
-import EditStructure from './pages/gl/EditStructure';
-import ManageValues from './pages/gl/ManageValues';
-import COASegments from './pages/gl/COASegments';
-import AccountCombinations from './pages/gl/AccountCombinations';
-import AccountingPeriods from './pages/gl/AccountingPeriods';
-import TrialBalance from './pages/gl/TrialBalance';
-import IncomeStatementTemplates from './pages/gl/IncomeStatementTemplates';
-import { APModule } from './pages/ap';
-import ManageInvoices from './pages/ap/ManageInvoices';
-import ManagePayments from './pages/ap/ManagePayments';
-import Banks from './pages/ap/Banks';
-import InvoiceHolds from './pages/ap/InvoiceHolds';
-import ManageSLAJournals from './pages/ap/ManageSLAJournals';
-import CreateAccounting from './pages/ap/CreateAccounting';
-import PrepaymentApplications from './pages/ap/PrepaymentApplications';
-import ManageSuppliers from './pages/suppliers/ManageSuppliers';
-import SupplierBalance from './pages/suppliers/SupplierBalance';
-import SyncData from './pages/sync/SyncData';
-import {
-  PMSModule, FundManagement, OrderManagement, TransactionsPage,
-  ClientManagement, RiskAnalytics, CompliancePage, ReportsPage,
-  ModelPortfolioPage, FeeManagementPage, BenchmarkComparison,
-} from './pages/pms';
-import PMSWatchlist from './pages/pms/Watchlist';
-import PMSPortfolio from './pages/pms/Portfolio';
-import { RMModule, ManageAgreements, ManageProperties, ManageCustomers, ManageExpenses } from './pages/rm';
-import AdminModule from './pages/admin/index';
-import UserManagement from './pages/admin/UserManagement';
-import CashModule from './pages/cash/CashModule';
-import ManageBankTransfers from './pages/cash/ManageBankTransfers';
-import ManageExternalTransactions from './pages/cash/ManageExternalTransactions';
-import ManageBankStatements from './pages/cash/ManageBankStatements';
-import BankReconciliation from './pages/cash/BankReconciliation';
+
+// All other pages lazy-loaded — only fetched when the user navigates to them
+const GLModule                = lazy(() => import('./pages/gl/GLModule'));
+const ManageJournals          = lazy(() => import('./pages/gl/ManageJournals'));
+const EditJournal             = lazy(() => import('./pages/gl/EditJournal'));
+const CreateJournal           = lazy(() => import('./pages/gl/CreateJournal'));
+const AccountAnalysis         = lazy(() => import('./pages/gl/AccountAnalysis'));
+const ChartOfAccounts         = lazy(() => import('./pages/gl/ChartOfAccounts'));
+const ChartOfAccountsEdit     = lazy(() => import('./pages/gl/ChartOfAccountsEdit'));
+const ManageStructures        = lazy(() => import('./pages/gl/ManageStructures'));
+const EditStructure           = lazy(() => import('./pages/gl/EditStructure'));
+const ManageValues            = lazy(() => import('./pages/gl/ManageValues'));
+const COASegments             = lazy(() => import('./pages/gl/COASegments'));
+const AccountCombinations     = lazy(() => import('./pages/gl/AccountCombinations'));
+const AccountingPeriods       = lazy(() => import('./pages/gl/AccountingPeriods'));
+const TrialBalance            = lazy(() => import('./pages/gl/TrialBalance'));
+const IncomeStatementTemplates= lazy(() => import('./pages/gl/IncomeStatementTemplates'));
+const ManageInvoices          = lazy(() => import('./pages/ap/ManageInvoices'));
+const ManagePayments          = lazy(() => import('./pages/ap/ManagePayments'));
+const Banks                   = lazy(() => import('./pages/ap/Banks'));
+const InvoiceHolds            = lazy(() => import('./pages/ap/InvoiceHolds'));
+const ManageSLAJournals       = lazy(() => import('./pages/ap/ManageSLAJournals'));
+const CreateAccounting        = lazy(() => import('./pages/ap/CreateAccounting'));
+const PrepaymentApplications  = lazy(() => import('./pages/ap/PrepaymentApplications'));
+const ManageSuppliers         = lazy(() => import('./pages/suppliers/ManageSuppliers'));
+const SupplierBalance         = lazy(() => import('./pages/suppliers/SupplierBalance'));
+const SyncData                = lazy(() => import('./pages/sync/SyncData'));
+const APModule                = lazy(() => import('./pages/ap').then(m => ({ default: m.APModule })));
+const PMSModule               = lazy(() => import('./pages/pms').then(m => ({ default: m.PMSModule })));
+const FundManagement          = lazy(() => import('./pages/pms').then(m => ({ default: m.FundManagement })));
+const OrderManagement         = lazy(() => import('./pages/pms').then(m => ({ default: m.OrderManagement })));
+const TransactionsPage        = lazy(() => import('./pages/pms').then(m => ({ default: m.TransactionsPage })));
+const ClientManagement        = lazy(() => import('./pages/pms').then(m => ({ default: m.ClientManagement })));
+const RiskAnalytics           = lazy(() => import('./pages/pms').then(m => ({ default: m.RiskAnalytics })));
+const CompliancePage          = lazy(() => import('./pages/pms').then(m => ({ default: m.CompliancePage })));
+const ReportsPage             = lazy(() => import('./pages/pms').then(m => ({ default: m.ReportsPage })));
+const ModelPortfolioPage      = lazy(() => import('./pages/pms').then(m => ({ default: m.ModelPortfolioPage })));
+const FeeManagementPage       = lazy(() => import('./pages/pms').then(m => ({ default: m.FeeManagementPage })));
+const BenchmarkComparison     = lazy(() => import('./pages/pms').then(m => ({ default: m.BenchmarkComparison })));
+const PMSWatchlist            = lazy(() => import('./pages/pms/Watchlist'));
+const PMSPortfolio            = lazy(() => import('./pages/pms/Portfolio'));
+const RMModule                = lazy(() => import('./pages/rm').then(m => ({ default: m.RMModule })));
+const ManageAgreements        = lazy(() => import('./pages/rm').then(m => ({ default: m.ManageAgreements })));
+const ManageProperties        = lazy(() => import('./pages/rm').then(m => ({ default: m.ManageProperties })));
+const ManageCustomers         = lazy(() => import('./pages/rm').then(m => ({ default: m.ManageCustomers })));
+const ManageExpenses          = lazy(() => import('./pages/rm').then(m => ({ default: m.ManageExpenses })));
+const AdminModule             = lazy(() => import('./pages/admin/index'));
+const UserManagement          = lazy(() => import('./pages/admin/UserManagement'));
+const CashModule              = lazy(() => import('./pages/cash/CashModule'));
+const ManageBankTransfers     = lazy(() => import('./pages/cash/ManageBankTransfers'));
+const ManageExternalTransactions = lazy(() => import('./pages/cash/ManageExternalTransactions'));
+const ManageBankStatements    = lazy(() => import('./pages/cash/ManageBankStatements'));
+const BankReconciliation      = lazy(() => import('./pages/cash/BankReconciliation'));
 
 // Placeholder component for modules under development
 const ComingSoon = ({ moduleName }: { moduleName: string }) => (
@@ -74,6 +89,11 @@ function App() {
     >
       <AuthProvider>
         <HashRouter>
+          <Suspense fallback={
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+              <Spin size="large" />
+            </div>
+          }>
           <Routes>
             {/* Public Routes */}
             <Route path="/login" element={<Login />} />
@@ -167,6 +187,7 @@ function App() {
             {/* Catch all */}
             <Route path="*" element={<Navigate to="/home" replace />} />
           </Routes>
+          </Suspense>
         </HashRouter>
       </AuthProvider>
     </ConfigProvider>

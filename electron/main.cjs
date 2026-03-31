@@ -463,17 +463,26 @@ function createWindow() {
 
 // Create system tray icon
 function createTray() {
-  // Create tray icon
-  const iconPath = path.join(__dirname, '../public/icons/icon-512.png');
+  // Use the smallest available icon directly — avoids loading 512px image and resizing on startup
+  const iconPath = path.join(
+    app.isPackaged ? app.getAppPath() : path.join(__dirname, '..'),
+    'public', 'icons', 'icon-16.png'
+  );
+  const fallbackPath = path.join(
+    app.isPackaged ? app.getAppPath() : path.join(__dirname, '..'),
+    'public', 'icons', 'icon-128.png'
+  );
   let trayIcon;
 
   try {
-    trayIcon = nativeImage.createFromPath(iconPath);
-    // Resize for tray (16x16 on most systems)
-    trayIcon = trayIcon.resize({ width: 16, height: 16 });
+    const p = fs.existsSync(iconPath) ? iconPath : fallbackPath;
+    trayIcon = nativeImage.createFromPath(p);
+    // Only resize if we loaded a large icon
+    if (!iconPath.includes('icon-16')) {
+      trayIcon = trayIcon.resize({ width: 16, height: 16 });
+    }
   } catch (e) {
     console.error('Failed to load tray icon:', e);
-    // Create a simple colored icon as fallback
     trayIcon = nativeImage.createEmpty();
   }
 
@@ -748,11 +757,15 @@ function setupAutoUpdater() {
 
 // App lifecycle
 app.whenReady().then(() => {
-  // Start proxy server and create window in parallel — no delay
+  // Start proxy and show window immediately — tray + updater deferred to after load
   startProxyServer();
   createWindow();
-  createTray();
-  setupAutoUpdater();
+
+  // Defer non-critical startup to after window is painted (keeps open time fast)
+  mainWindow.webContents.once('did-finish-load', () => {
+    createTray();
+    setupAutoUpdater();
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
