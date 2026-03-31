@@ -84,8 +84,10 @@
           "arch": ["x64"]
         }
       ],
-      "icon": "public/icons/icon-512.png",
-      "artifactName": "${productName}-${version}-${arch}.${ext}"
+      "icon": "public/icons/icon-512.png"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-portable.${ext}"
     },
     "mac": {
       "target": "dmg",
