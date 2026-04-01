@@ -183,27 +183,31 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPORT_PKG AS
         -- Insert attachments using JSON_ARRAY_T so large base64 CLOBs
         -- are not truncated by the VARCHAR2(32767) limit of JSON_TABLE.
         DECLARE
-            v_arr  JSON_ARRAY_T;
-            v_obj  JSON_OBJECT_T;
-            v_fname VARCHAR2(500);
+            v_arr_raw CLOB;
+            v_arr     JSON_ARRAY_T;
+            v_obj     JSON_OBJECT_T;
+            v_fname   VARCHAR2(500);
         BEGIN
-            v_arr := JSON_ARRAY_T(JSON_QUERY(p_body, '$.attachments'));
-            FOR i IN 0 .. v_arr.GET_SIZE - 1 LOOP
-                v_obj   := JSON_OBJECT_T(v_arr.GET(i));
-                v_fname := v_obj.GET_STRING('fileName');
-                IF v_fname IS NOT NULL THEN
-                    INSERT INTO RR_SUPPORT_TICKET_ATTACHMENTS (
-                        TICKET_ID, FILE_NAME, FILE_TYPE, FILE_SIZE, ATTACHMENT_DATA, CREATED_BY
-                    ) VALUES (
-                        v_ticket_id,
-                        v_fname,
-                        v_obj.GET_STRING('fileType'),
-                        v_obj.GET_NUMBER('fileSize'),
-                        v_obj.GET_CLOB('data'),   -- full CLOB, no 32767 truncation
-                        v_created
-                    );
-                END IF;
-            END LOOP;
+            v_arr_raw := JSON_QUERY(p_body, '$.attachments' RETURNING CLOB);
+            IF v_arr_raw IS NOT NULL THEN
+                v_arr := JSON_ARRAY_T(v_arr_raw);
+                FOR i IN 0 .. v_arr.GET_SIZE - 1 LOOP
+                    v_obj   := JSON_OBJECT_T(v_arr.GET(i));
+                    v_fname := v_obj.GET_STRING('fileName');
+                    IF v_fname IS NOT NULL THEN
+                        INSERT INTO RR_SUPPORT_TICKET_ATTACHMENTS (
+                            TICKET_ID, FILE_NAME, FILE_TYPE, FILE_SIZE, ATTACHMENT_DATA, CREATED_BY
+                        ) VALUES (
+                            v_ticket_id,
+                            v_fname,
+                            v_obj.GET_STRING('fileType'),
+                            v_obj.GET_NUMBER('fileSize'),
+                            v_obj.GET_CLOB('data'),
+                            v_created
+                        );
+                    END IF;
+                END LOOP;
+            END IF;
         END;
 
         COMMIT;
