@@ -13,6 +13,7 @@ import {
   DownloadOutlined,
   ShareAltOutlined,
   PlusSquareOutlined,
+  ProfileOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -207,6 +208,14 @@ const MainLayout: React.FC = () => {
                 style={{ color: '#fff' }}
               />
             </Badge>
+          </Tooltip>
+          <Tooltip title="My Tickets" placement="bottom">
+            <Button
+              type="text"
+              icon={<ProfileOutlined style={{ fontSize: 16, color: '#fff' }} />}
+              onClick={() => navigate('/support/my-tickets')}
+              style={{ color: '#fff' }}
+            />
           </Tooltip>
           <SupportTicketButton />
           <Tooltip title={user?.name || 'User Profile'}>
