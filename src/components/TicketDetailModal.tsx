@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Modal, Form, Input, Select, Button, Space, Tag, Divider,
   Alert, Empty, Typography, message,
@@ -7,6 +7,7 @@ import {
   BugOutlined, CheckCircleOutlined, ClockCircleOutlined,
   ExclamationCircleOutlined, PaperClipOutlined, MessageOutlined,
   CloseCircleOutlined, ReloadOutlined, UserOutlined, SwapOutlined,
+  ZoomInOutlined, CloseOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 
@@ -99,6 +100,7 @@ const TicketDetailModal: React.FC<{
   const [detail, setDetail]         = useState<TicketDetail | null>(null);
   const [loading, setLoading]       = useState(false);
   const [action, setAction]         = useState<string | null>(null);
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
   const [actionForm]                = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
 
@@ -163,6 +165,32 @@ const TicketDetailModal: React.FC<{
   const t = detail?.ticket;
 
   return (
+    <>
+    {/* ── Full-screen image zoom overlay ── */}
+    {previewSrc && (
+      <div
+        style={{
+          position: 'fixed', inset: 0, zIndex: 10000,
+          background: 'rgba(0,0,0,0.88)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'zoom-out',
+        }}
+        onClick={() => setPreviewSrc(null)}
+      >
+        <img
+          src={previewSrc}
+          alt="Preview"
+          style={{ maxWidth: '95vw', maxHeight: '92vh', borderRadius: 6, boxShadow: '0 8px 32px rgba(0,0,0,0.6)' }}
+          onClick={e => e.stopPropagation()}
+        />
+        <Button
+          icon={<CloseOutlined />}
+          shape="circle"
+          style={{ position: 'absolute', top: 16, right: 16, background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', fontSize: 16 }}
+          onClick={() => setPreviewSrc(null)}
+        />
+      </div>
+    )}
     <Modal
       open={!!ticketId}
       onCancel={onClose}
@@ -256,13 +284,28 @@ const TicketDetailModal: React.FC<{
                     width: a.fileType?.startsWith('image/') ? 120 : 'auto',
                   }}>
                     {a.fileType?.startsWith('image/') && a.data ? (
-                      <img
-                        src={`data:${a.fileType};base64,${a.data}`}
-                        alt={a.fileName}
-                        style={{ width: 120, height: 80, objectFit: 'cover', display: 'block', cursor: 'pointer' }}
-                        onClick={() => window.open(`data:${a.fileType};base64,${a.data}`)}
-                        title="Click to open"
-                      />
+                      <div
+                        style={{ position: 'relative', cursor: 'zoom-in' }}
+                        onClick={() => setPreviewSrc(`data:${a.fileType};base64,${a.data}`)}
+                        title="Click to zoom"
+                      >
+                        <img
+                          src={`data:${a.fileType};base64,${a.data}`}
+                          alt={a.fileName}
+                          style={{ width: 140, height: 90, objectFit: 'cover', display: 'block', borderRadius: 4 }}
+                        />
+                        <div style={{
+                          position: 'absolute', inset: 0, borderRadius: 4,
+                          background: 'rgba(0,0,0,0)', display: 'flex',
+                          alignItems: 'center', justifyContent: 'center',
+                          transition: 'background 0.15s',
+                        }}
+                          onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = 'rgba(0,0,0,0.35)'; const icon = (e.currentTarget as HTMLDivElement).querySelector('span') as HTMLElement; if (icon) icon.style.opacity = '1'; }}
+                          onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'rgba(0,0,0,0)'; const icon = (e.currentTarget as HTMLDivElement).querySelector('span') as HTMLElement; if (icon) icon.style.opacity = '0'; }}
+                        >
+                          <ZoomInOutlined style={{ color: '#fff', fontSize: 22, opacity: 0, transition: 'opacity 0.15s' }} />
+                        </div>
+                      </div>
                     ) : (
                       <div style={{ padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
                         <PaperClipOutlined />
@@ -406,6 +449,7 @@ const TicketDetailModal: React.FC<{
         </div>
       )}
     </Modal>
+    </>
   );
 };
 
