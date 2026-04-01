@@ -12,6 +12,8 @@ import {
   FileTextOutlined, ApiOutlined, ExportOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
+import * as XLSX from 'xlsx';
+import { saveAs } from 'file-saver';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -232,21 +234,28 @@ const TransferForm: React.FC<{
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '12px 24px' }}>
       <Text style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 16 }}>
-        {isEdit ? 'Edit Bank Account Transfer' : 'Create Bank Account Transfer'}
+        {isEdit ? 'View Bank Account Transfer' : 'Create Bank Account Transfer'}
       </Text>
+
+      {isEdit && (
+        <div style={{ marginBottom: 12, padding: '6px 12px', background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 4 }}>
+          <Text style={{ fontSize: 12, color: '#ad6800' }}>This record is read-only. Synced records cannot be edited.</Text>
+        </div>
+      )}
 
       <Form form={form} layout="horizontal" labelCol={lc} wrapperCol={wc}>
 
         {/* ── Business Unit — must be selected first ── */}
         <Row gutter={40}>
           <Col xs={24} lg={12}>
-            <Form.Item label="Business Unit" name="businessUnit" rules={[{ required: true, message: 'Business Unit is required' }]} style={fs}>
+            <Form.Item label="Business Unit" name="businessUnit" rules={[{ required: !isEdit, message: 'Business Unit is required' }]} style={fs}>
               <Select
                 showSearch placeholder="Select business unit" optionFilterProp="label" options={businessUnits}
                 style={{ width: '100%' }}
                 onChange={(v) => setSelectedBu(v ?? undefined)}
                 allowClear
                 onClear={() => setSelectedBu(undefined)}
+                disabled={isEdit}
               />
             </Form.Item>
           </Col>
@@ -262,26 +271,26 @@ const TransferForm: React.FC<{
           <Col xs={24} lg={12}>
             <Form.Item label="From Account" name="fromBankAccountName" rules={[{ required: true, message: 'From Account is required' }]} style={fs}>
               <Select showSearch placeholder="Select bank account" optionFilterProp="label" options={bankAccounts}
-                style={{ width: '100%' }} disabled={!buSelected}
+                style={{ width: '100%' }} disabled={isEdit || !buSelected}
                 notFoundContent={<Text type="secondary">No accounts loaded</Text>} />
             </Form.Item>
 
             <Form.Item label="To Account" name="toBankAccountName" rules={[{ required: true, message: 'To Account is required' }]} style={fs}>
               <Select showSearch placeholder="Select bank account" optionFilterProp="label" options={bankAccounts}
-                style={{ width: '100%' }} disabled={!buSelected}
+                style={{ width: '100%' }} disabled={isEdit || !buSelected}
                 notFoundContent={<Text type="secondary">No accounts loaded</Text>} />
             </Form.Item>
 
             <Form.Item label="Transfer Date" name="transactionDate" rules={[{ required: true, message: 'Transfer Date is required' }]} style={fs}>
-              <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={!buSelected} />
+              <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={isEdit || !buSelected} />
             </Form.Item>
 
             <Form.Item label="Transfer Amount" name="paymentAmount" rules={[{ required: true, message: 'Amount is required' }]} style={fs}>
-              <InputNumber style={{ width: '100%' }} min={0} precision={2} disabled={!buSelected} />
+              <InputNumber style={{ width: '100%' }} min={0} precision={2} disabled={isEdit || !buSelected} />
             </Form.Item>
 
             <Form.Item label="Conversion Rate Type" name="conversionRateType" style={fs}>
-              <Select placeholder="Select type" allowClear disabled={!buSelected}>
+              <Select placeholder="Select type" allowClear disabled={isEdit || !buSelected}>
                 <Option value="User">User</Option>
                 <Option value="Corporate">Corporate</Option>
                 <Option value="Spot">Spot</Option>
@@ -290,20 +299,20 @@ const TransferForm: React.FC<{
             </Form.Item>
 
             <Form.Item label="Conversion Rate" name="conversionRate" style={fs}>
-              <InputNumber style={{ width: '100%' }} min={0} precision={6} disabled={!buSelected} />
+              <InputNumber style={{ width: '100%' }} min={0} precision={6} disabled={isEdit || !buSelected} />
             </Form.Item>
           </Col>
 
           {/* Right column */}
           <Col xs={24} lg={12}>
             <Form.Item label=" " colon={false} name="isSettledWithIbyFlag" valuePropName="checked" style={fs}>
-              <Checkbox style={{ color: REDWOOD.info, fontWeight: 500 }} disabled={!buSelected}>
+              <Checkbox style={{ color: REDWOOD.info, fontWeight: 500 }} disabled={isEdit || !buSelected}>
                 Settle transaction through Payments
               </Checkbox>
             </Form.Item>
 
             <Form.Item label="Payment Method" name="paymentMethod" rules={[{ required: true, message: 'Payment Method is required' }]} style={fs}>
-              <Select placeholder="Select method" disabled={!buSelected}>
+              <Select placeholder="Select method" disabled={isEdit || !buSelected}>
                 <Option value="Electronic">Electronic</Option>
                 <Option value="Check">Check</Option>
                 <Option value="Wire">Wire</Option>
@@ -312,7 +321,7 @@ const TransferForm: React.FC<{
             </Form.Item>
 
             <Form.Item label="Payment Profile" name="paymentProfileName" rules={[{ required: true, message: 'Payment Profile is required' }]} style={fs}>
-              <Select placeholder="Select profile" showSearch optionFilterProp="children" disabled={!buSelected}>
+              <Select placeholder="Select profile" showSearch optionFilterProp="children" disabled={isEdit || !buSelected}>
                 {['BOB BCL EFT', 'BOB BCL WIRE', 'ADIB EFT', 'ADCB EFT', 'FAB EFT'].map(p => (
                   <Option key={p} value={p}>{p}</Option>
                 ))}
@@ -320,7 +329,7 @@ const TransferForm: React.FC<{
             </Form.Item>
 
             <Form.Item label="Memo" name="memo" style={fs}>
-              <Input.TextArea rows={3} placeholder="Enter memo / description" disabled={!buSelected} />
+              <Input.TextArea rows={3} placeholder="Enter memo / description" disabled={isEdit || !buSelected} />
             </Form.Item>
 
             <Form.Item label="Attachments" style={fs}>
@@ -332,19 +341,20 @@ const TransferForm: React.FC<{
 
         <Divider />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Button icon={<ApiOutlined />} onClick={handleApiOpen} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>
-            API
-          </Button>
-          <Space>
-            <Button onClick={onCancel}>Cancel</Button>
-            <Button
-              type="primary"
-              loading={saving}
-              onClick={handleSubmit}
-              style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
-            >
-              {isEdit ? 'Save Changes' : 'Create Transfer'}
+          {!isEdit && (
+            <Button icon={<ApiOutlined />} onClick={handleApiOpen} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>
+              API
             </Button>
+          )}
+          {isEdit && <span />}
+          <Space>
+            <Button onClick={onCancel}>{isEdit ? 'Close' : 'Cancel'}</Button>
+            {!isEdit && (
+              <Button type="primary" loading={saving} onClick={handleSubmit}
+                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
+                Create Transfer
+              </Button>
+            )}
           </Space>
         </div>
       </Form>
@@ -486,6 +496,39 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
   }, [searchForm]);
 
   const handleReset = () => { searchForm.resetFields(); setTransfers([]); setHasSearched(false); };
+
+  const exportToExcel = () => {
+    const rows = transfers.map(t => ({
+      'Transfer ID':          t.bankAccountTransferId ?? '',
+      'Transfer Number':      t.bankAccountTransferNumber ?? '',
+      'Date':                 t.transactionDate ?? '',
+      'From Account':         t.fromBankAccountName ?? '',
+      'To Account':           t.toBankAccountName ?? '',
+      'Business Unit':        t.businessUnit ?? '',
+      'Payment Amount':       t.paymentAmount ?? '',
+      'From Amount':          t.fromAmount ?? '',
+      'From Currency':        t.fromCurrencyCode ?? '',
+      'To Currency':          t.toCurrencyCode ?? '',
+      'Payment Currency':     t.paymentCurrencyCode ?? '',
+      'Conversion Rate':      t.conversionRate ?? '',
+      'Conversion Rate Type': t.conversionRateType ?? '',
+      'Status':               t.status ?? '',
+      'Payment Status':       t.paymentStatus ?? '',
+      'Payment Method':       t.paymentMethod ?? '',
+      'Payment Profile':      t.paymentProfileName ?? '',
+      'Settled via IBY':      t.isSettledWithIbyFlag ?? '',
+      'Memo':                 t.memo ?? '',
+      'Created By':           t.createdBy ?? '',
+      'Creation Date':        t.creationDate ?? '',
+      'Last Update Date':     t.lastUpdateDate ?? '',
+      'Sync Date':            t.syncDate ?? '',
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Bank Transfers');
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    saveAs(new Blob([buf], { type: 'application/octet-stream' }), `bank_transfers_${dayjs().format('YYYYMMDD_HHmmss')}.xlsx`);
+  };
 
   // ── Tab management ────────────────────────────────────────────────────────
   const openCreate = () => {
@@ -827,26 +870,17 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
         </div>
 
         <div style={{ padding: 24 }}>
-          {/* Page header */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <div style={{
-                width: 48, height: 48, borderRadius: 10,
-                background: `linear-gradient(135deg, ${REDWOOD.info} 0%, #0450A0 100%)`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                boxShadow: `0 4px 12px ${REDWOOD.info}40`,
-              }}>
-                <SwapOutlined style={{ fontSize: 24, color: '#fff' }} />
-              </div>
-              <div>
-                <Title level={3} style={{ margin: 0, color: REDWOOD.neutral900 }}>
-                  Manage Bank Account Transfers
-                </Title>
-                <Text type="secondary" style={{ fontSize: 13 }}>
-                  Search, create and manage interbank transfers
-                </Text>
-              </div>
-            </div>
+          {/* Toolbar */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginBottom: 12 }}>
+            <Space>
+              <Button icon={<DownloadOutlined />} onClick={exportToExcel} disabled={transfers.length === 0}>
+                Export to Excel
+              </Button>
+              <Button icon={<PlusOutlined />} type="primary" onClick={openCreate}
+                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
+                Create Transfer
+              </Button>
+            </Space>
           </div>
 
           {/* Tabs */}

@@ -9,9 +9,11 @@ import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, BankOutlined, PlusOutlined, SearchOutlined, ReloadOutlined,
   EditOutlined, CloseOutlined, DollarOutlined, ApiOutlined, FileTextOutlined,
-  SwapOutlined,
+  SwapOutlined, DownloadOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
+import * as XLSX from 'xlsx';
+import { saveAs } from 'file-saver';
 import AccountSelector from '../../components/AccountSelector';
 
 const { Content } = Layout;
@@ -226,8 +228,14 @@ const ExternalTxnForm: React.FC<{
   return (
     <div style={{ maxWidth: 900, margin: '0 auto', padding: '12px 24px' }}>
       <Text style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 14 }}>
-        {isEdit ? 'Edit External Transaction' : 'Create External Transaction'}
+        {isEdit ? 'View External Transaction' : 'Create External Transaction'}
       </Text>
+
+      {isEdit && (
+        <div style={{ marginBottom: 12, padding: '6px 12px', background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 4 }}>
+          <Text style={{ fontSize: 12, color: '#ad6800' }}>This record is read-only. Synced records cannot be edited.</Text>
+        </div>
+      )}
 
       <div style={{ marginBottom: 10, padding: '6px 12px', background: REDWOOD.neutral100, borderRadius: 4, display: 'flex', gap: 24 }}>
         {isEdit && <><Text style={{ fontSize: 12 }}>Transaction #: <Text strong>{initialValues?.transactionId ?? '—'}</Text></Text>
@@ -243,9 +251,10 @@ const ExternalTxnForm: React.FC<{
         {/* Bank Account first — drives Business Unit auto-fill */}
         <Row gutter={40}>
           <Col xs={24} lg={12}>
-            <Form.Item label="Bank Account" name="bankAccountName" rules={[{ required: true, message: 'Bank Account is required' }]} style={fs}>
+            <Form.Item label="Bank Account" name="bankAccountName" rules={[{ required: !isEdit, message: 'Bank Account is required' }]} style={fs}>
               <Select showSearch placeholder="Select bank account" optionFilterProp="label" options={bankAccounts}
                 style={{ width: '100%' }} notFoundContent={<Text type="secondary">No accounts loaded</Text>}
+                disabled={isEdit}
                 onChange={v => {
                   if (!isEdit) {
                     form.setFieldValue('assetAccountCombination', bankAccountMap[v] ?? '');
@@ -254,30 +263,31 @@ const ExternalTxnForm: React.FC<{
             </Form.Item>
           </Col>
           <Col xs={24} lg={12}>
-            <Form.Item label="Business Unit" name="businessUnitName" rules={[{ required: true, message: 'Business Unit is required' }]} style={fs}>
+            <Form.Item label="Business Unit" name="businessUnitName" rules={[{ required: !isEdit, message: 'Business Unit is required' }]} style={fs}>
               <Select showSearch placeholder="Select business unit" optionFilterProp="label" options={businessUnits}
-                style={{ width: '100%' }} onChange={v => setSelectedBu(v)} allowClear onClear={() => setSelectedBu(undefined)} />
+                style={{ width: '100%' }} onChange={v => setSelectedBu(v)} allowClear onClear={() => setSelectedBu(undefined)}
+                disabled={isEdit} />
             </Form.Item>
           </Col>
         </Row>
 
         <Row gutter={40}>
           <Col xs={24} lg={12}>
-            <Form.Item label="Amount" name="amount" rules={[{ required: true, message: 'Amount is required' }]} style={fs}>
-              <InputNumber style={{ width: '100%' }} precision={2} disabled={!buSelected}
+            <Form.Item label="Amount" name="amount" rules={[{ required: !isEdit, message: 'Amount is required' }]} style={fs}>
+              <InputNumber style={{ width: '100%' }} precision={2} disabled={isEdit || !buSelected}
                 placeholder="Enter amount (negative for debit)" />
             </Form.Item>
 
-            <Form.Item label="Date" name="transactionDate" rules={[{ required: true, message: 'Date is required' }]} style={fs}>
-              <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={!buSelected} />
+            <Form.Item label="Date" name="transactionDate" rules={[{ required: !isEdit, message: 'Date is required' }]} style={fs}>
+              <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={isEdit || !buSelected} />
             </Form.Item>
 
             <Form.Item label="Reference" name="referenceText" style={fs}>
-              <Input placeholder="Reference text" disabled={!buSelected} />
+              <Input placeholder="Reference text" disabled={isEdit || !buSelected} />
             </Form.Item>
 
             <Form.Item label="Transaction Type" name="transactionType" style={fs}>
-              <Select placeholder="Select type" allowClear disabled={!buSelected}>
+              <Select placeholder="Select type" allowClear disabled={isEdit || !buSelected}>
                 <Option value="EFT">EFT</Option>
                 <Option value="WIRE">WIRE</Option>
                 <Option value="CHECK">CHECK</Option>
@@ -286,17 +296,17 @@ const ExternalTxnForm: React.FC<{
             </Form.Item>
 
             <Form.Item label="Description" name="description" style={fs}>
-              <Input.TextArea rows={3} placeholder="Enter description" disabled={!buSelected} />
+              <Input.TextArea rows={3} placeholder="Enter description" disabled={isEdit || !buSelected} />
             </Form.Item>
           </Col>
 
           <Col xs={24} lg={12}>
             <Form.Item label="Value Date" name="valueDate" style={fs}>
-              <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={!buSelected} />
+              <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={isEdit || !buSelected} />
             </Form.Item>
 
             <Form.Item label="Currency" name="currencyCode" style={fs}>
-              <Select placeholder="Select currency" allowClear disabled={!buSelected}>
+              <Select placeholder="Select currency" allowClear disabled={isEdit || !buSelected}>
                 {['AED', 'USD', 'EUR', 'GBP', 'SAR', 'QAR', 'KWD', 'BHD', 'OMR'].map(c => (
                   <Option key={c} value={c}>{c}</Option>
                 ))}
@@ -364,15 +374,20 @@ const ExternalTxnForm: React.FC<{
 
         <Divider />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Button icon={<ApiOutlined />} onClick={handleApiOpen} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>
-            API
-          </Button>
-          <Space>
-            <Button onClick={onCancel}>Cancel</Button>
-            <Button type="primary" loading={saving} onClick={handleSubmit}
-              style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
-              {isEdit ? 'Save Changes' : 'Create Transaction'}
+          {!isEdit && (
+            <Button icon={<ApiOutlined />} onClick={handleApiOpen} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>
+              API
             </Button>
+          )}
+          {isEdit && <span />}
+          <Space>
+            <Button onClick={onCancel}>{isEdit ? 'Close' : 'Cancel'}</Button>
+            {!isEdit && (
+              <Button type="primary" loading={saving} onClick={handleSubmit}
+                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
+                Create Transaction
+              </Button>
+            )}
           </Space>
         </div>
       </Form>
@@ -449,6 +464,39 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   const [searchForm] = Form.useForm();
 
   const modulePrefix = module === 'ap' ? '/ap' : '/cash';
+
+  const exportToExcel = () => {
+    const rows = transactions.map(t => ({
+      'Txn Number':       t.transactionId ?? '',
+      'Bank Account':     t.bankAccountName ?? '',
+      'Business Unit':    t.businessUnitName ?? '',
+      'Date':             t.transactionDate ?? '',
+      'Value Date':       t.valueDate ?? '',
+      'Cleared Date':     t.clearedDate ?? '',
+      'Amount':           t.amount ?? '',
+      'Currency':         t.currencyCode ?? '',
+      'Reference':        t.referenceText ?? '',
+      'Description':      t.description ?? '',
+      'Cash Account':     t.assetAccountCombination ?? '',
+      'Offset Account':   t.offsetAccountCombination ?? '',
+      'Transaction Type': t.transactionType ?? '',
+      'Status':           t.status ?? '',
+      'Origin':           t.source ?? '',
+      'Legal Entity':     t.legalEntityName ?? '',
+      'Accounting Flag':  t.accountingFlag ?? '',
+      'Check Number':     t.checkNumber ?? '',
+      'Recon Reference':  t.reconReference ?? '',
+      'Created By':       t.createdBy ?? '',
+      'Creation Date':    t.creationDate ?? '',
+      'Last Update Date': t.lastUpdateDate ?? '',
+      'Sync Date':        t.syncDate ?? '',
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'External Transactions');
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    saveAs(new Blob([buf], { type: 'application/octet-stream' }), `external_transactions_${dayjs().format('YYYYMMDD_HHmmss')}.xlsx`);
+  };
 
   // ── Load LOVs ─────────────────────────────────────────────────────────────
   const loadLovs = useCallback(async () => {
@@ -757,9 +805,11 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
         </div>
 
         <div style={{ padding: '0 24px 24px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 0 4px' }}>
-            <Title level={4} style={{ margin: 0, color: REDWOOD.neutral900 }}>Manage External Transactions</Title>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', padding: '14px 0 4px' }}>
             <Space>
+              <Button icon={<DownloadOutlined />} onClick={exportToExcel} disabled={transactions.length === 0}>
+                Export to Excel
+              </Button>
               <Button icon={<PlusOutlined />} type="primary"
                 onClick={openCreateTab}
                 style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
