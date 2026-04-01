@@ -71,7 +71,11 @@
         "to": "email.config.json"
       }
     ],
-    "asar": false,
+    "asar": true,
+    "asarUnpack": [
+      "server/**/*",
+      "electron/**/*"
+    ],
     "win": {
       "target": [
         {
