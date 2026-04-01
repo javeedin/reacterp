@@ -180,22 +180,31 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPORT_PKG AS
                )
         WHERE  DESCRIPTION IS NOT NULL;
 
-        INSERT INTO RR_SUPPORT_TICKET_ATTACHMENTS (
-            TICKET_ID, FILE_NAME, FILE_TYPE, FILE_SIZE, ATTACHMENT_DATA, CREATED_BY
-        )
-        SELECT v_ticket_id,
-               FILE_NAME, FILE_TYPE, FILE_SIZE,
-               TO_CLOB(DATA),
-               v_created
-        FROM   JSON_TABLE(p_body, '$.attachments[*]'
-                   COLUMNS (
-                       FILE_NAME  VARCHAR2(500)   PATH '$.fileName',
-                       FILE_TYPE  VARCHAR2(100)   PATH '$.fileType',
-                       FILE_SIZE  NUMBER          PATH '$.fileSize',
-                       DATA       VARCHAR2(32767) PATH '$.data'
-                   )
-               )
-        WHERE  FILE_NAME IS NOT NULL;
+        -- Insert attachments using JSON_ARRAY_T so large base64 CLOBs
+        -- are not truncated by the VARCHAR2(32767) limit of JSON_TABLE.
+        DECLARE
+            v_arr  JSON_ARRAY_T;
+            v_obj  JSON_OBJECT_T;
+            v_fname VARCHAR2(500);
+        BEGIN
+            v_arr := JSON_ARRAY_T(JSON_QUERY(p_body, '$.attachments'));
+            FOR i IN 0 .. v_arr.GET_SIZE - 1 LOOP
+                v_obj   := JSON_OBJECT_T(v_arr.GET(i));
+                v_fname := v_obj.GET_STRING('fileName');
+                IF v_fname IS NOT NULL THEN
+                    INSERT INTO RR_SUPPORT_TICKET_ATTACHMENTS (
+                        TICKET_ID, FILE_NAME, FILE_TYPE, FILE_SIZE, ATTACHMENT_DATA, CREATED_BY
+                    ) VALUES (
+                        v_ticket_id,
+                        v_fname,
+                        v_obj.GET_STRING('fileType'),
+                        v_obj.GET_NUMBER('fileSize'),
+                        v_obj.GET_CLOB('data'),   -- full CLOB, no 32767 truncation
+                        v_created
+                    );
+                END IF;
+            END LOOP;
+        END;
 
         COMMIT;
         p_status_code := 200;
@@ -265,19 +274,21 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPORT_PKG AS
             ));
         END LOOP;
 
-        -- Attachments array
+        -- Attachments array — append ATTACHMENT_DATA CLOB directly so the
+        -- full base64 string is returned without the 32767-char truncation.
+        -- Base64 chars (A-Z a-z 0-9 + / =) need no JSON escaping.
         DBMS_LOB.APPEND(v_clob, TO_CLOB('],"attachments":['));
         v_first := TRUE;
         FOR r IN (
             SELECT ATTACHMENT_ID, FILE_NAME, FILE_TYPE, FILE_SIZE,
-                   CREATED_BY, CREATION_DATE,
-                   DBMS_LOB.SUBSTR(ATTACHMENT_DATA, 32767, 1) AS DATA_PREVIEW
+                   CREATED_BY, CREATION_DATE, ATTACHMENT_DATA
             FROM   RR_SUPPORT_TICKET_ATTACHMENTS
             WHERE  TICKET_ID = p_ticket_id
             ORDER  BY ATTACHMENT_ID
         ) LOOP
             IF NOT v_first THEN DBMS_LOB.APPEND(v_clob, TO_CLOB(',')); END IF;
             v_first := FALSE;
+            -- Write all scalar fields, then open the "data" string value
             DBMS_LOB.APPEND(v_clob, TO_CLOB(
                 '{"attachmentId":' || r.ATTACHMENT_ID || ','
              || '"fileName":'      || js(r.FILE_NAME)     || ','
@@ -285,8 +296,14 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPORT_PKG AS
              || '"fileSize":'      || NVL(r.FILE_SIZE, 0) || ','
              || '"createdBy":'     || js(r.CREATED_BY)    || ','
              || '"creationDate":'  || js(r.CREATION_DATE) || ','
-             || '"data":'          || js(r.DATA_PREVIEW)  || '}'
+             || '"data":"'
             ));
+            -- Append the full base64 CLOB without any size limit
+            IF r.ATTACHMENT_DATA IS NOT NULL THEN
+                DBMS_LOB.APPEND(v_clob, r.ATTACHMENT_DATA);
+            END IF;
+            -- Close the data string and the object
+            DBMS_LOB.APPEND(v_clob, TO_CLOB('"}'));
         END LOOP;
 
         DBMS_LOB.APPEND(v_clob, TO_CLOB(']}'));
