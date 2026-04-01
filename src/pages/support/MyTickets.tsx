@@ -104,7 +104,7 @@ const MyTickets: React.FC = () => {
       ),
     },
     {
-      title: 'Module', dataIndex: 'module', width: 160, ellipsis: true,
+      title: 'Module', dataIndex: 'module', width: 140, ellipsis: true,
       render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text>,
     },
     {
@@ -112,7 +112,7 @@ const MyTickets: React.FC = () => {
       render: v => <Tag color={PRIORITY_COLOR[v] ?? 'default'} style={{ fontSize: 11 }}>{v}</Tag>,
     },
     {
-      title: 'Status', dataIndex: 'status', width: 130,
+      title: 'Status', dataIndex: 'status', width: 120,
       render: v => (
         <Tag color={STATUS_COLOR[v] ?? 'default'} icon={STATUS_ICON[v]} style={{ fontSize: 11 }}>
           {v.replace('_', ' ')}
@@ -120,13 +120,13 @@ const MyTickets: React.FC = () => {
       ),
     },
     {
+      title: 'Created By', dataIndex: 'createdBy', width: 130,
+      render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text>,
+    },
+    {
       title: 'Assigned To', dataIndex: 'assignedTo', width: 120,
       render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text>,
     },
-    ...(viewMode === 'all' ? [{
-      title: 'Created By', dataIndex: 'createdBy', width: 120,
-      render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text>,
-    }] : []),
     {
       title: 'Issues', dataIndex: 'lineCount', width: 70, align: 'center' as const,
       render: (v: number) => v > 0 ? <Badge count={v} color="#1890ff" /> : '—',
