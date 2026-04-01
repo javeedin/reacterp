@@ -50,6 +50,7 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPORT_PKG AS
         p_date_to     IN  VARCHAR2 DEFAULT NULL,
         p_search      IN  VARCHAR2 DEFAULT NULL,
         p_created_by  IN  VARCHAR2 DEFAULT NULL,
+        p_assigned_to IN  VARCHAR2 DEFAULT NULL,
         p_limit       IN  NUMBER   DEFAULT 200,
         p_offset      IN  NUMBER   DEFAULT 0,
         p_status_code OUT NUMBER
@@ -61,12 +62,13 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPORT_PKG AS
         SELECT COUNT(*)
         INTO   v_total
         FROM   RR_SUPPORT_TICKETS t
-        WHERE  (p_status     IS NULL OR t.STATUS     = p_status)
-        AND    (p_module     IS NULL OR t.MODULE      = p_module)
-        AND    (p_priority   IS NULL OR t.PRIORITY   = p_priority)
-        AND    (p_created_by IS NULL OR UPPER(t.CREATED_BY) = UPPER(p_created_by))
-        AND    (p_date_from  IS NULL OR t.CREATION_DATE >= p_date_from)
-        AND    (p_date_to    IS NULL OR t.CREATION_DATE <= p_date_to || ' 23:59:59')
+        WHERE  (p_status      IS NULL OR t.STATUS      = p_status)
+        AND    (p_module      IS NULL OR t.MODULE       = p_module)
+        AND    (p_priority    IS NULL OR t.PRIORITY     = p_priority)
+        AND    (p_created_by  IS NULL OR UPPER(t.CREATED_BY)  LIKE '%' || UPPER(p_created_by)  || '%')
+        AND    (p_assigned_to IS NULL OR UPPER(t.ASSIGNED_TO) LIKE '%' || UPPER(p_assigned_to) || '%')
+        AND    (p_date_from   IS NULL OR t.CREATION_DATE >= p_date_from)
+        AND    (p_date_to     IS NULL OR t.CREATION_DATE <= p_date_to || ' 23:59:59')
         AND    (p_search IS NULL
                 OR UPPER(t.TITLE)         LIKE '%' || UPPER(p_search) || '%'
                 OR UPPER(t.TICKET_NUMBER) LIKE '%' || UPPER(p_search) || '%');
@@ -90,12 +92,13 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPORT_PKG AS
                     AND    REPLY_TYPE = 'SUPPORT'
                     AND    LINE_TYPE  = 'COMMENT') AS UNREAD_REPLIES
             FROM   RR_SUPPORT_TICKETS t
-            WHERE  (p_status     IS NULL OR t.STATUS     = p_status)
-            AND    (p_module     IS NULL OR t.MODULE      = p_module)
-            AND    (p_priority   IS NULL OR t.PRIORITY   = p_priority)
-            AND    (p_created_by IS NULL OR UPPER(t.CREATED_BY) = UPPER(p_created_by))
-            AND    (p_date_from  IS NULL OR t.CREATION_DATE >= p_date_from)
-            AND    (p_date_to    IS NULL OR t.CREATION_DATE <= p_date_to || ' 23:59:59')
+            WHERE  (p_status      IS NULL OR t.STATUS      = p_status)
+            AND    (p_module      IS NULL OR t.MODULE       = p_module)
+            AND    (p_priority    IS NULL OR t.PRIORITY     = p_priority)
+            AND    (p_created_by  IS NULL OR UPPER(t.CREATED_BY)  LIKE '%' || UPPER(p_created_by)  || '%')
+            AND    (p_assigned_to IS NULL OR UPPER(t.ASSIGNED_TO) LIKE '%' || UPPER(p_assigned_to) || '%')
+            AND    (p_date_from   IS NULL OR t.CREATION_DATE >= p_date_from)
+            AND    (p_date_to     IS NULL OR t.CREATION_DATE <= p_date_to || ' 23:59:59')
             AND    (p_search IS NULL
                     OR UPPER(t.TITLE)         LIKE '%' || UPPER(p_search) || '%'
                     OR UPPER(t.TICKET_NUMBER) LIKE '%' || UPPER(p_search) || '%')

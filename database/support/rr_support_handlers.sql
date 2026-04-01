@@ -38,6 +38,7 @@ BEGIN
         p_date_to     => :date_to,
         p_search      => :search,
         p_created_by  => :created_by,
+        p_assigned_to => :assigned_to,
         p_limit       => NVL(TO_NUMBER(:row_limit), 200),
         p_offset      => NVL(TO_NUMBER(:offset),    0),
         p_status_code => v_status_code

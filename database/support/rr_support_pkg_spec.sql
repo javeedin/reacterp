@@ -11,6 +11,7 @@ CREATE OR REPLACE PACKAGE RR_SUPPORT_PKG AS
         p_date_to     IN  VARCHAR2 DEFAULT NULL,
         p_search      IN  VARCHAR2 DEFAULT NULL,
         p_created_by  IN  VARCHAR2 DEFAULT NULL,
+        p_assigned_to IN  VARCHAR2 DEFAULT NULL,
         p_limit       IN  NUMBER   DEFAULT 200,
         p_offset      IN  NUMBER   DEFAULT 0,
         p_status_code OUT NUMBER

@@ -62,12 +62,14 @@ const ManageTickets: React.FC = () => {
   const handleSearch = useCallback(async () => {
     const v = searchForm.getFieldsValue();
     const p = new URLSearchParams();
-    if (v.status)   p.set('status',    v.status);
-    if (v.module)   p.set('module',    v.module);
-    if (v.priority) p.set('priority',  v.priority);
-    if (v.search)   p.set('search',    v.search);
-    if (v.dateFrom) p.set('date_from', dayjs(v.dateFrom).format('YYYY-MM-DD'));
-    if (v.dateTo)   p.set('date_to',   dayjs(v.dateTo).format('YYYY-MM-DD'));
+    if (v.status)     p.set('status',     v.status);
+    if (v.module)     p.set('module',     v.module);
+    if (v.priority)   p.set('priority',   v.priority);
+    if (v.createdBy)  p.set('created_by', v.createdBy);
+    if (v.assignedTo) p.set('assigned_to', v.assignedTo);
+    if (v.search)     p.set('search',     v.search);
+    if (v.dateFrom)   p.set('date_from',  dayjs(v.dateFrom).format('YYYY-MM-DD'));
+    if (v.dateTo)     p.set('date_to',    dayjs(v.dateTo).format('YYYY-MM-DD'));
     p.set('row_limit', '500');
 
     setLoading(true); setHasSearched(true);
@@ -245,8 +247,13 @@ const ManageTickets: React.FC = () => {
                       </Form.Item>
                     </Col>
                     <Col xs={24} md={8}>
+                      <Form.Item label="Created By" name="createdBy" style={{ marginBottom: 10 }}>
+                        <Input placeholder="Name or username…" />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} md={8}>
                       <Form.Item label="Assigned To" name="assignedTo" style={{ marginBottom: 10 }}>
-                        <Input placeholder="Username…" />
+                        <Input placeholder="Name or username…" />
                       </Form.Item>
                     </Col>
                     <Col xs={24} md={8}>
