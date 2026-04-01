@@ -63,6 +63,7 @@ const ManageBankStatements    = lazy(() => import('./pages/cash/ManageBankStatem
 const BankReconciliation      = lazy(() => import('./pages/cash/BankReconciliation'));
 const SupportModule           = lazy(() => import('./pages/support/SupportModule'));
 const ManageTickets           = lazy(() => import('./pages/support/ManageTickets'));
+const MyTickets               = lazy(() => import('./pages/support/MyTickets'));
 
 // Placeholder component for modules under development
 const ComingSoon = ({ moduleName }: { moduleName: string }) => (
@@ -185,8 +186,9 @@ function App() {
               <Route path="ap/external-transactions"   element={<ManageExternalTransactions module="ap" />} />
               <Route path="sync/*" element={<SyncData />} />
               {/* Support / Ticketing */}
-              <Route path="support"         element={<SupportModule />} />
-              <Route path="support/tickets" element={<ManageTickets />} />
+              <Route path="support"            element={<SupportModule />} />
+              <Route path="support/tickets"   element={<ManageTickets />} />
+              <Route path="support/my-tickets" element={<MyTickets />} />
             </Route>
 
             {/* Catch all */}

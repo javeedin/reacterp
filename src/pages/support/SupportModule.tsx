@@ -1,7 +1,7 @@
 import React from 'react';
 import { Layout, Breadcrumb, Typography, Card, Row, Col } from 'antd';
 import {
-  HomeOutlined, BugOutlined, UnorderedListOutlined, BarChartOutlined,
+  HomeOutlined, BugOutlined, UnorderedListOutlined, UserOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -15,10 +15,18 @@ const REDWOOD = {
 
 const items = [
   {
+    key: 'my-tickets',
+    icon: <UserOutlined />,
+    label: 'My Tickets',
+    description: 'View and track your own submitted tickets',
+    color: REDWOOD.info,
+    path: '/support/my-tickets',
+  },
+  {
     key: 'tickets',
     icon: <UnorderedListOutlined />,
     label: 'Manage Tickets',
-    description: 'View, search and resolve all support tickets',
+    description: 'Search, assign, update and resolve all support tickets',
     color: REDWOOD.primary,
     path: '/support/tickets',
   },
@@ -26,9 +34,9 @@ const items = [
     key: 'raise',
     icon: <BugOutlined />,
     label: 'Raise a Ticket',
-    description: 'Report an issue on the current page',
-    color: REDWOOD.info,
-    path: null,        // handled by the toolbar button — just shown for guidance
+    description: 'Use the bug icon in the toolbar from any page to report an issue',
+    color: REDWOOD.warning,
+    path: null,
   },
 ];
 
@@ -61,23 +69,24 @@ const SupportModule: React.FC = () => {
                     border: `1px solid ${REDWOOD.neutral200}`,
                     cursor: item.path ? 'pointer' : 'default',
                     opacity: item.path ? 1 : 0.6,
+                    borderTop: `3px solid ${item.color}`,
                   }}
-                  styles={{ body: { padding: '14px 16px' } }}
+                  styles={{ body: { padding: '16px 20px' } }}
                 >
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
                     <div style={{
-                      width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+                      width: 40, height: 40, borderRadius: 8, flexShrink: 0,
                       background: item.color + '18',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      color: item.color, fontSize: 18,
+                      color: item.color, fontSize: 20,
                     }}>
                       {item.icon}
                     </div>
                     <div>
-                      <Text strong style={{ fontSize: 13, color: item.path ? item.color : REDWOOD.neutral900 }}>
+                      <Text strong style={{ fontSize: 14, color: item.path ? item.color : REDWOOD.neutral900, display: 'block', marginBottom: 4 }}>
                         {item.label}
                       </Text>
-                      <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 2 }}>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
                         {item.description}
                       </Text>
                     </div>

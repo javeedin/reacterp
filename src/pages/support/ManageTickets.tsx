@@ -1,23 +1,26 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input, Select,
-  DatePicker, Row, Col, Space, Tag, Tooltip, Tabs, Modal, Badge, Divider,
-  message, Empty, Statistic, Collapse, Alert,
+  DatePicker, Row, Col, Space, Tag, Tooltip, Badge, Divider,
+  message, Empty, Statistic, Collapse,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, BugOutlined, SearchOutlined, ReloadOutlined,
   CheckCircleOutlined, ClockCircleOutlined, ExclamationCircleOutlined,
-  PaperClipOutlined, MessageOutlined, CloseCircleOutlined, PlusOutlined,
-  BarChartOutlined,
+  CloseCircleOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs from 'dayjs';
+import { useAuth } from '../../context/AuthContext';
+import TicketDetailModal, {
+  type Ticket,
+  PRIORITY_COLOR, STATUS_COLOR, STATUS_ICON, fmtDate,
+} from '../../components/TicketDetailModal';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
 const { Option } = Select;
-const { TextArea } = Input;
 
 const APEX_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp';
 
@@ -27,52 +30,6 @@ const REDWOOD = {
   neutral100: '#F7F7F7', neutral200: '#E5E5E5', neutral900: '#1A1A1A', surface: '#FFFFFF',
 };
 
-// ── Types ─────────────────────────────────────────────────────
-interface Ticket {
-  ticketId:       number;
-  ticketNumber:   string;
-  title:          string;
-  module:         string;
-  pageName:       string;
-  pageUrl:        string;
-  feature:        string;
-  priority:       string;
-  status:         string;
-  assignedTo:     string;
-  createdBy:      string;
-  creationDate:   string;
-  lastUpdateDate: string;
-  resolvedBy:     string;
-  resolutionDate: string;
-  lineCount:      number;
-  attachCount:    number;
-}
-
-interface TicketLine {
-  lineId:       number;
-  lineNumber:   number;
-  lineType:     string;
-  description:  string;
-  createdBy:    string;
-  creationDate: string;
-}
-
-interface TicketAttachment {
-  attachmentId: number;
-  fileName:     string;
-  fileType:     string;
-  fileSize:     number;
-  createdBy:    string;
-  creationDate: string;
-  data:         string;
-}
-
-interface TicketDetail {
-  ticket:      Ticket & { description: string; resolutionNotes: string };
-  lines:       TicketLine[];
-  attachments: TicketAttachment[];
-}
-
 interface DashboardData {
   summary: { open: number; inProgress: number; resolved: number; closed: number };
   byModule: { module: string; count: number }[];
@@ -80,279 +37,9 @@ interface DashboardData {
   recentOpen: Ticket[];
 }
 
-// ── Helpers ───────────────────────────────────────────────────
-const PRIORITY_COLOR: Record<string, string> = {
-  LOW: 'default', MEDIUM: 'blue', HIGH: 'orange', CRITICAL: 'red',
-};
-const STATUS_COLOR: Record<string, string> = {
-  OPEN: 'processing', IN_PROGRESS: 'warning', RESOLVED: 'success', CLOSED: 'default',
-};
-const STATUS_ICON: Record<string, React.ReactNode> = {
-  OPEN:        <ExclamationCircleOutlined />,
-  IN_PROGRESS: <ClockCircleOutlined />,
-  RESOLVED:    <CheckCircleOutlined />,
-  CLOSED:      <CloseCircleOutlined />,
-};
-
-const fmtDate = (d?: string) => d ? dayjs(d).format('D-MMM-YYYY HH:mm') : '—';
-
-const fmtSize = (b: number) =>
-  b < 1024 ? `${b} B` : b < 1024 * 1024 ? `${(b / 1024).toFixed(1)} KB` : `${(b / (1024 * 1024)).toFixed(1)} MB`;
-
-// ── Ticket Detail Modal ────────────────────────────────────────
-const TicketDetailModal: React.FC<{
-  ticketId: number | null;
-  onClose:  () => void;
-  onRefresh: () => void;
-}> = ({ ticketId, onClose, onRefresh }) => {
-  const [detail, setDetail]       = useState<TicketDetail | null>(null);
-  const [loading, setLoading]     = useState(false);
-  const [action, setAction]       = useState<string | null>(null);
-  const [actionForm] = Form.useForm();
-  const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (!ticketId) { setDetail(null); return; }
-    setLoading(true);
-    fetch(`${APEX_BASE}/support/tickets/${ticketId}`)
-      .then(r => r.json())
-      .then(d => setDetail(d.status === 'success' ? d : null))
-      .catch(() => setDetail(null))
-      .finally(() => setLoading(false));
-  }, [ticketId]);
-
-  const doAction = async (act: string) => {
-    let vals: any = {};
-    if (action === act && (act === 'resolve' || act === 'comment')) {
-      try { vals = await actionForm.validateFields(); } catch { return; }
-    }
-    setSubmitting(true);
-    try {
-      const res = await fetch(`${APEX_BASE}/support/update`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ticketId:         ticketId,
-          action:           act,
-          updatedBy:        'ERP_USER',
-          comment:          vals.comment,
-          resolutionNotes:  vals.resolutionNotes,
-        }),
-      });
-      const data = await res.json();
-      if (data.status === 'success') {
-        message.success(
-          act === 'comment' ? 'Comment added' :
-          act === 'resolve' ? 'Ticket resolved' :
-          act === 'close'   ? 'Ticket closed'  :
-          act === 'reopen'  ? 'Ticket reopened' : 'Updated'
-        );
-        setAction(null);
-        actionForm.resetFields();
-        // Reload detail
-        const r2 = await fetch(`${APEX_BASE}/support/tickets/${ticketId}`);
-        const d2 = await r2.json();
-        if (d2.status === 'success') setDetail(d2);
-        onRefresh();
-      } else { message.error(data.message || 'Update failed'); }
-    } catch (e: any) { message.error('Network error: ' + e.message); }
-    finally { setSubmitting(false); }
-  };
-
-  const t = detail?.ticket;
-
-  return (
-    <Modal
-      open={!!ticketId}
-      onCancel={onClose}
-      width={860}
-      footer={null}
-      title={
-        t ? (
-          <Space>
-            <BugOutlined style={{ color: '#cf1322' }} />
-            <Text strong>{t.ticketNumber}</Text>
-            <Tag color={STATUS_COLOR[t.status]}>{t.status.replace('_', ' ')}</Tag>
-            <Tag color={PRIORITY_COLOR[t.priority]}>{t.priority}</Tag>
-          </Space>
-        ) : 'Ticket Details'
-      }
-    >
-      {loading && <div style={{ textAlign: 'center', padding: 32 }}>Loading…</div>}
-      {!loading && t && (
-        <div>
-          {/* Header info */}
-          <Title level={5} style={{ margin: '0 0 4px' }}>{t.title}</Title>
-          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 12 }}>
-            {[
-              ['Module', t.module], ['Page', t.pageName], ['Feature', t.feature],
-              ['Created By', t.createdBy], ['Date', fmtDate(t.creationDate)],
-            ].map(([k, v]) => v ? (
-              <Text key={k} style={{ fontSize: 12 }}>
-                <Text type="secondary" style={{ fontSize: 12 }}>{k}: </Text>{v}
-              </Text>
-            ) : null)}
-          </div>
-          {t.description && (
-            <Alert type="info" showIcon={false} message={<Text style={{ fontSize: 13 }}>{t.description}</Text>}
-              style={{ marginBottom: 12 }} />
-          )}
-          {t.pageUrl && (
-            <Text code style={{ fontSize: 11, display: 'block', marginBottom: 12 }}>{t.pageUrl}</Text>
-          )}
-
-          {/* Issues / Comments timeline */}
-          <Divider style={{ margin: '8px 0 12px' }} />
-          <Text strong style={{ fontSize: 13 }}>Issues & Activity</Text>
-          <div style={{ margin: '10px 0', maxHeight: 300, overflowY: 'auto' }}>
-            {(detail?.lines ?? []).map(l => (
-              <div key={l.lineId} style={{
-                padding: '8px 12px', marginBottom: 6, borderRadius: 6,
-                background: l.lineType === 'RESOLUTION' ? '#f6ffed'
-                           : l.lineType === 'COMMENT'   ? '#f0f5ff'
-                           : '#fafafa',
-                border: `1px solid ${l.lineType === 'RESOLUTION' ? '#b7eb8f' : l.lineType === 'COMMENT' ? '#adc6ff' : '#f0f0f0'}`,
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <Tag color={l.lineType === 'RESOLUTION' ? 'success' : l.lineType === 'COMMENT' ? 'blue' : 'default'}
-                    style={{ fontSize: 11 }}>
-                    {l.lineType}
-                  </Tag>
-                  <Text type="secondary" style={{ fontSize: 11 }}>
-                    {l.createdBy} · {fmtDate(l.creationDate)}
-                  </Text>
-                </div>
-                <Text style={{ fontSize: 13 }}>{l.description}</Text>
-              </div>
-            ))}
-            {!(detail?.lines?.length) && (
-              <Empty description="No activity yet" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-            )}
-          </div>
-
-          {/* Attachments */}
-          {(detail?.attachments?.length ?? 0) > 0 && (
-            <>
-              <Divider style={{ margin: '8px 0 12px' }} />
-              <Text strong style={{ fontSize: 13 }}>
-                Attachments <Tag color="blue">{detail!.attachments.length}</Tag>
-              </Text>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
-                {detail!.attachments.map(a => (
-                  <div key={a.attachmentId} style={{
-                    border: '1px solid #f0f0f0', borderRadius: 6, overflow: 'hidden',
-                    width: a.fileType?.startsWith('image/') ? 120 : 'auto',
-                  }}>
-                    {a.fileType?.startsWith('image/') && a.data ? (
-                      <img
-                        src={`data:${a.fileType};base64,${a.data}`}
-                        alt={a.fileName}
-                        style={{ width: 120, height: 80, objectFit: 'cover', display: 'block' }}
-                        onClick={() => window.open(`data:${a.fileType};base64,${a.data}`)}
-                        title="Click to open"
-                      />
-                    ) : (
-                      <div style={{ padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <PaperClipOutlined />
-                        <div>
-                          <Text style={{ fontSize: 12, display: 'block' }}>{a.fileName}</Text>
-                          <Text type="secondary" style={{ fontSize: 11 }}>{fmtSize(a.fileSize)}</Text>
-                        </div>
-                      </div>
-                    )}
-                    <div style={{ padding: '2px 6px', background: '#fafafa' }}>
-                      <Text type="secondary" style={{ fontSize: 10 }}>{a.fileName}</Text>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-
-          {/* Resolution info */}
-          {t.resolutionNotes && (
-            <>
-              <Divider style={{ margin: '8px 0 12px' }} />
-              <Alert
-                type="success" showIcon icon={<CheckCircleOutlined />}
-                message={<Text strong>Resolution</Text>}
-                description={t.resolutionNotes}
-              />
-              {t.resolvedBy && (
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  Resolved by {t.resolvedBy} on {fmtDate(t.resolutionDate)}
-                </Text>
-              )}
-            </>
-          )}
-
-          {/* Action panel */}
-          <Divider style={{ margin: '12px 0 8px' }} />
-          {action && (
-            <div style={{ marginBottom: 12 }}>
-              {action === 'comment' && (
-                <Form form={actionForm} layout="vertical">
-                  <Form.Item name="comment" label="Comment" rules={[{ required: true }]}>
-                    <TextArea rows={3} placeholder="Add a comment…" />
-                  </Form.Item>
-                  <Space>
-                    <Button type="primary" size="small" loading={submitting} onClick={() => doAction('comment')}>
-                      Add Comment
-                    </Button>
-                    <Button size="small" onClick={() => { setAction(null); actionForm.resetFields(); }}>Cancel</Button>
-                  </Space>
-                </Form>
-              )}
-              {action === 'resolve' && (
-                <Form form={actionForm} layout="vertical">
-                  <Form.Item name="resolutionNotes" label="Resolution Notes" rules={[{ required: true }]}>
-                    <TextArea rows={3} placeholder="Describe how the issue was resolved…" />
-                  </Form.Item>
-                  <Space>
-                    <Button type="primary" size="small" loading={submitting}
-                      style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
-                      onClick={() => doAction('resolve')}>
-                      Mark Resolved
-                    </Button>
-                    <Button size="small" onClick={() => { setAction(null); actionForm.resetFields(); }}>Cancel</Button>
-                  </Space>
-                </Form>
-              )}
-            </div>
-          )}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Space>
-              <Button size="small" icon={<MessageOutlined />} onClick={() => setAction('comment')}>
-                Add Comment
-              </Button>
-              {t.status !== 'RESOLVED' && t.status !== 'CLOSED' && (
-                <Button size="small" icon={<CheckCircleOutlined />}
-                  style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}
-                  onClick={() => setAction('resolve')}>
-                  Resolve
-                </Button>
-              )}
-              {t.status === 'RESOLVED' && (
-                <Button size="small" icon={<CloseCircleOutlined />} onClick={() => doAction('close')}>
-                  Close
-                </Button>
-              )}
-              {(t.status === 'RESOLVED' || t.status === 'CLOSED') && (
-                <Button size="small" icon={<ReloadOutlined />} onClick={() => doAction('reopen')}>
-                  Reopen
-                </Button>
-              )}
-            </Space>
-            <Button onClick={onClose}>Close</Button>
-          </div>
-        </div>
-      )}
-    </Modal>
-  );
-};
-
 // ── Main page ─────────────────────────────────────────────────
 const ManageTickets: React.FC = () => {
+  const { user } = useAuth();
   const [tickets, setTickets]         = useState<Ticket[]>([]);
   const [loading, setLoading]         = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
@@ -428,6 +115,8 @@ const ManageTickets: React.FC = () => {
         {v.replace('_', ' ')}
       </Tag>,
     },
+    { title: 'Assigned To', dataIndex: 'assignedTo', width: 110,
+      render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Issues', dataIndex: 'lineCount', width: 70, align: 'center',
       render: v => v > 0 ? <Badge count={v} color="#1890ff" /> : '—' },
     { title: 'Files', dataIndex: 'attachCount', width: 60, align: 'center',
@@ -463,10 +152,10 @@ const ManageTickets: React.FC = () => {
           {summary && (
             <Row gutter={[16, 16]} style={{ padding: '16px 0 4px' }}>
               {[
-                { label: 'Open',        val: summary.open,       color: '#1890ff', icon: <ExclamationCircleOutlined /> },
-                { label: 'In Progress', val: summary.inProgress, color: '#fa8c16', icon: <ClockCircleOutlined /> },
-                { label: 'Resolved',    val: summary.resolved,   color: '#52c41a', icon: <CheckCircleOutlined /> },
-                { label: 'Closed',      val: summary.closed,     color: '#8c8c8c', icon: <CloseCircleOutlined /> },
+                { label: 'Open',        val: summary.open,       color: '#1890ff', icon: <ExclamationCircleOutlined />, status: 'OPEN' },
+                { label: 'In Progress', val: summary.inProgress, color: '#fa8c16', icon: <ClockCircleOutlined />,       status: 'IN_PROGRESS' },
+                { label: 'Resolved',    val: summary.resolved,   color: '#52c41a', icon: <CheckCircleOutlined />,       status: 'RESOLVED' },
+                { label: 'Closed',      val: summary.closed,     color: '#8c8c8c', icon: <CloseCircleOutlined />,       status: 'CLOSED' },
               ].map(s => (
                 <Col key={s.label} xs={12} sm={6}>
                   <Card
@@ -474,7 +163,7 @@ const ManageTickets: React.FC = () => {
                     style={{ borderRadius: 8, borderLeft: `4px solid ${s.color}`, cursor: 'pointer' }}
                     styles={{ body: { padding: '12px 16px' } }}
                     onClick={() => {
-                      searchForm.setFieldsValue({ status: s.label.replace(' ', '_').toUpperCase() === 'IN_PROGRESS' ? 'IN_PROGRESS' : s.label.toUpperCase() });
+                      searchForm.setFieldsValue({ status: s.status });
                       handleSearch();
                     }}
                   >
@@ -495,8 +184,7 @@ const ManageTickets: React.FC = () => {
             <div style={{ padding: '8px 0 4px', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {dashboard.byModule.map(m => (
                 <Tag
-                  key={m.module}
-                  color="geekblue" style={{ cursor: 'pointer' }}
+                  key={m.module} color="geekblue" style={{ cursor: 'pointer' }}
                   onClick={() => { searchForm.setFieldsValue({ module: m.module }); handleSearch(); }}
                 >
                   {m.module}: {m.count}
@@ -550,10 +238,15 @@ const ManageTickets: React.FC = () => {
                     <Col xs={24} md={8}>
                       <Form.Item label="Module" name="module" style={{ marginBottom: 10 }}>
                         <Select placeholder="Any" allowClear showSearch>
-                          {['General Ledger','Accounts Payable','Cash Management','Data Sync','Administration','General'].map(m => (
+                          {['General Ledger', 'Accounts Payable', 'Cash Management', 'Data Sync', 'Administration', 'General'].map(m => (
                             <Option key={m} value={m}>{m}</Option>
                           ))}
                         </Select>
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} md={8}>
+                      <Form.Item label="Assigned To" name="assignedTo" style={{ marginBottom: 10 }}>
+                        <Input placeholder="Username…" />
                       </Form.Item>
                     </Col>
                     <Col xs={24} md={8}>
@@ -602,7 +295,7 @@ const ManageTickets: React.FC = () => {
                 const filtered = q
                   ? tickets.filter(r =>
                       [r.ticketNumber, r.title, r.module, r.pageName, r.feature,
-                       r.status, r.priority, r.createdBy]
+                       r.status, r.priority, r.createdBy, r.assignedTo]
                       .some(v => String(v ?? '').toLowerCase().includes(q))
                     )
                   : tickets;
@@ -612,7 +305,7 @@ const ManageTickets: React.FC = () => {
                     loading={loading} size="small"
                     pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `${t} tickets` }}
                     locale={{ emptyText: <Empty description="No tickets found" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
-                    scroll={{ x: 1300 }}
+                    scroll={{ x: 1400 }}
                   />
                 );
               })()}
@@ -637,6 +330,8 @@ const ManageTickets: React.FC = () => {
                     render: v => <Text style={{ fontSize: 12 }}>{v}</Text> },
                   { title: 'Module', dataIndex: 'module', width: 160,
                     render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+                  { title: 'Assigned To', dataIndex: 'assignedTo', width: 120,
+                    render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
                   { title: 'Priority', dataIndex: 'priority', width: 90,
                     render: v => <Tag color={PRIORITY_COLOR[v] ?? 'default'} style={{ fontSize: 11 }}>{v}</Tag> },
                   { title: 'Status', dataIndex: 'status', width: 120,
@@ -644,7 +339,7 @@ const ManageTickets: React.FC = () => {
                   { title: 'Date', dataIndex: 'creationDate', width: 130,
                     render: v => <Text style={{ fontSize: 12 }}>{fmtDate(v)}</Text> },
                 ]}
-                scroll={{ x: 700 }}
+                scroll={{ x: 800 }}
               />
             </Card>
           )}
@@ -653,6 +348,7 @@ const ManageTickets: React.FC = () => {
 
       <TicketDetailModal
         ticketId={selectedId}
+        currentUser={user?.username}
         onClose={() => setSelectedId(null)}
         onRefresh={() => { loadDashboard(); if (hasSearched) handleSearch(); }}
       />

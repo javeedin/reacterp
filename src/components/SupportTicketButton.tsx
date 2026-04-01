@@ -8,6 +8,7 @@ import {
   PaperClipOutlined, CloseOutlined, ExclamationCircleOutlined,
 } from '@ant-design/icons';
 import { useLocation } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import type { UploadFile } from 'antd/es/upload';
 
 const { TextArea } = Input;
@@ -78,6 +79,7 @@ interface Attachment {
 // ── Main component ────────────────────────────────────────────
 const SupportTicketButton: React.FC = () => {
   const location  = useLocation();
+  const { user }  = useAuth();
   const [open, setOpen]         = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [capturing, setCapturing]   = useState(false);
@@ -188,7 +190,7 @@ const SupportTicketButton: React.FC = () => {
         pageUrl:     window.location.hash,
         feature:     vals.feature ?? '',
         priority:    vals.priority,
-        createdBy:   'ERP_USER',
+        createdBy:   user?.username || 'ERP_USER',
         lines: nonEmptyIssues.map(i => ({ lineType: 'ISSUE', description: i.description })),
         attachments: attachments.map(a => ({
           fileName: a.fileName,
