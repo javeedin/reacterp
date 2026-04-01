@@ -22,7 +22,6 @@
     "@ant-design/icons": "^6.1.0",
     "antd": "^6.1.0",
     "cors": "^2.8.5",
-    "electron-updater": "^6.8.3",
     "express": "^5.2.1",
     "file-saver": "^2.0.5",
     "jspdf": "^3.0.4",
@@ -103,11 +102,6 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
     },
-    "publish": {
-      "provider": "github",
-      "owner": "javeedin",
-      "repo": "reacterp",
-      "releaseType": "release"
-    }
+    "publish": null
   }
 }

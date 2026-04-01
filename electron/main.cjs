@@ -2,10 +2,9 @@ const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, Notification, nativeIma
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
+// electron-updater removed — was causing 5+ min startup delay in packaged EXE
+// (bundled into app, generated app-update.yml, triggered GitHub network calls before window opened)
 let autoUpdater = null;
-// Disabled: electron-updater runs synchronously at require() time before app.whenReady(),
-// blocking startup and making network calls to GitHub (via publish config in package.json).
-// try { autoUpdater = require('electron-updater').autoUpdater; } catch (_) { /* not available in portable build */ }
 
 let nodemailer = null;
 try { nodemailer = require('nodemailer'); } catch (_) { /* optional */ }
