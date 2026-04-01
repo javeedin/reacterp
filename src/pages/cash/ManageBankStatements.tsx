@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, Component } from 'react';
 import dayjs, { type Dayjs } from 'dayjs';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input, Select,
@@ -981,4 +981,45 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
   );
 };
 
-export default ManageBankStatements;
+// ── Error Boundary ────────────────────────────────────────────────────────────
+class StatementsErrorBoundary extends Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  constructor(props: any) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error('[ManageBankStatements] render error:', error, info);
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: 24 }}>
+          <div style={{ background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 8, padding: 16 }}>
+            <strong style={{ color: '#cf1322' }}>Page Error</strong>
+            <pre style={{ marginTop: 8, fontSize: 12, color: '#333', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+              {this.state.error.message}
+              {'\n\n'}
+              {this.state.error.stack}
+            </pre>
+            <button onClick={() => this.setState({ error: null })} style={{ marginTop: 8 }}>
+              Retry
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+const ManageBankStatementsWithBoundary: React.FC<{ module?: 'ap' | 'cash' }> = (props) => (
+  <StatementsErrorBoundary>
+    <ManageBankStatements {...props} />
+  </StatementsErrorBoundary>
+);
+
+export default ManageBankStatementsWithBoundary;
