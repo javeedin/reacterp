@@ -17,7 +17,7 @@
 -- ============================================================
 -- GET /support/tickets
 -- Query params: status, module, priority, date_from, date_to,
---               search, row_limit, offset
+--               search, created_by, row_limit, offset
 -- Success  → 200 { status:"success", total:N, items:[...] }
 -- No data  → 200 { status:"success", total:0, items:[] }
 -- Error    → 500 { status:"error", code:500, message:"..." }
@@ -34,6 +34,7 @@ BEGIN
         p_date_from   => :date_from,
         p_date_to     => :date_to,
         p_search      => :search,
+        p_created_by  => :created_by,
         p_limit       => NVL(TO_NUMBER(:row_limit), 200),
         p_offset      => NVL(TO_NUMBER(:offset),    0),
         p_status_code => v_status_code

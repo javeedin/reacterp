@@ -35,22 +35,23 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPORT_PKG AS
     -- Emit a standard error response
     PROCEDURE err(p_code IN NUMBER, p_msg IN VARCHAR2, p_status_code OUT NUMBER) IS
     BEGIN
-        p_status_code := 500;
-        HTP.P('{"status":"error","message":"' || REPLACE(p_msg, '"', '\"') || '"}');
+        p_status_code := p_code;
+        HTP.P('{"status":"error","code":' || p_code || ',"message":"' || REPLACE(p_msg, '"', '\"') || '"}');
     END err;
 
     -- ──────────────────────────────────────────────────────────
     -- GET_TICKETS  — list with optional filters
     -- ──────────────────────────────────────────────────────────
     PROCEDURE get_tickets(
-        p_status    IN  VARCHAR2 DEFAULT NULL,
-        p_module    IN  VARCHAR2 DEFAULT NULL,
-        p_priority  IN  VARCHAR2 DEFAULT NULL,
-        p_date_from IN  VARCHAR2 DEFAULT NULL,
-        p_date_to   IN  VARCHAR2 DEFAULT NULL,
-        p_search    IN  VARCHAR2 DEFAULT NULL,
-        p_limit     IN  NUMBER   DEFAULT 200,
-        p_offset    IN  NUMBER   DEFAULT 0,
+        p_status      IN  VARCHAR2 DEFAULT NULL,
+        p_module      IN  VARCHAR2 DEFAULT NULL,
+        p_priority    IN  VARCHAR2 DEFAULT NULL,
+        p_date_from   IN  VARCHAR2 DEFAULT NULL,
+        p_date_to     IN  VARCHAR2 DEFAULT NULL,
+        p_search      IN  VARCHAR2 DEFAULT NULL,
+        p_created_by  IN  VARCHAR2 DEFAULT NULL,
+        p_limit       IN  NUMBER   DEFAULT 200,
+        p_offset      IN  NUMBER   DEFAULT 0,
         p_status_code OUT NUMBER
     ) IS
         v_total NUMBER := 0;
@@ -60,11 +61,12 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPORT_PKG AS
         SELECT COUNT(*)
         INTO   v_total
         FROM   RR_SUPPORT_TICKETS t
-        WHERE  (p_status   IS NULL OR t.STATUS   = p_status)
-        AND    (p_module   IS NULL OR t.MODULE   = p_module)
-        AND    (p_priority IS NULL OR t.PRIORITY = p_priority)
-        AND    (p_date_from IS NULL OR t.CREATION_DATE >= p_date_from)
-        AND    (p_date_to   IS NULL OR t.CREATION_DATE <= p_date_to || ' 23:59:59')
+        WHERE  (p_status     IS NULL OR t.STATUS     = p_status)
+        AND    (p_module     IS NULL OR t.MODULE      = p_module)
+        AND    (p_priority   IS NULL OR t.PRIORITY   = p_priority)
+        AND    (p_created_by IS NULL OR UPPER(t.CREATED_BY) = UPPER(p_created_by))
+        AND    (p_date_from  IS NULL OR t.CREATION_DATE >= p_date_from)
+        AND    (p_date_to    IS NULL OR t.CREATION_DATE <= p_date_to || ' 23:59:59')
         AND    (p_search IS NULL
                 OR UPPER(t.TITLE)         LIKE '%' || UPPER(p_search) || '%'
                 OR UPPER(t.TICKET_NUMBER) LIKE '%' || UPPER(p_search) || '%');
@@ -82,13 +84,18 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPORT_PKG AS
                    t.LAST_UPDATED_BY, t.LAST_UPDATE_DATE,
                    t.RESOLVED_BY, t.RESOLUTION_DATE,
                    (SELECT COUNT(*) FROM RR_SUPPORT_TICKET_LINES      WHERE TICKET_ID = t.TICKET_ID) AS LINE_COUNT,
-                   (SELECT COUNT(*) FROM RR_SUPPORT_TICKET_ATTACHMENTS WHERE TICKET_ID = t.TICKET_ID) AS ATTACH_COUNT
+                   (SELECT COUNT(*) FROM RR_SUPPORT_TICKET_ATTACHMENTS WHERE TICKET_ID = t.TICKET_ID) AS ATTACH_COUNT,
+                   (SELECT COUNT(*) FROM RR_SUPPORT_TICKET_LINES
+                    WHERE  TICKET_ID = t.TICKET_ID
+                    AND    REPLY_TYPE = 'SUPPORT'
+                    AND    LINE_TYPE  = 'COMMENT') AS UNREAD_REPLIES
             FROM   RR_SUPPORT_TICKETS t
-            WHERE  (p_status   IS NULL OR t.STATUS   = p_status)
-            AND    (p_module   IS NULL OR t.MODULE   = p_module)
-            AND    (p_priority IS NULL OR t.PRIORITY = p_priority)
-            AND    (p_date_from IS NULL OR t.CREATION_DATE >= p_date_from)
-            AND    (p_date_to   IS NULL OR t.CREATION_DATE <= p_date_to || ' 23:59:59')
+            WHERE  (p_status     IS NULL OR t.STATUS     = p_status)
+            AND    (p_module     IS NULL OR t.MODULE      = p_module)
+            AND    (p_priority   IS NULL OR t.PRIORITY   = p_priority)
+            AND    (p_created_by IS NULL OR UPPER(t.CREATED_BY) = UPPER(p_created_by))
+            AND    (p_date_from  IS NULL OR t.CREATION_DATE >= p_date_from)
+            AND    (p_date_to    IS NULL OR t.CREATION_DATE <= p_date_to || ' 23:59:59')
             AND    (p_search IS NULL
                     OR UPPER(t.TITLE)         LIKE '%' || UPPER(p_search) || '%'
                     OR UPPER(t.TICKET_NUMBER) LIKE '%' || UPPER(p_search) || '%')
@@ -115,7 +122,8 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPORT_PKG AS
              || '"resolvedBy":'     || js(r.RESOLVED_BY)   || ','
              || '"resolutionDate":' || js(r.RESOLUTION_DATE)|| ','
              || '"lineCount":'      || NVL(r.LINE_COUNT, 0)   || ','
-             || '"attachCount":'    || NVL(r.ATTACH_COUNT, 0) || '}'
+             || '"attachCount":'    || NVL(r.ATTACH_COUNT, 0) || ','
+             || '"unreadReplies":'  || NVL(r.UNREAD_REPLIES, 0) || '}'
             ));
         END LOOP;
 
@@ -139,7 +147,6 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPORT_PKG AS
         v_priority  VARCHAR2(20);
         v_desc      VARCHAR2(4000);
     BEGIN
-        -- Parse scalar header fields using Oracle native JSON functions
         v_created  := NVL(JSON_VALUE(p_body, '$.createdBy'),  'ERP_USER');
         v_priority := NVL(JSON_VALUE(p_body, '$.priority'),   'MEDIUM');
         v_desc     := JSON_VALUE(p_body, '$.description');
@@ -158,12 +165,13 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPORT_PKG AS
         )
         RETURNING TICKET_ID INTO v_ticket_id;
 
-        -- Insert issue lines from the "lines" array
-        INSERT INTO RR_SUPPORT_TICKET_LINES (TICKET_ID, LINE_TYPE, DESCRIPTION, CREATED_BY)
+        -- Issue lines are always from the user
+        INSERT INTO RR_SUPPORT_TICKET_LINES (TICKET_ID, LINE_TYPE, DESCRIPTION, CREATED_BY, REPLY_TYPE)
         SELECT v_ticket_id,
                NVL(LINE_TYPE, 'ISSUE'),
                DESCRIPTION,
-               v_created
+               v_created,
+               'USER'
         FROM   JSON_TABLE(p_body, '$.lines[*]'
                    COLUMNS (
                        LINE_TYPE   VARCHAR2(20)   PATH '$.lineType',
@@ -172,9 +180,6 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPORT_PKG AS
                )
         WHERE  DESCRIPTION IS NOT NULL;
 
-        -- Insert attachments from the "attachments" array
-        -- Note: attachment data (base64) is capped at 32 KB per row via VARCHAR2.
-        -- For larger screenshots the client should compress before uploading.
         INSERT INTO RR_SUPPORT_TICKET_ATTACHMENTS (
             TICKET_ID, FILE_NAME, FILE_TYPE, FILE_SIZE, ATTACHMENT_DATA, CREATED_BY
         )
@@ -239,7 +244,7 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPORT_PKG AS
          || '"resolutionNotes":'|| js(DBMS_LOB.SUBSTR(v_hdr.RESOLUTION_NOTES,4000, 1))
         ));
 
-        -- Lines array
+        -- Lines array — includes replyType for UI color-coding
         DBMS_LOB.APPEND(v_clob, TO_CLOB('},"lines":['));
         v_first := TRUE;
         FOR r IN (
@@ -253,13 +258,14 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPORT_PKG AS
                 '{"lineId":'      || r.LINE_ID     || ','
              || '"lineNumber":'   || r.LINE_NUMBER  || ','
              || '"lineType":'     || js(r.LINE_TYPE)|| ','
+             || '"replyType":'    || js(NVL(r.REPLY_TYPE, 'SUPPORT')) || ','
              || '"description":'  || js(DBMS_LOB.SUBSTR(r.DESCRIPTION, 4000, 1)) || ','
              || '"createdBy":'    || js(r.CREATED_BY)    || ','
              || '"creationDate":' || js(r.CREATION_DATE) || '}'
             ));
         END LOOP;
 
-        -- Attachments array (data preview included for inline image display)
+        -- Attachments array
         DBMS_LOB.APPEND(v_clob, TO_CLOB('],"attachments":['));
         v_first := TRUE;
         FOR r IN (
@@ -290,7 +296,7 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPORT_PKG AS
     EXCEPTION
         WHEN NO_DATA_FOUND THEN
             p_status_code := 404;
-            HTP.P('{"status":"error","message":"Ticket not found"}');
+            HTP.P('{"status":"error","code":404,"message":"Ticket not found"}');
         WHEN OTHERS THEN err(500, SQLERRM, p_status_code);
     END get_ticket_detail;
 
@@ -301,27 +307,28 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPORT_PKG AS
         p_body        IN  CLOB,
         p_status_code OUT NUMBER
     ) IS
-        v_id      NUMBER  := JSON_VALUE(p_body, '$.ticketId'  RETURNING NUMBER);
-        v_action  VARCHAR2(20) := JSON_VALUE(p_body, '$.action');
-        v_user    VARCHAR2(100):= NVL(JSON_VALUE(p_body, '$.updatedBy'),       'ERP_USER');
-        v_comment VARCHAR2(4000):= JSON_VALUE(p_body, '$.comment');
-        v_notes   VARCHAR2(4000):= JSON_VALUE(p_body, '$.resolutionNotes');
-        v_assign  VARCHAR2(100) := JSON_VALUE(p_body, '$.assignedTo');
-        v_status  VARCHAR2(20)  := JSON_VALUE(p_body, '$.status');
-        v_now     VARCHAR2(30)  := TO_CHAR(SYSDATE, 'YYYY-MM-DD HH24:MI:SS');
+        v_id         NUMBER       := JSON_VALUE(p_body, '$.ticketId'  RETURNING NUMBER);
+        v_action     VARCHAR2(20) := JSON_VALUE(p_body, '$.action');
+        v_user       VARCHAR2(100):= NVL(JSON_VALUE(p_body, '$.updatedBy'),    'ERP_USER');
+        v_comment    VARCHAR2(4000):= JSON_VALUE(p_body, '$.comment');
+        v_notes      VARCHAR2(4000):= JSON_VALUE(p_body, '$.resolutionNotes');
+        v_assign     VARCHAR2(100) := JSON_VALUE(p_body, '$.assignedTo');
+        v_status     VARCHAR2(20)  := JSON_VALUE(p_body, '$.status');
+        v_reply_type VARCHAR2(10)  := NVL(JSON_VALUE(p_body, '$.replyType'), 'SUPPORT');
+        v_now        VARCHAR2(30)  := TO_CHAR(SYSDATE, 'YYYY-MM-DD HH24:MI:SS');
     BEGIN
         CASE v_action
 
             WHEN 'comment' THEN
-                INSERT INTO RR_SUPPORT_TICKET_LINES (TICKET_ID, LINE_TYPE, DESCRIPTION, CREATED_BY)
-                VALUES (v_id, 'COMMENT', v_comment, v_user);
+                INSERT INTO RR_SUPPORT_TICKET_LINES (TICKET_ID, LINE_TYPE, DESCRIPTION, CREATED_BY, REPLY_TYPE)
+                VALUES (v_id, 'COMMENT', v_comment, v_user, v_reply_type);
                 UPDATE RR_SUPPORT_TICKETS
                 SET    LAST_UPDATED_BY = v_user, LAST_UPDATE_DATE = v_now
                 WHERE  TICKET_ID = v_id;
 
             WHEN 'resolve' THEN
-                INSERT INTO RR_SUPPORT_TICKET_LINES (TICKET_ID, LINE_TYPE, DESCRIPTION, CREATED_BY)
-                VALUES (v_id, 'RESOLUTION', NVL(v_notes, 'Issue resolved.'), v_user);
+                INSERT INTO RR_SUPPORT_TICKET_LINES (TICKET_ID, LINE_TYPE, DESCRIPTION, CREATED_BY, REPLY_TYPE)
+                VALUES (v_id, 'RESOLUTION', NVL(v_notes, 'Issue resolved.'), v_user, 'SUPPORT');
                 UPDATE RR_SUPPORT_TICKETS
                 SET    STATUS = 'RESOLVED', RESOLVED_BY = v_user,
                        RESOLUTION_DATE = v_now, RESOLUTION_NOTES = v_notes,
@@ -354,7 +361,7 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPORT_PKG AS
 
             ELSE
                 p_status_code := 400;
-                HTP.P('{"status":"error","message":"Unknown action: ' || v_action || '"}');
+                HTP.P('{"status":"error","code":400,"message":"Unknown action: ' || v_action || '"}');
                 RETURN;
         END CASE;
 
