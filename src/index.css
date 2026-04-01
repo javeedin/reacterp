@@ -32,6 +32,24 @@ body {
   background: #fff;
 }
 
+/* Disabled form field styling — make read-only fields clearly visible */
+.ant-input[disabled],
+.ant-input-number-disabled .ant-input-number-input,
+.ant-picker-disabled .ant-picker-input > input,
+.ant-select-disabled .ant-select-selection-item,
+.ant-select-disabled .ant-select-selector,
+.ant-input-disabled,
+.ant-input-affix-wrapper-disabled {
+  background-color: #f0f0f0 !important;
+  color: #444 !important;
+  cursor: default !important;
+}
+
+.ant-select-disabled .ant-select-selector {
+  background-color: #f0f0f0 !important;
+  color: #444 !important;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 8px;
