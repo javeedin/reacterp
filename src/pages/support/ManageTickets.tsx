@@ -310,7 +310,7 @@ const ManageTickets: React.FC = () => {
                     loading={loading} size="small"
                     pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `${t} tickets` }}
                     locale={{ emptyText: <Empty description="No tickets found" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
-                    scroll={{ x: 1400 }}
+                    scroll={{ x: 1100 }}
                   />
                 );
               })()}
@@ -328,19 +328,21 @@ const ManageTickets: React.FC = () => {
                 dataSource={dashboard.recentOpen} rowKey="ticketId" size="small"
                 pagination={false}
                 columns={[
-                  { title: 'Ticket #', dataIndex: 'ticketNumber', width: 140,
+                  { title: 'Ticket #', dataIndex: 'ticketNumber', width: 130,
                     render: (v, r) => <Button type="link" size="small" style={{ padding: 0, fontSize: 12 }}
                       onClick={() => setSelectedId(r.ticketId)}>{v}</Button> },
                   { title: 'Title', dataIndex: 'title', ellipsis: true,
                     render: v => <Text style={{ fontSize: 12 }}>{v}</Text> },
-                  { title: 'Module', dataIndex: 'module', width: 160,
-                    render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
-                  { title: 'Assigned To', dataIndex: 'assignedTo', width: 120,
+                  { title: 'Module', dataIndex: 'module', width: 140,
                     render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
                   { title: 'Priority', dataIndex: 'priority', width: 90,
                     render: v => <Tag color={PRIORITY_COLOR[v] ?? 'default'} style={{ fontSize: 11 }}>{v}</Tag> },
                   { title: 'Status', dataIndex: 'status', width: 120,
                     render: v => <Tag color={STATUS_COLOR[v] ?? 'default'} style={{ fontSize: 11 }}>{v.replace('_', ' ')}</Tag> },
+                  { title: 'Created By', dataIndex: 'createdBy', width: 130,
+                    render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+                  { title: 'Assigned To', dataIndex: 'assignedTo', width: 120,
+                    render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
                   { title: 'Date', dataIndex: 'creationDate', width: 130,
                     render: v => <Text style={{ fontSize: 12 }}>{fmtDate(v)}</Text> },
                 ]}
