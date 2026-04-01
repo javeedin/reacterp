@@ -333,10 +333,7 @@ DECLARE
     l_amt_to      VARCHAR2(30)   := :amount_to;
     l_limit       NUMBER         := NVL(TO_NUMBER(:row_limit),  500);
     l_offset      NUMBER         := NVL(TO_NUMBER(:row_offset), 0);
-
-    v_clob  CLOB;
-    v_first BOOLEAN := TRUE;
-    v_total NUMBER  := 0;
+    v_total       NUMBER         := 0;
 
     CURSOR c_txns IS
         SELECT EXTERNAL_TRANSACTION_ID,
@@ -351,7 +348,7 @@ DECLARE
                SOURCE,
                STATUS,
                TRANSACTION_TYPE,
-               ACCOUNTING_FLAG,
+               NVL(ACCOUNTING_FLAG, 'N')                AS ACCOUNTING_FLAG,
                BANK_ACCOUNT_NAME,
                BUSINESS_UNIT_NAME,
                LEGAL_ENTITY_NAME,
@@ -401,64 +398,55 @@ BEGIN
        AND (l_amt_from   IS NULL OR AMOUNT >= TO_NUMBER(l_amt_from))
        AND (l_amt_to     IS NULL OR AMOUNT <= TO_NUMBER(l_amt_to));
 
-    DBMS_LOB.CREATETEMPORARY(v_clob, TRUE);
-    DBMS_LOB.APPEND(v_clob, TO_CLOB('{"status":"success","total":' || v_total || ',"items":['));
+    :status_code := 200;
+    APEX_JSON.OPEN_OBJECT;
+    APEX_JSON.WRITE('status', 'success');
+    APEX_JSON.WRITE('total',  v_total);
+    APEX_JSON.OPEN_ARRAY('items');
 
     OPEN c_txns;
     LOOP
         FETCH c_txns INTO r;
         EXIT WHEN c_txns%NOTFOUND;
 
-        IF NOT v_first THEN
-            DBMS_LOB.APPEND(v_clob, TO_CLOB(','));
-        END IF;
-        v_first := FALSE;
-
-        -- Split into multiple appends to avoid ORA-06502 (VARCHAR2 32767-byte limit
-        -- on intermediate PL/SQL expressions when fields contain long/multibyte text)
-        DBMS_LOB.APPEND(v_clob, TO_CLOB(
-            '{"externalTransactionId":'  || TO_CHAR(r.EXTERNAL_TRANSACTION_ID, 'FM99999999999999990') || ','
-         || '"transactionId":'           || NVL(TO_CHAR(r.TRANSACTION_ID, 'FM99999999999999990'), 'null') || ','
-         || '"transactionDate":"'        || NVL(r.TRANSACTION_DATE, '')  || '",'
-         || '"valueDate":"'              || NVL(r.VALUE_DATE, '')        || '",'
-         || '"clearedDate":"'            || NVL(r.CLEARED_DATE, '')      || '",'
-         || '"amount":'                  || NVL(REGEXP_REPLACE(TO_CHAR(r.AMOUNT, 'FM99999999999999990.9999999999'), '\.$', ''), 'null') || ','
-         || '"currencyCode":"'           || NVL(r.CURRENCY_CODE, '')     || '",'
-         || '"source":"'                 || NVL(r.SOURCE, '')            || '",'
-         || '"status":"'                 || NVL(r.STATUS, '')            || '",'
-         || '"transactionType":"'        || NVL(r.TRANSACTION_TYPE, '') || '",'
-         || '"accountingFlag":"'         || NVL(r.ACCOUNTING_FLAG, 'N') || '"'
-        ));
-        DBMS_LOB.APPEND(v_clob, TO_CLOB(
-            ',"bankAccountName":"'         || REPLACE(NVL(r.BANK_ACCOUNT_NAME,''),'"','\"')   || '",'
-         || '"businessUnitName":"'         || REPLACE(NVL(r.BUSINESS_UNIT_NAME,''),'"','\"')  || '",'
-         || '"legalEntityName":"'          || REPLACE(NVL(r.LEGAL_ENTITY_NAME,''),'"','\"')   || '",'
-         || '"assetAccountCombination":"'  || NVL(r.ASSET_ACCOUNT_COMBINATION,'')  || '",'
-         || '"offsetAccountCombination":"' || NVL(r.OFFSET_ACCOUNT_COMBINATION,'') || '",'
-         || '"bankConversionRate":'        || NVL(REGEXP_REPLACE(TO_CHAR(r.BANK_CONVERSION_RATE,'FM99999999999999990.9999999999'), '\.$', ''),'null') || ','
-         || '"bankConversionRateType":"'   || NVL(r.BANK_CONVERSION_RATE_TYPE,'')  || '",'
-         || '"transferId":'               || NVL(TO_CHAR(r.TRANSFER_ID,'FM99999999999999990'),'null') || ','
-         || '"checkNumber":"'              || NVL(r.CHECK_NUMBER,'')    || '",'
-         || '"reconReference":"'           || NVL(r.RECON_REFERENCE,'') || '"'
-        ));
-        DBMS_LOB.APPEND(v_clob, TO_CLOB(
-            ',"description":"'    || REPLACE(NVL(r.DESCRIPTION,''),   '"','\"') || '",'
-         || '"referenceText":"'   || REPLACE(NVL(r.REFERENCE_TEXT,''),'"','\"') || '",'
-         || '"createdBy":"'       || REPLACE(NVL(r.CREATED_BY,''),    '"','\"') || '",'
-         || '"creationDate":"'    || NVL(r.CREATION_DATE,'')    || '",'
-         || '"lastUpdateDate":"'  || NVL(r.LAST_UPDATE_DATE,'') || '",'
-         || '"syncDate":"'        || NVL(r.SYNC_DATE,'')        || '"}'
-        ));
+        APEX_JSON.OPEN_OBJECT;
+        APEX_JSON.WRITE('externalTransactionId',    r.EXTERNAL_TRANSACTION_ID);
+        APEX_JSON.WRITE('transactionId',            r.TRANSACTION_ID);
+        APEX_JSON.WRITE('transactionDate',          r.TRANSACTION_DATE);
+        APEX_JSON.WRITE('valueDate',                r.VALUE_DATE);
+        APEX_JSON.WRITE('clearedDate',              r.CLEARED_DATE);
+        APEX_JSON.WRITE('amount',                   r.AMOUNT);
+        APEX_JSON.WRITE('currencyCode',             r.CURRENCY_CODE);
+        APEX_JSON.WRITE('description',              r.DESCRIPTION);
+        APEX_JSON.WRITE('referenceText',            r.REFERENCE_TEXT);
+        APEX_JSON.WRITE('source',                   r.SOURCE);
+        APEX_JSON.WRITE('status',                   r.STATUS);
+        APEX_JSON.WRITE('transactionType',          r.TRANSACTION_TYPE);
+        APEX_JSON.WRITE('accountingFlag',           r.ACCOUNTING_FLAG);
+        APEX_JSON.WRITE('bankAccountName',          r.BANK_ACCOUNT_NAME);
+        APEX_JSON.WRITE('businessUnitName',         r.BUSINESS_UNIT_NAME);
+        APEX_JSON.WRITE('legalEntityName',          r.LEGAL_ENTITY_NAME);
+        APEX_JSON.WRITE('assetAccountCombination',  r.ASSET_ACCOUNT_COMBINATION);
+        APEX_JSON.WRITE('offsetAccountCombination', r.OFFSET_ACCOUNT_COMBINATION);
+        APEX_JSON.WRITE('bankConversionRate',       r.BANK_CONVERSION_RATE);
+        APEX_JSON.WRITE('bankConversionRateType',   r.BANK_CONVERSION_RATE_TYPE);
+        APEX_JSON.WRITE('transferId',               r.TRANSFER_ID);
+        APEX_JSON.WRITE('checkNumber',              r.CHECK_NUMBER);
+        APEX_JSON.WRITE('reconReference',           r.RECON_REFERENCE);
+        APEX_JSON.WRITE('createdBy',                r.CREATED_BY);
+        APEX_JSON.WRITE('creationDate',             r.CREATION_DATE);
+        APEX_JSON.WRITE('lastUpdateDate',           r.LAST_UPDATE_DATE);
+        APEX_JSON.WRITE('syncDate',                 r.SYNC_DATE);
+        APEX_JSON.CLOSE_OBJECT;
     END LOOP;
     CLOSE c_txns;
 
-    DBMS_LOB.APPEND(v_clob, TO_CLOB(']}'));
-    :status_code := 200;
-    HTP.P(v_clob);
+    APEX_JSON.CLOSE_ARRAY;
+    APEX_JSON.CLOSE_OBJECT;
 EXCEPTION
     WHEN OTHERS THEN
         :status_code := 500;
-        HTP.P('{"status":"error","message":"' || REPLACE(SQLERRM,'"','\"') || '"}');
+        HTP.P('{"status":"error","message":' || APEX_JSON.STRINGIFY(SQLERRM) || '}');
 END;
 ]'
     );
