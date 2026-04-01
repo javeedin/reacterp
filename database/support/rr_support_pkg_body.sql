@@ -180,34 +180,28 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPORT_PKG AS
                )
         WHERE  DESCRIPTION IS NOT NULL;
 
-        -- Insert attachments using JSON_ARRAY_T so large base64 CLOBs
-        -- are not truncated by the VARCHAR2(32767) limit of JSON_TABLE.
+        -- Insert attachments using JSON_VALUE with array indexing.
+        -- JSON_VALUE(...RETURNING CLOB) returns the full base64 string
+        -- without the 32767-char VARCHAR2 truncation of JSON_TABLE.
         DECLARE
-            v_arr_raw CLOB;
-            v_arr     JSON_ARRAY_T;
-            v_obj     JSON_OBJECT_T;
-            v_fname   VARCHAR2(500);
+            v_idx   NUMBER := 0;
+            v_fname VARCHAR2(500);
         BEGIN
-            v_arr_raw := JSON_QUERY(p_body, '$.attachments' RETURNING CLOB);
-            IF v_arr_raw IS NOT NULL THEN
-                v_arr := JSON_ARRAY_T(v_arr_raw);
-                FOR i IN 0 .. v_arr.GET_SIZE - 1 LOOP
-                    v_obj   := JSON_OBJECT_T(v_arr.GET(i));
-                    v_fname := v_obj.GET_STRING('fileName');
-                    IF v_fname IS NOT NULL THEN
-                        INSERT INTO RR_SUPPORT_TICKET_ATTACHMENTS (
-                            TICKET_ID, FILE_NAME, FILE_TYPE, FILE_SIZE, ATTACHMENT_DATA, CREATED_BY
-                        ) VALUES (
-                            v_ticket_id,
-                            v_fname,
-                            v_obj.GET_STRING('fileType'),
-                            v_obj.GET_NUMBER('fileSize'),
-                            v_obj.GET_CLOB('data'),
-                            v_created
-                        );
-                    END IF;
-                END LOOP;
-            END IF;
+            LOOP
+                v_fname := JSON_VALUE(p_body, '$.attachments[' || v_idx || '].fileName');
+                EXIT WHEN v_fname IS NULL;
+                INSERT INTO RR_SUPPORT_TICKET_ATTACHMENTS (
+                    TICKET_ID, FILE_NAME, FILE_TYPE, FILE_SIZE, ATTACHMENT_DATA, CREATED_BY
+                ) VALUES (
+                    v_ticket_id,
+                    v_fname,
+                    JSON_VALUE(p_body, '$.attachments[' || v_idx || '].fileType'),
+                    JSON_VALUE(p_body, '$.attachments[' || v_idx || '].fileSize' RETURNING NUMBER),
+                    JSON_VALUE(p_body, '$.attachments[' || v_idx || '].data'     RETURNING CLOB),
+                    v_created
+                );
+                v_idx := v_idx + 1;
+            END LOOP;
         END;
 
         COMMIT;
