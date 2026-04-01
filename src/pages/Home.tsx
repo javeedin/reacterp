@@ -22,6 +22,7 @@ import {
   AppstoreOutlined,
   CloseOutlined,
   KeyOutlined,
+  BugOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import type { Module } from '../types';
@@ -166,6 +167,14 @@ const modules: Module[] = [
     icon: <SyncOutlined style={{ fontSize: 32 }} />,
     path: '/sync',
     color: REDWOOD.info,
+  },
+  {
+    id: 'support',
+    name: 'Support',
+    description: 'Raise tickets, track issues, view resolutions',
+    icon: <BugOutlined style={{ fontSize: 32 }} />,
+    path: '/support',
+    color: '#C74634',
   },
 ];
 
