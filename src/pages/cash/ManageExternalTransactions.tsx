@@ -636,6 +636,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   ];
 
   const [searchOpen, setSearchOpen] = useState(true);
+  const [gridSearch, setGridSearch] = useState('');
 
   // ── Tab items ─────────────────────────────────────────────────────────────
   const searchPane = (
@@ -747,23 +748,46 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       />
 
       {/* Results */}
-      {hasSearched && (
-        <Card style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
-          styles={{ body: { padding: 0 } }}
-          title={
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text strong>Search Results {transactions.length > 0 && <Tag color="blue">{transactions.length}</Tag>}</Text>
-            </div>
-          }
-        >
-          <Table
-            dataSource={transactions} columns={columns} rowKey="externalTransactionId"
-            loading={loading} size="small" pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `${t} transactions` }}
-            locale={{ emptyText: <Empty description="No transactions found" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
-            scroll={{ x: 1500 }}
-          />
-        </Card>
-      )}
+      {hasSearched && (() => {
+        const q = gridSearch.trim().toLowerCase();
+        const filtered = q
+          ? transactions.filter(r =>
+              [r.transactionId, r.bankAccountName, r.businessUnitName, r.referenceText,
+               r.description, r.status, r.source, r.transactionType, r.currencyCode,
+               r.assetAccountCombination, r.offsetAccountCombination, r.transactionDate]
+              .some(v => String(v ?? '').toLowerCase().includes(q))
+            )
+          : transactions;
+        return (
+          <Card style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
+            styles={{ body: { padding: 0 } }}
+            title={
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <Text strong>
+                  Search Results{' '}
+                  <Tag color="blue">{filtered.length}{q && filtered.length !== transactions.length ? ` / ${transactions.length}` : ''}</Tag>
+                </Text>
+                <Input
+                  prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
+                  placeholder="Filter results…"
+                  allowClear
+                  size="small"
+                  style={{ width: 220 }}
+                  value={gridSearch}
+                  onChange={e => setGridSearch(e.target.value)}
+                />
+              </div>
+            }
+          >
+            <Table
+              dataSource={filtered} columns={columns} rowKey="externalTransactionId"
+              loading={loading} size="small" pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `${t} transactions` }}
+              locale={{ emptyText: <Empty description="No transactions found" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
+              scroll={{ x: 1500 }}
+            />
+          </Card>
+        );
+      })()}
     </div>
   );
 

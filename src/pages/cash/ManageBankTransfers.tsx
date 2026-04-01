@@ -9,7 +9,7 @@ import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, BankOutlined, PlusOutlined, SearchOutlined, ReloadOutlined,
   EditOutlined, CloseOutlined, FilterOutlined, SwapOutlined, DollarOutlined,
-  FileTextOutlined, ApiOutlined, ExportOutlined,
+  FileTextOutlined, ApiOutlined, ExportOutlined, DownloadOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -436,6 +436,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
   const [editTabs, setEditTabs]           = useState<TabItem[]>([]);
   const [showApiModal, setShowApiModal]   = useState(false);
   const [lastApiUrl, setLastApiUrl]       = useState('');
+  const [gridSearch, setGridSearch]       = useState('');
   const [searchForm]                      = Form.useForm();
 
   const modulePrefix = module === 'ap' ? '/ap' : '/cash';
@@ -755,30 +756,55 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
   const resultsPanel = (
     <>
       {/* Toolbar */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
-        <Space>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            {hasSearched ? `${transfers.length} transfer${transfers.length !== 1 ? 's' : ''} found` : 'Use the search panel above to find transfers'}
-          </Text>
-        </Space>
-        <Space>
-          <Tooltip title="API endpoint">
-            <Button size="small" icon={<ApiOutlined />} onClick={() => setShowApiModal(true)}
-              style={{ color: REDWOOD.info }} />
-          </Tooltip>
-          <Button size="small" icon={<ReloadOutlined />} onClick={handleSearch} loading={loading}>Refresh</Button>
-          <Button size="small" icon={<PlusOutlined />} type="primary"
-            style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
-            onClick={openCreate}>
-            Create Transfer
-          </Button>
-        </Space>
-      </div>
+      {(() => {
+        const q = gridSearch.trim().toLowerCase();
+        const filtered = q
+          ? transfers.filter(r =>
+              [r.bankAccountTransferNumber, r.fromBankAccountName, r.toBankAccountName,
+               r.businessUnit, r.status, r.paymentStatus, r.paymentMethod,
+               r.paymentProfileName, r.memo, r.transactionDate, r.fromCurrencyCode]
+              .some(v => String(v ?? '').toLowerCase().includes(q))
+            )
+          : transfers;
+        return (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+              <Space>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {hasSearched
+                    ? `${filtered.length}${q && filtered.length !== transfers.length ? ` / ${transfers.length}` : ''} transfer${filtered.length !== 1 ? 's' : ''} found`
+                    : 'Use the search panel above to find transfers'}
+                </Text>
+                {hasSearched && (
+                  <Input
+                    prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
+                    placeholder="Filter results…"
+                    allowClear
+                    size="small"
+                    style={{ width: 220 }}
+                    value={gridSearch}
+                    onChange={e => setGridSearch(e.target.value)}
+                  />
+                )}
+              </Space>
+              <Space>
+                <Tooltip title="API endpoint">
+                  <Button size="small" icon={<ApiOutlined />} onClick={() => setShowApiModal(true)}
+                    style={{ color: REDWOOD.info }} />
+                </Tooltip>
+                <Button size="small" icon={<ReloadOutlined />} onClick={handleSearch} loading={loading}>Refresh</Button>
+                <Button size="small" icon={<PlusOutlined />} type="primary"
+                  style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+                  onClick={openCreate}>
+                  Create Transfer
+                </Button>
+              </Space>
+            </div>
 
-      <div style={{ background: REDWOOD.surface, borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, overflow: 'hidden' }}>
-        <Table<TransferRecord>
-          columns={columns}
-          dataSource={transfers}
+            <div style={{ background: REDWOOD.surface, borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, overflow: 'hidden' }}>
+              <Table<TransferRecord>
+                columns={columns}
+                dataSource={filtered}
           rowKey="bankAccountTransferId"
           loading={loading}
           size="small"
@@ -789,10 +815,13 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
             showTotal: total => `${total} transfer${total !== 1 ? 's' : ''}`,
             style: { padding: '8px 16px' },
           }}
-          locale={{ emptyText: hasSearched ? <Empty description="No transfers found" /> : <Empty description="Enter search criteria and click Search" /> }}
-          onRow={record => ({ onDoubleClick: () => openEdit(record), style: { cursor: 'pointer' } })}
-        />
-      </div>
+              locale={{ emptyText: hasSearched ? <Empty description="No transfers found" /> : <Empty description="Enter search criteria and click Search" /> }}
+              onRow={record => ({ onDoubleClick: () => openEdit(record), style: { cursor: 'pointer' } })}
+            />
+            </div>
+          </>
+        );
+      })()}
     </>
   );
 
