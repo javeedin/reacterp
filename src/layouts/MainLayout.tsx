@@ -17,6 +17,7 @@ import {
 import { Outlet, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import ProfileModal from '../components/ProfileModal';
+import SupportTicketButton from '../components/SupportTicketButton';
 import type { MenuProps } from 'antd';
 
 // Type for BeforeInstallPromptEvent
@@ -207,6 +208,7 @@ const MainLayout: React.FC = () => {
               />
             </Badge>
           </Tooltip>
+          <SupportTicketButton />
           <Tooltip title={user?.name || 'User Profile'}>
             <Dropdown menu={{ items: userMenuItems }} placement="bottomRight" trigger={['click']}>
               <Avatar
