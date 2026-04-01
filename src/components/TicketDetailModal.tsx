@@ -136,7 +136,12 @@ const TicketDetailModal: React.FC<{
           status:          vals.status,
         }),
       });
-      const data = await res.json();
+      const text = await res.text();
+      let data: any;
+      try { data = JSON.parse(text); } catch {
+        message.error(`Server error (HTTP ${res.status}) — check the ORDS package status on the DB.`);
+        return;
+      }
       if (data.status === 'success') {
         const msgs: Record<string, string> = {
           comment: 'Comment added',
