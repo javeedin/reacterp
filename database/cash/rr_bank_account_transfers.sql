@@ -348,30 +348,34 @@ BEGIN
         END IF;
         v_first := FALSE;
 
+        -- Split into multiple appends to avoid ORA-06502 (VARCHAR2 32767-byte limit
+        -- on intermediate PL/SQL expressions when fields contain long/multibyte text)
         DBMS_LOB.APPEND(v_clob, TO_CLOB(
-            '{"bankAccountTransferId":'   || TO_CHAR(r.BANK_ACCOUNT_TRANSFER_ID, 'FM99999999999999990') || ','
+            '{"bankAccountTransferId":'    || TO_CHAR(r.BANK_ACCOUNT_TRANSFER_ID, 'FM99999999999999990') || ','
          || '"bankAccountTransferNumber":' || NVL(TO_CHAR(r.BANK_ACCOUNT_TRANSFER_NUMBER, 'FM99999999999999990'),'null') || ','
-         || '"transactionDate":"'          || NVL(r.TRANSACTION_DATE,'')   || '",'
-         || '"memo":"'                     || REPLACE(NVL(r.MEMO,''), '"','\"') || '",'
-         || '"paymentAmount":'             || NVL(REGEXP_REPLACE(TO_CHAR(r.PAYMENT_AMOUNT,    'FM99999999999999990.9999999999'), '\.$', ''),'null') || ','
-         || '"fromAmount":'                || NVL(REGEXP_REPLACE(TO_CHAR(r.FROM_AMOUNT,       'FM99999999999999990.9999999999'), '\.$', ''),'null') || ','
-         || '"conversionRate":'            || NVL(REGEXP_REPLACE(TO_CHAR(r.CONVERSION_RATE,   'FM99999999999999990.9999999999'), '\.$', ''),'null') || ','
-         || '"fromBankAccountName":"'      || REPLACE(NVL(r.FROM_BANK_ACCOUNT_NAME,''),'"','\"') || '",'
-         || '"toBankAccountName":"'        || REPLACE(NVL(r.TO_BANK_ACCOUNT_NAME,''),'"','\"')   || '",'
-         || '"fromCurrencyCode":"'         || NVL(r.FROM_CURRENCY_CODE,'')   || '",'
-         || '"toCurrencyCode":"'           || NVL(r.TO_CURRENCY_CODE,'')     || '",'
-         || '"paymentCurrencyCode":"'      || NVL(r.PAYMENT_CURRENCY_CODE,'')|| '",'
-         || '"conversionRateType":"'       || NVL(r.CONVERSION_RATE_TYPE,'') || '",'
-         || '"status":"'                   || NVL(r.STATUS,'')               || '",'
-         || '"paymentStatus":"'            || NVL(r.PAYMENT_STATUS,'')       || '",'
-         || '"paymentMethod":"'            || NVL(r.PAYMENT_METHOD,'')       || '",'
-         || '"paymentProfileName":"'       || REPLACE(NVL(r.PAYMENT_PROFILE_NAME,''),'"','\"') || '",'
-         || '"businessUnit":"'             || REPLACE(NVL(r.BUSINESS_UNIT,''),'"','\"')         || '",'
-         || '"isSettledWithIbyFlag":"'     || NVL(r.IS_SETTLED_WITH_IBY_FLAG,'N') || '",'
-         || '"createdBy":"'               || REPLACE(NVL(r.CREATED_BY,''),'"','\"')  || '",'
-         || '"creationDate":"'            || NVL(r.CREATION_DATE,'')         || '",'
-         || '"lastUpdateDate":"'          || NVL(r.LAST_UPDATE_DATE,'')      || '",'
-         || '"syncDate":"'               || NVL(r.SYNC_DATE,'')             || '"}'
+         || '"transactionDate":"'          || NVL(r.TRANSACTION_DATE,'') || '",'
+         || '"paymentAmount":'             || NVL(REGEXP_REPLACE(TO_CHAR(r.PAYMENT_AMOUNT,  'FM99999999999999990.9999999999'), '\.$', ''),'null') || ','
+         || '"fromAmount":'                || NVL(REGEXP_REPLACE(TO_CHAR(r.FROM_AMOUNT,     'FM99999999999999990.9999999999'), '\.$', ''),'null') || ','
+         || '"conversionRate":'            || NVL(REGEXP_REPLACE(TO_CHAR(r.CONVERSION_RATE, 'FM99999999999999990.9999999999'), '\.$', ''),'null') || ','
+         || '"fromCurrencyCode":"'         || NVL(r.FROM_CURRENCY_CODE,'')    || '",'
+         || '"toCurrencyCode":"'           || NVL(r.TO_CURRENCY_CODE,'')      || '",'
+         || '"paymentCurrencyCode":"'      || NVL(r.PAYMENT_CURRENCY_CODE,'') || '",'
+         || '"conversionRateType":"'       || NVL(r.CONVERSION_RATE_TYPE,'')  || '",'
+         || '"status":"'                   || NVL(r.STATUS,'')                || '",'
+         || '"paymentStatus":"'            || NVL(r.PAYMENT_STATUS,'')        || '",'
+         || '"paymentMethod":"'            || NVL(r.PAYMENT_METHOD,'')        || '",'
+         || '"isSettledWithIbyFlag":"'     || NVL(r.IS_SETTLED_WITH_IBY_FLAG,'N') || '"'
+        ));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(
+            ',"fromBankAccountName":"'  || REPLACE(NVL(r.FROM_BANK_ACCOUNT_NAME,''),'"','\"')  || '",'
+         || '"toBankAccountName":"'     || REPLACE(NVL(r.TO_BANK_ACCOUNT_NAME,''),'"','\"')    || '",'
+         || '"paymentProfileName":"'   || REPLACE(NVL(r.PAYMENT_PROFILE_NAME,''),'"','\"')    || '",'
+         || '"businessUnit":"'         || REPLACE(NVL(r.BUSINESS_UNIT,''),'"','\"')            || '",'
+         || '"memo":"'                 || REPLACE(NVL(r.MEMO,''),'"','\"')                     || '",'
+         || '"createdBy":"'            || REPLACE(NVL(r.CREATED_BY,''),'"','\"')               || '",'
+         || '"creationDate":"'         || NVL(r.CREATION_DATE,'')   || '",'
+         || '"lastUpdateDate":"'       || NVL(r.LAST_UPDATE_DATE,'')|| '",'
+         || '"syncDate":"'             || NVL(r.SYNC_DATE,'')       || '"}'
         ));
     END LOOP;
     CLOSE c_transfers;

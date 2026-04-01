@@ -414,34 +414,40 @@ BEGIN
         END IF;
         v_first := FALSE;
 
+        -- Split into multiple appends to avoid ORA-06502 (VARCHAR2 32767-byte limit
+        -- on intermediate PL/SQL expressions when fields contain long/multibyte text)
         DBMS_LOB.APPEND(v_clob, TO_CLOB(
-            '{"externalTransactionId":'    || TO_CHAR(r.EXTERNAL_TRANSACTION_ID, 'FM99999999999999990')       || ','
-         || '"transactionId":'             || NVL(TO_CHAR(r.TRANSACTION_ID, 'FM99999999999999990'), 'null')   || ','
-         || '"transactionDate":"'          || NVL(r.TRANSACTION_DATE, '')    || '",'
-         || '"valueDate":"'                || NVL(r.VALUE_DATE, '')          || '",'
-         || '"clearedDate":"'              || NVL(r.CLEARED_DATE, '')        || '",'
-         || '"amount":'                    || NVL(REGEXP_REPLACE(TO_CHAR(r.AMOUNT, 'FM99999999999999990.9999999999'), '\.$', ''), 'null') || ','
-         || '"currencyCode":"'             || NVL(r.CURRENCY_CODE, '')       || '",'
-         || '"description":"'             || REPLACE(NVL(r.DESCRIPTION,''), '"','\"') || '",'
-         || '"referenceText":"'            || REPLACE(NVL(r.REFERENCE_TEXT,''), '"','\"') || '",'
-         || '"source":"'                   || NVL(r.SOURCE, '')              || '",'
-         || '"status":"'                   || NVL(r.STATUS, '')              || '",'
-         || '"transactionType":"'          || NVL(r.TRANSACTION_TYPE, '')    || '",'
-         || '"accountingFlag":"'           || NVL(r.ACCOUNTING_FLAG, 'N')    || '",'
-         || '"bankAccountName":"'          || REPLACE(NVL(r.BANK_ACCOUNT_NAME,''),'"','\"')    || '",'
-         || '"businessUnitName":"'         || REPLACE(NVL(r.BUSINESS_UNIT_NAME,''),'"','\"')   || '",'
-         || '"legalEntityName":"'          || REPLACE(NVL(r.LEGAL_ENTITY_NAME,''),'"','\"')    || '",'
+            '{"externalTransactionId":'  || TO_CHAR(r.EXTERNAL_TRANSACTION_ID, 'FM99999999999999990') || ','
+         || '"transactionId":'           || NVL(TO_CHAR(r.TRANSACTION_ID, 'FM99999999999999990'), 'null') || ','
+         || '"transactionDate":"'        || NVL(r.TRANSACTION_DATE, '')  || '",'
+         || '"valueDate":"'              || NVL(r.VALUE_DATE, '')        || '",'
+         || '"clearedDate":"'            || NVL(r.CLEARED_DATE, '')      || '",'
+         || '"amount":'                  || NVL(REGEXP_REPLACE(TO_CHAR(r.AMOUNT, 'FM99999999999999990.9999999999'), '\.$', ''), 'null') || ','
+         || '"currencyCode":"'           || NVL(r.CURRENCY_CODE, '')     || '",'
+         || '"source":"'                 || NVL(r.SOURCE, '')            || '",'
+         || '"status":"'                 || NVL(r.STATUS, '')            || '",'
+         || '"transactionType":"'        || NVL(r.TRANSACTION_TYPE, '') || '",'
+         || '"accountingFlag":"'         || NVL(r.ACCOUNTING_FLAG, 'N') || '"'
+        ));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(
+            ',"bankAccountName":"'         || REPLACE(NVL(r.BANK_ACCOUNT_NAME,''),'"','\"')   || '",'
+         || '"businessUnitName":"'         || REPLACE(NVL(r.BUSINESS_UNIT_NAME,''),'"','\"')  || '",'
+         || '"legalEntityName":"'          || REPLACE(NVL(r.LEGAL_ENTITY_NAME,''),'"','\"')   || '",'
          || '"assetAccountCombination":"'  || NVL(r.ASSET_ACCOUNT_COMBINATION,'')  || '",'
          || '"offsetAccountCombination":"' || NVL(r.OFFSET_ACCOUNT_COMBINATION,'') || '",'
          || '"bankConversionRate":'        || NVL(REGEXP_REPLACE(TO_CHAR(r.BANK_CONVERSION_RATE,'FM99999999999999990.9999999999'), '\.$', ''),'null') || ','
          || '"bankConversionRateType":"'   || NVL(r.BANK_CONVERSION_RATE_TYPE,'')  || '",'
          || '"transferId":'               || NVL(TO_CHAR(r.TRANSFER_ID,'FM99999999999999990'),'null') || ','
-         || '"checkNumber":"'              || NVL(r.CHECK_NUMBER,'')         || '",'
-         || '"reconReference":"'           || NVL(r.RECON_REFERENCE,'')      || '",'
-         || '"createdBy":"'               || REPLACE(NVL(r.CREATED_BY,''),'"','\"')  || '",'
-         || '"creationDate":"'            || NVL(r.CREATION_DATE,'')         || '",'
-         || '"lastUpdateDate":"'          || NVL(r.LAST_UPDATE_DATE,'')      || '",'
-         || '"syncDate":"'               || NVL(r.SYNC_DATE,'')             || '"}'
+         || '"checkNumber":"'              || NVL(r.CHECK_NUMBER,'')    || '",'
+         || '"reconReference":"'           || NVL(r.RECON_REFERENCE,'') || '"'
+        ));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(
+            ',"description":"'    || REPLACE(NVL(r.DESCRIPTION,''),   '"','\"') || '",'
+         || '"referenceText":"'   || REPLACE(NVL(r.REFERENCE_TEXT,''),'"','\"') || '",'
+         || '"createdBy":"'       || REPLACE(NVL(r.CREATED_BY,''),    '"','\"') || '",'
+         || '"creationDate":"'    || NVL(r.CREATION_DATE,'')    || '",'
+         || '"lastUpdateDate":"'  || NVL(r.LAST_UPDATE_DATE,'') || '",'
+         || '"syncDate":"'        || NVL(r.SYNC_DATE,'')        || '"}'
         ));
     END LOOP;
     CLOSE c_txns;
