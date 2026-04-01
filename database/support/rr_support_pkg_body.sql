@@ -180,27 +180,34 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPORT_PKG AS
                )
         WHERE  DESCRIPTION IS NOT NULL;
 
-        -- Insert attachments using JSON_VALUE with array indexing.
-        -- JSON_VALUE(...RETURNING CLOB) returns the full base64 string
-        -- without the 32767-char VARCHAR2 truncation of JSON_TABLE.
+        -- Insert attachments.
+        -- JSON_TABLE handles VARCHAR2 metadata fields (no truncation risk).
+        -- EXECUTE IMMEDIATE builds a literal path at runtime so RETURNING CLOB
+        -- returns the full base64 without the 32767-char VARCHAR2 limit.
+        -- (Oracle requires JSON path to be a string literal, not a concatenation.)
         DECLARE
-            v_idx   NUMBER := 0;
-            v_fname VARCHAR2(500);
+            v_data CLOB;
         BEGIN
-            LOOP
-                v_fname := JSON_VALUE(p_body, '$.attachments[' || v_idx || '].fileName');
-                EXIT WHEN v_fname IS NULL;
+            FOR r IN (
+                SELECT jt.rn, jt.fname, jt.ftype, jt.fsize
+                FROM   JSON_TABLE(p_body, '$.attachments[*]'
+                           COLUMNS (
+                               rn    FOR ORDINALITY,
+                               fname VARCHAR2(500) PATH '$.fileName',
+                               ftype VARCHAR2(100) PATH '$.fileType',
+                               fsize NUMBER        PATH '$.fileSize'
+                           )) jt
+                WHERE  jt.fname IS NOT NULL
+            ) LOOP
+                EXECUTE IMMEDIATE
+                    'SELECT JSON_VALUE(:b, ''$.attachments[' || (r.rn - 1) || '].data'' RETURNING CLOB) FROM DUAL'
+                    INTO v_data USING p_body;
+
                 INSERT INTO RR_SUPPORT_TICKET_ATTACHMENTS (
                     TICKET_ID, FILE_NAME, FILE_TYPE, FILE_SIZE, ATTACHMENT_DATA, CREATED_BY
                 ) VALUES (
-                    v_ticket_id,
-                    v_fname,
-                    JSON_VALUE(p_body, '$.attachments[' || v_idx || '].fileType'),
-                    JSON_VALUE(p_body, '$.attachments[' || v_idx || '].fileSize' RETURNING NUMBER),
-                    JSON_VALUE(p_body, '$.attachments[' || v_idx || '].data'     RETURNING CLOB),
-                    v_created
+                    v_ticket_id, r.fname, r.ftype, r.fsize, v_data, v_created
                 );
-                v_idx := v_idx + 1;
             END LOOP;
         END;
 
