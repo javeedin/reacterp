@@ -730,11 +730,18 @@ const DailyRatesTab: React.FC = () => {
   const [adding, setAdding]       = useState(false);
   const [showAdd, setShowAdd]     = useState(false);
 
-  // Fetch live rates state
+  // Fetch live rates state (Frankfurter/ECB)
   const [fetchingLive, setFetchingLive]   = useState(false);
   const [liveBase, setLiveBase]           = useState('USD');
   const [liveRateType, setLiveRateType]   = useState('');
   const [liveStatus, setLiveStatus]       = useState<{ type: 'success'|'error'; msg: string } | null>(null);
+
+  // Fetch FMP rates state (Financial Modeling Prep)
+  const FMP_API_KEY = '05701fede44a33db24e0455cf8270a24';
+  const FMP_PAIRS   = 'USDINR,USDSGD,USDUSD,USDEUR,USDGBP,USDCHF,INRUSD,INRSGD,INREUR,INRINR,INRGBP,INRCHF,AEDEUR,AEDSGD,AEDAED,AEDGBP,AEDCHF,EURINR,EURAED,EURUSD,EUREUR,EURCHF,EURGBP,GBPINR,GBPAED,GBPUSD,GBPEUR,GBPCHF,CHFINR,CHFAED,CHFSGD,CHFUSD,CHFEUR,CHFGBP';
+  const [fetchingFmp, setFetchingFmp]     = useState(false);
+  const [fmpRateType, setFmpRateType]     = useState('');
+  const [fmpStatus, setFmpStatus]         = useState<{ type: 'success'|'error'; msg: string } | null>(null);
 
   const loadDropdowns = useCallback(async () => {
     try {
@@ -798,6 +805,60 @@ const DailyRatesTab: React.FC = () => {
       setLiveStatus({ type: 'error', msg: e.message });
     } finally {
       setFetchingLive(false);
+    }
+  };
+
+  // ── Financial Modeling Prep API ──────────────────────────────
+  const handleFetchFmpRates = async () => {
+    if (!fmpRateType) { message.warning('Select a Rate Type before fetching'); return; }
+    setFetchingFmp(true);
+    setFmpStatus(null);
+    try {
+      const url = `https://financialmodelingprep.com/api/v3/fx/${FMP_PAIRS}?apikey=${FMP_API_KEY}`;
+      let json: any[];
+      if (isElectron) {
+        const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+        if (!res.ok) throw new Error(`FMP HTTP ${res.status}`);
+        json = await res.json();
+      } else {
+        // browser: route through proxy
+        const proxyUrl = `${PROXY_BASE}/proxy?url=${encodeURIComponent(url)}`;
+        const res = await fetch(proxyUrl);
+        if (!res.ok) throw new Error(`Proxy HTTP ${res.status}`);
+        json = await res.json();
+      }
+      if (!Array.isArray(json) || !json.length) throw new Error('No data returned from FMP API');
+
+      const rates = json
+        .filter(r => r.ticker && r.open != null && r.ticker.length === 6)
+        .map(r => ({
+          fromCurrency: r.ticker.substring(0, 3).toUpperCase(),
+          toCurrency:   r.ticker.substring(3, 6).toUpperCase(),
+          rateDate:     r.date
+            ? r.date.substring(0, 10)                 // "YYYY-MM-DD HH:MM:SS" → "YYYY-MM-DD"
+            : dayjs().format('YYYY-MM-DD'),
+          rateType:     fmpRateType,
+          rate:         r.open,
+        }))
+        .filter(r => r.fromCurrency !== r.toCurrency); // skip self-pairs like USDUSD
+
+      const importRes = await fetch(`${ORDS_BASE}/currencies/dailyrates/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rates, source: 'API', createdBy: 'SYSTEM' }),
+      });
+      if (!importRes.ok) throw new Error(`Import HTTP ${importRes.status}`);
+      const importJson = await importRes.json();
+
+      setFmpStatus({
+        type: 'success',
+        msg: `Imported ${rates.length} FMP pairs (${importJson.saved ?? rates.length} saved). Source: Financial Modeling Prep`,
+      });
+      if (searched) await handleSearch();
+    } catch (e: any) {
+      setFmpStatus({ type: 'error', msg: e.message });
+    } finally {
+      setFetchingFmp(false);
     }
   };
 
@@ -1094,7 +1155,16 @@ const DailyRatesTab: React.FC = () => {
               style={{ borderColor: REDWOOD.success, color: REDWOOD.success }}
               onClick={() => { setShowAdd(false); setLiveStatus(null); }}
             >
-              Fetch Live Rates
+              ECB Rates
+            </Button>
+            <Button
+              icon={<CloudDownloadOutlined />}
+              size="small"
+              type="default"
+              style={{ borderColor: REDWOOD.warning, color: REDWOOD.warning }}
+              onClick={() => { setShowAdd(false); setFmpStatus(null); }}
+            >
+              FMP Rates
             </Button>
           </Space>
         }
@@ -1154,6 +1224,57 @@ const DailyRatesTab: React.FC = () => {
               message={liveStatus.msg}
               closable
               onClose={() => setLiveStatus(null)}
+              style={{ marginTop: 8 }}
+            />
+          )}
+        </Card>
+
+        {/* FMP Rates Panel */}
+        <Card
+          size="small"
+          style={{ marginBottom: 16, background: '#fffbf0', border: `1px dashed ${REDWOOD.warning}` }}
+        >
+          <Row gutter={[8, 8]} align="middle">
+            <Col>
+              <Text strong style={{ color: REDWOOD.warning }}>FMP Rates</Text>
+              <Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>via Financial Modeling Prep</Text>
+            </Col>
+            <Col>
+              <Space>
+                <Tooltip title={FMP_PAIRS.split(',').join(' · ')}>
+                  <Text style={{ fontSize: 12 }}>
+                    {FMP_PAIRS.split(',').filter(p => p.substring(0,3) !== p.substring(3,6)).length} pairs
+                  </Text>
+                </Tooltip>
+                <Text style={{ fontSize: 12 }}>Rate Type:</Text>
+                <Select
+                  value={fmpRateType || undefined}
+                  onChange={v => setFmpRateType(v ?? '')}
+                  size="small"
+                  style={{ width: 120 }}
+                  placeholder="Select type"
+                >
+                  {rateTypes.map(rt => <Option key={rt} value={rt}>{rt}</Option>)}
+                </Select>
+                <Button
+                  type="primary"
+                  size="small"
+                  loading={fetchingFmp}
+                  onClick={handleFetchFmpRates}
+                  icon={<CloudDownloadOutlined />}
+                  style={{ background: REDWOOD.warning, borderColor: REDWOOD.warning, color: '#fff' }}
+                >
+                  Fetch &amp; Import
+                </Button>
+              </Space>
+            </Col>
+          </Row>
+          {fmpStatus && (
+            <Alert
+              type={fmpStatus.type}
+              message={fmpStatus.msg}
+              closable
+              onClose={() => setFmpStatus(null)}
               style={{ marginTop: 8 }}
             />
           )}
