@@ -20,6 +20,7 @@ import {
   Tooltip,
   Popover,
   Divider,
+  Input,
 } from 'antd';
 import {
   HomeOutlined,
@@ -36,6 +37,7 @@ import {
   ApiOutlined,
   ArrowLeftOutlined,
   CloseOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -204,6 +206,9 @@ const AccountingPeriods: React.FC = () => {
     total: 0,
     fetching: false,
   });
+  const [allPeriodsSearch, setAllPeriodsSearch] = useState('');
+  const [allPeriodsPage, setAllPeriodsPage] = useState(1);
+  const [allPeriodsPageSize, setAllPeriodsPageSize] = useState(20);
 
   // Helper function to get application name by ID
   const getApplicationName = useCallback((appId: number): string => {
@@ -1254,25 +1259,47 @@ const AccountingPeriods: React.FC = () => {
         />
       )}
 
-      {/* Periods Table */}
+      {/* Search + Periods Table */}
       <Card
         style={{ flex: 1, borderRadius: 6, border: `1px solid ${REDWOOD.border}` }}
         bodyStyle={{ padding: 0 }}
       >
+        <div style={{ padding: '8px 12px', borderBottom: `1px solid ${REDWOOD.border}` }}>
+          <Input
+            placeholder="Search period name, set name, year..."
+            prefix={<SearchOutlined style={{ color: REDWOOD.textSecondary }} />}
+            value={allPeriodsSearch}
+            onChange={e => { setAllPeriodsSearch(e.target.value); setAllPeriodsPage(1); }}
+            allowClear
+            style={{ maxWidth: 360 }}
+            size="small"
+          />
+        </div>
         <Spin spinning={loading && periods.length === 0}>
           <Table
-            dataSource={periods}
+            dataSource={periods.filter(p => {
+              if (!allPeriodsSearch) return true;
+              const q = allPeriodsSearch.toLowerCase();
+              return (
+                (p.EnteredPeriodName || '').toLowerCase().includes(q) ||
+                (p.PeriodSetNameId || '').toLowerCase().includes(q) ||
+                String(p.PeriodYear || '').includes(q) ||
+                (p.PeriodType || '').toLowerCase().includes(q)
+              );
+            })}
             columns={allPeriodsColumns}
             rowKey="PeriodNameId"
             size="small"
             pagination={{
-              pageSize: 20,
+              current: allPeriodsPage,
+              pageSize: allPeriodsPageSize,
               showSizeChanger: true,
               pageSizeOptions: ['20', '50', '100', '200'],
               showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} periods`,
               size: 'small',
+              onChange: (page, size) => { setAllPeriodsPage(page); setAllPeriodsPageSize(size); },
             }}
-            scroll={{ y: 'calc(100vh - 480px)' }}
+            scroll={{ y: 'calc(100vh - 520px)' }}
           />
         </Spin>
       </Card>
