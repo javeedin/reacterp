@@ -94,13 +94,13 @@ interface RateType {
 }
 
 interface DailyRate {
-  rate_id: number;
-  from_currency: string;
-  to_currency: string;
-  rate_date: string;
-  rate_type: string;
+  rateId: number;
+  fromCurrency: string;
+  toCurrency: string;
+  rateDate: string;
+  rateType: string;
   rate: number;
-  inverse_rate: number;
+  inverseRate: number;
   source: string;
 }
 
@@ -434,15 +434,15 @@ const RateTypesTab: React.FC = () => {
       const json = await res.json();
       const items: any[] = json.items ?? json.data ?? (Array.isArray(json) ? json : []);
       setRows(items.map(r => ({
-        key: String(r.rate_type_id ?? r.RATE_TYPE_ID),
-        rate_type_id: r.rate_type_id ?? r.RATE_TYPE_ID,
+        key: String(r.id ?? r.rate_type_id ?? r.RATE_TYPE_ID),
+        rate_type_id: r.id ?? r.rate_type_id ?? r.RATE_TYPE_ID,
         name: r.name ?? r.NAME ?? '',
         description: r.description ?? r.DESCRIPTION ?? '',
-        default_rate_type: (r.default_rate_type ?? r.DEFAULT_RATE_TYPE) === 'Y',
-        enforce_inverse_relationship: (r.enforce_inverse_relationship ?? r.ENFORCE_INVERSE_RELATIONSHIP) === 'Y',
-        enable_cross_rates: (r.enable_cross_rates ?? r.ENABLE_CROSS_RATES) === 'Y',
-        allow_cross_rates_override: (r.allow_cross_rates_override ?? r.ALLOW_CROSS_RATES_OVERRIDE) === 'Y',
-        cross_rate_pivot_currency: r.cross_rate_pivot_currency ?? r.CROSS_RATE_PIVOT_CURRENCY ?? '',
+        default_rate_type: (r.defaultRateType ?? r.default_rate_type ?? r.DEFAULT_RATE_TYPE) === 'Y',
+        enforce_inverse_relationship: (r.enforceInverse ?? r.enforce_inverse_relationship ?? r.ENFORCE_INVERSE_RELATIONSHIP) === 'Y',
+        enable_cross_rates: (r.enableCrossRates ?? r.enable_cross_rates ?? r.ENABLE_CROSS_RATES) === 'Y',
+        allow_cross_rates_override: (r.allowOverride ?? r.allow_cross_rates_override ?? r.ALLOW_CROSS_RATES_OVERRIDE) === 'Y',
+        cross_rate_pivot_currency: r.pivotCurrency ?? r.cross_rate_pivot_currency ?? r.CROSS_RATE_PIVOT_CURRENCY ?? '',
       })));
     } catch (e: any) {
       setError(e.message);
@@ -457,7 +457,7 @@ const RateTypesTab: React.FC = () => {
       if (!res.ok) return;
       const json = await res.json();
       const items: any[] = json.items ?? json.data ?? (Array.isArray(json) ? json : []);
-      setCurrencies(items.map(r => r.currency_code ?? r.CURRENCY_CODE));
+      setCurrencies(items.map(r => r.code ?? r.currency_code ?? r.CURRENCY_CODE));
     } catch (_) {}
   }, []);
 
@@ -725,10 +725,16 @@ const DailyRatesTab: React.FC = () => {
   const [currencies, setCurrencies]     = useState<string[]>([]);
   const [rateTypes, setRateTypes]       = useState<string[]>([]);
 
-  // Add-rate modal state
+  // Add-rate form state
   const [addForm] = Form.useForm();
-  const [adding, setAdding]     = useState(false);
-  const [showAdd, setShowAdd]   = useState(false);
+  const [adding, setAdding]       = useState(false);
+  const [showAdd, setShowAdd]     = useState(false);
+
+  // Fetch live rates state
+  const [fetchingLive, setFetchingLive]   = useState(false);
+  const [liveBase, setLiveBase]           = useState('USD');
+  const [liveRateType, setLiveRateType]   = useState('');
+  const [liveStatus, setLiveStatus]       = useState<{ type: 'success'|'error'; msg: string } | null>(null);
 
   const loadDropdowns = useCallback(async () => {
     try {
@@ -739,7 +745,7 @@ const DailyRatesTab: React.FC = () => {
       if (cRes.ok) {
         const cj = await cRes.json();
         const items: any[] = cj.items ?? cj.data ?? (Array.isArray(cj) ? cj : []);
-        setCurrencies(items.map(r => r.currency_code ?? r.CURRENCY_CODE));
+        setCurrencies(items.map(r => r.code ?? r.currency_code ?? r.CURRENCY_CODE));
       }
       if (rtRes.ok) {
         const rj = await rtRes.json();
@@ -750,6 +756,50 @@ const DailyRatesTab: React.FC = () => {
   }, []);
 
   useEffect(() => { loadDropdowns(); }, [loadDropdowns]);
+
+  // ── Frankfurter public API: https://www.frankfurter.app ──────
+  const handleFetchLiveRates = async () => {
+    if (!liveRateType) { message.warning('Select a Rate Type before fetching'); return; }
+    setFetchingLive(true);
+    setLiveStatus(null);
+    try {
+      const res = await fetch(
+        `https://api.frankfurter.app/latest?base=${liveBase}`,
+        { headers: { 'Accept': 'application/json' } }
+      );
+      if (!res.ok) throw new Error(`Frankfurter HTTP ${res.status}`);
+      const json = await res.json();
+      // json = { amount:1, base:"USD", date:"2026-04-02", rates:{AED:3.67,...} }
+      const rateDate: string = json.date;
+      const rates: any[] = Object.entries(json.rates as Record<string,number>).map(
+        ([toCur, rate]) => ({
+          fromCurrency: json.base,
+          toCurrency:   toCur,
+          rateDate,
+          rateType:     liveRateType,
+          rate,
+        })
+      );
+
+      const importRes = await fetch(`${ORDS_BASE}/currencies/dailyrates/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rates, source: 'API', createdBy: 'SYSTEM' }),
+      });
+      if (!importRes.ok) throw new Error(`Import HTTP ${importRes.status}`);
+      const importJson = await importRes.json();
+
+      setLiveStatus({
+        type: 'success',
+        msg: `Imported ${rates.length} rates for ${json.base} on ${rateDate} (${importJson.saved ?? rates.length} saved). Source: Frankfurter / ECB`,
+      });
+      if (searched) await handleSearch();
+    } catch (e: any) {
+      setLiveStatus({ type: 'error', msg: e.message });
+    } finally {
+      setFetchingLive(false);
+    }
+  };
 
   const handleSearch = useCallback(async () => {
     if (!fromCurrency && !toCurrency) {
@@ -772,14 +822,14 @@ const DailyRatesTab: React.FC = () => {
       const json = await res.json();
       const items: any[] = json.items ?? json.data ?? (Array.isArray(json) ? json : []);
       setData(items.map(r => ({
-        rate_id:       r.rate_id       ?? r.RATE_ID,
-        from_currency: r.from_currency ?? r.FROM_CURRENCY,
-        to_currency:   r.to_currency   ?? r.TO_CURRENCY,
-        rate_date:     r.rate_date     ?? r.RATE_DATE,
-        rate_type:     r.rate_type     ?? r.RATE_TYPE,
-        rate:          r.rate          ?? r.RATE,
-        inverse_rate:  r.inverse_rate  ?? r.INVERSE_RATE,
-        source:        r.source        ?? r.SOURCE ?? 'MANUAL',
+        rateId:       r.rateId       ?? r.rate_id       ?? r.RATE_ID,
+        fromCurrency: r.fromCurrency ?? r.from_currency ?? r.FROM_CURRENCY,
+        toCurrency:   r.toCurrency   ?? r.to_currency   ?? r.TO_CURRENCY,
+        rateDate:     r.rateDate     ?? r.rate_date     ?? r.RATE_DATE,
+        rateType:     r.rateType     ?? r.rate_type     ?? r.RATE_TYPE,
+        rate:         r.rate         ?? r.RATE,
+        inverseRate:  r.inverseRate  ?? r.inverse_rate  ?? r.INVERSE_RATE,
+        source:       r.source       ?? r.SOURCE ?? 'MANUAL',
       })));
       setSearched(true);
     } catch (e: any) {
@@ -804,7 +854,7 @@ const DailyRatesTab: React.FC = () => {
     try {
       const res = await fetch(`${ORDS_BASE}/currencies/dailyrates/${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setData(prev => prev.filter(r => r.rate_id !== id));
+      setData(prev => prev.filter(r => r.rateId !== id));
       message.success('Rate deleted');
     } catch (e: any) {
       message.error(`Delete failed: ${e.message}`);
@@ -844,25 +894,25 @@ const DailyRatesTab: React.FC = () => {
   const columns = [
     {
       title: 'From Currency',
-      dataIndex: 'from_currency',
+      dataIndex: 'fromCurrency',
       width: 130,
       render: (v: string) => <Tag color="blue">{v}</Tag>,
     },
     {
       title: 'To Currency',
-      dataIndex: 'to_currency',
+      dataIndex: 'toCurrency',
       width: 130,
       render: (v: string) => <Tag color="geekblue">{v}</Tag>,
     },
     {
       title: 'Rate Date',
-      dataIndex: 'rate_date',
+      dataIndex: 'rateDate',
       width: 130,
       render: (v: string) => fmtDate(v),
     },
     {
       title: 'Rate Type',
-      dataIndex: 'rate_type',
+      dataIndex: 'rateType',
       width: 140,
     },
     {
@@ -874,7 +924,7 @@ const DailyRatesTab: React.FC = () => {
     },
     {
       title: 'Inverse Rate',
-      dataIndex: 'inverse_rate',
+      dataIndex: 'inverseRate',
       width: 140,
       align: 'right' as const,
       render: (v: number) => v?.toFixed(6),
@@ -891,7 +941,7 @@ const DailyRatesTab: React.FC = () => {
       render: (_: any, row: DailyRate) => (
         <Popconfirm
           title="Delete this rate?"
-          onConfirm={() => handleDelete(row.rate_id)}
+          onConfirm={() => handleDelete(row.rateId)}
           okText="Yes"
           cancelText="No"
         >
@@ -1027,18 +1077,88 @@ const DailyRatesTab: React.FC = () => {
           </Space>
         }
         extra={
-          <Button
-            icon={<PlusOutlined />}
-            size="small"
-            onClick={() => setShowAdd(v => !v)}
-            type={showAdd ? 'primary' : 'default'}
-            style={showAdd ? { background: REDWOOD.info, borderColor: REDWOOD.info } : {}}
-          >
-            Add Rate
-          </Button>
+          <Space>
+            <Button
+              icon={<PlusOutlined />}
+              size="small"
+              onClick={() => setShowAdd(v => !v)}
+              type={showAdd ? 'primary' : 'default'}
+              style={showAdd ? { background: REDWOOD.info, borderColor: REDWOOD.info } : {}}
+            >
+              Add Rate
+            </Button>
+            <Button
+              icon={<CloudDownloadOutlined />}
+              size="small"
+              type="default"
+              style={{ borderColor: REDWOOD.success, color: REDWOOD.success }}
+              onClick={() => { setShowAdd(false); setLiveStatus(null); }}
+            >
+              Fetch Live Rates
+            </Button>
+          </Space>
         }
         style={{ border: `1px solid ${REDWOOD.border}` }}
       >
+        {/* Live Rates Panel */}
+        <Card
+          size="small"
+          style={{ marginBottom: 16, background: '#f0fff4', border: `1px dashed ${REDWOOD.success}` }}
+        >
+          <Row gutter={[8, 8]} align="middle">
+            <Col>
+              <Text strong style={{ color: REDWOOD.success }}>Fetch Live Rates</Text>
+              <Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>via Frankfurter / ECB</Text>
+            </Col>
+            <Col>
+              <Space>
+                <Text style={{ fontSize: 12 }}>Base:</Text>
+                <Select
+                  value={liveBase}
+                  onChange={setLiveBase}
+                  showSearch
+                  size="small"
+                  style={{ width: 90 }}
+                >
+                  {currencies.length
+                    ? currencies.map(c => <Option key={c} value={c}>{c}</Option>)
+                    : ['USD','EUR','GBP','AED','SAR','INR'].map(c => <Option key={c} value={c}>{c}</Option>)
+                  }
+                </Select>
+                <Text style={{ fontSize: 12 }}>Rate Type:</Text>
+                <Select
+                  value={liveRateType || undefined}
+                  onChange={v => setLiveRateType(v ?? '')}
+                  size="small"
+                  style={{ width: 120 }}
+                  placeholder="Select type"
+                >
+                  {rateTypes.map(rt => <Option key={rt} value={rt}>{rt}</Option>)}
+                </Select>
+                <Button
+                  type="primary"
+                  size="small"
+                  loading={fetchingLive}
+                  onClick={handleFetchLiveRates}
+                  icon={<CloudDownloadOutlined />}
+                  style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+                >
+                  Fetch &amp; Import
+                </Button>
+              </Space>
+            </Col>
+          </Row>
+          {liveStatus && (
+            <Alert
+              type={liveStatus.type}
+              message={liveStatus.msg}
+              closable
+              onClose={() => setLiveStatus(null)}
+              style={{ marginTop: 8 }}
+            />
+          )}
+        </Card>
+
         {/* Inline Add Form */}
         {showAdd && (
           <Card
@@ -1097,7 +1217,7 @@ const DailyRatesTab: React.FC = () => {
           <Table
             dataSource={data}
             columns={columns}
-            rowKey="rate_id"
+            rowKey="rateId"
             size="small"
             pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `Total ${t}` }}
             locale={{
