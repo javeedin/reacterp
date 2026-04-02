@@ -32,10 +32,17 @@ import {
   SearchOutlined,
   ReloadOutlined,
   CheckCircleFilled,
+  CloudDownloadOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs from 'dayjs';
-import { APEX_DB_CONFIG } from '../../config/api.config';
+import { APEX_DB_CONFIG, ORACLE_FUSION_CONFIG } from '../../config/api.config';
+
+// ─── Fusion fetch helper (Electron = direct, Browser = proxy) ─
+const isElectron = typeof navigator !== 'undefined' && navigator.userAgent.includes('Electron');
+const FUSION_AUTH = () =>
+  `Basic ${btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`)}`;
+const PROXY_BASE = 'http://localhost:3001/api';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -109,6 +116,8 @@ const CurrenciesTab: React.FC = () => {
   const [loading, setLoading]         = useState(false);
   const [searched, setSearched]       = useState(false);
   const [error, setError]             = useState('');
+  const [syncing, setSyncing]         = useState(false);
+  const [syncStatus, setSyncStatus]   = useState<{ type: 'success'|'error'; msg: string } | null>(null);
 
   const handleSearch = useCallback(async () => {
     setLoading(true);
@@ -158,6 +167,81 @@ const CurrenciesTab: React.FC = () => {
       message.success(`Currency ${code} ${newVal === 'Y' ? 'enabled' : 'disabled'}`);
     } catch (e: any) {
       message.error(`Failed to toggle: ${e.message}`);
+    }
+  };
+
+  const handleFetchFromFusion = async () => {
+    setSyncing(true);
+    setSyncStatus(null);
+    try {
+      // ── Step 1: fetch from Oracle Fusion ──────────────────────
+      const fusionUrl = 'currenciesLOV?limit=500&onlyData=true';
+      let fusionItems: any[] = [];
+      let nextUrl: string | null = null;
+
+      const fetchPage = async (url: string) => {
+        let res: Response;
+        if (isElectron) {
+          res = await fetch(`${ORACLE_FUSION_CONFIG.baseUrl}/${url}`, {
+            headers: { 'Authorization': FUSION_AUTH(), 'Accept': 'application/json' },
+          });
+        } else {
+          res = await fetch(`${PROXY_BASE}/oracle/${url}`);
+        }
+        if (!res.ok) throw new Error(`Fusion HTTP ${res.status}`);
+        return res.json();
+      };
+
+      let page = await fetchPage(fusionUrl);
+      fusionItems = fusionItems.concat(page.items ?? []);
+
+      // paginate if needed
+      nextUrl = page.links?.find((l: any) => l.rel === 'next')?.href ?? null;
+      while (nextUrl) {
+        const rel = nextUrl.replace(`${ORACLE_FUSION_CONFIG.baseUrl}/`, '');
+        page = await fetchPage(rel);
+        fusionItems = fusionItems.concat(page.items ?? []);
+        nextUrl = page.links?.find((l: any) => l.rel === 'next')?.href ?? null;
+      }
+
+      if (!fusionItems.length) throw new Error('No currencies returned from Fusion');
+
+      // ── Step 2: POST to ORDS sync endpoint ────────────────────
+      const payload = {
+        items: fusionItems.map(r => ({
+          CurrencyCode:             r.CurrencyCode             ?? r.currencyCode,
+          Name:                     r.Name                     ?? r.name,
+          Description:              r.Description              ?? r.description,
+          EnabledFlag:              r.EnabledFlag              ?? r.enabledFlag ?? 'Y',
+          Symbol:                   r.Symbol                   ?? r.symbol,
+          Precision:                r.Precision                ?? r.precision,
+          ExtendedPrecision:        r.ExtendedPrecision        ?? r.extendedPrecision,
+          CurrencyFormat:           r.CurrencyFormat           ?? r.currencyFormat,
+          CurrencyFormatWithSymbol: r.CurrencyFormatWithSymbol ?? r.currencyFormatWithSymbol,
+          CurrencyFormatWithCode:   r.CurrencyFormatWithCode   ?? r.currencyFormatWithCode,
+          IssuingTerritoryCode:     r.IssuingTerritoryCode     ?? r.issuingTerritoryCode,
+          CurrencyFlag:             r.CurrencyFlag             ?? r.currencyFlag ?? 'Y',
+        })),
+      };
+
+      const syncRes = await fetch(`${ORDS_BASE}/currencies/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!syncRes.ok) throw new Error(`Sync HTTP ${syncRes.status}`);
+      const syncJson = await syncRes.json();
+
+      setSyncStatus({
+        type: 'success',
+        msg: `Synced ${fusionItems.length} currencies from Oracle Fusion. ${syncJson.message ?? ''}`,
+      });
+      // refresh the table if a search was already done
+      if (searched) await handleSearch();
+    } catch (e: any) {
+      setSyncStatus({ type: 'error', msg: e.message });
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -283,8 +367,30 @@ const CurrenciesTab: React.FC = () => {
             {searched && <Tag color="blue">{data.length} record{data.length !== 1 ? 's' : ''}</Tag>}
           </Space>
         }
+        extra={
+          <Tooltip title="Fetch all currencies from Oracle Fusion and sync to local DB">
+            <Button
+              icon={<CloudDownloadOutlined />}
+              loading={syncing}
+              onClick={handleFetchFromFusion}
+              style={{ borderColor: REDWOOD.info, color: REDWOOD.info }}
+              size="small"
+            >
+              Fetch from Fusion
+            </Button>
+          </Tooltip>
+        }
         style={{ border: `1px solid ${REDWOOD.border}` }}
       >
+        {syncStatus && (
+          <Alert
+            type={syncStatus.type}
+            message={syncStatus.msg}
+            closable
+            onClose={() => setSyncStatus(null)}
+            style={{ marginBottom: 12 }}
+          />
+        )}
         {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
         <Spin spinning={loading}>
           <Table
