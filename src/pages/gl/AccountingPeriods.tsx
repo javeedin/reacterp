@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   Layout,
   Card,
@@ -1186,8 +1186,22 @@ const AccountingPeriods: React.FC = () => {
     );
   };
 
-  // All Periods Tab Content
-  const AllPeriodsTab = () => (
+  // Memoised filtered list — avoids re-filtering on every unrelated render
+  const filteredPeriods = useMemo(() => {
+    if (!allPeriodsSearch) return periods;
+    const q = allPeriodsSearch.toLowerCase();
+    return periods.filter(p =>
+      (p.EnteredPeriodName || '').toLowerCase().includes(q) ||
+      (p.PeriodSetNameId || '').toLowerCase().includes(q) ||
+      String(p.PeriodYear || '').includes(q) ||
+      (p.PeriodType || '').toLowerCase().includes(q)
+    );
+  }, [periods, allPeriodsSearch]);
+
+  // All Periods Tab Content — rendered as JSX (NOT a sub-component) to prevent
+  // React treating it as a new component type on each render, which would remount
+  // the Table and make the search input feel laggy.
+  const allPeriodsTabContent = (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Statistics Cards */}
       <Row gutter={12} style={{ marginBottom: 12 }}>
@@ -1277,16 +1291,7 @@ const AccountingPeriods: React.FC = () => {
         </div>
         <Spin spinning={loading && periods.length === 0}>
           <Table
-            dataSource={periods.filter(p => {
-              if (!allPeriodsSearch) return true;
-              const q = allPeriodsSearch.toLowerCase();
-              return (
-                (p.EnteredPeriodName || '').toLowerCase().includes(q) ||
-                (p.PeriodSetNameId || '').toLowerCase().includes(q) ||
-                String(p.PeriodYear || '').includes(q) ||
-                (p.PeriodType || '').toLowerCase().includes(q)
-              );
-            })}
+            dataSource={filteredPeriods}
             columns={allPeriodsColumns}
             rowKey="PeriodNameId"
             size="small"
@@ -1390,7 +1395,7 @@ const AccountingPeriods: React.FC = () => {
               {
                 key: 'all',
                 label: 'All Periods',
-                children: <AllPeriodsTab />,
+                children: allPeriodsTabContent,
                 closable: false,
               },
               // Dynamically render open tabs for each module
