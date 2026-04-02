@@ -323,6 +323,111 @@ const mapFusionToSupplierDetail = (item: any): SupplierDetail => ({
   preferredFunctionalCurrency: item.PreferredFunctionalCurrency || '',
 });
 
+// ── InvoicesTabContent ──────────────────────────────────────────────────────
+// Defined OUTSIDE ManageSuppliers so its type identity is stable across
+// parent re-renders, preventing full remount when parent state changes.
+interface InvoicesTabContentProps {
+  invoices: InvoiceRecord[];
+  invoicesLoading: boolean;
+  supplierNumber: string;
+  onExport: (rows: InvoiceRecord[]) => void;
+  onRefresh: () => void;
+  onEdit: (invoice: InvoiceRecord) => void;
+}
+
+const InvoicesTabContent: React.FC<InvoicesTabContentProps> = ({
+  invoices, invoicesLoading, onExport, onRefresh, onEdit,
+}) => {
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+
+  const filtered = React.useMemo(() => {
+    if (!search) return invoices;
+    const q = search.toLowerCase();
+    return invoices.filter(r =>
+      (r.invoiceNumber || '').toLowerCase().includes(q) ||
+      (r.description   || '').toLowerCase().includes(q) ||
+      (r.invoiceStatus || '').toLowerCase().includes(q) ||
+      String(r.invoiceAmount).includes(q)
+    );
+  }, [invoices, search]);
+
+  // Reset to page 1 whenever filter changes
+  React.useEffect(() => { setPage(1); }, [search]);
+
+  const columns = React.useMemo(() => [
+    { title: 'Invoice #', dataIndex: 'invoiceNumber', key: 'invoiceNumber', width: 140 },
+    { title: 'Date', dataIndex: 'invoiceDate', key: 'invoiceDate', width: 110 },
+    {
+      title: 'Amount', dataIndex: 'invoiceAmount', key: 'invoiceAmount', width: 130, align: 'right' as const,
+      render: (amt: number, r: InvoiceRecord) => <Text strong>{new Intl.NumberFormat('en-AE', { style: 'currency', currency: r.currency || 'AED', minimumFractionDigits: 2 }).format(amt)}</Text>
+    },
+    {
+      title: 'Paid', dataIndex: 'amountPaid', key: 'amountPaid', width: 130, align: 'right' as const,
+      render: (amt: number, r: InvoiceRecord) => <Text style={{ color: REDWOOD.success }}>{new Intl.NumberFormat('en-AE', { style: 'currency', currency: r.currency || 'AED', minimumFractionDigits: 2 }).format(amt)}</Text>
+    },
+    {
+      title: 'Balance', dataIndex: 'amountRemaining', key: 'amountRemaining', width: 130, align: 'right' as const,
+      render: (amt: number, r: InvoiceRecord) => <Text style={{ color: amt > 0 ? REDWOOD.error : REDWOOD.success }}>{new Intl.NumberFormat('en-AE', { style: 'currency', currency: r.currency || 'AED', minimumFractionDigits: 2 }).format(amt)}</Text>
+    },
+    {
+      title: 'Status', dataIndex: 'invoiceStatus', key: 'invoiceStatus', width: 100,
+      render: (status: string) => <Tag>{status || '-'}</Tag>
+    },
+    { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
+    {
+      title: '', key: 'actions', width: 60, fixed: 'right' as const,
+      render: (_: any, record: InvoiceRecord) => (
+        <Tooltip title="View / Edit Invoice">
+          <Button type="text" size="small" icon={<EditOutlined />} style={{ color: REDWOOD.info }} onClick={() => onEdit(record)} />
+        </Tooltip>
+      ),
+    },
+  ], [onEdit]);
+
+  return (
+    <div>
+      <Row gutter={8} style={{ marginBottom: 12 }} align="middle">
+        <Col>
+          <Input
+            placeholder="Search invoice #, description, status..."
+            prefix={<SearchOutlined />}
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            allowClear
+            size="small"
+            style={{ width: 280 }}
+          />
+        </Col>
+        <Col>
+          <Space>
+            <Text type="secondary" style={{ fontSize: 12 }}>{filtered.length}/{invoices.length} rows</Text>
+            <Button icon={<FileExcelOutlined />} size="small" style={{ color: '#1D7B4D', borderColor: '#1D7B4D' }} onClick={() => onExport(filtered)}>Excel</Button>
+            <Button icon={<ReloadOutlined />} size="small" onClick={onRefresh} loading={invoicesLoading}>Refresh</Button>
+          </Space>
+        </Col>
+      </Row>
+      <Table
+        columns={columns}
+        dataSource={filtered}
+        loading={invoicesLoading}
+        scroll={{ x: 900 }}
+        size="small"
+        rowKey="key"
+        pagination={{
+          current: page,
+          pageSize,
+          showSizeChanger: true,
+          pageSizeOptions: ['10', '20', '50', '100'],
+          showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} invoices`,
+          onChange: (p, s) => { setPage(p); setPageSize(s); },
+        }}
+      />
+    </div>
+  );
+};
+
 const ManageSuppliers: React.FC = () => {
   const [form] = Form.useForm();
   const navigate = useNavigate();
@@ -343,10 +448,6 @@ const ManageSuppliers: React.FC = () => {
   const [balanceLoadingMap, setBalanceLoadingMap] = useState<Record<string, boolean>>({});
   const [invoicesLoadingMap, setInvoicesLoadingMap] = useState<Record<string, boolean>>({});
   const [paymentsLoadingMap, setPaymentsLoadingMap] = useState<Record<string, boolean>>({});
-  // Invoice grid controls — keyed by tabKey so each supplier tab is independent
-  const [invoiceSearchMap, setInvoiceSearchMap] = useState<Record<string, string>>({});
-  const [invoicePageMap, setInvoicePageMap] = useState<Record<string, number>>({});
-  const [invoicePageSizeMap, setInvoicePageSizeMap] = useState<Record<string, number>>({});
 
   // Payment drilldown modal
   const [drilldownVisible, setDrilldownVisible] = useState(false);
@@ -1479,17 +1580,6 @@ const ManageSuppliers: React.FC = () => {
     const balanceData = balanceDataMap[tabKey];
     const invoices = invoicesMap[tabKey] || [];
     const payments = paymentsMap[tabKey] || [];
-    const invSearch = invoiceSearchMap[tabKey] || '';
-    const invPage = invoicePageMap[tabKey] || 1;
-    const invPageSize = invoicePageSizeMap[tabKey] || 20;
-    const filteredInvoices = invSearch
-      ? invoices.filter(r =>
-          (r.invoiceNumber || '').toLowerCase().includes(invSearch.toLowerCase()) ||
-          (r.description  || '').toLowerCase().includes(invSearch.toLowerCase()) ||
-          (r.invoiceStatus|| '').toLowerCase().includes(invSearch.toLowerCase()) ||
-          String(r.invoiceAmount).includes(invSearch)
-        )
-      : invoices;
     const isLoading = balanceLoadingMap[tabKey];
     const invoicesLoading = invoicesLoadingMap[tabKey];
     const paymentsLoading = paymentsLoadingMap[tabKey];
@@ -1511,49 +1601,6 @@ const ManageSuppliers: React.FC = () => {
     }
 
     const { supplier, balanceSummary, agingReport } = balanceData;
-
-    // Invoice columns
-    const invoiceColumns = [
-      { title: 'Invoice Number', dataIndex: 'invoiceNumber', key: 'invoiceNumber', width: 140 },
-      { title: 'Invoice Date', dataIndex: 'invoiceDate', key: 'invoiceDate', width: 110 },
-      {
-        title: 'Amount', dataIndex: 'invoiceAmount', key: 'invoiceAmount', width: 130, align: 'right' as const,
-        render: (amt: number) => <Text strong>{formatCurrency(amt)}</Text>
-      },
-      {
-        title: 'Paid', dataIndex: 'amountPaid', key: 'amountPaid', width: 130, align: 'right' as const,
-        render: (amt: number) => <Text style={{ color: REDWOOD.success }}>{formatCurrency(amt)}</Text>
-      },
-      {
-        title: 'Balance', dataIndex: 'amountRemaining', key: 'amountRemaining', width: 130, align: 'right' as const,
-        render: (amt: number) => <Text style={{ color: amt > 0 ? REDWOOD.error : REDWOOD.success }}>{formatCurrency(amt)}</Text>
-      },
-      {
-        title: 'Status', dataIndex: 'invoiceStatus', key: 'invoiceStatus', width: 100,
-        render: (status: string) => <Tag>{status || '-'}</Tag>
-      },
-      { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
-      {
-        title: '',
-        key: 'actions',
-        width: 60,
-        fixed: 'right' as const,
-        render: (_: any, record: InvoiceRecord) => (
-          <Tooltip title="Edit Invoice">
-            <Button
-              type="text"
-              size="small"
-              icon={<EditOutlined />}
-              style={{ color: REDWOOD.info }}
-              onClick={() => {
-                setEditInvoice({ ...record });
-                setEditInvoiceVisible(true);
-              }}
-            />
-          </Tooltip>
-        ),
-      },
-    ];
 
     // Payment columns
     const paymentColumns = [
@@ -1703,55 +1750,14 @@ const ManageSuppliers: React.FC = () => {
                 key: 'invoices',
                 label: <Space><FileTextOutlined />Invoices ({invoices.length})</Space>,
                 children: (
-                  <div>
-                    <Row gutter={8} style={{ marginBottom: 12 }} align="middle">
-                      <Col flex="auto">
-                        <Input
-                          placeholder="Search invoice number, description, status, amount..."
-                          prefix={<SearchOutlined />}
-                          value={invSearch}
-                          onChange={e => {
-                            setInvoiceSearchMap(prev => ({ ...prev, [tabKey]: e.target.value }));
-                            setInvoicePageMap(prev => ({ ...prev, [tabKey]: 1 }));
-                          }}
-                          allowClear
-                          size="small"
-                        />
-                      </Col>
-                      <Col>
-                        <Space>
-                          <Text type="secondary" style={{ fontSize: 12 }}>
-                            {filteredInvoices.length}/{invoices.length} rows
-                          </Text>
-                          <Button
-                            icon={<FileExcelOutlined />}
-                            size="small"
-                            style={{ color: '#1D7B4D', borderColor: '#1D7B4D' }}
-                            onClick={() => exportInvoicesToExcel(tabKey, tab.supplier.supplierNumber, filteredInvoices)}
-                          >Excel</Button>
-                          <Button icon={<ReloadOutlined />} size="small" onClick={() => fetchBalanceInvoices(tab.supplier.supplierNumber, tabKey)} loading={invoicesLoading}>Refresh</Button>
-                        </Space>
-                      </Col>
-                    </Row>
-                    <Table
-                      columns={invoiceColumns}
-                      dataSource={filteredInvoices}
-                      loading={invoicesLoading}
-                      scroll={{ x: 900 }}
-                      size="small"
-                      pagination={{
-                        current: invPage,
-                        pageSize: invPageSize,
-                        showSizeChanger: true,
-                        pageSizeOptions: ['10', '20', '50', '100'],
-                        showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} invoices`,
-                        onChange: (page, size) => {
-                          setInvoicePageMap(prev => ({ ...prev, [tabKey]: page }));
-                          setInvoicePageSizeMap(prev => ({ ...prev, [tabKey]: size }));
-                        },
-                      }}
-                    />
-                  </div>
+                  <InvoicesTabContent
+                    invoices={invoices}
+                    invoicesLoading={!!invoicesLoading}
+                    supplierNumber={tab.supplier.supplierNumber}
+                    onExport={rows => exportInvoicesToExcel(tabKey, tab.supplier.supplierNumber, rows)}
+                    onRefresh={() => fetchBalanceInvoices(tab.supplier.supplierNumber, tabKey)}
+                    onEdit={record => { setEditInvoice({ ...record }); setEditInvoiceVisible(true); }}
+                  />
                 ),
               },
               {
