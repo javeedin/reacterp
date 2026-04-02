@@ -262,7 +262,9 @@ const mapApiToInvoiceRecord = (item: any, index: number): InvoiceRecord => ({
   invoiceGroup: item.invoice_group || '',
   termsDate: item.terms_date || '',
   goodsReceivedDate: item.goods_received_date || '',
-  syncStatus: item.sync_status || '',
+  // Invoices created in this app have invoice_source='MANUAL'.
+  // Any other source (Oracle Fusion sync, import, etc.) is read-only.
+  syncStatus: (item.invoice_source && item.invoice_source !== 'MANUAL') ? 'SYNCED' : '',
 });
 
 const ManageInvoices: React.FC = () => {
