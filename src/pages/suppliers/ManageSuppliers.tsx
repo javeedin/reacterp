@@ -433,9 +433,10 @@ const ManageSuppliers: React.FC = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
+  const [gridFilter, setGridFilter] = useState('');
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [searchCollapsed, setSearchCollapsed] = useState(false);
-  const [dataSource, setDataSource] = useState<'fusion' | 'apex'>('fusion');
+  const [dataSource, setDataSource] = useState<'fusion' | 'apex'>('apex');
 
   // Tab management state
   const [activeTab, setActiveTab] = useState('search');
@@ -1235,45 +1236,66 @@ const ManageSuppliers: React.FC = () => {
       </Card>
 
       {/* Search Results */}
-      <Card
-        title={
-          <Space>
-            <Text strong>Search Results</Text>
-            {suppliers.length > 0 && (
-              <Text type="secondary">({suppliers.length} records)</Text>
-            )}
-          </Space>
-        }
-        style={{
-          borderRadius: 8,
-          border: `1px solid ${REDWOOD.neutral200}`,
-        }}
-        extra={
-          <Space>
-            <Button size="small" icon={<PlusOutlined />} type="primary">
-              Register Supplier
-            </Button>
-          </Space>
-        }
-      >
-        <Table
-          columns={columns}
-          dataSource={suppliers}
-          rowSelection={rowSelection}
-          loading={loading}
-          scroll={{ x: 1550 }}
-          pagination={{
-            pageSize: 25,
-            showSizeChanger: true,
-            showTotal: (total) => `${total} suppliers`,
-          }}
-          size="small"
-          onRow={(record) => ({
-            onDoubleClick: () => openSupplierTab(record),
-            style: { cursor: 'pointer' },
-          })}
-        />
-      </Card>
+      {(() => {
+        const q = gridFilter.trim().toLowerCase();
+        const filtered = q
+          ? suppliers.filter(r =>
+              (r.supplier        || '').toLowerCase().includes(q) ||
+              (r.supplierNumber  || '').toLowerCase().includes(q) ||
+              (r.alternateName   || '').toLowerCase().includes(q) ||
+              (r.supplierType    || '').toLowerCase().includes(q) ||
+              (r.status          || '').toLowerCase().includes(q) ||
+              (r.taxRegistrationNumber || '').toLowerCase().includes(q)
+            )
+          : suppliers;
+        return (
+          <Card
+            title={
+              <Space>
+                <Text strong>Search Results</Text>
+                <Text type="secondary">
+                  {q ? `${filtered.length} / ${suppliers.length}` : suppliers.length} records
+                </Text>
+              </Space>
+            }
+            style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
+            extra={
+              <Space>
+                <Input
+                  placeholder="Filter results..."
+                  prefix={<SearchOutlined />}
+                  value={gridFilter}
+                  onChange={e => setGridFilter(e.target.value)}
+                  allowClear
+                  size="small"
+                  style={{ width: 220 }}
+                />
+                <Button size="small" icon={<PlusOutlined />} type="primary">
+                  Register Supplier
+                </Button>
+              </Space>
+            }
+          >
+            <Table
+              columns={columns}
+              dataSource={filtered}
+              rowSelection={rowSelection}
+              loading={loading}
+              scroll={{ x: 1550 }}
+              pagination={{
+                pageSize: 25,
+                showSizeChanger: true,
+                showTotal: (total) => `${total} suppliers`,
+              }}
+              size="small"
+              onRow={(record) => ({
+                onDoubleClick: () => openSupplierTab(record),
+                style: { cursor: 'pointer' },
+              })}
+            />
+          </Card>
+        );
+      })()}
     </div>
   );
 

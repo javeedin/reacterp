@@ -250,27 +250,27 @@ BEGIN
         p_comments       => 'Get Suppliers from RR_SUPPLIER_MASTER',
         p_source         => q'[
 SELECT DISTINCT
-    sm.supplier_id,
-    sm.supplier,
-    sm.supplier_number,
-    sm.alternate_name,
-    sm.status,
-    sm.supplier_type,
-    sm.taxpayer_id,
-    TO_CHAR(sm.creation_date, 'YYYY-MM-DD') AS creation_date
-FROM RR_SUPPLIER_MASTER sm
-WHERE (:supplier_number  IS NULL OR UPPER(sm.supplier_number) LIKE '%' || UPPER(:supplier_number) || '%')
-  AND (:supplier         IS NULL OR UPPER(sm.supplier)        LIKE '%' || UPPER(:supplier)        || '%')
+    s.supplier_id,
+    s.supplier,
+    s.supplier_number,
+    s.alternate_name,
+    s.status,
+    s.supplier_type,
+    s.taxpayer_id,
+    TO_CHAR(s.creation_date, 'YYYY-MM-DD') AS creation_date
+FROM RR_SUPPLIER_MASTER s
+WHERE (:supplier_number IS NULL OR UPPER(s.supplier_number) LIKE '%' || UPPER(:supplier_number) || '%')
+  AND (:supplier         IS NULL OR UPPER(s.supplier)        LIKE '%' || UPPER(:supplier)        || '%')
   AND (:q               IS NULL OR (
-           UPPER(sm.supplier_number) LIKE '%' || UPPER(:q) || '%'
-        OR UPPER(sm.supplier)        LIKE '%' || UPPER(:q) || '%'
+           UPPER(s.supplier_number) LIKE '%' || UPPER(:q) || '%'
+        OR UPPER(s.supplier)        LIKE '%' || UPPER(:q) || '%'
       ))
-  AND (:P_BUSINESS_UNIT  IS NULL OR EXISTS (
-        SELECT 1 FROM RR_SUPPLIER_SITES ss
-        WHERE ss.supplier_id = sm.supplier_id
-          AND UPPER(ss.procurement_bu) = UPPER(:P_BUSINESS_UNIT)
+  AND (:P_BUSINESS_UNIT IS NULL OR EXISTS (
+        SELECT 1 FROM RR_SUPPLIER_SITE_ASSIGNMENTS a
+        WHERE a.supplier_id = s.supplier_id
+          AND a.client_bu   = :P_BUSINESS_UNIT
       ))
-ORDER BY sm.supplier
+ORDER BY s.supplier
 ]'
     );
     COMMIT;
