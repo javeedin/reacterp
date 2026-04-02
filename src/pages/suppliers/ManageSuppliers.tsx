@@ -506,9 +506,13 @@ const ManageSuppliers: React.FC = () => {
     try {
       const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/${supplierNumber}`;
       const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
 
-      const data = await response.json();
+      const rawText = await response.text();
+      // Strip raw control characters that Oracle may embed in string values
+      // (e.g. \r causes "Bad control character at position N")
+      const sanitized = rawText.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ' ');
+      const data = JSON.parse(sanitized);
       const items = data.invoices || [];
       setInvoicesMap(prev => ({
         ...prev,
@@ -539,9 +543,11 @@ const ManageSuppliers: React.FC = () => {
     try {
       const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/payments/${supplierNumber}`;
       const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
 
-      const data = await response.json();
+      const rawText = await response.text();
+      const sanitized = rawText.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ' ');
+      const data = JSON.parse(sanitized);
       const items = data.payments || [];
       setPaymentsMap(prev => ({
         ...prev,

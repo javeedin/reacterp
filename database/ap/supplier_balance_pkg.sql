@@ -286,9 +286,18 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
     -- PRIVATE: escape VARCHAR2 value for JSON string (handles \, ", newline)
     -- ========================================================================
     FUNCTION js(p_val IN VARCHAR2) RETURN VARCHAR2 IS
+        v_str VARCHAR2(32767);
     BEGIN
         IF p_val IS NULL THEN RETURN 'null'; END IF;
-        RETURN '"' || REPLACE(REPLACE(REPLACE(p_val, '\', '\\'), '"', '\"'), CHR(10), '\n') || '"';
+        v_str := p_val;
+        v_str := REPLACE(v_str, '\',    '\\');   -- backslash first
+        v_str := REPLACE(v_str, '"',    '\"');   -- double quote
+        v_str := REPLACE(v_str, CHR(13), '\r');  -- carriage return (causes "Workfl ow" split)
+        v_str := REPLACE(v_str, CHR(10), '\n');  -- line feed
+        v_str := REPLACE(v_str, CHR(9),  '\t');  -- tab
+        v_str := REPLACE(v_str, CHR(8),  '\b');  -- backspace
+        v_str := REPLACE(v_str, CHR(12), '\f');  -- form feed
+        RETURN '"' || v_str || '"';
     END js;
 
     -- ========================================================================
