@@ -60,6 +60,7 @@ import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 import FloatingMenu from '../../components/FloatingMenu';
 import Autopilot from '../../components/Autopilot';
+import InvoiceDetail from '../ap/InvoiceDetail';
 import type { ColumnsType } from 'antd/es/table';
 
 const { Content } = Layout;
@@ -1471,38 +1472,6 @@ const ManageSuppliers: React.FC = () => {
     }
   };
 
-  // Save edited invoice
-  const saveEditInvoice = async () => {
-    if (!editInvoice) return;
-    setEditInvoiceSaving(true);
-    try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/invoices/${editInvoice.invoiceId}`;
-      const response = await fetch(url, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          invoice_date: editInvoice.invoiceDate,
-          invoice_amount: editInvoice.invoiceAmount,
-          description: editInvoice.description,
-          invoice_status: editInvoice.invoiceStatus,
-          currency: editInvoice.currency,
-        }),
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      message.success('Invoice updated successfully');
-      setEditInvoiceVisible(false);
-      setEditInvoice(null);
-      // Refresh invoices for the active balance tab
-      const activeBalanceTab = openTabs.find(t => t.tabType === 'balance' && t.key === activeTab);
-      if (activeBalanceTab) {
-        fetchBalanceInvoices(activeBalanceTab.supplier.supplierNumber, activeBalanceTab.key);
-      }
-    } catch (error) {
-      message.error(`Failed to save invoice: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    } finally {
-      setEditInvoiceSaving(false);
-    }
-  };
 
   // Render supplier balance tab content
   const renderSupplierBalanceTab = (tab: SupplierTab) => {
@@ -2140,91 +2109,51 @@ const ManageSuppliers: React.FC = () => {
             />
           </Card>
         </Modal>
-        {/* Edit Invoice Modal */}
+        {/* Edit Invoice Modal — full InvoiceDetail (header + lines) */}
         <Modal
           title={
             <Space>
               <EditOutlined style={{ color: REDWOOD.info }} />
-              <span>Edit Invoice: {editInvoice?.invoiceNumber}</span>
+              <span>Invoice: {editInvoice?.invoiceNumber}</span>
             </Space>
           }
           open={editInvoiceVisible}
-          onCancel={() => {
-            setEditInvoiceVisible(false);
-            setEditInvoice(null);
-          }}
-          footer={[
-            <Button key="cancel" onClick={() => { setEditInvoiceVisible(false); setEditInvoice(null); }}>
-              Cancel
-            </Button>,
-            <Button key="save" type="primary" loading={editInvoiceSaving} icon={<SaveOutlined />} onClick={saveEditInvoice} style={{ background: REDWOOD.primary }}>
-              Save
-            </Button>,
-          ]}
-          width={640}
+          onCancel={() => { setEditInvoiceVisible(false); setEditInvoice(null); }}
+          footer={null}
+          width="95vw"
+          style={{ top: 20 }}
+          styles={{ body: { padding: 0, maxHeight: 'calc(100vh - 120px)', overflowY: 'auto' } }}
           destroyOnClose
         >
-          {editInvoice && (
-            <Form layout="horizontal" labelCol={{ span: 8 }} wrapperCol={{ span: 16 }} size="small" style={{ marginTop: 8 }}>
-              <Form.Item label="Invoice Number">
-                <Text strong>{editInvoice.invoiceNumber}</Text>
-              </Form.Item>
-              <Form.Item label="Invoice Date">
-                <Input
-                  value={editInvoice.invoiceDate}
-                  onChange={e => setEditInvoice(prev => prev ? { ...prev, invoiceDate: e.target.value } : prev)}
-                  placeholder="dd-Mon-yyyy"
-                />
-              </Form.Item>
-              <Form.Item label="Invoice Amount">
-                <Input
-                  type="number"
-                  value={editInvoice.invoiceAmount}
-                  onChange={e => setEditInvoice(prev => prev ? { ...prev, invoiceAmount: parseFloat(e.target.value) || 0 } : prev)}
-                />
-              </Form.Item>
-              <Form.Item label="Amount Paid">
-                <Text>{formatCurrency(editInvoice.amountPaid, editInvoice.currency)}</Text>
-              </Form.Item>
-              <Form.Item label="Balance Due">
-                <Text style={{ color: editInvoice.amountRemaining > 0 ? REDWOOD.error : REDWOOD.success }}>
-                  {formatCurrency(editInvoice.amountRemaining, editInvoice.currency)}
-                </Text>
-              </Form.Item>
-              <Form.Item label="Currency">
-                <Select
-                  value={editInvoice.currency}
-                  onChange={val => setEditInvoice(prev => prev ? { ...prev, currency: val } : prev)}
-                  style={{ width: 120 }}
-                >
-                  <Option value="AED">AED</Option>
-                  <Option value="USD">USD</Option>
-                  <Option value="EUR">EUR</Option>
-                  <Option value="GBP">GBP</Option>
-                </Select>
-              </Form.Item>
-              <Form.Item label="Status">
-                <Select
-                  value={editInvoice.invoiceStatus}
-                  onChange={val => setEditInvoice(prev => prev ? { ...prev, invoiceStatus: val } : prev)}
-                  style={{ width: 160 }}
-                >
-                  <Option value="UNPAID">UNPAID</Option>
-                  <Option value="PAID">PAID</Option>
-                  <Option value="CANCELLED">CANCELLED</Option>
-                  <Option value="HOLD">HOLD</Option>
-                  <Option value="PARTIAL">PARTIAL</Option>
-                </Select>
-              </Form.Item>
-              <Form.Item label="Description">
-                <Input.TextArea
-                  rows={3}
-                  value={editInvoice.description}
-                  onChange={e => setEditInvoice(prev => prev ? { ...prev, description: e.target.value } : prev)}
-                />
-              </Form.Item>
-            </Form>
-          )}
+          {editInvoice && (() => {
+            // Find the supplier name from the active balance tab
+            const activeBalanceTab = openTabs.find(t => t.tabType === 'balance' && t.key === activeTab);
+            const supplierName = activeBalanceTab
+              ? balanceDataMap[activeBalanceTab.key]?.supplier?.supplierName || activeBalanceTab.supplier.supplier
+              : '';
+            return (
+              <InvoiceDetail
+                invoice={{
+                  invoiceId: editInvoice.invoiceId,
+                  invoiceNumber: editInvoice.invoiceNumber,
+                  invoiceDate: editInvoice.invoiceDate,
+                  invoiceType: 'Standard',
+                  supplierOrParty: supplierName,
+                  supplierSite: '',
+                  invoiceAmount: editInvoice.invoiceAmount,
+                  unpaidAmount: editInvoice.amountRemaining,
+                  appliedPrepayments: 0,
+                  invoiceCurrency: editInvoice.currency,
+                  businessUnit: '',
+                  validationStatus: editInvoice.invoiceStatus || 'Never validated',
+                  approvalStatus: '',
+                  holdPaidStatus: editInvoice.amountRemaining <= 0 ? 'Paid' : 'Not paid',
+                  notes: editInvoice.description,
+                }}
+                onClose={() => { setEditInvoiceVisible(false); setEditInvoice(null); }}
+              />
+            );
+          })()}
         </Modal>
 
         <FloatingMenu />
