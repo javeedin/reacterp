@@ -235,7 +235,7 @@ const MyTickets: React.FC = () => {
                       title={<Text style={{ fontSize: 12, color: '#666' }}>{s.label}</Text>}
                       value={s.val}
                       valueStyle={{ fontSize: 22, fontWeight: 700, color: s.color }}
-                      prefix={React.cloneElement(s.icon as React.ReactElement, { style: { color: s.color, fontSize: 16 } })}
+                      prefix={React.cloneElement(s.icon as React.ReactElement<any>, { style: { color: s.color, fontSize: 16 } })}
                     />
                   </Card>
                 </Col>
