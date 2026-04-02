@@ -18,6 +18,7 @@ import {
   Divider,
   message,
   Modal,
+  Alert,
 } from 'antd';
 import {
   HomeOutlined,
@@ -32,6 +33,7 @@ import {
   BankOutlined,
   ReloadOutlined,
   ExclamationCircleOutlined,
+  BugOutlined,
 } from '@ant-design/icons';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -182,6 +184,8 @@ const SupplierBalance: React.FC = () => {
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [invoicesLoading, setInvoicesLoading] = useState(false);
+  const [invoiceError, setInvoiceError] = useState<string>('');
+  const [invoiceDebug, setInvoiceDebug] = useState<Record<string, unknown> | null>(null);
   const [paymentsLoading, setPaymentsLoading] = useState(false);
 
   // Payment drilldown modal
@@ -265,18 +269,52 @@ const SupplierBalance: React.FC = () => {
     if (!supplierNumber) return;
 
     setInvoicesLoading(true);
+    setInvoiceError('');
+    setInvoiceDebug(null);
+    const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/${supplierNumber}`;
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/${supplierNumber}`;
       console.log('Fetching invoices:', url);
-
       const response = await fetch(url);
+      const rawText = await response.text();
+
+      // Capture debug info regardless of outcome
+      const debug: Record<string, unknown> = {
+        url,
+        status: response.status,
+        statusText: response.statusText,
+        rawLength: rawText.length,
+        rawPreview: rawText.substring(0, 1000),
+      };
+
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        debug.error = `HTTP ${response.status}: ${response.statusText}`;
+        setInvoiceDebug(debug);
+        setInvoiceError(`HTTP ${response.status} — ${rawText.substring(0, 300)}`);
+        return;
       }
 
-      const data = await response.json();
-      console.log('Invoices response:', data);
+      let data: any;
+      try {
+        data = JSON.parse(rawText);
+      } catch (parseErr) {
+        debug.parseError = String(parseErr);
+        debug.rawFull = rawText;
+        setInvoiceDebug(debug);
+        setInvoiceError(`JSON parse error: ${String(parseErr)}`);
+        return;
+      }
 
+      debug.parsedSuccess = data.success;
+      debug.totalCount = data.total_count;
+      debug.invoiceCount = (data.invoices || []).length;
+      if (data.success === 'false' || data.success === false) {
+        debug.serverError = data.error;
+        setInvoiceDebug(debug);
+        setInvoiceError(`Server error: ${data.error || JSON.stringify(data)}`);
+        return;
+      }
+
+      setInvoiceDebug(debug);
       const items = data.invoices || data.items || [];
       setInvoices(items.map((item: any, index: number) => ({
         key: item.invoice_id?.toString() || index.toString(),
@@ -292,8 +330,10 @@ const SupplierBalance: React.FC = () => {
         description: item.description || '',
       })));
     } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
       console.error('Error fetching invoices:', error);
-      message.error('Failed to load invoices');
+      setInvoiceError(`Network error: ${msg}`);
+      setInvoiceDebug({ url, networkError: msg });
     } finally {
       setInvoicesLoading(false);
     }
@@ -800,6 +840,27 @@ const SupplierBalance: React.FC = () => {
   // Render invoices tab
   const renderInvoicesTab = () => (
     <div>
+      {/* Debug panel — always visible so errors and success info can be inspected */}
+      {invoiceDebug && (
+        <Alert
+          type={invoiceError ? 'error' : 'success'}
+          style={{ marginBottom: 12, fontFamily: 'monospace', fontSize: 12 }}
+          icon={<BugOutlined />}
+          showIcon
+          message={
+            <span style={{ fontWeight: 600 }}>
+              {invoiceError ? `Error: ${invoiceError}` : `OK — ${invoiceDebug.invoiceCount ?? 0} invoices loaded`}
+            </span>
+          }
+          description={
+            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 260, overflowY: 'auto' }}>
+              {JSON.stringify(invoiceDebug, null, 2)}
+            </pre>
+          }
+          closable
+          onClose={() => { setInvoiceDebug(null); setInvoiceError(''); }}
+        />
+      )}
       <Card
         title={
           <Space>
