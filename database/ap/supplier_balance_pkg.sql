@@ -270,6 +270,28 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
     END get_balance_summary;
 
     -- ========================================================================
+    -- PRIVATE: number → valid JSON number (prevents leading-dot: .695 → 0.695)
+    -- ========================================================================
+    FUNCTION jn_ap(p_val IN NUMBER) RETURN VARCHAR2 IS
+        v_str VARCHAR2(100);
+    BEGIN
+        IF p_val IS NULL THEN RETURN 'null'; END IF;
+        v_str := TO_CHAR(p_val, 'TM9');
+        IF v_str LIKE '.%'  THEN v_str := '0'  || v_str; END IF;
+        IF v_str LIKE '-.%' THEN v_str := '-0.' || SUBSTR(v_str, 3); END IF;
+        RETURN v_str;
+    END jn_ap;
+
+    -- ========================================================================
+    -- PRIVATE: escape VARCHAR2 value for JSON string (handles \, ", newline)
+    -- ========================================================================
+    FUNCTION js(p_val IN VARCHAR2) RETURN VARCHAR2 IS
+    BEGIN
+        IF p_val IS NULL THEN RETURN 'null'; END IF;
+        RETURN '"' || REPLACE(REPLACE(REPLACE(p_val, '\', '\\'), '"', '\"'), CHR(10), '\n') || '"';
+    END js;
+
+    -- ========================================================================
     -- FUNCTION: Get Aging Report
     -- ========================================================================
     FUNCTION get_aging_report(
@@ -354,44 +376,26 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
             l_pct_over_120 := ROUND(l_days_over_120 / l_total_outstanding * 100, 2);
         END IF;
 
-        -- Build JSON response using string concatenation for aging_report array
-        l_result := '{"success": "true", "supplier_number": "' || p_supplier_number || '", "aging_report": [' ||
-            '{"bucket": "Current", "amount": ' || l_current || ', "invoice_count": ' || l_current_cnt || ', "percentage": ' || l_pct_current || '},' ||
-            '{"bucket": "1-30 Days", "amount": ' || l_days_1_30 || ', "invoice_count": ' || l_days_1_30_cnt || ', "percentage": ' || l_pct_1_30 || '},' ||
-            '{"bucket": "31-60 Days", "amount": ' || l_days_31_60 || ', "invoice_count": ' || l_days_31_60_cnt || ', "percentage": ' || l_pct_31_60 || '},' ||
-            '{"bucket": "61-90 Days", "amount": ' || l_days_61_90 || ', "invoice_count": ' || l_days_61_90_cnt || ', "percentage": ' || l_pct_61_90 || '},' ||
-            '{"bucket": "91-120 Days", "amount": ' || l_days_91_120 || ', "invoice_count": ' || l_days_91_120_cnt || ', "percentage": ' || l_pct_91_120 || '},' ||
-            '{"bucket": "120+ Days", "amount": ' || l_days_over_120 || ', "invoice_count": ' || l_days_over_120_cnt || ', "percentage": ' || l_pct_over_120 || '}' ||
-            '], "total_outstanding": ' || l_total_outstanding || ', "currency": "AED"}';
+        -- Build JSON — jn_ap() prevents leading-dot invalid JSON for decimals
+        l_result := '{"success":"true","supplier_number":"' || p_supplier_number || '","aging_report":[' ||
+            '{"bucket":"Current","amount":'    || jn_ap(l_current)      || ',"invoice_count":' || l_current_cnt      || ',"percentage":' || jn_ap(l_pct_current)  || '},' ||
+            '{"bucket":"1-30 Days","amount":' || jn_ap(l_days_1_30)    || ',"invoice_count":' || l_days_1_30_cnt    || ',"percentage":' || jn_ap(l_pct_1_30)     || '},' ||
+            '{"bucket":"31-60 Days","amount":' || jn_ap(l_days_31_60)  || ',"invoice_count":' || l_days_31_60_cnt   || ',"percentage":' || jn_ap(l_pct_31_60)    || '},' ||
+            '{"bucket":"61-90 Days","amount":' || jn_ap(l_days_61_90)  || ',"invoice_count":' || l_days_61_90_cnt   || ',"percentage":' || jn_ap(l_pct_61_90)    || '},' ||
+            '{"bucket":"91-120 Days","amount":' || jn_ap(l_days_91_120) || ',"invoice_count":' || l_days_91_120_cnt || ',"percentage":' || jn_ap(l_pct_91_120)   || '},' ||
+            '{"bucket":"120+ Days","amount":' || jn_ap(l_days_over_120) || ',"invoice_count":' || l_days_over_120_cnt || ',"percentage":' || jn_ap(l_pct_over_120) || '}' ||
+            '],"total_outstanding":' || jn_ap(l_total_outstanding) || ',"currency":"AED"}';
 
         RETURN l_result;
 
     EXCEPTION
         WHEN OTHERS THEN
-            RETURN '{"success": "false", "error": "' || REPLACE(SQLERRM, '"', '\"') || '"}';
+            RETURN '{"success":"false","error":' || js(SQLERRM) || '}';
     END get_aging_report;
 
     -- ========================================================================
     -- FUNCTION: Get Supplier Invoices
     -- ========================================================================
-    -- ── Private helper: number → valid JSON number string (no leading-dot) ──
-    FUNCTION jn_ap(p_val IN NUMBER) RETURN VARCHAR2 IS
-        v_str VARCHAR2(100);
-    BEGIN
-        IF p_val IS NULL THEN RETURN 'null'; END IF;
-        v_str := TO_CHAR(p_val, 'TM9');
-        IF v_str LIKE '.%'  THEN v_str := '0'  || v_str; END IF;
-        IF v_str LIKE '-.%' THEN v_str := '-0.' || SUBSTR(v_str, 3); END IF;
-        RETURN v_str;
-    END jn_ap;
-
-    -- ── Private helper: escape a string for JSON ─────────────────────────────
-    FUNCTION js(p_val IN VARCHAR2) RETURN VARCHAR2 IS
-    BEGIN
-        IF p_val IS NULL THEN RETURN 'null'; END IF;
-        RETURN '"' || REPLACE(REPLACE(REPLACE(p_val, '\', '\\'), '"', '\"'), CHR(10), '\n') || '"';
-    END js;
-
     FUNCTION get_supplier_invoices(
         p_supplier_number IN VARCHAR2,
         p_status          IN VARCHAR2 DEFAULT 'All',
@@ -545,23 +549,24 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
         l_payments      CLOB := '[';
         l_total_count   NUMBER := 0;
         l_first         BOOLEAN := TRUE;
+        -- Buffers sized to avoid ORA-06502 on long column values
         l_check_id      NUMBER;
         l_pay_id        NUMBER;
-        l_pay_num       VARCHAR2(100);
+        l_pay_num       VARCHAR2(500);
         l_pay_date      DATE;
         l_pay_amt       NUMBER;
-        l_currency      VARCHAR2(15);
-        l_pay_status    VARCHAR2(50);
-        l_pay_type      VARCHAR2(50);
-        l_pay_method    VARCHAR2(50);
-        l_desc          VARCHAR2(240);
+        l_currency      VARCHAR2(30);
+        l_pay_status    VARCHAR2(100);
+        l_pay_type      VARCHAR2(100);
+        l_pay_method    VARCHAR2(100);
+        l_desc          VARCHAR2(4000);
         l_clear_date    DATE;
         l_clear_amt     NUMBER;
         l_void_date     DATE;
-        l_bu            VARCHAR2(240);
-        l_bank_acct     VARCHAR2(240);
-        l_acct_status   VARCHAR2(50);
-        l_reconciled    VARCHAR2(1);
+        l_bu            VARCHAR2(500);
+        l_bank_acct     VARCHAR2(500);
+        l_acct_status   VARCHAR2(100);
+        l_reconciled    VARCHAR2(10);
         l_rn            NUMBER;
 
         CURSOR c_payments IS
@@ -571,12 +576,12 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
                     p.PAYMENT_ID,
                     p.PAYMENT_NUMBER,
                     p.PAYMENT_DATE,
-                    NVL(p.PAYMENT_AMOUNT, 0) AS PAYMENT_AMOUNT,
+                    NVL(p.PAYMENT_AMOUNT, 0)                          AS PAYMENT_AMOUNT,
                     p.PAYMENT_CURRENCY,
                     p.PAYMENT_STATUS,
                     p.PAYMENT_TYPE,
                     p.PAYMENT_METHOD,
-                    SUBSTR(p.PAYMENT_DESCRIPTION, 1, 240) AS PAYMENT_DESCRIPTION,
+                    SUBSTR(p.PAYMENT_DESCRIPTION, 1, 4000)            AS PAYMENT_DESCRIPTION,
                     p.CLEARING_DATE,
                     p.CLEARING_AMOUNT,
                     p.VOID_DATE,
@@ -584,14 +589,13 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
                     p.DISBURSEMENT_BANK_ACCOUNT_NAME,
                     p.ACCOUNTING_STATUS,
                     p.RECONCILED_FLAG,
-                    ROW_NUMBER() OVER (ORDER BY p.CHECK_ID DESC) AS RN
+                    ROW_NUMBER() OVER (ORDER BY p.CHECK_ID DESC)      AS RN
                 FROM RR_AP_PAYMENTS_ALL p
                 WHERE p.SUPPLIER_NUMBER = p_supplier_number
                 AND (p_status = 'All' OR p.PAYMENT_STATUS = p_status)
             )
             WHERE RN > p_offset AND RN <= (p_offset + p_limit);
     BEGIN
-        -- Get total count
         BEGIN
             SELECT COUNT(*)
             INTO l_total_count
@@ -599,11 +603,9 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
             WHERE SUPPLIER_NUMBER = p_supplier_number
             AND (p_status = 'All' OR PAYMENT_STATUS = p_status);
         EXCEPTION
-            WHEN OTHERS THEN
-                l_total_count := 0;
+            WHEN OTHERS THEN l_total_count := 0;
         END;
 
-        -- Build payments array using explicit cursor
         OPEN c_payments;
         LOOP
             FETCH c_payments INTO l_check_id, l_pay_id, l_pay_num, l_pay_date, l_pay_amt,
@@ -613,51 +615,58 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
             EXIT WHEN c_payments%NOTFOUND;
 
             IF NOT l_first THEN
-                l_payments := l_payments || ',';
+                DBMS_LOB.APPEND(l_payments, TO_CLOB(','));
             END IF;
             l_first := FALSE;
 
-            -- Build JSON manually to avoid JSON_OBJECT issues
-            l_payments := l_payments || '{' ||
-                '"payment_id": ' || NVL(TO_CHAR(l_pay_id), 'null') || ',' ||
-                '"check_id": ' || NVL(TO_CHAR(l_check_id), 'null') || ',' ||
-                '"payment_number": ' || CASE WHEN l_pay_num IS NULL THEN 'null' ELSE '"' || REPLACE(l_pay_num, '"', '\"') || '"' END || ',' ||
-                '"payment_date": ' || CASE WHEN l_pay_date IS NULL THEN 'null' ELSE '"' || TO_CHAR(l_pay_date, 'YYYY-MM-DD') || '"' END || ',' ||
-                '"payment_amount": ' || NVL(TO_CHAR(l_pay_amt), '0') || ',' ||
-                '"currency": ' || CASE WHEN l_currency IS NULL THEN 'null' ELSE '"' || l_currency || '"' END || ',' ||
-                '"payment_status": ' || CASE WHEN l_pay_status IS NULL THEN 'null' ELSE '"' || l_pay_status || '"' END || ',' ||
-                '"payment_type": ' || CASE WHEN l_pay_type IS NULL THEN 'null' ELSE '"' || l_pay_type || '"' END || ',' ||
-                '"payment_method": ' || CASE WHEN l_pay_method IS NULL THEN 'null' ELSE '"' || l_pay_method || '"' END || ',' ||
-                '"description": ' || CASE WHEN l_desc IS NULL THEN 'null' ELSE '"' || REPLACE(REPLACE(l_desc, '\', '\\'), '"', '\"') || '"' END || ',' ||
-                '"clearing_date": ' || CASE WHEN l_clear_date IS NULL THEN 'null' ELSE '"' || TO_CHAR(l_clear_date, 'YYYY-MM-DD') || '"' END || ',' ||
-                '"clearing_amount": ' || CASE WHEN l_clear_amt IS NULL THEN 'null' ELSE TO_CHAR(l_clear_amt) END || ',' ||
-                '"void_date": ' || CASE WHEN l_void_date IS NULL THEN 'null' ELSE '"' || TO_CHAR(l_void_date, 'YYYY-MM-DD') || '"' END || ',' ||
-                '"business_unit": ' || CASE WHEN l_bu IS NULL THEN 'null' ELSE '"' || REPLACE(l_bu, '"', '\"') || '"' END || ',' ||
-                '"bank_account_name": ' || CASE WHEN l_bank_acct IS NULL THEN 'null' ELSE '"' || REPLACE(l_bank_acct, '"', '\"') || '"' END || ',' ||
-                '"accounting_status": ' || CASE WHEN l_acct_status IS NULL THEN 'null' ELSE '"' || l_acct_status || '"' END || ',' ||
-                '"reconciled_flag": ' || CASE WHEN l_reconciled IS NULL THEN 'null' ELSE '"' || l_reconciled || '"' END ||
-            '}';
+            DBMS_LOB.APPEND(l_payments, TO_CLOB(
+                '{"payment_id":'       || jn_ap(l_pay_id)    || ',' ||
+                '"check_id":'          || jn_ap(l_check_id)  || ',' ||
+                '"payment_number":'    || js(l_pay_num)       || ',' ||
+                '"payment_date":'      || CASE WHEN l_pay_date IS NULL THEN 'null'
+                                          ELSE '"' || TO_CHAR(l_pay_date, 'YYYY-MM-DD') || '"' END || ',' ||
+                '"payment_amount":'    || jn_ap(l_pay_amt)   || ',' ||
+                '"currency":'          || js(l_currency)      || ',' ||
+                '"payment_status":'    || js(l_pay_status)    || ',' ||
+                '"payment_type":'      || js(l_pay_type)      || ',' ||
+                '"payment_method":'    || js(l_pay_method)    || ',' ||
+                '"description":'       || js(SUBSTR(l_desc,1,500)) || ',' ||
+                '"clearing_date":'     || CASE WHEN l_clear_date IS NULL THEN 'null'
+                                          ELSE '"' || TO_CHAR(l_clear_date, 'YYYY-MM-DD') || '"' END || ',' ||
+                '"clearing_amount":'   || jn_ap(l_clear_amt) || ',' ||
+                '"void_date":'         || CASE WHEN l_void_date IS NULL THEN 'null'
+                                          ELSE '"' || TO_CHAR(l_void_date, 'YYYY-MM-DD') || '"' END || ',' ||
+                '"business_unit":'     || js(l_bu)            || ',' ||
+                '"bank_account_name":' || js(l_bank_acct)     || ',' ||
+                '"accounting_status":' || js(l_acct_status)   || ',' ||
+                '"reconciled_flag":'   || js(l_reconciled)    ||
+                '}'
+            ));
         END LOOP;
         CLOSE c_payments;
 
-        l_payments := l_payments || ']';
+        DBMS_LOB.APPEND(l_payments, TO_CLOB(']'));
 
-        -- Build response
-        l_result := '{"success": "true", "supplier_number": "' || p_supplier_number ||
-                    '", "total_count": ' || NVL(l_total_count, 0) ||
-                    ', "limit": ' || NVL(p_limit, 100) ||
-                    ', "offset": ' || NVL(p_offset, 0) ||
-                    ', "has_more": ' || CASE WHEN (NVL(p_offset, 0) + NVL(p_limit, 100)) < NVL(l_total_count, 0) THEN 'true' ELSE 'false' END ||
-                    ', "payments": ' || l_payments || '}';
+        DBMS_LOB.CREATETEMPORARY(l_result, TRUE);
+        DBMS_LOB.APPEND(l_result, TO_CLOB(
+            '{"success":"true","supplier_number":"' || p_supplier_number ||
+            '","total_count":'  || l_total_count ||
+            ',"limit":'         || NVL(p_limit, 100) ||
+            ',"offset":'        || NVL(p_offset, 0) ||
+            ',"has_more":'      || CASE WHEN (NVL(p_offset,0) + NVL(p_limit,100)) < l_total_count
+                                        THEN 'true' ELSE 'false' END ||
+            ',"payments":'
+        ));
+        DBMS_LOB.APPEND(l_result, l_payments);
+        DBMS_LOB.APPEND(l_result, TO_CLOB('}'));
 
         RETURN l_result;
 
     EXCEPTION
         WHEN OTHERS THEN
-            IF c_payments%ISOPEN THEN
-                CLOSE c_payments;
-            END IF;
-            RETURN '{"success": "false", "error": "' || REPLACE(SQLERRM, '"', '\"') || '", "error_line": "' || DBMS_UTILITY.FORMAT_ERROR_BACKTRACE || '"}';
+            IF c_payments%ISOPEN THEN CLOSE c_payments; END IF;
+            RETURN '{"success":"false","error":' || js(SQLERRM) ||
+                   ',"error_line":"' || REPLACE(DBMS_UTILITY.FORMAT_ERROR_BACKTRACE, '"', '\"') || '"}';
     END get_supplier_payments;
 
     -- ========================================================================
@@ -888,44 +897,45 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
             l_pct_over_120 := ROUND(l_days_over_120 / l_total_outstanding * 100, 2);
         END IF;
 
-        -- Build complete dashboard response using string concatenation
-        l_result := '{' ||
-            '"success": "true",' ||
-            '"supplier": {' ||
-                '"supplier_id": ' || l_supplier_id || ',' ||
-                '"supplier_number": "' || p_supplier_number || '",' ||
-                '"supplier_name": "' || REPLACE(l_supplier_name, '"', '\"') || '",' ||
-                '"supplier_type": ' || CASE WHEN l_supplier_type IS NULL THEN 'null' ELSE '"' || l_supplier_type || '"' END || ',' ||
-                '"status": "' || l_supplier_status || '",' ||
-                '"tax_registration_number": ' || CASE WHEN l_tax_reg_number IS NULL THEN 'null' ELSE '"' || l_tax_reg_number || '"' END || ',' ||
-                '"creation_date": ' || CASE WHEN l_creation_date IS NULL THEN 'null' ELSE '"' || l_creation_date || '"' END || ',' ||
-                '"address": ' || NVL(l_address, 'null') ||
+        -- Build dashboard JSON — jn_ap() prevents leading-dot decimals
+        DBMS_LOB.CREATETEMPORARY(l_result, TRUE);
+        DBMS_LOB.APPEND(l_result, TO_CLOB(
+            '{"success":"true",' ||
+            '"supplier":{' ||
+                '"supplier_id":'              || jn_ap(l_supplier_id)       || ',' ||
+                '"supplier_number":'          || js(p_supplier_number)      || ',' ||
+                '"supplier_name":'            || js(l_supplier_name)        || ',' ||
+                '"supplier_type":'            || js(l_supplier_type)        || ',' ||
+                '"status":'                   || js(l_supplier_status)      || ',' ||
+                '"tax_registration_number":'  || js(l_tax_reg_number)       || ',' ||
+                '"creation_date":'            || js(l_creation_date)        || ',' ||
+                '"address":'                  || NVL(l_address, 'null')     ||
             '},' ||
-            '"balance_summary": {' ||
-                '"total_invoices": ' || l_invoice_count || ',' ||
-                '"total_invoice_amount": ' || l_total_invoices || ',' ||
-                '"total_payments": ' || l_payment_count || ',' ||
-                '"total_payment_amount": ' || l_total_paid || ',' ||
-                '"balance": ' || l_balance || ',' ||
-                '"currency": "AED"' ||
+            '"balance_summary":{' ||
+                '"total_invoices":'           || l_invoice_count            || ',' ||
+                '"total_invoice_amount":'     || jn_ap(l_total_invoices)    || ',' ||
+                '"total_payments":'           || l_payment_count            || ',' ||
+                '"total_payment_amount":'     || jn_ap(l_total_paid)        || ',' ||
+                '"balance":'                  || jn_ap(l_balance)           || ',' ||
+                '"currency":"AED"' ||
             '},' ||
-            '"aging_report": [' ||
-                '{"bucket": "Current", "amount": ' || l_current || ', "invoice_count": ' || l_current_cnt || ', "percentage": ' || l_pct_current || '},' ||
-                '{"bucket": "1-30 Days", "amount": ' || l_days_1_30 || ', "invoice_count": ' || l_days_1_30_cnt || ', "percentage": ' || l_pct_1_30 || '},' ||
-                '{"bucket": "31-60 Days", "amount": ' || l_days_31_60 || ', "invoice_count": ' || l_days_31_60_cnt || ', "percentage": ' || l_pct_31_60 || '},' ||
-                '{"bucket": "61-90 Days", "amount": ' || l_days_61_90 || ', "invoice_count": ' || l_days_61_90_cnt || ', "percentage": ' || l_pct_61_90 || '},' ||
-                '{"bucket": "91-120 Days", "amount": ' || l_days_91_120 || ', "invoice_count": ' || l_days_91_120_cnt || ', "percentage": ' || l_pct_91_120 || '},' ||
-                '{"bucket": "120+ Days", "amount": ' || l_days_over_120 || ', "invoice_count": ' || l_days_over_120_cnt || ', "percentage": ' || l_pct_over_120 || '}' ||
-            ']' ||
-        '}';
+            '"aging_report":[' ||
+                '{"bucket":"Current","amount":'     || jn_ap(l_current)      || ',"invoice_count":' || l_current_cnt      || ',"percentage":' || jn_ap(l_pct_current)  || '},' ||
+                '{"bucket":"1-30 Days","amount":'   || jn_ap(l_days_1_30)   || ',"invoice_count":' || l_days_1_30_cnt    || ',"percentage":' || jn_ap(l_pct_1_30)     || '},' ||
+                '{"bucket":"31-60 Days","amount":'  || jn_ap(l_days_31_60)  || ',"invoice_count":' || l_days_31_60_cnt   || ',"percentage":' || jn_ap(l_pct_31_60)    || '},' ||
+                '{"bucket":"61-90 Days","amount":'  || jn_ap(l_days_61_90)  || ',"invoice_count":' || l_days_61_90_cnt   || ',"percentage":' || jn_ap(l_pct_61_90)    || '},' ||
+                '{"bucket":"91-120 Days","amount":' || jn_ap(l_days_91_120) || ',"invoice_count":' || l_days_91_120_cnt  || ',"percentage":' || jn_ap(l_pct_91_120)   || '},' ||
+                '{"bucket":"120+ Days","amount":'   || jn_ap(l_days_over_120) || ',"invoice_count":' || l_days_over_120_cnt || ',"percentage":' || jn_ap(l_pct_over_120) || '}' ||
+            ']}'
+        ));
 
         RETURN l_result;
 
     EXCEPTION
         WHEN NO_DATA_FOUND THEN
-            RETURN '{"success": "false", "error": "Supplier not found", "supplier_number": "' || p_supplier_number || '"}';
+            RETURN '{"success":"false","error":"Supplier not found","supplier_number":"' || p_supplier_number || '"}';
         WHEN OTHERS THEN
-            RETURN '{"success": "false", "error": "' || REPLACE(SQLERRM, '"', '\"') || '"}';
+            RETURN '{"success":"false","error":' || js(SQLERRM) || '}';
     END get_dashboard;
 
     -- ========================================================================
