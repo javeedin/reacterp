@@ -5,7 +5,6 @@ import {
   Form,
   Select,
   Input,
-  AutoComplete,
   Button,
   Space,
   Typography,
@@ -463,49 +462,42 @@ const ManageSuppliers: React.FC = () => {
   const [apiModalVisible, setApiModalVisible] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
 
-  // LOV (List of Values) state for supplier search autocomplete
-  type LovOption = { value: string; label: React.ReactNode; record: { supplierNumber: string; supplier: string } };
-  const [supplierNumOptions, setSupplierNumOptions] = useState<LovOption[]>([]);
-  const [supplierNameOptions, setSupplierNameOptions] = useState<LovOption[]>([]);
+  // Supplier LOV modal state
+  const [lovVisible, setLovVisible] = useState(false);
+  const [lovSearch, setLovSearch] = useState('');
+  const [lovResults, setLovResults] = useState<{ supplierNumber: string; supplier: string }[]>([]);
+  const [lovLoading, setLovLoading] = useState(false);
   const lovDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const fetchLovSuggestions = (field: 'number' | 'name', value: string) => {
+  const openLov = (initialValue?: string) => {
+    setLovSearch(initialValue || '');
+    setLovResults([]);
+    setLovVisible(true);
+    if (initialValue) fetchLovResults(initialValue);
+  };
+
+  const fetchLovResults = (q: string) => {
     if (lovDebounceRef.current) clearTimeout(lovDebounceRef.current);
-    if (!value || value.length < 1) {
-      field === 'number' ? setSupplierNumOptions([]) : setSupplierNameOptions([]);
-      return;
-    }
     lovDebounceRef.current = setTimeout(async () => {
+      setLovLoading(true);
       try {
-        const param = field === 'number'
-          ? `supplier_number=${encodeURIComponent(value)}`
-          : `supplier=${encodeURIComponent(value)}`;
-        const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers?${param}`);
+        const param = q ? `supplier=${encodeURIComponent(q)}` : '';
+        const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers${param ? '?' + param : ''}`);
         if (!res.ok) return;
         const data = await res.json();
         const items: any[] = Array.isArray(data) ? data : (data.items || []);
-        const opts: LovOption[] = items.slice(0, 15).map((item: any) => ({
-          value: field === 'number' ? (item.supplier_number || '') : (item.supplier || ''),
-          label: (
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-              <span style={{ fontWeight: 500 }}>{item.supplier_number || ''}</span>
-              <span style={{ color: '#6B6B6B', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.supplier || ''}</span>
-            </div>
-          ),
-          record: { supplierNumber: item.supplier_number || '', supplier: item.supplier || '' },
-        }));
-        field === 'number' ? setSupplierNumOptions(opts) : setSupplierNameOptions(opts);
+        setLovResults(items.slice(0, 50).map((item: any) => ({
+          supplierNumber: item.supplier_number || '',
+          supplier: item.supplier || '',
+        })));
       } catch { /* ignore */ }
-    }, 250);
+      finally { setLovLoading(false); }
+    }, 300);
   };
 
-  const onLovSelect = (_value: string, option: LovOption) => {
-    form.setFieldsValue({
-      supplierNumber: option.record.supplierNumber,
-      supplier: option.record.supplier,
-    });
-    setSupplierNumOptions([]);
-    setSupplierNameOptions([]);
+  const onLovPick = (row: { supplierNumber: string; supplier: string }) => {
+    form.setFieldsValue({ supplierNumber: row.supplierNumber, supplier: row.supplier });
+    setLovVisible(false);
   };
 
   // API Configuration for this page
@@ -1062,29 +1054,31 @@ const ManageSuppliers: React.FC = () => {
               <Row gutter={16}>
                 <Col span={8}>
                   <Form.Item label="Supplier Number" name="supplierNumber" style={{ marginBottom: 8 }}>
-                    <AutoComplete
-                      options={supplierNumOptions}
-                      onSearch={v => fetchLovSuggestions('number', v)}
-                      onSelect={(v, opt) => onLovSelect(v, opt as LovOption)}
-                      onClear={() => setSupplierNumOptions([])}
-                      allowClear
+                    <Input
                       size="small"
                       placeholder="e.g. A022"
-                      dropdownMatchSelectWidth={400}
+                      suffix={
+                        <SearchOutlined
+                          style={{ color: REDWOOD.info, cursor: 'pointer' }}
+                          onClick={() => openLov(form.getFieldValue('supplierNumber'))}
+                        />
+                      }
+                      onPressEnter={() => openLov(form.getFieldValue('supplierNumber'))}
                     />
                   </Form.Item>
                 </Col>
                 <Col span={8}>
                   <Form.Item label="Supplier" name="supplier" style={{ marginBottom: 8 }}>
-                    <AutoComplete
-                      options={supplierNameOptions}
-                      onSearch={v => fetchLovSuggestions('name', v)}
-                      onSelect={(v, opt) => onLovSelect(v, opt as LovOption)}
-                      onClear={() => setSupplierNameOptions([])}
-                      allowClear
+                    <Input
                       size="small"
-                      placeholder="Type to search supplier name..."
-                      dropdownMatchSelectWidth={400}
+                      placeholder="Type name or click 🔍"
+                      suffix={
+                        <SearchOutlined
+                          style={{ color: REDWOOD.info, cursor: 'pointer' }}
+                          onClick={() => openLov(form.getFieldValue('supplier'))}
+                        />
+                      }
+                      onPressEnter={() => openLov(form.getFieldValue('supplier'))}
                     />
                   </Form.Item>
                 </Col>
@@ -1929,6 +1923,45 @@ const ManageSuppliers: React.FC = () => {
             borderBottom: `1px solid ${REDWOOD.neutral200}`,
           }}
         />
+
+        {/* Supplier LOV Modal */}
+        <Modal
+          title={<Space><SearchOutlined style={{ color: REDWOOD.info }} /><span>Supplier List of Values</span></Space>}
+          open={lovVisible}
+          onCancel={() => setLovVisible(false)}
+          footer={null}
+          width={680}
+          destroyOnClose
+        >
+          <Input
+            placeholder="Search by supplier number or name..."
+            prefix={<SearchOutlined />}
+            value={lovSearch}
+            onChange={e => { setLovSearch(e.target.value); fetchLovResults(e.target.value); }}
+            allowClear
+            autoFocus
+            style={{ marginBottom: 12 }}
+          />
+          <Table
+            size="small"
+            loading={lovLoading}
+            dataSource={lovResults.map((r, i) => ({ ...r, key: i }))}
+            pagination={{ pageSize: 10, showTotal: t => `${t} suppliers`, size: 'small' }}
+            locale={{ emptyText: 'Type to search suppliers' }}
+            onRow={row => ({
+              onClick: () => onLovPick(row),
+              style: { cursor: 'pointer' },
+            })}
+            columns={[
+              { title: 'Supplier Number', dataIndex: 'supplierNumber', key: 'supplierNumber', width: 160,
+                render: (v: string) => <Text style={{ color: REDWOOD.info, fontWeight: 500 }}>{v}</Text> },
+              { title: 'Supplier Name', dataIndex: 'supplier', key: 'supplier' },
+            ]}
+          />
+          <div style={{ marginTop: 8 }}>
+            <Text type="secondary" style={{ fontSize: 11 }}>Click a row to select</Text>
+          </div>
+        </Modal>
 
         {/* API Info Modal */}
         <Modal
