@@ -470,10 +470,11 @@ const ManageSuppliers: React.FC = () => {
   const lovDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const openLov = (initialValue?: string) => {
-    setLovSearch(initialValue || '');
+    const val = initialValue || '';
+    setLovSearch(val);
     setLovResults([]);
     setLovVisible(true);
-    if (initialValue) fetchLovResults(initialValue);
+    fetchLovResults(val);   // always load — empty string returns all suppliers
   };
 
   const fetchLovResults = (q: string) => {
@@ -481,12 +482,15 @@ const ManageSuppliers: React.FC = () => {
     lovDebounceRef.current = setTimeout(async () => {
       setLovLoading(true);
       try {
-        const param = q ? `supplier=${encodeURIComponent(q)}` : '';
-        const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers${param ? '?' + param : ''}`);
+        // Use combined ?q= param which searches both supplier_number and supplier name (LIKE)
+        const url = q
+          ? `${APEX_DB_CONFIG.baseUrl}/suppliers?q=${encodeURIComponent(q)}`
+          : `${APEX_DB_CONFIG.baseUrl}/suppliers`;
+        const res = await fetch(url);
         if (!res.ok) return;
         const data = await res.json();
         const items: any[] = Array.isArray(data) ? data : (data.items || []);
-        setLovResults(items.slice(0, 50).map((item: any) => ({
+        setLovResults(items.slice(0, 100).map((item: any) => ({
           supplierNumber: item.supplier_number || '',
           supplier: item.supplier || '',
         })));

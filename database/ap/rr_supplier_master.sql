@@ -259,8 +259,12 @@ SELECT DISTINCT
     sm.taxpayer_id,
     TO_CHAR(sm.creation_date, 'YYYY-MM-DD') AS creation_date
 FROM RR_SUPPLIER_MASTER sm
-WHERE (:supplier_number  IS NULL OR sm.supplier_number = :supplier_number)
-  AND (:supplier         IS NULL OR UPPER(sm.supplier) LIKE '%' || UPPER(:supplier) || '%')
+WHERE (:supplier_number  IS NULL OR UPPER(sm.supplier_number) LIKE '%' || UPPER(:supplier_number) || '%')
+  AND (:supplier         IS NULL OR UPPER(sm.supplier)        LIKE '%' || UPPER(:supplier)        || '%')
+  AND (:q               IS NULL OR (
+           UPPER(sm.supplier_number) LIKE '%' || UPPER(:q) || '%'
+        OR UPPER(sm.supplier)        LIKE '%' || UPPER(:q) || '%'
+      ))
   AND (:P_BUSINESS_UNIT  IS NULL OR EXISTS (
         SELECT 1 FROM RR_SUPPLIER_SITES ss
         WHERE ss.supplier_id = sm.supplier_id
