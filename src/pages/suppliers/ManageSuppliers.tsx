@@ -2071,7 +2071,16 @@ const ManageSuppliers: React.FC = () => {
           <Table
             size="small"
             loading={lovLoading}
-            dataSource={lovResults.map((r, i) => ({ ...r, key: i }))}
+            dataSource={(() => {
+              const q = lovSearch.trim().toLowerCase();
+              const rows = q
+                ? lovResults.filter(r =>
+                    (r.supplierNumber || '').toLowerCase().includes(q) ||
+                    (r.supplier       || '').toLowerCase().includes(q)
+                  )
+                : lovResults;
+              return rows.map((r, i) => ({ ...r, key: i }));
+            })()}
             pagination={{ pageSize: 10, showTotal: t => `${t} suppliers`, size: 'small' }}
             locale={{ emptyText: 'Type to search suppliers' }}
             onRow={row => ({
