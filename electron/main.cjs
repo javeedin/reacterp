@@ -386,6 +386,30 @@ function createWindow() {
     mainWindow.webContents.openDevTools();
   }
 
+  // Enable right-click → Inspect Element in all builds
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    const { Menu, MenuItem } = require('electron');
+    const menu = new Menu();
+    menu.append(new MenuItem({
+      label: 'Inspect Element',
+      click: () => {
+        mainWindow.webContents.inspectElement(params.x, params.y);
+        if (!mainWindow.webContents.isDevToolsOpened()) {
+          mainWindow.webContents.openDevTools();
+        }
+      },
+    }));
+    if (params.selectionText) {
+      menu.append(new MenuItem({ label: 'Copy', role: 'copy' }));
+    }
+    if (params.isEditable) {
+      menu.append(new MenuItem({ label: 'Cut',   role: 'cut'   }));
+      menu.append(new MenuItem({ label: 'Copy',  role: 'copy'  }));
+      menu.append(new MenuItem({ label: 'Paste', role: 'paste' }));
+    }
+    menu.popup({ window: mainWindow });
+  });
+
   // Log any load errors
   mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
     console.error('Failed to load:', validatedURL);
