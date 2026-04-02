@@ -165,6 +165,7 @@ interface InvoiceDetailProps {
     approvalStatus?: string;
     holdPaidStatus?: string;
     notes?: string;
+    syncStatus?: string;
   };
   onClose: () => void;
   onSave?: (data: any) => void;
@@ -182,6 +183,7 @@ const formatDate = (dateStr: string | null): string => {
 };
 
 const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
+  const isSynced = invoice.syncStatus === 'SYNCED';
   const [loading, setLoading] = useState(false);
   const [lines, setLines] = useState<InvoiceLine[]>([]);
   const [taxLines, setTaxLines] = useState<TaxLine[]>([]);
@@ -551,9 +553,9 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
     { key: 'requestInfo', label: 'Request Information' },
   ];
 
-  // Action menu items - matching Oracle Fusion
+  // Action menu items - Edit and mutating actions hidden for synced invoices
   const actionsMenuItems: MenuProps['items'] = [
-    { key: 'edit', label: 'Edit', icon: <EditOutlined /> },
+    ...(!isSynced ? [{ key: 'edit', label: 'Edit', icon: <EditOutlined /> }] : []),
     { key: 'validate', label: 'Validate', icon: <CheckCircleOutlined /> },
     {
       key: 'approval',
@@ -561,9 +563,11 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
       icon: <RightOutlined />,
       children: approvalSubMenu,
     },
-    { key: 'cancelInvoice', label: 'Cancel Invoice', icon: <StopOutlined /> },
-    { key: 'payInFull', label: 'Pay in Full', icon: <DollarOutlined /> },
-    { type: 'divider' },
+    ...(!isSynced ? [
+      { key: 'cancelInvoice', label: 'Cancel Invoice', icon: <StopOutlined /> },
+      { key: 'payInFull', label: 'Pay in Full', icon: <DollarOutlined /> },
+    ] : []),
+    { type: 'divider' as const },
     { key: 'installments', label: 'Installments', icon: <ScheduleOutlined /> },
   ];
 
@@ -898,7 +902,12 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
         justifyContent: 'space-between',
         alignItems: 'center',
       }}>
-        <Title level={5} style={{ margin: 0 }}>Invoice Details</Title>
+        <Space>
+          <Title level={5} style={{ margin: 0 }}>Invoice Details</Title>
+          {isSynced && (
+            <Tag color="blue" style={{ fontSize: 12 }}>Synced from Fusion</Tag>
+          )}
+        </Space>
         <Space>
           {getValidationTag(invoice.validationStatus)}
 
@@ -914,22 +923,24 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
             </Button>
           </Dropdown>
 
-          <Dropdown
-            menu={{ items: accountingActionsMenuItems, onClick: handleActionsMenuClick }}
-            trigger={['click']}
-          >
-            <Button
-              type="default"
-              loading={slaActionLoading}
-              style={{ borderColor: REDWOOD.info, color: REDWOOD.info }}
+          {!isSynced && (
+            <Dropdown
+              menu={{ items: accountingActionsMenuItems, onClick: handleActionsMenuClick }}
+              trigger={['click']}
             >
-              Accounting Actions <DownOutlined />
-            </Button>
-          </Dropdown>
+              <Button
+                type="default"
+                loading={slaActionLoading}
+                style={{ borderColor: REDWOOD.info, color: REDWOOD.info }}
+              >
+                Accounting Actions <DownOutlined />
+              </Button>
+            </Dropdown>
+          )}
 
-          <Button icon={<SaveOutlined />}>Save</Button>
-          <Button>Save and Close</Button>
-          <Button onClick={onClose}>Cancel</Button>
+          {!isSynced && <Button icon={<SaveOutlined />}>Save</Button>}
+          {!isSynced && <Button>Save and Close</Button>}
+          <Button onClick={onClose}>Close</Button>
         </Space>
       </div>
 

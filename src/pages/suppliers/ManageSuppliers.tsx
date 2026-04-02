@@ -2155,6 +2155,7 @@ const ManageSuppliers: React.FC = () => {
                   approvalStatus: '',
                   holdPaidStatus: editInvoice.amountRemaining <= 0 ? 'Paid' : 'Not paid',
                   notes: editInvoice.description,
+                  syncStatus: 'SYNCED',
                 }}
                 onClose={() => { setEditInvoiceVisible(false); setEditInvoice(null); }}
               />

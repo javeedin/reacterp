@@ -122,6 +122,7 @@ interface InvoiceRecord {
   invoiceGroup: string;
   termsDate: string;
   goodsReceivedDate: string;
+  syncStatus: string;
 }
 
 // Tab item interface
@@ -261,6 +262,7 @@ const mapApiToInvoiceRecord = (item: any, index: number): InvoiceRecord => ({
   invoiceGroup: item.invoice_group || '',
   termsDate: item.terms_date || '',
   goodsReceivedDate: item.goods_received_date || '',
+  syncStatus: item.sync_status || '',
 });
 
 const ManageInvoices: React.FC = () => {
@@ -755,18 +757,34 @@ const ManageInvoices: React.FC = () => {
     setTimeout(() => setCopiedUrl(null), 2000);
   };
 
-  // Open invoice in new tab — redirects to CreateInvoice for edit/view
+  // Open invoice in new tab
+  // Synced invoices (from Oracle Fusion) open as read-only InvoiceDetail.
+  // Locally-created invoices open in CreateInvoice (edit mode).
   const openInvoiceTab = (record: InvoiceRecord) => {
     const tabKey = `invoice-${record.invoiceId}`;
 
-    // Check if tab already exists
     const existingTab = openTabs.find((tab) => tab.key === tabKey);
     if (existingTab) {
       setActiveTab(tabKey);
       return;
     }
 
-    // Build initial data for CreateInvoice (edit mode)
+    const isSynced = record.syncStatus === 'SYNCED';
+
+    if (isSynced) {
+      // Read-only view via InvoiceDetail
+      const newTab: InvoiceTab = {
+        key: tabKey,
+        label: record.invoiceNumber,
+        invoice: record,
+        tabType: 'detail',
+      };
+      setOpenTabs([...openTabs, newTab]);
+      setActiveTab(tabKey);
+      return;
+    }
+
+    // Locally created — editable via CreateInvoice
     const editData: InvoiceInitialData = {
       invoiceId: record.invoiceId,
       supplier: record.supplierOrParty,
@@ -791,7 +809,6 @@ const ManageInvoices: React.FC = () => {
       goodsReceivedDate: record.goodsReceivedDate,
     };
 
-    // Add new tab — use 'create' tabType so it renders CreateInvoice
     const newTab: InvoiceTab = {
       key: tabKey,
       label: record.invoiceNumber,
