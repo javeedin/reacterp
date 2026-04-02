@@ -23,6 +23,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sendOtpEmail: (to, otp) =>
     ipcRenderer.invoke('send-otp-email', { to, otp }),
 
+  // Open a file (e.g. Excel) with the OS default application
+  openExcel: (buffer, filename) =>
+    ipcRenderer.invoke('open-excel', { buffer, filename }),
+
   // Check if running in Electron
   isElectron: true,
 

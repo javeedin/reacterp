@@ -688,6 +688,22 @@ ipcMain.on('show-notification', (event, title, body) => {
   showNotification(title, body);
 });
 
+// ── Open Excel file ─────────────────────────────────────────────────────────
+const { shell } = require('electron');
+const os = require('os');
+
+ipcMain.handle('open-excel', async (_event, { buffer, filename }) => {
+  try {
+    const tmpPath = path.join(os.tmpdir(), filename);
+    fs.writeFileSync(tmpPath, Buffer.from(buffer));
+    await shell.openPath(tmpPath);
+    return { success: true };
+  } catch (err) {
+    console.error('[open-excel] Error:', err.message);
+    return { success: false, error: err.message };
+  }
+});
+
 // ── Auto-update ────────────────────────────────────────────────────────────
 function setupAutoUpdater() {
   // Only run in production with autoUpdater available

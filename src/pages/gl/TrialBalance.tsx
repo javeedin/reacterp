@@ -620,7 +620,7 @@ const TrialBalance: React.FC = () => {
   );
 
   // Export current tab data to Excel
-  const exportTabToExcel = (tab: TabData, pivotData: PivotRow[]) => {
+  const exportTabToExcel = async (tab: TabData, pivotData: PivotRow[]) => {
     if (!pivotData.length) { message.warning('No data to export'); return; }
     const exportRows = pivotData.map(r => ({
       'Account':         r.account,
@@ -637,8 +637,15 @@ const TrialBalance: React.FC = () => {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, `TB-${tab.periodName}`);
     const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `TrialBalance_${tab.periodName}.xlsx`);
-    message.success('Exported to Excel');
+    const filename = `TrialBalance_${tab.periodName}.xlsx`;
+    const eAPI = (window as any).electronAPI;
+    if (eAPI?.openExcel) {
+      await eAPI.openExcel(buf, filename);
+      message.success('Excel opened');
+    } else {
+      saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), filename);
+      message.success('Exported to Excel');
+    }
   };
 
   // Render trial balance tab content
