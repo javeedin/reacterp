@@ -55,7 +55,7 @@
   },
   "build": {
     "appId": "com.buimerc.reacterp",
-    "productName": "ReactERP v1.0",
+    "productName": "ReactERP v1.1",
     "directories": {
       "output": "dist-electron"
     },
