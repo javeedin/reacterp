@@ -909,6 +909,9 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
         p_status_code OUT NUMBER
     ) IS
         l_success VARCHAR2(10);
+        l_len     INTEGER;
+        l_offset  INTEGER := 1;
+        l_chunk   CONSTANT INTEGER := 32000;
     BEGIN
         -- Determine status code based on response
         BEGIN
@@ -916,7 +919,6 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
             IF l_success = 'true' THEN
                 p_status_code := 200;
             ELSE
-                -- Check if it's a not found error
                 IF INSTR(p_json, 'not found') > 0 THEN
                     p_status_code := 404;
                 ELSE
@@ -928,8 +930,18 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
                 p_status_code := 500;
         END;
 
-        -- Output the JSON
-        HTP.p(p_json);
+        -- Output the JSON in 32 KB chunks — HTP.p accepts VARCHAR2 only (max 32767)
+        -- and an implicit CLOB→VARCHAR2 cast raises ORA-06502 for large responses.
+        l_len := NVL(DBMS_LOB.GETLENGTH(p_json), 0);
+        IF l_len = 0 THEN
+            HTP.p('');
+            RETURN;
+        END IF;
+
+        WHILE l_offset <= l_len LOOP
+            HTP.p(DBMS_LOB.SUBSTR(p_json, l_chunk, l_offset));
+            l_offset := l_offset + l_chunk;
+        END LOOP;
     END output_response;
 
 END PKG_SUPPLIER_BALANCE;
