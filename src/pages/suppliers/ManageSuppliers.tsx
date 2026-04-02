@@ -52,8 +52,12 @@ import {
   CreditCardOutlined,
   ExclamationCircleOutlined,
   CalendarOutlined,
+  FileExcelOutlined,
+  EditOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
+import * as XLSX from 'xlsx';
+import { saveAs } from 'file-saver';
 import FloatingMenu from '../../components/FloatingMenu';
 import Autopilot from '../../components/Autopilot';
 import type { ColumnsType } from 'antd/es/table';
@@ -338,10 +342,17 @@ const ManageSuppliers: React.FC = () => {
   const [balanceLoadingMap, setBalanceLoadingMap] = useState<Record<string, boolean>>({});
   const [invoicesLoadingMap, setInvoicesLoadingMap] = useState<Record<string, boolean>>({});
   const [paymentsLoadingMap, setPaymentsLoadingMap] = useState<Record<string, boolean>>({});
+  // Invoice grid controls — keyed by tabKey so each supplier tab is independent
+  const [invoiceSearchMap, setInvoiceSearchMap] = useState<Record<string, string>>({});
+  const [invoicePageMap, setInvoicePageMap] = useState<Record<string, number>>({});
+  const [invoicePageSizeMap, setInvoicePageSizeMap] = useState<Record<string, number>>({});
 
   // Payment drilldown modal
   const [drilldownVisible, setDrilldownVisible] = useState(false);
   const [drilldownPayment, setDrilldownPayment] = useState<PaymentRecord | null>(null);
+  const [editInvoiceVisible, setEditInvoiceVisible] = useState(false);
+  const [editInvoice, setEditInvoice] = useState<InvoiceRecord | null>(null);
+  const [editInvoiceSaving, setEditInvoiceSaving] = useState(false);
   const [relatedInvoices, setRelatedInvoices] = useState<RelatedInvoice[]>([]);
   const [drilldownLoading, setDrilldownLoading] = useState(false);
 
@@ -1431,12 +1442,85 @@ const ManageSuppliers: React.FC = () => {
     }
   };
 
+  // Export invoices for a tab to Excel
+  const exportInvoicesToExcel = async (tabKey: string, supplierNumber: string, rows: InvoiceRecord[]) => {
+    if (!rows.length) { message.warning('No data to export'); return; }
+    const exportRows = rows.map(r => ({
+      'Invoice Number':   r.invoiceNumber,
+      'Invoice Date':     r.invoiceDate,
+      'Invoice Amount':   r.invoiceAmount,
+      'Amount Paid':      r.amountPaid,
+      'Balance Due':      r.amountRemaining,
+      'Currency':         r.currency,
+      'Status':           r.invoiceStatus,
+      'Description':      r.description,
+    }));
+    const ws = XLSX.utils.json_to_sheet(exportRows);
+    ws['!cols'] = [{ wch: 30 }, { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 10 }, { wch: 12 }, { wch: 60 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, `Invoices`);
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const filename = `Invoices_${supplierNumber}.xlsx`;
+    const eAPI = (window as any).electronAPI;
+    if (eAPI?.openExcel) {
+      await eAPI.openExcel(buf, filename);
+      message.success('Excel opened');
+    } else {
+      saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), filename);
+      message.success('Exported to Excel');
+    }
+  };
+
+  // Save edited invoice
+  const saveEditInvoice = async () => {
+    if (!editInvoice) return;
+    setEditInvoiceSaving(true);
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/invoices/${editInvoice.invoiceId}`;
+      const response = await fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          invoice_date: editInvoice.invoiceDate,
+          invoice_amount: editInvoice.invoiceAmount,
+          description: editInvoice.description,
+          invoice_status: editInvoice.invoiceStatus,
+          currency: editInvoice.currency,
+        }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      message.success('Invoice updated successfully');
+      setEditInvoiceVisible(false);
+      setEditInvoice(null);
+      // Refresh invoices for the active balance tab
+      const activeBalanceTab = openTabs.find(t => t.tabType === 'balance' && t.key === activeTab);
+      if (activeBalanceTab) {
+        fetchBalanceInvoices(activeBalanceTab.supplier.supplierNumber, activeBalanceTab.key);
+      }
+    } catch (error) {
+      message.error(`Failed to save invoice: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setEditInvoiceSaving(false);
+    }
+  };
+
   // Render supplier balance tab content
   const renderSupplierBalanceTab = (tab: SupplierTab) => {
     const tabKey = tab.key;
     const balanceData = balanceDataMap[tabKey];
     const invoices = invoicesMap[tabKey] || [];
     const payments = paymentsMap[tabKey] || [];
+    const invSearch = invoiceSearchMap[tabKey] || '';
+    const invPage = invoicePageMap[tabKey] || 1;
+    const invPageSize = invoicePageSizeMap[tabKey] || 20;
+    const filteredInvoices = invSearch
+      ? invoices.filter(r =>
+          (r.invoiceNumber || '').toLowerCase().includes(invSearch.toLowerCase()) ||
+          (r.description  || '').toLowerCase().includes(invSearch.toLowerCase()) ||
+          (r.invoiceStatus|| '').toLowerCase().includes(invSearch.toLowerCase()) ||
+          String(r.invoiceAmount).includes(invSearch)
+        )
+      : invoices;
     const isLoading = balanceLoadingMap[tabKey];
     const invoicesLoading = invoicesLoadingMap[tabKey];
     const paymentsLoading = paymentsLoadingMap[tabKey];
@@ -1480,6 +1564,26 @@ const ManageSuppliers: React.FC = () => {
         render: (status: string) => <Tag>{status || '-'}</Tag>
       },
       { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
+      {
+        title: '',
+        key: 'actions',
+        width: 60,
+        fixed: 'right' as const,
+        render: (_: any, record: InvoiceRecord) => (
+          <Tooltip title="Edit Invoice">
+            <Button
+              type="text"
+              size="small"
+              icon={<EditOutlined />}
+              style={{ color: REDWOOD.info }}
+              onClick={() => {
+                setEditInvoice({ ...record });
+                setEditInvoiceVisible(true);
+              }}
+            />
+          </Tooltip>
+        ),
+      },
     ];
 
     // Payment columns
@@ -1631,10 +1735,53 @@ const ManageSuppliers: React.FC = () => {
                 label: <Space><FileTextOutlined />Invoices ({invoices.length})</Space>,
                 children: (
                   <div>
-                    <div style={{ marginBottom: 16 }}>
-                      <Button icon={<ReloadOutlined />} onClick={() => fetchBalanceInvoices(tab.supplier.supplierNumber, tabKey)} loading={invoicesLoading}>Refresh</Button>
-                    </div>
-                    <Table columns={invoiceColumns} dataSource={invoices} loading={invoicesLoading} scroll={{ x: 900 }} pagination={{ pageSize: 10, showTotal: (total) => `${total} invoices` }} size="small" />
+                    <Row gutter={8} style={{ marginBottom: 12 }} align="middle">
+                      <Col flex="auto">
+                        <Input
+                          placeholder="Search invoice number, description, status, amount..."
+                          prefix={<SearchOutlined />}
+                          value={invSearch}
+                          onChange={e => {
+                            setInvoiceSearchMap(prev => ({ ...prev, [tabKey]: e.target.value }));
+                            setInvoicePageMap(prev => ({ ...prev, [tabKey]: 1 }));
+                          }}
+                          allowClear
+                          size="small"
+                        />
+                      </Col>
+                      <Col>
+                        <Space>
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            {filteredInvoices.length}/{invoices.length} rows
+                          </Text>
+                          <Button
+                            icon={<FileExcelOutlined />}
+                            size="small"
+                            style={{ color: '#1D7B4D', borderColor: '#1D7B4D' }}
+                            onClick={() => exportInvoicesToExcel(tabKey, tab.supplier.supplierNumber, filteredInvoices)}
+                          >Excel</Button>
+                          <Button icon={<ReloadOutlined />} size="small" onClick={() => fetchBalanceInvoices(tab.supplier.supplierNumber, tabKey)} loading={invoicesLoading}>Refresh</Button>
+                        </Space>
+                      </Col>
+                    </Row>
+                    <Table
+                      columns={invoiceColumns}
+                      dataSource={filteredInvoices}
+                      loading={invoicesLoading}
+                      scroll={{ x: 900 }}
+                      size="small"
+                      pagination={{
+                        current: invPage,
+                        pageSize: invPageSize,
+                        showSizeChanger: true,
+                        pageSizeOptions: ['10', '20', '50', '100'],
+                        showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} invoices`,
+                        onChange: (page, size) => {
+                          setInvoicePageMap(prev => ({ ...prev, [tabKey]: page }));
+                          setInvoicePageSizeMap(prev => ({ ...prev, [tabKey]: size }));
+                        },
+                      }}
+                    />
                   </div>
                 ),
               },
@@ -1993,6 +2140,93 @@ const ManageSuppliers: React.FC = () => {
             />
           </Card>
         </Modal>
+        {/* Edit Invoice Modal */}
+        <Modal
+          title={
+            <Space>
+              <EditOutlined style={{ color: REDWOOD.info }} />
+              <span>Edit Invoice: {editInvoice?.invoiceNumber}</span>
+            </Space>
+          }
+          open={editInvoiceVisible}
+          onCancel={() => {
+            setEditInvoiceVisible(false);
+            setEditInvoice(null);
+          }}
+          footer={[
+            <Button key="cancel" onClick={() => { setEditInvoiceVisible(false); setEditInvoice(null); }}>
+              Cancel
+            </Button>,
+            <Button key="save" type="primary" loading={editInvoiceSaving} icon={<SaveOutlined />} onClick={saveEditInvoice} style={{ background: REDWOOD.primary }}>
+              Save
+            </Button>,
+          ]}
+          width={640}
+          destroyOnClose
+        >
+          {editInvoice && (
+            <Form layout="horizontal" labelCol={{ span: 8 }} wrapperCol={{ span: 16 }} size="small" style={{ marginTop: 8 }}>
+              <Form.Item label="Invoice Number">
+                <Text strong>{editInvoice.invoiceNumber}</Text>
+              </Form.Item>
+              <Form.Item label="Invoice Date">
+                <Input
+                  value={editInvoice.invoiceDate}
+                  onChange={e => setEditInvoice(prev => prev ? { ...prev, invoiceDate: e.target.value } : prev)}
+                  placeholder="dd-Mon-yyyy"
+                />
+              </Form.Item>
+              <Form.Item label="Invoice Amount">
+                <Input
+                  type="number"
+                  value={editInvoice.invoiceAmount}
+                  onChange={e => setEditInvoice(prev => prev ? { ...prev, invoiceAmount: parseFloat(e.target.value) || 0 } : prev)}
+                />
+              </Form.Item>
+              <Form.Item label="Amount Paid">
+                <Text>{formatCurrency(editInvoice.amountPaid, editInvoice.currency)}</Text>
+              </Form.Item>
+              <Form.Item label="Balance Due">
+                <Text style={{ color: editInvoice.amountRemaining > 0 ? REDWOOD.error : REDWOOD.success }}>
+                  {formatCurrency(editInvoice.amountRemaining, editInvoice.currency)}
+                </Text>
+              </Form.Item>
+              <Form.Item label="Currency">
+                <Select
+                  value={editInvoice.currency}
+                  onChange={val => setEditInvoice(prev => prev ? { ...prev, currency: val } : prev)}
+                  style={{ width: 120 }}
+                >
+                  <Option value="AED">AED</Option>
+                  <Option value="USD">USD</Option>
+                  <Option value="EUR">EUR</Option>
+                  <Option value="GBP">GBP</Option>
+                </Select>
+              </Form.Item>
+              <Form.Item label="Status">
+                <Select
+                  value={editInvoice.invoiceStatus}
+                  onChange={val => setEditInvoice(prev => prev ? { ...prev, invoiceStatus: val } : prev)}
+                  style={{ width: 160 }}
+                >
+                  <Option value="UNPAID">UNPAID</Option>
+                  <Option value="PAID">PAID</Option>
+                  <Option value="CANCELLED">CANCELLED</Option>
+                  <Option value="HOLD">HOLD</Option>
+                  <Option value="PARTIAL">PARTIAL</Option>
+                </Select>
+              </Form.Item>
+              <Form.Item label="Description">
+                <Input.TextArea
+                  rows={3}
+                  value={editInvoice.description}
+                  onChange={e => setEditInvoice(prev => prev ? { ...prev, description: e.target.value } : prev)}
+                />
+              </Form.Item>
+            </Form>
+          )}
+        </Modal>
+
         <FloatingMenu />
         <Autopilot module="ap" />
       </Content>
