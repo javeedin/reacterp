@@ -33,6 +33,10 @@ import {
   ReloadOutlined,
   CheckCircleFilled,
   CloudDownloadOutlined,
+  ApiOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  LoadingOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -418,12 +422,26 @@ const CurrenciesTab: React.FC = () => {
 // ═══════════════════════════════════════════════════════════════
 // TAB 2: Rate Types
 // ═══════════════════════════════════════════════════════════════
+interface ApiTestResult {
+  status: number | null;
+  ok: boolean | null;
+  body: string;
+  durationMs: number | null;
+  running: boolean;
+}
+const emptyResult = (): ApiTestResult => ({ status: null, ok: null, body: '', durationMs: null, running: false });
+
 const RateTypesTab: React.FC = () => {
   const [rows, setRows]       = useState<RateType[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving]   = useState(false);
   const [error, setError]     = useState('');
   const [currencies, setCurrencies] = useState<string[]>([]);
+
+  // API panel
+  const [showApi, setShowApi]     = useState(false);
+  const [getResult, setGetResult] = useState<ApiTestResult>(emptyResult());
+  const [postResult, setPostResult] = useState<ApiTestResult>(emptyResult());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -514,11 +532,11 @@ const RateTypesTab: React.FC = () => {
           id: r.rate_type_id,
           name: r.name,
           description: r.description,
-          defaultRateType: r.default_rate_type ? 'Y' : 'N',
-          enforceInverseRelationship: r.enforce_inverse_relationship ? 'Y' : 'N',
+          defaultRateType:  r.default_rate_type ? 'Y' : 'N',
+          enforceInverse:   r.enforce_inverse_relationship ? 'Y' : 'N',
           enableCrossRates: r.enable_cross_rates ? 'Y' : 'N',
-          allowCrossRatesOverride: r.allow_cross_rates_override ? 'Y' : 'N',
-          crossRatePivotCurrency: r.cross_rate_pivot_currency || null,
+          allowOverride:    r.allow_cross_rates_override ? 'Y' : 'N',
+          pivotCurrency:    r.cross_rate_pivot_currency || null,
         })),
       };
       const res = await fetch(`${ORDS_BASE}/currencies/ratetypes`, {
@@ -533,6 +551,29 @@ const RateTypesTab: React.FC = () => {
       message.error(`Save failed: ${e.message}`);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const runTest = async (
+    method: 'GET' | 'POST' | 'DELETE',
+    url: string,
+    body: object | null,
+    setResult: React.Dispatch<React.SetStateAction<ApiTestResult>>
+  ) => {
+    setResult({ status: null, ok: null, body: '', durationMs: null, running: true });
+    const t0 = performance.now();
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: body ? { 'Content-Type': 'application/json' } : {},
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const text = await res.text();
+      let pretty = text;
+      try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch (_) {}
+      setResult({ status: res.status, ok: res.ok, body: pretty, durationMs: Math.round(performance.now() - t0), running: false });
+    } catch (e: any) {
+      setResult({ status: 0, ok: false, body: e.message, durationMs: Math.round(performance.now() - t0), running: false });
     }
   };
 
@@ -688,8 +729,94 @@ const RateTypesTab: React.FC = () => {
           >
             Save
           </Button>
+          <Button
+            icon={<ApiOutlined />}
+            size="small"
+            type={showApi ? 'primary' : 'default'}
+            style={showApi ? { background: REDWOOD.info, borderColor: REDWOOD.info } : { borderColor: REDWOOD.info, color: REDWOOD.info }}
+            onClick={() => setShowApi(v => !v)}
+          >
+            API
+          </Button>
         </Space>
       </div>
+
+      {/* API Debug Panel */}
+      {showApi && (
+        <Card
+          size="small"
+          style={{ marginBottom: 12, background: '#f5f8ff', border: `1px solid ${REDWOOD.info}`, borderRadius: 4 }}
+          title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><Text strong style={{ color: REDWOOD.info }}>API Endpoints — Rate Types</Text></Space>}
+        >
+          {/* GET */}
+          <div style={{ marginBottom: 10 }}>
+            <Space align="start">
+              <Tag color="green" style={{ fontFamily: 'monospace', marginBottom: 0 }}>GET</Tag>
+              <Text code style={{ fontSize: 12 }}>{ORDS_BASE}/currencies/ratetypes</Text>
+              <Button
+                size="small"
+                icon={getResult.running ? <LoadingOutlined /> : <ApiOutlined />}
+                onClick={() => runTest('GET', `${ORDS_BASE}/currencies/ratetypes`, null, setGetResult)}
+                disabled={getResult.running}
+              >
+                Test
+              </Button>
+              {getResult.status !== null && (
+                <Tag color={getResult.ok ? 'success' : 'error'} icon={getResult.ok ? <CheckCircleOutlined /> : <CloseCircleOutlined />}>
+                  {getResult.status} · {getResult.durationMs}ms
+                </Tag>
+              )}
+            </Space>
+            {getResult.body && (
+              <pre style={{ fontSize: 11, background: '#fff', border: '1px solid #e5e5e5', padding: 8, borderRadius: 4, maxHeight: 160, overflow: 'auto', marginTop: 6 }}>
+                {getResult.body}
+              </pre>
+            )}
+          </div>
+
+          {/* POST */}
+          <div style={{ marginBottom: 10 }}>
+            <Space align="start">
+              <Tag color="blue" style={{ fontFamily: 'monospace' }}>POST</Tag>
+              <Text code style={{ fontSize: 12 }}>{ORDS_BASE}/currencies/ratetypes</Text>
+              <Button
+                size="small"
+                icon={postResult.running ? <LoadingOutlined /> : <ApiOutlined />}
+                onClick={() => runTest('POST', `${ORDS_BASE}/currencies/ratetypes`, {
+                  items: [{ id: null, name: 'TEST_TYPE', description: 'Test via API panel', defaultRateType: 'N', enforceInverse: 'Y', enableCrossRates: 'N', allowOverride: 'N', pivotCurrency: null }]
+                }, setPostResult)}
+                disabled={postResult.running}
+              >
+                Test POST
+              </Button>
+              {postResult.status !== null && (
+                <Tag color={postResult.ok ? 'success' : 'error'} icon={postResult.ok ? <CheckCircleOutlined /> : <CloseCircleOutlined />}>
+                  {postResult.status} · {postResult.durationMs}ms
+                </Tag>
+              )}
+            </Space>
+            <div style={{ marginTop: 4, marginLeft: 8 }}>
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                Payload: <Text code style={{ fontSize: 11 }}>{'{"items":[{id?,name,description,defaultRateType,enforceInverse,enableCrossRates,allowOverride,pivotCurrency}]}'}</Text>
+              </Text>
+            </div>
+            {postResult.body && (
+              <pre style={{ fontSize: 11, background: '#fff', border: '1px solid #e5e5e5', padding: 8, borderRadius: 4, maxHeight: 120, overflow: 'auto', marginTop: 6 }}>
+                {postResult.body}
+              </pre>
+            )}
+          </div>
+
+          {/* DELETE */}
+          <div>
+            <Space>
+              <Tag color="red" style={{ fontFamily: 'monospace' }}>DELETE</Tag>
+              <Text code style={{ fontSize: 12 }}>{ORDS_BASE}/currencies/ratetypes/<Text strong>:id</Text></Text>
+              <Text type="secondary" style={{ fontSize: 11 }}>— use delete icon on row</Text>
+            </Space>
+          </div>
+        </Card>
+      )}
 
       {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} closable />}
 
