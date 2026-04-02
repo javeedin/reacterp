@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Layout,
   Card,
@@ -482,10 +482,12 @@ const ManageSuppliers: React.FC = () => {
     lovDebounceRef.current = setTimeout(async () => {
       setLovLoading(true);
       try {
-        // Use combined ?q= param which searches both supplier_number and supplier name (LIKE)
-        const url = q
-          ? `${APEX_DB_CONFIG.baseUrl}/suppliers?q=${encodeURIComponent(q)}`
-          : `${APEX_DB_CONFIG.baseUrl}/suppliers`;
+        const bu: string = form.getFieldValue('businessUnit') || '';
+        const params = new URLSearchParams();
+        if (q)  params.set('q', q);
+        if (bu) params.set('P_BUSINESS_UNIT', bu);
+        const qs = params.toString();
+        const url = `${APEX_DB_CONFIG.baseUrl}/suppliers${qs ? '?' + qs : ''}`;
         const res = await fetch(url);
         if (!res.ok) return;
         const data = await res.json();
@@ -503,6 +505,19 @@ const ManageSuppliers: React.FC = () => {
     form.setFieldsValue({ supplierNumber: row.supplierNumber, supplier: row.supplier });
     setLovVisible(false);
   };
+
+  // Business Unit options — fetched once from APEX
+  const [businessUnits, setBusinessUnits] = useState<string[]>([]);
+  useEffect(() => {
+    fetch(`${APEX_DB_CONFIG.baseUrl}/business-units`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return;
+        const items: any[] = Array.isArray(data) ? data : (data.items || []);
+        setBusinessUnits(items.map((i: any) => i.business_unit || i.procurement_bu || '').filter(Boolean));
+      })
+      .catch(() => {});
+  }, []);
 
   // API Configuration for this page
   const PAGE_APIS = {
@@ -855,6 +870,7 @@ const ManageSuppliers: React.FC = () => {
       const formValues = form.getFieldsValue();
       const supplierNumber = formValues.supplierNumber?.trim();
       const supplierName = formValues.supplier?.trim();
+      const businessUnit = formValues.businessUnit?.trim();
 
       let headers: Record<string, string> = { 'Content-Type': 'application/json' };
 
@@ -880,14 +896,13 @@ const ManageSuppliers: React.FC = () => {
         headers['Authorization'] = `Basic ${FUSION_AUTH}`;
         mapFunction = mapFusionToSupplierRecord;
       } else {
-        // APEX API - direct URL
-        let queryParams = '';
-        if (supplierNumber) {
-          queryParams = `?supplier_number=${encodeURIComponent(supplierNumber)}`;
-        } else if (supplierName) {
-          queryParams = `?supplier=${encodeURIComponent(supplierName)}`;
-        }
-        proxyUrl = `${APEX_DB_CONFIG.baseUrl}/suppliers${queryParams}`;
+        // APEX API - build params
+        const apexParams = new URLSearchParams();
+        if (supplierNumber) apexParams.set('supplier_number', supplierNumber);
+        if (supplierName)   apexParams.set('supplier', supplierName);
+        if (businessUnit)   apexParams.set('P_BUSINESS_UNIT', businessUnit);
+        const qs = apexParams.toString();
+        proxyUrl = `${APEX_DB_CONFIG.baseUrl}/suppliers${qs ? '?' + qs : ''}`;
         mapFunction = mapApexToSupplierRecord;
       }
 
@@ -1057,6 +1072,27 @@ const ManageSuppliers: React.FC = () => {
             <Form form={form} layout="horizontal" labelCol={{ span: 10 }} wrapperCol={{ span: 14 }} size="small">
               <Row gutter={16}>
                 <Col span={8}>
+                  <Form.Item label="Business Unit" name="businessUnit" style={{ marginBottom: 8 }}>
+                    <Select
+                      placeholder="Select business unit..."
+                      allowClear
+                      size="small"
+                      showSearch
+                      filterOption={(input, option) =>
+                        String(option?.value ?? '').toLowerCase().includes(input.toLowerCase())
+                      }
+                      onChange={() => {
+                        // Re-run LOV search with new BU if LOV is open
+                        if (lovVisible) fetchLovResults(lovSearch);
+                      }}
+                    >
+                      {businessUnits.map(bu => (
+                        <Option key={bu} value={bu}>{bu}</Option>
+                      ))}
+                    </Select>
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
                   <Form.Item label="Supplier Number" name="supplierNumber" style={{ marginBottom: 8 }}>
                     <Input
                       size="small"
@@ -1086,6 +1122,8 @@ const ManageSuppliers: React.FC = () => {
                     />
                   </Form.Item>
                 </Col>
+              </Row>
+              <Row gutter={16}>
                 <Col span={8}>
                   <Form.Item label="Supplier Type" name="supplierType" style={{ marginBottom: 8 }}>
                     <Select placeholder="" allowClear size="small">
@@ -1095,8 +1133,6 @@ const ManageSuppliers: React.FC = () => {
                     </Select>
                   </Form.Item>
                 </Col>
-              </Row>
-              <Row gutter={16}>
                 <Col span={8}>
                   <Form.Item label="Taxpayer ID" name="taxpayerId" style={{ marginBottom: 8 }}>
                     <Input placeholder="" size="small" />
@@ -1111,11 +1147,6 @@ const ManageSuppliers: React.FC = () => {
                       <Option value="Partnership">Partnership</Option>
                     </Select>
                   </Form.Item>
-                </Col>
-                <Col span={8}>
-                  <div style={{ textAlign: 'right', paddingTop: 4 }}>
-                    <Text type="secondary" style={{ fontSize: 11 }}>** At least one is required</Text>
-                  </div>
                 </Col>
               </Row>
               <Row gutter={16}>
