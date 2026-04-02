@@ -472,11 +472,12 @@ const RateTypesTab: React.FC = () => {
   const loadCurrencies = useCallback(async () => {
     try {
       const res = await fetch(`${ORDS_BASE}/currencies?enabled=Y`);
-      if (!res.ok) return;
+      if (!res.ok) { setCurrencies(COMMON_CURRENCIES); return; }
       const json = await res.json();
       const items: any[] = json.items ?? json.data ?? (Array.isArray(json) ? json : []);
-      setCurrencies(items.map(r => r.code ?? r.currency_code ?? r.CURRENCY_CODE));
-    } catch (_) {}
+      const codes = items.map(r => r.code ?? r.currency_code ?? r.CURRENCY_CODE).filter(Boolean);
+      setCurrencies(codes.length ? codes : COMMON_CURRENCIES);
+    } catch (_) { setCurrencies(COMMON_CURRENCIES); }
   }, []);
 
   useEffect(() => { load(); loadCurrencies(); }, [load, loadCurrencies]);
@@ -836,6 +837,12 @@ const RateTypesTab: React.FC = () => {
   );
 };
 
+// Common fallback currencies if DB is empty
+const COMMON_CURRENCIES = [
+  'AED','USD','EUR','GBP','INR','SGD','SAR','CHF','JPY','CAD',
+  'AUD','CNY','HKD','MYR','QAR','KWD','BHD','OMR','EGP','PKR',
+];
+
 // ═══════════════════════════════════════════════════════════════
 // TAB 3: Daily Rates
 // ═══════════════════════════════════════════════════════════════
@@ -870,6 +877,35 @@ const DailyRatesTab: React.FC = () => {
   const [fmpRateType, setFmpRateType]     = useState('');
   const [fmpStatus, setFmpStatus]         = useState<{ type: 'success'|'error'; msg: string } | null>(null);
 
+  // API panel state
+  const [showApi, setShowApi]           = useState(false);
+  const [apiGetResult, setApiGetResult] = useState<ApiTestResult>(emptyResult());
+  const [apiPostResult, setApiPostResult] = useState<ApiTestResult>(emptyResult());
+  const [apiImportResult, setApiImportResult] = useState<ApiTestResult>(emptyResult());
+
+  const runDrTest = async (
+    method: 'GET' | 'POST',
+    url: string,
+    body: object | null,
+    setResult: React.Dispatch<React.SetStateAction<ApiTestResult>>
+  ) => {
+    setResult({ status: null, ok: null, body: '', durationMs: null, running: true });
+    const t0 = performance.now();
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: body ? { 'Content-Type': 'application/json' } : {},
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const text = await res.text();
+      let pretty = text;
+      try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch (_) {}
+      setResult({ status: res.status, ok: res.ok, body: pretty, durationMs: Math.round(performance.now() - t0), running: false });
+    } catch (e: any) {
+      setResult({ status: 0, ok: false, body: e.message, durationMs: Math.round(performance.now() - t0), running: false });
+    }
+  };
+
   const loadDropdowns = useCallback(async () => {
     try {
       const [cRes, rtRes] = await Promise.all([
@@ -879,14 +915,20 @@ const DailyRatesTab: React.FC = () => {
       if (cRes.ok) {
         const cj = await cRes.json();
         const items: any[] = cj.items ?? cj.data ?? (Array.isArray(cj) ? cj : []);
-        setCurrencies(items.map(r => r.code ?? r.currency_code ?? r.CURRENCY_CODE));
+        const codes = items.map(r => r.code ?? r.currency_code ?? r.CURRENCY_CODE).filter(Boolean);
+        // fallback to common list if DB not yet populated
+        setCurrencies(codes.length ? codes : COMMON_CURRENCIES);
+      } else {
+        setCurrencies(COMMON_CURRENCIES);
       }
       if (rtRes.ok) {
         const rj = await rtRes.json();
         const items: any[] = rj.items ?? rj.data ?? (Array.isArray(rj) ? rj : []);
         setRateTypes(items.map(r => r.name ?? r.NAME));
       }
-    } catch (_) {}
+    } catch (_) {
+      setCurrencies(COMMON_CURRENCIES);
+    }
   }, []);
 
   useEffect(() => { loadDropdowns(); }, [loadDropdowns]);
@@ -1293,10 +1335,129 @@ const DailyRatesTab: React.FC = () => {
             >
               FMP Rates
             </Button>
+            <Button
+              icon={<ApiOutlined />}
+              size="small"
+              type={showApi ? 'primary' : 'default'}
+              style={showApi ? { background: REDWOOD.info, borderColor: REDWOOD.info } : { borderColor: REDWOOD.info, color: REDWOOD.info }}
+              onClick={() => { setShowAdd(false); setShowApi(v => !v); }}
+            >
+              API
+            </Button>
           </Space>
         }
         style={{ border: `1px solid ${REDWOOD.border}` }}
       >
+        {/* API Debug Panel */}
+        {showApi && (
+          <Card
+            size="small"
+            style={{ marginBottom: 12, background: '#f5f8ff', border: `1px solid ${REDWOOD.info}`, borderRadius: 4 }}
+            title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><Text strong style={{ color: REDWOOD.info }}>API Endpoints — Daily Rates</Text></Space>}
+          >
+            {/* GET */}
+            <div style={{ marginBottom: 10 }}>
+              <Space align="start" wrap>
+                <Tag color="green" style={{ fontFamily: 'monospace' }}>GET</Tag>
+                <Text code style={{ fontSize: 12 }}>{ORDS_BASE}/currencies/dailyrates</Text>
+                <Text type="secondary" style={{ fontSize: 11 }}>?from_currency=USD&to_currency=AED&row_limit=5</Text>
+                <Button
+                  size="small"
+                  icon={apiGetResult.running ? <LoadingOutlined /> : <ApiOutlined />}
+                  onClick={() => runDrTest('GET', `${ORDS_BASE}/currencies/dailyrates?from_currency=USD&row_limit=5`, null, setApiGetResult)}
+                  disabled={apiGetResult.running}
+                >Test</Button>
+                {apiGetResult.status !== null && (
+                  <Tag color={apiGetResult.ok ? 'success' : 'error'} icon={apiGetResult.ok ? <CheckCircleOutlined /> : <CloseCircleOutlined />}>
+                    {apiGetResult.status} · {apiGetResult.durationMs}ms
+                  </Tag>
+                )}
+              </Space>
+              {apiGetResult.body && (
+                <pre style={{ fontSize: 11, background: '#fff', border: '1px solid #e5e5e5', padding: 8, borderRadius: 4, maxHeight: 160, overflow: 'auto', marginTop: 6 }}>
+                  {apiGetResult.body}
+                </pre>
+              )}
+            </div>
+
+            {/* POST single rate */}
+            <div style={{ marginBottom: 10 }}>
+              <Space align="start" wrap>
+                <Tag color="blue" style={{ fontFamily: 'monospace' }}>POST</Tag>
+                <Text code style={{ fontSize: 12 }}>{ORDS_BASE}/currencies/dailyrates</Text>
+                <Text type="secondary" style={{ fontSize: 11 }}>single rate upsert</Text>
+                <Button
+                  size="small"
+                  icon={apiPostResult.running ? <LoadingOutlined /> : <ApiOutlined />}
+                  onClick={() => runDrTest('POST', `${ORDS_BASE}/currencies/dailyrates`, {
+                    fromCurrency: 'USD', toCurrency: 'AED',
+                    rateDate: dayjs().format('YYYY-MM-DD'),
+                    rateType: rateTypes[0] ?? 'Corporate',
+                    rate: 3.6725, source: 'MANUAL',
+                  }, setApiPostResult)}
+                  disabled={apiPostResult.running}
+                >Test POST</Button>
+                {apiPostResult.status !== null && (
+                  <Tag color={apiPostResult.ok ? 'success' : 'error'} icon={apiPostResult.ok ? <CheckCircleOutlined /> : <CloseCircleOutlined />}>
+                    {apiPostResult.status} · {apiPostResult.durationMs}ms
+                  </Tag>
+                )}
+              </Space>
+              <div style={{ marginLeft: 8, marginTop: 2 }}>
+                <Text code style={{ fontSize: 11 }}>{'{ fromCurrency, toCurrency, rateDate, rateType, rate, source? }'}</Text>
+              </div>
+              {apiPostResult.body && (
+                <pre style={{ fontSize: 11, background: '#fff', border: '1px solid #e5e5e5', padding: 8, borderRadius: 4, maxHeight: 120, overflow: 'auto', marginTop: 6 }}>
+                  {apiPostResult.body}
+                </pre>
+              )}
+            </div>
+
+            {/* POST bulk import */}
+            <div style={{ marginBottom: 10 }}>
+              <Space align="start" wrap>
+                <Tag color="blue" style={{ fontFamily: 'monospace' }}>POST</Tag>
+                <Text code style={{ fontSize: 12 }}>{ORDS_BASE}/currencies/dailyrates/import</Text>
+                <Text type="secondary" style={{ fontSize: 11 }}>bulk import (upsert on conflict)</Text>
+                <Button
+                  size="small"
+                  icon={apiImportResult.running ? <LoadingOutlined /> : <ApiOutlined />}
+                  onClick={() => runDrTest('POST', `${ORDS_BASE}/currencies/dailyrates/import`, {
+                    rates: [
+                      { fromCurrency: 'USD', toCurrency: 'AED', rateDate: dayjs().format('YYYY-MM-DD'), rateType: rateTypes[0] ?? 'Corporate', rate: 3.6725 },
+                      { fromCurrency: 'USD', toCurrency: 'EUR', rateDate: dayjs().format('YYYY-MM-DD'), rateType: rateTypes[0] ?? 'Corporate', rate: 0.9201 },
+                    ],
+                    source: 'API', createdBy: 'TEST',
+                  }, setApiImportResult)}
+                  disabled={apiImportResult.running}
+                >Test Import</Button>
+                {apiImportResult.status !== null && (
+                  <Tag color={apiImportResult.ok ? 'success' : 'error'} icon={apiImportResult.ok ? <CheckCircleOutlined /> : <CloseCircleOutlined />}>
+                    {apiImportResult.status} · {apiImportResult.durationMs}ms
+                  </Tag>
+                )}
+              </Space>
+              <div style={{ marginLeft: 8, marginTop: 2 }}>
+                <Text code style={{ fontSize: 11 }}>{'{ rates:[{fromCurrency,toCurrency,rateDate,rateType,rate}], source, createdBy }'}</Text>
+              </div>
+              {apiImportResult.body && (
+                <pre style={{ fontSize: 11, background: '#fff', border: '1px solid #e5e5e5', padding: 8, borderRadius: 4, maxHeight: 120, overflow: 'auto', marginTop: 6 }}>
+                  {apiImportResult.body}
+                </pre>
+              )}
+            </div>
+
+            {/* DELETE */}
+            <div>
+              <Space wrap>
+                <Tag color="red" style={{ fontFamily: 'monospace' }}>DELETE</Tag>
+                <Text code style={{ fontSize: 12 }}>{ORDS_BASE}/currencies/dailyrates/<Text strong>:id</Text></Text>
+                <Text type="secondary" style={{ fontSize: 11 }}>— use delete icon on row</Text>
+              </Space>
+            </div>
+          </Card>
+        )}
+
         {/* Live Rates Panel */}
         <Card
           size="small"
