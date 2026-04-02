@@ -67,14 +67,16 @@ const REDWOOD = {
 
 // ─── Types ────────────────────────────────────────────────────
 interface Currency {
-  currency_code: string;
+  code: string;
   name: string;
   description: string;
-  enabled_flag: string;
-  start_date_active: string | null;
-  end_date_active: string | null;
+  enabled: string;
   symbol: string;
   precision: number;
+  extPrecision: number;
+  territory: string;
+  currencyFlag: string;
+  lastSyncDate: string | null;
 }
 
 interface RateType {
@@ -162,7 +164,7 @@ const CurrenciesTab: React.FC = () => {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setData(prev =>
-        prev.map(r => r.currency_code === code ? { ...r, enabled_flag: newVal } : r)
+        prev.map(r => r.code === code ? { ...r, enabled: newVal } : r)
       );
       message.success(`Currency ${code} ${newVal === 'Y' ? 'enabled' : 'disabled'}`);
     } catch (e: any) {
@@ -248,7 +250,7 @@ const CurrenciesTab: React.FC = () => {
   const columns = [
     {
       title: 'Currency Code',
-      dataIndex: 'currency_code',
+      dataIndex: 'code',
       width: 130,
       render: (v: string) => <Text strong style={{ color: REDWOOD.info }}>{v}</Text>,
     },
@@ -264,27 +266,15 @@ const CurrenciesTab: React.FC = () => {
     },
     {
       title: 'Enabled',
-      dataIndex: 'enabled_flag',
+      dataIndex: 'enabled',
       width: 90,
       align: 'center' as const,
       render: (v: string, record: Currency) => (
         <Checkbox
           checked={v === 'Y'}
-          onChange={() => handleToggle(record.currency_code, v)}
+          onChange={() => handleToggle(record.code, v)}
         />
       ),
-    },
-    {
-      title: 'Start Date',
-      dataIndex: 'start_date_active',
-      width: 130,
-      render: fmtDate,
-    },
-    {
-      title: 'End Date',
-      dataIndex: 'end_date_active',
-      width: 130,
-      render: fmtDate,
     },
     {
       title: 'Symbol',
@@ -297,6 +287,17 @@ const CurrenciesTab: React.FC = () => {
       dataIndex: 'precision',
       width: 90,
       align: 'center' as const,
+    },
+    {
+      title: 'Territory',
+      dataIndex: 'territory',
+      width: 100,
+    },
+    {
+      title: 'Last Sync',
+      dataIndex: 'lastSyncDate',
+      width: 120,
+      render: fmtDate,
     },
   ];
 
@@ -396,7 +397,7 @@ const CurrenciesTab: React.FC = () => {
           <Table
             dataSource={data}
             columns={columns}
-            rowKey="currency_code"
+            rowKey="code"
             size="small"
             pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `Total ${t}` }}
             locale={{
