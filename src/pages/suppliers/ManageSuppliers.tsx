@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Layout,
   Card,
   Form,
   Select,
   Input,
+  AutoComplete,
   Button,
   Space,
   Typography,
@@ -461,6 +462,51 @@ const ManageSuppliers: React.FC = () => {
   // API Info Modal state
   const [apiModalVisible, setApiModalVisible] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
+
+  // LOV (List of Values) state for supplier search autocomplete
+  type LovOption = { value: string; label: React.ReactNode; record: { supplierNumber: string; supplier: string } };
+  const [supplierNumOptions, setSupplierNumOptions] = useState<LovOption[]>([]);
+  const [supplierNameOptions, setSupplierNameOptions] = useState<LovOption[]>([]);
+  const lovDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const fetchLovSuggestions = (field: 'number' | 'name', value: string) => {
+    if (lovDebounceRef.current) clearTimeout(lovDebounceRef.current);
+    if (!value || value.length < 1) {
+      field === 'number' ? setSupplierNumOptions([]) : setSupplierNameOptions([]);
+      return;
+    }
+    lovDebounceRef.current = setTimeout(async () => {
+      try {
+        const param = field === 'number'
+          ? `supplier_number=${encodeURIComponent(value)}`
+          : `supplier=${encodeURIComponent(value)}`;
+        const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers?${param}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const items: any[] = Array.isArray(data) ? data : (data.items || []);
+        const opts: LovOption[] = items.slice(0, 15).map((item: any) => ({
+          value: field === 'number' ? (item.supplier_number || '') : (item.supplier || ''),
+          label: (
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+              <span style={{ fontWeight: 500 }}>{item.supplier_number || ''}</span>
+              <span style={{ color: '#6B6B6B', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.supplier || ''}</span>
+            </div>
+          ),
+          record: { supplierNumber: item.supplier_number || '', supplier: item.supplier || '' },
+        }));
+        field === 'number' ? setSupplierNumOptions(opts) : setSupplierNameOptions(opts);
+      } catch { /* ignore */ }
+    }, 250);
+  };
+
+  const onLovSelect = (_value: string, option: LovOption) => {
+    form.setFieldsValue({
+      supplierNumber: option.record.supplierNumber,
+      supplier: option.record.supplier,
+    });
+    setSupplierNumOptions([]);
+    setSupplierNameOptions([]);
+  };
 
   // API Configuration for this page
   const PAGE_APIS = {
@@ -1016,12 +1062,30 @@ const ManageSuppliers: React.FC = () => {
               <Row gutter={16}>
                 <Col span={8}>
                   <Form.Item label="Supplier Number" name="supplierNumber" style={{ marginBottom: 8 }}>
-                    <Input placeholder="e.g. A022" size="small" />
+                    <AutoComplete
+                      options={supplierNumOptions}
+                      onSearch={v => fetchLovSuggestions('number', v)}
+                      onSelect={(v, opt) => onLovSelect(v, opt as LovOption)}
+                      onClear={() => setSupplierNumOptions([])}
+                      allowClear
+                      size="small"
+                      placeholder="e.g. A022"
+                      dropdownMatchSelectWidth={400}
+                    />
                   </Form.Item>
                 </Col>
                 <Col span={8}>
                   <Form.Item label="Supplier" name="supplier" style={{ marginBottom: 8 }}>
-                    <Input placeholder="" size="small" />
+                    <AutoComplete
+                      options={supplierNameOptions}
+                      onSearch={v => fetchLovSuggestions('name', v)}
+                      onSelect={(v, opt) => onLovSelect(v, opt as LovOption)}
+                      onClear={() => setSupplierNameOptions([])}
+                      allowClear
+                      size="small"
+                      placeholder="Type to search supplier name..."
+                      dropdownMatchSelectWidth={400}
+                    />
                   </Form.Item>
                 </Col>
                 <Col span={8}>
