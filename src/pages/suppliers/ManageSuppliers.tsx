@@ -506,15 +506,15 @@ const ManageSuppliers: React.FC = () => {
     setLovVisible(false);
   };
 
-  // Business Unit options — fetched once from APEX
+  // Business Unit options — fetched from RR_GL_BUSINESS_UNITS via GET /gl/businessunits
   const [businessUnits, setBusinessUnits] = useState<string[]>([]);
   useEffect(() => {
-    fetch(`${APEX_DB_CONFIG.baseUrl}/business-units`)
+    fetch(`${APEX_DB_CONFIG.baseUrl}/gl/businessunits`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (!data) return;
         const items: any[] = Array.isArray(data) ? data : (data.items || []);
-        setBusinessUnits(items.map((i: any) => i.business_unit || i.procurement_bu || '').filter(Boolean));
+        setBusinessUnits(items.map((i: any) => i.business_unit_name || '').filter(Boolean));
       })
       .catch(() => {});
   }, []);
