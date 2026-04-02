@@ -339,41 +339,63 @@ const InvoicesTabContent: React.FC<InvoicesTabContentProps> = ({
   invoices, invoicesLoading, onExport, onRefresh, onEdit,
 }) => {
   const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'paid' | 'unpaid'>('all');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
-  const filtered = React.useMemo(() => {
-    if (!search) return invoices;
-    const q = search.toLowerCase();
-    return invoices.filter(r =>
-      (r.invoiceNumber || '').toLowerCase().includes(q) ||
-      (r.description   || '').toLowerCase().includes(q) ||
-      (r.invoiceStatus || '').toLowerCase().includes(q) ||
-      String(r.invoiceAmount).includes(q)
-    );
-  }, [invoices, search]);
+  const fmt = (amt: number, currency = 'AED') =>
+    new Intl.NumberFormat('en-AE', { style: 'currency', currency, minimumFractionDigits: 2 }).format(amt);
 
-  // Reset to page 1 whenever filter changes
-  React.useEffect(() => { setPage(1); }, [search]);
+  // Totals over ALL invoices (not just filtered) for the summary cards
+  const totals = React.useMemo(() => ({
+    count:     invoices.length,
+    amount:    invoices.reduce((s, r) => s + (r.invoiceAmount   || 0), 0),
+    paid:      invoices.reduce((s, r) => s + (r.amountPaid      || 0), 0),
+    balance:   invoices.reduce((s, r) => s + (r.amountRemaining || 0), 0),
+    currency:  invoices[0]?.currency || 'AED',
+    paidCount:   invoices.filter(r => (r.amountRemaining || 0) <= 0).length,
+    unpaidCount: invoices.filter(r => (r.amountRemaining || 0) >  0).length,
+  }), [invoices]);
+
+  const filtered = React.useMemo(() => {
+    let rows = invoices;
+    if (statusFilter === 'paid')   rows = rows.filter(r => (r.amountRemaining || 0) <= 0);
+    if (statusFilter === 'unpaid') rows = rows.filter(r => (r.amountRemaining || 0) >  0);
+    if (search) {
+      const q = search.toLowerCase();
+      rows = rows.filter(r =>
+        (r.invoiceNumber || '').toLowerCase().includes(q) ||
+        (r.description   || '').toLowerCase().includes(q) ||
+        (r.invoiceStatus || '').toLowerCase().includes(q) ||
+        String(r.invoiceAmount).includes(q)
+      );
+    }
+    return rows;
+  }, [invoices, statusFilter, search]);
+
+  React.useEffect(() => { setPage(1); }, [search, statusFilter]);
 
   const columns = React.useMemo(() => [
     { title: 'Invoice #', dataIndex: 'invoiceNumber', key: 'invoiceNumber', width: 140 },
     { title: 'Date', dataIndex: 'invoiceDate', key: 'invoiceDate', width: 110 },
     {
       title: 'Amount', dataIndex: 'invoiceAmount', key: 'invoiceAmount', width: 130, align: 'right' as const,
-      render: (amt: number, r: InvoiceRecord) => <Text strong>{new Intl.NumberFormat('en-AE', { style: 'currency', currency: r.currency || 'AED', minimumFractionDigits: 2 }).format(amt)}</Text>
+      render: (amt: number, r: InvoiceRecord) => <Text strong>{fmt(amt, r.currency)}</Text>
     },
     {
       title: 'Paid', dataIndex: 'amountPaid', key: 'amountPaid', width: 130, align: 'right' as const,
-      render: (amt: number, r: InvoiceRecord) => <Text style={{ color: REDWOOD.success }}>{new Intl.NumberFormat('en-AE', { style: 'currency', currency: r.currency || 'AED', minimumFractionDigits: 2 }).format(amt)}</Text>
+      render: (amt: number, r: InvoiceRecord) => <Text style={{ color: REDWOOD.success }}>{fmt(amt, r.currency)}</Text>
     },
     {
       title: 'Balance', dataIndex: 'amountRemaining', key: 'amountRemaining', width: 130, align: 'right' as const,
-      render: (amt: number, r: InvoiceRecord) => <Text style={{ color: amt > 0 ? REDWOOD.error : REDWOOD.success }}>{new Intl.NumberFormat('en-AE', { style: 'currency', currency: r.currency || 'AED', minimumFractionDigits: 2 }).format(amt)}</Text>
+      render: (amt: number, r: InvoiceRecord) => <Text style={{ color: amt > 0 ? REDWOOD.error : REDWOOD.success }}>{fmt(amt, r.currency)}</Text>
     },
     {
       title: 'Status', dataIndex: 'invoiceStatus', key: 'invoiceStatus', width: 100,
-      render: (status: string) => <Tag>{status || '-'}</Tag>
+      render: (status: string) => {
+        const color = status === 'PAID' ? 'green' : status === 'CANCELLED' ? 'default' : status === 'HOLD' ? 'orange' : 'blue';
+        return <Tag color={color}>{status || '-'}</Tag>;
+      }
     },
     { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
     {
@@ -388,26 +410,67 @@ const InvoicesTabContent: React.FC<InvoicesTabContentProps> = ({
 
   return (
     <div>
-      <Row gutter={8} style={{ marginBottom: 12 }} align="middle">
+      {/* Totals row */}
+      {invoices.length > 0 && (
+        <Row gutter={12} style={{ marginBottom: 12 }}>
+          <Col span={6}>
+            <Card size="small" style={{ background: '#f0f5ff', borderColor: '#adc6ff' }}>
+              <Statistic title={<Text style={{ fontSize: 11 }}>Total Invoices</Text>} value={totals.count} valueStyle={{ fontSize: 16 }} />
+            </Card>
+          </Col>
+          <Col span={6}>
+            <Card size="small" style={{ background: '#f0f5ff', borderColor: '#adc6ff' }}>
+              <Statistic title={<Text style={{ fontSize: 11 }}>Invoice Amount</Text>} value={totals.amount} precision={2} suffix={totals.currency} valueStyle={{ fontSize: 15 }} />
+            </Card>
+          </Col>
+          <Col span={6}>
+            <Card size="small" style={{ background: '#f6ffed', borderColor: '#b7eb8f' }}>
+              <Statistic title={<Text style={{ fontSize: 11 }}>Total Paid</Text>} value={totals.paid} precision={2} suffix={totals.currency} valueStyle={{ fontSize: 15, color: REDWOOD.success }} />
+            </Card>
+          </Col>
+          <Col span={6}>
+            <Card size="small" style={{ background: totals.balance > 0 ? '#fff2f0' : '#f6ffed', borderColor: totals.balance > 0 ? '#ffccc7' : '#b7eb8f' }}>
+              <Statistic title={<Text style={{ fontSize: 11 }}>Outstanding Balance</Text>} value={totals.balance} precision={2} suffix={totals.currency} valueStyle={{ fontSize: 15, color: totals.balance > 0 ? REDWOOD.error : REDWOOD.success }} />
+            </Card>
+          </Col>
+        </Row>
+      )}
+
+      {/* Status filter + search toolbar */}
+      <Row gutter={8} style={{ marginBottom: 12 }} align="middle" justify="space-between">
         <Col>
-          <Input
-            placeholder="Search invoice #, description, status..."
-            prefix={<SearchOutlined />}
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            allowClear
-            size="small"
-            style={{ width: 280 }}
-          />
+          <Space>
+            {(['all', 'paid', 'unpaid'] as const).map(s => (
+              <Button
+                key={s}
+                size="small"
+                type={statusFilter === s ? 'primary' : 'default'}
+                onClick={() => setStatusFilter(s)}
+                style={statusFilter === s ? { background: s === 'paid' ? REDWOOD.success : s === 'unpaid' ? REDWOOD.error : REDWOOD.info } : {}}
+              >
+                {s === 'all' ? `All (${totals.count})` : s === 'paid' ? `Paid (${totals.paidCount})` : `Unpaid (${totals.unpaidCount})`}
+              </Button>
+            ))}
+          </Space>
         </Col>
         <Col>
           <Space>
-            <Text type="secondary" style={{ fontSize: 12 }}>{filtered.length}/{invoices.length} rows</Text>
+            <Input
+              placeholder="Search invoice #, description..."
+              prefix={<SearchOutlined />}
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              allowClear
+              size="small"
+              style={{ width: 240 }}
+            />
+            <Text type="secondary" style={{ fontSize: 12 }}>{filtered.length} rows</Text>
             <Button icon={<FileExcelOutlined />} size="small" style={{ color: '#1D7B4D', borderColor: '#1D7B4D' }} onClick={() => onExport(filtered)}>Excel</Button>
             <Button icon={<ReloadOutlined />} size="small" onClick={onRefresh} loading={invoicesLoading}>Refresh</Button>
           </Space>
         </Col>
       </Row>
+
       <Table
         columns={columns}
         dataSource={filtered}
@@ -918,7 +981,13 @@ const ManageSuppliers: React.FC = () => {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const data = await response.json();
+      const rawText = await response.text();
+      if (!rawText || !rawText.trim()) {
+        setSuppliers([]);
+        message.info('No suppliers found');
+        return;
+      }
+      const data = JSON.parse(rawText);
       console.log('API Response:', data);
 
       const items = data.items || data || [];
