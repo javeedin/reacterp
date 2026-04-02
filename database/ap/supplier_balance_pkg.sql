@@ -976,7 +976,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
         END IF;
 
         WHILE l_offset <= l_len LOOP
-            HTP.p(DBMS_LOB.SUBSTR(p_json, l_chunk, l_offset));
+            HTP.prn(DBMS_LOB.SUBSTR(p_json, l_chunk, l_offset));
             l_offset := l_offset + l_chunk;
         END LOOP;
     END output_response;
