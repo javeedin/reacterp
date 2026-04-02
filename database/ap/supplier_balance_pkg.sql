@@ -374,6 +374,24 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
     -- ========================================================================
     -- FUNCTION: Get Supplier Invoices
     -- ========================================================================
+    -- ── Private helper: number → valid JSON number string (no leading-dot) ──
+    FUNCTION jn_ap(p_val IN NUMBER) RETURN VARCHAR2 IS
+        v_str VARCHAR2(100);
+    BEGIN
+        IF p_val IS NULL THEN RETURN 'null'; END IF;
+        v_str := TO_CHAR(p_val, 'TM9');
+        IF v_str LIKE '.%'  THEN v_str := '0'  || v_str; END IF;
+        IF v_str LIKE '-.%' THEN v_str := '-0.' || SUBSTR(v_str, 3); END IF;
+        RETURN v_str;
+    END jn_ap;
+
+    -- ── Private helper: escape a string for JSON ─────────────────────────────
+    FUNCTION js(p_val IN VARCHAR2) RETURN VARCHAR2 IS
+    BEGIN
+        IF p_val IS NULL THEN RETURN 'null'; END IF;
+        RETURN '"' || REPLACE(REPLACE(REPLACE(p_val, '\', '\\'), '"', '\"'), CHR(10), '\n') || '"';
+    END js;
+
     FUNCTION get_supplier_invoices(
         p_supplier_number IN VARCHAR2,
         p_status          IN VARCHAR2 DEFAULT 'All',
@@ -385,22 +403,23 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
         l_total_count   NUMBER := 0;
         l_row_count     NUMBER := 0;
         l_first         BOOLEAN := TRUE;
+        -- Buffers sized generously to avoid ORA-06502 on long column values
         l_inv_id        NUMBER;
-        l_inv_num       VARCHAR2(100);
+        l_inv_num       VARCHAR2(500);
         l_inv_date      DATE;
         l_inv_amt       NUMBER;
         l_amt_paid      NUMBER;
         l_balance       NUMBER;
-        l_currency      VARCHAR2(15);
-        l_inv_type      VARCHAR2(50);
-        l_desc          VARCHAR2(240);
-        l_val_status    VARCHAR2(50);
-        l_appr_status   VARCHAR2(50);
-        l_paid_status   VARCHAR2(50);
-        l_acct_status   VARCHAR2(50);
-        l_pay_terms     VARCHAR2(50);
+        l_currency      VARCHAR2(30);
+        l_inv_type      VARCHAR2(100);
+        l_desc          VARCHAR2(4000);
+        l_val_status    VARCHAR2(100);
+        l_appr_status   VARCHAR2(100);
+        l_paid_status   VARCHAR2(100);
+        l_acct_status   VARCHAR2(100);
+        l_pay_terms     VARCHAR2(200);
         l_acct_date     DATE;
-        l_bu            VARCHAR2(240);
+        l_bu            VARCHAR2(500);
         l_rn            NUMBER;
 
         CURSOR c_invoices IS
@@ -409,12 +428,12 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
                     i.INVOICE_ID,
                     i.INVOICE_NUMBER,
                     i.INVOICE_DATE,
-                    NVL(i.INVOICE_AMOUNT, 0) AS INVOICE_AMOUNT,
-                    NVL(i.AMOUNT_PAID, 0) AS AMOUNT_PAID,
-                    NVL(i.INVOICE_AMOUNT, 0) - NVL(i.AMOUNT_PAID, 0) AS BALANCE_DUE,
+                    NVL(i.INVOICE_AMOUNT, 0)                             AS INVOICE_AMOUNT,
+                    NVL(i.AMOUNT_PAID, 0)                                AS AMOUNT_PAID,
+                    NVL(i.INVOICE_AMOUNT, 0) - NVL(i.AMOUNT_PAID, 0)    AS BALANCE_DUE,
                     i.INVOICE_CURRENCY,
                     i.INVOICE_TYPE,
-                    SUBSTR(i.DESCRIPTION, 1, 240) AS DESCRIPTION,
+                    SUBSTR(i.DESCRIPTION, 1, 4000)                       AS DESCRIPTION,
                     i.VALIDATION_STATUS,
                     i.APPROVAL_STATUS,
                     i.PAID_STATUS,
@@ -422,7 +441,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
                     i.PAYMENT_TERMS,
                     i.ACCOUNTING_DATE,
                     i.BUSINESS_UNIT,
-                    ROW_NUMBER() OVER (ORDER BY i.INVOICE_ID DESC) AS RN
+                    ROW_NUMBER() OVER (ORDER BY i.INVOICE_ID DESC)       AS RN
                 FROM RR_AP_INVOICES_ALL i
                 WHERE i.SUPPLIER_NUMBER = p_supplier_number
                 AND NVL(i.CANCELED_FLAG, 'N') != 'Y'
@@ -432,7 +451,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
             )
             WHERE RN > p_offset AND RN <= (p_offset + p_limit);
     BEGIN
-        -- Get total count
+        -- Total count (respects same status filter)
         BEGIN
             SELECT COUNT(*)
             INTO l_total_count
@@ -443,11 +462,10 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
                  OR (p_status = 'Paid' AND PAID_STATUS = 'Paid')
                  OR (p_status = 'Unpaid' AND NVL(PAID_STATUS, 'Unpaid') != 'Paid'));
         EXCEPTION
-            WHEN OTHERS THEN
-                l_total_count := 0;
+            WHEN OTHERS THEN l_total_count := 0;
         END;
 
-        -- Build invoices array using explicit cursor
+        -- Build invoices JSON array row by row (CLOB append avoids 32767 limit)
         OPEN c_invoices;
         LOOP
             FETCH c_invoices INTO l_inv_id, l_inv_num, l_inv_date, l_inv_amt, l_amt_paid,
@@ -457,52 +475,61 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
             EXIT WHEN c_invoices%NOTFOUND;
 
             IF NOT l_first THEN
-                l_invoices := l_invoices || ',';
+                DBMS_LOB.APPEND(l_invoices, TO_CLOB(','));
             END IF;
             l_first := FALSE;
 
-            -- Build JSON manually to avoid JSON_OBJECT issues
-            l_invoices := l_invoices || '{' ||
-                '"invoice_id": ' || NVL(TO_CHAR(l_inv_id), 'null') || ',' ||
-                '"invoice_number": ' || CASE WHEN l_inv_num IS NULL THEN 'null' ELSE '"' || REPLACE(l_inv_num, '"', '\"') || '"' END || ',' ||
-                '"invoice_date": ' || CASE WHEN l_inv_date IS NULL THEN 'null' ELSE '"' || TO_CHAR(l_inv_date, 'YYYY-MM-DD') || '"' END || ',' ||
-                '"invoice_amount": ' || NVL(TO_CHAR(l_inv_amt), '0') || ',' ||
-                '"amount_paid": ' || NVL(TO_CHAR(l_amt_paid), '0') || ',' ||
-                '"amount_remaining": ' || NVL(TO_CHAR(l_balance), '0') || ',' ||
-                '"currency": ' || CASE WHEN l_currency IS NULL THEN 'null' ELSE '"' || l_currency || '"' END || ',' ||
-                '"invoice_type": ' || CASE WHEN l_inv_type IS NULL THEN 'null' ELSE '"' || l_inv_type || '"' END || ',' ||
-                '"description": ' || CASE WHEN l_desc IS NULL THEN 'null' ELSE '"' || REPLACE(REPLACE(l_desc, '\', '\\'), '"', '\"') || '"' END || ',' ||
-                '"validation_status": ' || CASE WHEN l_val_status IS NULL THEN 'null' ELSE '"' || l_val_status || '"' END || ',' ||
-                '"approval_status": ' || CASE WHEN l_appr_status IS NULL THEN 'null' ELSE '"' || l_appr_status || '"' END || ',' ||
-                '"invoice_status": ' || CASE WHEN l_paid_status IS NULL THEN 'null' ELSE '"' || l_paid_status || '"' END || ',' ||
-                '"accounting_status": ' || CASE WHEN l_acct_status IS NULL THEN 'null' ELSE '"' || l_acct_status || '"' END || ',' ||
-                '"payment_terms": ' || CASE WHEN l_pay_terms IS NULL THEN 'null' ELSE '"' || l_pay_terms || '"' END || ',' ||
-                '"accounting_date": ' || CASE WHEN l_acct_date IS NULL THEN 'null' ELSE '"' || TO_CHAR(l_acct_date, 'YYYY-MM-DD') || '"' END || ',' ||
-                '"business_unit": ' || CASE WHEN l_bu IS NULL THEN 'null' ELSE '"' || REPLACE(l_bu, '"', '\"') || '"' END ||
-            '}';
+            -- jn_ap() for numbers prevents leading-dot invalid JSON (.695 → 0.695)
+            -- js() for strings handles backslash, quote and newline escaping
+            DBMS_LOB.APPEND(l_invoices, TO_CLOB(
+                '{"invoice_id": '        || jn_ap(l_inv_id)                          || ',' ||
+                '"invoice_number": '     || js(l_inv_num)                             || ',' ||
+                '"invoice_date": '       || CASE WHEN l_inv_date IS NULL THEN 'null'
+                                             ELSE '"' || TO_CHAR(l_inv_date, 'YYYY-MM-DD') || '"' END || ',' ||
+                '"invoice_amount": '     || jn_ap(l_inv_amt)                          || ',' ||
+                '"amount_paid": '        || jn_ap(l_amt_paid)                         || ',' ||
+                '"amount_remaining": '   || jn_ap(l_balance)                          || ',' ||
+                '"currency": '           || js(l_currency)                            || ',' ||
+                '"invoice_type": '       || js(l_inv_type)                            || ',' ||
+                '"description": '        || js(SUBSTR(l_desc, 1, 500))               || ',' ||
+                '"validation_status": '  || js(l_val_status)                          || ',' ||
+                '"approval_status": '    || js(l_appr_status)                         || ',' ||
+                '"invoice_status": '     || js(l_paid_status)                         || ',' ||
+                '"accounting_status": '  || js(l_acct_status)                         || ',' ||
+                '"payment_terms": '      || js(l_pay_terms)                           || ',' ||
+                '"accounting_date": '    || CASE WHEN l_acct_date IS NULL THEN 'null'
+                                             ELSE '"' || TO_CHAR(l_acct_date, 'YYYY-MM-DD') || '"' END || ',' ||
+                '"business_unit": '      || js(l_bu)                                  ||
+                '}'
+            ));
 
             l_row_count := l_row_count + 1;
         END LOOP;
         CLOSE c_invoices;
 
-        l_invoices := l_invoices || ']';
+        DBMS_LOB.APPEND(l_invoices, TO_CLOB(']'));
 
-        -- Build response
-        l_result := '{"success": "true", "supplier_number": "' || p_supplier_number ||
-                    '", "total_count": ' || NVL(l_total_count, 0) ||
-                    ', "limit": ' || NVL(p_limit, 100) ||
-                    ', "offset": ' || NVL(p_offset, 0) ||
-                    ', "has_more": ' || CASE WHEN (NVL(p_offset, 0) + NVL(p_limit, 100)) < NVL(l_total_count, 0) THEN 'true' ELSE 'false' END ||
-                    ', "invoices": ' || l_invoices || '}';
+        -- Wrap in response envelope (CLOB concat keeps type as CLOB throughout)
+        DBMS_LOB.CREATETEMPORARY(l_result, TRUE);
+        DBMS_LOB.APPEND(l_result, TO_CLOB(
+            '{"success":"true","supplier_number":"' || p_supplier_number ||
+            '","total_count":'  || l_total_count ||
+            ',"limit":'         || NVL(p_limit, 100) ||
+            ',"offset":'        || NVL(p_offset, 0) ||
+            ',"has_more":'      || CASE WHEN (NVL(p_offset,0) + NVL(p_limit,100)) < l_total_count
+                                        THEN 'true' ELSE 'false' END ||
+            ',"invoices":'
+        ));
+        DBMS_LOB.APPEND(l_result, l_invoices);
+        DBMS_LOB.APPEND(l_result, TO_CLOB('}'));
 
         RETURN l_result;
 
     EXCEPTION
         WHEN OTHERS THEN
-            IF c_invoices%ISOPEN THEN
-                CLOSE c_invoices;
-            END IF;
-            RETURN '{"success": "false", "error": "' || REPLACE(SQLERRM, '"', '\"') || '", "error_line": "' || DBMS_UTILITY.FORMAT_ERROR_BACKTRACE || '"}';
+            IF c_invoices%ISOPEN THEN CLOSE c_invoices; END IF;
+            RETURN '{"success":"false","error":' || js(SQLERRM) ||
+                   ',"error_line":"' || REPLACE(DBMS_UTILITY.FORMAT_ERROR_BACKTRACE, '"', '\"') || '"}';
     END get_supplier_invoices;
 
     -- ========================================================================
