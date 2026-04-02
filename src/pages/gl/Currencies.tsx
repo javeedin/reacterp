@@ -897,9 +897,9 @@ const DailyRatesTab: React.FC = () => {
         headers: body ? { 'Content-Type': 'application/json' } : {},
         body: body ? JSON.stringify(body) : undefined,
       });
-      const text = await res.text();
-      let pretty = text;
-      try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch (_) {}
+      const raw  = (await res.text()).replace(/:\s*(-?)\.(\d)/g, ': $10.$2');
+      let pretty = raw;
+      try { pretty = JSON.stringify(JSON.parse(raw), null, 2); } catch (_) {}
       setResult({ status: res.status, ok: res.ok, body: pretty, durationMs: Math.round(performance.now() - t0), running: false });
     } catch (e: any) {
       setResult({ status: 0, ok: false, body: e.message, durationMs: Math.round(performance.now() - t0), running: false });
@@ -1049,7 +1049,9 @@ const DailyRatesTab: React.FC = () => {
 
       const res = await fetch(`${ORDS_BASE}/currencies/dailyrates?${params.toString()}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
+      // Oracle can emit leading-dot numbers (.695) which are invalid JSON — patch before parsing
+      const raw = (await res.text()).replace(/:\s*(-?)\.(\d)/g, ': $10.$2');
+      const json = JSON.parse(raw);
       const items: any[] = json.items ?? json.data ?? (Array.isArray(json) ? json : []);
       setData(items.map(r => ({
         rateId:       r.rateId       ?? r.rate_id       ?? r.RATE_ID,

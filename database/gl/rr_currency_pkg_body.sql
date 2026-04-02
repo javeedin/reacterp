@@ -18,9 +18,14 @@ CREATE OR REPLACE PACKAGE BODY RR_CURRENCY_PKG AS
     END js;
 
     FUNCTION jn(p_val IN NUMBER) RETURN VARCHAR2 IS
+        v_str VARCHAR2(100);
     BEGIN
         IF p_val IS NULL THEN RETURN 'null'; END IF;
-        RETURN TO_CHAR(p_val);
+        v_str := TO_CHAR(p_val, 'TM9');          -- minimal text, no trailing zeros
+        -- JSON requires leading zero: .695 → 0.695, -.695 → -0.695
+        IF v_str LIKE '.%'  THEN v_str := '0'  || v_str; END IF;
+        IF v_str LIKE '-.%' THEN v_str := '-0.' || SUBSTR(v_str, 3); END IF;
+        RETURN v_str;
     END jn;
 
     FUNCTION jd(p_val IN DATE) RETURN VARCHAR2 IS
@@ -378,8 +383,8 @@ CREATE OR REPLACE PACKAGE BODY RR_CURRENCY_PKG AS
              || '"toCurrency":'    || js(r.TO_CURRENCY)   || ','
              || '"rateDate":'      || js(r.RATE_DATE)     || ','
              || '"rateType":'      || js(r.RATE_TYPE)     || ','
-             || '"rate":'          || r.RATE              || ','
-             || '"inverseRate":'   || NVL(TO_CHAR(r.INVERSE_RATE), 'null') || ','
+             || '"rate":'          || jn(r.RATE)          || ','
+             || '"inverseRate":'   || jn(r.INVERSE_RATE)  || ','
              || '"source":'        || js(r.SOURCE)        || ','
              || '"createdAt":'     || js(r.CREATED_AT)    || ','
              || '"createdBy":'     || js(r.CREATED_BY)    || '}'
