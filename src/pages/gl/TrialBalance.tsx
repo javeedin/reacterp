@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   Layout,
   Card,
@@ -18,6 +18,8 @@ import {
   Statistic,
   Empty,
   Modal,
+  Input,
+  message,
 } from 'antd';
 import {
   HomeOutlined,
@@ -32,10 +34,18 @@ import {
   CalendarOutlined,
   DragOutlined,
   ExpandAltOutlined,
+  ApiOutlined,
+  FileExcelOutlined,
+  SearchOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  LoadingOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import { Divider } from 'antd';
+import * as XLSX from 'xlsx';
+import { saveAs } from 'file-saver';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -124,6 +134,18 @@ interface TabData {
   selectedCurrency: string | null;
   segmentsBefore: string[];
   segmentsAfter: string[];
+  gridSearch: string;
+}
+
+interface ApiCallInfo {
+  label: string;
+  url: string;
+  method: string;
+  status: number | null;
+  ok: boolean | null;
+  durationMs: number | null;
+  running: boolean;
+  body: string;
 }
 
 interface PivotRow {
@@ -154,6 +176,13 @@ const TrialBalance: React.FC = () => {
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [detailModalData, setDetailModalData] = useState<{ account: string; account_desc: string; rows: GLBalanceRecord[] } | null>(null);
 
+  // API panel state
+  const [apiPanelVisible, setApiPanelVisible] = useState(false);
+  const [apiCalls, setApiCalls] = useState<Record<string, ApiCallInfo>>({
+    periods:      { label: 'Periods', url: '', method: 'GET', status: null, ok: null, durationMs: null, running: false, body: '' },
+    trialBalance: { label: 'Trial Balance', url: '', method: 'GET', status: null, ok: null, durationMs: null, running: false, body: '' },
+  });
+
   // Get unique years from periods
   const availableYears = useMemo(() => {
     const years = [...new Set(periods.map(p => p.period_year))].sort((a, b) => b - a);
@@ -166,6 +195,32 @@ const TrialBalance: React.FC = () => {
     return periods.filter(p => p.period_year === selectedYear);
   }, [periods, selectedYear]);
 
+  // Track an API call for the panel
+  const trackCall = (key: string, label: string, url: string) => {
+    setApiCalls(prev => ({ ...prev, [key]: { ...prev[key], label, url, method: 'GET', status: null, ok: null, durationMs: null, running: true, body: '' } }));
+    return performance.now();
+  };
+  const resolveCall = (key: string, t0: number, status: number, ok: boolean, body: string) => {
+    setApiCalls(prev => ({ ...prev, [key]: { ...prev[key], status, ok, durationMs: Math.round(performance.now() - t0), running: false, body } }));
+  };
+
+  // Test an API endpoint directly from the panel
+  const testEndpoint = async (key: string) => {
+    const call = apiCalls[key];
+    if (!call.url) { message.warning('Load a period first to capture the URL'); return; }
+    setApiCalls(prev => ({ ...prev, [key]: { ...prev[key], status: null, ok: null, body: '', running: true } }));
+    const t0 = performance.now();
+    try {
+      const res = await fetch(call.url);
+      const text = await res.text();
+      let pretty = text;
+      try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch (_) {}
+      setApiCalls(prev => ({ ...prev, [key]: { ...prev[key], status: res.status, ok: res.ok, durationMs: Math.round(performance.now() - t0), running: false, body: pretty.slice(0, 2000) } }));
+    } catch (e: any) {
+      setApiCalls(prev => ({ ...prev, [key]: { ...prev[key], status: 0, ok: false, durationMs: Math.round(performance.now() - t0), running: false, body: e.message } }));
+    }
+  };
+
   // Fetch periods list from APEX periods status endpoint
   const fetchPeriods = useCallback(async () => {
     setLoadingPeriods(true);
@@ -177,13 +232,17 @@ const TrialBalance: React.FC = () => {
         'P_LEDGER_NAME': 'BUIMERC LEDGER',
       });
       const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.periodsStatus}?${params}`;
+      const t0 = trackCall('periods', 'GET Periods', url);
       const response = await fetch(url);
 
       if (!response.ok) {
+        resolveCall('periods', t0, response.status, false, response.statusText);
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      const data = await response.json();
+      const text = await response.text();
+      resolveCall('periods', t0, response.status, true, `${JSON.parse(text)?.items?.length ?? '?'} periods returned`);
+      const data = JSON.parse(text);
       const items: PeriodInfo[] = data.items || [];
 
       // Sort by year desc, then by period_number desc
@@ -232,6 +291,7 @@ const TrialBalance: React.FC = () => {
       selectedCurrency: null,
       segmentsBefore: [],
       segmentsAfter: [],
+      gridSearch: '',
     };
 
     setTabs(prev => [...prev, newTab]);
@@ -239,18 +299,22 @@ const TrialBalance: React.FC = () => {
 
     try {
       const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.glBalances}?p_period_name=${encodeURIComponent(periodName)}`;
+      const t0 = trackCall('trialBalance', `GET Trial Balance — ${periodName}`, url);
       const response = await fetch(url);
 
       if (!response.ok) {
+        resolveCall('trialBalance', t0, response.status, false, response.statusText);
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      const data = await response.json();
+      const text = await response.text();
+      const data = JSON.parse(text);
       const items: GLBalanceRecord[] = data.items || [];
+      resolveCall('trialBalance', t0, response.status, true, `${items.length} rows returned`);
 
-      // Extract unique companies and currencies
-      const companies = [...new Set(items.map(i => i.company))].sort();
-      const currencies = [...new Set(items.map(i => i.currency))].sort();
+      // Extract unique companies and currencies from actual JSON result
+      const companies = [...new Set(items.map(i => i.company).filter(Boolean))].sort();
+      const currencies = [...new Set(items.map(i => i.currency || i.currency_code).filter(Boolean))].sort() as string[];
 
       setTabs(prev => prev.map(t =>
         t.key === tabKey
@@ -282,6 +346,10 @@ const TrialBalance: React.FC = () => {
         ? { ...t, [field]: value }
         : t
     ));
+  }, []);
+
+  const updateTabSearch = useCallback((tabKey: string, search: string) => {
+    setTabs(prev => prev.map(t => t.key === tabKey ? { ...t, gridSearch: search } : t));
   }, []);
 
   // Handle segment drop
@@ -551,17 +619,50 @@ const TrialBalance: React.FC = () => {
     </Card>
   );
 
+  // Export current tab data to Excel
+  const exportTabToExcel = (tab: TabData, pivotData: PivotRow[]) => {
+    if (!pivotData.length) { message.warning('No data to export'); return; }
+    const exportRows = pivotData.map(r => ({
+      'Account':         r.account,
+      'Description':     r.account_desc,
+      ...tab.segmentsBefore.reduce((acc, s) => ({ ...acc, [getSegmentLabel(s)]: r[s] }), {}),
+      ...tab.segmentsAfter.reduce((acc, s) => ({ ...acc, [getSegmentLabel(s)]: r[s] }), {}),
+      'Opening Balance': r.opening_balance,
+      'Debit':           r.debit,
+      'Credit':          r.credit,
+      'Closing Balance': r.closing_balance,
+    }));
+    const ws = XLSX.utils.json_to_sheet(exportRows);
+    ws['!cols'] = [{ wch: 16 }, { wch: 40 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 16 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, `TB-${tab.periodName}`);
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `TrialBalance_${tab.periodName}.xlsx`);
+    message.success('Exported to Excel');
+  };
+
   // Render trial balance tab content
   const renderTBTab = (tab: TabData) => {
     // Filter data based on selected filters
     const filteredData = tab.data.filter(item => {
       if (tab.selectedCompany && item.company !== tab.selectedCompany) return false;
-      if (tab.selectedCurrency && item.currency !== tab.selectedCurrency) return false;
+      if (tab.selectedCurrency && (item.currency || item.currency_code) !== tab.selectedCurrency) return false;
       return true;
     });
 
     // Generate pivot data
-    const pivotData = generatePivotData(filteredData, tab.segmentsBefore, tab.segmentsAfter);
+    let pivotData = generatePivotData(filteredData, tab.segmentsBefore, tab.segmentsAfter);
+
+    // Grid search filter
+    if (tab.gridSearch.trim()) {
+      const lc = tab.gridSearch.toLowerCase();
+      pivotData = pivotData.filter(r =>
+        r.account.toLowerCase().includes(lc) ||
+        (r.account_desc as string)?.toLowerCase().includes(lc) ||
+        tab.segmentsBefore.some(s => String(r[s]).toLowerCase().includes(lc)) ||
+        tab.segmentsAfter.some(s => String(r[s]).toLowerCase().includes(lc))
+      );
+    }
 
     // Calculate totals from pivot data
     const totals = pivotData.reduce(
@@ -712,41 +813,64 @@ const TrialBalance: React.FC = () => {
         }}
       >
         {/* Filters */}
-        <Row gutter={16} style={{ marginBottom: 12 }}>
-          <Col span={6}>
+        <Row gutter={[8, 8]} style={{ marginBottom: 12 }} align="middle">
+          <Col xs={24} sm={6}>
             <Select
-              placeholder="Filter by Company"
+              placeholder="All Companies"
               value={tab.selectedCompany}
               onChange={(value) => updateTabFilter(tab.key, 'selectedCompany', value)}
               allowClear
               style={{ width: '100%' }}
+              showSearch
             >
               {tab.companies.map(company => (
                 <Select.Option key={company} value={company}>
-                  <BankOutlined style={{ marginRight: 8 }} />
-                  Company {company}
+                  <BankOutlined style={{ marginRight: 6, color: REDWOOD.info }} />
+                  {company}
                 </Select.Option>
               ))}
             </Select>
           </Col>
-          <Col span={6}>
+          <Col xs={24} sm={5}>
             <Select
-              placeholder="Filter by Currency"
+              placeholder="All Currencies"
               value={tab.selectedCurrency}
               onChange={(value) => updateTabFilter(tab.key, 'selectedCurrency', value)}
               allowClear
               style={{ width: '100%' }}
+              showSearch
             >
               {tab.currencies.map(currency => (
                 <Select.Option key={currency} value={currency}>
-                  <DollarOutlined style={{ marginRight: 8 }} />
+                  <DollarOutlined style={{ marginRight: 6, color: REDWOOD.success }} />
                   {currency}
                 </Select.Option>
               ))}
             </Select>
           </Col>
-          <Col span={12} style={{ textAlign: 'right' }}>
-            <Text type="secondary">{pivotData.length} rows</Text>
+          <Col xs={24} sm={7}>
+            <Input
+              placeholder="Search account, description..."
+              prefix={<SearchOutlined style={{ color: REDWOOD.textSecondary }} />}
+              value={tab.gridSearch}
+              onChange={e => updateTabSearch(tab.key, e.target.value)}
+              allowClear
+            />
+          </Col>
+          <Col xs={24} sm={6} style={{ textAlign: 'right' }}>
+            <Space>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {pivotData.length} / {generatePivotData(filteredData, tab.segmentsBefore, tab.segmentsAfter).length} rows
+              </Text>
+              <Button
+                icon={<FileExcelOutlined />}
+                size="small"
+                onClick={() => exportTabToExcel(tab, pivotData)}
+                style={{ borderColor: REDWOOD.success, color: REDWOOD.success }}
+              >
+                Excel
+              </Button>
+            </Space>
           </Col>
         </Row>
 
@@ -897,18 +1021,13 @@ const TrialBalance: React.FC = () => {
           <Tag style={{ fontSize: 11, margin: 0 }} color="default">Closing</Tag>
         </div>
 
-        {/* Table */}
+        {/* Table — all rows, no pagination */}
         <Table
           columns={dynamicColumns}
           dataSource={pivotData}
           rowKey="key"
-          pagination={{
-            pageSize: 50,
-            showSizeChanger: true,
-            pageSizeOptions: ['25', '50', '100', '200'],
-            showTotal: (total) => `${total} rows`,
-          }}
-          scroll={{ x: 1000 }}
+          pagination={false}
+          scroll={{ x: 1000, y: 520 }}
           size="small"
           style={{ borderRadius: 8 }}
           summary={() => (
@@ -995,7 +1114,64 @@ const TrialBalance: React.FC = () => {
                 View and analyze trial balance by period with company and currency filters
               </Text>
             </Col>
+            <Col>
+              <Button
+                icon={<ApiOutlined />}
+                type={apiPanelVisible ? 'primary' : 'default'}
+                style={apiPanelVisible
+                  ? { background: REDWOOD.info, borderColor: REDWOOD.info }
+                  : { borderColor: REDWOOD.info, color: REDWOOD.info }
+                }
+                onClick={() => setApiPanelVisible(v => !v)}
+              >
+                API
+              </Button>
+            </Col>
           </Row>
+
+          {/* API Panel */}
+          {apiPanelVisible && (
+            <Card
+              size="small"
+              style={{ marginTop: 12, background: '#f5f8ff', border: `1px solid ${REDWOOD.info}`, borderRadius: 8 }}
+              title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><Text strong style={{ color: REDWOOD.info }}>API Endpoints — Trial Balance</Text></Space>}
+            >
+              {Object.entries(apiCalls).map(([key, call]) => (
+                <div key={key} style={{ marginBottom: 12 }}>
+                  <Space align="start" wrap>
+                    <Tag color="green" style={{ fontFamily: 'monospace' }}>GET</Tag>
+                    <Text strong style={{ fontSize: 12 }}>{call.label}</Text>
+                    <Button
+                      size="small"
+                      icon={call.running ? <LoadingOutlined /> : <ApiOutlined />}
+                      onClick={() => testEndpoint(key)}
+                      disabled={call.running || !call.url}
+                    >
+                      Test
+                    </Button>
+                    {call.status !== null && (
+                      <Tag
+                        color={call.ok ? 'success' : 'error'}
+                        icon={call.ok ? <CheckCircleOutlined /> : <CloseCircleOutlined />}
+                      >
+                        {call.status} · {call.durationMs}ms
+                      </Tag>
+                    )}
+                  </Space>
+                  {call.url && (
+                    <div style={{ marginTop: 2 }}>
+                      <Text code style={{ fontSize: 11, wordBreak: 'break-all' }}>{call.url}</Text>
+                    </div>
+                  )}
+                  {call.body && (
+                    <pre style={{ fontSize: 11, background: '#fff', border: '1px solid #e5e5e5', padding: 6, borderRadius: 4, maxHeight: 120, overflow: 'auto', marginTop: 4 }}>
+                      {call.body}
+                    </pre>
+                  )}
+                </div>
+              ))}
+            </Card>
+          )}
         </div>
 
         {/* Main Content - Tabs */}
