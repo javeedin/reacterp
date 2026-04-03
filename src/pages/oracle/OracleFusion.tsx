@@ -45,108 +45,159 @@ const INJECT_SCRIPT = `
   window.__reactErpTracking = true;
   window.__reactErpSteps = window.__reactErpSteps || [];
 
-  // Find best label for an element
-  function getLabel(el) {
-    // 1. Explicit <label for="id">
-    if (el.id) {
-      var lbl = document.querySelector('label[for="' + el.id + '"]');
-      if (lbl) return lbl.textContent.trim().replace(/:$/, '');
-    }
-    // 2. aria-label / aria-labelledby
-    var al = el.getAttribute('aria-label');
-    if (al) return al.trim();
+  // ── Label resolution ──────────────────────────────────────────────────────
+  function getDirectLabel(el) {
+    if (!el || !el.getAttribute) return '';
+    // aria-label is most reliable
+    var al = el.getAttribute('aria-label'); if (al) return al.trim();
+    // aria-labelledby
     var alby = el.getAttribute('aria-labelledby');
     if (alby) {
-      var lblEl = document.getElementById(alby);
-      if (lblEl) return lblEl.textContent.trim();
-    }
-    // 3. title / placeholder / name
-    return el.getAttribute('title') || el.getAttribute('placeholder') || el.name || '';
-  }
-
-  // Walk up to find a meaningful parent label (Oracle Fusion uses wrapper divs)
-  function findNearbyLabel(el) {
-    var lbl = getLabel(el);
-    if (lbl) return lbl;
-    var parent = el.parentElement;
-    for (var i = 0; i < 4 && parent; i++) {
-      var labels = parent.querySelectorAll('label,span[class*="label"],div[class*="label"]');
-      for (var j = 0; j < labels.length; j++) {
-        var t = labels[j].textContent.trim().replace(/:$/, '');
-        if (t && t.length < 60) return t;
+      var parts = alby.split(' ');
+      var texts = [];
+      for (var k = 0; k < parts.length; k++) {
+        var ref = document.getElementById(parts[k]);
+        if (ref) texts.push(ref.textContent.trim());
       }
-      parent = parent.parentElement;
+      if (texts.length) return texts.join(' ');
     }
-    return el.getAttribute('class') ? '' : (el.textContent || '').trim().slice(0, 50);
+    // explicit <label for="id">
+    if (el.id) {
+      var lbl = document.querySelector('label[for="' + el.id + '"]');
+      if (lbl) return lbl.textContent.trim().replace(/:$/, '').trim();
+    }
+    // title / placeholder / name
+    return (el.getAttribute('title') || el.getAttribute('placeholder') || el.name || '').trim();
   }
 
+  function findLabel(el) {
+    var direct = getDirectLabel(el);
+    if (direct) return direct;
+
+    // Walk up DOM — Oracle ADF puts label in adjacent cell (previousElementSibling)
+    var node = el.parentElement;
+    for (var i = 0; i < 8 && node; i++) {
+      // Check previous sibling for label text (ADF panel form layout)
+      var prev = node.previousElementSibling;
+      if (prev) {
+        var lblEl = prev.querySelector('label') || prev.querySelector('[role="label"]');
+        if (lblEl) {
+          var t = lblEl.textContent.trim().replace(/:$/, '').trim();
+          if (t && t.length < 80) return t;
+        }
+        // Sometimes the sibling itself is the label cell
+        var pt = prev.textContent.trim().replace(/:$/, '').trim();
+        if (pt && pt.length < 60 && !pt.includes('\\n') && !/^[0-9,.$%]+$/.test(pt)) return pt;
+      }
+      // <label> anywhere in current ancestor
+      var labels = node.querySelectorAll('label');
+      for (var j = 0; j < labels.length; j++) {
+        var lt = labels[j].textContent.trim().replace(/:$/, '').trim();
+        if (lt && lt.length < 80) return lt;
+      }
+      node = node.parentElement;
+    }
+    return '';
+  }
+
+  // ── Field info extraction ─────────────────────────────────────────────────
   function getFieldInfo(el) {
-    var tag = el.tagName ? el.tagName.toLowerCase() : 'element';
+    if (!el || !el.tagName) return null;
+    var tag  = el.tagName.toLowerCase();
     var type = (el.getAttribute('type') || '').toLowerCase();
+    var role = (el.getAttribute('role') || '').toLowerCase();
     var fieldName, action, value;
 
     if (tag === 'select') {
-      fieldName = findNearbyLabel(el) || 'Dropdown';
-      action = 'Select';
-      value = el.options && el.selectedIndex >= 0 ? (el.options[el.selectedIndex].text || el.value) : el.value;
+      fieldName = findLabel(el) || 'Dropdown';
+      action    = 'Select';
+      value     = el.options && el.selectedIndex >= 0 ? (el.options[el.selectedIndex].text || el.value) : el.value;
     } else if (type === 'checkbox') {
-      fieldName = findNearbyLabel(el) || 'Checkbox';
-      action = el.checked ? 'Check' : 'Uncheck';
-      value = el.checked ? 'Yes' : 'No';
+      fieldName = findLabel(el) || 'Checkbox';
+      action    = el.checked ? 'Check' : 'Uncheck';
+      value     = el.checked ? 'Yes' : 'No';
     } else if (type === 'radio') {
-      fieldName = findNearbyLabel(el) || 'Radio';
-      action = 'Select';
-      value = el.value || (el.checked ? 'Yes' : 'No');
-    } else if (tag === 'input' || tag === 'textarea') {
-      fieldName = findNearbyLabel(el) || el.placeholder || 'Input field';
-      action = 'Enter';
-      value = (el.value || '').slice(0, 80);
+      fieldName = findLabel(el) || 'Radio';
+      action    = 'Select';
+      value     = el.value || '';
+    } else if (tag === 'input' || tag === 'textarea' || role === 'textbox' || role === 'combobox' || role === 'spinbutton') {
+      fieldName = findLabel(el) || el.getAttribute('placeholder') || 'Field';
+      action    = 'Enter';
+      value     = (el.value || el.textContent || '').trim().slice(0, 100);
     } else if (tag === 'button' || type === 'button' || type === 'submit') {
-      var btnText = (el.innerText || el.textContent || '').trim().slice(0, 60);
-      fieldName = btnText || el.getAttribute('aria-label') || 'Button';
-      action = 'Click';
-      value = fieldName;
+      var btnText = (el.innerText || el.textContent || '').trim().slice(0, 80);
+      fieldName   = el.getAttribute('aria-label') || btnText || 'Button';
+      action      = 'Click';
+      value       = fieldName;
     } else if (tag === 'a') {
-      var linkText = (el.innerText || el.textContent || '').trim().slice(0, 60);
-      fieldName = linkText || el.getAttribute('aria-label') || 'Link';
-      action = 'Click';
-      value = fieldName;
+      var linkText = (el.innerText || el.textContent || '').trim().slice(0, 80);
+      fieldName    = el.getAttribute('aria-label') || linkText || el.getAttribute('title') || 'Link';
+      action       = 'Click';
+      value        = fieldName;
     } else {
-      var elText = (el.innerText || el.textContent || '').trim().slice(0, 60);
-      fieldName = el.getAttribute('aria-label') || elText || tag;
-      action = 'Click';
-      value = elText || '';
+      // Generic — get the most meaningful visible text
+      var elText = (el.getAttribute('aria-label') || el.getAttribute('title') ||
+                   (el.innerText || el.textContent || '').trim()).slice(0, 80);
+      if (!elText || elText.length < 2) return null; // skip meaningless elements
+      fieldName = elText;
+      action    = 'Click';
+      value     = elText;
     }
     return { fieldName: fieldName, action: action, value: value };
   }
 
+  // ── Click listener — skip plain input/textarea/select (captured via change) ─
   document.addEventListener('click', function(e) {
     var el = e.target;
+    if (!el || !el.tagName) return;
+    var tag  = el.tagName.toLowerCase();
+    var type = (el.getAttribute('type') || '').toLowerCase();
+    var role = (el.getAttribute('role') || '').toLowerCase();
+
+    // Skip focusable field elements — their data entry is captured via 'change'
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+    if (role === 'textbox' || role === 'combobox' || role === 'spinbutton') return;
+    if (type === 'text' || type === 'number' || type === 'date' || type === 'email') return;
+
     var info = getFieldInfo(el);
+    if (!info) return;
     window.__reactErpSteps.push({
-      type: 'click',
-      fieldName: info.fieldName,
-      action: info.action,
-      value: info.value,
+      type: 'click', fieldName: info.fieldName, action: info.action, value: info.value,
       description: info.action + ': ' + info.fieldName,
-      url: location.href,
-      pageTitle: document.title,
-      timestamp: Date.now()
+      url: location.href, pageTitle: document.title, timestamp: Date.now()
     });
   }, true);
 
+  // ── Change listener — fires when field value is committed ─────────────────
   document.addEventListener('change', function(e) {
     var el = e.target;
     var info = getFieldInfo(el);
+    if (!info) return;
     window.__reactErpSteps.push({
-      type: 'input',
-      fieldName: info.fieldName,
-      action: info.action,
-      value: info.value,
+      type: 'input', fieldName: info.fieldName, action: info.action, value: info.value,
       description: info.action + ' "' + info.value + '" in: ' + info.fieldName,
-      url: location.href,
-      pageTitle: document.title,
-      timestamp: Date.now()
+      url: location.href, pageTitle: document.title, timestamp: Date.now()
+    });
+  }, true);
+
+  // Also capture blur on text inputs (ADF doesn't always fire 'change')
+  document.addEventListener('blur', function(e) {
+    var el = e.target;
+    if (!el || !el.tagName) return;
+    var tag  = el.tagName.toLowerCase();
+    var role = (el.getAttribute('role') || '').toLowerCase();
+    if (tag !== 'input' && tag !== 'textarea' && role !== 'textbox' && role !== 'combobox') return;
+    var val = (el.value || el.textContent || '').trim();
+    if (!val) return;
+    var info = getFieldInfo(el);
+    if (!info || !info.fieldName) return;
+    // Avoid double-capture if 'change' already pushed this
+    var last = window.__reactErpSteps[window.__reactErpSteps.length - 1];
+    if (last && last.fieldName === info.fieldName && last.value === val) return;
+    window.__reactErpSteps.push({
+      type: 'input', fieldName: info.fieldName, action: 'Enter', value: val,
+      description: 'Enter "' + val + '" in: ' + info.fieldName,
+      url: location.href, pageTitle: document.title, timestamp: Date.now()
     });
   }, true);
 
@@ -388,8 +439,11 @@ const OracleFusion: React.FC = () => {
   const [showPanel, setShowPanel] = useState(false);
   const trackingRef = useRef(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const screenshotIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Tracks the pageTitle of the screen currently being interacted with
   const currentPageTitleRef = useRef<string>('');
+  // Rolling screenshot updated every 2s while tracking — applied to steps on navigate away
+  const lastScreenshotRef = useRef<string>('');
 
   // --- Saved credentials ---
   const [credsModalOpen, setCredsModalOpen] = useState(false);
@@ -498,6 +552,7 @@ const OracleFusion: React.FC = () => {
   useEffect(() => () => {
     if (timerRef.current) clearInterval(timerRef.current);
     if (pollRef.current) clearInterval(pollRef.current);
+    if (screenshotIntervalRef.current) clearInterval(screenshotIntervalRef.current);
     streamRef.current?.getTracks().forEach(t => t.stop());
   }, []);
 
@@ -524,25 +579,84 @@ const OracleFusion: React.FC = () => {
     setSteps([]);
     setShowPanel(true);
     trackingRef.current = true;
+    lastScreenshotRef.current = '';
+    // Seed current page title
+    try { currentPageTitleRef.current = await wv.executeJavaScript('document.title'); } catch (_) {}
     await injectTracking(wv);
 
-    // Poll webview every 800ms for accumulated steps.
-    // NO screenshot per step — screenshots are only taken on navigation events.
+    // ── Rolling screenshot every 2s (shows filled-in state of current screen) ──
+    screenshotIntervalRef.current = setInterval(async () => {
+      if (!trackingRef.current) return;
+      try {
+        const shot = await wv.capturePage();
+        const url = shot?.resize?.({ width: 960 })?.toDataURL?.() || shot?.toDataURL?.() || '';
+        if (url) lastScreenshotRef.current = url;
+      } catch (_) {}
+    }, 2000);
+
+    // ── Poll every 800ms: collect steps + detect SPA navigation by title change ──
     pollRef.current = setInterval(async () => {
       if (!trackingRef.current) return;
       try {
-        const newSteps: any[] = await wv.executeJavaScript('(window.__reactErpSteps||[]).splice(0)');
-        if (newSteps?.length) {
-          const enriched: Step[] = newSteps.map((s: any) => ({
+        const pollData = await wv.executeJavaScript(
+          '({steps:(window.__reactErpSteps||[]).splice(0), title:document.title, url:location.href})'
+        );
+        const { steps: rawSteps, title: liveTitle, url: liveUrl } = pollData as any;
+
+        // ── SPA navigation detected (Oracle Fusion ADF navigates without full reload) ──
+        if (liveTitle && liveTitle !== currentPageTitleRef.current) {
+          const oldTitle = currentPageTitleRef.current;
+          const navId = Date.now() + Math.random() + '';
+
+          // 1. Apply last rolling screenshot to all steps from the OLD screen (filled state)
+          if (lastScreenshotRef.current && oldTitle) {
+            const snap = lastScreenshotRef.current;
+            setSteps(prev => prev.map(s =>
+              !s.screenshot && s.pageTitle === oldTitle ? { ...s, screenshot: snap } : s
+            ));
+          }
+
+          currentPageTitleRef.current = liveTitle;
+          lastScreenshotRef.current = '';
+
+          // 2. Add navigate step
+          setSteps(prev => [...prev, {
+            id: navId,
+            type: 'navigate' as const,
+            fieldName: liveTitle,
+            action: 'Navigate',
+            value: '',
+            description: `Navigate to: ${liveTitle}`,
+            url: liveUrl,
+            pageTitle: liveTitle,
+            timestamp: Date.now(),
+          }]);
+
+          // 3. Re-inject tracker into new SPA page
+          await injectTracking(wv);
+
+          // 4. Capture screenshot of new screen once settled (1s)
+          setTimeout(async () => {
+            try {
+              const shot = await wv.capturePage();
+              const dataUrl = shot?.resize?.({ width: 960 })?.toDataURL?.() || shot?.toDataURL?.() || '';
+              if (dataUrl) {
+                lastScreenshotRef.current = dataUrl;
+                setSteps(prev => prev.map(s => s.id === navId ? { ...s, screenshot: dataUrl } : s));
+              }
+            } catch (_) {}
+          }, 1000);
+        }
+
+        // ── Collect field/click steps ──
+        if (rawSteps?.length) {
+          const enriched: Step[] = rawSteps.map((s: any) => ({
             fieldName: s.fieldName || s.description || '',
             action: s.action || s.type || '',
             value: s.value || '',
             ...s,
             id: Date.now() + Math.random() + '',
           }));
-          // Keep currentPageTitleRef up to date with the latest step's pageTitle
-          const lastTitle = enriched[enriched.length - 1].pageTitle;
-          if (lastTitle) currentPageTitleRef.current = lastTitle;
           setSteps(prev => [...prev, ...enriched]);
         }
       } catch (_) {}
@@ -551,10 +665,19 @@ const OracleFusion: React.FC = () => {
     message.success('Step tracking started — perform your Oracle Fusion workflow');
   };
 
-  const stopTracking = () => {
+  const stopTracking = async () => {
     setTracking(false);
     trackingRef.current = false;
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    if (screenshotIntervalRef.current) { clearInterval(screenshotIntervalRef.current); screenshotIntervalRef.current = null; }
+    // Apply last rolling screenshot to any steps still missing one
+    if (lastScreenshotRef.current) {
+      const snap = lastScreenshotRef.current;
+      const title = currentPageTitleRef.current;
+      setSteps(prev => prev.map(s =>
+        !s.screenshot && s.pageTitle === title ? { ...s, screenshot: snap } : s
+      ));
+    }
     message.info(`Tracking stopped — ${steps.length} steps captured`);
   };
 
@@ -713,6 +836,7 @@ const OracleFusion: React.FC = () => {
   };
 
   return (
+    <>
     <Layout style={{ height: 'calc(100vh - 64px)', display: 'flex', flexDirection: 'column', background: '#1a1a2e', overflow: 'hidden' }}>
       <style>{`
         @keyframes pulse-rec { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.35;transform:scale(1.35)} }
@@ -974,6 +1098,7 @@ const OracleFusion: React.FC = () => {
         )}
       </Form>
     </Modal>
+    </>
   );
 };
 
