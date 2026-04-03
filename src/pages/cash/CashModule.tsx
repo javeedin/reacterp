@@ -2,7 +2,7 @@ import React from 'react';
 import { Layout, Breadcrumb, Typography, Card, Row, Col } from 'antd';
 import {
   HomeOutlined, BankOutlined, SwapOutlined, ReconciliationOutlined,
-  BarChartOutlined, FileTextOutlined, SettingOutlined,
+  BarChartOutlined, FileTextOutlined, SettingOutlined, CheckCircleOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -42,15 +42,27 @@ const reportItems: MenuItemType[] = [
 
 const TaskCard: React.FC<{ item: MenuItemType; onClick: () => void }> = ({ item, onClick }) => (
   <Card
-    hoverable
+    hoverable={!!item.path}
     onClick={onClick}
     style={{
-      borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`,
+      borderRadius: 8,
+      border: item.path ? `1px solid ${REDWOOD.success}30` : `1px solid ${REDWOOD.neutral200}`,
       cursor: item.path ? 'pointer' : 'default',
       opacity: item.path ? 1 : 0.6,
+      position: 'relative',
     }}
     styles={{ body: { padding: '14px 16px' } }}
   >
+    {item.path && (
+      <div style={{
+        position: 'absolute', top: 6, right: 6,
+        background: REDWOOD.success, color: '#fff',
+        borderRadius: '50%', width: 16, height: 16,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <CheckCircleOutlined style={{ fontSize: 10 }} />
+      </div>
+    )}
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
       <div style={{
         width: 36, height: 36, borderRadius: 8, flexShrink: 0,

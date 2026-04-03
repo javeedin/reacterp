@@ -374,17 +374,29 @@ const GLModule: React.FC = () => {
   // Menu Card Component
   const MenuCard = ({ item }: { item: MenuItemType }) => (
     <Card
-      hoverable
+      hoverable={!!item.path}
       onClick={() => handleMenuItemClick(item.key, item.path)}
       style={{
         borderRadius: 12,
-        border: `1px solid ${REDWOOD.neutral200}`,
-        cursor: 'pointer',
+        border: item.path ? `1px solid ${REDWOOD.success}30` : `1px solid ${REDWOOD.neutral200}`,
+        cursor: item.path ? 'pointer' : 'default',
         transition: 'all 0.3s ease',
         height: '100%',
+        position: 'relative',
+        opacity: item.path ? 1 : 0.72,
       }}
       bodyStyle={{ padding: 20 }}
     >
+      {item.path && (
+        <div style={{
+          position: 'absolute', top: 8, right: 8,
+          background: REDWOOD.success, color: '#fff',
+          borderRadius: '50%', width: 18, height: 18,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <CheckCircleOutlined style={{ fontSize: 11 }} />
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
         <div style={{
           width: 48,
