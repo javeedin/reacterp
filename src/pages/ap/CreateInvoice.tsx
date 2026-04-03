@@ -507,6 +507,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [balanceInvoicesLoading, setBalanceInvoicesLoading] = useState(false);
   const [balancePaymentsLoading, setBalancePaymentsLoading] = useState(false);
   const [balanceActiveTab, setBalanceActiveTab] = useState('invoices');
+  const [balanceInvoiceFilter, setBalanceInvoiceFilter] = useState<'all' | 'paid' | 'unpaid'>('unpaid');
+  const [balancePrepayments, setBalancePrepayments] = useState<any[]>([]);
+  const [balancePrepaymentsLoading, setBalancePrepaymentsLoading] = useState(false);
 
   // Saving state
   const [saving, setSaving] = useState(false);
@@ -2170,11 +2173,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     }
   };
 
-  // Fetch supplier balance invoices
-  const fetchBalanceInvoices = async (supplierNum: string) => {
+  // Fetch supplier balance invoices (filter: 'all' | 'paid' | 'unpaid')
+  const fetchBalanceInvoices = async (supplierNum: string, filter: 'all' | 'paid' | 'unpaid' = 'unpaid') => {
     setBalanceInvoicesLoading(true);
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/${supplierNum}`;
+      const statusParam = filter === 'all' ? 'All' : filter === 'paid' ? 'Paid' : 'Unpaid';
+      const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/${supplierNum}?status=${statusParam}`;
       const response = await fetch(url);
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
       const data = await response.json();
@@ -2231,6 +2235,25 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     }
   };
 
+  // Fetch supplier prepayment balances
+  const fetchBalancePrepayments = async (supplierNum: string) => {
+    setBalancePrepaymentsLoading(true);
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/applied-prepayments/balances?supplier_number=${encodeURIComponent(supplierNum)}`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      const text = await response.text();
+      if (!text.trim()) { setBalancePrepayments([]); return; }
+      const data = JSON.parse(text);
+      setBalancePrepayments(Array.isArray(data) ? data : (data.items || []));
+    } catch (error) {
+      console.error('Error fetching prepayments:', error);
+      setBalancePrepayments([]);
+    } finally {
+      setBalancePrepaymentsLoading(false);
+    }
+  };
+
   // Open supplier balance popup
   const handleCheckBalance = () => {
     const supplierName = form.getFieldValue('supplier');
@@ -2245,15 +2268,20 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     setBalanceActiveTab('invoices');
     setBalanceInvoices([]);
     setBalancePayments([]);
+    setBalancePrepayments([]);
+    setBalanceInvoiceFilter('unpaid');
     fetchBalanceDashboard(supplierNum);
-    fetchBalanceInvoices(supplierNum);
+    fetchBalanceInvoices(supplierNum, 'unpaid');
   };
 
-  // Handle balance tab change (lazy-load payments)
+  // Handle balance tab change (lazy-load payments & prepayments)
   const handleBalanceTabChange = (key: string) => {
     setBalanceActiveTab(key);
     if (key === 'payments' && balancePayments.length === 0 && !balancePaymentsLoading) {
       fetchBalancePayments(balanceSupplierNumber);
+    }
+    if (key === 'prepayments' && balancePrepayments.length === 0 && !balancePrepaymentsLoading) {
+      fetchBalancePrepayments(balanceSupplierNumber);
     }
   };
 
@@ -6753,23 +6781,41 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   key: 'invoices',
                   label: <span><FileTextOutlined /> Invoices ({balanceInvoices.length})</span>,
                   children: (
-                    <Table
-                      dataSource={balanceInvoices}
-                      columns={[
-                        { title: 'Invoice Number', dataIndex: 'invoiceNumber', key: 'invoiceNumber', width: 130 },
-                        { title: 'Invoice Date', dataIndex: 'invoiceDate', key: 'invoiceDate', width: 100, render: (d: string) => formatDateStr(d) },
-                        { title: 'Amount', dataIndex: 'invoiceAmount', key: 'invoiceAmount', width: 120, align: 'right' as const, render: (amt: number) => <Text strong>{formatCurrency(amt)}</Text> },
-                        { title: 'Paid', dataIndex: 'amountPaid', key: 'amountPaid', width: 120, align: 'right' as const, render: (amt: number) => <Text style={{ color: REDWOOD.success }}>{formatCurrency(amt)}</Text> },
-                        { title: 'Balance', dataIndex: 'amountRemaining', key: 'amountRemaining', width: 120, align: 'right' as const, render: (amt: number) => <Text style={{ color: amt > 0 ? REDWOOD.error : REDWOOD.success }}>{formatCurrency(amt)}</Text> },
-                        { title: 'Status', dataIndex: 'invoiceStatus', key: 'invoiceStatus', width: 90, render: (s: string) => <Tag>{s || '-'}</Tag> },
-                        { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
-                      ]}
-                      rowKey="key"
-                      size="small"
-                      loading={balanceInvoicesLoading}
-                      pagination={{ pageSize: 8, size: 'small' }}
-                      scroll={{ y: 300 }}
-                    />
+                    <>
+                      {/* All / Unpaid / Paid filter */}
+                      <div style={{ marginBottom: 8, display: 'flex', gap: 6 }}>
+                        {(['all', 'unpaid', 'paid'] as const).map(f => (
+                          <Button
+                            key={f}
+                            size="small"
+                            type={balanceInvoiceFilter === f ? 'primary' : 'default'}
+                            onClick={() => {
+                              setBalanceInvoiceFilter(f);
+                              fetchBalanceInvoices(balanceSupplierNumber, f);
+                            }}
+                          >
+                            {f === 'all' ? 'All' : f === 'unpaid' ? 'Unpaid' : 'Paid'}
+                          </Button>
+                        ))}
+                      </div>
+                      <Table
+                        dataSource={balanceInvoices}
+                        columns={[
+                          { title: 'Invoice Number', dataIndex: 'invoiceNumber', key: 'invoiceNumber', width: 130 },
+                          { title: 'Invoice Date', dataIndex: 'invoiceDate', key: 'invoiceDate', width: 100, render: (d: string) => formatDateStr(d) },
+                          { title: 'Amount', dataIndex: 'invoiceAmount', key: 'invoiceAmount', width: 120, align: 'right' as const, render: (amt: number) => <Text strong>{formatCurrency(amt)}</Text> },
+                          { title: 'Paid', dataIndex: 'amountPaid', key: 'amountPaid', width: 120, align: 'right' as const, render: (amt: number) => <Text style={{ color: REDWOOD.success }}>{formatCurrency(amt)}</Text> },
+                          { title: 'Balance', dataIndex: 'amountRemaining', key: 'amountRemaining', width: 120, align: 'right' as const, render: (amt: number) => <Text style={{ color: amt > 0 ? REDWOOD.error : REDWOOD.success }}>{formatCurrency(amt)}</Text> },
+                          { title: 'Status', dataIndex: 'invoiceStatus', key: 'invoiceStatus', width: 90, render: (s: string) => <Tag>{s || '-'}</Tag> },
+                          { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
+                        ]}
+                        rowKey="key"
+                        size="small"
+                        loading={balanceInvoicesLoading}
+                        pagination={{ pageSize: 8, size: 'small' }}
+                        scroll={{ y: 280 }}
+                      />
+                    </>
                   ),
                 },
                 {
@@ -6791,6 +6837,32 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                       loading={balancePaymentsLoading}
                       pagination={{ pageSize: 8, size: 'small' }}
                       scroll={{ y: 300 }}
+                    />
+                  ),
+                },
+                {
+                  key: 'prepayments',
+                  label: <span><DollarOutlined /> Prepayments ({balancePrepayments.length})</span>,
+                  children: (
+                    <Table
+                      dataSource={balancePrepayments.map((r, i) => ({ ...r, key: r.PrepaymentInvoiceId?.toString() || i.toString() }))}
+                      columns={[
+                        { title: 'Prepayment #', dataIndex: 'PrepaymentNumber', key: 'PrepaymentNumber', width: 140 },
+                        { title: 'Date', dataIndex: 'InvoiceDate', key: 'InvoiceDate', width: 100, render: (d: string) => formatDateStr(d) },
+                        { title: 'Amount', dataIndex: 'InvoiceAmount', key: 'InvoiceAmount', width: 120, align: 'right' as const, render: (v: number) => <Text strong>{formatCurrency(v)}</Text> },
+                        { title: 'Applied', dataIndex: 'TotalApplied', key: 'TotalApplied', width: 120, align: 'right' as const, render: (v: number) => <Text style={{ color: REDWOOD.warning }}>{formatCurrency(v)}</Text> },
+                        { title: 'Available', dataIndex: 'AvailableBalance', key: 'AvailableBalance', width: 120, align: 'right' as const,
+                          render: (v: number) => <Text strong style={{ color: v > 0 ? REDWOOD.success : REDWOOD.neutral600 }}>{formatCurrency(v)}</Text> },
+                        { title: 'Status', dataIndex: 'PaidStatus', key: 'PaidStatus', width: 90,
+                          render: (s: string) => <Tag color={s === 'Paid' ? 'green' : 'orange'}>{s || 'Unpaid'}</Tag> },
+                        { title: 'Business Unit', dataIndex: 'BusinessUnit', key: 'BusinessUnit', ellipsis: true },
+                      ]}
+                      rowKey="key"
+                      size="small"
+                      loading={balancePrepaymentsLoading}
+                      pagination={{ pageSize: 8, size: 'small' }}
+                      scroll={{ y: 300 }}
+                      locale={{ emptyText: 'No prepayments found for this supplier' }}
                     />
                   ),
                 },
