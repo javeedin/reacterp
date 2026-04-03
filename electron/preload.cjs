@@ -27,6 +27,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openExcel: (buffer, filename) =>
     ipcRenderer.invoke('open-excel', { buffer, filename }),
 
+  // Screen recording
+  getScreenSources: () => ipcRenderer.invoke('get-screen-sources'),
+  saveRecording: (buffer, defaultName) => ipcRenderer.invoke('save-recording', { buffer, defaultName }),
+
   // Check if running in Electron
   isElectron: true,
 

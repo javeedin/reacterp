@@ -728,6 +728,35 @@ ipcMain.handle('open-excel', async (_event, { buffer, filename }) => {
   }
 });
 
+// ── Screen Recording ───────────────────────────────────────────────────────
+ipcMain.handle('get-screen-sources', async () => {
+  const { desktopCapturer } = require('electron');
+  const sources = await desktopCapturer.getSources({
+    types: ['window', 'screen'],
+    thumbnailSize: { width: 160, height: 100 },
+  });
+  return sources.map(s => ({
+    id: s.id,
+    name: s.name,
+    thumbnail: s.thumbnail.toDataURL(),
+  }));
+});
+
+ipcMain.handle('save-recording', async (_event, { buffer, defaultName }) => {
+  try {
+    const { filePath } = await dialog.showSaveDialog({
+      title: 'Save Screen Recording',
+      defaultPath: defaultName,
+      filters: [{ name: 'WebM Video', extensions: ['webm'] }],
+    });
+    if (!filePath) return { success: false, cancelled: true };
+    fs.writeFileSync(filePath, Buffer.from(buffer));
+    return { success: true, filePath };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 // ── Auto-update ────────────────────────────────────────────────────────────
 function setupAutoUpdater() {
   // Only run in production with autoUpdater available
