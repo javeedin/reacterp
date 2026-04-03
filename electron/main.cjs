@@ -289,6 +289,7 @@ function createWindow() {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.cjs'),
       webSecurity: false, // Allow cross-origin requests to Oracle Fusion API
+      webviewTag: true,   // Enable <webview> tag for Oracle Fusion embedded browser
     },
     show: true, // Show immediately — avoids window getting stuck invisible
   });
