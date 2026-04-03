@@ -76,7 +76,7 @@ interface MenuItemType {
 
 // Invoice task items
 const invoiceTaskItems: MenuItemType[] = [
-  { key: 'create-invoice', icon: <FileAddOutlined />, label: 'Create Invoice', description: 'Create new supplier invoice', color: REDWOOD.taskBlue, path: '/ap/create-invoice' },
+  { key: 'create-invoice', icon: <FileAddOutlined />, label: 'Create Invoice', description: 'Create new supplier invoice', color: REDWOOD.taskBlue, path: '/ap/manage-invoices' },
   { key: 'create-invoice-spreadsheet', icon: <ImportOutlined />, label: 'Create Invoice from Spreadsheet', description: 'Import invoices from file', color: REDWOOD.info },
   { key: 'create-recurring', icon: <ScheduleOutlined />, label: 'Create Recurring Invoices', description: 'Set up recurring invoices', color: REDWOOD.success },
   { key: 'manage-invoices', icon: <FileTextOutlined />, label: 'Manage Invoices', description: 'Search and manage invoices', color: REDWOOD.primary, path: '/ap/manage-invoices' },
@@ -158,19 +158,35 @@ const APModule: React.FC = () => {
   const navigate = useNavigate();
   const [kpi, setKpi] = useState<KpiData>(DEFAULT_KPI);
   const [kpiLoading, setKpiLoading] = useState(true);
+  const [businessUnits, setBusinessUnits] = useState<string[]>([]);
+  const [selectedBU, setSelectedBU] = useState<string>('');   // '' = All
 
+  // Fetch BU list once on mount
+  useEffect(() => {
+    fetch(`${APEX_DB_CONFIG.baseUrl}/gl/businessunits`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return;
+        const items: any[] = Array.isArray(data) ? data : (data.items || []);
+        setBusinessUnits(items.map((i: any) => i.business_unit_name || '').filter(Boolean));
+      })
+      .catch(() => {});
+  }, []);
+
+  // Fetch stats whenever selectedBU changes
   useEffect(() => {
     const fetchStats = async () => {
       setKpiLoading(true);
       try {
-        const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/stats`;
+        const params = new URLSearchParams();
+        if (selectedBU) params.set('P_BUSINESS_UNIT', selectedBU);
+        const qs = params.toString();
+        const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/stats${qs ? '?' + qs : ''}`;
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const text = await res.text();
         if (!text.trim()) throw new Error('empty');
         const data = JSON.parse(text);
-        // Support both flat object and ORDS items-array formats
-        // Support both flat object (json/item) and ORDS items-array formats
         const d = Array.isArray(data?.items) && data.items.length > 0 ? data.items[0] : data;
         setKpi({
           pendingInvoices:  Number(d.pending_invoices  ?? 0),
@@ -183,16 +199,19 @@ const APModule: React.FC = () => {
             : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         });
       } catch {
-        // Endpoint not yet deployed — keep zeros, show "unavailable"
         setKpi({ ...DEFAULT_KPI, lastSync: 'Unavailable' });
       } finally {
         setKpiLoading(false);
       }
     };
     fetchStats();
-  }, []);
+  }, [selectedBU]);
 
-  const handleMenuItemClick = (_key: string, path?: string) => {
+  const handleMenuItemClick = (key: string, path?: string) => {
+    if (key === 'create-invoice') {
+      navigate('/ap/manage-invoices', { state: { quickCreate: true } });
+      return;
+    }
     if (path) {
       navigate(path);
     }
@@ -375,7 +394,7 @@ const APModule: React.FC = () => {
         {/* Main Content Area */}
         <div style={{ padding: 24, paddingRight: 100 }}>
           {/* Page Title */}
-          <div style={{ marginBottom: 24 }}>
+          <div style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Space align="center">
               <div style={{
                 width: 56,
@@ -395,6 +414,24 @@ const APModule: React.FC = () => {
                 </Title>
                 <Text type="secondary">Manage invoices, payments, and supplier transactions</Text>
               </div>
+            </Space>
+            {/* Business Unit filter */}
+            <Space>
+              <Text type="secondary" style={{ fontSize: 13 }}>Business Unit:</Text>
+              <Select
+                value={selectedBU || 'all'}
+                onChange={v => setSelectedBU(v === 'all' ? '' : v)}
+                style={{ width: 260 }}
+                showSearch
+                filterOption={(input, option) =>
+                  String(option?.value ?? '').toLowerCase().includes(input.toLowerCase())
+                }
+              >
+                <Select.Option value="all">All Business Units</Select.Option>
+                {businessUnits.map(bu => (
+                  <Select.Option key={bu} value={bu}>{bu}</Select.Option>
+                ))}
+              </Select>
             </Space>
           </div>
 

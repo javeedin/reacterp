@@ -61,6 +61,7 @@ SELECT
     TO_CHAR(MAX(creation_date), 'YYYY-MM-DD HH24:MI:SS') AS last_sync_date
 
 FROM RR_AP_INVOICES_ALL
+WHERE (:P_BUSINESS_UNIT IS NULL OR business_unit = :P_BUSINESS_UNIT)
 ]'
     );
     COMMIT;
