@@ -20,6 +20,9 @@ interface Step {
   id: string;
   type: 'click' | 'input' | 'navigate';
   description: string;
+  fieldName: string;   // label / button text / element name
+  action: string;      // Click | Enter | Select | Check | Navigate
+  value: string;       // entered value, selected option, or button text
   url: string;
   pageTitle: string;
   timestamp: number;
@@ -41,23 +44,90 @@ const INJECT_SCRIPT = `
   window.__reactErpTracking = true;
   window.__reactErpSteps = window.__reactErpSteps || [];
 
-  function describeElement(el) {
-    if (!el || !el.tagName) return 'element';
-    var tag = el.tagName.toLowerCase();
-    var label = el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('placeholder') || '';
-    var text = (el.innerText || el.value || el.textContent || '').trim().slice(0, 100);
-    if (label) return label;
-    if (text) return text;
-    var id = el.id ? '#' + el.id : '';
-    return tag + id;
+  // Find best label for an element
+  function getLabel(el) {
+    // 1. Explicit <label for="id">
+    if (el.id) {
+      var lbl = document.querySelector('label[for="' + el.id + '"]');
+      if (lbl) return lbl.textContent.trim().replace(/:$/, '');
+    }
+    // 2. aria-label / aria-labelledby
+    var al = el.getAttribute('aria-label');
+    if (al) return al.trim();
+    var alby = el.getAttribute('aria-labelledby');
+    if (alby) {
+      var lblEl = document.getElementById(alby);
+      if (lblEl) return lblEl.textContent.trim();
+    }
+    // 3. title / placeholder / name
+    return el.getAttribute('title') || el.getAttribute('placeholder') || el.name || '';
+  }
+
+  // Walk up to find a meaningful parent label (Oracle Fusion uses wrapper divs)
+  function findNearbyLabel(el) {
+    var lbl = getLabel(el);
+    if (lbl) return lbl;
+    var parent = el.parentElement;
+    for (var i = 0; i < 4 && parent; i++) {
+      var labels = parent.querySelectorAll('label,span[class*="label"],div[class*="label"]');
+      for (var j = 0; j < labels.length; j++) {
+        var t = labels[j].textContent.trim().replace(/:$/, '');
+        if (t && t.length < 60) return t;
+      }
+      parent = parent.parentElement;
+    }
+    return el.getAttribute('class') ? '' : (el.textContent || '').trim().slice(0, 50);
+  }
+
+  function getFieldInfo(el) {
+    var tag = el.tagName ? el.tagName.toLowerCase() : 'element';
+    var type = (el.getAttribute('type') || '').toLowerCase();
+    var fieldName, action, value;
+
+    if (tag === 'select') {
+      fieldName = findNearbyLabel(el) || 'Dropdown';
+      action = 'Select';
+      value = el.options && el.selectedIndex >= 0 ? (el.options[el.selectedIndex].text || el.value) : el.value;
+    } else if (type === 'checkbox') {
+      fieldName = findNearbyLabel(el) || 'Checkbox';
+      action = el.checked ? 'Check' : 'Uncheck';
+      value = el.checked ? 'Yes' : 'No';
+    } else if (type === 'radio') {
+      fieldName = findNearbyLabel(el) || 'Radio';
+      action = 'Select';
+      value = el.value || (el.checked ? 'Yes' : 'No');
+    } else if (tag === 'input' || tag === 'textarea') {
+      fieldName = findNearbyLabel(el) || el.placeholder || 'Input field';
+      action = 'Enter';
+      value = (el.value || '').slice(0, 80);
+    } else if (tag === 'button' || type === 'button' || type === 'submit') {
+      var btnText = (el.innerText || el.textContent || '').trim().slice(0, 60);
+      fieldName = btnText || el.getAttribute('aria-label') || 'Button';
+      action = 'Click';
+      value = fieldName;
+    } else if (tag === 'a') {
+      var linkText = (el.innerText || el.textContent || '').trim().slice(0, 60);
+      fieldName = linkText || el.getAttribute('aria-label') || 'Link';
+      action = 'Click';
+      value = fieldName;
+    } else {
+      var elText = (el.innerText || el.textContent || '').trim().slice(0, 60);
+      fieldName = el.getAttribute('aria-label') || elText || tag;
+      action = 'Click';
+      value = elText || '';
+    }
+    return { fieldName: fieldName, action: action, value: value };
   }
 
   document.addEventListener('click', function(e) {
     var el = e.target;
-    var desc = describeElement(el);
+    var info = getFieldInfo(el);
     window.__reactErpSteps.push({
       type: 'click',
-      description: 'Click: ' + desc,
+      fieldName: info.fieldName,
+      action: info.action,
+      value: info.value,
+      description: info.action + ': ' + info.fieldName,
       url: location.href,
       pageTitle: document.title,
       timestamp: Date.now()
@@ -66,11 +136,13 @@ const INJECT_SCRIPT = `
 
   document.addEventListener('change', function(e) {
     var el = e.target;
-    var desc = describeElement(el);
-    var val = (el.value || '').slice(0, 60);
+    var info = getFieldInfo(el);
     window.__reactErpSteps.push({
       type: 'input',
-      description: 'Input "' + val + '" in: ' + desc,
+      fieldName: info.fieldName,
+      action: info.action,
+      value: info.value,
+      description: info.action + ' "' + info.value + '" in: ' + info.fieldName,
       url: location.href,
       pageTitle: document.title,
       timestamp: Date.now()
@@ -103,20 +175,71 @@ const downloadHtml = (content: string, filename: string) => {
 
 const generateUserManual = (steps: Step[]): string => {
   const date = new Date().toLocaleString();
-  const stepsHtml = steps.map((s, i) => {
-    const badge = s.type === 'click' ? '#1565c0' : s.type === 'input' ? '#2e7d32' : '#e65100';
-    const badgeBg = s.type === 'click' ? '#e3f2fd' : s.type === 'input' ? '#e8f5e9' : '#fff3e0';
+
+  // Group steps by screen (pageTitle)
+  const screens: { title: string; steps: (Step & { globalIdx: number })[] }[] = [];
+  let globalIdx = 0;
+  for (const s of steps) {
+    const title = s.pageTitle || 'Oracle Fusion';
+    let screen = screens.find(sc => sc.title === title);
+    if (!screen) { screen = { title, steps: [] }; screens.push(screen); }
+    screen.steps.push({ ...s, globalIdx: ++globalIdx });
+  }
+
+  const typeLabel: Record<string, string> = { click: 'Click', input: 'Input', navigate: 'Navigate' };
+  const typeColor: Record<string, string> = { click: '#1565c0', input: '#2e7d32', navigate: '#e65100' };
+  const typeBg:    Record<string, string> = { click: '#e3f2fd', input: '#e8f5e9', navigate: '#fff3e0' };
+
+  const toc = screens.map((sc, i) =>
+    `<li><a href="#screen-${i}">${escapeHtml(sc.title)}</a> <span style="color:#999">(${sc.steps.length} step${sc.steps.length !== 1 ? 's' : ''})</span></li>`
+  ).join('\n');
+
+  const sectionsHtml = screens.map((sc, si) => {
+    const rows = sc.steps.map(s => {
+      // Build a human-readable explanation sentence
+      const explanation = s.type === 'navigate'
+        ? `Navigate to the <strong>${escapeHtml(s.pageTitle)}</strong> screen.`
+        : s.type === 'input'
+          ? `In the <strong>${escapeHtml(s.fieldName || 'field')}</strong> field, enter <strong>${escapeHtml(s.value || '')}</strong>.`
+          : `Click the <strong>${escapeHtml(s.fieldName || s.description)}</strong> ${s.value && s.value !== s.fieldName ? '(<em>' + escapeHtml(s.value) + '</em>)' : ''}.`;
+
+      const badge = `<span style="display:inline-block;padding:1px 7px;border-radius:3px;font-size:10px;font-weight:700;background:${typeBg[s.type] || '#eee'};color:${typeColor[s.type] || '#333'}">${typeLabel[s.type] || s.type}</span>`;
+
+      const screenshot = s.screenshot
+        ? `<img src="${s.screenshot}" style="width:100%;border:1px solid #ddd;border-radius:4px;display:block;" alt="Step ${s.globalIdx}" />`
+        : '<span style="color:#ccc;font-size:11px;">—</span>';
+
+      return `
+      <tr>
+        <td style="text-align:center;font-weight:700;font-size:15px;color:#444;white-space:nowrap;">${s.globalIdx}</td>
+        <td>${badge}</td>
+        <td style="font-weight:600;color:#222;">${escapeHtml(s.fieldName || s.description)}</td>
+        <td style="color:#555;">${s.value && s.type !== 'navigate' ? escapeHtml(s.value) : '—'}</td>
+        <td style="line-height:1.5;">${explanation}</td>
+      </tr>
+      ${s.screenshot ? `<tr><td colspan="5" style="padding:0 12px 14px;">${screenshot}</td></tr>` : ''}`;
+    }).join('\n');
+
     return `
-    <div class="step">
-      <div class="step-hdr">
-        <span class="step-num">Step ${i + 1}</span>
-        <span class="badge" style="background:${badgeBg};color:${badge}">${s.type.toUpperCase()}</span>
-        <span class="page-title">${escapeHtml(s.pageTitle || '')}</span>
-      </div>
-      <div class="step-desc">${escapeHtml(s.description)}</div>
-      <div class="step-url">${escapeHtml(s.url)}</div>
-      ${s.screenshot ? `<img src="${s.screenshot}" class="screenshot" alt="Step ${i + 1} screenshot" />` : ''}
-    </div>`;
+    <section id="screen-${si}" style="margin-bottom:40px;">
+      <h2 style="color:${REDWOOD};border-bottom:2px solid ${REDWOOD};padding-bottom:6px;margin-top:36px;">
+        ${escapeHtml(sc.title)}
+      </h2>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead>
+          <tr style="background:#f5f5f5;">
+            <th style="padding:9px 12px;border-bottom:2px solid #ddd;width:40px;">#</th>
+            <th style="padding:9px 12px;border-bottom:2px solid #ddd;width:80px;">Type</th>
+            <th style="padding:9px 12px;border-bottom:2px solid #ddd;width:160px;">Field / Element</th>
+            <th style="padding:9px 12px;border-bottom:2px solid #ddd;width:130px;">Value</th>
+            <th style="padding:9px 12px;border-bottom:2px solid #ddd;">Explanation</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows}
+        </tbody>
+      </table>
+    </section>`;
   }).join('\n');
 
   return `<!DOCTYPE html>
@@ -125,24 +248,34 @@ const generateUserManual = (steps: Step[]): string => {
 <meta charset="UTF-8">
 <title>User Manual — Oracle Fusion</title>
 <style>
-  body { font-family: Segoe UI, Arial, sans-serif; max-width: 960px; margin: 0 auto; padding: 30px; color: #333; }
+  body { font-family: Segoe UI, Arial, sans-serif; max-width: 1000px; margin: 0 auto; padding: 30px; color: #333; }
   h1 { color: ${REDWOOD}; margin-bottom: 4px; }
-  .meta { color: #888; font-size: 13px; margin-bottom: 30px; }
-  .step { border: 1px solid #e0e0e0; border-radius: 8px; padding: 16px 20px; margin: 14px 0; background: #fafafa; }
-  .step-hdr { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-  .step-num { font-size: 17px; font-weight: 700; color: #222; }
-  .badge { padding: 2px 9px; border-radius: 4px; font-size: 11px; font-weight: 600; letter-spacing: .5px; }
-  .page-title { font-size: 13px; color: #666; margin-left: auto; }
-  .step-desc { font-size: 15px; margin: 6px 0 4px; }
-  .step-url { font-size: 11px; color: #999; font-family: monospace; word-break: break-all; }
-  .screenshot { width: 100%; border: 1px solid #ddd; border-radius: 6px; margin-top: 12px; display: block; }
-  @media print { .step { break-inside: avoid; } }
+  .meta { color: #888; font-size: 13px; margin-bottom: 20px; }
+  .toc { background:#f9f9f9; border:1px solid #e0e0e0; border-radius:8px; padding:16px 24px; margin-bottom:32px; }
+  .toc h3 { margin:0 0 10px; color:#444; font-size:14px; }
+  .toc ol { margin:0; padding-left:20px; }
+  .toc li { margin:4px 0; font-size:13px; }
+  .toc a { color:${REDWOOD}; text-decoration:none; }
+  .toc a:hover { text-decoration:underline; }
+  tbody tr:hover td { background:#fafafa; }
+  td, th { padding:9px 12px; border-bottom:1px solid #eee; vertical-align:top; text-align:left; }
+  @media print {
+    body { max-width:100%; padding:15px; }
+    section { break-before:auto; }
+    tr { break-inside:avoid; }
+  }
 </style>
 </head>
 <body>
 <h1>&#128214; User Manual — Oracle Fusion</h1>
-<div class="meta">Generated: ${date} &nbsp;|&nbsp; Total steps: ${steps.length}</div>
-${stepsHtml}
+<div class="meta">Generated: ${date} &nbsp;|&nbsp; Total steps: ${steps.length} &nbsp;|&nbsp; Screens: ${screens.length}</div>
+
+<div class="toc">
+  <h3>&#128196; Table of Contents</h3>
+  <ol>${toc}</ol>
+</div>
+
+${sectionsHtml}
 </body>
 </html>`;
 };
@@ -279,6 +412,9 @@ const OracleFusion: React.FC = () => {
             setSteps(prev => [...prev, {
               id: Date.now() + Math.random() + '',
               type: 'navigate',
+              fieldName: title || navUrl,
+              action: 'Navigate',
+              value: '',
               description: `Navigate to: ${title || navUrl}`,
               url: navUrl,
               pageTitle: title || '',
@@ -353,6 +489,9 @@ const OracleFusion: React.FC = () => {
         if (newSteps?.length && !pendingScreenshot.current) {
           pendingScreenshot.current = true;
           const enriched: Step[] = newSteps.map((s: any) => ({
+            fieldName: s.fieldName || s.description || '',
+            action: s.action || s.type || '',
+            value: s.value || '',
             ...s,
             id: Date.now() + Math.random() + '',
           }));
