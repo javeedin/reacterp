@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Layout, Typography, Card, Breadcrumb, Space, Tooltip, Row, Col, Statistic, Input, Select, Button, Form, DatePicker } from 'antd';
+import { Layout, Typography, Card, Breadcrumb, Space, Tooltip, Row, Col, Statistic, Input, Select, Button, Form, DatePicker, Spin, Tag } from 'antd';
 import {
   HomeOutlined,
   FileTextOutlined,
@@ -38,6 +38,7 @@ import {
 import { Link, useNavigate } from 'react-router-dom';
 import Autopilot from '../../components/Autopilot';
 import FloatingMenu from '../../components/FloatingMenu';
+import { APEX_DB_CONFIG } from '../../config/api.config';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -135,19 +136,58 @@ const paymentTaskItems: MenuItemType[] = [
   { key: 'retrieve-acknowledgments', icon: <CheckCircleOutlined />, label: 'Retrieve Disbursement Acknowledgments', description: 'Get bank responses', color: REDWOOD.warning },
 ];
 
-// AP KPI Data (mock)
-const apKpiData = {
-  pendingInvoices: { value: 48, trend: 'up', change: 12 },
-  approvedInvoices: { value: 234, trend: 'up', change: 8 },
-  pendingPayments: { value: 15, trend: 'down', change: 5 },
-  overduePayments: { value: 3, trend: 'down', change: 2 },
-  totalPayables: 1245678.90,
-  periodProgress: 72,
-  lastSync: '30 minutes ago',
+interface KpiData {
+  pendingInvoices: number;
+  approvedInvoices: number;
+  pendingPayments: number;
+  overduePayments: number;
+  totalPayables: number;
+  lastSync: string;
+}
+
+const DEFAULT_KPI: KpiData = {
+  pendingInvoices: 0,
+  approvedInvoices: 0,
+  pendingPayments: 0,
+  overduePayments: 0,
+  totalPayables: 0,
+  lastSync: '—',
 };
 
 const APModule: React.FC = () => {
   const navigate = useNavigate();
+  const [kpi, setKpi] = useState<KpiData>(DEFAULT_KPI);
+  const [kpiLoading, setKpiLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      setKpiLoading(true);
+      try {
+        const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/stats`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const text = await res.text();
+        if (!text.trim()) throw new Error('empty');
+        const data = JSON.parse(text);
+        // Support both flat object and ORDS items-array formats
+        const d = Array.isArray(data?.items) && data.items.length > 0 ? data.items[0] : data;
+        setKpi({
+          pendingInvoices:  Number(d.pending_invoices   ?? d.pending_count       ?? 0),
+          approvedInvoices: Number(d.approved_invoices  ?? d.approved_count      ?? 0),
+          pendingPayments:  Number(d.pending_payments   ?? d.pending_payment_count ?? 0),
+          overduePayments:  Number(d.overdue_payments   ?? d.overdue_count       ?? 0),
+          totalPayables:    Number(d.total_outstanding  ?? d.total_payables      ?? d.total_amount ?? 0),
+          lastSync: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        });
+      } catch {
+        // Endpoint not yet deployed — keep zeros, show "unavailable"
+        setKpi({ ...DEFAULT_KPI, lastSync: 'Unavailable' });
+      } finally {
+        setKpiLoading(false);
+      }
+    };
+    fetchStats();
+  }, []);
 
   const handleMenuItemClick = (_key: string, path?: string) => {
     if (path) {
@@ -232,20 +272,33 @@ const APModule: React.FC = () => {
     </Card>
   );
 
-  // Menu Card Component
+  // Menu Card Component — shows green "Implemented" badge when the feature has a path
   const MenuCard = ({ item }: { item: MenuItemType }) => (
     <Card
-      hoverable
+      hoverable={!!item.path}
       onClick={() => handleMenuItemClick(item.key, item.path)}
       style={{
         borderRadius: 12,
-        border: `1px solid ${REDWOOD.neutral200}`,
-        cursor: 'pointer',
+        border: item.path ? `1px solid ${REDWOOD.success}30` : `1px solid ${REDWOOD.neutral200}`,
+        cursor: item.path ? 'pointer' : 'default',
         transition: 'all 0.3s ease',
         height: '100%',
+        position: 'relative',
+        opacity: item.path ? 1 : 0.72,
       }}
       bodyStyle={{ padding: 20 }}
     >
+      {item.path && (
+        <div style={{
+          position: 'absolute', top: 8, right: 8,
+          background: REDWOOD.success, color: '#fff',
+          borderRadius: '50%', width: 18, height: 18,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 11,
+        }}>
+          <CheckCircleOutlined style={{ fontSize: 11 }} />
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
         <div style={{
           width: 48,
@@ -343,94 +396,57 @@ const APModule: React.FC = () => {
           </div>
 
           {/* KPI Cards Row */}
-          <Row gutter={[16, 16]} style={{ marginBottom: 32 }}>
-            <Col xs={24} sm={12} lg={6}>
-              <KpiCard
-                title="Pending Invoices"
-                value={apKpiData.pendingInvoices.value}
-                icon={<ClockCircleOutlined />}
-                color={REDWOOD.warning}
-                trend={apKpiData.pendingInvoices.trend as 'up' | 'down'}
-                change={apKpiData.pendingInvoices.change}
-              />
-            </Col>
-            <Col xs={24} sm={12} lg={6}>
-              <KpiCard
-                title="Approved Invoices"
-                value={apKpiData.approvedInvoices.value}
-                icon={<CheckCircleOutlined />}
-                color={REDWOOD.success}
-                trend={apKpiData.approvedInvoices.trend as 'up' | 'down'}
-                change={apKpiData.approvedInvoices.change}
-              />
-            </Col>
-            <Col xs={24} sm={12} lg={6}>
-              <KpiCard
-                title="Pending Payments"
-                value={apKpiData.pendingPayments.value}
-                icon={<CreditCardOutlined />}
-                color={REDWOOD.info}
-                trend={apKpiData.pendingPayments.trend as 'up' | 'down'}
-                change={apKpiData.pendingPayments.change}
-              />
-            </Col>
-            <Col xs={24} sm={12} lg={6}>
-              <KpiCard
-                title="Overdue Payments"
-                value={apKpiData.overduePayments.value}
-                icon={<WarningOutlined />}
-                color={REDWOOD.primary}
-                trend={apKpiData.overduePayments.trend as 'up' | 'down'}
-                change={apKpiData.overduePayments.change}
-              />
-            </Col>
-          </Row>
+          <Spin spinning={kpiLoading}>
+            <Row gutter={[16, 16]} style={{ marginBottom: 32 }}>
+              <Col xs={24} sm={12} lg={6}>
+                <KpiCard title="Pending Invoices"  value={kpi.pendingInvoices}  icon={<ClockCircleOutlined />} color={REDWOOD.warning} />
+              </Col>
+              <Col xs={24} sm={12} lg={6}>
+                <KpiCard title="Approved Invoices" value={kpi.approvedInvoices} icon={<CheckCircleOutlined />}  color={REDWOOD.success} />
+              </Col>
+              <Col xs={24} sm={12} lg={6}>
+                <KpiCard title="Pending Payments"  value={kpi.pendingPayments}  icon={<CreditCardOutlined />}  color={REDWOOD.info} />
+              </Col>
+              <Col xs={24} sm={12} lg={6}>
+                <KpiCard title="Overdue Payments"  value={kpi.overduePayments}  icon={<WarningOutlined />}     color={REDWOOD.primary} />
+              </Col>
+            </Row>
 
-          {/* Total Payables and Period Progress */}
-          <Row gutter={[16, 16]} style={{ marginBottom: 32 }}>
-            <Col xs={24} lg={12}>
-              <Card
-                style={{ borderRadius: 12, border: 'none', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
-                bodyStyle={{ padding: 20 }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <Text strong style={{ fontSize: 15 }}>Total Outstanding Payables</Text>
-                  <Text type="secondary">Current Period</Text>
-                </div>
-                <Text style={{ fontSize: 32, fontWeight: 600, color: REDWOOD.neutral900 }}>
-                  ${apKpiData.totalPayables.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                </Text>
-              </Card>
-            </Col>
-            <Col xs={24} lg={12}>
-              <Card
-                style={{ borderRadius: 12, border: 'none', boxShadow: '0 2px 8px rgba(0,0,0,0.06)', height: '100%' }}
-                bodyStyle={{ padding: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-              >
-                <div>
-                  <Text strong style={{ fontSize: 15, display: 'block' }}>Last Data Sync</Text>
-                  <Text type="secondary">{apKpiData.lastSync}</Text>
-                </div>
-                <Link to="/sync">
-                  <div style={{
-                    padding: '10px 20px',
-                    background: REDWOOD.surface,
-                    border: `1px solid ${REDWOOD.neutral200}`,
-                    borderRadius: 8,
-                    color: REDWOOD.neutral600,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    cursor: 'pointer',
-                    transition: 'all 0.2s',
-                  }}>
-                    <SyncOutlined />
-                    <span>Sync Now</span>
+            {/* Total Payables and Last Sync */}
+            <Row gutter={[16, 16]} style={{ marginBottom: 32 }}>
+              <Col xs={24} lg={12}>
+                <Card
+                  style={{ borderRadius: 12, border: 'none', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
+                  bodyStyle={{ padding: 20 }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <Text strong style={{ fontSize: 15 }}>Total Outstanding Payables</Text>
+                    <Text type="secondary">Current Period</Text>
                   </div>
-                </Link>
-              </Card>
-            </Col>
-          </Row>
+                  <Text style={{ fontSize: 32, fontWeight: 600, color: REDWOOD.neutral900 }}>
+                    ${kpi.totalPayables.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  </Text>
+                </Card>
+              </Col>
+              <Col xs={24} lg={12}>
+                <Card
+                  style={{ borderRadius: 12, border: 'none', boxShadow: '0 2px 8px rgba(0,0,0,0.06)', height: '100%' }}
+                  bodyStyle={{ padding: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                >
+                  <div>
+                    <Text strong style={{ fontSize: 15, display: 'block' }}>Last Data Sync</Text>
+                    <Text type="secondary">{kpi.lastSync}</Text>
+                  </div>
+                  <Button
+                    icon={<SyncOutlined />}
+                    onClick={() => { setKpiLoading(true); setKpi(DEFAULT_KPI); setTimeout(() => window.location.reload(), 100); }}
+                  >
+                    Sync Now
+                  </Button>
+                </Card>
+              </Col>
+            </Row>
+          </Spin>
 
           {/* Invoice Tasks Section */}
           <div style={{ marginBottom: 32 }}>
