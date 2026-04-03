@@ -493,6 +493,7 @@ const InvoicesTabContent: React.FC<InvoicesTabContentProps> = ({
 
 const ManageSuppliers: React.FC = () => {
   const [form] = Form.useForm();
+  const selectedBU = Form.useWatch('businessUnit', form);
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
@@ -1168,23 +1169,38 @@ const ManageSuppliers: React.FC = () => {
               <Row gutter={16}>
                 <Col span={8}>
                   <Form.Item label="Business Unit" name="businessUnit" style={{ marginBottom: 8 }}>
-                    <Select
-                      placeholder="Select business unit..."
-                      allowClear
-                      size="small"
-                      showSearch
-                      filterOption={(input, option) =>
-                        String(option?.value ?? '').toLowerCase().includes(input.toLowerCase())
-                      }
-                      onChange={() => {
-                        // Re-run LOV search with new BU if LOV is open
-                        if (lovVisible) fetchLovResults(lovSearch);
-                      }}
-                    >
-                      {businessUnits.map(bu => (
-                        <Option key={bu} value={bu}>{bu}</Option>
-                      ))}
-                    </Select>
+                    <Space.Compact style={{ width: '100%' }}>
+                      <Select
+                        placeholder="Select business unit..."
+                        allowClear
+                        size="small"
+                        showSearch
+                        style={{ flex: 1 }}
+                        filterOption={(input, option) =>
+                          String(option?.value ?? '').toLowerCase().includes(input.toLowerCase())
+                        }
+                        onChange={() => {
+                          // Re-run LOV search with new BU if LOV is open
+                          if (lovVisible) fetchLovResults(lovSearch);
+                        }}
+                      >
+                        {businessUnits.map(bu => (
+                          <Option key={bu} value={bu}>{bu}</Option>
+                        ))}
+                      </Select>
+                      {selectedBU && (
+                        <Tooltip title={`Copy: ${selectedBU}`}>
+                          <Button
+                            size="small"
+                            icon={<CopyOutlined />}
+                            onClick={() => {
+                              navigator.clipboard.writeText(selectedBU);
+                              message.success('Business unit name copied');
+                            }}
+                          />
+                        </Tooltip>
+                      )}
+                    </Space.Compact>
                   </Form.Item>
                 </Col>
                 <Col span={8}>
