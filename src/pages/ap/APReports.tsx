@@ -1,13 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Layout, Typography, Card, Breadcrumb, Space, Tabs,
-  Form, Select, Input, Button, Table, Tag, Spin, Divider,
+  Form, Select, Input, Button, Table, Tag, Spin,
   Tooltip, message, Empty,
 } from 'antd';
 import {
-  HomeOutlined, FileTextOutlined, BarChartOutlined, DollarOutlined,
+  HomeOutlined, BarChartOutlined, DollarOutlined,
   ClockCircleOutlined, PlayCircleOutlined, FileExcelOutlined,
-  FilePdfOutlined, TeamOutlined,
+  FilePdfOutlined, TeamOutlined, SearchOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -23,8 +23,8 @@ const { Option } = Select;
 const REDWOOD = {
   primary: '#C74634', success: '#1D7B4D', warning: '#D4A800',
   info: '#0572CE', neutral100: '#F7F7F7', neutral200: '#E5E5E5',
-  neutral600: '#6B6B6B', neutral900: '#1A1A1A', surface: '#FFFFFF',
-  reportGreen: '#1D7B4D',
+  neutral300: '#C7C7C7', neutral600: '#6B6B6B', neutral900: '#1A1A1A',
+  surface: '#FFFFFF', reportGreen: '#1D7B4D',
 };
 
 // ─── Report definitions ───────────────────────────────────────────────────────
@@ -102,31 +102,31 @@ const COLUMNS: Record<string, any[]> = {
     { title: 'Currency',        dataIndex: 'currency',       key: 'currency',       width: 80 },
   ],
   'payment-register': [
-    { title: 'Payment #',       dataIndex: 'paymentNumber',  key: 'paymentNumber',  width: 140 },
-    { title: 'Date',            dataIndex: 'paymentDate',    key: 'paymentDate',    width: 110 },
-    { title: 'Supplier',        dataIndex: 'payee',          key: 'payee',          width: 200 },
-    { title: 'Amount',          dataIndex: 'paymentAmount',  key: 'paymentAmount',  width: 130, align: 'right' as const,
+    { title: 'Payment #',        dataIndex: 'paymentNumber',   key: 'paymentNumber',  width: 140 },
+    { title: 'Date',             dataIndex: 'paymentDate',     key: 'paymentDate',    width: 110 },
+    { title: 'Supplier',         dataIndex: 'payee',           key: 'payee',          width: 200 },
+    { title: 'Amount',           dataIndex: 'paymentAmount',   key: 'paymentAmount',  width: 130, align: 'right' as const,
       render: (v: number) => <Text strong>{fmt(v)}</Text> },
-    { title: 'Currency',        dataIndex: 'currency',       key: 'currency',       width: 80 },
-    { title: 'Status',          dataIndex: 'paymentStatus',  key: 'paymentStatus',  width: 110,
+    { title: 'Currency',         dataIndex: 'currency',        key: 'currency',       width: 80 },
+    { title: 'Status',           dataIndex: 'paymentStatus',   key: 'paymentStatus',  width: 110,
       render: (s: string) => <Tag color={s === 'NEGOTIABLE' ? 'green' : s === 'VOIDED' ? 'red' : 'blue'}>{s}</Tag> },
-    { title: 'Method',          dataIndex: 'paymentMethod',  key: 'paymentMethod',  width: 110 },
-    { title: 'Bank Account',    dataIndex: 'bankAccountName', key: 'bankAccountName', ellipsis: true },
+    { title: 'Method',           dataIndex: 'paymentMethod',   key: 'paymentMethod',  width: 110 },
+    { title: 'Bank Account',     dataIndex: 'bankAccountName', key: 'bankAccountName', ellipsis: true },
   ],
   'aging-report': [
-    { title: 'Supplier #',      dataIndex: 'supplierNumber', key: 'supplierNumber', width: 120 },
-    { title: 'Supplier Name',   dataIndex: 'supplier',       key: 'supplier',       width: 200 },
-    { title: 'Current',         dataIndex: 'current',        key: 'current',        width: 120, align: 'right' as const,
+    { title: 'Supplier #',    dataIndex: 'supplierNumber', key: 'supplierNumber', width: 120 },
+    { title: 'Supplier Name', dataIndex: 'supplier',       key: 'supplier',       width: 200 },
+    { title: 'Current',       dataIndex: 'current',        key: 'current',        width: 120, align: 'right' as const,
       render: (v: number) => <Text style={{ color: REDWOOD.success }}>{fmt(v)}</Text> },
-    { title: '1–30 Days',       dataIndex: 'days30',         key: 'days30',         width: 110, align: 'right' as const,
+    { title: '1–30 Days',     dataIndex: 'days30',         key: 'days30',         width: 110, align: 'right' as const,
       render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.warning : undefined }}>{fmt(v)}</Text> },
-    { title: '31–60 Days',      dataIndex: 'days60',         key: 'days60',         width: 110, align: 'right' as const,
+    { title: '31–60 Days',    dataIndex: 'days60',         key: 'days60',         width: 110, align: 'right' as const,
       render: (v: number) => <Text style={{ color: v > 0 ? '#D46B08' : undefined }}>{fmt(v)}</Text> },
-    { title: '61–90 Days',      dataIndex: 'days90',         key: 'days90',         width: 110, align: 'right' as const,
+    { title: '61–90 Days',    dataIndex: 'days90',         key: 'days90',         width: 110, align: 'right' as const,
       render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.primary : undefined }}>{fmt(v)}</Text> },
-    { title: '90+ Days',        dataIndex: 'days90plus',     key: 'days90plus',     width: 110, align: 'right' as const,
+    { title: '90+ Days',      dataIndex: 'days90plus',     key: 'days90plus',     width: 110, align: 'right' as const,
       render: (v: number) => <Text strong style={{ color: v > 0 ? '#8B0000' : undefined }}>{fmt(v)}</Text> },
-    { title: 'Total',           dataIndex: 'total',          key: 'total',          width: 130, align: 'right' as const,
+    { title: 'Total',         dataIndex: 'total',          key: 'total',          width: 130, align: 'right' as const,
       render: (v: number) => <Text strong>{fmt(v)}</Text> },
   ],
 };
@@ -137,31 +137,23 @@ const fmt = (v: number) =>
 
 const daysDiff = (dateStr: string) => {
   if (!dateStr) return 0;
-  const d = new Date(dateStr);
-  return Math.floor((new Date().getTime() - d.getTime()) / 86400000);
+  return Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000);
 };
 
-// ─── Per-tab report panel (isolated state) ────────────────────────────────────
-interface ReportPanelProps {
-  report: ReportDef;
-  businessUnits: string[];
-}
-
-const ReportPanel: React.FC<ReportPanelProps> = ({ report, businessUnits }) => {
+// ─── Per-tab report panel (fully isolated state) ──────────────────────────────
+const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({ report, businessUnits }) => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<any[]>([]);
   const [hasRun, setHasRun] = useState(false);
   const reportTitle = useRef('');
 
-  // ── Fetch helpers ────────────────────────────────────────────────────────
   const fetchSuppliersListing = async (bu: string, supplierNum: string, supplierName: string) => {
-    const params = new URLSearchParams();
-    if (bu)           params.set('P_BUSINESS_UNIT', bu);
-    if (supplierNum)  params.set('supplier_number', supplierNum);
-    if (supplierName) params.set('supplier', supplierName);
-    const url = `${APEX_DB_CONFIG.baseUrl}/suppliers${params.toString() ? '?' + params : ''}`;
-    const res = await fetch(url);
+    const p = new URLSearchParams();
+    if (bu)           p.set('P_BUSINESS_UNIT', bu);
+    if (supplierNum)  p.set('supplier_number', supplierNum);
+    if (supplierName) p.set('supplier', supplierName);
+    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers${p.toString() ? '?' + p : ''}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = JSON.parse(await res.text() || '{}');
     const items: any[] = Array.isArray(data) ? data : (data.items || []);
@@ -178,11 +170,10 @@ const ReportPanel: React.FC<ReportPanelProps> = ({ report, businessUnits }) => {
   };
 
   const fetchSupplierBalance = async (bu: string, supplierNum: string) => {
-    const params = new URLSearchParams();
-    if (bu)          params.set('business_unit', bu);
-    if (supplierNum) params.set('supplier_number', supplierNum);
-    const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice${params.toString() ? '?' + params : ''}`;
-    const res = await fetch(url);
+    const p = new URLSearchParams();
+    if (bu)          p.set('business_unit', bu);
+    if (supplierNum) p.set('supplier_number', supplierNum);
+    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/createinvoice${p.toString() ? '?' + p : ''}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = JSON.parse(await res.text() || '{}');
     const items: any[] = Array.isArray(data) ? data : (data.items || []);
@@ -191,44 +182,35 @@ const ReportPanel: React.FC<ReportPanelProps> = ({ report, businessUnits }) => {
       const sKey = it.supplier_number || it.supplier || 'Unknown';
       const amt = Number(it.invoice_amount || 0);
       const paid = Number(it.amount_paid || 0);
-      const existing = map.get(sKey);
-      if (existing) {
-        existing.invoiceCount += 1;
-        existing.invoiceAmount += amt;
-        existing.amountPaid += paid;
-        existing.outstanding += (amt - paid);
+      const ex = map.get(sKey);
+      if (ex) {
+        ex.invoiceCount += 1; ex.invoiceAmount += amt;
+        ex.amountPaid += paid; ex.outstanding += amt - paid;
       } else {
-        map.set(sKey, {
-          key: sKey,
-          supplierNumber: it.supplier_number || '',
-          supplier: it.supplier || '',
-          invoiceCount: 1,
-          invoiceAmount: amt,
-          amountPaid: paid,
-          outstanding: amt - paid,
-          currency: it.invoice_currency || 'AED',
-        });
+        map.set(sKey, { key: sKey, supplierNumber: it.supplier_number || '', supplier: it.supplier || '',
+          invoiceCount: 1, invoiceAmount: amt, amountPaid: paid, outstanding: amt - paid,
+          currency: it.invoice_currency || 'AED' });
       }
     }
     return Array.from(map.values()).sort((a, b) => b.outstanding - a.outstanding);
   };
 
   const fetchPaymentRegister = async (bu: string, supplierNum: string, dateFrom: string, dateTo: string) => {
-    const params = new URLSearchParams();
-    if (bu)          params.set('business_unit', bu);
-    if (supplierNum) params.set('supplier_number', supplierNum);
-    if (dateFrom)    params.set('date_from', dateFrom);
-    if (dateTo)      params.set('date_to', dateTo);
-    params.set('limit', '500');
-    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/payments?${params}`);
+    const p = new URLSearchParams();
+    if (bu)          p.set('business_unit', bu);
+    if (supplierNum) p.set('supplier_number', supplierNum);
+    if (dateFrom)    p.set('date_from', dateFrom);
+    if (dateTo)      p.set('date_to', dateTo);
+    p.set('limit', '500');
+    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/payments?${p}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = JSON.parse(await res.text() || '{}');
     const items: any[] = Array.isArray(data) ? data : (data.items || data.payments || []);
     return items.map((it: any, i: number) => ({
-      key: it.payment_id?.toString() || it.check_id?.toString() || i.toString(),
+      key: it.payment_id?.toString() || i.toString(),
       paymentNumber: it.payment_number || it.check_number || '',
       paymentDate: (it.payment_date || it.check_date || '').slice(0, 10),
-      payee: it.payee || it.supplier || it.Payee || '',
+      payee: it.payee || it.supplier || '',
       paymentAmount: Number(it.payment_amount || it.amount || 0),
       currency: it.currency || it.payment_currency || 'AED',
       paymentStatus: it.payment_status || it.status || '',
@@ -238,11 +220,11 @@ const ReportPanel: React.FC<ReportPanelProps> = ({ report, businessUnits }) => {
   };
 
   const fetchAgingReport = async (bu: string, supplierNum: string) => {
-    const params = new URLSearchParams();
-    if (bu)          params.set('business_unit', bu);
-    if (supplierNum) params.set('supplier_number', supplierNum);
-    params.set('limit', '500');
-    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/createinvoice?${params}`);
+    const p = new URLSearchParams();
+    if (bu)          p.set('business_unit', bu);
+    if (supplierNum) p.set('supplier_number', supplierNum);
+    p.set('limit', '500');
+    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/createinvoice?${p}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = JSON.parse(await res.text() || '{}');
     const items: any[] = (Array.isArray(data) ? data : (data.items || [])).filter(
@@ -251,53 +233,34 @@ const ReportPanel: React.FC<ReportPanelProps> = ({ report, businessUnits }) => {
     const map = new Map<string, any>();
     for (const it of items) {
       const sKey = it.supplier_number || it.supplier || 'Unknown';
-      const balance = Number(it.invoice_amount || 0) - Number(it.amount_paid || 0);
-      if (balance <= 0) continue;
+      const bal = Number(it.invoice_amount || 0) - Number(it.amount_paid || 0);
+      if (bal <= 0) continue;
       const age = daysDiff(it.terms_date || it.invoice_date || '');
-      const existing = map.get(sKey) || {
-        key: sKey,
-        supplierNumber: it.supplier_number || '',
-        supplier: it.supplier || '',
-        current: 0, days30: 0, days60: 0, days90: 0, days90plus: 0, total: 0,
-      };
-      if (age <= 0)        existing.current    += balance;
-      else if (age <= 30)  existing.days30     += balance;
-      else if (age <= 60)  existing.days60     += balance;
-      else if (age <= 90)  existing.days90     += balance;
-      else                 existing.days90plus += balance;
-      existing.total += balance;
-      map.set(sKey, existing);
+      const ex = map.get(sKey) || { key: sKey, supplierNumber: it.supplier_number || '',
+        supplier: it.supplier || '', current: 0, days30: 0, days60: 0, days90: 0, days90plus: 0, total: 0 };
+      if (age <= 0)       ex.current    += bal;
+      else if (age <= 30) ex.days30     += bal;
+      else if (age <= 60) ex.days60     += bal;
+      else if (age <= 90) ex.days90     += bal;
+      else                ex.days90plus += bal;
+      ex.total += bal;
+      map.set(sKey, ex);
     }
     return Array.from(map.values()).sort((a, b) => b.total - a.total);
   };
 
-  // ── Run ──────────────────────────────────────────────────────────────────
   const handleRun = async () => {
-    const vals = form.getFieldsValue();
-    const bu           = vals.businessUnit  || '';
-    const supplierNum  = vals.supplierNumber || '';
-    const supplierName = vals.supplierName   || '';
-    const dateFrom     = vals.dateFrom       || '';
-    const dateTo       = vals.dateTo         || '';
-
-    setLoading(true);
-    setRows([]);
+    const { businessUnit: bu = '', supplierNumber: sn = '', supplierName: snm = '', dateFrom = '', dateTo = '' } = form.getFieldsValue();
+    setLoading(true); setRows([]);
     reportTitle.current = `${report.label}${bu ? ' — ' + bu : ''}`;
     try {
       let result: any[] = [];
-      if (report.key === 'suppliers-listing')
-        result = await fetchSuppliersListing(bu, supplierNum, supplierName);
-      else if (report.key === 'supplier-balance')
-        result = await fetchSupplierBalance(bu, supplierNum);
-      else if (report.key === 'payment-register')
-        result = await fetchPaymentRegister(bu, supplierNum, dateFrom, dateTo);
-      else if (report.key === 'aging-report')
-        result = await fetchAgingReport(bu, supplierNum);
-
-      setRows(result);
-      setHasRun(true);
-      if (result.length === 0) message.info('No data found for the selected parameters.');
-      else message.success(`${result.length} records loaded.`);
+      if (report.key === 'suppliers-listing')  result = await fetchSuppliersListing(bu, sn, snm);
+      if (report.key === 'supplier-balance')   result = await fetchSupplierBalance(bu, sn);
+      if (report.key === 'payment-register')   result = await fetchPaymentRegister(bu, sn, dateFrom, dateTo);
+      if (report.key === 'aging-report')       result = await fetchAgingReport(bu, sn);
+      setRows(result); setHasRun(true);
+      result.length === 0 ? message.info('No data found.') : message.success(`${result.length} records loaded.`);
     } catch (e: any) {
       message.error(`Report failed: ${e.message}`);
     } finally {
@@ -305,42 +268,29 @@ const ReportPanel: React.FC<ReportPanelProps> = ({ report, businessUnits }) => {
     }
   };
 
-  // ── Export ───────────────────────────────────────────────────────────────
   const exportExcel = () => {
     const cols = COLUMNS[report.key];
-    const exportRows = rows.map(r => {
+    const ws = XLSX.utils.json_to_sheet(rows.map(r => {
       const obj: any = {};
-      for (const c of cols) {
-        const val = r[c.dataIndex as string];
-        obj[c.title] = typeof val === 'number' ? val : (val ?? '');
-      }
+      cols.forEach(c => { obj[c.title] = r[c.dataIndex as string] ?? ''; });
       return obj;
-    });
-    const ws = XLSX.utils.json_to_sheet(exportRows);
+    }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, report.label.slice(0, 31));
-    saveAs(
-      new Blob([XLSX.write(wb, { bookType: 'xlsx', type: 'array' })], { type: 'application/octet-stream' }),
-      `${report.key}_${new Date().toISOString().slice(0, 10)}.xlsx`
-    );
+    saveAs(new Blob([XLSX.write(wb, { bookType: 'xlsx', type: 'array' })], { type: 'application/octet-stream' }),
+      `${report.key}_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   const exportPdf = () => {
     const doc = new jsPDF('landscape', 'mm', 'a4');
     const cols = COLUMNS[report.key];
-    doc.setFontSize(14);
-    doc.setTextColor(30, 30, 30);
-    doc.text(reportTitle.current, 14, 16);
-    doc.setFontSize(9);
-    doc.setTextColor(100);
+    doc.setFontSize(14); doc.setTextColor(30, 30, 30); doc.text(reportTitle.current, 14, 16);
+    doc.setFontSize(9);  doc.setTextColor(100);
     doc.text(`Generated: ${new Date().toLocaleString()}   Records: ${rows.length}`, 14, 22);
     autoTable(doc, {
       startY: 28,
       head: [cols.map(c => c.title)],
-      body: rows.map(r => cols.map(c => {
-        const v = r[c.dataIndex as string];
-        return typeof v === 'number' ? fmt(v) : (v ?? '');
-      })),
+      body: rows.map(r => cols.map(c => { const v = r[c.dataIndex as string]; return typeof v === 'number' ? fmt(v) : (v ?? ''); })),
       styles: { fontSize: 8, cellPadding: 2 },
       headStyles: { fillColor: [199, 70, 52], textColor: 255, fontStyle: 'bold' },
       alternateRowStyles: { fillColor: [247, 247, 247] },
@@ -348,114 +298,68 @@ const ReportPanel: React.FC<ReportPanelProps> = ({ report, businessUnits }) => {
     doc.save(`${report.key}_${new Date().toISOString().slice(0, 10)}.pdf`);
   };
 
-  // ── Render ───────────────────────────────────────────────────────────────
   const columns = COLUMNS[report.key];
 
   return (
     <div style={{ padding: '16px 0' }}>
-      {/* Description */}
-      <Text type="secondary" style={{ fontSize: 13, display: 'block', marginBottom: 16 }}>
-        {report.description}
-      </Text>
+      <Text type="secondary" style={{ fontSize: 13, display: 'block', marginBottom: 14 }}>{report.description}</Text>
 
-      {/* Parameters form */}
-      <Card
-        size="small"
-        style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 16 }}
-        styles={{ body: { padding: '14px 16px' } }}
-      >
+      {/* Parameters */}
+      <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 14 }}
+        styles={{ body: { padding: '12px 16px' } }}>
         <Form form={form} layout="inline" size="small">
           <Form.Item label="Business Unit" name="businessUnit">
-            <Select placeholder="All Business Units" allowClear showSearch style={{ width: 220 }}
+            <Select placeholder="All Business Units" allowClear showSearch style={{ width: 200 }}
               filterOption={(i, o) => String(o?.value ?? '').toLowerCase().includes(i.toLowerCase())}>
               {businessUnits.map(bu => <Option key={bu} value={bu}>{bu}</Option>)}
             </Select>
           </Form.Item>
-
-          {report.hasSupplierFilter && (
-            <>
-              <Form.Item label="Supplier #" name="supplierNumber">
-                <Input placeholder="Optional" style={{ width: 130 }} allowClear />
-              </Form.Item>
-              <Form.Item label="Supplier Name" name="supplierName">
-                <Input placeholder="Optional" style={{ width: 160 }} allowClear />
-              </Form.Item>
-            </>
-          )}
-
-          {report.hasDateFilter && (
-            <>
-              <Form.Item label="Date From" name="dateFrom">
-                <Input type="date" style={{ width: 140 }} />
-              </Form.Item>
-              <Form.Item label="Date To" name="dateTo">
-                <Input type="date" style={{ width: 140 }} />
-              </Form.Item>
-            </>
-          )}
+          {report.hasSupplierFilter && (<>
+            <Form.Item label="Supplier #" name="supplierNumber">
+              <Input placeholder="Optional" style={{ width: 120 }} allowClear />
+            </Form.Item>
+            <Form.Item label="Supplier Name" name="supplierName">
+              <Input placeholder="Optional" style={{ width: 150 }} allowClear />
+            </Form.Item>
+          </>)}
+          {report.hasDateFilter && (<>
+            <Form.Item label="Date From" name="dateFrom"><Input type="date" style={{ width: 140 }} /></Form.Item>
+            <Form.Item label="Date To" name="dateTo"><Input type="date" style={{ width: 140 }} /></Form.Item>
+          </>)}
         </Form>
       </Card>
 
-      {/* Action buttons */}
-      <Space style={{ marginBottom: 16 }}>
-        <Button
-          type="primary"
-          icon={<PlayCircleOutlined />}
-          onClick={handleRun}
-          loading={loading}
-          style={{ background: report.color, borderColor: report.color }}
-        >
-          Run Report
-        </Button>
+      {/* Buttons */}
+      <Space style={{ marginBottom: 14 }}>
+        <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleRun} loading={loading}
+          style={{ background: report.color, borderColor: report.color }}>Run Report</Button>
         <Tooltip title="Export to Excel">
-          <Button icon={<FileExcelOutlined />} onClick={exportExcel} disabled={rows.length === 0}>
-            Excel
-          </Button>
+          <Button icon={<FileExcelOutlined />} onClick={exportExcel} disabled={rows.length === 0}>Excel</Button>
         </Tooltip>
         <Tooltip title="Export to PDF">
-          <Button icon={<FilePdfOutlined />} onClick={exportPdf} disabled={rows.length === 0} danger>
-            PDF
-          </Button>
+          <Button icon={<FilePdfOutlined />} onClick={exportPdf} disabled={rows.length === 0} danger>PDF</Button>
         </Tooltip>
-        {rows.length > 0 && (
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            {rows.length} record{rows.length !== 1 ? 's' : ''}
-          </Text>
-        )}
+        {rows.length > 0 && <Text type="secondary" style={{ fontSize: 12 }}>{rows.length} record{rows.length !== 1 ? 's' : ''}</Text>}
       </Space>
 
       {/* Results */}
       <Spin spinning={loading}>
         {!hasRun ? (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE}
             description={<Text type="secondary">Set parameters and click Run Report</Text>}
-            style={{ padding: '40px 0' }}
-          />
+            style={{ padding: '40px 0' }} />
         ) : (
-          <Table
-            dataSource={rows}
-            columns={columns}
-            rowKey="key"
-            size="small"
-            scroll={{ x: 'max-content', y: 460 }}
+          <Table dataSource={rows} columns={columns} rowKey="key" size="small"
+            scroll={{ x: 'max-content', y: 440 }}
             pagination={{ pageSize: 50, showSizeChanger: true, showTotal: t => `${t} records` }}
             summary={
               report.key === 'supplier-balance' ? () => (
                 <Table.Summary.Row>
                   <Table.Summary.Cell index={0} colSpan={2}><Text strong>Total</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell index={2} align="right">
-                    <Text strong>{rows.reduce((s, r) => s + (r.invoiceCount || 0), 0)}</Text>
-                  </Table.Summary.Cell>
-                  <Table.Summary.Cell index={3} align="right">
-                    <Text strong>{fmt(rows.reduce((s, r) => s + (r.invoiceAmount || 0), 0))}</Text>
-                  </Table.Summary.Cell>
-                  <Table.Summary.Cell index={4} align="right">
-                    <Text style={{ color: REDWOOD.success }}>{fmt(rows.reduce((s, r) => s + (r.amountPaid || 0), 0))}</Text>
-                  </Table.Summary.Cell>
-                  <Table.Summary.Cell index={5} align="right">
-                    <Text strong style={{ color: REDWOOD.primary }}>{fmt(rows.reduce((s, r) => s + (r.outstanding || 0), 0))}</Text>
-                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={2} align="right"><Text strong>{rows.reduce((s, r) => s + (r.invoiceCount || 0), 0)}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={3} align="right"><Text strong>{fmt(rows.reduce((s, r) => s + (r.invoiceAmount || 0), 0))}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={4} align="right"><Text style={{ color: REDWOOD.success }}>{fmt(rows.reduce((s, r) => s + (r.amountPaid || 0), 0))}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={5} align="right"><Text strong style={{ color: REDWOOD.primary }}>{fmt(rows.reduce((s, r) => s + (r.outstanding || 0), 0))}</Text></Table.Summary.Cell>
                   <Table.Summary.Cell index={6} />
                 </Table.Summary.Row>
               ) : report.key === 'aging-report' ? () => (
@@ -470,9 +374,7 @@ const ReportPanel: React.FC<ReportPanelProps> = ({ report, businessUnits }) => {
               ) : report.key === 'payment-register' ? () => (
                 <Table.Summary.Row>
                   <Table.Summary.Cell index={0} colSpan={3}><Text strong>Total</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell index={3} align="right">
-                    <Text strong>{fmt(rows.reduce((s, r) => s + (r.paymentAmount || 0), 0))}</Text>
-                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={3} align="right"><Text strong>{fmt(rows.reduce((s, r) => s + (r.paymentAmount || 0), 0))}</Text></Table.Summary.Cell>
                   <Table.Summary.Cell index={4} colSpan={4} />
                 </Table.Summary.Row>
               ) : undefined
@@ -484,9 +386,18 @@ const ReportPanel: React.FC<ReportPanelProps> = ({ report, businessUnits }) => {
   );
 };
 
+// ─── Tab entry ────────────────────────────────────────────────────────────────
+interface TabEntry {
+  tabKey: string;
+  report: ReportDef;
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 const APReports: React.FC = () => {
   const [businessUnits, setBusinessUnits] = useState<string[]>([]);
+  const [reportSearch, setReportSearch] = useState('');
+  const [tabs, setTabs] = useState<TabEntry[]>([]);
+  const [activeTab, setActiveTab] = useState<string>('');
 
   useEffect(() => {
     fetch(`${APEX_DB_CONFIG.baseUrl}/gl/businessunits`)
@@ -498,16 +409,36 @@ const APReports: React.FC = () => {
       }).catch(() => {});
   }, []);
 
-  const tabItems = REPORTS.map(report => ({
-    key: report.key,
-    label: (
-      <Space size={6}>
-        <span style={{ color: report.color, fontSize: 14 }}>{report.icon}</span>
-        <span>{report.label}</span>
-      </Space>
+  const filteredReports = useMemo(() =>
+    REPORTS.filter(r =>
+      r.label.toLowerCase().includes(reportSearch.toLowerCase()) ||
+      r.description.toLowerCase().includes(reportSearch.toLowerCase())
     ),
-    children: <ReportPanel report={report} businessUnits={businessUnits} />,
-  }));
+    [reportSearch]
+  );
+
+  const openReport = (report: ReportDef) => {
+    const tabKey = `${report.key}-${Date.now()}`;
+    const newTab: TabEntry = { tabKey, report };
+    setTabs(prev => [...prev, newTab]);
+    setActiveTab(tabKey);
+  };
+
+  const closeTab = (targetKey: string) => {
+    setTabs(prev => {
+      const next = prev.filter(t => t.tabKey !== targetKey);
+      if (activeTab === targetKey && next.length > 0) {
+        setActiveTab(next[next.length - 1].tabKey);
+      } else if (next.length === 0) {
+        setActiveTab('');
+      }
+      return next;
+    });
+  };
+
+  const onTabEdit = (targetKey: React.MouseEvent | React.KeyboardEvent | string, action: 'add' | 'remove') => {
+    if (action === 'remove') closeTab(targetKey as string);
+  };
 
   return (
     <Layout style={{ minHeight: 'calc(100vh - 64px)', background: REDWOOD.neutral100 }}>
@@ -521,36 +452,133 @@ const APReports: React.FC = () => {
           ]} />
         </div>
 
-        <div style={{ padding: 24, paddingRight: 96 }}>
-          {/* Page title */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20 }}>
-            <div style={{
-              width: 48, height: 48, borderRadius: 10,
-              background: `linear-gradient(135deg, ${REDWOOD.reportGreen} 0%, #0D5C36 100%)`,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: `0 4px 12px ${REDWOOD.reportGreen}40`,
-            }}>
-              <BarChartOutlined style={{ fontSize: 24, color: '#fff' }} />
+        <div style={{ display: 'flex', height: 'calc(100vh - 113px)' }}>
+
+          {/* ── Left panel: report list ── */}
+          <div style={{
+            width: 260, flexShrink: 0, background: REDWOOD.surface,
+            borderRight: `1px solid ${REDWOOD.neutral200}`,
+            display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          }}>
+            {/* Header */}
+            <div style={{ padding: '16px 14px 10px', borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
+              <Space align="center" style={{ marginBottom: 10 }}>
+                <div style={{
+                  width: 32, height: 32, borderRadius: 8,
+                  background: `linear-gradient(135deg, ${REDWOOD.reportGreen} 0%, #0D5C36 100%)`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <BarChartOutlined style={{ fontSize: 16, color: '#fff' }} />
+                </div>
+                <div>
+                  <Text strong style={{ fontSize: 14, display: 'block', lineHeight: 1.2 }}>Reports</Text>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Payables Module</Text>
+                </div>
+              </Space>
+              <Input
+                prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
+                placeholder="Search reports..."
+                size="small"
+                allowClear
+                value={reportSearch}
+                onChange={e => setReportSearch(e.target.value)}
+                style={{ borderRadius: 6 }}
+              />
             </div>
-            <div>
-              <Title level={3} style={{ margin: 0 }}>Reports — Payables</Title>
-              <Text type="secondary">Each tab is independent — run multiple reports at the same time</Text>
+
+            {/* Report list */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '8px 8px' }}>
+              {filteredReports.length === 0 ? (
+                <Text type="secondary" style={{ fontSize: 12, padding: '12px 6px', display: 'block' }}>
+                  No reports match your search.
+                </Text>
+              ) : filteredReports.map(r => (
+                <div
+                  key={r.key}
+                  onClick={() => openReport(r)}
+                  style={{
+                    padding: '10px 12px', borderRadius: 8, cursor: 'pointer',
+                    marginBottom: 4, transition: 'all 0.15s',
+                    border: `1px solid transparent`,
+                  }}
+                  onMouseEnter={e => {
+                    (e.currentTarget as HTMLDivElement).style.background = `${r.color}10`;
+                    (e.currentTarget as HTMLDivElement).style.borderColor = `${r.color}30`;
+                  }}
+                  onMouseLeave={e => {
+                    (e.currentTarget as HTMLDivElement).style.background = 'transparent';
+                    (e.currentTarget as HTMLDivElement).style.borderColor = 'transparent';
+                  }}
+                >
+                  <Space align="start" size={10}>
+                    <div style={{
+                      width: 30, height: 30, borderRadius: 6, flexShrink: 0,
+                      background: `${r.color}18`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      color: r.color, fontSize: 14,
+                    }}>
+                      {r.icon}
+                    </div>
+                    <div>
+                      <Text strong style={{ fontSize: 12, color: REDWOOD.neutral900, display: 'block', lineHeight: 1.3 }}>
+                        {r.label}
+                      </Text>
+                      <Text type="secondary" style={{ fontSize: 11, lineHeight: 1.3 }}>{r.description}</Text>
+                    </div>
+                  </Space>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ padding: '10px 14px', borderTop: `1px solid ${REDWOOD.neutral200}` }}>
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                Click a report to open it in a new tab
+              </Text>
             </div>
           </div>
 
-          {/* Tabs */}
-          <Card
-            style={{ borderRadius: 10, border: `1px solid ${REDWOOD.neutral200}` }}
-            styles={{ body: { padding: '0 24px 24px' } }}
-          >
-            <Tabs
-              type="card"
-              size="small"
-              items={tabItems}
-              style={{ marginTop: 0 }}
-              tabBarStyle={{ marginBottom: 0, borderBottom: `1px solid ${REDWOOD.neutral200}` }}
-            />
-          </Card>
+          {/* ── Right panel: tabs ── */}
+          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            {tabs.length === 0 ? (
+              /* Empty state */
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12 }}>
+                <div style={{
+                  width: 64, height: 64, borderRadius: 16,
+                  background: `${REDWOOD.reportGreen}12`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <BarChartOutlined style={{ fontSize: 32, color: REDWOOD.reportGreen }} />
+                </div>
+                <Title level={4} style={{ margin: 0, color: REDWOOD.neutral600 }}>No reports open</Title>
+                <Text type="secondary">Select a report from the left panel to open it here</Text>
+              </div>
+            ) : (
+              <Tabs
+                type="editable-card"
+                hideAdd
+                activeKey={activeTab}
+                onChange={setActiveTab}
+                onEdit={onTabEdit}
+                style={{ height: '100%' }}
+                tabBarStyle={{ padding: '0 16px', margin: 0, background: REDWOOD.surface, borderBottom: `1px solid ${REDWOOD.neutral200}` }}
+                items={tabs.map(({ tabKey, report }) => ({
+                  key: tabKey,
+                  closable: true,
+                  label: (
+                    <Space size={6}>
+                      <span style={{ color: report.color, fontSize: 13 }}>{report.icon}</span>
+                      <span style={{ fontSize: 13 }}>{report.label}</span>
+                    </Space>
+                  ),
+                  children: (
+                    <div style={{ padding: '0 24px 24px', overflowY: 'auto', height: 'calc(100vh - 165px)' }}>
+                      <ReportPanel report={report} businessUnits={businessUnits} />
+                    </div>
+                  ),
+                }))}
+              />
+            )}
+          </div>
         </div>
       </Content>
     </Layout>
