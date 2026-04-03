@@ -146,7 +146,16 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<any[]>([]);
   const [hasRun, setHasRun] = useState(false);
+  const [gridSearch, setGridSearch] = useState('');
   const reportTitle = useRef('');
+
+  const filteredRows = useMemo(() => {
+    if (!gridSearch.trim()) return rows;
+    const q = gridSearch.toLowerCase();
+    return rows.filter(r =>
+      Object.values(r).some(v => String(v ?? '').toLowerCase().includes(q))
+    );
+  }, [rows, gridSearch]);
 
   const fetchSuppliersListing = async (bu: string, supplierNum: string, supplierName: string) => {
     const p = new URLSearchParams();
@@ -251,7 +260,7 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
 
   const handleRun = async () => {
     const { businessUnit: bu = '', supplierNumber: sn = '', supplierName: snm = '', dateFrom = '', dateTo = '' } = form.getFieldsValue();
-    setLoading(true); setRows([]);
+    setLoading(true); setRows([]); setGridSearch('');
     reportTitle.current = `${report.label}${bu ? ' — ' + bu : ''}`;
     try {
       let result: any[] = [];
@@ -330,17 +339,34 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
       </Card>
 
       {/* Buttons */}
-      <Space style={{ marginBottom: 14 }}>
-        <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleRun} loading={loading}
-          style={{ background: report.color, borderColor: report.color }}>Run Report</Button>
-        <Tooltip title="Export to Excel">
-          <Button icon={<FileExcelOutlined />} onClick={exportExcel} disabled={rows.length === 0}>Excel</Button>
-        </Tooltip>
-        <Tooltip title="Export to PDF">
-          <Button icon={<FilePdfOutlined />} onClick={exportPdf} disabled={rows.length === 0} danger>PDF</Button>
-        </Tooltip>
-        {rows.length > 0 && <Text type="secondary" style={{ fontSize: 12 }}>{rows.length} record{rows.length !== 1 ? 's' : ''}</Text>}
-      </Space>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+        <Space>
+          <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleRun} loading={loading}
+            style={{ background: report.color, borderColor: report.color }}>Run Report</Button>
+          <Tooltip title="Export to Excel">
+            <Button icon={<FileExcelOutlined />} onClick={exportExcel} disabled={rows.length === 0}>Excel</Button>
+          </Tooltip>
+          <Tooltip title="Export to PDF">
+            <Button icon={<FilePdfOutlined />} onClick={exportPdf} disabled={rows.length === 0} danger>PDF</Button>
+          </Tooltip>
+        </Space>
+        {hasRun && (
+          <Space>
+            <Input
+              prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
+              placeholder="Search in results..."
+              size="small"
+              allowClear
+              value={gridSearch}
+              onChange={e => setGridSearch(e.target.value)}
+              style={{ width: 220, borderRadius: 6 }}
+            />
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {filteredRows.length}{filteredRows.length !== rows.length ? ` / ${rows.length}` : ''} record{rows.length !== 1 ? 's' : ''}
+            </Text>
+          </Space>
+        )}
+      </div>
 
       {/* Results */}
       <Spin spinning={loading}>
@@ -349,17 +375,17 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
             description={<Text type="secondary">Set parameters and click Run Report</Text>}
             style={{ padding: '40px 0' }} />
         ) : (
-          <Table dataSource={rows} columns={columns} rowKey="key" size="small"
+          <Table dataSource={filteredRows} columns={columns} rowKey="key" size="small"
             scroll={{ x: 'max-content', y: 440 }}
             pagination={{ pageSize: 50, showSizeChanger: true, showTotal: t => `${t} records` }}
             summary={
               report.key === 'supplier-balance' ? () => (
                 <Table.Summary.Row>
                   <Table.Summary.Cell index={0} colSpan={2}><Text strong>Total</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell index={2} align="right"><Text strong>{rows.reduce((s, r) => s + (r.invoiceCount || 0), 0)}</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell index={3} align="right"><Text strong>{fmt(rows.reduce((s, r) => s + (r.invoiceAmount || 0), 0))}</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell index={4} align="right"><Text style={{ color: REDWOOD.success }}>{fmt(rows.reduce((s, r) => s + (r.amountPaid || 0), 0))}</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell index={5} align="right"><Text strong style={{ color: REDWOOD.primary }}>{fmt(rows.reduce((s, r) => s + (r.outstanding || 0), 0))}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={2} align="right"><Text strong>{filteredRows.reduce((s, r) => s + (r.invoiceCount || 0), 0)}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={3} align="right"><Text strong>{fmt(filteredRows.reduce((s, r) => s + (r.invoiceAmount || 0), 0))}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={4} align="right"><Text style={{ color: REDWOOD.success }}>{fmt(filteredRows.reduce((s, r) => s + (r.amountPaid || 0), 0))}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={5} align="right"><Text strong style={{ color: REDWOOD.primary }}>{fmt(filteredRows.reduce((s, r) => s + (r.outstanding || 0), 0))}</Text></Table.Summary.Cell>
                   <Table.Summary.Cell index={6} />
                 </Table.Summary.Row>
               ) : report.key === 'aging-report' ? () => (
@@ -367,14 +393,14 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
                   <Table.Summary.Cell index={0} colSpan={2}><Text strong>Total</Text></Table.Summary.Cell>
                   {(['current', 'days30', 'days60', 'days90', 'days90plus', 'total'] as const).map((f, i) => (
                     <Table.Summary.Cell key={f} index={i + 2} align="right">
-                      <Text strong>{fmt(rows.reduce((s, r) => s + (r[f] || 0), 0))}</Text>
+                      <Text strong>{fmt(filteredRows.reduce((s, r) => s + (r[f] || 0), 0))}</Text>
                     </Table.Summary.Cell>
                   ))}
                 </Table.Summary.Row>
               ) : report.key === 'payment-register' ? () => (
                 <Table.Summary.Row>
                   <Table.Summary.Cell index={0} colSpan={3}><Text strong>Total</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell index={3} align="right"><Text strong>{fmt(rows.reduce((s, r) => s + (r.paymentAmount || 0), 0))}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={3} align="right"><Text strong>{fmt(filteredRows.reduce((s, r) => s + (r.paymentAmount || 0), 0))}</Text></Table.Summary.Cell>
                   <Table.Summary.Cell index={4} colSpan={4} />
                 </Table.Summary.Row>
               ) : undefined
