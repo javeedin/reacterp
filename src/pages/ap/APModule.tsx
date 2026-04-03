@@ -120,6 +120,11 @@ const setupItems: MenuItemType[] = [
   { key: 'invoice-holds', icon: <StopOutlined />, label: 'Manage Invoice Holds', description: 'View and manage invoice hold codes', color: REDWOOD.primaryDark, path: '/ap/invoice-holds' },
 ];
 
+// Reports items
+const reportsItems: MenuItemType[] = [
+  { key: 'ap-reports', icon: <BarChartOutlined />, label: 'Payables Reports', description: 'Suppliers listing, balance, payment register, aging report', color: REDWOOD.reportGreen, path: '/ap/reports' },
+];
+
 // Payment task items
 const paymentTaskItems: MenuItemType[] = [
   { key: 'manage-payments', icon: <DollarOutlined />, label: 'Manage Payments', description: 'Search and manage payments', color: REDWOOD.taskBlue, path: '/ap/manage-payments' },
@@ -536,6 +541,18 @@ const APModule: React.FC = () => {
             <SectionTitle icon={<BookOutlined />} title="Accounting" color={REDWOOD.info} />
             <Row gutter={[16, 16]}>
               {accountingTaskItems.map((item) => (
+                <Col xs={24} sm={12} lg={8} xl={6} key={item.key}>
+                  <MenuCard item={item} />
+                </Col>
+              ))}
+            </Row>
+          </div>
+
+          {/* Reports Section */}
+          <div style={{ marginBottom: 32 }}>
+            <SectionTitle icon={<BarChartOutlined />} title="Reports & Analytics" color={REDWOOD.reportGreen} />
+            <Row gutter={[16, 16]}>
+              {reportsItems.map((item) => (
                 <Col xs={24} sm={12} lg={8} xl={6} key={item.key}>
                   <MenuCard item={item} />
                 </Col>

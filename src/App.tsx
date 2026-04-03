@@ -27,6 +27,7 @@ const TrialBalance            = lazy(() => import('./pages/gl/TrialBalance'));
 const IncomeStatementTemplates= lazy(() => import('./pages/gl/IncomeStatementTemplates'));
 const Currencies              = lazy(() => import('./pages/gl/Currencies'));
 const ManageInvoices          = lazy(() => import('./pages/ap/ManageInvoices'));
+const APReports               = lazy(() => import('./pages/ap/APReports'));
 const ManagePayments          = lazy(() => import('./pages/ap/ManagePayments'));
 const Banks                   = lazy(() => import('./pages/ap/Banks'));
 const InvoiceHolds            = lazy(() => import('./pages/ap/InvoiceHolds'));
@@ -138,6 +139,7 @@ function App() {
               <Route path="ap/sla-journals" element={<ManageSLAJournals />} />
               <Route path="ap/create-accounting" element={<CreateAccounting />} />
               <Route path="ap/prepayment-applications" element={<PrepaymentApplications />} />
+              <Route path="ap/reports" element={<APReports />} />
               <Route path="ap/*" element={<APModule />} />
               <Route path="ar/*" element={<ComingSoon moduleName="Accounts Receivable" />} />
               <Route path="inventory/*" element={<ComingSoon moduleName="Inventory" />} />
