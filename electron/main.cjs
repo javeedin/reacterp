@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, Notification, nativeImage, utilityProcess } = require('electron');
+const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, Notification, nativeImage, utilityProcess, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -814,6 +814,52 @@ ipcMain.handle('open-recordings-folder', async () => {
 
 ipcMain.handle('get-file-url', (_event, filePath) => {
   return 'file://' + filePath.split(path.sep).join('/');
+});
+
+// ── Oracle Fusion credential storage (OS-level encryption via safeStorage) ──
+const CREDS_FILE = path.join(app.getPath('userData'), 'fusion-creds.json');
+
+ipcMain.handle('save-fusion-credentials', (_event, { username, password }) => {
+  try {
+    let storedPassword, encrypted;
+    if (safeStorage.isEncryptionAvailable()) {
+      storedPassword = safeStorage.encryptString(password).toString('base64');
+      encrypted = true;
+    } else {
+      // Fallback: base64 only (no OS keychain available)
+      storedPassword = Buffer.from(password).toString('base64');
+      encrypted = false;
+    }
+    fs.writeFileSync(CREDS_FILE, JSON.stringify({ username, password: storedPassword, encrypted }), 'utf8');
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('get-fusion-credentials', () => {
+  try {
+    if (!fs.existsSync(CREDS_FILE)) return null;
+    const data = JSON.parse(fs.readFileSync(CREDS_FILE, 'utf8'));
+    let password;
+    if (data.encrypted && safeStorage.isEncryptionAvailable()) {
+      password = safeStorage.decryptString(Buffer.from(data.password, 'base64'));
+    } else {
+      password = Buffer.from(data.password, 'base64').toString();
+    }
+    return { username: data.username, password };
+  } catch (e) {
+    return null;
+  }
+});
+
+ipcMain.handle('clear-fusion-credentials', () => {
+  try {
+    if (fs.existsSync(CREDS_FILE)) fs.unlinkSync(CREDS_FILE);
+    return { success: true };
+  } catch (e) {
+    return { success: false };
+  }
 });
 
 // ── Auto-update ────────────────────────────────────────────────────────────

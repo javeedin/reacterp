@@ -1,13 +1,14 @@
 import React, { useRef, useState, useEffect } from 'react';
 import {
-  Layout, Typography, Space, Button, Input, Tooltip, Breadcrumb,
-  Select, message, Tag, Badge, Empty, Divider,
+  Layout, Typography, Button, Input, Tooltip, Breadcrumb,
+  Select, message, Tag, Badge, Modal, Form,
 } from 'antd';
 import {
   HomeOutlined, ReloadOutlined, ArrowLeftOutlined, ArrowRightOutlined,
   VideoCameraOutlined, StopOutlined, LockOutlined,
   AimOutlined, FileTextOutlined, CheckSquareOutlined,
   DeleteOutlined, CloseOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
+  KeyOutlined, SettingOutlined, UserOutlined, EyeInvisibleOutlined, EyeTwoTone,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -390,6 +391,11 @@ const OracleFusion: React.FC = () => {
   // Tracks the pageTitle of the screen currently being interacted with
   const currentPageTitleRef = useRef<string>('');
 
+  // --- Saved credentials ---
+  const [credsModalOpen, setCredsModalOpen] = useState(false);
+  const [hasSavedCreds, setHasSavedCreds] = useState(false);
+  const [credsForm] = Form.useForm();
+
   // --- Screen recording ---
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -552,6 +558,96 @@ const OracleFusion: React.FC = () => {
     message.info(`Tracking stopped — ${steps.length} steps captured`);
   };
 
+  // ---- Saved Credentials ----
+  // Check on mount whether credentials are already stored
+  useEffect(() => {
+    (window as any).electronAPI?.getFusionCredentials?.().then((creds: any) => {
+      setHasSavedCreds(!!creds?.username);
+      if (creds?.username) credsForm.setFieldsValue({ username: creds.username, password: creds.password });
+    });
+  }, []);
+
+  const openCredsModal = async () => {
+    // Pre-fill form with saved values
+    const creds = await (window as any).electronAPI?.getFusionCredentials?.();
+    if (creds) credsForm.setFieldsValue({ username: creds.username, password: creds.password });
+    setCredsModalOpen(true);
+  };
+
+  const handleSaveCreds = async () => {
+    const values = await credsForm.validateFields();
+    const result = await (window as any).electronAPI?.saveFusionCredentials?.(values.username, values.password);
+    if (result?.success) {
+      setHasSavedCreds(true);
+      setCredsModalOpen(false);
+      message.success('Credentials saved — use the key button to auto-login');
+    } else {
+      message.error('Failed to save credentials');
+    }
+  };
+
+  const handleClearCreds = async () => {
+    await (window as any).electronAPI?.clearFusionCredentials?.();
+    credsForm.resetFields();
+    setHasSavedCreds(false);
+    message.info('Credentials cleared');
+  };
+
+  // Inject credentials into the Oracle Fusion login page
+  const handleAutoLogin = async () => {
+    const wv = webviewRef.current;
+    if (!wv) { message.warning('WebView not ready'); return; }
+    const creds = await (window as any).electronAPI?.getFusionCredentials?.();
+    if (!creds) { message.warning('No saved credentials — click the settings icon to set up'); return; }
+
+    const script = `
+      (function(u, p) {
+        // Oracle Fusion / OAM login field selectors
+        var userSelectors = ['input[name="userid"]','input[id="userid"]','input[name="username"]','input[id="username"]','input[type="text"]:not([style*="display:none"])'];
+        var passSelectors = ['input[name="password"]','input[id="password"]','input[type="password"]'];
+        var btnSelectors  = ['input[type="submit"]','button[type="submit"]','#btnActive','[id*="login"]'];
+
+        function fill(selectors, value) {
+          for (var i = 0; i < selectors.length; i++) {
+            var el = document.querySelector(selectors[i]);
+            if (el && el.offsetParent !== null) {
+              var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+              nativeInputValueSetter.call(el, value);
+              el.dispatchEvent(new Event('input',  { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              return true;
+            }
+          }
+          return false;
+        }
+
+        var filledUser = fill(userSelectors, u);
+        var filledPass = fill(passSelectors, p);
+
+        if (filledUser && filledPass) {
+          for (var j = 0; j < btnSelectors.length; j++) {
+            var btn = document.querySelector(btnSelectors[j]);
+            if (btn && btn.offsetParent !== null) { btn.click(); break; }
+          }
+          'ok';
+        } else {
+          'not-found';
+        }
+      })(${JSON.stringify(creds.username)}, ${JSON.stringify(creds.password)});
+    `;
+
+    try {
+      const result = await wv.executeJavaScript(script);
+      if (result === 'ok') {
+        message.success('Login submitted');
+      } else {
+        message.warning('Could not find login fields on this page — navigate to the Oracle Fusion login page first');
+      }
+    } catch (e: any) {
+      message.error('Auto-login failed: ' + e.message);
+    }
+  };
+
   // ---- Screen Recording ----
   const startRecording = async () => {
     if (!isElectron()) { message.warning('Recording only works in the desktop app'); return; }
@@ -703,6 +799,18 @@ const OracleFusion: React.FC = () => {
             style={{ background: '#444', border: 'none', color: steps.length ? '#ffd54f' : '#fff' }} />
         </Tooltip>
 
+        {/* Auto-login button */}
+        <Tooltip title={hasSavedCreds ? 'Auto-fill login credentials' : 'No credentials saved yet — click ⚙ to set up'}>
+          <Button size="small" icon={<KeyOutlined />} onClick={handleAutoLogin}
+            style={{ background: hasSavedCreds ? '#5b3a8c' : '#444', border: 'none', color: hasSavedCreds ? '#fff' : '#666' }} />
+        </Tooltip>
+
+        {/* Credentials settings */}
+        <Tooltip title="Login credentials settings">
+          <Button size="small" icon={<SettingOutlined />} onClick={openCredsModal}
+            style={{ background: '#444', border: 'none', color: hasSavedCreds ? '#4caf50' : '#aaa' }} />
+        </Tooltip>
+
         <Tooltip title="Open Training Library">
           <Button size="small" onClick={() => navigate('/training')}
             style={{ background: '#1D7B4D', border: 'none', color: '#fff', fontSize: 11 }}>
@@ -818,6 +926,54 @@ const OracleFusion: React.FC = () => {
         )}
       </div>
     </Layout>
+
+    {/* ── Credentials Setup Modal ── */}
+    <Modal
+      title={<span><LockOutlined style={{ color: '#5b3a8c', marginRight: 8 }} />Oracle Fusion Login Credentials</span>}
+      open={credsModalOpen}
+      onCancel={() => setCredsModalOpen(false)}
+      footer={null}
+      width={420}
+    >
+      <p style={{ color: '#666', fontSize: 13, marginBottom: 20 }}>
+        Credentials are encrypted using your OS keychain (Windows DPAPI / Mac Keychain) and stored locally.
+        They are never sent to any server.
+      </p>
+      <Form form={credsForm} layout="vertical">
+        <Form.Item
+          name="username"
+          label="Oracle Fusion Username"
+          rules={[{ required: true, message: 'Please enter your username' }]}
+        >
+          <Input prefix={<UserOutlined style={{ color: '#aaa' }} />} placeholder="e.g. john.smith@company.com" />
+        </Form.Item>
+        <Form.Item
+          name="password"
+          label="Oracle Fusion Password"
+          rules={[{ required: true, message: 'Please enter your password' }]}
+        >
+          <Input.Password
+            placeholder="Your Oracle Fusion password"
+            iconRender={visible => (visible ? <EyeTwoTone /> : <EyeInvisibleOutlined />)}
+          />
+        </Form.Item>
+        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+          <Button type="primary" onClick={handleSaveCreds} style={{ flex: 1, background: '#5b3a8c', borderColor: '#5b3a8c' }}>
+            <LockOutlined /> Save Credentials
+          </Button>
+          {hasSavedCreds && (
+            <Button danger onClick={handleClearCreds}>
+              Clear
+            </Button>
+          )}
+        </div>
+        {hasSavedCreds && (
+          <div style={{ marginTop: 12, padding: '8px 12px', background: '#f0fff4', borderRadius: 6, border: '1px solid #b7eb8f', fontSize: 12, color: '#389e0d' }}>
+            ✓ Credentials saved — click the <KeyOutlined /> button in the toolbar to auto-fill the login page
+          </div>
+        )}
+      </Form>
+    </Modal>
   );
 };
 

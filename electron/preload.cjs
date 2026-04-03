@@ -37,6 +37,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openRecordingsFolder: () => ipcRenderer.invoke('open-recordings-folder'),
   getFileUrl: (filePath) => ipcRenderer.invoke('get-file-url', filePath),
 
+  // Oracle Fusion saved credentials
+  saveFusionCredentials: (username, password) => ipcRenderer.invoke('save-fusion-credentials', { username, password }),
+  getFusionCredentials: () => ipcRenderer.invoke('get-fusion-credentials'),
+  clearFusionCredentials: () => ipcRenderer.invoke('clear-fusion-credentials'),
+
   // Check if running in Electron
   isElectron: true,
 
