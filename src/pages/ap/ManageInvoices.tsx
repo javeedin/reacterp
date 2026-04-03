@@ -26,6 +26,8 @@ import {
   Statistic,
   Progress,
   Spin,
+  List,
+  Badge,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -59,6 +61,12 @@ import {
   WalletOutlined,
   CreditCardOutlined,
   LoadingOutlined,
+  FileOutlined,
+  FilePdfOutlined,
+  FileImageOutlined,
+  FileWordOutlined,
+  FileExcelOutlined,
+  FileZipOutlined,
 } from '@ant-design/icons';
 import { Link, useLocation } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -67,7 +75,7 @@ import Autopilot from '../../components/Autopilot';
 import InvoiceDetail from './InvoiceDetail';
 import CreateInvoice from './CreateInvoice';
 import type { InvoiceInitialData } from './CreateInvoice';
-import { APEX_DB_CONFIG } from '../../config/api.config';
+import { APEX_DB_CONFIG, ORACLE_FUSION_CONFIG } from '../../config/api.config';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 
@@ -313,6 +321,12 @@ const ManageInvoices: React.FC = () => {
 
   // Show/hide fully paid invoices
   const [showFullyPaid, setShowFullyPaid] = useState(true);
+
+  // Attachment modal state
+  const [attachModalVisible, setAttachModalVisible] = useState(false);
+  const [attachments, setAttachments] = useState<any[]>([]);
+  const [attachLoading, setAttachLoading] = useState(false);
+  const [attachInvoiceNum, setAttachInvoiceNum] = useState('');
 
   // Filtered invoices based on fully paid toggle
   const displayedInvoices = useMemo(() => {
@@ -729,6 +743,67 @@ const ManageInvoices: React.FC = () => {
     }
   };
 
+  // ── Attachment helpers ────────────────────────────────────────────────────
+  const FUSION_HOST = 'https://iaaobn.fa.ocs.oraclecloud.com';
+
+  const fetchAttachments = async (invoiceId: number, invoiceNum: string) => {
+    setAttachments([]);
+    setAttachLoading(true);
+    setAttachInvoiceNum(invoiceNum);
+    setAttachModalVisible(true);
+    try {
+      const creds = btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
+      const url = `${ORACLE_FUSION_CONFIG.baseUrl}/invoices/${invoiceId}/child/attachments`;
+      const res = await fetch(url, { headers: { 'Authorization': `Basic ${creds}` } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setAttachments(data.items || []);
+    } catch (e: any) {
+      message.error(`Failed to load attachments: ${e.message}`);
+    } finally {
+      setAttachLoading(false);
+    }
+  };
+
+  const downloadAttachment = async (att: any) => {
+    const fileName = att.FileName || att.Title || 'attachment';
+    if (!att.FileUrl) {
+      // fallback to enclosure link
+      const link = (att.links || []).find((l: any) => l.rel === 'enclosure' && l.name === 'FileContents');
+      if (link) window.open(link.href, '_blank');
+      return;
+    }
+    const url = FUSION_HOST + att.FileUrl;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objUrl; a.download = fileName; a.click();
+      URL.revokeObjectURL(objUrl);
+    } catch {
+      window.open(url, '_blank');
+    }
+  };
+
+  const getFileIcon = (contentType: string, fileName: string) => {
+    const ext = (fileName || '').split('.').pop()?.toLowerCase() || '';
+    if (contentType?.includes('pdf') || ext === 'pdf')   return <FilePdfOutlined style={{ color: '#E53935', fontSize: 20 }} />;
+    if (contentType?.includes('image') || ['jpg','jpeg','png','gif','bmp','webp'].includes(ext)) return <FileImageOutlined style={{ color: '#1E88E5', fontSize: 20 }} />;
+    if (['xls','xlsx'].includes(ext))  return <FileExcelOutlined style={{ color: '#1D7B4D', fontSize: 20 }} />;
+    if (['doc','docx'].includes(ext))  return <FileWordOutlined  style={{ color: '#1565C0', fontSize: 20 }} />;
+    if (['zip','rar','7z'].includes(ext)) return <FileZipOutlined style={{ color: '#F57C00', fontSize: 20 }} />;
+    return <FileOutlined style={{ color: '#6B6B6B', fontSize: 20 }} />;
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (!bytes) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
   // API Configuration for this page
   const PAGE_APIS = {
     apex: [
@@ -1141,12 +1216,15 @@ const ManageInvoices: React.FC = () => {
       dataIndex: 'attachments',
       key: 'attachments',
       width: 100,
-      render: (text: string) => (
+      render: (text: string, record: InvoiceRecord) => (
         text !== 'None' ? (
-          <Tooltip title="View attachments">
-            <PaperClipOutlined style={{ color: REDWOOD.info, cursor: 'pointer' }} />
+          <Tooltip title="View & download attachments">
+            <PaperClipOutlined
+              style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 16 }}
+              onClick={() => fetchAttachments(record.invoiceId, record.invoiceNumber)}
+            />
           </Tooltip>
-        ) : <Text type="secondary">None</Text>
+        ) : <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
       ),
     },
     {
@@ -2189,6 +2267,83 @@ const ManageInvoices: React.FC = () => {
             </div>
           )}
         </Modal>
+      {/* ── Attachments Modal ─────────────────────────────────────────── */}
+      <Modal
+        title={
+          <Space>
+            <PaperClipOutlined style={{ color: REDWOOD.info }} />
+            <span>Attachments — Invoice {attachInvoiceNum}</span>
+            {attachments.length > 0 && <Badge count={attachments.length} style={{ backgroundColor: REDWOOD.info }} />}
+          </Space>
+        }
+        open={attachModalVisible}
+        onCancel={() => setAttachModalVisible(false)}
+        footer={<Button onClick={() => setAttachModalVisible(false)}>Close</Button>}
+        width={640}
+      >
+        <Spin spinning={attachLoading}>
+          {!attachLoading && attachments.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '32px 0', color: '#999' }}>
+              <PaperClipOutlined style={{ fontSize: 32, marginBottom: 8 }} />
+              <div>No attachments found for this invoice</div>
+            </div>
+          ) : (
+            <List
+              dataSource={attachments}
+              renderItem={(att: any) => (
+                <List.Item
+                  style={{ padding: '12px 0' }}
+                  actions={[
+                    <Tooltip title="Download" key="dl">
+                      <Button
+                        type="primary"
+                        size="small"
+                        icon={<DownloadOutlined />}
+                        onClick={() => downloadAttachment(att)}
+                        style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+                      >
+                        Download
+                      </Button>
+                    </Tooltip>,
+                  ]}
+                >
+                  <List.Item.Meta
+                    avatar={getFileIcon(att.UploadedFileContentType, att.FileName)}
+                    title={
+                      <Text strong style={{ fontSize: 13 }}>
+                        {att.FileName || att.Title || 'Unnamed file'}
+                      </Text>
+                    }
+                    description={
+                      <Space size={12}>
+                        {att.UploadedFileLength > 0 && (
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            {formatFileSize(att.UploadedFileLength)}
+                          </Text>
+                        )}
+                        {att.Category && (
+                          <Tag color="blue" style={{ fontSize: 11 }}>{att.Category}</Tag>
+                        )}
+                        {att.CreationDate && (
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            {att.CreationDate.slice(0, 10)}
+                          </Text>
+                        )}
+                        {att.CreatedByUserName && (
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            {att.CreatedByUserName}
+                          </Text>
+                        )}
+                      </Space>
+                    }
+                  />
+                </List.Item>
+              )}
+            />
+          )}
+        </Spin>
+      </Modal>
+
       </Content>
       <Autopilot module="ap" />
       <FloatingMenu />
