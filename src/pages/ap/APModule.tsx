@@ -170,14 +170,17 @@ const APModule: React.FC = () => {
         if (!text.trim()) throw new Error('empty');
         const data = JSON.parse(text);
         // Support both flat object and ORDS items-array formats
+        // Support both flat object (json/item) and ORDS items-array formats
         const d = Array.isArray(data?.items) && data.items.length > 0 ? data.items[0] : data;
         setKpi({
-          pendingInvoices:  Number(d.pending_invoices   ?? d.pending_count       ?? 0),
-          approvedInvoices: Number(d.approved_invoices  ?? d.approved_count      ?? 0),
-          pendingPayments:  Number(d.pending_payments   ?? d.pending_payment_count ?? 0),
-          overduePayments:  Number(d.overdue_payments   ?? d.overdue_count       ?? 0),
-          totalPayables:    Number(d.total_outstanding  ?? d.total_payables      ?? d.total_amount ?? 0),
-          lastSync: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          pendingInvoices:  Number(d.pending_invoices  ?? 0),
+          approvedInvoices: Number(d.approved_invoices ?? 0),
+          pendingPayments:  Number(d.pending_payments  ?? 0),
+          overduePayments:  Number(d.overdue_payments  ?? 0),
+          totalPayables:    Number(d.total_outstanding ?? 0),
+          lastSync: d.last_sync_date
+            ? new Date(d.last_sync_date).toLocaleString()
+            : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         });
       } catch {
         // Endpoint not yet deployed — keep zeros, show "unavailable"
