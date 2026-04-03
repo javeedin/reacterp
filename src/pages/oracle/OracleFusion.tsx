@@ -195,50 +195,62 @@ const generateUserManual = (steps: Step[]): string => {
   ).join('\n');
 
   const sectionsHtml = screens.map((sc, si) => {
-    const rows = sc.steps.map(s => {
-      // Build a human-readable explanation sentence
-      const explanation = s.type === 'navigate'
-        ? `Navigate to the <strong>${escapeHtml(s.pageTitle)}</strong> screen.`
-        : s.type === 'input'
-          ? `In the <strong>${escapeHtml(s.fieldName || 'field')}</strong> field, enter <strong>${escapeHtml(s.value || '')}</strong>.`
-          : `Click the <strong>${escapeHtml(s.fieldName || s.description)}</strong> ${s.value && s.value !== s.fieldName ? '(<em>' + escapeHtml(s.value) + '</em>)' : ''}.`;
+    // Pick one representative screenshot for the screen:
+    // prefer the navigate step's screenshot (shows the screen on arrival),
+    // or fall back to the first screenshot found among field steps (filled state).
+    const navStep = sc.steps.find(s => s.type === 'navigate' && s.screenshot);
+    const filledStep = sc.steps.find(s => s.type !== 'navigate' && s.screenshot);
+    const screenShot = (navStep || filledStep)?.screenshot || '';
+
+    // Filter out navigate steps from the field table — they are shown as the section heading
+    const fieldSteps = sc.steps.filter(s => s.type !== 'navigate');
+
+    const rows = fieldSteps.map(s => {
+      const explanation = s.type === 'input'
+        ? `In the <strong>${escapeHtml(s.fieldName || 'field')}</strong> field, enter <strong>${escapeHtml(s.value || '')}</strong>.`
+        : `Click the <strong>${escapeHtml(s.fieldName || s.description)}</strong>${s.value && s.value !== s.fieldName ? ' — <em>' + escapeHtml(s.value) + '</em>' : ''}.`;
 
       const badge = `<span style="display:inline-block;padding:1px 7px;border-radius:3px;font-size:10px;font-weight:700;background:${typeBg[s.type] || '#eee'};color:${typeColor[s.type] || '#333'}">${typeLabel[s.type] || s.type}</span>`;
-
-      const screenshot = s.screenshot
-        ? `<img src="${s.screenshot}" style="width:100%;border:1px solid #ddd;border-radius:4px;display:block;" alt="Step ${s.globalIdx}" />`
-        : '<span style="color:#ccc;font-size:11px;">—</span>';
 
       return `
       <tr>
         <td style="text-align:center;font-weight:700;font-size:15px;color:#444;white-space:nowrap;">${s.globalIdx}</td>
         <td>${badge}</td>
         <td style="font-weight:600;color:#222;">${escapeHtml(s.fieldName || s.description)}</td>
-        <td style="color:#555;">${s.value && s.type !== 'navigate' ? escapeHtml(s.value) : '—'}</td>
+        <td style="color:#555;">${s.value ? escapeHtml(s.value) : '—'}</td>
         <td style="line-height:1.5;">${explanation}</td>
-      </tr>
-      ${s.screenshot ? `<tr><td colspan="5" style="padding:0 12px 14px;">${screenshot}</td></tr>` : ''}`;
+      </tr>`;
     }).join('\n');
 
-    return `
-    <section id="screen-${si}" style="margin-bottom:40px;">
-      <h2 style="color:${REDWOOD};border-bottom:2px solid ${REDWOOD};padding-bottom:6px;margin-top:36px;">
-        ${escapeHtml(sc.title)}
-      </h2>
-      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+    const screenshotHtml = screenShot
+      ? `<div style="margin:14px 0 20px;">
+           <img src="${screenShot}" alt="${escapeHtml(sc.title)} screenshot"
+             style="width:100%;border:1px solid #ddd;border-radius:6px;display:block;box-shadow:0 2px 8px rgba(0,0,0,.08);" />
+           <div style="font-size:11px;color:#aaa;margin-top:4px;text-align:right;">Screenshot: ${escapeHtml(sc.title)}</div>
+         </div>`
+      : '';
+
+    const tableHtml = fieldSteps.length ? `
+      <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:10px;">
         <thead>
           <tr style="background:#f5f5f5;">
             <th style="padding:9px 12px;border-bottom:2px solid #ddd;width:40px;">#</th>
-            <th style="padding:9px 12px;border-bottom:2px solid #ddd;width:80px;">Type</th>
-            <th style="padding:9px 12px;border-bottom:2px solid #ddd;width:160px;">Field / Element</th>
-            <th style="padding:9px 12px;border-bottom:2px solid #ddd;width:130px;">Value</th>
-            <th style="padding:9px 12px;border-bottom:2px solid #ddd;">Explanation</th>
+            <th style="padding:9px 12px;border-bottom:2px solid #ddd;width:72px;">Type</th>
+            <th style="padding:9px 12px;border-bottom:2px solid #ddd;width:170px;">Field / Element</th>
+            <th style="padding:9px 12px;border-bottom:2px solid #ddd;width:140px;">Value Entered</th>
+            <th style="padding:9px 12px;border-bottom:2px solid #ddd;">Step Explanation</th>
           </tr>
         </thead>
-        <tbody>
-          ${rows}
-        </tbody>
-      </table>
+        <tbody>${rows}</tbody>
+      </table>` : '<p style="color:#aaa;font-size:12px;font-style:italic;">No field interactions recorded on this screen.</p>';
+
+    return `
+    <section id="screen-${si}" style="margin-bottom:50px;page-break-inside:avoid;">
+      <h2 style="color:${REDWOOD};border-bottom:2px solid ${REDWOOD};padding-bottom:6px;margin-top:36px;">
+        ${escapeHtml(sc.title)}
+      </h2>
+      ${screenshotHtml}
+      ${tableHtml}
     </section>`;
   }).join('\n');
 
@@ -375,7 +387,8 @@ const OracleFusion: React.FC = () => {
   const [showPanel, setShowPanel] = useState(false);
   const trackingRef = useRef(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const pendingScreenshot = useRef(false);
+  // Tracks the pageTitle of the screen currently being interacted with
+  const currentPageTitleRef = useRef<string>('');
 
   // --- Screen recording ---
   const [recording, setRecording] = useState(false);
@@ -397,54 +410,80 @@ const OracleFusion: React.FC = () => {
     const wv = webviewRef.current;
     if (!wv || !isElectron()) return;
 
-    const onLoad = () => {
+    // Helper: capture webview screenshot as data URL
+    const captureShot = async (): Promise<string> => {
+      try {
+        const shot = await wv.capturePage();
+        return shot?.resize?.({ width: 900 })?.toDataURL?.() || shot?.toDataURL?.() || '';
+      } catch (_) { return ''; }
+    };
+
+    // BEFORE leaving a screen: capture it while fields are still filled in.
+    // Apply screenshot to all steps belonging to that screen that don't have one yet.
+    const onWillNavigate = async () => {
+      if (!trackingRef.current) return;
+      const leavingTitle = currentPageTitleRef.current;
+      const dataUrl = await captureShot();
+      if (dataUrl && leavingTitle) {
+        setSteps(prev => prev.map(s =>
+          !s.screenshot && s.pageTitle === leavingTitle ? { ...s, screenshot: dataUrl } : s
+        ));
+      }
+    };
+
+    // AFTER arriving at a new screen: add navigate step + capture screenshot of new screen.
+    const onLoad = async () => {
       setLoading(false);
       const currentUrl = wv.getURL ? wv.getURL() : url;
       setInputUrl(currentUrl);
       setCanGoBack(wv.canGoBack?.() ?? false);
       setCanGoFwd(wv.canGoForward?.() ?? false);
 
-      if (trackingRef.current) {
-        injectTracking(wv).then(async () => {
-          try {
-            const title = await wv.executeJavaScript('document.title');
-            const navUrl = wv.getURL?.() || currentUrl;
-            setSteps(prev => [...prev, {
-              id: Date.now() + Math.random() + '',
-              type: 'navigate',
-              fieldName: title || navUrl,
-              action: 'Navigate',
-              value: '',
-              description: `Navigate to: ${title || navUrl}`,
-              url: navUrl,
-              pageTitle: title || '',
-              timestamp: Date.now(),
-            }]);
-            // Capture screenshot after navigation
-            setTimeout(async () => {
-              try {
-                const shot = await wv.capturePage();
-                const dataUrl = shot?.resize({ width: 900 })?.toDataURL?.() || shot?.toDataURL?.() || '';
-                if (dataUrl) {
-                  setSteps(prev => prev.map(s => s.screenshot ? s : { ...s, screenshot: dataUrl }));
-                }
-              } catch (_) {}
-            }, 800);
-          } catch (_) {}
-        });
-      }
+      if (!trackingRef.current) return;
+
+      await injectTracking(wv);
+      try {
+        const title = await wv.executeJavaScript('document.title');
+        const navUrl = wv.getURL?.() || currentUrl;
+        const navId = Date.now() + Math.random() + '';
+        currentPageTitleRef.current = title || navUrl;
+
+        // Add navigate step (screenshot filled in shortly after page settles)
+        setSteps(prev => [...prev, {
+          id: navId,
+          type: 'navigate',
+          fieldName: title || navUrl,
+          action: 'Navigate',
+          value: '',
+          description: `Navigate to: ${title || navUrl}`,
+          url: navUrl,
+          pageTitle: title || navUrl,
+          timestamp: Date.now(),
+        }]);
+
+        // Capture screenshot of the new screen once it has fully rendered
+        setTimeout(async () => {
+          const dataUrl = await captureShot();
+          if (dataUrl) {
+            // Apply ONLY to the navigate step we just added (keyed by id)
+            setSteps(prev => prev.map(s => s.id === navId ? { ...s, screenshot: dataUrl } : s));
+          }
+        }, 1000);
+      } catch (_) {}
     };
 
     const onStart = () => setLoading(true);
-    const onFail = () => setLoading(false);
+    const onFail  = () => setLoading(false);
 
-    wv.addEventListener('did-finish-load', onLoad);
+    wv.addEventListener('will-navigate',    onWillNavigate);
+    wv.addEventListener('did-finish-load',  onLoad);
     wv.addEventListener('did-start-loading', onStart);
-    wv.addEventListener('did-fail-load', onFail);
+    wv.addEventListener('did-fail-load',    onFail);
     return () => {
-      wv.removeEventListener('did-finish-load', onLoad);
+      wv.removeEventListener('will-navigate',    onWillNavigate);
+      wv.removeEventListener('did-finish-load',  onLoad);
       wv.removeEventListener('did-start-loading', onStart);
-      wv.removeEventListener('did-fail-load', onFail);
+      wv.removeEventListener('did-fail-load',    onFail);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -481,13 +520,13 @@ const OracleFusion: React.FC = () => {
     trackingRef.current = true;
     await injectTracking(wv);
 
-    // Poll webview every 800ms for accumulated steps
+    // Poll webview every 800ms for accumulated steps.
+    // NO screenshot per step — screenshots are only taken on navigation events.
     pollRef.current = setInterval(async () => {
       if (!trackingRef.current) return;
       try {
         const newSteps: any[] = await wv.executeJavaScript('(window.__reactErpSteps||[]).splice(0)');
-        if (newSteps?.length && !pendingScreenshot.current) {
-          pendingScreenshot.current = true;
+        if (newSteps?.length) {
           const enriched: Step[] = newSteps.map((s: any) => ({
             fieldName: s.fieldName || s.description || '',
             action: s.action || s.type || '',
@@ -495,19 +534,10 @@ const OracleFusion: React.FC = () => {
             ...s,
             id: Date.now() + Math.random() + '',
           }));
+          // Keep currentPageTitleRef up to date with the latest step's pageTitle
+          const lastTitle = enriched[enriched.length - 1].pageTitle;
+          if (lastTitle) currentPageTitleRef.current = lastTitle;
           setSteps(prev => [...prev, ...enriched]);
-
-          // Capture screenshot 500ms after the action (shows result state)
-          setTimeout(async () => {
-            try {
-              const shot = await wv.capturePage();
-              const dataUrl = shot?.resize?.({ width: 900 })?.toDataURL?.() || shot?.toDataURL?.() || '';
-              if (dataUrl) {
-                setSteps(prev => prev.map(s => s.screenshot ? s : { ...s, screenshot: dataUrl }));
-              }
-            } catch (_) {}
-            pendingScreenshot.current = false;
-          }, 500);
         }
       } catch (_) {}
     }, 800);
