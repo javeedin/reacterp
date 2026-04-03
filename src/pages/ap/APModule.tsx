@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Layout, Typography, Card, Breadcrumb, Space, Tooltip, Row, Col, Statistic, Input, Select, Button, Form, DatePicker, Spin, Tag } from 'antd';
+import { Layout, Typography, Card, Breadcrumb, Space, Tooltip, Row, Col, Statistic, Input, Select, Button, Form, DatePicker, Spin, Tag, Modal } from 'antd';
 import {
   HomeOutlined,
   FileTextOutlined,
@@ -34,6 +34,9 @@ import {
   ExceptionOutlined,
   SettingOutlined,
   StopOutlined,
+  ApiOutlined,
+  CopyOutlined,
+  CheckOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import Autopilot from '../../components/Autopilot';
@@ -160,6 +163,14 @@ const APModule: React.FC = () => {
   const [kpiLoading, setKpiLoading] = useState(true);
   const [businessUnits, setBusinessUnits] = useState<string[]>([]);
   const [selectedBU, setSelectedBU] = useState<string>('');   // '' = All
+  const [apiModalVisible, setApiModalVisible] = useState(false);
+  const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
+
+  const copyUrl = (url: string) => {
+    navigator.clipboard.writeText(url);
+    setCopiedUrl(url);
+    setTimeout(() => setCopiedUrl(null), 2000);
+  };
 
   // Fetch BU list once on mount
   useEffect(() => {
@@ -209,7 +220,7 @@ const APModule: React.FC = () => {
 
   const handleMenuItemClick = (key: string, path?: string) => {
     if (key === 'create-invoice') {
-      navigate('/ap/manage-invoices', { state: { quickCreate: true } });
+      navigate('/ap/manage-invoices', { state: { quickCreate: true, quickCreateData: {} } });
       return;
     }
     if (path) {
@@ -432,6 +443,14 @@ const APModule: React.FC = () => {
                   <Select.Option key={bu} value={bu}>{bu}</Select.Option>
                 ))}
               </Select>
+              <Tooltip title="View API Endpoints">
+                <Button
+                  type="text"
+                  icon={<ApiOutlined style={{ color: REDWOOD.info }} />}
+                  onClick={() => setApiModalVisible(true)}
+                  size="small"
+                />
+              </Tooltip>
             </Space>
           </div>
 
@@ -538,6 +557,50 @@ const APModule: React.FC = () => {
         </div>
 
       </Content>
+
+      {/* API Endpoints Modal */}
+      <Modal
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>API Endpoints — Payables Dashboard</span></Space>}
+        open={apiModalVisible}
+        onCancel={() => setApiModalVisible(false)}
+        footer={<Button onClick={() => setApiModalVisible(false)}>Close</Button>}
+        width={720}
+      >
+        {[
+          {
+            label: 'Invoice Statistics (KPI cards)',
+            method: 'GET',
+            url: `${APEX_DB_CONFIG.baseUrl}/ap/invoices/stats`,
+            params: selectedBU ? `P_BUSINESS_UNIT=${selectedBU}` : '(no filter — all BUs)',
+            note: 'Returns pending/approved/payment counts and total outstanding. Deploy database/ap/rr_ap_dashboard_stats.sql to activate.',
+          },
+          {
+            label: 'Business Unit List',
+            method: 'GET',
+            url: `${APEX_DB_CONFIG.baseUrl}/gl/businessunits`,
+            params: '',
+            note: 'Populates the Business Unit dropdown.',
+          },
+        ].map((api, i) => (
+          <Card key={i} size="small" style={{ marginBottom: 12, border: `1px solid ${REDWOOD.neutral200}` }}>
+            <Space direction="vertical" style={{ width: '100%' }} size={4}>
+              <Space>
+                <Tag color={api.method === 'GET' ? 'green' : 'blue'}>{api.method}</Tag>
+                <Text strong>{api.label}</Text>
+              </Space>
+              <Space style={{ width: '100%' }}>
+                <Text code style={{ fontSize: 12, flex: 1, wordBreak: 'break-all' }}>{api.url}{api.params ? '?' + api.params : ''}</Text>
+                <Button
+                  size="small"
+                  icon={copiedUrl === api.url ? <CheckOutlined /> : <CopyOutlined />}
+                  onClick={() => copyUrl(api.url + (api.params && !api.params.startsWith('(') ? '?' + api.params : ''))}
+                />
+              </Space>
+              {api.note && <Text type="secondary" style={{ fontSize: 11 }}>{api.note}</Text>}
+            </Space>
+          </Card>
+        ))}
+      </Modal>
 
       {/* Autopilot Assistant */}
       <Autopilot module="ap" />
