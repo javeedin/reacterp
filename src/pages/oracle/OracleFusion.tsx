@@ -202,6 +202,50 @@ const INJECT_SCRIPT = `
   }, true);
 
   console.log('[ReactERP] Step tracking active');
+
+  // ── Snapshot: scan all filled inputs on demand ────────────────────────────
+  window.__reactErpCaptureFields = function() {
+    var results = [];
+    var seen = {};
+    var els = Array.from(document.querySelectorAll(
+      'input, select, textarea, [role="textbox"], [role="combobox"], [role="spinbutton"]'
+    ));
+    els.forEach(function(el) {
+      var tag  = el.tagName.toLowerCase();
+      var type = (el.getAttribute('type') || 'text').toLowerCase();
+      if (type === 'hidden' || type === 'submit' || type === 'button' ||
+          type === 'image'  || type === 'reset'  || type === 'file') return;
+
+      var value = '';
+      if (tag === 'select') {
+        value = el.options && el.selectedIndex >= 0 ? (el.options[el.selectedIndex].text || el.value) : el.value;
+      } else if (type === 'checkbox' || type === 'radio') {
+        if (!el.checked) return;
+        value = findLabel(el) || (el.checked ? 'Yes' : 'No');
+      } else {
+        value = (el.value || el.textContent || '').trim();
+      }
+      if (!value || value.length < 1) return;
+
+      var label = findLabel(el);
+      if (!label || label.length < 2) return;
+      if (seen[label]) return;
+      seen[label] = true;
+
+      var action = tag === 'select' ? 'Select' : (type === 'checkbox' || type === 'radio') ? 'Check' : 'Enter';
+      results.push({
+        type: 'input',
+        fieldName: label,
+        action: action,
+        value: value,
+        description: action + ' "' + value + '" in: ' + label,
+        url: location.href,
+        pageTitle: document.title,
+        timestamp: Date.now()
+      });
+    });
+    return JSON.stringify(results);
+  };
 })();
 true;
 `;
@@ -723,70 +767,79 @@ const OracleFusion: React.FC = () => {
     const creds = await (window as any).electronAPI?.getFusionCredentials?.();
     if (!creds) { message.warning('No saved credentials — click the settings icon to set up'); return; }
 
-    // Fills a field using native value setter so any framework picks it up
-    const fillFn = `
-      function fillField(el, val) {
-        try {
-          var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-          if (!setter) setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
-          if (setter && setter.set) setter.set.call(el, val);
-          else el.value = val;
-        } catch(e) { el.value = val; }
-        ['input','change','keyup','keydown'].forEach(function(t){
-          el.dispatchEvent(new Event(t, {bubbles:true,cancelable:true}));
-        });
-      }
-    `;
-
     const script = `
       (function() {
-        ${fillFn}
+        function fillField(el, val) {
+          el.focus();
+          // Clear first
+          el.value = '';
+          el.dispatchEvent(new Event('input', {bubbles:true}));
+          // Set via native setter (bypasses React/ADF synthetic events)
+          try {
+            var proto = el.tagName === 'INPUT' ? window.HTMLInputElement.prototype : window.HTMLTextAreaElement.prototype;
+            var setter = Object.getOwnPropertyDescriptor(proto, 'value');
+            if (setter && setter.set) setter.set.call(el, val);
+            else el.value = val;
+          } catch(e) { el.value = val; }
+          // Fire all events ADF/OAM listens to
+          el.dispatchEvent(new Event('input',  {bubbles:true, cancelable:true}));
+          el.dispatchEvent(new Event('change', {bubbles:true, cancelable:true}));
+          el.dispatchEvent(new KeyboardEvent('keydown', {bubbles:true, cancelable:true, key:'Tab'}));
+          el.dispatchEvent(new KeyboardEvent('keyup',   {bubbles:true, cancelable:true, key:'Tab'}));
+          el.blur();
+        }
 
-        // Collect all inputs (no visibility filter — webview offsetParent is unreliable)
         var allInputs = Array.from(document.querySelectorAll('input'));
 
-        // Username: first non-hidden, non-password input
-        var userField = allInputs.find(function(el) {
-          var t = (el.type || 'text').toLowerCase();
-          return t !== 'password' && t !== 'hidden' && t !== 'submit' && t !== 'button' && t !== 'checkbox' && t !== 'radio';
-        });
+        // Username: prefer named/id'd fields, then first text-type
+        var userField =
+          document.querySelector('input[name="userid"]') ||
+          document.querySelector('input[id="userid"]') ||
+          document.querySelector('input[autocomplete="username"]') ||
+          document.querySelector('input[name="username"]') ||
+          document.querySelector('input[id="username"]') ||
+          allInputs.find(function(el) {
+            var t = (el.type || 'text').toLowerCase();
+            return t !== 'password' && t !== 'hidden' && t !== 'submit' &&
+                   t !== 'button'   && t !== 'checkbox' && t !== 'radio' && t !== 'file';
+          });
 
-        // Password: first password input
-        var passField = allInputs.find(function(el) {
-          return (el.type || '').toLowerCase() === 'password';
-        });
+        // Password: first password-type
+        var passField =
+          document.querySelector('input[type="password"]') ||
+          document.querySelector('input[name="password"]');
 
         if (!userField && !passField) {
-          // Diagnostic: return what's on the page
-          return 'no-inputs:' + allInputs.map(function(i){ return i.type+'|'+i.name+'|'+i.id+'|'+i.placeholder; }).join(', ');
+          return 'no-inputs | found: ' + allInputs.map(function(i){
+            return (i.type||'text') + '|' + i.name + '|' + i.id + '|' + i.placeholder;
+          }).join(' :: ');
         }
 
         if (userField) fillField(userField, ${JSON.stringify(creds.username)});
         if (passField) fillField(passField, ${JSON.stringify(creds.password)});
 
-        // Click Sign In / Login button
+        // Sign In button
         var allBtns = Array.from(document.querySelectorAll('button, input[type="submit"], a[role="button"]'));
         var loginBtn = allBtns.find(function(b) {
           var t = (b.textContent || b.value || b.getAttribute('aria-label') || '').toLowerCase().trim();
           return t === 'sign in' || t === 'login' || t === 'log in' || t === 'submit' || t === 'ok' || t === 'next';
-        });
-        // Fallback: any submit input
-        if (!loginBtn) loginBtn = document.querySelector('input[type="submit"]');
-        if (loginBtn) { loginBtn.click(); return 'ok-with-submit'; }
+        }) || document.querySelector('input[type="submit"]') || document.querySelector('#btnActive');
 
-        return 'ok-no-button';
+        if (loginBtn) { loginBtn.click(); return 'ok-submitted'; }
+        return 'ok-filled';
       })();
     `;
 
     try {
       const result = await wv.executeJavaScript(script);
-      if (typeof result === 'string' && result.startsWith('ok')) {
-        message.success(result === 'ok-with-submit' ? 'Credentials filled and login submitted' : 'Credentials filled — click Sign In to continue');
+      if (typeof result === 'string' && result.startsWith('ok-submitted')) {
+        message.success('Credentials filled and Sign In clicked');
+      } else if (typeof result === 'string' && result.startsWith('ok-filled')) {
+        message.success('Credentials filled — click Sign In to continue');
       } else if (typeof result === 'string' && result.startsWith('no-inputs')) {
-        // Show diagnostic so user knows what the page sees
-        message.warning(`No input fields found. Page inputs: ${result.replace('no-inputs:', '')}`, 8);
+        message.warning(`No login fields found on this page. Detected: ${result.replace('no-inputs | found: ', '')}`, 10);
       } else {
-        message.warning('Unexpected result: ' + String(result));
+        message.warning('Result: ' + String(result));
       }
     } catch (e: any) {
       message.error('Auto-login error: ' + e.message);
@@ -838,6 +891,50 @@ const OracleFusion: React.FC = () => {
         message.success(<span>Saved! <a onClick={() => navigate('/training')} style={{ textDecoration: 'underline', cursor: 'pointer' }}>View in Training Library</a></span>, 6);
       }
     };
+  };
+
+  // ---- Capture Fields Snapshot ----
+  const handleCaptureFields = async () => {
+    const wv = webviewRef.current;
+    if (!wv) return;
+    try {
+      const raw = await wv.executeJavaScript('window.__reactErpCaptureFields ? window.__reactErpCaptureFields() : "[]"');
+      const captured: any[] = JSON.parse(raw || '[]');
+      if (!captured.length) { message.warning('No filled fields found on this page'); return; }
+
+      const currentTitle = currentPageTitleRef.current ||
+        await wv.executeJavaScript('document.title');
+
+      // Capture screenshot of current state
+      const shot = await wv.capturePage();
+      const dataUrl = shot?.resize?.({ width: 960 })?.toDataURL?.() || shot?.toDataURL?.() || '';
+      if (dataUrl) lastScreenshotRef.current = dataUrl;
+
+      // Build enriched steps
+      const now = Date.now();
+      const enriched: Step[] = captured.map((s: any, i: number) => ({
+        ...s,
+        id: now + i + Math.random() + '',
+        pageTitle: currentTitle,
+        screenshot: undefined,
+      }));
+
+      // Replace all non-navigate steps from this screen with the clean snapshot
+      setSteps(prev => {
+        const others = prev.filter(s => s.pageTitle !== currentTitle || s.type === 'navigate');
+        // Apply screenshot to the navigate step for this screen
+        const withShot = others.map(s =>
+          s.pageTitle === currentTitle && s.type === 'navigate' && dataUrl
+            ? { ...s, screenshot: dataUrl }
+            : s
+        );
+        return [...withShot, ...enriched];
+      });
+
+      message.success(`Captured ${captured.length} fields from "${currentTitle}"`);
+    } catch (e: any) {
+      message.error('Capture failed: ' + e.message);
+    }
   };
 
   // ---- Document Generation ----
@@ -907,15 +1004,23 @@ const OracleFusion: React.FC = () => {
 
         {/* Track Steps */}
         {tracking ? (
-          <Badge count={steps.length} size="small" offset={[-4, 0]}>
-            <Button size="small" onClick={stopTracking}
-              style={{ background: '#7b2d00', border: 'none', color: '#fff', display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#ff6b35', display: 'inline-block', animation: 'pulse-trk 1s infinite' }} />
-              Stop Tracking
-            </Button>
-          </Badge>
+          <>
+            <Tooltip title="Scan all filled fields on this screen and replace noisy clicks with clean data">
+              <Button size="small" icon={<FileTextOutlined />} onClick={handleCaptureFields}
+                style={{ background: '#1b5e20', border: 'none', color: '#fff', fontWeight: 600 }}>
+                Capture Fields
+              </Button>
+            </Tooltip>
+            <Badge count={steps.length} size="small" offset={[-4, 0]}>
+              <Button size="small" onClick={stopTracking}
+                style={{ background: '#7b2d00', border: 'none', color: '#fff', display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#ff6b35', display: 'inline-block', animation: 'pulse-trk 1s infinite' }} />
+                Stop Tracking
+              </Button>
+            </Badge>
+          </>
         ) : (
-          <Tooltip title="Track clicks & navigation to generate User Manual / UAT Script">
+          <Tooltip title="Track navigation to generate User Manual / UAT Script">
             <Button size="small" icon={<AimOutlined />} onClick={startTracking}
               style={{ background: '#1565c0', border: 'none', color: '#fff' }}>
               Track Steps
