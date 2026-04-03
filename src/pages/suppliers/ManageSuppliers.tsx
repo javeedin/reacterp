@@ -547,6 +547,17 @@ const ManageSuppliers: React.FC = () => {
   const [lovLoading, setLovLoading] = useState(false);
   const lovDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const displayedLovResults = React.useMemo(() => {
+    const q = lovSearch.trim().toLowerCase();
+    const rows = q
+      ? lovResults.filter(r =>
+          (r.supplierNumber || '').toLowerCase().includes(q) ||
+          (r.supplier       || '').toLowerCase().includes(q)
+        )
+      : lovResults;
+    return rows.map((r, i) => ({ ...r, key: i }));
+  }, [lovSearch, lovResults]);
+
   const openLov = (initialValue?: string) => {
     const val = initialValue || '';
     setLovSearch(val);
@@ -2071,16 +2082,7 @@ const ManageSuppliers: React.FC = () => {
           <Table
             size="small"
             loading={lovLoading}
-            dataSource={(() => {
-              const q = lovSearch.trim().toLowerCase();
-              const rows = q
-                ? lovResults.filter(r =>
-                    (r.supplierNumber || '').toLowerCase().includes(q) ||
-                    (r.supplier       || '').toLowerCase().includes(q)
-                  )
-                : lovResults;
-              return rows.map((r, i) => ({ ...r, key: i }));
-            })()}
+            dataSource={displayedLovResults}
             pagination={{ pageSize: 10, showTotal: t => `${t} suppliers`, size: 'small' }}
             locale={{ emptyText: 'Type to search suppliers' }}
             onRow={row => ({
