@@ -15,6 +15,7 @@ import {
   PlusSquareOutlined,
   ProfileOutlined,
   PlaySquareOutlined,
+  GlobalOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -226,6 +227,14 @@ const MainLayout: React.FC = () => {
               icon={<PlaySquareOutlined style={{ fontSize: 18, color: '#fff' }} />}
               style={{ color: '#fff' }}
               onClick={() => navigate('/training')}
+            />
+          </Tooltip>
+          <Tooltip title="Oracle Fusion" placement="bottom">
+            <Button
+              type="text"
+              icon={<GlobalOutlined style={{ fontSize: 18, color: '#fff' }} />}
+              style={{ color: '#fff' }}
+              onClick={() => navigate('/oracle-fusion')}
             />
           </Tooltip>
           <SupportTicketButton />

@@ -67,6 +67,7 @@ const SupportModule           = lazy(() => import('./pages/support/SupportModule
 const ManageTickets           = lazy(() => import('./pages/support/ManageTickets'));
 const MyTickets               = lazy(() => import('./pages/support/MyTickets'));
 const TrainingModule          = lazy(() => import('./pages/training/TrainingModule'));
+const OracleFusion            = lazy(() => import('./pages/oracle/OracleFusion'));
 
 // Placeholder component for modules under development
 const ComingSoon = ({ moduleName }: { moduleName: string }) => (
@@ -196,6 +197,8 @@ function App() {
               <Route path="support/my-tickets" element={<MyTickets />} />
               {/* Training Library */}
               <Route path="training" element={<TrainingModule />} />
+              {/* Oracle Fusion WebView */}
+              <Route path="oracle-fusion" element={<OracleFusion />} />
             </Route>
 
             {/* Catch all */}

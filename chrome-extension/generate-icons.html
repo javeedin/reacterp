@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<!-- Open this file in Chrome, right-click each canvas and "Save image as" the .png -->
+<html>
+<body style="background:#333;padding:20px;display:flex;gap:20px;align-items:center">
+<script>
+function drawIcon(size) {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  canvas.title = `icon${size}.png`;
+  const ctx = canvas.getContext('2d');
+  // Background
+  ctx.fillStyle = '#C74634';
+  ctx.beginPath();
+  ctx.roundRect(0, 0, size, size, size * 0.18);
+  ctx.fill();
+  // Record dot outer ring
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = size * 0.09;
+  ctx.beginPath();
+  ctx.arc(size/2, size/2, size * 0.3, 0, Math.PI * 2);
+  ctx.stroke();
+  // Record dot center
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(size/2, size/2, size * 0.14, 0, Math.PI * 2);
+  ctx.fill();
+  document.body.appendChild(canvas);
+  const p = document.createElement('p');
+  p.style.color='#fff'; p.style.textAlign='center'; p.style.fontSize='12px'; p.textContent = `icon${size}.png`;
+  canvas.parentNode.insertBefore(p, canvas.nextSibling);
+}
+[16,48,128].forEach(drawIcon);
+</script>
+</body>
+</html>
