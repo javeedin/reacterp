@@ -1040,6 +1040,29 @@ const ManageSuppliers: React.FC = () => {
     setSuppliers([]);
   };
 
+  const exportSuppliersToExcel = () => {
+    const rows = filteredSuppliers.map(r => ({
+      'Supplier Number':          r.supplierNumber,
+      'Supplier Name':            r.supplier,
+      'Alternate Name':           r.alternateName,
+      'Business Relationship':    r.businessRelationship,
+      'Parent Supplier':          r.parentSupplier,
+      'Supplier Type':            r.supplierType,
+      'Tax Organization Type':    r.taxOrganizationType,
+      'Taxpayer ID':              r.taxpayerId,
+      'Tax Registration Number':  r.taxRegistrationNumber,
+      'D-U-N-S Number':           r.dunsNumber,
+      'Status':                   r.status,
+      'Creation Date':            r.creationDate,
+      'Inactive Since':           r.inactiveSince,
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Suppliers');
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    saveAs(new Blob([buf], { type: 'application/octet-stream' }), `Suppliers_${new Date().toISOString().slice(0,10)}.xlsx`);
+  };
+
   // Table columns
   const columns: ColumnsType<SupplierRecord> = [
     {
@@ -1367,6 +1390,14 @@ const ManageSuppliers: React.FC = () => {
               size="small"
               style={{ width: 220 }}
             />
+            <Button
+              size="small"
+              icon={<FileExcelOutlined />}
+              onClick={exportSuppliersToExcel}
+              disabled={filteredSuppliers.length === 0}
+            >
+              Export
+            </Button>
             <Button size="small" icon={<PlusOutlined />} type="primary">
               Register Supplier
             </Button>
