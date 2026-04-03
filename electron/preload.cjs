@@ -29,7 +29,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Screen recording
   getScreenSources: () => ipcRenderer.invoke('get-screen-sources'),
-  saveRecording: (buffer, defaultName) => ipcRenderer.invoke('save-recording', { buffer, defaultName }),
+  saveRecording: (buffer, metadata) => ipcRenderer.invoke('save-recording', { buffer, metadata }),
+
+  // Training video library
+  listRecordings: () => ipcRenderer.invoke('list-recordings'),
+  deleteRecording: (id, filePath) => ipcRenderer.invoke('delete-recording', { id, filePath }),
+  openRecordingsFolder: () => ipcRenderer.invoke('open-recordings-folder'),
+  getFileUrl: (filePath) => ipcRenderer.invoke('get-file-url', filePath),
 
   // Check if running in Electron
   isElectron: true,

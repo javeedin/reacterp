@@ -14,6 +14,7 @@ import {
   ShareAltOutlined,
   PlusSquareOutlined,
   ProfileOutlined,
+  PlaySquareOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -219,6 +220,14 @@ const MainLayout: React.FC = () => {
             />
           </Tooltip>
           <ScreenRecorder />
+          <Tooltip title="Training Library" placement="bottom">
+            <Button
+              type="text"
+              icon={<PlaySquareOutlined style={{ fontSize: 18, color: '#fff' }} />}
+              style={{ color: '#fff' }}
+              onClick={() => navigate('/training')}
+            />
+          </Tooltip>
           <SupportTicketButton />
           <Tooltip title={user?.name || 'User Profile'}>
             <Dropdown menu={{ items: userMenuItems }} placement="bottomRight" trigger={['click']}>

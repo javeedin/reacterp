@@ -742,19 +742,77 @@ ipcMain.handle('get-screen-sources', async () => {
   }));
 });
 
-ipcMain.handle('save-recording', async (_event, { buffer, defaultName }) => {
+// ── Training: recordings library ───────────────────────────────────────────
+function getRecordingsDir() {
+  const dir = path.join(app.getPath('userData'), 'recordings');
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+function readManifest(dir) {
+  const p = path.join(dir, 'manifest.json');
+  if (!fs.existsSync(p)) return [];
+  try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return []; }
+}
+function writeManifest(dir, data) {
+  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(data, null, 2));
+}
+
+ipcMain.handle('save-recording', async (_event, { buffer, metadata }) => {
   try {
+    const dir = getRecordingsDir();
     const { filePath } = await dialog.showSaveDialog({
       title: 'Save Screen Recording',
-      defaultPath: defaultName,
+      defaultPath: path.join(dir, metadata.defaultName || 'recording.webm'),
       filters: [{ name: 'WebM Video', extensions: ['webm'] }],
     });
     if (!filePath) return { success: false, cancelled: true };
     fs.writeFileSync(filePath, Buffer.from(buffer));
+    const stats = fs.statSync(filePath);
+    const manifest = readManifest(dir);
+    manifest.unshift({
+      id: Date.now().toString(),
+      title:       metadata.title       || path.basename(filePath, '.webm'),
+      description: metadata.description || '',
+      category:    metadata.category    || 'General',
+      filePath,
+      fileName:    path.basename(filePath),
+      duration:    metadata.duration    || 0,
+      fileSize:    stats.size,
+      createdAt:   new Date().toISOString(),
+      createdBy:   metadata.createdBy   || '',
+    });
+    writeManifest(dir, manifest);
     return { success: true, filePath };
   } catch (err) {
     return { success: false, error: err.message };
   }
+});
+
+ipcMain.handle('list-recordings', async () => {
+  const dir = getRecordingsDir();
+  const manifest = readManifest(dir).filter(r => {
+    try { return fs.existsSync(r.filePath); } catch { return false; }
+  });
+  return manifest;
+});
+
+ipcMain.handle('delete-recording', async (_event, { id, filePath }) => {
+  try {
+    const dir = getRecordingsDir();
+    if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    writeManifest(dir, readManifest(dir).filter(r => r.id !== id));
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('open-recordings-folder', async () => {
+  await shell.openPath(getRecordingsDir());
+});
+
+ipcMain.handle('get-file-url', (_event, filePath) => {
+  return 'file://' + filePath.split(path.sep).join('/');
 });
 
 // ── Auto-update ────────────────────────────────────────────────────────────
