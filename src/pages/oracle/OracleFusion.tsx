@@ -723,51 +723,73 @@ const OracleFusion: React.FC = () => {
     const creds = await (window as any).electronAPI?.getFusionCredentials?.();
     if (!creds) { message.warning('No saved credentials — click the settings icon to set up'); return; }
 
+    // Fills a field using native value setter so any framework picks it up
+    const fillFn = `
+      function fillField(el, val) {
+        try {
+          var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+          if (!setter) setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
+          if (setter && setter.set) setter.set.call(el, val);
+          else el.value = val;
+        } catch(e) { el.value = val; }
+        ['input','change','keyup','keydown'].forEach(function(t){
+          el.dispatchEvent(new Event(t, {bubbles:true,cancelable:true}));
+        });
+      }
+    `;
+
     const script = `
-      (function(u, p) {
-        // Oracle Fusion / OAM login field selectors
-        var userSelectors = ['input[name="userid"]','input[id="userid"]','input[name="username"]','input[id="username"]','input[type="text"]:not([style*="display:none"])'];
-        var passSelectors = ['input[name="password"]','input[id="password"]','input[type="password"]'];
-        var btnSelectors  = ['input[type="submit"]','button[type="submit"]','#btnActive','[id*="login"]'];
+      (function() {
+        ${fillFn}
 
-        function fill(selectors, value) {
-          for (var i = 0; i < selectors.length; i++) {
-            var el = document.querySelector(selectors[i]);
-            if (el && el.offsetParent !== null) {
-              var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-              nativeInputValueSetter.call(el, value);
-              el.dispatchEvent(new Event('input',  { bubbles: true }));
-              el.dispatchEvent(new Event('change', { bubbles: true }));
-              return true;
-            }
-          }
-          return false;
+        // Collect all inputs (no visibility filter — webview offsetParent is unreliable)
+        var allInputs = Array.from(document.querySelectorAll('input'));
+
+        // Username: first non-hidden, non-password input
+        var userField = allInputs.find(function(el) {
+          var t = (el.type || 'text').toLowerCase();
+          return t !== 'password' && t !== 'hidden' && t !== 'submit' && t !== 'button' && t !== 'checkbox' && t !== 'radio';
+        });
+
+        // Password: first password input
+        var passField = allInputs.find(function(el) {
+          return (el.type || '').toLowerCase() === 'password';
+        });
+
+        if (!userField && !passField) {
+          // Diagnostic: return what's on the page
+          return 'no-inputs:' + allInputs.map(function(i){ return i.type+'|'+i.name+'|'+i.id+'|'+i.placeholder; }).join(', ');
         }
 
-        var filledUser = fill(userSelectors, u);
-        var filledPass = fill(passSelectors, p);
+        if (userField) fillField(userField, ${JSON.stringify(creds.username)});
+        if (passField) fillField(passField, ${JSON.stringify(creds.password)});
 
-        if (filledUser && filledPass) {
-          for (var j = 0; j < btnSelectors.length; j++) {
-            var btn = document.querySelector(btnSelectors[j]);
-            if (btn && btn.offsetParent !== null) { btn.click(); break; }
-          }
-          'ok';
-        } else {
-          'not-found';
-        }
-      })(${JSON.stringify(creds.username)}, ${JSON.stringify(creds.password)});
+        // Click Sign In / Login button
+        var allBtns = Array.from(document.querySelectorAll('button, input[type="submit"], a[role="button"]'));
+        var loginBtn = allBtns.find(function(b) {
+          var t = (b.textContent || b.value || b.getAttribute('aria-label') || '').toLowerCase().trim();
+          return t === 'sign in' || t === 'login' || t === 'log in' || t === 'submit' || t === 'ok' || t === 'next';
+        });
+        // Fallback: any submit input
+        if (!loginBtn) loginBtn = document.querySelector('input[type="submit"]');
+        if (loginBtn) { loginBtn.click(); return 'ok-with-submit'; }
+
+        return 'ok-no-button';
+      })();
     `;
 
     try {
       const result = await wv.executeJavaScript(script);
-      if (result === 'ok') {
-        message.success('Login submitted');
+      if (typeof result === 'string' && result.startsWith('ok')) {
+        message.success(result === 'ok-with-submit' ? 'Credentials filled and login submitted' : 'Credentials filled — click Sign In to continue');
+      } else if (typeof result === 'string' && result.startsWith('no-inputs')) {
+        // Show diagnostic so user knows what the page sees
+        message.warning(`No input fields found. Page inputs: ${result.replace('no-inputs:', '')}`, 8);
       } else {
-        message.warning('Could not find login fields on this page — navigate to the Oracle Fusion login page first');
+        message.warning('Unexpected result: ' + String(result));
       }
     } catch (e: any) {
-      message.error('Auto-login failed: ' + e.message);
+      message.error('Auto-login error: ' + e.message);
     }
   };
 
