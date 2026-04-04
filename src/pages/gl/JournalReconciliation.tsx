@@ -56,6 +56,7 @@ interface Ledger {
   ledger_id: number;
   ledger_name: string;
   batch_count: number;
+  periods: Period[];
 }
 
 interface Period {
@@ -134,14 +135,15 @@ const headerRowStyle = (record: HeaderDetail): React.CSSProperties => {
 
 export default function JournalReconciliation() {
   const [ledgers, setLedgers] = useState<Ledger[]>([]);
-  const [periods, setPeriods] = useState<Period[]>([]);
   const [selectedLedger, setSelectedLedger] = useState<number | null>(null);
   const [selectedPeriod, setSelectedPeriod] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingLedgers, setLoadingLedgers] = useState(false);
-  const [loadingPeriods, setLoadingPeriods] = useState(false);
   const [batches, setBatches] = useState<BatchRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  // Periods derived from selected ledger — no extra API call
+  const periods: Period[] = ledgers.find((l) => l.ledger_id === selectedLedger)?.periods ?? [];
 
   // Summary stats
   const totalBatches = batches.length;
@@ -182,25 +184,9 @@ export default function JournalReconciliation() {
     fetchLedgers();
   }, []);
 
-  // ── Fetch periods when ledger changes ──────────────────────────────────────
+  // ── Reset period when ledger changes ───────────────────────────────────────
   useEffect(() => {
-    if (!selectedLedger) { setPeriods([]); setSelectedPeriod(null); return; }
-    const fetchPeriods = async () => {
-      setLoadingPeriods(true);
-      setSelectedPeriod(null);
-      try {
-        const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/reconciliation/periods?ledger_id=${selectedLedger}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const items: Period[] = Array.isArray(data) ? data : data.items ?? data.periods ?? [];
-        setPeriods(items);
-      } catch (e: any) {
-        console.error('Failed to fetch periods', e);
-      } finally {
-        setLoadingPeriods(false);
-      }
-    };
-    fetchPeriods();
+    setSelectedPeriod(null);
   }, [selectedLedger]);
 
   // ── Load reconciliation data ────────────────────────────────────────────────
@@ -485,7 +471,7 @@ export default function JournalReconciliation() {
               <Select
                 style={{ width: 220 }}
                 placeholder="All periods"
-                loading={loadingPeriods}
+                loading={loadingLedgers}
                 value={selectedPeriod ?? undefined}
                 onChange={(v) => setSelectedPeriod(v)}
                 allowClear

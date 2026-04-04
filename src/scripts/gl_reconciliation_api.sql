@@ -19,17 +19,10 @@
 
 CREATE OR REPLACE PACKAGE RR_GL_RECON_PKG AS
 
-  -- Returns distinct ledgers that have synced batches
+  -- Returns distinct ledgers with their periods (both from RR_GL_JOURNAL_BATCHES)
   PROCEDURE get_ledgers (
     p_status   OUT NUMBER,
     p_response OUT CLOB
-  );
-
-  -- Returns distinct periods for a given ledger from synced batches
-  PROCEDURE get_periods (
-    p_ledger_id IN  VARCHAR2,
-    p_status    OUT NUMBER,
-    p_response  OUT CLOB
   );
 
   -- Main reconciliation: batch ↔ headers ↔ lines
@@ -50,6 +43,7 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
   -- ─────────────────────────────────────────────────────────────────────────
   -- PROCEDURE: get_ledgers
   -- GET /reerp/gl/reconciliation/ledgers
+  -- Returns each ledger with its distinct periods nested – no params needed
   -- ─────────────────────────────────────────────────────────────────────────
   PROCEDURE get_ledgers (
     p_status   OUT NUMBER,
@@ -59,62 +53,43 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
     SELECT JSON_OBJECT(
       'items' VALUE JSON_ARRAYAGG(
         JSON_OBJECT(
-          'ledger_id'   VALUE ledger_id,
-          'ledger_name' VALUE ledger_name,
-          'batch_count' VALUE batch_count
-        ) ORDER BY ledger_name
+          'ledger_id'   VALUE l.ledger_id,
+          'ledger_name' VALUE l.ledger_name,
+          'batch_count' VALUE l.batch_count,
+          'periods'     VALUE (
+            SELECT JSON_ARRAYAGG(
+              JSON_OBJECT(
+                'period_name' VALUE p.DEFAULT_PERIOD_NAME,
+                'batch_count' VALUE p.period_batch_count
+              ) ORDER BY p.DEFAULT_PERIOD_NAME DESC
+            )
+            FROM (
+              SELECT DEFAULT_PERIOD_NAME,
+                     COUNT(*) AS period_batch_count
+              FROM   RR_GL_JOURNAL_BATCHES
+              WHERE  LEDGER_ID = l.ledger_id
+              AND    DEFAULT_PERIOD_NAME IS NOT NULL
+              GROUP BY DEFAULT_PERIOD_NAME
+            ) p
+          )
+        ) ORDER BY l.ledger_name
       )
     )
     INTO p_response
     FROM (
-      SELECT   LEDGER_ID,
-               MAX(LEDGER_NAME)  AS ledger_name,
-               COUNT(*)          AS batch_count
+      SELECT   LEDGER_ID        AS ledger_id,
+               MAX(LEDGER_NAME) AS ledger_name,
+               COUNT(*)         AS batch_count
       FROM     RR_GL_JOURNAL_BATCHES
       WHERE    LEDGER_ID IS NOT NULL
       GROUP BY LEDGER_ID
-    );
+    ) l;
 
     p_status := 200;
   EXCEPTION WHEN OTHERS THEN
     p_status   := 500;
     p_response := JSON_OBJECT('error' VALUE SQLERRM);
   END get_ledgers;
-
-  -- ─────────────────────────────────────────────────────────────────────────
-  -- PROCEDURE: get_periods
-  -- GET /reerp/gl/reconciliation/periods?ledger_id=XXX
-  -- ─────────────────────────────────────────────────────────────────────────
-  PROCEDURE get_periods (
-    p_ledger_id IN  VARCHAR2,
-    p_status    OUT NUMBER,
-    p_response  OUT CLOB
-  ) AS
-    v_ledger_id NUMBER := TO_NUMBER(p_ledger_id);
-  BEGIN
-    SELECT JSON_OBJECT(
-      'items' VALUE JSON_ARRAYAGG(
-        JSON_OBJECT(
-          'period_name' VALUE period_name,
-          'batch_count' VALUE batch_count
-        ) ORDER BY period_name DESC
-      )
-    )
-    INTO p_response
-    FROM (
-      SELECT DEFAULT_PERIOD_NAME AS period_name,
-             COUNT(*)            AS batch_count
-      FROM   RR_GL_JOURNAL_BATCHES
-      WHERE  LEDGER_ID = v_ledger_id
-      AND    DEFAULT_PERIOD_NAME IS NOT NULL
-      GROUP BY DEFAULT_PERIOD_NAME
-    );
-
-    p_status := 200;
-  EXCEPTION WHEN OTHERS THEN
-    p_status   := 500;
-    p_response := JSON_OBJECT('error' VALUE SQLERRM);
-  END get_periods;
 
   -- ─────────────────────────────────────────────────────────────────────────
   -- PROCEDURE: get_reconciliation
@@ -281,28 +256,7 @@ END;
 
 
 -- =============================================================================
--- ORDS HANDLER 2 – GET /reerp/gl/reconciliation/periods
--- Bind variables:  :ledger_id  (query string, required)
--- Paste this block as the PL/SQL source in the APEX ORDS GET handler
--- =============================================================================
-/*
-DECLARE
-  v_status   NUMBER;
-  v_response CLOB;
-BEGIN
-  RR_GL_RECON_PKG.get_periods(
-    p_ledger_id => :ledger_id,
-    p_status    => v_status,
-    p_response  => v_response
-  );
-  :status    := v_status;
-  :body_text := v_response;
-END;
-*/
-
-
--- =============================================================================
--- ORDS HANDLER 3 – GET /reerp/gl/reconciliation
+-- ORDS HANDLER 2 – GET /reerp/gl/reconciliation
 -- Bind variables:  :ledger_id   (query string)
 --                  :period_name (query string, optional)
 -- Paste this block as the PL/SQL source in the APEX ORDS GET handler
