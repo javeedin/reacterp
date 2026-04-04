@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Layout,
   Card,
@@ -100,6 +100,18 @@ interface BatchRow {
   headers: HeaderDetail[];
 }
 
+interface LineRow {
+  key: string;
+  line_number: number;
+  account_combination: string;
+  description: string;
+  currency_code: string;
+  entered_dr: number;
+  entered_cr: number;
+  accounted_dr: number;
+  accounted_cr: number;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const fmt = (n: number) =>
@@ -133,6 +145,128 @@ const headerRowStyle = (record: HeaderDetail): React.CSSProperties => {
   if (mismatch) return { background: '#fff1f0' };
   return {};
 };
+
+// ─── HeadersPanel: shows headers table with expandable lines ─────────────────
+
+function HeadersPanel({ headers }: { headers: HeaderDetail[] }) {
+  const [linesMap, setLinesMap] = useState<Record<number, { loading: boolean; lines: LineRow[]; totals: any }>>({});
+
+  const fetchLines = async (headerId: number) => {
+    if (linesMap[headerId]) return;
+    setLinesMap(prev => ({ ...prev, [headerId]: { loading: true, lines: [], totals: null } }));
+    try {
+      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/reconciliation/lines?je_header_id=${headerId}`);
+      const data = await res.json();
+      const lines: LineRow[] = (data.items ?? []).map((l: any, i: number) => ({ ...l, key: String(i) }));
+      setLinesMap(prev => ({ ...prev, [headerId]: { loading: false, lines, totals: data.totals ?? null } }));
+    } catch {
+      setLinesMap(prev => ({ ...prev, [headerId]: { loading: false, lines: [], totals: null } }));
+    }
+  };
+
+  const linesExpandedRowRender = (h: HeaderDetail & { key: string }) => {
+    const state = linesMap[h.je_header_id];
+    if (!state || state.loading) return <Spin size="small" style={{ padding: 16 }} />;
+    if (state.lines.length === 0) return <Empty description="No lines" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
+
+    const lineCols = [
+      { title: '#', dataIndex: 'line_number', key: 'line_number', width: 50 },
+      { title: 'Account', dataIndex: 'account_combination', key: 'account_combination', ellipsis: true, width: 200 },
+      { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
+      { title: 'CCY', dataIndex: 'currency_code', key: 'currency_code', width: 55 },
+      {
+        title: 'Entered DR', dataIndex: 'entered_dr', key: 'entered_dr', align: 'right' as const, width: 130,
+        render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text>,
+      },
+      {
+        title: 'Entered CR', dataIndex: 'entered_cr', key: 'entered_cr', align: 'right' as const, width: 130,
+        render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text>,
+      },
+      {
+        title: 'Accounted DR', dataIndex: 'accounted_dr', key: 'accounted_dr', align: 'right' as const, width: 130,
+        render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text>,
+      },
+      {
+        title: 'Accounted CR', dataIndex: 'accounted_cr', key: 'accounted_cr', align: 'right' as const, width: 130,
+        render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text>,
+      },
+    ];
+
+    const t = state.totals;
+    return (
+      <Table
+        columns={lineCols}
+        dataSource={state.lines}
+        pagination={false}
+        size="small"
+        scroll={{ x: 900 }}
+        style={{ marginLeft: 8, marginBottom: 4 }}
+        summary={() => t && (
+          <Table.Summary.Row style={{ background: '#f0f5ff', fontWeight: 600 }}>
+            <Table.Summary.Cell index={0} colSpan={4}>
+              <Text strong>Total</Text>
+            </Table.Summary.Cell>
+            <Table.Summary.Cell index={4} align="right">
+              <Text style={{ fontFamily: 'monospace', color: REDWOOD.success }}>{fmt(t.entered_dr)}</Text>
+            </Table.Summary.Cell>
+            <Table.Summary.Cell index={5} align="right">
+              <Text style={{ fontFamily: 'monospace', color: REDWOOD.success }}>{fmt(t.entered_cr)}</Text>
+            </Table.Summary.Cell>
+            <Table.Summary.Cell index={6} align="right">
+              <Text style={{ fontFamily: 'monospace', color: REDWOOD.info }}>{fmt(t.accounted_dr)}</Text>
+            </Table.Summary.Cell>
+            <Table.Summary.Cell index={7} align="right">
+              <Text style={{ fontFamily: 'monospace', color: REDWOOD.info }}>{fmt(t.accounted_cr)}</Text>
+            </Table.Summary.Cell>
+          </Table.Summary.Row>
+        )}
+      />
+    );
+  };
+
+  const headerCols = [
+    { title: 'Journal Name', dataIndex: 'journal_name', key: 'journal_name', ellipsis: true, width: 240 },
+    { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
+    { title: 'Header DR', dataIndex: 'header_dr', key: 'header_dr', align: 'right' as const, width: 130,
+      render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
+    { title: 'Header CR', dataIndex: 'header_cr', key: 'header_cr', align: 'right' as const, width: 130,
+      render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
+    { title: 'Lines DR', dataIndex: 'lines_dr', key: 'lines_dr', align: 'right' as const, width: 130,
+      render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
+    { title: 'Lines CR', dataIndex: 'lines_cr', key: 'lines_cr', align: 'right' as const, width: 130,
+      render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
+    { title: 'Lines', dataIndex: 'line_count', key: 'line_count', align: 'center' as const, width: 55 },
+    {
+      title: 'Match', key: 'match', width: 110,
+      render: (_: any, r: HeaderDetail) => (
+        <Space size={2}>
+          {matchTag(r.dr_ok, 'DR')}
+          {matchTag(r.cr_ok, 'CR')}
+        </Space>
+      ),
+    },
+  ];
+
+  if (!headers || headers.length === 0)
+    return <Empty description="No journal headers" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
+
+  return (
+    <Table
+      columns={headerCols}
+      dataSource={headers.map((h) => ({ ...h, key: String(h.je_header_id) }))}
+      pagination={false}
+      size="small"
+      scroll={{ x: 900 }}
+      onRow={(r: any) => ({ style: headerRowStyle(r) })}
+      expandable={{
+        expandedRowRender: linesExpandedRowRender,
+        rowExpandable: (r: any) => r.line_count > 0,
+        onExpand: (expanded: boolean, r: any) => { if (expanded) fetchLines(r.je_header_id); },
+      }}
+      style={{ marginLeft: 8 }}
+    />
+  );
+}
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -246,76 +380,10 @@ export default function JournalReconciliation() {
     }
   }, [selectedLedger, selectedPeriod]);
 
-  // ── Expanded row: header detail table ──────────────────────────────────────
-  const expandedRowRender = (record: BatchRow) => {
-    if (!record.headers || record.headers.length === 0) {
-      return <Empty description="No journal headers" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
-    }
-    const cols = [
-      { title: 'Journal Name', dataIndex: 'journal_name', key: 'journal_name', ellipsis: true, width: 240 },
-      { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
-      {
-        title: 'Header DR',
-        dataIndex: 'header_dr',
-        key: 'header_dr',
-        align: 'right' as const,
-        width: 130,
-        render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text>,
-      },
-      {
-        title: 'Header CR',
-        dataIndex: 'header_cr',
-        key: 'header_cr',
-        align: 'right' as const,
-        width: 130,
-        render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text>,
-      },
-      {
-        title: 'Lines DR',
-        dataIndex: 'lines_dr',
-        key: 'lines_dr',
-        align: 'right' as const,
-        width: 130,
-        render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text>,
-      },
-      {
-        title: 'Lines CR',
-        dataIndex: 'lines_cr',
-        key: 'lines_cr',
-        align: 'right' as const,
-        width: 130,
-        render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text>,
-      },
-      {
-        title: 'Lines',
-        dataIndex: 'line_count',
-        key: 'line_count',
-        align: 'center' as const,
-        width: 60,
-      },
-      {
-        title: 'Match',
-        key: 'match',
-        width: 120,
-        render: (_: any, r: HeaderDetail) => (
-          <Space size={2}>
-            {matchTag(r.dr_ok, 'DR')}
-            {matchTag(r.cr_ok, 'CR')}
-          </Space>
-        ),
-      },
-    ];
-    return (
-      <Table
-        columns={cols}
-        dataSource={record.headers.map((h, i) => ({ ...h, key: String(h.je_header_id ?? i) }))}
-        pagination={false}
-        size="small"
-        rowStyle={headerRowStyle}
-        style={{ marginLeft: 8 }}
-      />
-    );
-  };
+  // ── Expanded row: headers panel with drilldown to lines ───────────────────
+  const expandedRowRender = (record: BatchRow) => (
+    <HeadersPanel headers={record.headers} />
+  );
 
   // ── Main batch columns ──────────────────────────────────────────────────────
   const columns = [

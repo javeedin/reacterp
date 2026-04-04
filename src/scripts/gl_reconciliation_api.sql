@@ -32,6 +32,13 @@ CREATE OR REPLACE PACKAGE RR_GL_RECON_PKG AS
     p_response    OUT CLOB
   );
 
+  -- Journal lines for a specific header (on-demand drilldown)
+  PROCEDURE get_lines (
+    p_je_header_id IN  VARCHAR2,
+    p_status       OUT NUMBER,
+    p_response     OUT CLOB
+  );
+
 END RR_GL_RECON_PKG;
 /
 
@@ -259,6 +266,81 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
     p_response := '{"error":"' || REPLACE(SQLERRM, '"', '''') || '"}';
   END get_reconciliation;
 
+  -- ─────────────────────────────────────────────────────────────────────────
+  -- PROCEDURE: get_lines
+  -- GET /reerp/gl/reconciliation/lines?je_header_id=XXX
+  -- ─────────────────────────────────────────────────────────────────────────
+  PROCEDURE get_lines (
+    p_je_header_id IN  VARCHAR2,
+    p_status       OUT NUMBER,
+    p_response     OUT CLOB
+  ) AS
+    v_header_id NUMBER := TO_NUMBER(p_je_header_id);
+
+    CURSOR c_lines IS
+      SELECT l.JE_LINE_NUMBER,
+             l.ACCOUNT_COMBINATION,
+             l.DESCRIPTION,
+             l.CURRENCY_CODE,
+             NVL(l.ENTERED_DR,    0) AS entered_dr,
+             NVL(l.ENTERED_CR,    0) AS entered_cr,
+             NVL(l.ACCOUNTED_DR,  0) AS accounted_dr,
+             NVL(l.ACCOUNTED_CR,  0) AS accounted_cr
+      FROM   RR_GL_JE_LINES_ALL l
+      WHERE  l.JE_HEADER_ID = v_header_id
+      ORDER  BY l.JE_LINE_NUMBER;
+
+    v_total_dr  NUMBER := 0;
+    v_total_cr  NUMBER := 0;
+    v_total_adr NUMBER := 0;
+    v_total_acr NUMBER := 0;
+
+  BEGIN
+    APEX_JSON.initialize_clob_output;
+    APEX_JSON.open_object;
+    APEX_JSON.open_array('items');
+
+    FOR l IN c_lines LOOP
+      v_total_dr  := v_total_dr  + l.entered_dr;
+      v_total_cr  := v_total_cr  + l.entered_cr;
+      v_total_adr := v_total_adr + l.accounted_dr;
+      v_total_acr := v_total_acr + l.accounted_cr;
+
+      APEX_JSON.open_object;
+      APEX_JSON.write('line_number',         l.JE_LINE_NUMBER);
+      APEX_JSON.write('account_combination', l.ACCOUNT_COMBINATION);
+      APEX_JSON.write('description',         l.DESCRIPTION);
+      APEX_JSON.write('currency_code',       l.CURRENCY_CODE);
+      APEX_JSON.write('entered_dr',          l.entered_dr);
+      APEX_JSON.write('entered_cr',          l.entered_cr);
+      APEX_JSON.write('accounted_dr',        l.accounted_dr);
+      APEX_JSON.write('accounted_cr',        l.accounted_cr);
+      APEX_JSON.close_object;
+    END LOOP;
+
+    APEX_JSON.close_array;
+
+    -- Totals
+    APEX_JSON.open_object('totals');
+    APEX_JSON.write('entered_dr',   v_total_dr);
+    APEX_JSON.write('entered_cr',   v_total_cr);
+    APEX_JSON.write('accounted_dr', v_total_adr);
+    APEX_JSON.write('accounted_cr', v_total_acr);
+    APEX_JSON.close_object;
+
+    APEX_JSON.close_object;
+
+    DBMS_LOB.CREATETEMPORARY(p_response, TRUE, DBMS_LOB.SESSION);
+    DBMS_LOB.APPEND(p_response, APEX_JSON.get_clob_output);
+    APEX_JSON.free_output;
+    p_status := 200;
+
+  EXCEPTION WHEN OTHERS THEN
+    APEX_JSON.free_output;
+    p_status   := 500;
+    p_response := '{"error":"' || REPLACE(SQLERRM, '"', '''') || '"}';
+  END get_lines;
+
 END RR_GL_RECON_PKG;
 /
 
@@ -309,6 +391,36 @@ BEGIN
   OWA_UTIL.mime_header('application/json', TRUE);
   IF v_response IS NULL THEN
     HTP.PRN('{"items":[]}');
+  ELSE
+    WHILE v_offset <= DBMS_LOB.GETLENGTH(v_response) LOOP
+      v_chunk  := DBMS_LOB.SUBSTR(v_response, 32767, v_offset);
+      HTP.PRN(v_chunk);
+      v_offset := v_offset + 32767;
+    END LOOP;
+  END IF;
+END;
+*/
+
+
+-- =============================================================================
+-- ORDS HANDLER 3 – GET /reerp/gl/reconciliation/lines
+-- Bind variable: :je_header_id (query string, required)
+-- =============================================================================
+/*
+DECLARE
+  v_status   NUMBER;
+  v_response CLOB;
+  v_offset   PLS_INTEGER := 1;
+  v_chunk    VARCHAR2(32767);
+BEGIN
+  RR_GL_RECON_PKG.get_lines(
+    p_je_header_id => :je_header_id,
+    p_status       => v_status,
+    p_response     => v_response
+  );
+  OWA_UTIL.mime_header('application/json', TRUE);
+  IF v_response IS NULL THEN
+    HTP.PRN('{"items":[],"totals":{"entered_dr":0,"entered_cr":0,"accounted_dr":0,"accounted_cr":0}}');
   ELSE
     WHILE v_offset <= DBMS_LOB.GETLENGTH(v_response) LOOP
       v_chunk  := DBMS_LOB.SUBSTR(v_response, 32767, v_offset);
