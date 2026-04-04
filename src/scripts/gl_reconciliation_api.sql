@@ -142,7 +142,12 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
              NVL((SELECT SUM(NVL(l.ENTERED_CR,0)) FROM RR_GL_JE_LINES_ALL l WHERE l.BATCH_ID = b.JE_BATCH_ID), 0) AS lines_cr,
              (SELECT COUNT(*) FROM RR_GL_JE_LINES_ALL l WHERE l.BATCH_ID = b.JE_BATCH_ID) AS line_count
       FROM   RR_GL_JOURNAL_BATCHES b
-      WHERE  b.LEDGER_NAME = p_ledger_id
+      WHERE  (b.LEDGER_NAME = p_ledger_id
+              OR b.JE_BATCH_ID IN (
+                   SELECT DISTINCT h.BATCH_ID
+                   FROM   RR_GL_JE_HEADERS h
+                   WHERE  h.LEDGER_NAME = p_ledger_id
+                 ))
       AND   (p_period_name IS NULL OR b.DEFAULT_PERIOD_NAME = p_period_name)
       ORDER  BY b.JE_BATCH_ID;
 
@@ -169,6 +174,20 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
     v_cr_ok            VARCHAR2(1);
 
   BEGIN
+    -- Backfill LEDGER_NAME in batches from headers where missing
+    UPDATE RR_GL_JOURNAL_BATCHES b
+    SET   (LEDGER_ID, LEDGER_NAME) = (
+            SELECT h.LEDGER_ID, h.LEDGER_NAME
+            FROM   RR_GL_JE_HEADERS h
+            WHERE  h.BATCH_ID = b.JE_BATCH_ID
+            AND    ROWNUM = 1
+          )
+    WHERE  b.LEDGER_NAME IS NULL
+    AND    EXISTS (
+             SELECT 1 FROM RR_GL_JE_HEADERS h
+             WHERE h.BATCH_ID = b.JE_BATCH_ID
+           );
+    COMMIT;
     APEX_JSON.initialize_clob_output;
     APEX_JSON.open_object;
     APEX_JSON.open_array('items');
