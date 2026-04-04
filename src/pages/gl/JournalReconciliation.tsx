@@ -286,6 +286,8 @@ export default function JournalReconciliation() {
   const [batches, setBatches] = useState<BatchRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [apiModalOpen, setApiModalOpen] = useState(false);
+  const [searchText, setSearchText] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'matched' | 'mismatch' | 'nolines'>('all');
 
   // Periods derived from selected ledger — no extra API call
   const periods: Period[] = ledgers.find((l) => l.ledger_name === selectedLedger)?.periods ?? [];
@@ -319,6 +321,31 @@ export default function JournalReconciliation() {
       b.hdr_lines_cr_ok === 'N'
   ).length;
   const noLinesBatches = batches.filter((b) => b.line_count === 0).length;
+
+  // ── Filtered rows for table ─────────────────────────────────────────────────
+  const filteredBatches = batches.filter((b) => {
+    if (searchText) {
+      const q = searchText.toLowerCase();
+      if (
+        !b.batch_name?.toLowerCase().includes(q) &&
+        !b.period_name?.toLowerCase().includes(q)
+      )
+        return false;
+    }
+    if (statusFilter === 'matched')
+      return (
+        b.batch_hdr_dr_ok === 'Y' && b.batch_hdr_cr_ok === 'Y' &&
+        b.hdr_lines_dr_ok === 'Y' && b.hdr_lines_cr_ok === 'Y' &&
+        b.line_count > 0
+      );
+    if (statusFilter === 'mismatch')
+      return (
+        b.batch_hdr_dr_ok === 'N' || b.batch_hdr_cr_ok === 'N' ||
+        b.hdr_lines_dr_ok === 'N' || b.hdr_lines_cr_ok === 'N'
+      );
+    if (statusFilter === 'nolines') return b.line_count === 0;
+    return true;
+  });
 
   // ── Fetch ledgers on mount ──────────────────────────────────────────────────
   useEffect(() => {
@@ -690,26 +717,77 @@ export default function JournalReconciliation() {
               style={{ padding: '48px 0' }}
             />
           ) : (
-            <Spin spinning={loading}>
-              <Table
-                columns={columns}
-                dataSource={batches}
-                rowKey="key"
-                size="small"
-                scroll={{ x: 1400 }}
-                expandable={{
-                  expandedRowRender,
-                  rowExpandable: (r) => r.header_count > 0,
-                }}
-                onRow={(record) => ({ style: rowStyle(record) })}
-                pagination={{
-                  pageSize: 50,
-                  showSizeChanger: true,
-                  pageSizeOptions: ['25', '50', '100'],
-                  showTotal: (total) => `${total} batches`,
-                }}
-              />
-            </Spin>
+            <>
+              {/* Table filter toolbar */}
+              {batches.length > 0 && (
+                <div
+                  style={{
+                    padding: '10px 16px',
+                    display: 'flex',
+                    gap: 8,
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    borderBottom: '1px solid #f0f0f0',
+                    background: REDWOOD.neutral100,
+                  }}
+                >
+                  <Input
+                    prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
+                    placeholder="Search batch name or period…"
+                    value={searchText}
+                    onChange={(e) => setSearchText(e.target.value)}
+                    allowClear
+                    style={{ width: 280 }}
+                  />
+                  <Select
+                    value={statusFilter}
+                    onChange={(v) => setStatusFilter(v)}
+                    style={{ width: 160 }}
+                    options={[
+                      { value: 'all',      label: 'All statuses' },
+                      { value: 'matched',  label: '✓ Matched only' },
+                      { value: 'mismatch', label: '✗ Mismatched' },
+                      { value: 'nolines',  label: '⚠ No Lines' },
+                    ]}
+                  />
+                  {(searchText || statusFilter !== 'all') && (
+                    <>
+                      <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>
+                        {filteredBatches.length} of {batches.length} batches
+                      </Text>
+                      <Button
+                        size="small"
+                        onClick={() => { setSearchText(''); setStatusFilter('all'); }}
+                      >
+                        Clear filters
+                      </Button>
+                    </>
+                  )}
+                </div>
+              )}
+
+              <Spin spinning={loading}>
+                <Table
+                  columns={columns}
+                  dataSource={filteredBatches}
+                  rowKey="key"
+                  size="small"
+                  scroll={{ x: 1400 }}
+                  expandable={{
+                    expandedRowRender,
+                    rowExpandable: (r) => r.header_count > 0,
+                  }}
+                  onRow={(record) => ({ style: rowStyle(record) })}
+                  pagination={{
+                    pageSize: 50,
+                    showSizeChanger: true,
+                    pageSizeOptions: ['25', '50', '100'],
+                    showTotal: (total, range) =>
+                      `${range[0]}-${range[1]} of ${total} batches${batches.length !== total ? ` (filtered from ${batches.length})` : ''}`,
+                  }}
+                />
+              </Spin>
+            </>
           )}
         </Card>
       </Content>
