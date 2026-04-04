@@ -71,6 +71,9 @@ interface HeaderDetail {
   je_header_id: number;
   journal_name: string;
   description: string;
+  ledger_name: string;
+  period_name: string;
+  status: string;
   header_dr: number;
   header_cr: number;
   lines_dr: number;
@@ -225,8 +228,11 @@ function HeadersPanel({ headers }: { headers: HeaderDetail[] }) {
   };
 
   const headerCols = [
+    { title: 'Ledger Name', dataIndex: 'ledger_name', key: 'ledger_name', ellipsis: true, width: 160 },
     { title: 'Journal Name', dataIndex: 'journal_name', key: 'journal_name', ellipsis: true, width: 240 },
     { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
+    { title: 'Period', dataIndex: 'period_name', key: 'period_name', width: 90,
+      render: (v: string) => v ? <Tag color="blue">{v}</Tag> : null },
     { title: 'Header DR', dataIndex: 'header_dr', key: 'header_dr', align: 'right' as const, width: 130,
       render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
     { title: 'Header CR', dataIndex: 'header_cr', key: 'header_cr', align: 'right' as const, width: 130,
@@ -235,7 +241,8 @@ function HeadersPanel({ headers }: { headers: HeaderDetail[] }) {
       render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
     { title: 'Lines CR', dataIndex: 'lines_cr', key: 'lines_cr', align: 'right' as const, width: 130,
       render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
-    { title: 'Lines', dataIndex: 'line_count', key: 'line_count', align: 'center' as const, width: 55 },
+    { title: 'Lines', dataIndex: 'line_count', key: 'line_count', align: 'center' as const, width: 55,
+      render: (v: number) => v === 0 ? <Tag color="warning" style={{ fontSize: 11 }}>0</Tag> : v },
     {
       title: 'Match', key: 'match', width: 110,
       render: (_: any, r: HeaderDetail) => (
@@ -260,7 +267,7 @@ function HeadersPanel({ headers }: { headers: HeaderDetail[] }) {
       onRow={(r: any) => ({ style: headerRowStyle(r) })}
       expandable={{
         expandedRowRender: linesExpandedRowRender,
-        rowExpandable: (r: any) => r.line_count > 0,
+        rowExpandable: () => true,
         onExpand: (expanded: boolean, r: any) => { if (expanded) fetchLines(r.je_header_id); },
       }}
       style={{ marginLeft: 8 }}

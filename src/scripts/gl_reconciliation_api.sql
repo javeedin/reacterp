@@ -162,6 +162,7 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
       SELECT h.JE_HEADER_ID,
              h.JOURNAL_NAME,
              h.JOURNAL_DESCRIPTION,
+             h.LEDGER_NAME,
              h.PERIOD_NAME,
              h.POSTING_STATUS,
              NVL(h.RUNNING_TOTAL_DR, 0) AS header_dr,
@@ -236,6 +237,7 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
         APEX_JSON.write('je_header_id',  h.JE_HEADER_ID);
         APEX_JSON.write('journal_name',  h.JOURNAL_NAME);
         APEX_JSON.write('description',   h.JOURNAL_DESCRIPTION);
+        APEX_JSON.write('ledger_name',   h.LEDGER_NAME);
         APEX_JSON.write('period_name',   h.PERIOD_NAME);
         APEX_JSON.write('status',        h.POSTING_STATUS);
         APEX_JSON.write('header_dr',     h.header_dr);
