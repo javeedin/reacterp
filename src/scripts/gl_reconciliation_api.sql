@@ -50,6 +50,23 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
     p_response OUT CLOB
   ) AS
   BEGIN
+    WITH ledgers AS (
+      SELECT   LEDGER_ID        AS ledger_id,
+               MAX(LEDGER_NAME) AS ledger_name,
+               COUNT(*)         AS batch_count
+      FROM     RR_GL_JOURNAL_BATCHES
+      WHERE    LEDGER_ID IS NOT NULL
+      GROUP BY LEDGER_ID
+    ),
+    periods AS (
+      SELECT   LEDGER_ID           AS ledger_id,
+               DEFAULT_PERIOD_NAME AS period_name,
+               COUNT(*)            AS period_batch_count
+      FROM     RR_GL_JOURNAL_BATCHES
+      WHERE    LEDGER_ID IS NOT NULL
+      AND      DEFAULT_PERIOD_NAME IS NOT NULL
+      GROUP BY LEDGER_ID, DEFAULT_PERIOD_NAME
+    )
     SELECT JSON_OBJECT(
       'items' VALUE JSON_ARRAYAGG(
         JSON_OBJECT(
@@ -59,31 +76,18 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
           'periods'     VALUE (
             SELECT JSON_ARRAYAGG(
               JSON_OBJECT(
-                'period_name' VALUE p.DEFAULT_PERIOD_NAME,
+                'period_name' VALUE p.period_name,
                 'batch_count' VALUE p.period_batch_count
-              ) ORDER BY p.DEFAULT_PERIOD_NAME DESC
+              ) ORDER BY p.period_name DESC
             )
-            FROM (
-              SELECT DEFAULT_PERIOD_NAME,
-                     COUNT(*) AS period_batch_count
-              FROM   RR_GL_JOURNAL_BATCHES
-              WHERE  LEDGER_ID = l.ledger_id
-              AND    DEFAULT_PERIOD_NAME IS NOT NULL
-              GROUP BY DEFAULT_PERIOD_NAME
-            ) p
+            FROM periods p
+            WHERE p.ledger_id = l.ledger_id
           )
         ) ORDER BY l.ledger_name
       )
     )
     INTO p_response
-    FROM (
-      SELECT   LEDGER_ID        AS ledger_id,
-               MAX(LEDGER_NAME) AS ledger_name,
-               COUNT(*)         AS batch_count
-      FROM     RR_GL_JOURNAL_BATCHES
-      WHERE    LEDGER_ID IS NOT NULL
-      GROUP BY LEDGER_ID
-    ) l;
+    FROM ledgers l;
 
     p_status := 200;
   EXCEPTION WHEN OTHERS THEN
