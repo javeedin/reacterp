@@ -151,25 +151,49 @@ const headerRowStyle = (record: HeaderDetail): React.CSSProperties => {
 
 // ─── HeadersPanel: shows headers table with expandable lines ─────────────────
 
-function HeadersPanel({ headers }: { headers: HeaderDetail[] }) {
-  const [linesMap, setLinesMap] = useState<Record<number, { loading: boolean; lines: LineRow[]; totals: any }>>({});
+function HeadersPanel({
+  headers,
+  onLinesUrlChange,
+}: {
+  headers: HeaderDetail[];
+  onLinesUrlChange?: (url: string) => void;
+}) {
+  const [linesMap, setLinesMap] = useState<
+    Record<number, { loading: boolean; lines: LineRow[]; totals: any; error?: string }>
+  >({});
 
   const fetchLines = async (headerId: number) => {
     if (linesMap[headerId]) return;
+    const url = `${APEX_DB_CONFIG.baseUrl}/gl/reconciliation/lines?je_header_id=${headerId}`;
+    onLinesUrlChange?.(url);
     setLinesMap(prev => ({ ...prev, [headerId]: { loading: true, lines: [], totals: null } }));
     try {
-      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/reconciliation/lines?je_header_id=${headerId}`);
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
       const data = await res.json();
       const lines: LineRow[] = (data.items ?? []).map((l: any, i: number) => ({ ...l, key: String(i) }));
       setLinesMap(prev => ({ ...prev, [headerId]: { loading: false, lines, totals: data.totals ?? null } }));
-    } catch {
-      setLinesMap(prev => ({ ...prev, [headerId]: { loading: false, lines: [], totals: null } }));
+    } catch (e: any) {
+      setLinesMap(prev => ({
+        ...prev,
+        [headerId]: { loading: false, lines: [], totals: null, error: e.message ?? 'Failed to load lines' },
+      }));
     }
   };
 
   const linesExpandedRowRender = (h: HeaderDetail & { key: string }) => {
     const state = linesMap[h.je_header_id];
     if (!state || state.loading) return <Spin size="small" style={{ padding: 16 }} />;
+    if (state.error)
+      return (
+        <Alert
+          type="error"
+          showIcon
+          message="Failed to load journal lines"
+          description={state.error}
+          style={{ margin: 8 }}
+        />
+      );
     if (state.lines.length === 0) return <Empty description="No lines" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
 
     const lineCols = [
@@ -288,6 +312,7 @@ export default function JournalReconciliation() {
   const [apiModalOpen, setApiModalOpen] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'matched' | 'mismatch' | 'nolines'>('all');
+  const [linesUrl, setLinesUrl] = useState('');
 
   // Periods derived from selected ledger — no extra API call
   const periods: Period[] = ledgers.find((l) => l.ledger_name === selectedLedger)?.periods ?? [];
@@ -416,7 +441,7 @@ export default function JournalReconciliation() {
 
   // ── Expanded row: headers panel with drilldown to lines ───────────────────
   const expandedRowRender = (record: BatchRow) => (
-    <HeadersPanel headers={record.headers} />
+    <HeadersPanel headers={record.headers} onLinesUrlChange={setLinesUrl} />
   );
 
   // ── Main batch columns ──────────────────────────────────────────────────────
@@ -819,7 +844,7 @@ export default function JournalReconciliation() {
           </Input.Group>
         </div>
 
-        <div>
+        <div style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4, fontWeight: 600 }}>
             GET — Reconciliation Data
           </div>
@@ -840,6 +865,42 @@ export default function JournalReconciliation() {
           {!selectedLedger && (
             <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 4 }}>
               Select a ledger to build the full URL
+            </div>
+          )}
+        </div>
+
+        <div>
+          <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4, fontWeight: 600 }}>
+            GET — Journal Lines (expand a header row to populate)
+          </div>
+          <Input.Group compact style={{ display: 'flex' }}>
+            <Input
+              value={
+                linesUrl ||
+                `${APEX_DB_CONFIG.baseUrl}/gl/reconciliation/lines?je_header_id=<expand a header row>`
+              }
+              readOnly
+              style={{ fontFamily: 'monospace', fontSize: 12, color: linesUrl ? undefined : REDWOOD.neutral600 }}
+            />
+            <Tooltip title="Copy">
+              <Button
+                icon={<CopyOutlined />}
+                disabled={!linesUrl}
+                onClick={() => navigator.clipboard.writeText(linesUrl)}
+              />
+            </Tooltip>
+            <Button
+              type="primary"
+              style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+              disabled={!linesUrl}
+              onClick={() => window.open(linesUrl, '_blank')}
+            >
+              Test
+            </Button>
+          </Input.Group>
+          {!linesUrl && (
+            <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 4 }}>
+              Expand a batch row → expand a header row — the URL will appear here
             </div>
           )}
         </div>
