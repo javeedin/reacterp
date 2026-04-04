@@ -189,7 +189,7 @@ export default function JournalReconciliation() {
       setLoadingPeriods(true);
       setSelectedPeriod(null);
       try {
-        const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/sync/glbatchesperiods?ledger_id=${selectedLedger}`);
+        const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/reconciliation/periods?ledger_id=${selectedLedger}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         const items: Period[] = Array.isArray(data) ? data : data.items ?? data.periods ?? [];
