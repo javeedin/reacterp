@@ -50,6 +50,21 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
     p_response OUT CLOB
   ) AS
   BEGIN
+    -- Backfill LEDGER_ID / LEDGER_NAME in batches from headers where missing
+    UPDATE RR_GL_JOURNAL_BATCHES b
+    SET   (LEDGER_ID, LEDGER_NAME) = (
+            SELECT h.LEDGER_ID, h.LEDGER_NAME
+            FROM   RR_GL_JE_HEADERS h
+            WHERE  h.BATCH_ID = b.JE_BATCH_ID
+            AND    ROWNUM = 1
+          )
+    WHERE  b.LEDGER_ID IS NULL
+    AND    EXISTS (
+             SELECT 1 FROM RR_GL_JE_HEADERS h
+             WHERE h.BATCH_ID = b.JE_BATCH_ID
+           );
+    COMMIT;
+
     -- Pre-aggregate periods per ledger into a JSON array first,
     -- then join to ledgers — avoids scalar subquery inside JSON_ARRAYAGG
     WITH periods_agg AS (
