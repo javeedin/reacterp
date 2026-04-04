@@ -247,10 +247,17 @@ END RR_GL_RECON_PKG;
 DECLARE
   v_status   NUMBER;
   v_response CLOB;
+  v_offset   PLS_INTEGER := 1;
+  v_chunk    VARCHAR2(32767);
 BEGIN
   RR_GL_RECON_PKG.get_ledgers(v_status, v_response);
-  :status    := v_status;
-  :body_text := v_response;
+  :status := v_status;
+  OWA_UTIL.mime_header('application/json', TRUE);
+  WHILE v_offset <= DBMS_LOB.GETLENGTH(v_response) LOOP
+    v_chunk  := DBMS_LOB.SUBSTR(v_response, 32767, v_offset);
+    HTP.PRN(v_chunk);
+    v_offset := v_offset + 32767;
+  END LOOP;
 END;
 */
 
@@ -265,6 +272,8 @@ END;
 DECLARE
   v_status   NUMBER;
   v_response CLOB;
+  v_offset   PLS_INTEGER := 1;
+  v_chunk    VARCHAR2(32767);
 BEGIN
   RR_GL_RECON_PKG.get_reconciliation(
     p_ledger_id   => :ledger_id,
@@ -272,7 +281,12 @@ BEGIN
     p_status      => v_status,
     p_response    => v_response
   );
-  :status    := v_status;
-  :body_text := v_response;
+  :status := v_status;
+  OWA_UTIL.mime_header('application/json', TRUE);
+  WHILE v_offset <= DBMS_LOB.GETLENGTH(v_response) LOOP
+    v_chunk  := DBMS_LOB.SUBSTR(v_response, 32767, v_offset);
+    HTP.PRN(v_chunk);
+    v_offset := v_offset + 32767;
+  END LOOP;
 END;
 */
