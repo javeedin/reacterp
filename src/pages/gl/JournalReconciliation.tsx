@@ -17,6 +17,8 @@ import {
   Empty,
   Tooltip,
   Badge,
+  Modal,
+  Input,
 } from 'antd';
 import {
   HomeOutlined,
@@ -29,6 +31,8 @@ import {
   BankOutlined,
   FileTextOutlined,
   UnorderedListOutlined,
+  ApiOutlined,
+  CopyOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../../config/api.config';
@@ -140,9 +144,21 @@ export default function JournalReconciliation() {
   const [loadingLedgers, setLoadingLedgers] = useState(false);
   const [batches, setBatches] = useState<BatchRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [apiModalOpen, setApiModalOpen] = useState(false);
 
   // Periods derived from selected ledger — no extra API call
   const periods: Period[] = ledgers.find((l) => l.ledger_name === selectedLedger)?.periods ?? [];
+
+  // Current reconciliation API URL
+  const reconUrl = (() => {
+    if (!selectedLedger) return `${APEX_DB_CONFIG.baseUrl}/gl/reconciliation?ledger_id=<select ledger>`;
+    const url = new URL(`${APEX_DB_CONFIG.baseUrl}/gl/reconciliation`);
+    url.searchParams.set('ledger_id', selectedLedger);
+    if (selectedPeriod) url.searchParams.set('period_name', selectedPeriod);
+    return url.toString();
+  })();
+
+  const ledgersUrl = `${APEX_DB_CONFIG.baseUrl}/gl/reconciliation/ledgers`;
 
   // Summary stats
   const totalBatches = batches.length;
@@ -484,7 +500,7 @@ export default function JournalReconciliation() {
                 }))}
               />
             </div>
-            <div style={{ paddingTop: 20 }}>
+            <div style={{ paddingTop: 20, display: 'flex', gap: 8 }}>
               <Button
                 type="primary"
                 icon={<SearchOutlined />}
@@ -495,6 +511,12 @@ export default function JournalReconciliation() {
               >
                 Load
               </Button>
+              <Tooltip title="View API URLs">
+                <Button
+                  icon={<ApiOutlined />}
+                  onClick={() => setApiModalOpen(true)}
+                />
+              </Tooltip>
             </div>
           </Space>
         </Card>
@@ -616,6 +638,59 @@ export default function JournalReconciliation() {
           )}
         </Card>
       </Content>
+
+      {/* API URL Viewer Modal */}
+      <Modal
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /> API Endpoints</Space>}
+        open={apiModalOpen}
+        onCancel={() => setApiModalOpen(false)}
+        footer={null}
+        width={720}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4, fontWeight: 600 }}>
+            GET — Ledgers (with periods)
+          </div>
+          <Input.Group compact style={{ display: 'flex' }}>
+            <Input value={ledgersUrl} readOnly style={{ fontFamily: 'monospace', fontSize: 12 }} />
+            <Tooltip title="Copy">
+              <Button icon={<CopyOutlined />} onClick={() => navigator.clipboard.writeText(ledgersUrl)} />
+            </Tooltip>
+            <Button
+              type="primary"
+              style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+              onClick={() => window.open(ledgersUrl, '_blank')}
+            >
+              Test
+            </Button>
+          </Input.Group>
+        </div>
+
+        <div>
+          <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4, fontWeight: 600 }}>
+            GET — Reconciliation Data
+          </div>
+          <Input.Group compact style={{ display: 'flex' }}>
+            <Input value={reconUrl} readOnly style={{ fontFamily: 'monospace', fontSize: 12 }} />
+            <Tooltip title="Copy">
+              <Button icon={<CopyOutlined />} onClick={() => navigator.clipboard.writeText(reconUrl)} />
+            </Tooltip>
+            <Button
+              type="primary"
+              style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+              disabled={!selectedLedger}
+              onClick={() => window.open(reconUrl, '_blank')}
+            >
+              Test
+            </Button>
+          </Input.Group>
+          {!selectedLedger && (
+            <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 4 }}>
+              Select a ledger to build the full URL
+            </div>
+          )}
+        </div>
+      </Modal>
     </Layout>
   );
 }

@@ -105,7 +105,8 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
     APEX_JSON.close_array;   -- items
     APEX_JSON.close_object;  -- root
 
-    p_response := APEX_JSON.get_clob_output;
+    DBMS_LOB.CREATETEMPORARY(p_response, TRUE, DBMS_LOB.SESSION);
+    DBMS_LOB.APPEND(p_response, APEX_JSON.get_clob_output);
     APEX_JSON.free_output;
     p_status := 200;
 
@@ -228,7 +229,8 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
     APEX_JSON.close_array;   -- items
     APEX_JSON.close_object;  -- root
 
-    p_response := APEX_JSON.get_clob_output;
+    DBMS_LOB.CREATETEMPORARY(p_response, TRUE, DBMS_LOB.SESSION);
+    DBMS_LOB.APPEND(p_response, APEX_JSON.get_clob_output);
     APEX_JSON.free_output;
     p_status := 200;
 
