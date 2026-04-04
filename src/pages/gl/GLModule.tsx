@@ -70,6 +70,7 @@ const taskMenuItems: MenuItemType[] = [
   { key: 'reverse-journal', icon: <ReconciliationOutlined />, label: 'Reverse Journal', description: 'Reverse posted journals', color: REDWOOD.warning },
   { key: 'accounting-periods', icon: <CalendarOutlined />, label: 'Manage Accounting Periods', description: 'View and manage accounting periods', color: REDWOOD.success, path: '/gl/accounting-periods' },
   { key: 'revaluation', icon: <DollarOutlined />, label: 'Run Revaluation', description: 'Foreign currency revaluation', color: REDWOOD.primary },
+  { key: 'journal-reconciliation', icon: <ReconciliationOutlined />, label: 'Fusion Journal Reconciliation', description: 'Reconcile batch ↔ header ↔ line totals', color: REDWOOD.primaryDark, path: '/gl/journal-reconciliation' },
 ];
 
 // Report menu items

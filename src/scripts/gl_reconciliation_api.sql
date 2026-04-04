@@ -1,0 +1,255 @@
+-- =============================================================================
+-- GL Journal Reconciliation – PL/SQL Package + ORDS Handler
+-- Compares: Batch totals ↔ Header totals ↔ Line totals
+-- 
+-- NOTE: Verify these table/column names match your APEX schema:
+--   RR_GL_JOURNAL_BATCHES  → columns: JE_BATCH_ID, BATCH_NAME, DEFAULT_PERIOD_NAME,
+--                            LEDGER_ID, LEDGER_NAME, STATUS, RUNNING_TOTAL_DR,
+--                            RUNNING_TOTAL_CR, RUNNING_TOTAL_ACCOUNTED_DR,
+--                            RUNNING_TOTAL_ACCOUNTED_CR
+--   RR_GL_JOURNAL_HEADERS  → columns: JE_HEADER_ID, BATCH_ID, JOURNAL_NAME,
+--                            DEFAULT_PERIOD_NAME, LEDGER_ID, STATUS,
+--                            RUNNING_TOTAL_DR, RUNNING_TOTAL_CR
+--   RR_GL_JOURNAL_LINES    → columns: JE_HEADER_ID, BATCH_ID,
+--                            ENTERED_DR, ENTERED_CR
+-- =============================================================================
+
+CREATE OR REPLACE PACKAGE RR_GL_RECON_PKG AS
+
+  -- Returns distinct ledgers that have synced batches
+  PROCEDURE get_ledgers (
+    p_status   OUT NUMBER,
+    p_response OUT CLOB
+  );
+
+  -- Main reconciliation: batch ↔ headers ↔ lines
+  PROCEDURE get_reconciliation (
+    p_ledger_id   IN  VARCHAR2,
+    p_period_name IN  VARCHAR2 DEFAULT NULL,
+    p_status      OUT NUMBER,
+    p_response    OUT CLOB
+  );
+
+END RR_GL_RECON_PKG;
+/
+
+CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
+
+  c_tol CONSTANT NUMBER := 0.01;   -- tolerance for float comparison
+
+  -- ─────────────────────────────────────────────────────────────────────────
+  -- PROCEDURE: get_ledgers
+  -- GET /reerp/gl/reconciliation/ledgers
+  -- ─────────────────────────────────────────────────────────────────────────
+  PROCEDURE get_ledgers (
+    p_status   OUT NUMBER,
+    p_response OUT CLOB
+  ) AS
+  BEGIN
+    SELECT JSON_OBJECT(
+      'items' VALUE JSON_ARRAYAGG(
+        JSON_OBJECT(
+          'ledger_id'   VALUE ledger_id,
+          'ledger_name' VALUE ledger_name,
+          'batch_count' VALUE batch_count
+        ) ORDER BY ledger_name
+      )
+    )
+    INTO p_response
+    FROM (
+      SELECT   LEDGER_ID,
+               MAX(LEDGER_NAME)  AS ledger_name,
+               COUNT(*)          AS batch_count
+      FROM     RR_GL_JOURNAL_BATCHES
+      WHERE    LEDGER_ID IS NOT NULL
+      GROUP BY LEDGER_ID
+    );
+
+    p_status := 200;
+  EXCEPTION WHEN OTHERS THEN
+    p_status   := 500;
+    p_response := JSON_OBJECT('error' VALUE SQLERRM);
+  END get_ledgers;
+
+  -- ─────────────────────────────────────────────────────────────────────────
+  -- PROCEDURE: get_reconciliation
+  -- GET /reerp/gl/reconciliation?ledger_id=XXX&period_name=Sep-23
+  -- ─────────────────────────────────────────────────────────────────────────
+  PROCEDURE get_reconciliation (
+    p_ledger_id   IN  VARCHAR2,
+    p_period_name IN  VARCHAR2 DEFAULT NULL,
+    p_status      OUT NUMBER,
+    p_response    OUT CLOB
+  ) AS
+    v_ledger_id NUMBER := TO_NUMBER(p_ledger_id);
+  BEGIN
+
+    SELECT JSON_OBJECT(
+      'items' VALUE JSON_ARRAYAGG(
+        JSON_OBJECT(
+          -- ── Batch Identity ──────────────────────────────────────────────
+          'batch_id'     VALUE b.JE_BATCH_ID,
+          'batch_name'   VALUE b.BATCH_NAME,
+          'period_name'  VALUE b.DEFAULT_PERIOD_NAME,
+          'ledger_id'    VALUE b.LEDGER_ID,
+          'ledger_name'  VALUE b.LEDGER_NAME,
+          'batch_status' VALUE b.STATUS,
+
+          -- ── Batch-level totals (from Oracle Fusion sync) ────────────────
+          'batch_dr'     VALUE NVL(b.RUNNING_TOTAL_DR,           0),
+          'batch_cr'     VALUE NVL(b.RUNNING_TOTAL_CR,           0),
+          'batch_acc_dr' VALUE NVL(b.RUNNING_TOTAL_ACCOUNTED_DR, 0),
+          'batch_acc_cr' VALUE NVL(b.RUNNING_TOTAL_ACCOUNTED_CR, 0),
+
+          -- ── Header-level totals (SUM of synced headers for this batch) ──
+          'headers_dr'    VALUE NVL((SELECT SUM(NVL(h.RUNNING_TOTAL_DR,0))
+                                     FROM   RR_GL_JOURNAL_HEADERS h
+                                     WHERE  h.BATCH_ID = b.JE_BATCH_ID), 0),
+          'headers_cr'    VALUE NVL((SELECT SUM(NVL(h.RUNNING_TOTAL_CR,0))
+                                     FROM   RR_GL_JOURNAL_HEADERS h
+                                     WHERE  h.BATCH_ID = b.JE_BATCH_ID), 0),
+          'header_count'  VALUE (SELECT COUNT(*)
+                                 FROM   RR_GL_JOURNAL_HEADERS h
+                                 WHERE  h.BATCH_ID = b.JE_BATCH_ID),
+
+          -- ── Line-level totals (SUM of synced lines for this batch) ──────
+          'lines_dr'     VALUE NVL((SELECT SUM(NVL(l.ENTERED_DR,0))
+                                    FROM   RR_GL_JOURNAL_LINES l
+                                    WHERE  l.BATCH_ID = b.JE_BATCH_ID), 0),
+          'lines_cr'     VALUE NVL((SELECT SUM(NVL(l.ENTERED_CR,0))
+                                    FROM   RR_GL_JOURNAL_LINES l
+                                    WHERE  l.BATCH_ID = b.JE_BATCH_ID), 0),
+          'line_count'   VALUE (SELECT COUNT(*)
+                                FROM   RR_GL_JOURNAL_LINES l
+                                WHERE  l.BATCH_ID = b.JE_BATCH_ID),
+
+          -- ── Match flags: Batch ↔ Headers ────────────────────────────────
+          'batch_hdr_dr_ok' VALUE CASE
+            WHEN ABS(NVL(b.RUNNING_TOTAL_DR,0) -
+                     NVL((SELECT SUM(NVL(h.RUNNING_TOTAL_DR,0))
+                          FROM RR_GL_JOURNAL_HEADERS h
+                          WHERE h.BATCH_ID = b.JE_BATCH_ID),0)) <= c_tol
+            THEN 'Y' ELSE 'N' END,
+          'batch_hdr_cr_ok' VALUE CASE
+            WHEN ABS(NVL(b.RUNNING_TOTAL_CR,0) -
+                     NVL((SELECT SUM(NVL(h.RUNNING_TOTAL_CR,0))
+                          FROM RR_GL_JOURNAL_HEADERS h
+                          WHERE h.BATCH_ID = b.JE_BATCH_ID),0)) <= c_tol
+            THEN 'Y' ELSE 'N' END,
+
+          -- ── Match flags: Headers ↔ Lines ────────────────────────────────
+          'hdr_lines_dr_ok' VALUE CASE
+            WHEN ABS(NVL((SELECT SUM(NVL(h.RUNNING_TOTAL_DR,0))
+                          FROM RR_GL_JOURNAL_HEADERS h
+                          WHERE h.BATCH_ID = b.JE_BATCH_ID),0) -
+                     NVL((SELECT SUM(NVL(l.ENTERED_DR,0))
+                          FROM RR_GL_JOURNAL_LINES l
+                          WHERE l.BATCH_ID = b.JE_BATCH_ID),0)) <= c_tol
+            THEN 'Y' ELSE 'N' END,
+          'hdr_lines_cr_ok' VALUE CASE
+            WHEN ABS(NVL((SELECT SUM(NVL(h.RUNNING_TOTAL_CR,0))
+                          FROM RR_GL_JOURNAL_HEADERS h
+                          WHERE h.BATCH_ID = b.JE_BATCH_ID),0) -
+                     NVL((SELECT SUM(NVL(l.ENTERED_CR,0))
+                          FROM RR_GL_JOURNAL_LINES l
+                          WHERE l.BATCH_ID = b.JE_BATCH_ID),0)) <= c_tol
+            THEN 'Y' ELSE 'N' END,
+
+          -- ── Per-Header breakdown (for expandable rows) ───────────────────
+          'headers' VALUE (
+            SELECT JSON_ARRAYAGG(
+              JSON_OBJECT(
+                'header_id'   VALUE h.JE_HEADER_ID,
+                'header_name' VALUE h.JOURNAL_NAME,
+                'status'      VALUE h.STATUS,
+                'period_name' VALUE h.DEFAULT_PERIOD_NAME,
+
+                -- Header totals
+                'header_dr'   VALUE NVL(h.RUNNING_TOTAL_DR, 0),
+                'header_cr'   VALUE NVL(h.RUNNING_TOTAL_CR, 0),
+
+                -- Lines for this header
+                'lines_dr'    VALUE NVL((SELECT SUM(NVL(l.ENTERED_DR,0))
+                                         FROM   RR_GL_JOURNAL_LINES l
+                                         WHERE  l.JE_HEADER_ID = h.JE_HEADER_ID), 0),
+                'lines_cr'    VALUE NVL((SELECT SUM(NVL(l.ENTERED_CR,0))
+                                         FROM   RR_GL_JOURNAL_LINES l
+                                         WHERE  l.JE_HEADER_ID = h.JE_HEADER_ID), 0),
+                'line_count'  VALUE (SELECT COUNT(*)
+                                     FROM   RR_GL_JOURNAL_LINES l
+                                     WHERE  l.JE_HEADER_ID = h.JE_HEADER_ID),
+
+                -- Match flags for this header
+                'dr_ok'  VALUE CASE
+                  WHEN ABS(NVL(h.RUNNING_TOTAL_DR,0) -
+                           NVL((SELECT SUM(NVL(l.ENTERED_DR,0))
+                                FROM RR_GL_JOURNAL_LINES l
+                                WHERE l.JE_HEADER_ID = h.JE_HEADER_ID),0)) <= c_tol
+                  THEN 'Y' ELSE 'N' END,
+                'cr_ok'  VALUE CASE
+                  WHEN ABS(NVL(h.RUNNING_TOTAL_CR,0) -
+                           NVL((SELECT SUM(NVL(l.ENTERED_CR,0))
+                                FROM RR_GL_JOURNAL_LINES l
+                                WHERE l.JE_HEADER_ID = h.JE_HEADER_ID),0)) <= c_tol
+                  THEN 'Y' ELSE 'N' END
+              ) ORDER BY h.JE_HEADER_ID
+            )
+            FROM RR_GL_JOURNAL_HEADERS h
+            WHERE h.BATCH_ID = b.JE_BATCH_ID
+          )
+        ) ORDER BY b.JE_BATCH_ID
+      )
+    )
+    INTO p_response
+    FROM  RR_GL_JOURNAL_BATCHES b
+    WHERE b.LEDGER_ID        = v_ledger_id
+    AND  (p_period_name IS NULL OR b.DEFAULT_PERIOD_NAME = p_period_name);
+
+    p_status := 200;
+
+  EXCEPTION WHEN OTHERS THEN
+    p_status   := 500;
+    p_response := JSON_OBJECT('error' VALUE SQLERRM);
+  END get_reconciliation;
+
+END RR_GL_RECON_PKG;
+/
+
+
+-- =============================================================================
+-- ORDS HANDLER 1 – GET /reerp/gl/reconciliation/ledgers
+-- Paste this block as the PL/SQL source in the APEX ORDS GET handler
+-- =============================================================================
+/*
+DECLARE
+  v_status   NUMBER;
+  v_response CLOB;
+BEGIN
+  RR_GL_RECON_PKG.get_ledgers(v_status, v_response);
+  :status := v_status;
+  :body   := v_response;
+END;
+*/
+
+
+-- =============================================================================
+-- ORDS HANDLER 2 – GET /reerp/gl/reconciliation
+-- Bind variables:  :ledger_id   (query string)
+--                  :period_name (query string, optional)
+-- Paste this block as the PL/SQL source in the APEX ORDS GET handler
+-- =============================================================================
+/*
+DECLARE
+  v_status   NUMBER;
+  v_response CLOB;
+BEGIN
+  RR_GL_RECON_PKG.get_reconciliation(
+    p_ledger_id   => :ledger_id,
+    p_period_name => :period_name,
+    p_status      => v_status,
+    p_response    => v_response
+  );
+  :status := v_status;
+  :body   := v_response;
+END;
+*/
