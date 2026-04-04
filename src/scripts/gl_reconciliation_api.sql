@@ -82,14 +82,16 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
                  JSON_OBJECT(
                    'period_name' VALUE period_name,
                    'batch_count' VALUE period_batch_count
+                   RETURNING CLOB
                  ) ORDER BY period_name DESC
+                 RETURNING CLOB
                ) AS periods_arr
       FROM     periods_agg
       GROUP BY LEDGER_NAME
     ),
     ledgers AS (
-      SELECT   LEDGER_NAME        AS ledger_name,
-               COUNT(*)           AS batch_count
+      SELECT   LEDGER_NAME AS ledger_name,
+               COUNT(*)    AS batch_count
       FROM     RR_GL_JOURNAL_BATCHES
       WHERE    LEDGER_NAME IS NOT NULL
       GROUP BY LEDGER_NAME
@@ -99,9 +101,12 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
         JSON_OBJECT(
           'ledger_name' VALUE l.ledger_name,
           'batch_count' VALUE l.batch_count,
-          'periods'     VALUE pj.periods_arr
+          'periods'     VALUE pj.periods_arr FORMAT JSON
+          RETURNING CLOB
         ) ORDER BY l.ledger_name
+        RETURNING CLOB
       )
+      RETURNING CLOB
     )
     INTO p_response
     FROM ledgers l
@@ -110,7 +115,7 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
     p_status := 200;
   EXCEPTION WHEN OTHERS THEN
     p_status   := 500;
-    p_response := JSON_OBJECT('error' VALUE SQLERRM);
+    p_response := JSON_OBJECT('error' VALUE SQLERRM RETURNING CLOB);
   END get_ledgers;
 
   -- ─────────────────────────────────────────────────────────────────────────
@@ -132,7 +137,6 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
           'je_batch_id'  VALUE b.JE_BATCH_ID,
           'batch_name'   VALUE b.BATCH_NAME,
           'period_name'  VALUE b.DEFAULT_PERIOD_NAME,
-          'ledger_id'    VALUE b.LEDGER_ID,
           'ledger_name'  VALUE b.LEDGER_NAME,
           'batch_status' VALUE b.STATUS,
 
@@ -140,7 +144,7 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
           'batch_dr'     VALUE NVL(b.RUNNING_TOTAL_DR, 0),
           'batch_cr'     VALUE NVL(b.RUNNING_TOTAL_CR, 0),
 
-          -- ── Header-level totals (SUM of synced headers for this batch) ──
+          -- ── Header-level totals ──────────────────────────────────────────
           'headers_dr'   VALUE NVL((SELECT SUM(NVL(h.RUNNING_TOTAL_DR, 0))
                                     FROM   RR_GL_JE_HEADERS h
                                     WHERE  h.BATCH_ID = b.JE_BATCH_ID), 0),
@@ -151,7 +155,7 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
                                 FROM   RR_GL_JE_HEADERS h
                                 WHERE  h.BATCH_ID = b.JE_BATCH_ID),
 
-          -- ── Line-level totals (SUM of synced lines for this batch) ──────
+          -- ── Line-level totals ────────────────────────────────────────────
           'lines_dr'     VALUE NVL((SELECT SUM(NVL(l.ENTERED_DR, 0))
                                     FROM   RR_GL_JE_LINES_ALL l
                                     WHERE  l.BATCH_ID = b.JE_BATCH_ID), 0),
@@ -196,7 +200,7 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
                           WHERE l.BATCH_ID = b.JE_BATCH_ID), 0)) <= c_tol
             THEN 'Y' ELSE 'N' END,
 
-          -- ── Per-Header breakdown (for expandable rows in React) ──────────
+          -- ── Per-Header breakdown ─────────────────────────────────────────
           'headers' VALUE (
             SELECT JSON_ARRAYAGG(
               JSON_OBJECT(
@@ -205,12 +209,8 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
                 'description'  VALUE h.JOURNAL_DESCRIPTION,
                 'period_name'  VALUE h.PERIOD_NAME,
                 'status'       VALUE h.POSTING_STATUS,
-
-                -- Header totals
                 'header_dr'    VALUE NVL(h.RUNNING_TOTAL_DR, 0),
                 'header_cr'    VALUE NVL(h.RUNNING_TOTAL_CR, 0),
-
-                -- Lines for this header
                 'lines_dr'     VALUE NVL((SELECT SUM(NVL(l.ENTERED_DR, 0))
                                           FROM   RR_GL_JE_LINES_ALL l
                                           WHERE  l.JE_HEADER_ID = h.JE_HEADER_ID), 0),
@@ -220,29 +220,30 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
                 'line_count'   VALUE (SELECT COUNT(*)
                                       FROM   RR_GL_JE_LINES_ALL l
                                       WHERE  l.JE_HEADER_ID = h.JE_HEADER_ID),
-
-                -- Match flags for this header
                 'dr_ok' VALUE CASE
                   WHEN ABS(NVL(h.RUNNING_TOTAL_DR, 0) -
                            NVL((SELECT SUM(NVL(l.ENTERED_DR, 0))
                                 FROM RR_GL_JE_LINES_ALL l
                                 WHERE l.JE_HEADER_ID = h.JE_HEADER_ID), 0)) <= c_tol
                   THEN 'Y' ELSE 'N' END,
-
                 'cr_ok' VALUE CASE
                   WHEN ABS(NVL(h.RUNNING_TOTAL_CR, 0) -
                            NVL((SELECT SUM(NVL(l.ENTERED_CR, 0))
                                 FROM RR_GL_JE_LINES_ALL l
                                 WHERE l.JE_HEADER_ID = h.JE_HEADER_ID), 0)) <= c_tol
                   THEN 'Y' ELSE 'N' END
+                RETURNING CLOB
               ) ORDER BY h.JE_HEADER_ID
+              RETURNING CLOB
             )
             FROM RR_GL_JE_HEADERS h
             WHERE h.BATCH_ID = b.JE_BATCH_ID
           )
-
+          RETURNING CLOB
         ) ORDER BY b.JE_BATCH_ID
+        RETURNING CLOB
       )
+      RETURNING CLOB
     )
     INTO p_response
     FROM  RR_GL_JOURNAL_BATCHES b
@@ -253,7 +254,7 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
 
   EXCEPTION WHEN OTHERS THEN
     p_status   := 500;
-    p_response := JSON_OBJECT('error' VALUE SQLERRM);
+    p_response := JSON_OBJECT('error' VALUE SQLERRM RETURNING CLOB);
   END get_reconciliation;
 
 END RR_GL_RECON_PKG;
