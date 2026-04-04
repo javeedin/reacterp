@@ -4,9 +4,8 @@
 -- 
 -- NOTE: Verify these table/column names match your APEX schema:
 --   RR_GL_JOURNAL_BATCHES  → columns: JE_BATCH_ID, BATCH_NAME, DEFAULT_PERIOD_NAME,
---                            LEDGER_ID, LEDGER_NAME, STATUS, RUNNING_TOTAL_DR,
---                            RUNNING_TOTAL_CR, RUNNING_TOTAL_ACCOUNTED_DR,
---                            RUNNING_TOTAL_ACCOUNTED_CR
+--                            LEDGER_ID, LEDGER_NAME, STATUS,
+--                            RUNNING_TOTAL_DR, RUNNING_TOTAL_CR
 --   RR_GL_JOURNAL_HEADERS  → columns: JE_HEADER_ID, BATCH_ID, JOURNAL_NAME,
 --                            DEFAULT_PERIOD_NAME, LEDGER_ID, STATUS,
 --                            RUNNING_TOTAL_DR, RUNNING_TOTAL_CR
@@ -96,10 +95,8 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
           'batch_status' VALUE b.STATUS,
 
           -- ── Batch-level totals (from Oracle Fusion sync) ────────────────
-          'batch_dr'     VALUE NVL(b.RUNNING_TOTAL_DR,           0),
-          'batch_cr'     VALUE NVL(b.RUNNING_TOTAL_CR,           0),
-          'batch_acc_dr' VALUE NVL(b.RUNNING_TOTAL_ACCOUNTED_DR, 0),
-          'batch_acc_cr' VALUE NVL(b.RUNNING_TOTAL_ACCOUNTED_CR, 0),
+          'batch_dr'     VALUE NVL(b.RUNNING_TOTAL_DR, 0),
+          'batch_cr'     VALUE NVL(b.RUNNING_TOTAL_CR, 0),
 
           -- ── Header-level totals (SUM of synced headers for this batch) ──
           'headers_dr'    VALUE NVL((SELECT SUM(NVL(h.RUNNING_TOTAL_DR,0))
