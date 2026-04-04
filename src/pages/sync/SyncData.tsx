@@ -145,6 +145,9 @@ const SyncData: React.FC = () => {
   const [form] = Form.useForm();
   const [selectedObject, setSelectedObject] = useState<SyncObjectConfig | null>(null);
   const [, setApiType] = useState<ApiType>('REST');
+
+  // API-driven select options cache: paramKey → { loading, items }
+  const [apiSelectOptions, setApiSelectOptions] = useState<Record<string, { loading: boolean; items: { label: string; value: string; count?: number }[] }>>({});
   const [logs, setLogs] = useState<SyncLog[]>([]);
   const [isTesting, setIsTesting] = useState(false);
   const [testMode, setTestMode] = useState<boolean | 'single'>(true); // true=25, false=full, 'single'=1
@@ -1533,6 +1536,36 @@ const SyncData: React.FC = () => {
         form.setFieldsValue(defaults);
       }
       addLog('info', `Selected: ${object.name}`);
+
+      // Fetch options for any api-select parameters
+      object.parameters.forEach((param) => {
+        if (param.type === 'api-select' && param.apiUrl) {
+          fetchApiSelectOptions(param.key, param.apiUrl, param.apiLabelKey!, param.apiValueKey!, param.apiCountKey);
+        }
+      });
+    }
+  };
+
+  const fetchApiSelectOptions = async (
+    paramKey: string,
+    apiUrl: string,
+    labelKey: string,
+    valueKey: string,
+    countKey?: string,
+  ) => {
+    setApiSelectOptions(prev => ({ ...prev, [paramKey]: { loading: true, items: prev[paramKey]?.items || [] } }));
+    try {
+      const res = await fetch(apiUrl);
+      const data = await res.json();
+      const rawItems: any[] = data.items || data || [];
+      const items = rawItems.map((item: any) => ({
+        label: String(item[labelKey] ?? ''),
+        value: String(item[valueKey] ?? ''),
+        count: countKey ? Number(item[countKey]) : undefined,
+      }));
+      setApiSelectOptions(prev => ({ ...prev, [paramKey]: { loading: false, items } }));
+    } catch {
+      setApiSelectOptions(prev => ({ ...prev, [paramKey]: { loading: false, items: [] } }));
     }
   };
 
@@ -2790,6 +2823,31 @@ const SyncData: React.FC = () => {
                         <Select placeholder={param.placeholder || `Select ${param.label}`} disabled={isSyncing || isTesting}>
                           {param.options.map((opt) => (
                             <Option key={opt.value} value={opt.value}>{opt.label}</Option>
+                          ))}
+                        </Select>
+                      ) : param.type === 'api-select' ? (
+                        <Select
+                          showSearch
+                          allowClear
+                          placeholder={param.placeholder || `Select ${param.label}`}
+                          disabled={isSyncing || isTesting}
+                          loading={apiSelectOptions[param.key]?.loading}
+                          filterOption={(input, option) =>
+                            String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                          }
+                          notFoundContent={
+                            apiSelectOptions[param.key]?.loading ? 'Loading periods…' : 'No periods found'
+                          }
+                        >
+                          {(apiSelectOptions[param.key]?.items || []).map((opt) => (
+                            <Option key={opt.value} value={opt.value} label={opt.label}>
+                              <span style={{ fontWeight: 600 }}>{opt.label}</span>
+                              {opt.count !== undefined && (
+                                <span style={{ float: 'right', color: '#888', fontSize: 12 }}>
+                                  {opt.count.toLocaleString()} batches
+                                </span>
+                              )}
+                            </Option>
                           ))}
                         </Select>
                       ) : (

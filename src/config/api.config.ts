@@ -96,9 +96,13 @@ export interface SyncObjectConfig {
 export interface ParameterConfig {
   key: string;
   label: string;
-  type: 'text' | 'select' | 'date';
+  type: 'text' | 'select' | 'date' | 'api-select';
   required: boolean;
   options?: { label: string; value: string }[];
+  apiUrl?: string;           // for type='api-select': URL to fetch options from
+  apiLabelKey?: string;      // response item key to use as label
+  apiValueKey?: string;      // response item key to use as value
+  apiCountKey?: string;      // optional count key to show alongside label
   defaultValue?: string;
   placeholder?: string;
 }
@@ -166,8 +170,13 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
       {
         key: 'DefaultPeriodName',
         label: 'Period',
-        type: 'text',
+        type: 'api-select',
         required: false,
+        apiUrl: 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/sync/glbatchesperiods',
+        apiLabelKey: 'default_period_name',
+        apiValueKey: 'default_period_name',
+        apiCountKey: 'count',
+        placeholder: 'Select period (from synced batches)',
         defaultValue: '',
       },
     ],
@@ -183,8 +192,13 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
       {
         key: 'DefaultPeriodName',
         label: 'Period',
-        type: 'text',
+        type: 'api-select',
         required: false,
+        apiUrl: 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/sync/glbatchesperiods',
+        apiLabelKey: 'default_period_name',
+        apiValueKey: 'default_period_name',
+        apiCountKey: 'count',
+        placeholder: 'Select period (from synced batches)',
         defaultValue: '',
       },
     ],
