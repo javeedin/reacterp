@@ -232,8 +232,8 @@ DECLARE
   v_response CLOB;
 BEGIN
   RR_GL_RECON_PKG.get_ledgers(v_status, v_response);
-  :status := v_status;
-  :body   := v_response;
+  :status    := v_status;
+  :body_text := v_response;
 END;
 */
 
@@ -255,7 +255,7 @@ BEGIN
     p_status      => v_status,
     p_response    => v_response
   );
-  :status := v_status;
-  :body   := v_response;
+  :status    := v_status;
+  :body_text := v_response;
 END;
 */
