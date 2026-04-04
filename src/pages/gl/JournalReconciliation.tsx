@@ -53,7 +53,6 @@ const REDWOOD = {
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 interface Ledger {
-  ledger_id: number;
   ledger_name: string;
   batch_count: number;
   periods: Period[];
@@ -135,7 +134,7 @@ const headerRowStyle = (record: HeaderDetail): React.CSSProperties => {
 
 export default function JournalReconciliation() {
   const [ledgers, setLedgers] = useState<Ledger[]>([]);
-  const [selectedLedger, setSelectedLedger] = useState<number | null>(null);
+  const [selectedLedger, setSelectedLedger] = useState<string | null>(null);
   const [selectedPeriod, setSelectedPeriod] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingLedgers, setLoadingLedgers] = useState(false);
@@ -143,7 +142,7 @@ export default function JournalReconciliation() {
   const [error, setError] = useState<string | null>(null);
 
   // Periods derived from selected ledger — no extra API call
-  const periods: Period[] = ledgers.find((l) => l.ledger_id === selectedLedger)?.periods ?? [];
+  const periods: Period[] = ledgers.find((l) => l.ledger_name === selectedLedger)?.periods ?? [];
 
   // Summary stats
   const totalBatches = batches.length;
@@ -174,7 +173,7 @@ export default function JournalReconciliation() {
         const data = await res.json();
         const items: Ledger[] = Array.isArray(data) ? data : data.items ?? data.ledgers ?? [];
         setLedgers(items);
-        if (items.length === 1) setSelectedLedger(items[0].ledger_id);
+        if (items.length === 1) setSelectedLedger(items[0].ledger_name);
       } catch (e: any) {
         console.error('Failed to fetch ledgers', e);
       } finally {
@@ -197,7 +196,7 @@ export default function JournalReconciliation() {
     setBatches([]);
     try {
       const url = new URL(`${APEX_DB_CONFIG.baseUrl}/gl/reconciliation`);
-      url.searchParams.set('ledger_id', String(selectedLedger));
+      url.searchParams.set('ledger_id', selectedLedger);
       if (selectedPeriod) url.searchParams.set('period_name', selectedPeriod);
 
       const res = await fetch(url.toString());
@@ -459,7 +458,7 @@ export default function JournalReconciliation() {
                   String(opt?.label ?? '').toLowerCase().includes(input.toLowerCase())
                 }
                 options={ledgers.map((l) => ({
-                  value: l.ledger_id,
+                  value: l.ledger_name,
                   label: `${l.ledger_name} (${l.batch_count} batches)`,
                 }))}
               />

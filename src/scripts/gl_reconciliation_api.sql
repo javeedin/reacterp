@@ -68,16 +68,16 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
     -- Pre-aggregate periods per ledger into a JSON array first,
     -- then join to ledgers — avoids scalar subquery inside JSON_ARRAYAGG
     WITH periods_agg AS (
-      SELECT   LEDGER_ID,
+      SELECT   LEDGER_NAME,
                DEFAULT_PERIOD_NAME AS period_name,
                COUNT(*)            AS period_batch_count
       FROM     RR_GL_JOURNAL_BATCHES
-      WHERE    LEDGER_ID IS NOT NULL
+      WHERE    LEDGER_NAME IS NOT NULL
       AND      DEFAULT_PERIOD_NAME IS NOT NULL
-      GROUP BY LEDGER_ID, DEFAULT_PERIOD_NAME
+      GROUP BY LEDGER_NAME, DEFAULT_PERIOD_NAME
     ),
     periods_json AS (
-      SELECT   LEDGER_ID,
+      SELECT   LEDGER_NAME,
                JSON_ARRAYAGG(
                  JSON_OBJECT(
                    'period_name' VALUE period_name,
@@ -85,20 +85,18 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
                  ) ORDER BY period_name DESC
                ) AS periods_arr
       FROM     periods_agg
-      GROUP BY LEDGER_ID
+      GROUP BY LEDGER_NAME
     ),
     ledgers AS (
-      SELECT   LEDGER_ID        AS ledger_id,
-               MAX(LEDGER_NAME) AS ledger_name,
-               COUNT(*)         AS batch_count
+      SELECT   LEDGER_NAME        AS ledger_name,
+               COUNT(*)           AS batch_count
       FROM     RR_GL_JOURNAL_BATCHES
-      WHERE    LEDGER_ID IS NOT NULL
-      GROUP BY LEDGER_ID
+      WHERE    LEDGER_NAME IS NOT NULL
+      GROUP BY LEDGER_NAME
     )
     SELECT JSON_OBJECT(
       'items' VALUE JSON_ARRAYAGG(
         JSON_OBJECT(
-          'ledger_id'   VALUE l.ledger_id,
           'ledger_name' VALUE l.ledger_name,
           'batch_count' VALUE l.batch_count,
           'periods'     VALUE pj.periods_arr
@@ -107,7 +105,7 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
     )
     INTO p_response
     FROM ledgers l
-    JOIN periods_json pj ON pj.LEDGER_ID = l.ledger_id;
+    JOIN periods_json pj ON pj.LEDGER_NAME = l.ledger_name;
 
     p_status := 200;
   EXCEPTION WHEN OTHERS THEN
@@ -117,7 +115,7 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
 
   -- ─────────────────────────────────────────────────────────────────────────
   -- PROCEDURE: get_reconciliation
-  -- GET /reerp/gl/reconciliation?ledger_id=XXX&period_name=Sep-23
+  -- GET /reerp/gl/reconciliation?ledger_name=XXX&period_name=Sep-23
   -- ─────────────────────────────────────────────────────────────────────────
   PROCEDURE get_reconciliation (
     p_ledger_id   IN  VARCHAR2,
@@ -125,7 +123,6 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
     p_status      OUT NUMBER,
     p_response    OUT CLOB
   ) AS
-    v_ledger_id NUMBER := TO_NUMBER(p_ledger_id);
   BEGIN
 
     SELECT JSON_OBJECT(
@@ -249,7 +246,7 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
     )
     INTO p_response
     FROM  RR_GL_JOURNAL_BATCHES b
-    WHERE b.LEDGER_ID = v_ledger_id
+    WHERE b.LEDGER_NAME = p_ledger_id
     AND  (p_period_name IS NULL OR b.DEFAULT_PERIOD_NAME = p_period_name);
 
     p_status := 200;
@@ -291,7 +288,7 @@ END;
 
 -- =============================================================================
 -- ORDS HANDLER 2 – GET /reerp/gl/reconciliation
--- Bind variables:  :ledger_id   (query string)
+-- Bind variables:  :ledger_id   (query string — pass ledger_name value)
 --                  :period_name (query string, optional)
 -- Paste this block as the PL/SQL source in the APEX ORDS GET handler
 -- =============================================================================
