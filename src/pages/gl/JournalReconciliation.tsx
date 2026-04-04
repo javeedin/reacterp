@@ -585,7 +585,7 @@ export default function JournalReconciliation() {
           size="small"
           style={{ marginBottom: 16, borderRadius: 8, boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
         >
-          <Space wrap size="middle">
+          <Space wrap size="middle" align="end">
             <div>
               <Text style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 4 }}>
                 Ledger
@@ -611,7 +611,7 @@ export default function JournalReconciliation() {
                 Period
               </Text>
               <Select
-                style={{ width: 220 }}
+                style={{ width: 200 }}
                 placeholder="All periods"
                 loading={loadingLedgers}
                 value={selectedPeriod ?? undefined}
@@ -627,7 +627,20 @@ export default function JournalReconciliation() {
                 }))}
               />
             </div>
-            <div style={{ paddingTop: 20, display: 'flex', gap: 8 }}>
+            <div>
+              <Text style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 4 }}>
+                Search
+              </Text>
+              <Input
+                prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
+                placeholder="Batch name or period…"
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                allowClear
+                style={{ width: 220 }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
               <Button
                 type="primary"
                 icon={<SearchOutlined />}
@@ -639,58 +652,82 @@ export default function JournalReconciliation() {
                 Load
               </Button>
               <Tooltip title="View API URLs">
-                <Button
-                  icon={<ApiOutlined />}
-                  onClick={() => setApiModalOpen(true)}
-                />
+                <Button icon={<ApiOutlined />} onClick={() => setApiModalOpen(true)} />
               </Tooltip>
+              {(searchText || statusFilter !== 'all') && (
+                <Button onClick={() => { setSearchText(''); setStatusFilter('all'); }}>
+                  Clear filters
+                </Button>
+              )}
             </div>
           </Space>
         </Card>
 
-        {/* Summary Cards */}
+        {/* Summary / Filter Cards — click to filter */}
         {batches.length > 0 && (
-          <Row gutter={16} style={{ marginBottom: 16 }}>
-            <Col xs={12} sm={6}>
-              <Card size="small" style={{ borderRadius: 8, textAlign: 'center', borderTop: `3px solid ${REDWOOD.info}` }}>
-                <Statistic
-                  title="Total Batches"
-                  value={totalBatches}
-                  prefix={<UnorderedListOutlined style={{ color: REDWOOD.info }} />}
-                  valueStyle={{ color: REDWOOD.info }}
-                />
-              </Card>
-            </Col>
-            <Col xs={12} sm={6}>
-              <Card size="small" style={{ borderRadius: 8, textAlign: 'center', borderTop: `3px solid ${REDWOOD.success}` }}>
-                <Statistic
-                  title="Matched"
-                  value={matchedBatches}
-                  prefix={<CheckCircleOutlined style={{ color: REDWOOD.success }} />}
-                  valueStyle={{ color: REDWOOD.success }}
-                />
-              </Card>
-            </Col>
-            <Col xs={12} sm={6}>
-              <Card size="small" style={{ borderRadius: 8, textAlign: 'center', borderTop: `3px solid ${REDWOOD.error}` }}>
-                <Statistic
-                  title="Mismatched"
-                  value={mismatchedBatches}
-                  prefix={<CloseCircleOutlined style={{ color: REDWOOD.error }} />}
-                  valueStyle={{ color: REDWOOD.error }}
-                />
-              </Card>
-            </Col>
-            <Col xs={12} sm={6}>
-              <Card size="small" style={{ borderRadius: 8, textAlign: 'center', borderTop: `3px solid ${REDWOOD.warning}` }}>
-                <Statistic
-                  title="No Lines"
-                  value={noLinesBatches}
-                  prefix={<WarningOutlined style={{ color: REDWOOD.warning }} />}
-                  valueStyle={{ color: REDWOOD.warning }}
-                />
-              </Card>
-            </Col>
+          <Row gutter={12} style={{ marginBottom: 16 }}>
+            {[
+              {
+                key: 'all',
+                label: 'Total Batches',
+                value: totalBatches,
+                color: REDWOOD.info,
+                icon: <UnorderedListOutlined style={{ color: REDWOOD.info }} />,
+              },
+              {
+                key: 'matched',
+                label: 'Matched',
+                value: matchedBatches,
+                color: REDWOOD.success,
+                icon: <CheckCircleOutlined style={{ color: REDWOOD.success }} />,
+              },
+              {
+                key: 'mismatch',
+                label: 'Mismatched',
+                value: mismatchedBatches,
+                color: REDWOOD.error,
+                icon: <CloseCircleOutlined style={{ color: REDWOOD.error }} />,
+              },
+              {
+                key: 'nolines',
+                label: 'No Lines',
+                value: noLinesBatches,
+                color: REDWOOD.warning,
+                icon: <WarningOutlined style={{ color: REDWOOD.warning }} />,
+              },
+            ].map(({ key, label, value, color, icon }) => {
+              const active = statusFilter === key;
+              return (
+                <Col xs={12} sm={6} key={key}>
+                  <Card
+                    size="small"
+                    onClick={() => setStatusFilter(active ? 'all' : (key as typeof statusFilter))}
+                    style={{
+                      borderRadius: 8,
+                      textAlign: 'center',
+                      borderTop: `3px solid ${color}`,
+                      cursor: 'pointer',
+                      boxShadow: active
+                        ? `0 0 0 2px ${color}`
+                        : '0 1px 4px rgba(0,0,0,0.08)',
+                      background: active ? `${color}11` : undefined,
+                      transition: 'box-shadow 0.15s, background 0.15s',
+                    }}
+                  >
+                    <Statistic
+                      title={
+                        <span style={{ fontWeight: active ? 700 : 400 }}>
+                          {active ? '▶ ' : ''}{label}
+                        </span>
+                      }
+                      value={value}
+                      prefix={icon}
+                      valueStyle={{ color }}
+                    />
+                  </Card>
+                </Col>
+              );
+            })}
           </Row>
         )}
 
@@ -743,51 +780,16 @@ export default function JournalReconciliation() {
             />
           ) : (
             <>
-              {/* Table filter toolbar */}
-              {batches.length > 0 && (
-                <div
-                  style={{
-                    padding: '10px 16px',
-                    display: 'flex',
-                    gap: 8,
-                    alignItems: 'center',
-                    flexWrap: 'wrap',
-                    borderBottom: '1px solid #f0f0f0',
-                    background: REDWOOD.neutral100,
-                  }}
-                >
-                  <Input
-                    prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
-                    placeholder="Search batch name or period…"
-                    value={searchText}
-                    onChange={(e) => setSearchText(e.target.value)}
-                    allowClear
-                    style={{ width: 280 }}
-                  />
-                  <Select
-                    value={statusFilter}
-                    onChange={(v) => setStatusFilter(v)}
-                    style={{ width: 160 }}
-                    options={[
-                      { value: 'all',      label: 'All statuses' },
-                      { value: 'matched',  label: '✓ Matched only' },
-                      { value: 'mismatch', label: '✗ Mismatched' },
-                      { value: 'nolines',  label: '⚠ No Lines' },
-                    ]}
-                  />
-                  {(searchText || statusFilter !== 'all') && (
-                    <>
-                      <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>
-                        {filteredBatches.length} of {batches.length} batches
-                      </Text>
-                      <Button
-                        size="small"
-                        onClick={() => { setSearchText(''); setStatusFilter('all'); }}
-                      >
-                        Clear filters
-                      </Button>
-                    </>
-                  )}
+              {/* Active filter indicator */}
+              {batches.length > 0 && (searchText || statusFilter !== 'all') && (
+                <div style={{
+                  padding: '6px 16px',
+                  borderBottom: '1px solid #f0f0f0',
+                  background: '#fafafa',
+                  fontSize: 12,
+                  color: REDWOOD.neutral600,
+                }}>
+                  Showing <strong>{filteredBatches.length}</strong> of <strong>{batches.length}</strong> batches
                 </div>
               )}
 
