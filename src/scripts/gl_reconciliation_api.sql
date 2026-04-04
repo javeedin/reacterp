@@ -50,22 +50,35 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
     p_response OUT CLOB
   ) AS
   BEGIN
-    WITH ledgers AS (
-      SELECT   LEDGER_ID        AS ledger_id,
-               MAX(LEDGER_NAME) AS ledger_name,
-               COUNT(*)         AS batch_count
-      FROM     RR_GL_JOURNAL_BATCHES
-      WHERE    LEDGER_ID IS NOT NULL
-      GROUP BY LEDGER_ID
-    ),
-    periods AS (
-      SELECT   LEDGER_ID           AS ledger_id,
+    -- Pre-aggregate periods per ledger into a JSON array first,
+    -- then join to ledgers — avoids scalar subquery inside JSON_ARRAYAGG
+    WITH periods_agg AS (
+      SELECT   LEDGER_ID,
                DEFAULT_PERIOD_NAME AS period_name,
                COUNT(*)            AS period_batch_count
       FROM     RR_GL_JOURNAL_BATCHES
       WHERE    LEDGER_ID IS NOT NULL
       AND      DEFAULT_PERIOD_NAME IS NOT NULL
       GROUP BY LEDGER_ID, DEFAULT_PERIOD_NAME
+    ),
+    periods_json AS (
+      SELECT   LEDGER_ID,
+               JSON_ARRAYAGG(
+                 JSON_OBJECT(
+                   'period_name' VALUE period_name,
+                   'batch_count' VALUE period_batch_count
+                 ) ORDER BY period_name DESC
+               ) AS periods_arr
+      FROM     periods_agg
+      GROUP BY LEDGER_ID
+    ),
+    ledgers AS (
+      SELECT   LEDGER_ID        AS ledger_id,
+               MAX(LEDGER_NAME) AS ledger_name,
+               COUNT(*)         AS batch_count
+      FROM     RR_GL_JOURNAL_BATCHES
+      WHERE    LEDGER_ID IS NOT NULL
+      GROUP BY LEDGER_ID
     )
     SELECT JSON_OBJECT(
       'items' VALUE JSON_ARRAYAGG(
@@ -73,21 +86,13 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_RECON_PKG AS
           'ledger_id'   VALUE l.ledger_id,
           'ledger_name' VALUE l.ledger_name,
           'batch_count' VALUE l.batch_count,
-          'periods'     VALUE (
-            SELECT JSON_ARRAYAGG(
-              JSON_OBJECT(
-                'period_name' VALUE p.period_name,
-                'batch_count' VALUE p.period_batch_count
-              ) ORDER BY p.period_name DESC
-            )
-            FROM periods p
-            WHERE p.ledger_id = l.ledger_id
-          )
+          'periods'     VALUE pj.periods_arr
         ) ORDER BY l.ledger_name
       )
     )
     INTO p_response
-    FROM ledgers l;
+    FROM ledgers l
+    JOIN periods_json pj ON pj.LEDGER_ID = l.ledger_id;
 
     p_status := 200;
   EXCEPTION WHEN OTHERS THEN
@@ -255,13 +260,16 @@ DECLARE
   v_chunk    VARCHAR2(32767);
 BEGIN
   RR_GL_RECON_PKG.get_ledgers(v_status, v_response);
-  :status := v_status;
   OWA_UTIL.mime_header('application/json', TRUE);
-  WHILE v_offset <= DBMS_LOB.GETLENGTH(v_response) LOOP
-    v_chunk  := DBMS_LOB.SUBSTR(v_response, 32767, v_offset);
-    HTP.PRN(v_chunk);
-    v_offset := v_offset + 32767;
-  END LOOP;
+  IF v_response IS NULL THEN
+    HTP.PRN('{"items":[]}');
+  ELSE
+    WHILE v_offset <= DBMS_LOB.GETLENGTH(v_response) LOOP
+      v_chunk  := DBMS_LOB.SUBSTR(v_response, 32767, v_offset);
+      HTP.PRN(v_chunk);
+      v_offset := v_offset + 32767;
+    END LOOP;
+  END IF;
 END;
 */
 
@@ -285,12 +293,15 @@ BEGIN
     p_status      => v_status,
     p_response    => v_response
   );
-  :status := v_status;
   OWA_UTIL.mime_header('application/json', TRUE);
-  WHILE v_offset <= DBMS_LOB.GETLENGTH(v_response) LOOP
-    v_chunk  := DBMS_LOB.SUBSTR(v_response, 32767, v_offset);
-    HTP.PRN(v_chunk);
-    v_offset := v_offset + 32767;
-  END LOOP;
+  IF v_response IS NULL THEN
+    HTP.PRN('{"items":[]}');
+  ELSE
+    WHILE v_offset <= DBMS_LOB.GETLENGTH(v_response) LOOP
+      v_chunk  := DBMS_LOB.SUBSTR(v_response, 32767, v_offset);
+      HTP.PRN(v_chunk);
+      v_offset := v_offset + 32767;
+    END LOOP;
+  END IF;
 END;
 */
