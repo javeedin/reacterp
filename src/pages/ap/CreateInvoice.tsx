@@ -7148,7 +7148,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 for (const inst of pendingInst) {
                   try {
                     const res2 = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments`, {
-                      method: 'PUT',
+                      method: 'POST',
                       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
                       body: JSON.stringify({
                         InvoiceId: invoiceId, InstallmentId: inst.key,

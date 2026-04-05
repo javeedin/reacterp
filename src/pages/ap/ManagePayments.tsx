@@ -729,7 +729,7 @@ const ManagePayments: React.FC = () => {
           for (const inst of pending) {
             const instId = inst.installment_id?.toString() || inst.key;
             const putRes = await fetch(instBaseUrl, {
-              method: 'PUT',
+              method: 'POST',
               headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
               body: JSON.stringify({
                 InvoiceId:     inv.invoiceId,
@@ -3958,7 +3958,7 @@ const ManagePayments: React.FC = () => {
             <div key={stepKey} style={{ border: `1px solid ${step2Result ? (step2Result.status === 'success' ? '#b7eb8f' : '#ffa39e') : '#d9d9d9'}`, borderRadius: 8, marginBottom: 12, overflow: 'hidden' }}>
               <div style={{ padding: '8px 12px', background: '#f5f5f5', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                 <Space size={4} wrap>
-                  <Tag color="orange" style={{ fontSize: 11, margin: 0 }}>PUT</Tag>
+                  <Tag color="green" style={{ fontSize: 11, margin: 0 }}>POST</Tag>
                   <Typography.Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{instUrl}</Typography.Text>
                   <Tag style={{ fontSize: 10 }}>{inv.invoiceNumber}</Tag>
                 </Space>
@@ -3982,7 +3982,7 @@ const ManagePayments: React.FC = () => {
                       for (const inst of pending) {
                         const instId = inst.installment_id?.toString() || inst.key;
                         const putRes = await fetch(instUrl, {
-                          method: 'PUT',
+                          method: 'POST',
                           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
                           body: JSON.stringify({ InvoiceId: inv.invoiceId, InstallmentId: instId, PaymentStatus: 'Fully Paid', AmountRemaining: 0 }),
                         });
@@ -4006,7 +4006,7 @@ const ManagePayments: React.FC = () => {
                 </Typography.Text>
               </div>
               <div style={{ padding: '0 12px 8px' }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: '#aaa', marginBottom: 4 }}>PUT BODY (per installment)</div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: '#aaa', marginBottom: 4 }}>POST BODY (per installment)</div>
                 <div style={{ position: 'relative' }}>
                   <Button
                     size="small"
