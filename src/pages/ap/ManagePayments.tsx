@@ -729,12 +729,12 @@ const ManagePayments: React.FC = () => {
           for (const inst of pending) {
             const instId = inst.installment_id?.toString() || inst.key;
             const putRes = await fetch(instBaseUrl, {
-              method: 'POST',
+              method: 'PUT',
               headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
               body: JSON.stringify({
-                InvoiceId:     inv.invoiceId,
-                InstallmentId: instId,
-                PaymentStatus: 'Fully Paid',
+                InvoiceId:       inv.invoiceId,
+                InstallmentId:   instId,
+                PaymentStatus:   'Fully Paid',
                 AmountRemaining: 0,
               }),
             });
@@ -751,9 +751,56 @@ const ManagePayments: React.FC = () => {
       }
 
       if (instErrors.length > 0) {
-        message.warning(`Payment #${paymentNumber} created but ${instErrors.length} installment update(s) failed: ${instErrors.join('; ')}`);
+        message.warning(`Payment #${paymentNumber} created, ${instErrors.length} installment update(s) failed: ${instErrors.join('; ')}`);
+      }
+
+      // ── Step 3: POST /ap/payments/related-invoices — link payment to each invoice ──
+      const relatedUrl = `${APEX_DB_CONFIG.baseUrl}/ap/payments/related-invoices`;
+      const relatedErrors: string[] = [];
+      const v = createPaymentForm.getFieldsValue();
+
+      for (const inv of invoicesToPay) {
+        const body3 = {
+          InvoicePaymentId:          null,
+          CheckId:                   checkId,
+          InvoiceId:                 inv.invoiceId,
+          InvoiceBusinessUnit:       buName,
+          InvoiceNumber:             inv.invoiceNumber,
+          InstallmentNumber:         null,
+          AmountPaidPaymentCurrency: inv.applyAmount,
+          AmountPaidInvoiceCurrency: inv.applyAmount,
+          InvoicePaymentAmount:      inv.applyAmount,
+          InvoiceAmount:             inv.invoiceAmount,
+          InvoiceBaseAmount:         inv.invoiceAmount,
+          PaymentBaseAmount:         inv.applyAmount,
+          DiscountLost:              null,
+          DiscountTaken:             inv.discountAmount || null,
+          InvoiceCurrency:           inv.currency || v.paymentCurrency || 'AED',
+          CrossCurrencyRate:         v.conversionRate || null,
+          InvoicePaymentStatus:      'Negotiable',
+          CreatedBy:                 null,
+          LastUpdatedBy:             null,
+          LastUpdateLogin:           null,
+        };
+        try {
+          const res3 = await fetch(relatedUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify(body3),
+          });
+          const d3 = await res3.json().catch(() => ({}));
+          if (d3?.status === 'error' || !res3.ok) {
+            relatedErrors.push(`${inv.invoiceNumber}: ${d3?.message || `HTTP ${res3.status}`}`);
+          }
+        } catch (e: any) {
+          relatedErrors.push(`${inv.invoiceNumber}: ${e?.message ?? 'Network error'}`);
+        }
+      }
+
+      if (relatedErrors.length > 0) {
+        message.warning(`Payment #${paymentNumber} created but ${relatedErrors.length} invoice link(s) failed: ${relatedErrors.join('; ')}`);
       } else {
-        message.success(`Payment #${paymentNumber} created — ${totalInstUpdated} installment(s) marked Fully Paid`);
+        message.success(`Payment #${paymentNumber} created — ${totalInstUpdated} installment(s) updated, ${invoicesToPay.length} invoice(s) linked`);
       }
 
       if (mode === 'close') {
@@ -3867,11 +3914,13 @@ const ManagePayments: React.FC = () => {
           type="info"
           showIcon
           style={{ marginBottom: 16, fontSize: 12 }}
-          message="Two-step payment creation"
+          message="Execute steps in order: 1 → 2 → 3"
           description={
             <>
-              <b>Step 1</b> — POST /ap/payments → creates payment record, returns <code>checkId</code>.<br />
-              <b>Step 2</b> — POST /ap/payments/related-invoices → one call per invoice in the list (links payment → invoice).
+              Click Execute on each step. Step 1 response <code>checkId</code> is captured automatically and injected into the Step 3 body. Step 3 Execute button is locked until Step 1 succeeds.<br />
+              <b>Step 1</b> — POST /ap/payments → create payment header, returns <code>checkId</code>.<br />
+              <b>Step 2</b> — PUT /ap/createinvoice/installments → one call per pending installment (sets PaymentStatus=Fully Paid).<br />
+              <b>Step 3</b> — POST /ap/payments/related-invoices → one call per invoice (links payment → invoice).
             </>
           }
         />
@@ -3941,14 +3990,14 @@ const ManagePayments: React.FC = () => {
           );
         })()}
 
-        {/* Step 2 — update installments per invoice (same as Pay in Full) */}
+        {/* Step 2 — PUT installments per invoice */}
         {invoicesToPay.length > 0 && invoicesToPay.map((inv, idx) => {
           const stepKey = 100 + idx;
           const step2Result = apiTestResults[stepKey];
           const step2Loading = apiTestLoading[stepKey] ?? false;
           const instUrl = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments`;
-          // Example body — actual InstallmentId fetched at runtime
           const exampleBody = {
+            '// call once per pending installment': '',
             InvoiceId:       inv.invoiceId,
             InstallmentId:   '<fetched from GET installments>',
             PaymentStatus:   'Fully Paid',
@@ -3958,7 +4007,7 @@ const ManagePayments: React.FC = () => {
             <div key={stepKey} style={{ border: `1px solid ${step2Result ? (step2Result.status === 'success' ? '#b7eb8f' : '#ffa39e') : '#d9d9d9'}`, borderRadius: 8, marginBottom: 12, overflow: 'hidden' }}>
               <div style={{ padding: '8px 12px', background: '#f5f5f5', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                 <Space size={4} wrap>
-                  <Tag color="green" style={{ fontSize: 11, margin: 0 }}>POST</Tag>
+                  <Tag color="orange" style={{ fontSize: 11, margin: 0 }}>PUT</Tag>
                   <Typography.Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{instUrl}</Typography.Text>
                   <Tag style={{ fontSize: 10 }}>{inv.invoiceNumber}</Tag>
                 </Space>
@@ -3982,7 +4031,7 @@ const ManagePayments: React.FC = () => {
                       for (const inst of pending) {
                         const instId = inst.installment_id?.toString() || inst.key;
                         const putRes = await fetch(instUrl, {
-                          method: 'POST',
+                          method: 'PUT',
                           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
                           body: JSON.stringify({ InvoiceId: inv.invoiceId, InstallmentId: instId, PaymentStatus: 'Fully Paid', AmountRemaining: 0 }),
                         });
@@ -4006,14 +4055,10 @@ const ManagePayments: React.FC = () => {
                 </Typography.Text>
               </div>
               <div style={{ padding: '0 12px 8px' }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: '#aaa', marginBottom: 4 }}>POST BODY (per installment)</div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: '#aaa', marginBottom: 4 }}>PUT BODY (per installment)</div>
                 <div style={{ position: 'relative' }}>
-                  <Button
-                    size="small"
-                    icon={<CopyOutlined />}
-                    style={{ position: 'absolute', top: 6, right: 6, zIndex: 1 }}
-                    onClick={() => { navigator.clipboard.writeText(JSON.stringify(exampleBody, null, 2)); message.success('JSON copied'); }}
-                  />
+                  <Button size="small" icon={<CopyOutlined />} style={{ position: 'absolute', top: 6, right: 6, zIndex: 1 }}
+                    onClick={() => { navigator.clipboard.writeText(JSON.stringify(exampleBody, null, 2)); message.success('JSON copied'); }} />
                   <pre style={{ background: '#1e1e1e', color: '#d4d4d4', fontSize: 11, padding: 12, borderRadius: 6, margin: 0, maxHeight: 160, overflow: 'auto', fontFamily: 'monospace' }}>
                     {JSON.stringify(exampleBody, null, 2)}
                   </pre>
@@ -4033,8 +4078,89 @@ const ManagePayments: React.FC = () => {
           );
         })}
 
+        {/* Step 3 — POST /ap/payments/related-invoices per invoice */}
+        {invoicesToPay.length > 0 && invoicesToPay.map((inv, idx) => {
+          const stepKey = 200 + idx;
+          const step3Result = apiTestResults[stepKey];
+          const step3Loading = apiTestLoading[stepKey] ?? false;
+          const relUrl = `${APEX_DB_CONFIG.baseUrl}/ap/payments/related-invoices`;
+          const fv = createPaymentForm.getFieldsValue();
+          const body3 = {
+            InvoicePaymentId:          null,
+            CheckId:                   apiStep1CheckId ?? '<checkId from Step 1>',
+            InvoiceId:                 inv.invoiceId,
+            InvoiceBusinessUnit:       fv.businessUnit || null,
+            InvoiceNumber:             inv.invoiceNumber,
+            InstallmentNumber:         null,
+            AmountPaidPaymentCurrency: inv.applyAmount,
+            AmountPaidInvoiceCurrency: inv.applyAmount,
+            InvoicePaymentAmount:      inv.applyAmount,
+            InvoiceAmount:             inv.invoiceAmount,
+            InvoiceBaseAmount:         inv.invoiceAmount,
+            PaymentBaseAmount:         inv.applyAmount,
+            DiscountLost:              null,
+            DiscountTaken:             inv.discountAmount || null,
+            InvoiceCurrency:           inv.currency || fv.paymentCurrency || 'AED',
+            CrossCurrencyRate:         fv.conversionRate || null,
+            InvoicePaymentStatus:      'Negotiable',
+            CreatedBy:                 null,
+            LastUpdatedBy:             null,
+            LastUpdateLogin:           null,
+          };
+          const locked = apiStep1CheckId === null;
+          return (
+            <div key={stepKey} style={{ border: `1px solid ${step3Result ? (step3Result.status === 'success' ? '#b7eb8f' : '#ffa39e') : '#d9d9d9'}`, borderRadius: 8, marginBottom: 12, overflow: 'hidden' }}>
+              <div style={{ padding: '8px 12px', background: '#f5f5f5', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <Space size={4} wrap>
+                  <Tag color="green" style={{ fontSize: 11, margin: 0 }}>POST</Tag>
+                  <Typography.Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{relUrl}</Typography.Text>
+                  <Tag style={{ fontSize: 10 }}>{inv.invoiceNumber}</Tag>
+                </Space>
+                <Tooltip title={locked ? 'Execute Step 1 first to get CheckId' : ''}>
+                  <Button
+                    size="small"
+                    type="primary"
+                    icon={<PlayCircleOutlined />}
+                    loading={step3Loading}
+                    disabled={locked}
+                    onClick={() => executeApiStep(stepKey, relUrl, body3)}
+                  >
+                    Execute Step 3
+                  </Button>
+                </Tooltip>
+              </div>
+              <div style={{ padding: '4px 12px 6px' }}>
+                <Typography.Text style={{ fontSize: 11, color: '#888' }}>
+                  Links payment to invoice <b>{inv.invoiceNumber}</b> — CheckId auto-filled after Step 1
+                  {locked && <span style={{ color: '#faad14', marginLeft: 8 }}>⚠ Execute Step 1 first</span>}
+                </Typography.Text>
+              </div>
+              <div style={{ padding: '0 12px 8px' }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: '#aaa', marginBottom: 4 }}>REQUEST BODY</div>
+                <div style={{ position: 'relative' }}>
+                  <Button size="small" icon={<CopyOutlined />} style={{ position: 'absolute', top: 6, right: 6, zIndex: 1 }}
+                    onClick={() => { navigator.clipboard.writeText(JSON.stringify(body3, null, 2)); message.success('JSON copied'); }} />
+                  <pre style={{ background: '#1e1e1e', color: '#d4d4d4', fontSize: 11, padding: 12, borderRadius: 6, margin: 0, maxHeight: 260, overflow: 'auto', fontFamily: 'monospace' }}>
+                    {JSON.stringify(body3, null, 2)}
+                  </pre>
+                </div>
+              </div>
+              {step3Result && (
+                <div style={{ padding: '0 12px 12px', borderTop: '1px solid #f0f0f0' }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: step3Result.status === 'success' ? '#52c41a' : '#ff4d4f', margin: '8px 0 4px' }}>
+                    {step3Result.status === 'success' ? '✅ RESPONSE' : '❌ ERROR'}
+                  </div>
+                  <pre style={{ background: step3Result.status === 'success' ? '#f6ffed' : '#fff2f0', border: `1px solid ${step3Result.status === 'success' ? '#b7eb8f' : '#ffccc7'}`, fontSize: 11, padding: 10, borderRadius: 6, margin: 0, maxHeight: 200, overflow: 'auto' }}>
+                    {JSON.stringify(step3Result.data, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
+          );
+        })}
+
         {invoicesToPay.length === 0 && (
-          <Alert type="warning" showIcon message="Add invoices to the payment to see Step 2 calls" style={{ fontSize: 12 }} />
+          <Alert type="warning" showIcon message="Add invoices to the payment to see Step 2 & 3 calls" style={{ fontSize: 12 }} />
         )}
       </Drawer>
 
