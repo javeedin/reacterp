@@ -196,6 +196,7 @@ interface BankAccountRecord {
 // Invoice record used in the "Invoices to Pay" grid within Create Payment
 interface PaymentInvoice {
   key: string;
+  invoiceId: number;
   invoiceNumber: string;
   invoiceDate: string;
   description: string;
@@ -679,25 +680,82 @@ const ManagePayments: React.FC = () => {
 
   const handleSavePayment = async (mode: 'close' | 'another') => {
     try {
-      const values = await createPaymentForm.validateFields();
-      setSavePaymentLoading(true);
+      await createPaymentForm.validateFields();
+    } catch {
+      message.warning('Please fill in all required fields');
+      return;
+    }
 
-      // Use the same live payload as the API panel (identical to Pay in Full pattern)
-      const payload = livePaymentPayload;
+    setSavePaymentLoading(true);
+    const v = createPaymentForm.getFieldsValue();
+    const buName = v.businessUnit || '';
 
-      const response = await fetch(APEX_PAYMENTS_URL, {
+    try {
+      // ── Step 1: POST /ap/payments — create payment header ──────────────────
+      const step1Payload = livePaymentPayload;
+      const res1 = await fetch(APEX_PAYMENTS_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify(payload),
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(step1Payload),
       });
+      const text1 = await res1.text();
+      const data1 = (() => { try { return JSON.parse(text1); } catch { return { raw: text1 }; } })();
 
-      const resData = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        throw new Error(resData?.error || resData?.message || `HTTP ${response.status}`);
+      if (data1?.status === 'error' || !res1.ok) {
+        throw new Error(data1?.message || data1?.error || `Step 1 HTTP ${res1.status}`);
       }
 
-      message.success('Payment saved successfully');
+      const checkId: number | null = data1?.checkId ?? null;
+      const paymentNumber: string = data1?.paymentNumber ?? (checkId ? String(checkId) : 'Unknown');
+
+      // ── Step 2: POST /ap/payments/related-invoices — one per invoice ───────
+      const relatedUrl = `${APEX_DB_CONFIG.baseUrl}/ap/payments/related-invoices`;
+      const relatedErrors: string[] = [];
+
+      for (const inv of invoicesToPay) {
+        const body2 = {
+          InvoicePaymentId:          null,
+          CheckId:                   checkId,
+          InvoiceId:                 inv.invoiceId || null,
+          InvoiceBusinessUnit:       buName,
+          InvoiceNumber:             inv.invoiceNumber,
+          InstallmentNumber:         null,
+          AmountPaidPaymentCurrency: inv.applyAmount,
+          AmountPaidInvoiceCurrency: inv.applyAmount,
+          InvoicePaymentAmount:      inv.applyAmount,
+          InvoiceAmount:             inv.invoiceAmount,
+          InvoiceBaseAmount:         inv.invoiceAmount,
+          PaymentBaseAmount:         inv.applyAmount,
+          DiscountLost:              null,
+          DiscountTaken:             inv.discountAmount || null,
+          InvoiceCurrency:           inv.currency || v.paymentCurrency || 'AED',
+          CrossCurrencyRate:         v.conversionRate || null,
+          InvoicePaymentStatus:      'Negotiable',
+          CreatedBy:                 null,
+          LastUpdatedBy:             null,
+          LastUpdateLogin:           null,
+        };
+
+        try {
+          const res2 = await fetch(relatedUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify(body2),
+          });
+          const d2 = await res2.json().catch(() => ({}));
+          if (d2?.status === 'error' || !res2.ok) {
+            relatedErrors.push(`${inv.invoiceNumber}: ${d2?.message || `HTTP ${res2.status}`}`);
+          }
+        } catch (e: any) {
+          relatedErrors.push(`${inv.invoiceNumber}: ${e?.message ?? 'Network error'}`);
+        }
+      }
+
+      if (relatedErrors.length > 0) {
+        message.warning(`Payment #${paymentNumber} created but ${relatedErrors.length} invoice link(s) failed: ${relatedErrors.join('; ')}`);
+      } else {
+        message.success(`Payment #${paymentNumber} created and ${invoicesToPay.length} invoice(s) linked successfully`);
+      }
 
       if (mode === 'close') {
         setCreatePaymentTabOpen(false);
@@ -706,7 +764,6 @@ const ManagePayments: React.FC = () => {
         setInvoicesToPay([]);
         setSelectedBuLegalEntityName('');
       } else {
-        // Save and Create Another — reset form, keep tab open
         createPaymentForm.resetFields();
         setInvoicesToPay([]);
         setSelectedBuLegalEntityName('');
@@ -714,11 +771,6 @@ const ManagePayments: React.FC = () => {
         message.info('Form cleared — ready to create another payment');
       }
     } catch (err: any) {
-      // Ant Design validation errors have errorFields — don't show a toast for those
-      if (err?.errorFields) {
-        message.warning('Please fill in all required fields');
-        return;
-      }
       message.error(`Failed to save payment: ${err?.message ?? 'Unknown error'}`);
     } finally {
       setSavePaymentLoading(false);
@@ -736,6 +788,7 @@ const ManagePayments: React.FC = () => {
       const items = (data.items || [])
         .map((item: any, index: number) => ({
           key: item.invoice_id?.toString() || item.invoice_number || index.toString(),
+          invoiceId: item.invoice_id || 0,
           invoiceNumber: item.invoice_number || '',
           invoiceDate: item.invoice_date ? item.invoice_date.substring(0, 10) : '',
           description: item.description || '',
@@ -3896,24 +3949,26 @@ const ManagePayments: React.FC = () => {
           const step2Loading = apiTestLoading[stepKey] ?? false;
           const url2 = `${APEX_DB_CONFIG.baseUrl}/ap/payments/related-invoices`;
           const body2 = {
-            InvoicePaymentId: null,
-            CheckId: apiStep1CheckId ?? '<checkId from Step 1>',
-            InvoiceId: null,
-            InvoiceBusinessUnit: createPaymentForm.getFieldValue('businessUnit') || null,
-            InvoiceNumber: inv.invoiceNumber,
-            InstallmentNumber: null,
+            InvoicePaymentId:          null,
+            CheckId:                   apiStep1CheckId ?? '<checkId from Step 1>',
+            InvoiceId:                 inv.invoiceId || null,
+            InvoiceBusinessUnit:       createPaymentForm.getFieldValue('businessUnit') || null,
+            InvoiceNumber:             inv.invoiceNumber,
+            InstallmentNumber:         null,
             AmountPaidPaymentCurrency: inv.applyAmount,
             AmountPaidInvoiceCurrency: inv.applyAmount,
-            InvoicePaymentAmount: inv.applyAmount,
-            InvoiceAmount: inv.invoiceAmount,
-            InvoiceBaseAmount: inv.invoiceAmount,
-            PaymentBaseAmount: inv.applyAmount,
-            DiscountLost: null,
-            DiscountTaken: inv.discountAmount || null,
-            InvoiceCurrency: inv.currency || createPaymentForm.getFieldValue('paymentCurrency') || 'AED',
-            CrossCurrencyRate: null,
-            InvoicePaymentStatus: 'Negotiable',
-            CreatedBy: null, LastUpdatedBy: null, LastUpdateLogin: null,
+            InvoicePaymentAmount:      inv.applyAmount,
+            InvoiceAmount:             inv.invoiceAmount,
+            InvoiceBaseAmount:         inv.invoiceAmount,
+            PaymentBaseAmount:         inv.applyAmount,
+            DiscountLost:              null,
+            DiscountTaken:             inv.discountAmount || null,
+            InvoiceCurrency:           inv.currency || createPaymentForm.getFieldValue('paymentCurrency') || 'AED',
+            CrossCurrencyRate:         createPaymentForm.getFieldValue('conversionRate') || null,
+            InvoicePaymentStatus:      'Negotiable',
+            CreatedBy:                 null,
+            LastUpdatedBy:             null,
+            LastUpdateLogin:           null,
           };
           const locked = apiStep1CheckId === null;
           return (
