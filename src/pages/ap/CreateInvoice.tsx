@@ -440,6 +440,8 @@ export interface InvoiceInitialData {
   invoiceGroup?: string;
   termsDate?: string;
   goodsReceivedDate?: string;
+  // Synced invoice (from Oracle Fusion) — read-only except Pay in Full
+  isSynced?: boolean;
 }
 
 interface CreateInvoiceProps {
@@ -725,13 +727,17 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const isEditMode = Boolean(initialData?.invoiceId);
   const isPrepaymentInvoice = (initialData?.invoiceType || '').toLowerCase() === 'prepayment';
   const [isEditing, setIsEditing] = useState(false);
+  const isInvoiceSynced = !!initialData?.isSynced;
+
   const { isReadOnly, isPermanentlyLocked, isPaid, isPostedToGL } = useMemo(() => {
     if (!initialData?.invoiceId) return { isReadOnly: false, isPermanentlyLocked: false, isPaid: false, isPostedToGL: false };
     const status = (initialData.holdPaidStatus || '').toLowerCase();
     const isPostedToGL = initialData.validationStatus === 'Validated';
     const isPaid = status === 'fully paid' || status === 'paid' || status === 'available' || status.includes('partial');
     const permanentlyLocked = isPostedToGL || isPaid;
-    return { isReadOnly: permanentlyLocked || !isEditing, isPermanentlyLocked: permanentlyLocked, isPaid, isPostedToGL };
+    // Synced invoices are always read-only (can't be edited in this app)
+    const ro = initialData.isSynced ? true : (permanentlyLocked || !isEditing);
+    return { isReadOnly: ro, isPermanentlyLocked: permanentlyLocked || !!initialData.isSynced, isPaid, isPostedToGL };
   }, [initialData, isEditing]);
 
   // True when applied prepayments fully cover the invoice amount
@@ -2622,68 +2628,85 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // ────────────────────────────────────────────────────────────────────────
 
   // Invoice Actions dropdown menu items
-  const invoiceActionItems: MenuProps['items'] = [
-    {
-      key: 'manageInstallments',
-      icon: <ScheduleOutlined />,
-      label: 'Manage Installments',
-    },
-    { type: 'divider' },
-    {
-      key: 'calculateTax',
-      icon: <CalculatorOutlined />,
-      label: 'Calculate Tax',
-    },
-    { type: 'divider' },
-    {
-      key: 'payInFull',
-      icon: <CreditCardOutlined />,
-      label: 'Pay in Full',
-    },
-    {
-      key: 'applyPrepayment',
-      icon: <DollarOutlined />,
-      label: 'Apply Prepayment',
-    },
-    {
-      key: 'voidPayment',
-      icon: <StopOutlined />,
-      label: 'Void Payment',
-      danger: true,
-    },
-    {
-      key: 'placeHold',
-      icon: <LockOutlined />,
-      label: 'Place Hold',
-    },
-    {
-      key: 'releaseHold',
-      icon: <UnlockOutlined />,
-      label: 'Release Hold',
-    },
-    { type: 'divider' },
-    {
-      key: 'initiateApproval',
-      icon: <SendOutlined />,
-      label: 'Initiate Approval',
-    },
-    {
-      key: 'cancelInvoice',
-      icon: <StopOutlined />,
-      label: 'Cancel Invoice',
-    },
-    {
-      key: 'reverseInvoice',
-      icon: <RollbackOutlined />,
-      label: 'Reverse Invoice',
-    },
-    { type: 'divider' },
-    {
-      key: 'duplicate',
-      icon: <CopyOutlined />,
-      label: 'Duplicate Invoice',
-    },
-  ];
+  // For synced invoices: only show Pay in Full (if unpaid) and Manage Installments
+  const invoiceActionItems: MenuProps['items'] = isInvoiceSynced
+    ? [
+        {
+          key: 'manageInstallments',
+          icon: <ScheduleOutlined />,
+          label: 'Manage Installments',
+        },
+        ...(!isPaid ? [
+          { type: 'divider' as const },
+          {
+            key: 'payInFull',
+            icon: <CreditCardOutlined />,
+            label: 'Pay in Full',
+          },
+        ] : []),
+      ]
+    : [
+        {
+          key: 'manageInstallments',
+          icon: <ScheduleOutlined />,
+          label: 'Manage Installments',
+        },
+        { type: 'divider' as const },
+        {
+          key: 'calculateTax',
+          icon: <CalculatorOutlined />,
+          label: 'Calculate Tax',
+        },
+        { type: 'divider' as const },
+        {
+          key: 'payInFull',
+          icon: <CreditCardOutlined />,
+          label: 'Pay in Full',
+        },
+        {
+          key: 'applyPrepayment',
+          icon: <DollarOutlined />,
+          label: 'Apply Prepayment',
+        },
+        {
+          key: 'voidPayment',
+          icon: <StopOutlined />,
+          label: 'Void Payment',
+          danger: true,
+        },
+        {
+          key: 'placeHold',
+          icon: <LockOutlined />,
+          label: 'Place Hold',
+        },
+        {
+          key: 'releaseHold',
+          icon: <UnlockOutlined />,
+          label: 'Release Hold',
+        },
+        { type: 'divider' as const },
+        {
+          key: 'initiateApproval',
+          icon: <SendOutlined />,
+          label: 'Initiate Approval',
+        },
+        {
+          key: 'cancelInvoice',
+          icon: <StopOutlined />,
+          label: 'Cancel Invoice',
+        },
+        {
+          key: 'reverseInvoice',
+          icon: <RollbackOutlined />,
+          label: 'Reverse Invoice',
+        },
+        { type: 'divider' as const },
+        {
+          key: 'duplicate',
+          icon: <CopyOutlined />,
+          label: 'Duplicate Invoice',
+        },
+      ];
 
   // Handle invoice action menu clicks
   // Run all validations and show checklist
