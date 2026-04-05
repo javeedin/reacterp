@@ -252,7 +252,9 @@ const mapApiToInvoiceRecord = (item: any, index: number): InvoiceRecord => ({
   creationDate: formatDate(item.creation_date || item.fusion_creation_date),
   supplierOrParty: item.supplier || item.party || '',
   supplierSite: item.supplier_site || '',
-  unpaidAmount: (item.invoice_amount || 0) - (item.amount_paid || 0),
+  unpaidAmount: item.unpaid_amount != null
+    ? Number(item.unpaid_amount)
+    : (item.invoice_amount || 0) - (item.amount_paid || 0),
   invoiceAmount: item.invoice_amount || 0,
   appliedPrepayments: item.applied_prepayments || 0,
   invoiceType: item.invoice_type || 'Standard',
@@ -260,7 +262,7 @@ const mapApiToInvoiceRecord = (item: any, index: number): InvoiceRecord => ({
   notes: item.description || '',
   validationStatus: item.validation_status || 'Never validated',
   approvalStatus: item.approval_status || 'Not required',
-  holdPaidStatus: item.paid_status || 'Not paid',
+  holdPaidStatus: item.paid_status || 'Unpaid',
   accountingStatus: item.accounting_status || 'Not Accounted',
   applyAfterDate: item.apply_after_date || '',
   businessUnit: item.business_unit || '',
@@ -1276,17 +1278,16 @@ const ManageInvoices: React.FC = () => {
       onFilter: (value, record) => record.accountingStatus === value,
     },
     {
-      title: 'Hold Paid Status',
+      title: 'Paid Status',
       dataIndex: 'holdPaidStatus',
       key: 'holdPaidStatus',
-      width: 110,
+      width: 120,
       render: (status: string) => {
-        const isPaid = status === 'Fully paid';
-        return (
-          <span style={{ color: isPaid ? REDWOOD.success : REDWOOD.neutral600 }}>
-            {isPaid ? '0' : ''} {status}
-          </span>
-        );
+        if (status === 'Fully Paid')
+          return <Tag color="success" style={{ fontSize: 11 }}>Fully Paid</Tag>;
+        if (status === 'Partially Paid')
+          return <Tag color="warning" style={{ fontSize: 11 }}>Partially Paid</Tag>;
+        return <Tag color="error" style={{ fontSize: 11 }}>Unpaid</Tag>;
       },
     },
     {

@@ -62,10 +62,44 @@ SELECT
     i.pay_group,
     i.payment_terms,
     i.payment_method,
-    i.amount_paid,
+    -- Amount paid: derive from installments (GROSS - UNPAID), fall back to stored value
+    NVL(
+        (SELECT SUM(NVL(inst.GROSS_AMOUNT, 0)) - SUM(NVL(inst.UNPAID_AMOUNT, 0))
+         FROM   RR_AP_INVOICE_INSTALLMENTS inst
+         WHERE  inst.INVOICE_ID = i.invoice_id),
+        NVL(i.amount_paid, 0)
+    ) AS amount_paid,
+    -- Unpaid amount from installments
+    NVL(
+        (SELECT SUM(NVL(inst.UNPAID_AMOUNT, 0))
+         FROM   RR_AP_INVOICE_INSTALLMENTS inst
+         WHERE  inst.INVOICE_ID = i.invoice_id),
+        CASE
+            WHEN NVL(i.paid_status, 'Unpaid') = 'Fully Paid' THEN 0
+            ELSE NVL(i.invoice_amount, 0)
+        END
+    ) AS unpaid_amount,
+    -- Paid status: derived live from installments
+    CASE
+        WHEN NOT EXISTS (
+            SELECT 1 FROM RR_AP_INVOICE_INSTALLMENTS inst
+            WHERE inst.INVOICE_ID = i.invoice_id
+        ) THEN NVL(i.paid_status, 'Unpaid')
+        WHEN NVL(
+            (SELECT SUM(NVL(inst.UNPAID_AMOUNT, 0))
+             FROM   RR_AP_INVOICE_INSTALLMENTS inst
+             WHERE  inst.INVOICE_ID = i.invoice_id), 0) <= 0
+        THEN 'Fully Paid'
+        WHEN NVL(
+            (SELECT SUM(NVL(inst.UNPAID_AMOUNT, 0))
+             FROM   RR_AP_INVOICE_INSTALLMENTS inst
+             WHERE  inst.INVOICE_ID = i.invoice_id), 0)
+           < NVL(i.invoice_amount, 0)
+        THEN 'Partially Paid'
+        ELSE 'Unpaid'
+    END AS paid_status,
     i.validation_status,
     i.approval_status,
-    i.paid_status,
     (SELECT h.accounting_status
      FROM   RR_SLA_ACCOUNTING_HEADERS h
      WHERE  h.source_table = 'AP_INVOICES'
