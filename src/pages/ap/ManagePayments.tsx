@@ -580,11 +580,18 @@ const ManagePayments: React.FC = () => {
   const [apiTestResults, setApiTestResults] = useState<Record<number, { status: 'success' | 'error'; data: any }>>({});
   const [apiStep1CheckId, setApiStep1CheckId] = useState<number | null>(null);
 
+  // Convert form date value (dayjs | string | null) → 'YYYY-MM-DD'
+  const formDateStr = (val: any): string => {
+    if (!val) return new Date().toISOString().slice(0, 10);
+    if (dayjs.isDayjs(val)) return val.format('YYYY-MM-DD');
+    return toApiDate(String(val));
+  };
+
   // Build live payload from current form values — recomputed every render so it
   // always reflects what the user has typed (no tick counter needed).
   const livePaymentPayload = (() => {
     const v = createPaymentForm.getFieldsValue();
-    const payDate = v.paymentDate ? toApiDate(v.paymentDate) : new Date().toISOString().slice(0, 10);
+    const payDate = formDateStr(v.paymentDate);
     const sysdate = new Date().toISOString();
     return {
       CheckId: null, PaymentId: null,
@@ -598,7 +605,7 @@ const ManagePayments: React.FC = () => {
       PaymentDate: payDate, AccountingDate: payDate,
       MaturityDate: null, AnticipatedValueDate: null,
       StopDate: null, VoidDate: null, VoidAccountingDate: null,
-      ConversionDate: v.conversionDate ? toApiDate(v.conversionDate) : payDate,
+      ConversionDate: v.conversionDate ? formDateStr(v.conversionDate) : payDate,
       ClearingDate: null, ClearingConversionDate: null,
       ClearingValueDate: null, MaturityConversionDate: null,
       CreationDate: sysdate, LastUpdateDate: sysdate,
