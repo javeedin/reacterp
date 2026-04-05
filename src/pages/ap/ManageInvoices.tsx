@@ -848,24 +848,10 @@ const ManageInvoices: React.FC = () => {
       return;
     }
 
-    const isSynced = record.syncStatus === 'SYNCED';
-
-    if (isSynced) {
-      // Read-only view via InvoiceDetail
-      const newTab: InvoiceTab = {
-        key: tabKey,
-        label: record.invoiceNumber,
-        invoice: record,
-        tabType: 'detail',
-      };
-      setOpenTabs([...openTabs, newTab]);
-      setActiveTab(tabKey);
-      return;
-    }
-
-    // Locally created — editable via CreateInvoice
+    // Always open CreateInvoice — synced invoices are read-only inside that component
     const editData: InvoiceInitialData = {
       invoiceId: record.invoiceId,
+      isSynced: record.syncStatus === 'SYNCED',
       supplier: record.supplierOrParty,
       supplierNumber: record.supplierNumber,
       supplierId: record.supplierId,
@@ -1636,7 +1622,7 @@ const ManageInvoices: React.FC = () => {
       key: tab.key,
       label: tab.label,
       closable: true,
-      children: tab.tabType === 'create' ? (
+      children: (
         <CreateInvoice
           onClose={() => closeInvoiceTab(tab.key)}
           initialData={tab.initialData}
@@ -1646,11 +1632,6 @@ const ManageInvoices: React.FC = () => {
               form.submit();
             }
           }}
-        />
-      ) : (
-        <InvoiceDetail
-          invoice={tab.invoice}
-          onClose={() => closeInvoiceTab(tab.key)}
         />
       ),
     })),
