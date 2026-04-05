@@ -574,6 +574,99 @@ const ManagePayments: React.FC = () => {
   const totalAppliedAmount = invoicesToPay.reduce((sum, i) => sum + (i.applyAmount || 0), 0);
   const balanceAfterApplication = supplierTotalBalance !== null ? supplierTotalBalance - totalAppliedAmount : null;
 
+  // ── API panel ───────────────────────────────────────────────────────────────
+  const [apiPanelOpen, setApiPanelOpen] = useState(false);
+  const [apiTestLoading, setApiTestLoading] = useState<Record<number, boolean>>({});
+  const [apiTestResults, setApiTestResults] = useState<Record<number, { status: 'success' | 'error'; data: any }>>({});
+  const [apiStep1CheckId, setApiStep1CheckId] = useState<number | null>(null);
+
+  // Build live payload from current form values — recomputed every render so it
+  // always reflects what the user has typed (no tick counter needed).
+  const livePaymentPayload = (() => {
+    const v = createPaymentForm.getFieldsValue();
+    const payDate = v.paymentDate ? toApiDate(v.paymentDate) : new Date().toISOString().slice(0, 10);
+    const sysdate = new Date().toISOString();
+    return {
+      CheckId: null, PaymentId: null,
+      PaymentReference: null,
+      PaperDocumentNumber: v.paperDocumentNumber || null,
+      PaymentNumber: v.paperDocumentNumber || null,
+      VoucherNumber: v.voucherNumber || null,
+      PaymentAmount: totalAppliedAmount,
+      PaymentBaseAmount: totalAppliedAmount,
+      WithheldAmount: null, BankChargeAmount: null,
+      PaymentDate: payDate, AccountingDate: payDate,
+      MaturityDate: null, AnticipatedValueDate: null,
+      StopDate: null, VoidDate: null, VoidAccountingDate: null,
+      ConversionDate: v.conversionDate ? toApiDate(v.conversionDate) : payDate,
+      ClearingDate: null, ClearingConversionDate: null,
+      ClearingValueDate: null, MaturityConversionDate: null,
+      CreationDate: sysdate, LastUpdateDate: sysdate,
+      PaymentDescription: v.paymentDescription || null,
+      PaymentStatus: 'Negotiable',
+      PaymentType: v.paymentType || 'Quick',
+      PaymentMode: null,
+      PaymentFunction: 'Supplier Payments',
+      PaymentCurrency: v.paymentCurrency || null,
+      PaymentBaseCurrency: v.paymentCurrency || null,
+      ConversionRate: v.conversionRate || null,
+      ConversionRateType: v.conversionRateType || null,
+      CrossCurrencyRateType: 'Corporate',
+      ClearingAmount: null, ClearingLedgerAmount: null,
+      ClearingConversionRate: null, ClearingConversionRateType: null,
+      MaturityConversionRateType: null, MaturityConversionRate: null,
+      AccountingStatus: null, ReconciledFlag: 'false',
+      SeparateRemittanceAdviceCreated: null, IbyPaymentStatus: null,
+      LegalEntity: selectedBuLegalEntityName || null,
+      BusinessUnit: v.businessUnit || null,
+      ProcurementBU: v.businessUnit || null,
+      Payee: v.payee || null,
+      PartyId: null,
+      PayeeSite: v.payeeSite || null,
+      SupplierNumber: v.supplierNumber || null,
+      EmployeeAddress: null, ThirdPartySupplier: null, ThirdPartyAddressName: null,
+      ExternalBankAccountId: null,
+      RemitToAccountNumber: v.remitToAccount || null,
+      DisbursementBankAccountNumber: selectedBankAccount?.bankAccountNumber || null,
+      DisbursementBankAccountName: v.disbursementBankAccount || null,
+      FundingCardAccount: null, DigitalPaymentAccount: null,
+      PaymentMethodCode: v.paymentMethod || null,
+      PaymentMethod: v.paymentMethod || null,
+      PaymentDocument: v.paymentDocument || null,
+      PaymentProcessProfileCode: null,
+      PaymentProcessProfile: v.paymentProcessProfile || null,
+      DocumentCategory: v.documentCategory || null,
+      DocumentSequence: null,
+      AddressLine1: null, AddressLine2: null, AddressLine3: null, AddressLine4: null,
+      City: null, County: null, Province: null, State: null,
+      Country: 'AE', Zip: null,
+      StopReason: null, StopReference: null,
+      CreatedBy: null, LastUpdatedBy: null, LastUpdateLogin: null,
+    };
+  })();
+
+  const executeApiStep = async (step: number, url: string, body: object) => {
+    setApiTestLoading(prev => ({ ...prev, [step]: true }));
+    setApiTestResults(prev => { const n = { ...prev }; delete n[step]; return n; });
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const text = await res.text();
+      let data: any;
+      try { data = JSON.parse(text); } catch { data = { raw: text }; }
+      const isErr = data?.status === 'error' || !res.ok;
+      if (step === 1 && data?.checkId != null) setApiStep1CheckId(data.checkId);
+      setApiTestResults(prev => ({ ...prev, [step]: { status: isErr ? 'error' : 'success', data } }));
+    } catch (err: any) {
+      setApiTestResults(prev => ({ ...prev, [step]: { status: 'error', data: { message: err?.message ?? 'Network error' } } }));
+    } finally {
+      setApiTestLoading(prev => ({ ...prev, [step]: false }));
+    }
+  };
+
   // ── Save payment ────────────────────────────────────────────────────────────
   const [savePaymentLoading, setSavePaymentLoading] = useState(false);
 
@@ -582,38 +675,8 @@ const ManagePayments: React.FC = () => {
       const values = await createPaymentForm.validateFields();
       setSavePaymentLoading(true);
 
-      // Payload uses PascalCase to match XXAP_PAYMENTS_PKG.save_payment JSON_VALUE keys
-      const payload = {
-        BusinessUnit:                   values.businessUnit,
-        Payee:                          values.payee,
-        SupplierNumber:                 values.supplierNumber,
-        PayeeSite:                      values.payeeSite,
-        PaymentDate:                    toApiDate(values.paymentDate),
-        PaymentType:                    values.paymentType,
-        DisbursementBankAccountName:    values.disbursementBankAccount,
-        PaymentCurrency:                values.paymentCurrency,
-        PaymentMethod:                  values.paymentMethod,
-        PaymentDocument:                values.paymentDocument ?? null,
-        PaperDocumentNumber:            values.paperDocumentNumber ?? null,
-        PaymentDescription:             values.paymentDescription ?? null,
-        PaymentProcessProfile:          values.paymentProcessProfile ?? null,
-        RemitToAccountNumber:           values.remitToAccount ?? null,
-        ConversionRateType:             values.conversionRateType ?? null,
-        ConversionDate:                 values.conversionDate ? toApiDate(values.conversionDate) : null,
-        ConversionRate:                 values.conversionRate ?? null,
-        PaymentAmount:                  totalAppliedAmount,
-        PaymentStatus:                  'Negotiable',    // standard status for newly created payments
-        Invoices: invoicesToPay.map((inv) => ({
-          InvoiceNumber:  inv.invoiceNumber,
-          InvoiceDate:    inv.invoiceDate,
-          InvoiceAmount:  inv.invoiceAmount,
-          ApplyAmount:    inv.applyAmount,
-          DiscountAmount: inv.discountAmount,
-          DueDate:        inv.dueDate,
-          Currency:       inv.currency,
-          SupplierSite:   inv.supplierSite,
-        })),
-      };
+      // Use the same live payload as the API panel (identical to Pay in Full pattern)
+      const payload = livePaymentPayload;
 
       const response = await fetch(APEX_PAYMENTS_URL, {
         method: 'POST',
@@ -2032,6 +2095,19 @@ const ManagePayments: React.FC = () => {
                     >
                       Cancel
                     </Button>
+                    <Tooltip title="View API payload & test">
+                      <Button
+                        size="small"
+                        icon={<ApiOutlined />}
+                        onClick={() => {
+                          setApiStep1CheckId(null);
+                          setApiTestResults({});
+                          setApiPanelOpen(true);
+                        }}
+                      >
+                        API
+                      </Button>
+                    </Tooltip>
                     <Button
                       size="small"
                       loading={savePaymentLoading}
@@ -3710,6 +3786,188 @@ const ManagePayments: React.FC = () => {
           </Space>
         ) : null}
       </Modal>
+
+      <Autopilot module="ap" />
+      <FloatingMenu />
+
+      {/* ── Create Payment — API panel drawer ─────────────────────────────── */}
+      <Drawer
+        title={
+          <Space>
+            <ApiOutlined style={{ color: '#0572CE' }} />
+            <span>Create Payment — API Panel</span>
+            <Tag color="blue" style={{ fontSize: 11 }}>Same as Pay in Full</Tag>
+          </Space>
+        }
+        open={apiPanelOpen}
+        onClose={() => setApiPanelOpen(false)}
+        width={680}
+        styles={{ body: { padding: 16, background: '#fafafa' } }}
+      >
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 16, fontSize: 12 }}
+          message="Two-step payment creation"
+          description={
+            <>
+              <b>Step 1</b> — POST /ap/payments → creates payment record, returns <code>checkId</code>.<br />
+              <b>Step 2</b> — POST /ap/payments/related-invoices → one call per invoice in the list (links payment → invoice).
+            </>
+          }
+        />
+
+        {/* Step 1 */}
+        {(() => {
+          const step1Result = apiTestResults[1];
+          const step1Loading = apiTestLoading[1] ?? false;
+          const url1 = APEX_PAYMENTS_URL;
+          return (
+            <div style={{ border: `1px solid ${step1Result ? (step1Result.status === 'success' ? '#b7eb8f' : '#ffa39e') : '#d9d9d9'}`, borderRadius: 8, marginBottom: 16, overflow: 'hidden' }}>
+              <div style={{ padding: '8px 12px', background: '#f5f5f5', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <Space size={4} wrap>
+                  <Tag color="green" style={{ fontSize: 11, margin: 0 }}>POST</Tag>
+                  <Typography.Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{url1}</Typography.Text>
+                </Space>
+                <Space size={4}>
+                  <Tooltip title="Copy URL">
+                    <Button size="small" icon={<CopyOutlined />} onClick={() => { navigator.clipboard.writeText(url1); message.success('URL copied'); }} />
+                  </Tooltip>
+                  <Button
+                    size="small"
+                    type="primary"
+                    icon={<PlayCircleOutlined />}
+                    loading={step1Loading}
+                    onClick={() => executeApiStep(1, url1, livePaymentPayload)}
+                  >
+                    Execute Step 1
+                  </Button>
+                </Space>
+              </div>
+              <div style={{ padding: '4px 12px 6px' }}>
+                <Typography.Text style={{ fontSize: 11, color: '#888' }}>
+                  Creates the payment record. <code>checkId</code> from the response is captured automatically for Step 2.
+                  {apiStep1CheckId !== null && (
+                    <span style={{ marginLeft: 8, color: '#52c41a', fontWeight: 600 }}>
+                      ✓ CheckId captured: {apiStep1CheckId}
+                    </span>
+                  )}
+                </Typography.Text>
+              </div>
+              <div style={{ padding: '0 12px 8px' }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: '#aaa', marginBottom: 4 }}>REQUEST BODY</div>
+                <div style={{ position: 'relative' }}>
+                  <Button
+                    size="small"
+                    icon={<CopyOutlined />}
+                    style={{ position: 'absolute', top: 6, right: 6, zIndex: 1 }}
+                    onClick={() => { navigator.clipboard.writeText(JSON.stringify(livePaymentPayload, null, 2)); message.success('JSON copied'); }}
+                  />
+                  <pre style={{ background: '#1e1e1e', color: '#d4d4d4', fontSize: 11, padding: 12, borderRadius: 6, margin: 0, maxHeight: 320, overflow: 'auto', fontFamily: 'monospace' }}>
+                    {JSON.stringify(livePaymentPayload, null, 2)}
+                  </pre>
+                </div>
+              </div>
+              {step1Result && (
+                <div style={{ padding: '0 12px 12px', borderTop: '1px solid #f0f0f0' }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: step1Result.status === 'success' ? '#52c41a' : '#ff4d4f', margin: '8px 0 4px' }}>
+                    {step1Result.status === 'success' ? '✅ RESPONSE' : '❌ ERROR'}
+                  </div>
+                  <pre style={{ background: step1Result.status === 'success' ? '#f6ffed' : '#fff2f0', border: `1px solid ${step1Result.status === 'success' ? '#b7eb8f' : '#ffccc7'}`, fontSize: 11, padding: 10, borderRadius: 6, margin: 0, maxHeight: 200, overflow: 'auto' }}>
+                    {JSON.stringify(step1Result.data, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* Step 2 — one call per invoice */}
+        {invoicesToPay.length > 0 && invoicesToPay.map((inv, idx) => {
+          const stepKey = 100 + idx;
+          const step2Result = apiTestResults[stepKey];
+          const step2Loading = apiTestLoading[stepKey] ?? false;
+          const url2 = `${APEX_DB_CONFIG.baseUrl}/ap/payments/related-invoices`;
+          const body2 = {
+            InvoicePaymentId: null,
+            CheckId: apiStep1CheckId ?? '<checkId from Step 1>',
+            InvoiceId: null,
+            InvoiceBusinessUnit: createPaymentForm.getFieldValue('businessUnit') || null,
+            InvoiceNumber: inv.invoiceNumber,
+            InstallmentNumber: null,
+            AmountPaidPaymentCurrency: inv.applyAmount,
+            AmountPaidInvoiceCurrency: inv.applyAmount,
+            InvoicePaymentAmount: inv.applyAmount,
+            InvoiceAmount: inv.invoiceAmount,
+            InvoiceBaseAmount: inv.invoiceAmount,
+            PaymentBaseAmount: inv.applyAmount,
+            DiscountLost: null,
+            DiscountTaken: inv.discountAmount || null,
+            InvoiceCurrency: inv.currency || createPaymentForm.getFieldValue('paymentCurrency') || 'AED',
+            CrossCurrencyRate: null,
+            InvoicePaymentStatus: 'Negotiable',
+            CreatedBy: null, LastUpdatedBy: null, LastUpdateLogin: null,
+          };
+          const locked = apiStep1CheckId === null;
+          return (
+            <div key={stepKey} style={{ border: `1px solid ${step2Result ? (step2Result.status === 'success' ? '#b7eb8f' : '#ffa39e') : '#d9d9d9'}`, borderRadius: 8, marginBottom: 12, overflow: 'hidden' }}>
+              <div style={{ padding: '8px 12px', background: '#f5f5f5', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <Space size={4} wrap>
+                  <Tag color="green" style={{ fontSize: 11, margin: 0 }}>POST</Tag>
+                  <Typography.Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{url2}</Typography.Text>
+                  <Tag style={{ fontSize: 10 }}>{inv.invoiceNumber}</Tag>
+                </Space>
+                <Tooltip title={locked ? 'Execute Step 1 first to capture CheckId' : ''}>
+                  <Button
+                    size="small"
+                    type="primary"
+                    icon={<PlayCircleOutlined />}
+                    loading={step2Loading}
+                    disabled={locked}
+                    onClick={() => executeApiStep(stepKey, url2, body2)}
+                  >
+                    Execute Step 2
+                  </Button>
+                </Tooltip>
+              </div>
+              <div style={{ padding: '4px 12px 6px' }}>
+                <Typography.Text style={{ fontSize: 11, color: '#888' }}>
+                  Links payment to invoice <b>{inv.invoiceNumber}</b> — apply amount: <b>{inv.applyAmount?.toLocaleString('en-US', { minimumFractionDigits: 2 })}</b>
+                  {locked && <span style={{ color: '#faad14', marginLeft: 8 }}>⚠ Execute Step 1 first</span>}
+                </Typography.Text>
+              </div>
+              <div style={{ padding: '0 12px 8px' }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: '#aaa', marginBottom: 4 }}>REQUEST BODY</div>
+                <div style={{ position: 'relative' }}>
+                  <Button
+                    size="small"
+                    icon={<CopyOutlined />}
+                    style={{ position: 'absolute', top: 6, right: 6, zIndex: 1 }}
+                    onClick={() => { navigator.clipboard.writeText(JSON.stringify(body2, null, 2)); message.success('JSON copied'); }}
+                  />
+                  <pre style={{ background: '#1e1e1e', color: '#d4d4d4', fontSize: 11, padding: 12, borderRadius: 6, margin: 0, maxHeight: 260, overflow: 'auto', fontFamily: 'monospace' }}>
+                    {JSON.stringify(body2, null, 2)}
+                  </pre>
+                </div>
+              </div>
+              {step2Result && (
+                <div style={{ padding: '0 12px 12px', borderTop: '1px solid #f0f0f0' }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: step2Result.status === 'success' ? '#52c41a' : '#ff4d4f', margin: '8px 0 4px' }}>
+                    {step2Result.status === 'success' ? '✅ RESPONSE' : '❌ ERROR'}
+                  </div>
+                  <pre style={{ background: step2Result.status === 'success' ? '#f6ffed' : '#fff2f0', border: `1px solid ${step2Result.status === 'success' ? '#b7eb8f' : '#ffccc7'}`, fontSize: 11, padding: 10, borderRadius: 6, margin: 0, maxHeight: 200, overflow: 'auto' }}>
+                    {JSON.stringify(step2Result.data, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {invoicesToPay.length === 0 && (
+          <Alert type="warning" showIcon message="Add invoices to the payment to see Step 2 calls" style={{ fontSize: 12 }} />
+        )}
+      </Drawer>
 
       <Autopilot module="ap" />
       <FloatingMenu />
