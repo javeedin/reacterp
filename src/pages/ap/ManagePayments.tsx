@@ -574,6 +574,88 @@ const ManagePayments: React.FC = () => {
   const totalAppliedAmount = invoicesToPay.reduce((sum, i) => sum + (i.applyAmount || 0), 0);
   const balanceAfterApplication = supplierTotalBalance !== null ? supplierTotalBalance - totalAppliedAmount : null;
 
+  // ── Save payment ────────────────────────────────────────────────────────────
+  const [savePaymentLoading, setSavePaymentLoading] = useState(false);
+
+  const handleSavePayment = async (mode: 'close' | 'another') => {
+    try {
+      const values = await createPaymentForm.validateFields();
+      setSavePaymentLoading(true);
+
+      const payload = {
+        business_unit:              values.businessUnit,
+        payee:                      values.payee,
+        supplier_number:            values.supplierNumber,
+        payee_site:                 values.payeeSite,
+        payment_date:               toApiDate(values.paymentDate),
+        payment_type:               values.paymentType,
+        disbursement_bank_account:  values.disbursementBankAccount,
+        payment_currency:           values.paymentCurrency,
+        payment_method:             values.paymentMethod,
+        payment_document:           values.paymentDocument ?? null,
+        paper_document_number:      values.paperDocumentNumber ?? null,
+        payment_description:        values.paymentDescription ?? null,
+        payment_process_profile:    values.paymentProcessProfile ?? null,
+        remit_to_account:           values.remitToAccount ?? null,
+        conversion_rate_type:       values.conversionRateType ?? null,
+        conversion_date:            values.conversionDate ? toApiDate(values.conversionDate) : null,
+        conversion_rate:            values.conversionRate ?? null,
+        notes:                      values.notes ?? null,
+        payment_purpose:            values.paymentPurpose ?? null,
+        reference_info:             values.referenceInfo ?? null,
+        payment_amount:             totalAppliedAmount,
+        invoices: invoicesToPay.map((inv) => ({
+          invoice_number:   inv.invoiceNumber,
+          invoice_date:     inv.invoiceDate,
+          invoice_amount:   inv.invoiceAmount,
+          apply_amount:     inv.applyAmount,
+          discount_amount:  inv.discountAmount,
+          due_date:         inv.dueDate,
+          currency:         inv.currency,
+          supplier_site:    inv.supplierSite,
+        })),
+      };
+
+      const response = await fetch(APEX_PAYMENTS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const resData = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(resData?.error || resData?.message || `HTTP ${response.status}`);
+      }
+
+      message.success('Payment saved successfully');
+
+      if (mode === 'close') {
+        setCreatePaymentTabOpen(false);
+        setActiveTab('search');
+        createPaymentForm.resetFields();
+        setInvoicesToPay([]);
+        setSelectedBuLegalEntityName('');
+      } else {
+        // Save and Create Another — reset form, keep tab open
+        createPaymentForm.resetFields();
+        setInvoicesToPay([]);
+        setSelectedBuLegalEntityName('');
+        setCreatePaymentActiveTab('paymentDetails');
+        message.info('Form cleared — ready to create another payment');
+      }
+    } catch (err: any) {
+      // Ant Design validation errors have errorFields — don't show a toast for those
+      if (err?.errorFields) {
+        message.warning('Please fill in all required fields');
+        return;
+      }
+      message.error(`Failed to save payment: ${err?.message ?? 'Unknown error'}`);
+    } finally {
+      setSavePaymentLoading(false);
+    }
+  };
+
   const fetchAvailableInvoices = async (supplierNumber: string) => {
     setAvailableInvoicesLoading(true);
     try {
@@ -1939,9 +2021,34 @@ const ManagePayments: React.FC = () => {
                 tabBarStyle={{ marginBottom: 0 }}
                 tabBarExtraContent={
                   <Space style={{ paddingRight: 4 }}>
-                    <Button size="small" onClick={() => { setCreatePaymentTabOpen(false); setActiveTab('search'); }}>Cancel</Button>
-                    <Button size="small">Save and Create Another</Button>
-                    <Button size="small" type="primary" style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Save and Close</Button>
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        setCreatePaymentTabOpen(false);
+                        setActiveTab('search');
+                        createPaymentForm.resetFields();
+                        setInvoicesToPay([]);
+                        setSelectedBuLegalEntityName('');
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      size="small"
+                      loading={savePaymentLoading}
+                      onClick={() => handleSavePayment('another')}
+                    >
+                      Save and Create Another
+                    </Button>
+                    <Button
+                      size="small"
+                      type="primary"
+                      loading={savePaymentLoading}
+                      style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+                      onClick={() => handleSavePayment('close')}
+                    >
+                      Save and Close
+                    </Button>
                   </Space>
                 }
                 items={[
