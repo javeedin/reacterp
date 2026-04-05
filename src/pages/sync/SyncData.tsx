@@ -804,6 +804,8 @@ const SyncData: React.FC = () => {
   const abortControllerRef = useRef<AbortController | null>(null);
   const isSyncingRef = useRef(false);
   const logCounterRef = useRef(0); // Track total logs generated for debugging
+  const allLogsRef = useRef<SyncLog[]>([]); // Unbounded full log store
+  const [missingLogsModalOpen, setMissingLogsModalOpen] = useState(false);
 
   const addLog: LogCallback = useCallback((type, message) => {
     logCounterRef.current += 1;
@@ -815,6 +817,9 @@ const SyncData: React.FC = () => {
       type,
       message,
     };
+
+    // Always store every log in the unbounded ref
+    allLogsRef.current.push(log);
 
     // Only log to console if verboseConsole is enabled
     if (verboseConsole) {
@@ -1751,6 +1756,7 @@ const SyncData: React.FC = () => {
     setSupplierSitesPayloads([]);
     setSiteAssignmentsPayloads([]);
     logCounterRef.current = 0;
+    allLogsRef.current = [];
 
     // Notify Electron that sync started
     const syncTypeName = selectedObject?.name || 'Data';
@@ -5571,8 +5577,12 @@ const SyncData: React.FC = () => {
                     <Tag style={{ borderRadius: 12 }}>{logs.length} displayed</Tag>
                     <Tag color="blue" style={{ borderRadius: 12 }}>{logCounterRef.current} generated</Tag>
                     {logCounterRef.current !== logs.length && logCounterRef.current > 0 && (
-                      <Tag color="warning" style={{ borderRadius: 12 }}>
-                        {logCounterRef.current - logs.length} missing!
+                      <Tag
+                        color="warning"
+                        style={{ borderRadius: 12, cursor: 'pointer' }}
+                        onClick={() => setMissingLogsModalOpen(true)}
+                      >
+                        ⚠ {logCounterRef.current - logs.length} missing — click to view
                       </Tag>
                     )}
                   </Space>
@@ -5982,6 +5992,68 @@ const SyncData: React.FC = () => {
             )}
           </div>
         )}
+      </Modal>
+
+      {/* Missing Logs Modal */}
+      <Modal
+        title={
+          <Space>
+            <WarningOutlined style={{ color: '#faad14' }} />
+            <span>Full Sync Log</span>
+            <Tag style={{ borderRadius: 12 }}>{allLogsRef.current.length} total</Tag>
+            <Tag color="blue" style={{ borderRadius: 12 }}>{logs.length} displayed</Tag>
+            {allLogsRef.current.length > logs.length && (
+              <Tag color="warning" style={{ borderRadius: 12 }}>
+                {allLogsRef.current.length - logs.length} not shown in main view
+              </Tag>
+            )}
+          </Space>
+        }
+        open={missingLogsModalOpen}
+        onCancel={() => setMissingLogsModalOpen(false)}
+        width={860}
+        footer={
+          isSyncingRef.current ? (
+            <Space>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                Sync is currently running. Do you want to stop it?
+              </Text>
+              <Button onClick={() => setMissingLogsModalOpen(false)}>
+                Continue Sync
+              </Button>
+              <Button
+                danger
+                type="primary"
+                onClick={() => {
+                  handleStop();
+                  setMissingLogsModalOpen(false);
+                }}
+              >
+                Stop Sync
+              </Button>
+            </Space>
+          ) : (
+            <Button type="primary" onClick={() => setMissingLogsModalOpen(false)}>
+              Close
+            </Button>
+          )
+        }
+      >
+        <div style={{ marginBottom: 8, fontSize: 12, color: REDWOOD.textSecondary }}>
+          The main log view keeps the latest 500 entries. All {allLogsRef.current.length} log entries are shown below (oldest first).
+        </div>
+        <Table
+          dataSource={[...allLogsRef.current].reverse().map((l, i) => ({ ...l, key: `all-${i}` }))}
+          columns={logColumns}
+          rowKey="key"
+          size="small"
+          pagination={{ pageSize: 50, showSizeChanger: true, pageSizeOptions: ['25', '50', '100', '200'], showTotal: (t) => `${t} entries` }}
+          scroll={{ y: 460 }}
+          rowClassName={(record: SyncLog) =>
+            record.type === 'error' ? 'ant-table-row-error' : ''
+          }
+          style={{ fontSize: 12 }}
+        />
       </Modal>
     </Layout>
   );
