@@ -9,6 +9,7 @@ import {
   AimOutlined, FileTextOutlined, CheckSquareOutlined,
   DeleteOutlined, CloseOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
   KeyOutlined, SettingOutlined, UserOutlined, EyeInvisibleOutlined, EyeTwoTone,
+  CameraOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -19,7 +20,7 @@ const REDWOOD = '#C74634';
 
 interface Step {
   id: string;
-  type: 'click' | 'input' | 'navigate';
+  type: 'click' | 'input' | 'navigate' | 'snapshot';
   description: string;
   fieldName: string;   // label / button text / element name
   action: string;      // Click | Enter | Select | Check | Navigate
@@ -291,62 +292,93 @@ const generateUserManual = (steps: Step[]): string => {
   ).join('\n');
 
   const sectionsHtml = screens.map((sc, si) => {
-    // Pick one representative screenshot for the screen:
-    // prefer the navigate step's screenshot (shows the screen on arrival),
-    // or fall back to the first screenshot found among field steps (filled state).
+    // Navigate step screenshot (shows the screen on arrival)
     const navStep = sc.steps.find(s => s.type === 'navigate' && s.screenshot);
-    const filledStep = sc.steps.find(s => s.type !== 'navigate' && s.screenshot);
-    const screenShot = (navStep || filledStep)?.screenshot || '';
+    const navScreenShot = navStep?.screenshot || '';
 
-    // Filter out navigate steps from the field table — they are shown as the section heading
-    const fieldSteps = sc.steps.filter(s => s.type !== 'navigate');
+    // Split non-navigate steps into groups separated by 'snapshot' steps.
+    // Each snapshot step starts a new group and carries that group's screenshot.
+    const nonNavSteps = sc.steps.filter(s => s.type !== 'navigate');
 
-    const rows = fieldSteps.map(s => {
-      const explanation = s.type === 'input'
-        ? `In the <strong>${escapeHtml(s.fieldName || 'field')}</strong> field, enter <strong>${escapeHtml(s.value || '')}</strong>.`
-        : `Click the <strong>${escapeHtml(s.fieldName || s.description)}</strong>${s.value && s.value !== s.fieldName ? ' — <em>' + escapeHtml(s.value) + '</em>' : ''}.`;
+    type Group = { screenshot: string; label: string; steps: (Step & { globalIdx: number })[] };
+    const groups: Group[] = [];
+    let current: Group = { screenshot: '', label: '', steps: [] };
 
-      const badge = `<span style="display:inline-block;padding:1px 7px;border-radius:3px;font-size:10px;font-weight:700;background:${typeBg[s.type] || '#eee'};color:${typeColor[s.type] || '#333'}">${typeLabel[s.type] || s.type}</span>`;
+    for (const step of nonNavSteps) {
+      if (step.type === 'snapshot') {
+        // Push whatever we've accumulated so far (even if empty — preserves order)
+        groups.push(current);
+        current = { screenshot: step.screenshot || '', label: step.fieldName || '', steps: [] };
+      } else {
+        current.steps.push(step);
+      }
+    }
+    groups.push(current);
 
-      return `
-      <tr>
-        <td style="text-align:center;font-weight:700;font-size:15px;color:#444;white-space:nowrap;">${s.globalIdx}</td>
-        <td>${badge}</td>
-        <td style="font-weight:600;color:#222;">${escapeHtml(s.fieldName || s.description)}</td>
-        <td style="color:#555;">${s.value ? escapeHtml(s.value) : '—'}</td>
-        <td style="line-height:1.5;">${explanation}</td>
-      </tr>`;
-    }).join('\n');
+    // If no snapshot steps were captured, use the nav screenshot for the single group
+    if (groups.length === 1 && !groups[0].screenshot && navScreenShot) {
+      groups[0].screenshot = navScreenShot;
+    }
 
-    const screenshotHtml = screenShot
-      ? `<div style="margin:14px 0 20px;">
-           <img src="${screenShot}" alt="${escapeHtml(sc.title)} screenshot"
-             style="width:100%;border:1px solid #ddd;border-radius:6px;display:block;box-shadow:0 2px 8px rgba(0,0,0,.08);" />
-           <div style="font-size:11px;color:#aaa;margin-top:4px;text-align:right;">Screenshot: ${escapeHtml(sc.title)}</div>
-         </div>`
-      : '';
+    const renderGroup = (g: Group, gIdx: number) => {
+      const shotHtml = g.screenshot
+        ? `<div style="margin:${gIdx === 0 ? '14px' : '24px'} 0 16px;">
+             <img src="${g.screenshot}" alt="${escapeHtml(sc.title)} screenshot"
+               style="width:100%;border:1px solid #ddd;border-radius:6px;display:block;box-shadow:0 2px 8px rgba(0,0,0,.08);" />
+             <div style="font-size:11px;color:#aaa;margin-top:4px;text-align:right;">
+               ${g.label ? `Tab: ${escapeHtml(g.label)}` : `Screenshot: ${escapeHtml(sc.title)}`}
+             </div>
+           </div>`
+        : '';
 
-    const tableHtml = fieldSteps.length ? `
-      <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:10px;">
-        <thead>
-          <tr style="background:#f5f5f5;">
-            <th style="padding:9px 12px;border-bottom:2px solid #ddd;width:40px;">#</th>
-            <th style="padding:9px 12px;border-bottom:2px solid #ddd;width:72px;">Type</th>
-            <th style="padding:9px 12px;border-bottom:2px solid #ddd;width:170px;">Field / Element</th>
-            <th style="padding:9px 12px;border-bottom:2px solid #ddd;width:140px;">Value Entered</th>
-            <th style="padding:9px 12px;border-bottom:2px solid #ddd;">Step Explanation</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>` : '<p style="color:#aaa;font-size:12px;font-style:italic;">No field interactions recorded on this screen.</p>';
+      if (!g.steps.length) return shotHtml;
+
+      const rows = g.steps.map(s => {
+        const explanation = s.type === 'input'
+          ? `In the <strong>${escapeHtml(s.fieldName || 'field')}</strong> field, enter <strong>${escapeHtml(s.value || '')}</strong>.`
+          : `Click the <strong>${escapeHtml(s.fieldName || s.description)}</strong>${s.value && s.value !== s.fieldName ? ' — <em>' + escapeHtml(s.value) + '</em>' : ''}.`;
+        const badge = `<span style="display:inline-block;padding:1px 7px;border-radius:3px;font-size:10px;font-weight:700;background:${typeBg[s.type] || '#eee'};color:${typeColor[s.type] || '#333'}">${typeLabel[s.type] || s.type}</span>`;
+        return `
+        <tr>
+          <td style="text-align:center;font-weight:700;font-size:15px;color:#444;white-space:nowrap;">${s.globalIdx}</td>
+          <td>${badge}</td>
+          <td style="font-weight:600;color:#222;">${escapeHtml(s.fieldName || s.description)}</td>
+          <td style="color:#555;">${s.value ? escapeHtml(s.value) : '—'}</td>
+          <td style="line-height:1.5;">${explanation}</td>
+        </tr>`;
+      }).join('\n');
+
+      const tableHtml = `
+        <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:8px;margin-bottom:8px;">
+          <thead>
+            <tr style="background:#f5f5f5;">
+              <th style="padding:9px 12px;border-bottom:2px solid #ddd;width:40px;">#</th>
+              <th style="padding:9px 12px;border-bottom:2px solid #ddd;width:72px;">Type</th>
+              <th style="padding:9px 12px;border-bottom:2px solid #ddd;width:170px;">Field / Element</th>
+              <th style="padding:9px 12px;border-bottom:2px solid #ddd;width:140px;">Value Entered</th>
+              <th style="padding:9px 12px;border-bottom:2px solid #ddd;">Step Explanation</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+
+      return shotHtml + tableHtml;
+    };
+
+    const bodyHtml = groups.map((g, gi) => renderGroup(g, gi)).join('\n');
+    const hasAnyFields = groups.some(g => g.steps.length > 0);
+    const content = hasAnyFields
+      ? bodyHtml
+      : (navScreenShot
+          ? `<div style="margin:14px 0 20px;"><img src="${navScreenShot}" style="width:100%;border:1px solid #ddd;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,.08);" /></div>` : '')
+        + '<p style="color:#aaa;font-size:12px;font-style:italic;">No field interactions recorded on this screen.</p>';
 
     return `
     <section id="screen-${si}" style="margin-bottom:50px;page-break-inside:avoid;">
       <h2 style="color:${REDWOOD};border-bottom:2px solid ${REDWOOD};padding-bottom:6px;margin-top:36px;">
         ${escapeHtml(sc.title)}
       </h2>
-      ${screenshotHtml}
-      ${tableHtml}
+      ${content}
     </section>`;
   }).join('\n');
 
@@ -466,7 +498,7 @@ const isElectron = () => !!(window as any).electronAPI?.isElectron;
 const formatTime = (s: number) =>
   `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
 
-const STEP_COLORS: Record<string, string> = { click: 'blue', input: 'green', navigate: 'orange' };
+const STEP_COLORS: Record<string, string> = { click: 'blue', input: 'green', navigate: 'orange', snapshot: 'purple' };
 
 const OracleFusion: React.FC = () => {
   const navigate = useNavigate();
@@ -937,6 +969,53 @@ const OracleFusion: React.FC = () => {
     }
   };
 
+  // ---- Capture Screenshot + Fields (multi-tab: appends, never replaces) ----
+  const handleCaptureTab = async () => {
+    const wv = webviewRef.current;
+    if (!wv) return;
+    try {
+      const raw = await wv.executeJavaScript('window.__reactErpCaptureFields ? window.__reactErpCaptureFields() : "[]"');
+      const captured: any[] = JSON.parse(raw || '[]');
+      if (!captured.length) { message.warning('No filled fields found on this page'); return; }
+
+      const currentTitle = currentPageTitleRef.current ||
+        await wv.executeJavaScript('document.title');
+
+      // Capture screenshot of current state
+      const shot = await wv.capturePage();
+      const dataUrl = shot?.resize?.({ width: 960 })?.toDataURL?.() || shot?.toDataURL?.() || '';
+
+      const now = Date.now();
+      // Snapshot step — acts as a section marker carrying the screenshot
+      const snapshotStep: Step = {
+        id: now + 'snap' + Math.random(),
+        type: 'snapshot',
+        fieldName: currentTitle,
+        action: 'Snapshot',
+        value: '',
+        description: `Screenshot: ${currentTitle}`,
+        url: wv.getURL?.() || '',
+        pageTitle: currentTitle,
+        timestamp: now,
+        screenshot: dataUrl,
+      };
+
+      // Field steps — appended after snapshot, no screenshot (it lives on the snapshot step)
+      const enriched: Step[] = captured.map((s: any, i: number) => ({
+        ...s,
+        id: now + i + Math.random() + '',
+        pageTitle: currentTitle,
+        screenshot: undefined,
+      }));
+
+      // Always APPEND — never replace — so every tab is preserved independently
+      setSteps(prev => [...prev, snapshotStep, ...enriched]);
+      message.success(`Captured screenshot + ${captured.length} fields from "${currentTitle}"`);
+    } catch (e: any) {
+      message.error('Capture failed: ' + e.message);
+    }
+  };
+
   // ---- Document Generation ----
   const handleGenerateManual = () => {
     if (!steps.length) { message.warning('No steps recorded yet'); return; }
@@ -1005,10 +1084,16 @@ const OracleFusion: React.FC = () => {
         {/* Track Steps */}
         {tracking ? (
           <>
-            <Tooltip title="Scan all filled fields on this screen and replace noisy clicks with clean data">
+            <Tooltip title="Scan fields and replace noisy clicks with clean data (replaces existing captures for this screen)">
               <Button size="small" icon={<FileTextOutlined />} onClick={handleCaptureFields}
                 style={{ background: '#1b5e20', border: 'none', color: '#fff', fontWeight: 600 }}>
                 Capture Fields
+              </Button>
+            </Tooltip>
+            <Tooltip title="Capture screenshot + fields and APPEND — use this when switching between tab pages on the same screen">
+              <Button size="small" icon={<CameraOutlined />} onClick={handleCaptureTab}
+                style={{ background: '#4a148c', border: 'none', color: '#fff', fontWeight: 600 }}>
+                Capture Tab
               </Button>
             </Tooltip>
             <Badge count={steps.length} size="small" offset={[-4, 0]}>
