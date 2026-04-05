@@ -33,9 +33,12 @@ import {
   UnorderedListOutlined,
   ApiOutlined,
   CopyOutlined,
+  DownloadOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../../config/api.config';
+import * as XLSX from 'xlsx';
+import { saveAs } from 'file-saver';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -439,6 +442,81 @@ export default function JournalReconciliation() {
     }
   }, [selectedLedger, selectedPeriod]);
 
+  // ── Export to Excel ────────────────────────────────────────────────────────
+  const handleExport = useCallback(() => {
+    const wb = XLSX.utils.book_new();
+
+    // ── Sheet 1: Batches summary ─────────────────────────────────────────────
+    const batchRows = filteredBatches.map((b) => ({
+      'Batch ID':       b.je_batch_id,
+      'Batch Name':     b.batch_name,
+      'Period':         b.period_name,
+      'Batch DR':       b.batch_dr,
+      'Batch CR':       b.batch_cr,
+      'Headers DR':     b.headers_dr,
+      'Headers CR':     b.headers_cr,
+      'Lines DR':       b.lines_dr,
+      'Lines CR':       b.lines_cr,
+      'Header Count':   b.header_count,
+      'Line Count':     b.line_count,
+      'Batch↔Hdr DR':  b.batch_hdr_dr_ok === 'Y' ? 'OK' : 'MISMATCH',
+      'Batch↔Hdr CR':  b.batch_hdr_cr_ok === 'Y' ? 'OK' : 'MISMATCH',
+      'Hdr↔Lines DR':  b.hdr_lines_dr_ok === 'Y' ? 'OK' : 'MISMATCH',
+      'Hdr↔Lines CR':  b.hdr_lines_cr_ok === 'Y' ? 'OK' : 'MISMATCH',
+      'Status': (
+        b.batch_hdr_dr_ok === 'N' || b.batch_hdr_cr_ok === 'N' ||
+        b.hdr_lines_dr_ok === 'N' || b.hdr_lines_cr_ok === 'N'
+      ) ? 'Mismatch' : b.line_count === 0 ? 'No Lines' : 'Matched',
+    }));
+    const ws1 = XLSX.utils.json_to_sheet(batchRows);
+    ws1['!cols'] = [
+      { wch: 10 }, { wch: 40 }, { wch: 10 }, { wch: 14 }, { wch: 14 },
+      { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 },
+      { wch: 10 }, { wch: 10 }, { wch: 13 }, { wch: 13 }, { wch: 13 }, { wch: 13 },
+      { wch: 12 },
+    ];
+    XLSX.utils.book_append_sheet(wb, ws1, 'Batches');
+
+    // ── Sheet 2: Headers detail ──────────────────────────────────────────────
+    const headerRows: any[] = [];
+    filteredBatches.forEach((b) => {
+      (b.headers ?? []).forEach((h: any) => {
+        headerRows.push({
+          'Batch ID':      b.je_batch_id,
+          'Batch Name':    b.batch_name,
+          'Batch Period':  b.period_name,
+          'Header ID':     h.je_header_id,
+          'Ledger Name':   h.ledger_name,
+          'Journal Name':  h.journal_name,
+          'Description':   h.description,
+          'Period':        h.period_name,
+          'Status':        h.status,
+          'Header DR':     h.header_dr,
+          'Header CR':     h.header_cr,
+          'Lines DR':      h.lines_dr,
+          'Lines CR':      h.lines_cr,
+          'Line Count':    h.line_count,
+          'DR Match':      h.dr_ok === 'Y' ? 'OK' : 'MISMATCH',
+          'CR Match':      h.cr_ok === 'Y' ? 'OK' : 'MISMATCH',
+        });
+      });
+    });
+    if (headerRows.length > 0) {
+      const ws2 = XLSX.utils.json_to_sheet(headerRows);
+      ws2['!cols'] = [
+        { wch: 10 }, { wch: 35 }, { wch: 10 }, { wch: 10 }, { wch: 22 },
+        { wch: 35 }, { wch: 30 }, { wch: 10 }, { wch: 12 },
+        { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 },
+        { wch: 10 }, { wch: 10 }, { wch: 10 },
+      ];
+      XLSX.utils.book_append_sheet(wb, ws2, 'Headers');
+    }
+
+    const filename = `gl_reconciliation_${selectedLedger ?? 'all'}_${selectedPeriod ?? 'all-periods'}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const wbOut = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    saveAs(new Blob([wbOut], { type: 'application/octet-stream' }), filename);
+  }, [filteredBatches, selectedLedger, selectedPeriod]);
+
   // ── Expanded row: headers panel with drilldown to lines ───────────────────
   const expandedRowRender = (record: BatchRow) => (
     <HeadersPanel headers={record.headers} onLinesUrlChange={setLinesUrl} />
@@ -651,6 +729,16 @@ export default function JournalReconciliation() {
               >
                 Load
               </Button>
+              <Tooltip title="Export to Excel">
+                <Button
+                  icon={<DownloadOutlined />}
+                  disabled={filteredBatches.length === 0}
+                  onClick={handleExport}
+                  style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}
+                >
+                  Export
+                </Button>
+              </Tooltip>
               <Tooltip title="View API URLs">
                 <Button icon={<ApiOutlined />} onClick={() => setApiModalOpen(true)} />
               </Tooltip>
