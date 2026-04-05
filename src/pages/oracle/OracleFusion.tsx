@@ -204,10 +204,12 @@ const INJECT_SCRIPT = `
 
   console.log('[ReactERP] Step tracking active');
 
-  // ── Snapshot: scan all filled inputs on demand ────────────────────────────
+  // ── Snapshot: scan all filled inputs AND read-only ADF display fields ────────
   window.__reactErpCaptureFields = function() {
     var results = [];
     var seen = {};
+
+    // ── 1. Standard form inputs / ARIA widgets ──────────────────────────────
     var els = Array.from(document.querySelectorAll(
       'input, select, textarea, [role="textbox"], [role="combobox"], [role="spinbutton"]'
     ));
@@ -245,6 +247,55 @@ const INJECT_SCRIPT = `
         timestamp: Date.now()
       });
     });
+
+    // ── 2. Oracle ADF read-only display fields ──────────────────────────────
+    // ADF renders read-only fields as label text + adjacent output text (spans/divs/tds).
+    // Strategy: find label elements, then look for the value in the next sibling cell/element.
+    var labelEls = Array.from(document.querySelectorAll(
+      'label, [class*="af_panelLabelAndMessage_label"], [class*="AFPanelFormLayoutLabel"]'
+    ));
+    labelEls.forEach(function(lbl) {
+      var labelText = lbl.textContent.trim().replace(/:$/, '').trim();
+      if (!labelText || labelText.length < 2 || labelText.length > 80) return;
+      if (seen[labelText]) return;
+
+      // Try to find the value in the adjacent element
+      // Pattern 1: <td>label</td><td>value</td>
+      var parentCell = lbl.closest('td, th');
+      var valueEl = parentCell ? parentCell.nextElementSibling : null;
+      // Pattern 2: label is directly followed by sibling span/div
+      if (!valueEl) valueEl = lbl.nextElementSibling;
+      // Pattern 3: parent div → next sibling div (ADF panelFormLayout)
+      if (!valueEl) {
+        var p = lbl.parentElement;
+        if (p) valueEl = p.nextElementSibling;
+      }
+
+      if (!valueEl) return;
+
+      // Get text, skip if empty, too short, or contains nested inputs (handled above)
+      var val = (valueEl.textContent || '').trim();
+      // Strip internal whitespace runs
+      val = val.replace(/\\s+/g, ' ').trim();
+      if (!val || val.length < 1 || val.length > 300) return;
+      // Skip if the element itself contains an input (already captured above)
+      if (valueEl.querySelector('input, select, textarea')) return;
+      // Skip noise values
+      if (/^[0-9]+$/.test(val) && val.length < 2) return;
+
+      seen[labelText] = true;
+      results.push({
+        type: 'input',
+        fieldName: labelText,
+        action: 'Display',
+        value: val,
+        description: 'Display "' + val + '" — ' + labelText,
+        url: location.href,
+        pageTitle: document.title,
+        timestamp: Date.now()
+      });
+    });
+
     return JSON.stringify(results);
   };
 })();
@@ -930,9 +981,10 @@ const OracleFusion: React.FC = () => {
     const wv = webviewRef.current;
     if (!wv) return;
     try {
+      await injectTracking(wv);
       const raw = await wv.executeJavaScript('window.__reactErpCaptureFields ? window.__reactErpCaptureFields() : "[]"');
       const captured: any[] = JSON.parse(raw || '[]');
-      if (!captured.length) { message.warning('No filled fields found on this page'); return; }
+      if (!captured.length) { message.warning('No fields found — try Capture Tab to save a screenshot instead'); return; }
 
       const currentTitle = currentPageTitleRef.current ||
         await wv.executeJavaScript('document.title');
@@ -974,19 +1026,21 @@ const OracleFusion: React.FC = () => {
     const wv = webviewRef.current;
     if (!wv) return;
     try {
+      // Always inject the script first so __reactErpCaptureFields is available
+      await injectTracking(wv);
+
       const raw = await wv.executeJavaScript('window.__reactErpCaptureFields ? window.__reactErpCaptureFields() : "[]"');
       const captured: any[] = JSON.parse(raw || '[]');
-      if (!captured.length) { message.warning('No filled fields found on this page'); return; }
 
       const currentTitle = currentPageTitleRef.current ||
         await wv.executeJavaScript('document.title');
 
-      // Capture screenshot of current state
+      // Always capture screenshot — even if no fields found
       const shot = await wv.capturePage();
       const dataUrl = shot?.resize?.({ width: 960 })?.toDataURL?.() || shot?.toDataURL?.() || '';
 
       const now = Date.now();
-      // Snapshot step — acts as a section marker carrying the screenshot
+      // Snapshot step — section marker carrying the screenshot
       const snapshotStep: Step = {
         id: now + 'snap' + Math.random(),
         type: 'snapshot',
@@ -1000,7 +1054,7 @@ const OracleFusion: React.FC = () => {
         screenshot: dataUrl,
       };
 
-      // Field steps — appended after snapshot, no screenshot (it lives on the snapshot step)
+      // Field steps — appended after snapshot
       const enriched: Step[] = captured.map((s: any, i: number) => ({
         ...s,
         id: now + i + Math.random() + '',
@@ -1010,7 +1064,12 @@ const OracleFusion: React.FC = () => {
 
       // Always APPEND — never replace — so every tab is preserved independently
       setSteps(prev => [...prev, snapshotStep, ...enriched]);
-      message.success(`Captured screenshot + ${captured.length} fields from "${currentTitle}"`);
+
+      if (captured.length > 0) {
+        message.success(`Captured screenshot + ${captured.length} fields from "${currentTitle}"`);
+      } else {
+        message.info(`Screenshot captured from "${currentTitle}" (no fillable fields detected — read-only view)`);
+      }
     } catch (e: any) {
       message.error('Capture failed: ' + e.message);
     }
