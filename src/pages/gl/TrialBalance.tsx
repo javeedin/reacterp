@@ -432,14 +432,15 @@ const TrialBalance: React.FC = () => {
     // Compare each Lines Summary row with TB
     const newMap = new Map<string, { tbDr: number; tbCr: number; matched: boolean }>();
     for (const row of lsData) {
-      const key = `${(row.seg1_company || '').trim()}|${(row.seg4_account || '').trim()}`;
-      const tb  = tbMap.get(key);
+      const tbKey  = `${(row.seg1_company || '').trim()}|${(row.seg4_account || '').trim()}`;
+      const rowKey = `${row.account_combination}||${row.ledger_name}||${row.period_name}`;
+      const tb     = tbMap.get(tbKey);
       if (!tb) {
-        newMap.set(row.account_combination, { tbDr: 0, tbCr: 0, matched: false });
+        newMap.set(rowKey, { tbDr: 0, tbCr: 0, matched: false });
       } else {
         const drOk = Math.abs(tb.dr - row.total_dr) < 0.01;
         const crOk = Math.abs(tb.cr - row.total_cr) < 0.01;
-        newMap.set(row.account_combination, { tbDr: tb.dr, tbCr: tb.cr, matched: drOk && crOk });
+        newMap.set(rowKey, { tbDr: tb.dr, tbCr: tb.cr, matched: drOk && crOk });
       }
     }
 
@@ -1295,7 +1296,7 @@ const TrialBalance: React.FC = () => {
         align: 'center' as const,
         fixed: 'right' as const,
         render: (_: any, r: LineSummaryRow) => {
-          const res = lsReconMap.get(r.account_combination);
+          const res = lsReconMap.get(`${r.account_combination}||${r.ledger_name}||${r.period_name}`);
           if (!res) return <Tag style={{ fontSize: 10 }} color="orange">No TB</Tag>;
           if (res.matched) {
             return <CheckCircleOutlined style={{ color: REDWOOD.success, fontSize: 16 }} />;
@@ -1519,7 +1520,7 @@ const TrialBalance: React.FC = () => {
         <Table<LineSummaryRow>
           columns={columns}
           dataSource={visibleData}
-          rowKey="account_combination"
+          rowKey={(r: LineSummaryRow) => `${r.account_combination}||${r.ledger_name}||${r.period_name}`}
           size="small"
           loading={lsLoading}
           scroll={{ x: 1100 }}
