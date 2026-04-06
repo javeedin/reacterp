@@ -216,6 +216,8 @@ const TrialBalance: React.FC = () => {
   const [lsSearch,   setLsSearch]   = useState('');
   const [lsApiUrl,   setLsApiUrl]   = useState('');
   const [lsError,    setLsError]    = useState<string | null>(null);
+  const [lsReconMap, setLsReconMap] = useState<Map<string, { tbDr: number; tbCr: number; matched: boolean }>>(new Map());
+  const [lsReconDone, setLsReconDone] = useState(false);
 
   // Get unique years from periods
   const availableYears = useMemo(() => {
@@ -404,6 +406,49 @@ const TrialBalance: React.FC = () => {
     setLsVisible(true);
     setActiveTab('lines-summary');
   }, [tabs, activeTab, lsPeriod]);
+
+  const handleReconcile = useCallback(() => {
+    if (!lsPeriod) { message.warning('Select a period first'); return; }
+    if (!lsData.length) { message.warning('Fetch Lines Summary data first'); return; }
+
+    // Find the GL TB tab for this period
+    const tbTab = tabs.find(t => t.periodName === lsPeriod);
+    if (!tbTab || !tbTab.data.length) {
+      message.warning(`Open the GL Trial Balance tab for ${lsPeriod} first`);
+      return;
+    }
+
+    // Build TB map: company|account → { dr, cr }
+    const tbMap = new Map<string, { dr: number; cr: number }>();
+    for (const rec of tbTab.data) {
+      const key = `${(rec.company || '').trim()}|${(rec.account || '').trim()}`;
+      const prev = tbMap.get(key) ?? { dr: 0, cr: 0 };
+      tbMap.set(key, {
+        dr: prev.dr + (rec.debit  || 0),
+        cr: prev.cr + (rec.credit || 0),
+      });
+    }
+
+    // Compare each Lines Summary row with TB
+    const newMap = new Map<string, { tbDr: number; tbCr: number; matched: boolean }>();
+    for (const row of lsData) {
+      const key = `${(row.seg1_company || '').trim()}|${(row.seg4_account || '').trim()}`;
+      const tb  = tbMap.get(key);
+      if (!tb) {
+        newMap.set(row.account_combination, { tbDr: 0, tbCr: 0, matched: false });
+      } else {
+        const drOk = Math.abs(tb.dr - row.total_dr) < 0.01;
+        const crOk = Math.abs(tb.cr - row.total_cr) < 0.01;
+        newMap.set(row.account_combination, { tbDr: tb.dr, tbCr: tb.cr, matched: drOk && crOk });
+      }
+    }
+
+    setLsReconMap(newMap);
+    setLsReconDone(true);
+    const matched   = [...newMap.values()].filter(v => v.matched).length;
+    const unmatched = newMap.size - matched;
+    message.info(`Reconciliation: ${matched} matched ✓, ${unmatched} unmatched ✗`);
+  }, [lsPeriod, lsData, tabs]);
 
   // Update tab filter
   const updateTabFilter = useCallback((tabKey: string, field: 'selectedCompany' | 'selectedCurrency', value: string | null) => {
@@ -1148,7 +1193,7 @@ const TrialBalance: React.FC = () => {
 
     // Client-side filter
     const visibleData = lsData.filter(r => {
-      if (lsLedger && r.ledger_name !== lsLedger) return false;
+      if (lsLedger && (r.ledger_name || '').trim().toLowerCase() !== lsLedger.trim().toLowerCase()) return false;
       if (lsSearch) {
         const q = lsSearch.toLowerCase();
         if (
@@ -1243,6 +1288,32 @@ const TrialBalance: React.FC = () => {
         sorter: (a: LineSummaryRow, b: LineSummaryRow) => a.line_count - b.line_count,
         render: (v: number) => <Text type="secondary" style={{ fontSize: 11 }}>{v}</Text>,
       },
+      ...(lsReconDone ? [{
+        title: <Tooltip title="Reconciled against GL Trial Balance PTD"><CheckCircleOutlined style={{ color: REDWOOD.success }} /> TB Recon</Tooltip>,
+        key: 'recon',
+        width: 90,
+        align: 'center' as const,
+        fixed: 'right' as const,
+        render: (_: any, r: LineSummaryRow) => {
+          const res = lsReconMap.get(r.account_combination);
+          if (!res) return <Tag style={{ fontSize: 10 }} color="orange">No TB</Tag>;
+          if (res.matched) {
+            return <CheckCircleOutlined style={{ color: REDWOOD.success, fontSize: 16 }} />;
+          }
+          return (
+            <Tooltip title={
+              <span>
+                TB PTD DR: {res.tbDr.toFixed(2)}<br />
+                LS Total DR: {r.total_dr.toFixed(2)}<br />
+                TB PTD CR: {res.tbCr.toFixed(2)}<br />
+                LS Total CR: {r.total_cr.toFixed(2)}
+              </span>
+            }>
+              <CloseCircleOutlined style={{ color: REDWOOD.primary, fontSize: 16 }} />
+            </Tooltip>
+          );
+        },
+      }] : []),
     ];
 
     return (
@@ -1312,6 +1383,23 @@ const TrialBalance: React.FC = () => {
                 Fetch
               </Button>
             </Col>
+            {lsData.length > 0 && (
+              <Col style={{ marginTop: 18 }}>
+                <Tooltip title="Compare Lines Summary PTD DR/CR against GL Trial Balance for the same period">
+                  <Button
+                    size="small"
+                    icon={<CheckCircleOutlined />}
+                    onClick={handleReconcile}
+                    style={{
+                      color: lsReconDone ? REDWOOD.success : REDWOOD.primary,
+                      borderColor: lsReconDone ? REDWOOD.success : REDWOOD.primary,
+                    }}
+                  >
+                    Reconcile TB
+                  </Button>
+                </Tooltip>
+              </Col>
+            )}
             {lsData.length > 0 && (
               <Col style={{ marginTop: 18 }}>
                 <Button
