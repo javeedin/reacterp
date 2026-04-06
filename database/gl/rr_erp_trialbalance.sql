@@ -309,42 +309,41 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
                 EXTRACT(YEAR  FROM TO_DATE('01-' || ra.PERIOD_NAME, 'DD-Mon-RR'))  AS PERIOD_YEAR,
                 EXTRACT(MONTH FROM TO_DATE('01-' || ra.PERIOD_NAME, 'DD-Mon-RR'))  AS PERIOD_NUM,
 
-                -- Account segments: prefer data from REERP_GL_CODE_COMBINATIONS
-                -- (joined by inlining the segment concatenation formula — virtual
-                -- columns cannot be referenced in PL/SQL JOIN conditions);
-                -- fall back to REGEXP_SUBSTR parsing of ACCOUNT_COMBINATION.
-                NVL(cc.SEGMENT1_COMPANY,
+                -- Account segments: REERP_GL_CODE_COMBINATIONS uses the v2 schema
+                -- with quoted mixed-case column names ("buimercFinGlb..." prefix).
+                -- Fall back to REGEXP_SUBSTR when no COA match is found.
+                NVL(cc."buimercFinGlbCoaCo",
                     NULLIF(TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,1)),
                            ''))                                    AS COMPANY,
-                NVL(cc.SEGMENT2_LOB,
+                NVL(cc."buimercFinGlbCoaLob",
                     NULLIF(TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,2)),
                            ''))                                    AS LOB,
-                NVL(cc.SEGMENT3_DEPARTMENT,
+                NVL(cc."buimercFinGlbCoaDepartment",
                     NULLIF(TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,3)),
                            ''))                                    AS DEPARTMENT,
-                NVL(cc.SEGMENT4_ACCOUNT,
+                NVL(cc."buimercFinGlbCoaAccount",
                     NULLIF(TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,4)),
                            ''))                                    AS ACCOUNT,
-                cc.FINANCIAL_CATEGORY                             AS ACCOUNT_DESC,
-                NVL(cc.SEGMENT5_SUB_ACCOUNT,
+                cc."FinancialCategory"                             AS ACCOUNT_DESC,
+                NVL(cc."buimercFinGlbCoaSubAcc",
                     NULLIF(TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,5)),
                            ''))                                    AS SUB_ACCOUNT,
-                NVL(cc.SEGMENT6_ANALYSIS,
+                NVL(cc."buimercFinGlbCoaAlys",
                     NULLIF(TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,6)),
                            ''))                                    AS ANALYSIS,
-                NVL(cc.SEGMENT7_INTERCOMPANY,
+                NVL(cc."buimercFinGlbCoaIc",
                     NULLIF(TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,7)),
                            ''))                                    AS INTERCOMPANY,
-                NVL(cc.SEGMENT8_FUTURE1,
+                NVL(cc."buimercFinGlbCoaFut1",
                     NULLIF(TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,8)),
                            ''))                                    AS FUTURE1,
-                NVL(cc.SEGMENT9_FUTURE2,
+                NVL(cc."buimercFinGlbCoaFut2",
                     NULLIF(TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,9)),
                            ''))                                    AS FUTURE2,
                 -- Account type (determines opening balance carry-forward rule)
                 -- A=Asset  L=Liability  O=Owner's Equity → Balance Sheet (carry forward)
                 -- R=Revenue  E=Expense                   → P&L (reset each fiscal year)
-                NVL(cc.ACCOUNT_TYPE, 'E')                         AS ACCOUNT_TYPE,
+                NVL(cc."AccountType", 'E')                        AS ACCOUNT_TYPE,
 
                 ra.PTD_DR,
                 ra.PTD_CR,
@@ -352,15 +351,15 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
 
             FROM raw_agg ra
             LEFT JOIN REERP_GL_CODE_COMBINATIONS cc
-                   ON (   cc.SEGMENT1_COMPANY
-                       || '-' || cc.SEGMENT2_LOB
-                       || '-' || cc.SEGMENT3_DEPARTMENT
-                       || '-' || cc.SEGMENT4_ACCOUNT
-                       || '-' || cc.SEGMENT5_SUB_ACCOUNT
-                       || '-' || cc.SEGMENT6_ANALYSIS
-                       || '-' || cc.SEGMENT7_INTERCOMPANY
-                       || '-' || cc.SEGMENT8_FUTURE1
-                       || '-' || cc.SEGMENT9_FUTURE2
+                   ON (   cc."buimercFinGlbCoaCo"
+                       || '-' || cc."buimercFinGlbCoaLob"
+                       || '-' || cc."buimercFinGlbCoaDepartment"
+                       || '-' || cc."buimercFinGlbCoaAccount"
+                       || '-' || cc."buimercFinGlbCoaSubAcc"
+                       || '-' || cc."buimercFinGlbCoaAlys"
+                       || '-' || cc."buimercFinGlbCoaIc"
+                       || '-' || cc."buimercFinGlbCoaFut1"
+                       || '-' || cc."buimercFinGlbCoaFut2"
                        ) = ra.ACCOUNT_COMBINATION
         ),
 
