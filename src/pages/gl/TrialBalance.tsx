@@ -421,29 +421,20 @@ const TrialBalance: React.FC = () => {
       return;
     }
 
-    const RECON_CCY = 'AED';
-
-    // Build TB map (AED only): company|account → { dr, cr }
+    // Build TB map: company|account → { dr, cr } (sum all rows — TB debit/credit are functional currency)
     const tbMap = new Map<string, { dr: number; cr: number }>();
     for (const rec of tbTab.data) {
-      if ((rec.currency || rec.currency_code || '').toUpperCase() !== RECON_CCY) continue;
       const key  = `${(rec.company || '').trim()}|${(rec.account || '').trim()}`;
       const prev = tbMap.get(key) ?? { dr: 0, cr: 0 };
       tbMap.set(key, { dr: prev.dr + (rec.debit || 0), cr: prev.cr + (rec.credit || 0) });
     }
 
-    // Aggregate LS data (AED only) at account level: company|account|ledger → totals
+    // Aggregate LS data (ACCOUNTED_DR/CR are functional currency — sum all currencies)
     const lsAcctMap = new Map<string, { dr: number; cr: number }>();
     for (const row of lsData) {
-      if ((row.currency || '').toUpperCase() !== RECON_CCY) continue;
       const key  = `${(row.seg1_company || '').trim()}|${(row.seg4_account || '').trim()}|${(row.ledger_name || '').trim()}`;
       const prev = lsAcctMap.get(key) ?? { dr: 0, cr: 0 };
       lsAcctMap.set(key, { dr: prev.dr + row.total_dr, cr: prev.cr + row.total_cr });
-    }
-
-    if (lsAcctMap.size === 0) {
-      message.warning('No AED lines found in Lines Summary for this period');
-      return;
     }
 
     // Build recon map keyed by company|account|ledger
@@ -462,7 +453,7 @@ const TrialBalance: React.FC = () => {
     setLsReconDone(true);
     const matched   = [...newMap.values()].filter(v => v.matched).length;
     const unmatched = newMap.size - matched;
-    message.info(`AED Reconciliation: ${matched} matched ✓, ${unmatched} unmatched ✗`);
+    message.info(`Reconciliation: ${matched} matched ✓, ${unmatched} unmatched ✗`);
   }, [lsPeriod, lsData, tabs]);
 
   // Update tab filter
@@ -1227,12 +1218,38 @@ const TrialBalance: React.FC = () => {
       if (!tbDescMap.has(k) && rec.account_desc) tbDescMap.set(k, rec.account_desc);
     }
 
-    // Each raw row is grouped by account+ledger+period+currency from SQL
-    const displayData: any[] = visibleData.map(r => ({
-      ...r,
-      rowKey: `${r.seg1_company}|${r.seg4_account}|${r.ledger_name}|${r.currency}`,
-      account_desc: tbDescMap.get(`${(r.seg1_company||'').trim()}|${(r.seg4_account||'').trim()}`) || '',
-    }));
+    // When no currency selected (All): aggregate ACCOUNTED DR/CR per company+account+ledger
+    // When specific currency selected: filter rows to that currency, then show as-is
+    let displayData: any[];
+    if (!lsCurrency) {
+      const aggMap = new Map<string, any>();
+      for (const r of visibleData) {
+        const key = `${r.seg1_company}|${r.seg4_account}|${r.ledger_name}`;
+        if (!aggMap.has(key)) {
+          aggMap.set(key, {
+            rowKey: key,
+            seg1_company: r.seg1_company,
+            seg4_account: r.seg4_account,
+            ledger_name:  r.ledger_name,
+            period_name:  r.period_name,
+            account_desc: tbDescMap.get(`${(r.seg1_company||'').trim()}|${(r.seg4_account||'').trim()}`) || '',
+            total_dr: 0, total_cr: 0, net_amount: 0, line_count: 0,
+          });
+        }
+        const row = aggMap.get(key)!;
+        row.total_dr   += r.total_dr;
+        row.total_cr   += r.total_cr;
+        row.net_amount += r.net_amount;
+        row.line_count += r.line_count;
+      }
+      displayData = [...aggMap.values()];
+    } else {
+      displayData = visibleData.map(r => ({
+        ...r,
+        rowKey: `${r.seg1_company}|${r.seg4_account}|${r.ledger_name}|${r.currency}`,
+        account_desc: tbDescMap.get(`${(r.seg1_company||'').trim()}|${(r.seg4_account||'').trim()}`) || '',
+      }));
+    }
 
     // KPI totals (always from displayData)
     const totalDr    = displayData.reduce((s: number, r: any) => s + (r.total_dr   || 0), 0);
@@ -1304,10 +1321,6 @@ const TrialBalance: React.FC = () => {
         filters: ledgers.map(l => ({ text: l, value: l })),
         onFilter: (val: any, r: any) => r.ledger_name === val,
         render: (v: string) => <Text type="secondary" style={{ fontSize: 11 }}>{v||'—'}</Text> },
-      { title: 'CCY', dataIndex: 'currency', key: 'currency', width: 60,
-        filters: currencies.map(c => ({ text: c, value: c })),
-        onFilter: (val: any, r: any) => (r.currency||'').toUpperCase() === (val||'').toUpperCase(),
-        render: (v: string) => <Tag style={{ fontSize: 10 }}>{v || '—'}</Tag> },
       numCol(<span style={{ color: REDWOOD.info }}>Total DR</span>,   'total_dr',   REDWOOD.info),
       numCol(<span style={{ color: REDWOOD.primary }}>Total CR</span>, 'total_cr',   REDWOOD.primary),
       numCol('Net (Dr−Cr)', 'net_amount', ''),
@@ -1541,7 +1554,7 @@ const TrialBalance: React.FC = () => {
           summary={() =>
             displayData.length > 0 ? (
               <Table.Summary.Row style={{ background: REDWOOD.surfaceSecondary }}>
-                <Table.Summary.Cell index={0} colSpan={5}>
+                <Table.Summary.Cell index={0} colSpan={4}>
                   <Text strong style={{ fontSize: 11 }}>TOTAL ({displayData.length} rows)</Text>
                 </Table.Summary.Cell>
                 <Table.Summary.Cell index={1} align="right">
