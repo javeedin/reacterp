@@ -2629,9 +2629,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // ────────────────────────────────────────────────────────────────────────
 
   // Invoice Actions dropdown menu items
-  // For synced invoices: only show Pay in Full (if unpaid) and Manage Installments
+  // For synced invoices: only show View Accounting, Manage Installments, Pay in Full (if unpaid)
+  // Create Accounting is NOT available for synced invoices (they are accounted in Oracle Fusion)
   const invoiceActionItems: MenuProps['items'] = isInvoiceSynced
     ? [
+        {
+          key: 'viewAccounting',
+          icon: <AccountBookOutlined />,
+          label: 'View Accounting',
+        },
+        { type: 'divider' as const },
         {
           key: 'manageInstallments',
           icon: <ScheduleOutlined />,
@@ -2955,6 +2962,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   const handleInvoiceAction = async ({ key }: { key: string }) => {
     switch (key) {
+      case 'viewAccounting':
+        setAccountingModalVisible(true);
+        break;
       case 'validate':
         runValidation();
         break;
