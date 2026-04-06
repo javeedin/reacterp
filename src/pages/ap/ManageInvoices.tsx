@@ -918,7 +918,14 @@ const ManageInvoices: React.FC = () => {
     if (quickCreateHandled.current === location.key) return;
     quickCreateHandled.current = location.key;
 
-    if (state.quickCreateData) {
+    if (state.showAndTellOpen && state.demoData) {
+      // Show & Tell tour: open Create Invoice tab with demo data pre-filled
+      const satData = { ...state.demoData } as InvoiceInitialData;
+      if (satData.invoiceDate && typeof satData.invoiceDate === 'string') {
+        satData.invoiceDate = dayjs(satData.invoiceDate);
+      }
+      setTimeout(() => openCreateInvoiceTab(satData), 150);
+    } else if (state.quickCreateData) {
       // FloatingMenu / Autopilot flow: data already collected, open tab directly
       const qcData = { ...state.quickCreateData } as InvoiceInitialData;
       // Convert serialised date string back to dayjs (structured clone strips prototype)

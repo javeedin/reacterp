@@ -4,6 +4,7 @@ import { ConfigProvider, Spin } from 'antd';
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import MainLayout from './layouts/MainLayout';
+import { ShowAndTellProvider, ShowAndTellOverlay } from './features/showAndTell';
 
 // These two load immediately (login + home are always needed)
 import Login from './pages/Login';
@@ -97,6 +98,8 @@ function App() {
     >
       <AuthProvider>
         <HashRouter>
+          <ShowAndTellProvider>
+          <ShowAndTellOverlay />
           <Suspense fallback={
             <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
               <Spin size="large" />
@@ -207,6 +210,7 @@ function App() {
             <Route path="*" element={<Navigate to="/home" replace />} />
           </Routes>
           </Suspense>
+          </ShowAndTellProvider>
         </HashRouter>
       </AuthProvider>
     </ConfigProvider>

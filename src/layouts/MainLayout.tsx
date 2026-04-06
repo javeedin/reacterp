@@ -16,8 +16,10 @@ import {
   ProfileOutlined,
   PlaySquareOutlined,
   GlobalOutlined,
+  BookOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, Link } from 'react-router-dom';
+import { ShowAndTellPanel } from '../features/showAndTell';
 import { useAuth } from '../context/AuthContext';
 import ProfileModal from '../components/ProfileModal';
 import SupportTicketButton from '../components/SupportTicketButton';
@@ -56,6 +58,7 @@ const MainLayout: React.FC = () => {
   const [showIOSModal, setShowIOSModal] = useState(false);
   const [showInstallButton, setShowInstallButton] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [showAndTellOpen, setShowAndTellOpen] = useState(false);
 
   // Listen for PWA install prompt
   useEffect(() => {
@@ -229,6 +232,14 @@ const MainLayout: React.FC = () => {
               onClick={() => navigate('/training')}
             />
           </Tooltip>
+          <Tooltip title="Show &amp; Tell" placement="bottom">
+            <Button
+              type="text"
+              icon={<BookOutlined style={{ fontSize: 18, color: '#fff' }} />}
+              style={{ color: '#fff', background: showAndTellOpen ? 'rgba(255,255,255,0.2)' : undefined }}
+              onClick={() => setShowAndTellOpen(true)}
+            />
+          </Tooltip>
           <Tooltip title="Oracle Fusion" placement="bottom">
             <Button
               type="text"
@@ -338,6 +349,7 @@ const MainLayout: React.FC = () => {
       </Modal>
 
       <ProfileModal open={showProfile} onClose={() => setShowProfile(false)} />
+      <ShowAndTellPanel open={showAndTellOpen} onClose={() => setShowAndTellOpen(false)} />
     </Layout>
   );
 };

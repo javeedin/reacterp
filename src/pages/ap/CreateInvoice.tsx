@@ -4200,6 +4200,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               disabled={saving || !isValidated}
               icon={savedInvoiceId ? <SaveOutlined /> : undefined}
               style={{ background: isValidated ? REDWOOD.primary : undefined, borderColor: isValidated ? REDWOOD.primary : undefined }}
+              data-sat-id="invoice-save-button"
             >
               {savedInvoiceId ? 'Update Invoice' : 'Save'}
             </Button>
@@ -4346,6 +4347,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           name="businessUnit"
                           rules={[{ required: true, message: 'Required' }]}
                           style={{ marginBottom: 4 }}
+                          data-sat-id="invoice-business-unit"
                         >
                           <Select placeholder="Select Business Unit" showSearch allowClear>
                             {businessUnits.map(bu => (
@@ -4358,6 +4360,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           name="invoiceNumber"
                           rules={[{ required: true, message: 'Required' }]}
                           style={{ marginBottom: 4 }}
+                          data-sat-id="invoice-number"
                         >
                           <Input placeholder="Enter invoice number" />
                         </Form.Item>
@@ -4378,6 +4381,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           name="invoiceAmount"
                           rules={[{ required: true, message: 'Required' }]}
                           style={{ marginBottom: 4 }}
+                          data-sat-id="invoice-amount"
                         >
                           <InputNumber
                             style={{ width: '100%' }}
@@ -4392,6 +4396,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           name="invoiceDate"
                           rules={[{ required: true, message: 'Required' }]}
                           style={{ marginBottom: 4 }}
+                          data-sat-id="invoice-date"
                         >
                           <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
                         </Form.Item>
@@ -4412,6 +4417,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                       <Col span={8}>
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Supplier</Text>}
+                          data-sat-id="invoice-supplier"
                           required
                           style={{ marginBottom: 4 }}
                         >
@@ -4787,7 +4793,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             </div>
           )}
 
-          <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div data-sat-id="invoice-lines-table" style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text strong style={{ fontSize: 14, color: REDWOOD.neutral900 }}>
               Invoice Lines
               <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>({lines.length} line{lines.length !== 1 ? 's' : ''})</Text>
