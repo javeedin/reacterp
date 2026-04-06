@@ -109,6 +109,7 @@ BEGIN
                 REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,9)                AS seg9_future2,
                 hdr.LEDGER_NAME                                                    AS ledger_name,
                 hdr.PERIOD_NAME                                                    AS period_name,
+                hdr.CURRENCY_CODE                                                  AS currency,
                 SUM(NVL(lin.ACCOUNTED_DR,0))                                       AS total_dr,
                 SUM(NVL(lin.ACCOUNTED_CR,0))                                       AS total_cr,
                 SUM(NVL(lin.ACCOUNTED_DR,0)) - SUM(NVL(lin.ACCOUNTED_CR,0))       AS net_amount,
@@ -118,9 +119,9 @@ BEGIN
             WHERE lin.ACCOUNT_COMBINATION IS NOT NULL
               AND (l_period  IS NULL OR UPPER(hdr.PERIOD_NAME) = UPPER(l_period))
               AND (l_company IS NULL OR UPPER(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,1)) = UPPER(l_company))
-            GROUP BY lin.ACCOUNT_COMBINATION, hdr.LEDGER_NAME, hdr.PERIOD_NAME
+            GROUP BY lin.ACCOUNT_COMBINATION, hdr.LEDGER_NAME, hdr.PERIOD_NAME, hdr.CURRENCY_CODE
         )
-        ORDER BY seg1_company, seg4_account, account_combination
+        ORDER BY seg1_company, seg4_account, currency, account_combination
     ) LOOP
         APEX_JSON.open_object;
         APEX_JSON.write('account_combination', r.account_combination);
@@ -135,6 +136,7 @@ BEGIN
         APEX_JSON.write('seg9_future2',        r.seg9_future2);
         APEX_JSON.write('ledger_name',         r.ledger_name);
         APEX_JSON.write('period_name',         r.period_name);
+        APEX_JSON.write('currency',            r.currency);
         APEX_JSON.write('total_dr',            r.total_dr);
         APEX_JSON.write('total_cr',            r.total_cr);
         APEX_JSON.write('net_amount',          r.net_amount);

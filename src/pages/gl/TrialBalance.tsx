@@ -180,6 +180,7 @@ interface LineSummaryRow {
   seg9_future2:        string | null;
   ledger_name:         string | null;
   period_name:         string | null;
+  currency:            string | null;
   total_dr:            number;
   total_cr:            number;
   net_amount:          number;
@@ -215,6 +216,7 @@ const TrialBalance: React.FC = () => {
   const [lsPeriod,   setLsPeriod]   = useState<string | null>(null);
   const [lsCompany,  setLsCompany]  = useState<string | null>(null);
   const [lsLedger,   setLsLedger]   = useState<string | null>(null);
+  const [lsCurrency, setLsCurrency] = useState<string | null>(null);
   const [lsSearch,   setLsSearch]   = useState('');
   const [lsApiUrl,   setLsApiUrl]   = useState('');
   const [lsError,    setLsError]    = useState<string | null>(null);
@@ -227,6 +229,7 @@ const TrialBalance: React.FC = () => {
     lsDr: number; lsCr: number; lsNet: number; lsLines: number;
     tbRecords: GLBalanceRecord[];
   } | null>(null);
+  const [lsDetailCcy, setLsDetailCcy] = useState<string | null>(null);
 
   // Get unique years from periods
   const availableYears = useMemo(() => {
@@ -427,20 +430,29 @@ const TrialBalance: React.FC = () => {
       return;
     }
 
-    // Build TB map: company|account → { dr, cr }
+    const RECON_CCY = 'AED';
+
+    // Build TB map (AED only): company|account → { dr, cr }
     const tbMap = new Map<string, { dr: number; cr: number }>();
     for (const rec of tbTab.data) {
+      if ((rec.currency || rec.currency_code || '').toUpperCase() !== RECON_CCY) continue;
       const key  = `${(rec.company || '').trim()}|${(rec.account || '').trim()}`;
       const prev = tbMap.get(key) ?? { dr: 0, cr: 0 };
       tbMap.set(key, { dr: prev.dr + (rec.debit || 0), cr: prev.cr + (rec.credit || 0) });
     }
 
-    // Aggregate LS data at account level: company|account|ledger → totals
+    // Aggregate LS data (AED only) at account level: company|account|ledger → totals
     const lsAcctMap = new Map<string, { dr: number; cr: number }>();
     for (const row of lsData) {
+      if ((row.currency || '').toUpperCase() !== RECON_CCY) continue;
       const key  = `${(row.seg1_company || '').trim()}|${(row.seg4_account || '').trim()}|${(row.ledger_name || '').trim()}`;
       const prev = lsAcctMap.get(key) ?? { dr: 0, cr: 0 };
       lsAcctMap.set(key, { dr: prev.dr + row.total_dr, cr: prev.cr + row.total_cr });
+    }
+
+    if (lsAcctMap.size === 0) {
+      message.warning('No AED lines found in Lines Summary for this period');
+      return;
     }
 
     // Build recon map keyed by company|account|ledger
@@ -459,7 +471,7 @@ const TrialBalance: React.FC = () => {
     setLsReconDone(true);
     const matched   = [...newMap.values()].filter(v => v.matched).length;
     const unmatched = newMap.size - matched;
-    message.info(`Reconciliation: ${matched} matched ✓, ${unmatched} unmatched ✗`);
+    message.info(`AED Reconciliation: ${matched} matched ✓, ${unmatched} unmatched ✗`);
   }, [lsPeriod, lsData, tabs]);
 
   // Update tab filter
@@ -1200,12 +1212,14 @@ const TrialBalance: React.FC = () => {
       n === 0 ? '—' : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
     // Distinct values for dropdowns
-    const companies = [...new Set(lsData.map(r => r.seg1_company).filter(Boolean) as string[])].sort();
-    const ledgers   = [...new Set(lsData.map(r => r.ledger_name).filter(Boolean)  as string[])].sort();
+    const companies  = [...new Set(lsData.map(r => r.seg1_company).filter(Boolean) as string[])].sort();
+    const ledgers    = [...new Set(lsData.map(r => r.ledger_name).filter(Boolean)  as string[])].sort();
+    const currencies = [...new Set(lsData.map(r => r.currency).filter(Boolean)     as string[])].sort();
 
     // Client-side filter
     const visibleData = lsData.filter(r => {
-      if (lsLedger && (r.ledger_name || '').trim().toLowerCase() !== lsLedger.trim().toLowerCase()) return false;
+      if (lsLedger   && (r.ledger_name || '').trim().toLowerCase() !== lsLedger.trim().toLowerCase()) return false;
+      if (lsCurrency && (r.currency    || '').toUpperCase() !== lsCurrency.toUpperCase()) return false;
       if (lsSearch) {
         const q = lsSearch.toLowerCase();
         if (
@@ -1227,18 +1241,18 @@ const TrialBalance: React.FC = () => {
 
     type AcctRow = {
       rowKey: string; seg1_company: string | null; seg4_account: string | null;
-      account_desc: string; ledger_name: string | null;
+      account_desc: string; ledger_name: string | null; currency: string | null;
       total_dr: number; total_cr: number; net_amount: number; line_count: number;
       combinations: string[];
     };
     const acctMap = new Map<string, AcctRow>();
     for (const r of visibleData) {
-      const key = `${r.seg1_company}|${r.seg4_account}|${r.ledger_name}`;
+      const key = `${r.seg1_company}|${r.seg4_account}|${r.ledger_name}|${r.currency}`;
       if (!acctMap.has(key)) {
         acctMap.set(key, {
           rowKey: key, seg1_company: r.seg1_company, seg4_account: r.seg4_account,
           account_desc: tbDescMap.get(`${(r.seg1_company||'').trim()}|${(r.seg4_account||'').trim()}`) || '',
-          ledger_name: r.ledger_name,
+          ledger_name: r.ledger_name, currency: r.currency,
           total_dr: 0, total_cr: 0, net_amount: 0, line_count: 0, combinations: [],
         });
       }
@@ -1315,10 +1329,14 @@ const TrialBalance: React.FC = () => {
         ) },
       { title: 'Description', dataIndex: 'account_desc', key: 'account_desc', ellipsis: true,
         render: (v: string) => <Text style={{ fontSize: 12 }}>{v || <Text type="secondary">—</Text>}</Text> },
-      { title: 'Ledger', dataIndex: 'ledger_name', key: 'ledger_name', width: 140, ellipsis: true,
+      { title: 'Ledger', dataIndex: 'ledger_name', key: 'ledger_name', width: 130, ellipsis: true,
         filters: ledgers.map(l => ({ text: l, value: l })),
         onFilter: (val: any, r: any) => r.ledger_name === val,
         render: (v: string) => <Text type="secondary" style={{ fontSize: 11 }}>{v || '—'}</Text> },
+      { title: 'CCY', dataIndex: 'currency', key: 'currency', width: 60,
+        filters: currencies.map(c => ({ text: c, value: c })),
+        onFilter: (val: any, r: any) => (r.currency||'').toUpperCase() === (val||'').toUpperCase(),
+        render: (v: string) => <Tag style={{ fontSize: 10 }}>{v || '—'}</Tag> },
       numCol(<span style={{ color: REDWOOD.info }}>Total DR</span>,   'total_dr',   REDWOOD.info),
       numCol(<span style={{ color: REDWOOD.primary }}>Total CR</span>, 'total_cr',   REDWOOD.primary),
       numCol('Net (Dr−Cr)', 'net_amount', ''),
@@ -1343,6 +1361,10 @@ const TrialBalance: React.FC = () => {
         filters: ledgers.map(l => ({ text: l, value: l })),
         onFilter: (val: any, r: any) => r.ledger_name === val,
         render: (v: string) => <Text type="secondary" style={{ fontSize: 11 }}>{v||'—'}</Text> },
+      { title: 'CCY', dataIndex: 'currency', key: 'currency', width: 60,
+        filters: currencies.map(c => ({ text: c, value: c })),
+        onFilter: (val: any, r: any) => (r.currency||'').toUpperCase() === (val||'').toUpperCase(),
+        render: (v: string) => <Tag style={{ fontSize: 10 }}>{v || '—'}</Tag> },
       numCol(<span style={{ color: REDWOOD.info }}>Total DR</span>,   'total_dr',   REDWOOD.info),
       numCol(<span style={{ color: REDWOOD.primary }}>Total CR</span>, 'total_cr',   REDWOOD.primary),
       numCol('Net (Dr−Cr)', 'net_amount', ''),
@@ -1403,6 +1425,21 @@ const TrialBalance: React.FC = () => {
                 >
                   {ledgers.map(l => (
                     <Select.Option key={l} value={l}>{l}</Select.Option>
+                  ))}
+                </Select>
+              </Col>
+            )}
+            {currencies.length > 0 && (
+              <Col>
+                <Text style={{ fontSize: 11, color: REDWOOD.textSecondary, display: 'block', marginBottom: 2 }}>Currency</Text>
+                <Select
+                  style={{ width: 90 }} size="small" placeholder="All"
+                  value={lsCurrency ?? undefined}
+                  onChange={v => setLsCurrency(v || null)}
+                  allowClear showSearch
+                >
+                  {currencies.map(c => (
+                    <Select.Option key={c} value={c}>{c}</Select.Option>
                   ))}
                 </Select>
               </Col>
@@ -1599,7 +1636,7 @@ const TrialBalance: React.FC = () => {
         {/* Account Detail Modal */}
         <Modal
           open={!!lsDetailRow}
-          onCancel={() => setLsDetailRow(null)}
+          onCancel={() => { setLsDetailRow(null); setLsDetailCcy(null); }}
           footer={[
             <Button key="tb" type="primary"
               style={{ background: REDWOOD.primary, borderColor: REDWOOD.primaryDark }}
@@ -1625,10 +1662,23 @@ const TrialBalance: React.FC = () => {
           }
         >
           {lsDetailRow && (() => {
-            const tbDr  = lsDetailRow.tbRecords.reduce((s, r) => s + (r.debit  || 0), 0);
-            const tbCr  = lsDetailRow.tbRecords.reduce((s, r) => s + (r.credit || 0), 0);
-            const varDr = lsDetailRow.lsDr - tbDr;
-            const varCr = lsDetailRow.lsCr - tbCr;
+            const modalCurrencies = [...new Set(lsDetailRow.tbRecords.map(r => r.currency || r.currency_code).filter(Boolean) as string[])].sort();
+            const filteredTb = lsDetailCcy
+              ? lsDetailRow.tbRecords.filter(r => (r.currency || r.currency_code || '').toUpperCase() === lsDetailCcy.toUpperCase())
+              : lsDetailRow.tbRecords;
+            const tbDr  = filteredTb.reduce((s, r) => s + (r.debit  || 0), 0);
+            const tbCr  = filteredTb.reduce((s, r) => s + (r.credit || 0), 0);
+            // For LS totals, filter lsData for this account+company+ledger by currency
+            const filteredLs = lsData.filter(r =>
+              (r.seg1_company || '').trim() === lsDetailRow.company.trim() &&
+              (r.seg4_account  || '').trim() === lsDetailRow.account.trim() &&
+              (!lsDetailRow.ledger || (r.ledger_name || '') === lsDetailRow.ledger) &&
+              (!lsDetailCcy || (r.currency || '').toUpperCase() === lsDetailCcy.toUpperCase())
+            );
+            const lsDr  = lsDetailCcy ? filteredLs.reduce((s, r) => s + r.total_dr, 0) : lsDetailRow.lsDr;
+            const lsCr  = lsDetailCcy ? filteredLs.reduce((s, r) => s + r.total_cr, 0) : lsDetailRow.lsCr;
+            const varDr = lsDr - tbDr;
+            const varCr = lsCr - tbCr;
             const fmt   = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             return (
               <div>
@@ -1638,10 +1688,25 @@ const TrialBalance: React.FC = () => {
                   <Descriptions.Item label="Ledger">{lsDetailRow.ledger || '—'}</Descriptions.Item>
                 </Descriptions>
 
+                {modalCurrencies.length > 0 && (
+                  <Row align="middle" gutter={8} style={{ marginBottom: 12 }}>
+                    <Col><Text style={{ fontSize: 12 }}>Filter Currency:</Text></Col>
+                    <Col>
+                      <Select size="small" style={{ width: 100 }} allowClear placeholder="All"
+                        value={lsDetailCcy ?? undefined}
+                        onChange={v => setLsDetailCcy(v || null)}
+                      >
+                        {modalCurrencies.map(c => <Select.Option key={c} value={c}>{c}</Select.Option>)}
+                      </Select>
+                    </Col>
+                    {lsDetailCcy && <Col><Tag color="blue">{lsDetailCcy} only</Tag></Col>}
+                  </Row>
+                )}
+
                 <Row gutter={12} style={{ marginBottom: 16 }}>
                   {[
-                    { label: 'Lines Summary DR', value: lsDetailRow.lsDr, color: REDWOOD.info },
-                    { label: 'Lines Summary CR', value: lsDetailRow.lsCr, color: REDWOOD.primary },
+                    { label: 'Lines Summary DR', value: lsDr, color: REDWOOD.info },
+                    { label: 'Lines Summary CR', value: lsCr, color: REDWOOD.primary },
                     { label: 'TB Debit',  value: tbDr, color: REDWOOD.info },
                     { label: 'TB Credit', value: tbCr, color: REDWOOD.primary },
                     { label: 'Variance DR', value: varDr, color: Math.abs(varDr) < 0.01 ? REDWOOD.success : '#f5222d' },
@@ -1659,7 +1724,7 @@ const TrialBalance: React.FC = () => {
                 {lsDetailRow.tbRecords.length > 0 ? (
                   <Table
                     size="small"
-                    dataSource={lsDetailRow.tbRecords}
+                    dataSource={filteredTb}
                     rowKey={(r: GLBalanceRecord) => `${r.period_name}|${r.company}|${r.account}|${r.currency}`}
                     pagination={false}
                     columns={[
