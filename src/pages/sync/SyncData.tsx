@@ -658,7 +658,27 @@ const SyncData: React.FC = () => {
     endTime: null,
   });
 
-  // GL Balances (SOAP) Progress State
+  // ── Chain GL Sync state ───────────────────────────────────────────────────
+  const [chainGLEnabled, setChainGLEnabled] = useState(false);
+  type ChainStepStatus = 'idle' | 'running' | 'success' | 'error' | 'skipped';
+  interface ChainGLStatus {
+    batches: ChainStepStatus;
+    headers: ChainStepStatus;
+    lines:   ChainStepStatus;
+    batchesInserted: number;
+    headersInserted: number;
+    linesInserted:   number;
+    batchesErrors: number;
+    headersErrors: number;
+    linesErrors:   number;
+    visible: boolean;
+  }
+  const [chainStatus, setChainStatus] = useState<ChainGLStatus>({
+    batches: 'idle', headers: 'idle', lines: 'idle',
+    batchesInserted: 0, headersInserted: 0, linesInserted: 0,
+    batchesErrors: 0,  headersErrors: 0,  linesErrors: 0,
+    visible: false,
+  });
   const [glBalancesProgress, setGLBalancesProgress] = useState<GLBalancesSyncProgress>({
     status: 'idle',
     totalRecords: 0,
@@ -2366,7 +2386,15 @@ const SyncData: React.FC = () => {
       );
       syncResult = { inserted: result.insertedRecords + result.updatedRecords, errors: result.errors, type: 'GL balances' };
     } else if (isGLBatchesOnly) {
-      // GL Batches Only Sync
+      // ── GL Batches (+ optional chain: Headers → Lines) ────────────────────
+      const runChain = chainGLEnabled;
+
+      if (runChain) {
+        setChainStatus({ batches: 'running', headers: 'idle', lines: 'idle',
+          batchesInserted: 0, headersInserted: 0, linesInserted: 0,
+          batchesErrors: 0, headersErrors: 0, linesErrors: 0, visible: true });
+      }
+
       setGLBatchesOnlyProgress({
         status: 'counting',
         totalBatches: 0,
@@ -2380,7 +2408,7 @@ const SyncData: React.FC = () => {
         endTime: null,
       });
 
-      const result = await syncGLBatchesOnly(
+      const batchResult = await syncGLBatchesOnly(
         parameters,
         testMode,
         addLog,
@@ -2389,10 +2417,89 @@ const SyncData: React.FC = () => {
           if (newProgress.insertedBatches !== undefined && newProgress.totalBatches) {
             notifySyncProgress(`${newProgress.insertedBatches}/${newProgress.totalBatches} batches inserted`);
           }
+          if (runChain && newProgress.insertedBatches !== undefined) {
+            setChainStatus(prev => ({ ...prev, batchesInserted: newProgress.insertedBatches ?? 0, batchesErrors: newProgress.errors ?? 0 }));
+          }
         },
         abortControllerRef.current.signal
       );
-      syncResult = { inserted: result.insertedBatches, errors: result.errors, type: 'batches' };
+
+      if (runChain) {
+        const batchFailed = batchResult.errors > 0 && batchResult.insertedBatches === 0;
+        setChainStatus(prev => ({
+          ...prev,
+          batches: batchFailed ? 'error' : 'success',
+          batchesInserted: batchResult.insertedBatches,
+          batchesErrors:   batchResult.errors,
+          headers: batchFailed ? 'skipped' : 'running',
+        }));
+
+        if (!batchFailed && !abortControllerRef.current?.signal.aborted) {
+          // ── Step 2: GL Headers ──────────────────────────────────────────
+          addLog('step', '─────────────────────────────────────────────────────');
+          addLog('step', '  CHAIN SYNC: Starting GL Headers');
+          addLog('step', '─────────────────────────────────────────────────────');
+          setGLHeadersOnlyProgress({
+            status: 'fetching_batches', totalBatches: 0, processedBatches: 0,
+            currentBatchId: null, totalHeaders: 0, insertedHeaders: 0,
+            errors: 0, lastError: '', startTime: new Date(), endTime: null,
+          });
+
+          const headersResult = await syncGLHeadersOnly(
+            parameters, testMode, addLog,
+            (newProgress) => {
+              setGLHeadersOnlyProgress((prev) => ({ ...prev, ...newProgress }));
+              if (newProgress.insertedHeaders !== undefined) {
+                notifySyncProgress(`Headers: ${newProgress.insertedHeaders}/${newProgress.totalHeaders ?? '?'} inserted`);
+                setChainStatus(prev => ({ ...prev, headersInserted: newProgress.insertedHeaders ?? 0, headersErrors: newProgress.errors ?? 0 }));
+              }
+            },
+            abortControllerRef.current.signal
+          );
+
+          const headersFailed = headersResult.errors > 0 && headersResult.insertedHeaders === 0;
+          setChainStatus(prev => ({
+            ...prev,
+            headers: headersFailed ? 'error' : 'success',
+            headersInserted: headersResult.insertedHeaders,
+            headersErrors:   headersResult.errors,
+            lines: headersFailed ? 'skipped' : 'running',
+          }));
+
+          if (!headersFailed && !abortControllerRef.current?.signal.aborted) {
+            // ── Step 3: GL Lines ──────────────────────────────────────────
+            addLog('step', '─────────────────────────────────────────────────────');
+            addLog('step', '  CHAIN SYNC: Starting GL Lines');
+            addLog('step', '─────────────────────────────────────────────────────');
+            setGLLinesOnlyProgress({
+              status: 'fetching_headers', totalHeaders: 0, processedHeaders: 0,
+              currentHeaderId: null, currentBatchId: null, totalLines: 0, insertedLines: 0,
+              errors: 0, lastError: '', startTime: new Date(), endTime: null,
+            });
+
+            const linesResult = await syncGLLinesOnly(
+              parameters, testMode, addLog,
+              (newProgress) => {
+                setGLLinesOnlyProgress((prev) => ({ ...prev, ...newProgress }));
+                if (newProgress.insertedLines !== undefined) {
+                  notifySyncProgress(`Lines: ${newProgress.insertedLines}/${newProgress.totalLines ?? '?'} inserted`);
+                  setChainStatus(prev => ({ ...prev, linesInserted: newProgress.insertedLines ?? 0, linesErrors: newProgress.errors ?? 0 }));
+                }
+              },
+              abortControllerRef.current.signal
+            );
+
+            setChainStatus(prev => ({
+              ...prev,
+              lines: linesResult.errors > 0 && linesResult.insertedLines === 0 ? 'error' : 'success',
+              linesInserted: linesResult.insertedLines,
+              linesErrors:   linesResult.errors,
+            }));
+          }
+        }
+      }
+
+      syncResult = { inserted: batchResult.insertedBatches, errors: batchResult.errors, type: 'batches' };
     } else if (isGLHeadersOnly) {
       // GL Headers Only Sync
       setGLHeadersOnlyProgress({
@@ -2995,6 +3102,25 @@ const SyncData: React.FC = () => {
                       Test Connection
                     </Button>
 
+                    {isGLBatchesOnly && !isSyncing && (
+                      <div style={{
+                        background: '#fffbe6',
+                        border: '1px solid #ffe58f',
+                        borderRadius: 8,
+                        padding: '10px 14px',
+                      }}>
+                        <Checkbox
+                          checked={chainGLEnabled}
+                          onChange={e => setChainGLEnabled(e.target.checked)}
+                        >
+                          <span style={{ fontWeight: 600, fontSize: 13 }}>Chain Sync</span>
+                        </Checkbox>
+                        <div style={{ fontSize: 11, color: '#888', marginTop: 4, marginLeft: 24 }}>
+                          After batches → auto-run GL Headers → GL Lines
+                        </div>
+                      </div>
+                    )}
+
                     {!isSyncing ? (
                       <Button
                         type="primary"
@@ -3010,7 +3136,7 @@ const SyncData: React.FC = () => {
                           height: 48,
                         }}
                       >
-                        Start Sync
+                        {isGLBatchesOnly && chainGLEnabled ? 'Start Chain Sync' : 'Start Sync'}
                       </Button>
                     ) : (
                       <Button
@@ -6055,6 +6181,134 @@ const SyncData: React.FC = () => {
           style={{ fontSize: 12 }}
         />
       </Modal>
+
+      {/* ── Chain GL Sync Floating Popup ─────────────────────────────────── */}
+      {chainStatus.visible && (
+        <div style={{
+          position:     'fixed',
+          bottom:       24,
+          left:         24,
+          zIndex:       9998,
+          width:        320,
+          background:   '#fff',
+          borderRadius: 12,
+          boxShadow:    '0 8px 32px rgba(0,0,0,0.18)',
+          border:       '1px solid #e8e8e8',
+          overflow:     'hidden',
+        }}>
+          {/* Header */}
+          <div style={{
+            background:  '#1a1a2e',
+            padding:     '10px 16px',
+            display:     'flex',
+            alignItems:  'center',
+            justifyContent: 'space-between',
+          }}>
+            <Space size={8}>
+              <SyncOutlined spin={chainStatus.batches === 'running' || chainStatus.headers === 'running' || chainStatus.lines === 'running'}
+                style={{ color: '#fff', fontSize: 15 }} />
+              <span style={{ color: '#fff', fontWeight: 700, fontSize: 13 }}>Chain GL Sync</span>
+            </Space>
+            <Space size={6}>
+              {chainStatus.batches !== 'running' && chainStatus.headers !== 'running' && chainStatus.lines !== 'running' && (
+                <Tag color={
+                  chainStatus.batches === 'success' && chainStatus.headers === 'success' && chainStatus.lines === 'success'
+                    ? 'success'
+                    : chainStatus.batches === 'error' || chainStatus.headers === 'error' || chainStatus.lines === 'error'
+                    ? 'error' : 'default'
+                } style={{ margin: 0, fontSize: 10 }}>
+                  {chainStatus.batches === 'success' && chainStatus.headers === 'success' && chainStatus.lines === 'success'
+                    ? 'Complete' : 'Done'}
+                </Tag>
+              )}
+              <Button type="text" size="small"
+                style={{ color: '#aaa', padding: 0, height: 20, lineHeight: '20px' }}
+                onClick={() => setChainStatus(prev => ({ ...prev, visible: false }))}>✕</Button>
+            </Space>
+          </div>
+
+          {/* Steps */}
+          {[
+            { key: 'batches', label: 'GL Batches',  status: chainStatus.batches,  inserted: chainStatus.batchesInserted, errors: chainStatus.batchesErrors,  icon: '📦' },
+            { key: 'headers', label: 'GL Headers',  status: chainStatus.headers,  inserted: chainStatus.headersInserted, errors: chainStatus.headersErrors,  icon: '📋' },
+            { key: 'lines',   label: 'GL Lines',    status: chainStatus.lines,    inserted: chainStatus.linesInserted,   errors: chainStatus.linesErrors,    icon: '📄' },
+          ].map((step, idx) => {
+            const statusColor =
+              step.status === 'running' ? '#1677ff' :
+              step.status === 'success' ? '#52c41a' :
+              step.status === 'error'   ? '#ff4d4f' :
+              step.status === 'skipped' ? '#bbb'     : '#d9d9d9';
+            const statusBg =
+              step.status === 'running' ? '#e6f4ff' :
+              step.status === 'success' ? '#f6ffed' :
+              step.status === 'error'   ? '#fff2f0' :
+              step.status === 'skipped' ? '#fafafa'  : '#fafafa';
+            return (
+              <div key={step.key} style={{
+                display:        'flex',
+                alignItems:     'center',
+                padding:        '10px 16px',
+                background:     statusBg,
+                borderBottom:   idx < 2 ? '1px solid #f0f0f0' : undefined,
+                gap:            10,
+              }}>
+                {/* Step number badge */}
+                <div style={{
+                  width: 24, height: 24, borderRadius: '50%',
+                  background: statusColor, color: '#fff',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 11, fontWeight: 700, flexShrink: 0,
+                }}>
+                  {step.status === 'success' ? '✓' : step.status === 'error' ? '✗' : idx + 1}
+                </div>
+
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a' }}>
+                      {step.icon} {step.label}
+                    </span>
+                    {step.status === 'running' && (
+                      <SyncOutlined spin style={{ color: statusColor, fontSize: 13 }} />
+                    )}
+                    {step.status === 'idle' && (
+                      <span style={{ fontSize: 10, color: '#bbb' }}>Waiting</span>
+                    )}
+                    {step.status === 'skipped' && (
+                      <Tag style={{ fontSize: 10, margin: 0 }}>Skipped</Tag>
+                    )}
+                  </div>
+                  {(step.status === 'success' || step.status === 'error' || (step.status === 'running' && step.inserted > 0)) && (
+                    <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>
+                      <span style={{ color: '#52c41a', fontWeight: 600 }}>{step.inserted.toLocaleString()} inserted</span>
+                      {step.errors > 0 && (
+                        <span style={{ color: '#ff4d4f', marginLeft: 8 }}>{step.errors} errors</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* KPI summary row */}
+          {(chainStatus.batches === 'success' || chainStatus.batches === 'error') && (
+            <div style={{ padding: '8px 16px', background: '#fafafa', borderTop: '1px solid #f0f0f0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-around', textAlign: 'center' }}>
+                {[
+                  { label: 'Batches', val: chainStatus.batchesInserted },
+                  { label: 'Headers', val: chainStatus.headersInserted },
+                  { label: 'Lines',   val: chainStatus.linesInserted   },
+                ].map(k => (
+                  <div key={k.label}>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: '#1a1a2e' }}>{k.val.toLocaleString()}</div>
+                    <div style={{ fontSize: 10, color: '#888' }}>{k.label}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </Layout>
   );
 };
