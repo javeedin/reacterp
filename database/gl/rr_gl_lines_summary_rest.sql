@@ -94,27 +94,30 @@ BEGIN
     APEX_JSON.open_object;
     APEX_JSON.open_array('items');
     FOR r IN (
-        SELECT
-            REGEXP_SUBSTR(MIN(lin.ACCOUNT_COMBINATION),'[^-]+',1,1)                AS seg1_company,
-            REGEXP_SUBSTR(MIN(lin.ACCOUNT_COMBINATION),'[^-]+',1,4)                AS seg4_account,
-            hdr.LEDGER_NAME                                                         AS ledger_name,
-            hdr.PERIOD_NAME                                                         AS period_name,
-            hdr.CURRENCY_CODE                                                       AS currency,
-            SUM(NVL(lin.ACCOUNTED_DR,0))                                            AS total_dr,
-            SUM(NVL(lin.ACCOUNTED_CR,0))                                            AS total_cr,
-            SUM(NVL(lin.ACCOUNTED_DR,0)) - SUM(NVL(lin.ACCOUNTED_CR,0))            AS net_amount,
-            COUNT(*)                                                                AS line_count
-        FROM RR_GL_JE_LINES_ALL  lin
-        JOIN RR_GL_JE_HEADERS     hdr ON hdr.JE_HEADER_ID = lin.JE_HEADER_ID
-        WHERE lin.ACCOUNT_COMBINATION IS NOT NULL
-          AND (l_period  IS NULL OR UPPER(hdr.PERIOD_NAME) = UPPER(l_period))
-          AND (l_company IS NULL OR UPPER(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,1)) = UPPER(l_company))
-        GROUP BY
-            REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,1),
-            REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,4),
-            hdr.LEDGER_NAME,
-            hdr.PERIOD_NAME,
-            hdr.CURRENCY_CODE
+        SELECT *
+        FROM (
+            SELECT
+                REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,1)                AS seg1_company,
+                REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,4)                AS seg4_account,
+                hdr.LEDGER_NAME                                                    AS ledger_name,
+                hdr.PERIOD_NAME                                                    AS period_name,
+                hdr.CURRENCY_CODE                                                  AS currency,
+                SUM(NVL(lin.ACCOUNTED_DR,0))                                       AS total_dr,
+                SUM(NVL(lin.ACCOUNTED_CR,0))                                       AS total_cr,
+                SUM(NVL(lin.ACCOUNTED_DR,0)) - SUM(NVL(lin.ACCOUNTED_CR,0))       AS net_amount,
+                COUNT(*)                                                            AS line_count
+            FROM RR_GL_JE_LINES_ALL  lin
+            JOIN RR_GL_JE_HEADERS     hdr ON hdr.JE_HEADER_ID = lin.JE_HEADER_ID
+            WHERE lin.ACCOUNT_COMBINATION IS NOT NULL
+              AND (l_period  IS NULL OR UPPER(hdr.PERIOD_NAME) = UPPER(l_period))
+              AND (l_company IS NULL OR UPPER(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,1)) = UPPER(l_company))
+            GROUP BY
+                REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,1),
+                REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,4),
+                hdr.LEDGER_NAME,
+                hdr.PERIOD_NAME,
+                hdr.CURRENCY_CODE
+        )
         ORDER BY seg1_company, seg4_account, currency
     ) LOOP
         APEX_JSON.open_object;

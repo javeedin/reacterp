@@ -214,7 +214,6 @@ const TrialBalance: React.FC = () => {
   const [lsError,    setLsError]    = useState<string | null>(null);
   const [lsReconMap,  setLsReconMap]  = useState<Map<string, { tbDr: number; tbCr: number; matched: boolean }>>(new Map());
   const [lsReconDone, setLsReconDone] = useState(false);
-  const [lsByAccount, setLsByAccount] = useState(true);
   const [lsDetailRow, setLsDetailRow] = useState<{
     account: string; company: string; ledger: string | null;
     accountDesc: string; combinations: string[];
@@ -1228,39 +1227,12 @@ const TrialBalance: React.FC = () => {
       if (!tbDescMap.has(k) && rec.account_desc) tbDescMap.set(k, rec.account_desc);
     }
 
-    // SQL already groups by account+ledger+period+currency.
-    // "By Account" mode collapses ledger/currency further → one row per company+account.
-    type AcctRow = {
-      rowKey: string; seg1_company: string | null; seg4_account: string | null;
-      account_desc: string; ledger_name: string | null; currency: string | null;
-      total_dr: number; total_cr: number; net_amount: number; line_count: number;
-    };
-    const acctMap = new Map<string, AcctRow>();
-    for (const r of visibleData) {
-      const key = `${r.seg1_company}|${r.seg4_account}`;
-      if (!acctMap.has(key)) {
-        acctMap.set(key, {
-          rowKey: key, seg1_company: r.seg1_company, seg4_account: r.seg4_account,
-          account_desc: tbDescMap.get(`${(r.seg1_company||'').trim()}|${(r.seg4_account||'').trim()}`) || '',
-          ledger_name: null, currency: null,
-          total_dr: 0, total_cr: 0, net_amount: 0, line_count: 0,
-        });
-      }
-      const row = acctMap.get(key)!;
-      row.total_dr   += r.total_dr;
-      row.total_cr   += r.total_cr;
-      row.net_amount += r.net_amount;
-      row.line_count += r.line_count;
-    }
-
-    // Each raw row already IS account-level — just add description
-    const enrichedData: any[] = visibleData.map(r => ({
+    // Each raw row is grouped by account+ledger+period+currency from SQL
+    const displayData: any[] = visibleData.map(r => ({
       ...r,
       rowKey: `${r.seg1_company}|${r.seg4_account}|${r.ledger_name}|${r.currency}`,
       account_desc: tbDescMap.get(`${(r.seg1_company||'').trim()}|${(r.seg4_account||'').trim()}`) || '',
     }));
-
-    const displayData: any[] = lsByAccount ? [...acctMap.values()] : enrichedData;
 
     // KPI totals (always from displayData)
     const totalDr    = displayData.reduce((s: number, r: any) => s + (r.total_dr   || 0), 0);
@@ -1314,33 +1286,7 @@ const TrialBalance: React.FC = () => {
       },
     }] : [];
 
-    const columns = lsByAccount ? [
-      { title: 'Co.', dataIndex: 'seg1_company', key: 'seg1_company', width: 55,
-        render: (v: string) => <Tag style={{ fontSize: 11 }}>{v || '—'}</Tag> },
-      { title: 'Account', dataIndex: 'seg4_account', key: 'seg4_account', width: 100,
-        sorter: (a: any, b: any) => (a.seg4_account||'').localeCompare(b.seg4_account||''),
-        render: (v: string, r: any) => (
-          <span style={{ cursor: 'pointer' }} onClick={() => openDetail(r)}>
-            <Text strong style={{ fontFamily: 'monospace', fontSize: 12 }}>{v}</Text>
-          </span>
-        ) },
-      { title: 'Description', dataIndex: 'account_desc', key: 'account_desc', ellipsis: true,
-        render: (v: string) => <Text style={{ fontSize: 12 }}>{v || <Text type="secondary">—</Text>}</Text> },
-      { title: 'Ledger', dataIndex: 'ledger_name', key: 'ledger_name', width: 130, ellipsis: true,
-        filters: ledgers.map(l => ({ text: l, value: l })),
-        onFilter: (val: any, r: any) => r.ledger_name === val,
-        render: (v: string) => <Text type="secondary" style={{ fontSize: 11 }}>{v || '—'}</Text> },
-      { title: 'CCY', dataIndex: 'currency', key: 'currency', width: 60,
-        filters: currencies.map(c => ({ text: c, value: c })),
-        onFilter: (val: any, r: any) => (r.currency||'').toUpperCase() === (val||'').toUpperCase(),
-        render: (v: string) => <Tag style={{ fontSize: 10 }}>{v || '—'}</Tag> },
-      numCol(<span style={{ color: REDWOOD.info }}>Total DR</span>,   'total_dr',   REDWOOD.info),
-      numCol(<span style={{ color: REDWOOD.primary }}>Total CR</span>, 'total_cr',   REDWOOD.primary),
-      numCol('Net (Dr−Cr)', 'net_amount', ''),
-      { title: 'Lines', dataIndex: 'line_count', key: 'line_count', align: 'right' as const, width: 60,
-        render: (v: number) => <Text type="secondary" style={{ fontSize: 11 }}>{v}</Text> },
-      ...reconCol,
-    ] : [
+    const columns = [
       { title: 'Co.', dataIndex: 'seg1_company', key: 'seg1_company', width: 55,
         render: (v: string) => <Tag style={{ fontSize: 11 }}>{v || '—'}</Tag>,
         filters: companies.map(c => ({ text: c, value: c })),
@@ -1441,10 +1387,6 @@ const TrialBalance: React.FC = () => {
                 </Select>
               </Col>
             )}
-            <Col>
-              <Text style={{ fontSize: 11, color: REDWOOD.textSecondary, display: 'block', marginBottom: 4 }}>By Account</Text>
-              <Switch size="small" checked={lsByAccount} onChange={setLsByAccount} />
-            </Col>
             <Col style={{ marginTop: 18 }}>
               <Button
                 type="primary" size="small" icon={<BarChartOutlined />}
@@ -1599,7 +1541,7 @@ const TrialBalance: React.FC = () => {
           summary={() =>
             displayData.length > 0 ? (
               <Table.Summary.Row style={{ background: REDWOOD.surfaceSecondary }}>
-                <Table.Summary.Cell index={0} colSpan={lsByAccount ? 5 : 7}>
+                <Table.Summary.Cell index={0} colSpan={5}>
                   <Text strong style={{ fontSize: 11 }}>TOTAL ({displayData.length} rows)</Text>
                 </Table.Summary.Cell>
                 <Table.Summary.Cell index={1} align="right">
