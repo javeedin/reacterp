@@ -324,7 +324,7 @@ export const syncGLJournals = async (
       // ========================================
       updateProgress({ status: 'fetching_headers' });
 
-      const headers = await fetchAllFromOracleUrl(headersHref, log, verbose, 500);
+      const headers = await fetchAllFromOracleUrl(headersHref, log, verbose, 500, abortSignal);
 
       updateProgress({ totalHeaders: progress.totalHeaders + headers.length });
       if (verbose) {
@@ -365,7 +365,7 @@ export const syncGLJournals = async (
           updateProgress({ status: 'fetching_lines' });
 
           try {
-            lines = await fetchAllFromOracleUrl(linesHref, log, verbose, 500);
+            lines = await fetchAllFromOracleUrl(linesHref, log, verbose, 500, abortSignal);
 
             updateProgress({ totalLines: progress.totalLines + lines.length });
             if (verbose) {
@@ -995,7 +995,7 @@ export const syncGLHeadersOnly = async (
       const headersUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/journalBatches/${batchId}/child/journalHeaders`;
 
       try {
-        const headers = await fetchAllFromOracleUrl(headersUrl, log, false, 500);
+        const headers = await fetchAllFromOracleUrl(headersUrl, log, false, 500, abortSignal);
 
         if (headers.length === 0) {
           log?.('info', `  No headers found for batch ${batchId}`);
@@ -1194,7 +1194,7 @@ export const syncGLLinesOnly = async (
       const linesUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/journalBatches/${batchId}/child/journalHeaders/${headerId}/child/journalLines`;
 
       try {
-        const lines = await fetchAllFromOracleUrl(linesUrl, log, false, 500);
+        const lines = await fetchAllFromOracleUrl(linesUrl, log, false, 500, abortSignal);
 
         if (lines.length === 0) {
           log?.('info', `  No lines found for header ${headerId}`);

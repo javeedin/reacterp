@@ -66,7 +66,8 @@ export const fetchFromOracle = async (
 export const fetchFromOracleUrl = async (
   url: string,
   log?: LogCallback,
-  verbose = true
+  verbose = true,
+  signal?: AbortSignal,
 ): Promise<any> => {
   try {
     let response: Response;
@@ -75,11 +76,12 @@ export const fetchFromOracleUrl = async (
       if (verbose) { log?.('step', '──── [GET] Oracle Fusion URL (Electron) ────'); log?.('info', `GET URL: ${url}`); }
       response = await fetch(url, {
         headers: { 'Authorization': oracleAuth(), 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        signal,
       });
     } else {
       const proxyUrl = `${PROXY_BASE}/oracle-url?url=${encodeURIComponent(url)}`;
       if (verbose) { log?.('step', '──── [GET] Oracle Fusion URL (proxy) ────'); log?.('info', `Original URL: ${url}`); }
-      response = await fetch(proxyUrl);
+      response = await fetch(proxyUrl, { signal });
     }
 
     if (!response.ok) {
@@ -106,6 +108,7 @@ export const fetchAllFromOracleUrl = async (
   log?: LogCallback,
   verbose = false,
   pageSize = 500,
+  signal?: AbortSignal,
 ): Promise<any[]> => {
   const allItems: any[] = [];
   let offset = 0;
@@ -120,6 +123,8 @@ export const fetchAllFromOracleUrl = async (
   const baseQuery = qp.toString();
 
   while (hasMore) {
+    if (signal?.aborted) break;
+
     pageNum++;
     const pageQp = new URLSearchParams(baseQuery);
     pageQp.set('limit', pageSize.toString());
@@ -128,7 +133,7 @@ export const fetchAllFromOracleUrl = async (
 
     if (verbose) log?.('info', `  Fetching page ${pageNum} (offset ${offset}, limit ${pageSize})…`);
 
-    const result = await fetchFromOracleUrl(url, log, verbose);
+    const result = await fetchFromOracleUrl(url, log, verbose, signal);
     const items: any[] = result.items || [];
     allItems.push(...items);
 
