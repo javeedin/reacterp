@@ -1606,7 +1606,7 @@ const TrialBalance: React.FC = () => {
           summary={() =>
             displayData.length > 0 ? (
               <Table.Summary.Row style={{ background: REDWOOD.surfaceSecondary }}>
-                <Table.Summary.Cell index={0} colSpan={lsByAccount ? 4 : 6}>
+                <Table.Summary.Cell index={0} colSpan={lsByAccount ? 5 : 7}>
                   <Text strong style={{ fontSize: 11 }}>TOTAL ({displayData.length} rows)</Text>
                 </Table.Summary.Cell>
                 <Table.Summary.Cell index={1} align="right">
@@ -1662,96 +1662,156 @@ const TrialBalance: React.FC = () => {
           }
         >
           {lsDetailRow && (() => {
-            const modalCurrencies = [...new Set(lsDetailRow.tbRecords.map(r => r.currency || r.currency_code).filter(Boolean) as string[])].sort();
+            const fmt = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+            // All currencies available in both sources
+            const tbCcys = [...new Set(lsDetailRow.tbRecords.map(r => r.currency || r.currency_code).filter(Boolean) as string[])].sort();
+            const lsAllRows = lsData.filter(r =>
+              (r.seg1_company || '').trim() === lsDetailRow.company.trim() &&
+              (r.seg4_account  || '').trim() === lsDetailRow.account.trim() &&
+              (!lsDetailRow.ledger || (r.ledger_name || '') === lsDetailRow.ledger)
+            );
+            const lsCcys = [...new Set(lsAllRows.map(r => r.currency).filter(Boolean) as string[])].sort();
+            const allCcys = [...new Set([...tbCcys, ...lsCcys])].sort();
+
+            // Apply currency filter
             const filteredTb = lsDetailCcy
               ? lsDetailRow.tbRecords.filter(r => (r.currency || r.currency_code || '').toUpperCase() === lsDetailCcy.toUpperCase())
               : lsDetailRow.tbRecords;
-            const tbDr  = filteredTb.reduce((s, r) => s + (r.debit  || 0), 0);
-            const tbCr  = filteredTb.reduce((s, r) => s + (r.credit || 0), 0);
-            // For LS totals, filter lsData for this account+company+ledger by currency
-            const filteredLs = lsData.filter(r =>
-              (r.seg1_company || '').trim() === lsDetailRow.company.trim() &&
-              (r.seg4_account  || '').trim() === lsDetailRow.account.trim() &&
-              (!lsDetailRow.ledger || (r.ledger_name || '') === lsDetailRow.ledger) &&
-              (!lsDetailCcy || (r.currency || '').toUpperCase() === lsDetailCcy.toUpperCase())
-            );
-            const lsDr  = lsDetailCcy ? filteredLs.reduce((s, r) => s + r.total_dr, 0) : lsDetailRow.lsDr;
-            const lsCr  = lsDetailCcy ? filteredLs.reduce((s, r) => s + r.total_cr, 0) : lsDetailRow.lsCr;
+            const filteredLs = lsDetailCcy
+              ? lsAllRows.filter(r => (r.currency || '').toUpperCase() === lsDetailCcy.toUpperCase())
+              : lsAllRows;
+
+            // Totals — compare only PTD Debit vs PTD Credit (not balances)
+            const tbDr = filteredTb.reduce((s, r) => s + (r.debit  || 0), 0);
+            const tbCr = filteredTb.reduce((s, r) => s + (r.credit || 0), 0);
+            const lsDr = filteredLs.reduce((s, r) => s + r.total_dr, 0);
+            const lsCr = filteredLs.reduce((s, r) => s + r.total_cr, 0);
             const varDr = lsDr - tbDr;
             const varCr = lsCr - tbCr;
-            const fmt   = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
             return (
               <div>
-                <Descriptions size="small" column={3} bordered style={{ marginBottom: 16 }}>
-                  <Descriptions.Item label="Company">{lsDetailRow.company}</Descriptions.Item>
-                  <Descriptions.Item label="Account">{lsDetailRow.account}</Descriptions.Item>
-                  <Descriptions.Item label="Ledger">{lsDetailRow.ledger || '—'}</Descriptions.Item>
-                </Descriptions>
-
-                {modalCurrencies.length > 0 && (
-                  <Row align="middle" gutter={8} style={{ marginBottom: 12 }}>
-                    <Col><Text style={{ fontSize: 12 }}>Filter Currency:</Text></Col>
-                    <Col>
+                {/* Header: account info + currency filter */}
+                <Row align="middle" justify="space-between" style={{ marginBottom: 12 }}>
+                  <Col>
+                    <Descriptions size="small" column={3} bordered>
+                      <Descriptions.Item label="Company">{lsDetailRow.company}</Descriptions.Item>
+                      <Descriptions.Item label="Account">{lsDetailRow.account}</Descriptions.Item>
+                      <Descriptions.Item label="Ledger">{lsDetailRow.ledger || '—'}</Descriptions.Item>
+                    </Descriptions>
+                  </Col>
+                  {allCcys.length > 0 && (
+                    <Col style={{ marginLeft: 16 }}>
+                      <Text style={{ fontSize: 11, marginRight: 8 }} type="secondary">Currency:</Text>
                       <Select size="small" style={{ width: 100 }} allowClear placeholder="All"
-                        value={lsDetailCcy ?? undefined}
-                        onChange={v => setLsDetailCcy(v || null)}
-                      >
-                        {modalCurrencies.map(c => <Select.Option key={c} value={c}>{c}</Select.Option>)}
+                        value={lsDetailCcy ?? undefined} onChange={v => setLsDetailCcy(v || null)}>
+                        {allCcys.map(c => <Select.Option key={c} value={c}>{c}</Select.Option>)}
                       </Select>
                     </Col>
-                    {lsDetailCcy && <Col><Tag color="blue">{lsDetailCcy} only</Tag></Col>}
-                  </Row>
-                )}
-
-                <Row gutter={12} style={{ marginBottom: 16 }}>
-                  {[
-                    { label: 'Lines Summary DR', value: lsDr, color: REDWOOD.info },
-                    { label: 'Lines Summary CR', value: lsCr, color: REDWOOD.primary },
-                    { label: 'TB Debit',  value: tbDr, color: REDWOOD.info },
-                    { label: 'TB Credit', value: tbCr, color: REDWOOD.primary },
-                    { label: 'Variance DR', value: varDr, color: Math.abs(varDr) < 0.01 ? REDWOOD.success : '#f5222d' },
-                    { label: 'Variance CR', value: varCr, color: Math.abs(varCr) < 0.01 ? REDWOOD.success : '#f5222d' },
-                  ].map(k => (
-                    <Col span={4} key={k.label}>
-                      <Card size="small" bodyStyle={{ padding: '6px 10px', textAlign: 'right' }}>
-                        <Text type="secondary" style={{ fontSize: 10, display: 'block' }}>{k.label}</Text>
-                        <Text strong style={{ fontFamily: 'monospace', fontSize: 12, color: k.color }}>{fmt(k.value)}</Text>
-                      </Card>
-                    </Col>
-                  ))}
+                  )}
                 </Row>
 
-                {lsDetailRow.tbRecords.length > 0 ? (
+                {/* Comparison table — PTD DR/CR only */}
+                <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 16, fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: REDWOOD.surfaceSecondary }}>
+                      <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600 }}>Source</th>
+                      <th style={{ padding: '6px 10px', textAlign: 'right', color: REDWOOD.info, fontWeight: 600 }}>PTD Debit (DR)</th>
+                      <th style={{ padding: '6px 10px', textAlign: 'right', color: REDWOOD.primary, fontWeight: 600 }}>PTD Credit (CR)</th>
+                      <th style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 600 }}>Net (Dr−Cr)</th>
+                      <th style={{ padding: '6px 10px', textAlign: 'center', fontWeight: 600 }}>Match</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
+                      <td style={{ padding: '6px 10px' }}><Text strong>Lines Summary</Text></td>
+                      <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: REDWOOD.info }}>{fmt(lsDr)}</td>
+                      <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(lsCr)}</td>
+                      <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace' }}>{fmt(lsDr - lsCr)}</td>
+                      <td />
+                    </tr>
+                    <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
+                      <td style={{ padding: '6px 10px' }}><Text strong>GL Trial Balance</Text></td>
+                      <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: REDWOOD.info }}>{fmt(tbDr)}</td>
+                      <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(tbCr)}</td>
+                      <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace' }}>{fmt(tbDr - tbCr)}</td>
+                      <td />
+                    </tr>
+                    <tr style={{ background: Math.abs(varDr) < 0.01 && Math.abs(varCr) < 0.01 ? '#f6ffed' : '#fff2f0' }}>
+                      <td style={{ padding: '6px 10px' }}><Text strong>Variance</Text></td>
+                      <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace',
+                        color: Math.abs(varDr) < 0.01 ? REDWOOD.success : '#f5222d', fontWeight: 700 }}>{fmt(varDr)}</td>
+                      <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace',
+                        color: Math.abs(varCr) < 0.01 ? REDWOOD.success : '#f5222d', fontWeight: 700 }}>{fmt(varCr)}</td>
+                      <td />
+                      <td style={{ textAlign: 'center', fontSize: 18 }}>
+                        {Math.abs(varDr) < 0.01 && Math.abs(varCr) < 0.01
+                          ? <CheckCircleOutlined style={{ color: REDWOOD.success }} />
+                          : <CloseCircleOutlined style={{ color: '#f5222d' }} />}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                {/* Lines Summary breakdown */}
+                <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
+                  Lines Summary — {filteredLs.length} row(s)
+                  {lsDetailRow.combinations.length > 1 &&
+                    <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>
+                      ({lsDetailRow.combinations.length} combinations)
+                    </Text>}
+                </Text>
+                <Table
+                  size="small"
+                  dataSource={filteredLs}
+                  rowKey={(r: LineSummaryRow) => `${r.account_combination}|${r.currency}`}
+                  pagination={false}
+                  style={{ marginBottom: 16 }}
+                  columns={[
+                    { title: 'Combination', dataIndex: 'account_combination', ellipsis: true,
+                      render: (v: string) => <Text code style={{ fontSize: 10 }}>{v}</Text> },
+                    { title: 'CCY', dataIndex: 'currency', width: 55,
+                      render: (v: string) => <Tag style={{ fontSize: 10 }}>{v}</Tag> },
+                    { title: 'PTD DR', dataIndex: 'total_dr', align: 'right' as const, width: 120,
+                      render: (v: number) => <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info }}>{fmt(v)}</Text> },
+                    { title: 'PTD CR', dataIndex: 'total_cr', align: 'right' as const, width: 120,
+                      render: (v: number) => <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.primary }}>{fmt(v)}</Text> },
+                    { title: 'Net', dataIndex: 'net_amount', align: 'right' as const, width: 110,
+                      render: (v: number) => <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{fmt(v)}</Text> },
+                    { title: 'Lines', dataIndex: 'line_count', align: 'right' as const, width: 55,
+                      render: (v: number) => <Text type="secondary" style={{ fontSize: 11 }}>{v}</Text> },
+                  ]}
+                />
+
+                {/* GL Trial Balance breakdown */}
+                <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
+                  GL Trial Balance — {filteredTb.length} row(s)
+                  <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>(PTD Debit / Credit only)</Text>
+                </Text>
+                {filteredTb.length > 0 ? (
                   <Table
                     size="small"
                     dataSource={filteredTb}
-                    rowKey={(r: GLBalanceRecord) => `${r.period_name}|${r.company}|${r.account}|${r.currency}`}
+                    rowKey={(r: GLBalanceRecord) => `${r.period_name}|${r.currency}|${r.account_type}`}
                     pagination={false}
                     columns={[
-                      { title: 'Period',   dataIndex: 'period_name',     width: 90 },
-                      { title: 'Currency', dataIndex: 'currency',        width: 75 },
-                      { title: 'Type',     dataIndex: 'account_type',    width: 55 },
-                      { title: 'Opening',  dataIndex: 'opening_balance', align: 'right' as const, width: 110,
-                        render: (v: number) => <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{fmt(v || 0)}</Text> },
-                      { title: 'Debit',    dataIndex: 'debit',  align: 'right' as const, width: 110,
+                      { title: 'Period',   dataIndex: 'period_name',  width: 90 },
+                      { title: 'CCY', dataIndex: 'currency', width: 55,
+                        render: (v: string) => <Tag style={{ fontSize: 10 }}>{v}</Tag> },
+                      { title: 'Type', dataIndex: 'account_type', width: 50 },
+                      { title: 'PTD Debit', dataIndex: 'debit', align: 'right' as const, width: 120,
                         render: (v: number) => <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info }}>{fmt(v || 0)}</Text> },
-                      { title: 'Credit',   dataIndex: 'credit', align: 'right' as const, width: 110,
+                      { title: 'PTD Credit', dataIndex: 'credit', align: 'right' as const, width: 120,
                         render: (v: number) => <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.primary }}>{fmt(v || 0)}</Text> },
-                      { title: 'Closing',  dataIndex: 'closing_balance', align: 'right' as const, width: 110,
+                      { title: 'Opening', dataIndex: 'opening_balance', align: 'right' as const, width: 120,
+                        render: (v: number) => <Text type="secondary" style={{ fontFamily: 'monospace', fontSize: 11 }}>{fmt(v || 0)}</Text> },
+                      { title: 'Closing', dataIndex: 'closing_balance', align: 'right' as const, width: 120,
                         render: (v: number) => <Text strong style={{ fontFamily: 'monospace', fontSize: 11 }}>{fmt(v || 0)}</Text> },
                     ]}
                   />
                 ) : (
-                  <Alert type="warning" message="No GL Trial Balance records found for this account. Open the TB tab for this period first." />
-                )}
-
-                {lsDetailRow.combinations.length > 1 && (
-                  <div style={{ marginTop: 12 }}>
-                    <Text type="secondary" style={{ fontSize: 11 }}>
-                      Aggregated from {lsDetailRow.combinations.length} combinations:&nbsp;
-                      {lsDetailRow.combinations.map(c => <Tag key={c} style={{ fontSize: 10 }}>{c}</Tag>)}
-                    </Text>
-                  </div>
+                  <Alert type="warning" message="No GL Trial Balance records found. Open the TB tab for this period first." />
                 )}
               </div>
             );
