@@ -24,6 +24,10 @@ export const APEX_DB_CONFIG = {
     journalLines: 'gl/journals/lines',
     glBalances: 'gl/trialbalance',
     periodsStatus: 'periodsstatus/create',
+    rrTrialBalance: 'gl/rr-trialbalance',
+    rrTrialBalanceGenerate: 'gl/rr-trialbalance/generate',
+    rrTrialBalanceLedgers: 'gl/rr-trialbalance/ledgers',
+    rrTrialBalancePeriods: 'gl/rr-trialbalance/periods',
     // SLA Endpoints
     slaAccountingCreate:  'sla/accounting/create',
     slaAccountingPost:    'sla/accounting/post',
