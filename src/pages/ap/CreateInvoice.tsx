@@ -2924,6 +2924,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     });
     setPayInFullOpen(true);
 
+    // Always fetch fresh installments when opening the modal so the table is up to date
+    const invoiceId = savedInvoiceId ?? initialData?.invoiceId;
+    if (invoiceId) {
+      fetchInvoiceInstallments(invoiceId);
+    }
+
     // Step 1: fetch BUs to resolve legalEntityName for the current BU
     try {
       const buRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/businessunits`, {
