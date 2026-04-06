@@ -521,8 +521,9 @@ END;
 -- GET /ap/createinvoice/installments?P_INVOICE_ID=...
 -- Returns installments with effective unpaid amount
 -- derived from RR_AP_PAYMENTS_RELATED_INVOICES (source of truth).
--- amount_remaining = GROSS_AMOUNT - SUM(payments paid against invoice)
--- payment_status   = derived live, not from stale stored column
+-- UNPAID_AMOUNT / AMOUNT_REMAINING = GROSS_AMOUNT - SUM(payments paid against invoice)
+-- PAYMENT_STATUS = derived live, not from stale stored column
+-- All original columns preserved for UI mapping compatibility.
 -- =====================================================
 BEGIN
     ORDS.DEFINE_HANDLER(
@@ -534,51 +535,71 @@ BEGIN
         p_comments      => 'Get installments for invoice with live unpaid amount from payments',
         p_source        => q'[
 SELECT
-    inst.INSTALLMENT_ID                                        AS installment_id,
-    inst.INVOICE_ID                                            AS invoice_id,
-    inst.INSTALLMENT_NUMBER                                    AS installment_number,
-    TO_CHAR(inst.DUE_DATE, 'DD-MON-YYYY')                     AS due_date,
-    inst.GROSS_AMOUNT                                          AS gross_amount,
-    NVL(
-        (SELECT SUM(NVL(rel.AMOUNT_PAID_PAYMENT_CURRENCY, 0))
-         FROM   RR_AP_PAYMENTS_RELATED_INVOICES rel
-         WHERE  rel.INVOICE_ID = inst.INVOICE_ID),
-        0
-    )                                                          AS total_paid,
+    inst.INSTALLMENT_ID,
+    inst.INVOICE_ID,
+    inst.INSTALLMENT_NUMBER,
+    TO_CHAR(inst.DUE_DATE, 'DD-MON-YYYY')                          AS DUE_DATE,
+    inst.GROSS_AMOUNT,
+    -- UNPAID_AMOUNT: derived from actual payments (replaces stale stored column)
     GREATEST(0,
-        inst.GROSS_AMOUNT -
-        NVL(
-            (SELECT SUM(NVL(rel.AMOUNT_PAID_PAYMENT_CURRENCY, 0))
+        NVL(inst.GROSS_AMOUNT, 0) -
+        NVL((SELECT SUM(NVL(rel.AMOUNT_PAID_PAYMENT_CURRENCY, 0))
              FROM   RR_AP_PAYMENTS_RELATED_INVOICES rel
-             WHERE  rel.INVOICE_ID = inst.INVOICE_ID),
-            inst.UNPAID_AMOUNT
-        )
-    )                                                          AS amount_remaining,
+             WHERE  rel.INVOICE_ID = inst.INVOICE_ID), 0)
+    )                                                               AS UNPAID_AMOUNT,
+    -- AMOUNT_REMAINING: same value, kept for newer UI mapping compatibility
+    GREATEST(0,
+        NVL(inst.GROSS_AMOUNT, 0) -
+        NVL((SELECT SUM(NVL(rel.AMOUNT_PAID_PAYMENT_CURRENCY, 0))
+             FROM   RR_AP_PAYMENTS_RELATED_INVOICES rel
+             WHERE  rel.INVOICE_ID = inst.INVOICE_ID), 0)
+    )                                                               AS AMOUNT_REMAINING,
+    -- PAYMENT_STATUS: derived live from payments vs gross amount
     CASE
         WHEN GREATEST(0,
-                 inst.GROSS_AMOUNT -
-                 NVL(
-                     (SELECT SUM(NVL(rel.AMOUNT_PAID_PAYMENT_CURRENCY, 0))
+                 NVL(inst.GROSS_AMOUNT, 0) -
+                 NVL((SELECT SUM(NVL(rel.AMOUNT_PAID_PAYMENT_CURRENCY, 0))
                       FROM   RR_AP_PAYMENTS_RELATED_INVOICES rel
-                      WHERE  rel.INVOICE_ID = inst.INVOICE_ID),
-                     inst.UNPAID_AMOUNT
-                 )
+                      WHERE  rel.INVOICE_ID = inst.INVOICE_ID), 0)
              ) <= 0
             THEN 'Fully Paid'
-        WHEN NVL(
-                (SELECT SUM(NVL(rel.AMOUNT_PAID_PAYMENT_CURRENCY, 0))
-                 FROM   RR_AP_PAYMENTS_RELATED_INVOICES rel
-                 WHERE  rel.INVOICE_ID = inst.INVOICE_ID),
-             0) > 0
+        WHEN NVL((SELECT SUM(NVL(rel.AMOUNT_PAID_PAYMENT_CURRENCY, 0))
+                  FROM   RR_AP_PAYMENTS_RELATED_INVOICES rel
+                  WHERE  rel.INVOICE_ID = inst.INVOICE_ID), 0) > 0
             THEN 'Partially Paid'
         ELSE NVL(inst.PAYMENT_STATUS, 'Unpaid')
-    END                                                        AS payment_status,
-    inst.PAYMENT_PRIORITY                                      AS payment_priority,
-    inst.PAYMENT_METHOD                                        AS payment_method,
-    inst.BANK_ACCOUNT                                          AS bank_account
+    END                                                             AS PAYMENT_STATUS,
+    inst.FIRST_DISCOUNT_AMOUNT,
+    TO_CHAR(inst.FIRST_DISCOUNT_DATE, 'DD-MON-YYYY')               AS FIRST_DISCOUNT_DATE,
+    inst.SECOND_DISCOUNT_AMOUNT,
+    TO_CHAR(inst.SECOND_DISCOUNT_DATE, 'DD-MON-YYYY')              AS SECOND_DISCOUNT_DATE,
+    inst.THIRD_DISCOUNT_AMOUNT,
+    TO_CHAR(inst.THIRD_DISCOUNT_DATE, 'DD-MON-YYYY')               AS THIRD_DISCOUNT_DATE,
+    inst.NET_AMOUNT_ONE,
+    inst.NET_AMOUNT_TWO,
+    inst.NET_AMOUNT_THREE,
+    inst.PAYMENT_PRIORITY,
+    inst.PAYMENT_METHOD,
+    inst.PAYMENT_METHOD_CODE,
+    inst.HOLD_FLAG,
+    inst.HOLD_REASON,
+    inst.HOLD_TYPE,
+    TO_CHAR(inst.HOLD_DATE, 'DD-MON-YYYY')                         AS HOLD_DATE,
+    inst.HELD_BY,
+    inst.BANK_ACCOUNT,
+    inst.EXTERNAL_BANK_ACCOUNT_ID,
+    inst.DIGITAL_PAYMENT_ACCOUNT,
+    inst.REMIT_TO_ADDRESS_NAME,
+    inst.REMIT_TO_SUPPLIER,
+    inst.REMITTANCE_MESSAGE_ONE,
+    inst.REMITTANCE_MESSAGE_TWO,
+    inst.REMITTANCE_MESSAGE_THREE,
+    inst.PROCESS_STATUS,
+    TO_CHAR(inst.CREATION_DATE, 'YYYY-MM-DD"T"HH24:MI:SS')         AS CREATION_DATE,
+    TO_CHAR(inst.LAST_UPDATE_DATE, 'YYYY-MM-DD"T"HH24:MI:SS')      AS LAST_UPDATE_DATE
 FROM  RR_AP_INVOICE_INSTALLMENTS inst
-WHERE inst.INVOICE_ID = :P_INVOICE_ID
-ORDER BY inst.INSTALLMENT_NUMBER
+WHERE inst.INVOICE_ID = NVL(:P_INVOICE_ID, inst.INVOICE_ID)
+ORDER BY inst.INVOICE_ID, inst.INSTALLMENT_NUMBER
 ]'
     );
     COMMIT;
