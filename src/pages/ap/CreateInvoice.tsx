@@ -733,7 +733,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     if (!initialData?.invoiceId) return { isReadOnly: false, isPermanentlyLocked: false, isPaid: false, isPostedToGL: false };
     const status = (initialData.holdPaidStatus || '').toLowerCase();
     const isPostedToGL = initialData.validationStatus === 'Validated';
-    const isPaid = status === 'fully paid' || status === 'paid' || status === 'available' || status.includes('partial');
+    const isPaid = status === 'fully paid' || status === 'paid' || status === 'available';
+    // Note: 'partially paid' is NOT isPaid — Pay in Full must remain available while balance exists
     const permanentlyLocked = isPostedToGL || isPaid;
     // Synced invoices are always read-only (can't be edited in this app)
     const ro = initialData.isSynced ? true : (permanentlyLocked || !isEditing);
@@ -4035,11 +4036,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           )}
           {isEditMode && initialData?.holdPaidStatus && (
             <Tag
-              color={
-                initialData.holdPaidStatus === 'Fully paid' || initialData.holdPaidStatus === 'Paid' ? 'blue'
-                : initialData.holdPaidStatus === 'Available' ? 'cyan'
-                : 'default'
-              }
+              color={(() => {
+                const s = (initialData.holdPaidStatus || '').toLowerCase();
+                if (s === 'fully paid' || s === 'paid') return 'green';
+                if (s.includes('partial')) return 'warning';
+                if (s === 'available') return 'cyan';
+                return 'default';
+              })()}
               style={{ fontSize: 12 }}
             >
               {initialData.holdPaidStatus}

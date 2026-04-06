@@ -69,22 +69,30 @@ SELECT
          WHERE  inst.INVOICE_ID = i.invoice_id),
         NVL(i.amount_paid, 0)
     ) AS amount_paid,
-    -- Unpaid amount from installments
+    -- Unpaid amount: derive from installments when they exist,
+    -- otherwise fall back to invoice_amount - amount_paid (never trust stale paid_status)
     NVL(
         (SELECT SUM(NVL(inst.UNPAID_AMOUNT, 0))
          FROM   RR_AP_INVOICE_INSTALLMENTS inst
          WHERE  inst.INVOICE_ID = i.invoice_id),
-        CASE
-            WHEN NVL(i.paid_status, 'Unpaid') = 'Fully Paid' THEN 0
-            ELSE NVL(i.invoice_amount, 0)
-        END
+        GREATEST(0, NVL(i.invoice_amount, 0) - NVL(i.amount_paid, 0))
     ) AS unpaid_amount,
-    -- Paid status: derived live from installments
+    -- Paid status: derived live from installments when they exist;
+    -- when no installments, derive from amount_paid vs invoice_amount so local
+    -- payments are reflected even without installment rows.
     CASE
         WHEN NOT EXISTS (
             SELECT 1 FROM RR_AP_INVOICE_INSTALLMENTS inst
             WHERE inst.INVOICE_ID = i.invoice_id
-        ) THEN NVL(i.paid_status, 'Unpaid')
+        ) THEN
+            CASE
+                WHEN NVL(i.amount_paid, 0) >= NVL(i.invoice_amount, 1)
+                     AND NVL(i.invoice_amount, 0) > 0
+                    THEN 'Fully Paid'
+                WHEN NVL(i.amount_paid, 0) > 0
+                    THEN 'Partially Paid'
+                ELSE NVL(i.paid_status, 'Unpaid')
+            END
         WHEN NVL(
             (SELECT SUM(NVL(inst.UNPAID_AMOUNT, 0))
              FROM   RR_AP_INVOICE_INSTALLMENTS inst
