@@ -212,6 +212,7 @@ const TrialBalance: React.FC = () => {
   const [lsData,     setLsData]     = useState<LineSummaryRow[]>([]);
   const [lsPeriod,   setLsPeriod]   = useState<string | null>(null);
   const [lsCompany,  setLsCompany]  = useState<string | null>(null);
+  const [lsLedger,   setLsLedger]   = useState<string | null>(null);
   const [lsSearch,   setLsSearch]   = useState('');
   const [lsApiUrl,   setLsApiUrl]   = useState('');
   const [lsError,    setLsError]    = useState<string | null>(null);
@@ -1141,17 +1142,23 @@ const TrialBalance: React.FC = () => {
     const fmtN = (n: number) =>
       n === 0 ? '—' : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-    // Client-side search filter
-    const visibleData = lsSearch
-      ? lsData.filter(r =>
-          (r.account_combination || '').toLowerCase().includes(lsSearch.toLowerCase()) ||
-          (r.seg4_account        || '').toLowerCase().includes(lsSearch.toLowerCase()) ||
-          (r.seg1_company        || '').toLowerCase().includes(lsSearch.toLowerCase())
-        )
-      : lsData;
-
-    // Distinct companies from loaded data
+    // Distinct values from loaded data (for filter dropdowns)
     const companies = [...new Set(lsData.map(r => r.seg1_company).filter(Boolean) as string[])].sort();
+    const ledgers   = [...new Set(lsData.map(r => r.ledger_name).filter(Boolean)  as string[])].sort();
+
+    // Client-side filter
+    const visibleData = lsData.filter(r => {
+      if (lsLedger && r.ledger_name !== lsLedger) return false;
+      if (lsSearch) {
+        const q = lsSearch.toLowerCase();
+        if (
+          !(r.account_combination || '').toLowerCase().includes(q) &&
+          !(r.seg4_account        || '').toLowerCase().includes(q) &&
+          !(r.seg1_company        || '').toLowerCase().includes(q)
+        ) return false;
+      }
+      return true;
+    });
 
     // KPI totals
     const totalDr    = visibleData.reduce((s, r) => s + r.total_dr,   0);
@@ -1192,6 +1199,12 @@ const TrialBalance: React.FC = () => {
             <Text code style={{ fontSize: 11 }}>{v}</Text>
           </Tooltip>
         ),
+      },
+      {
+        title: 'Ledger', dataIndex: 'ledger_name', key: 'ledger_name', width: 130, ellipsis: true,
+        filters: ledgers.map(l => ({ text: l, value: l })),
+        onFilter: (val: any, r: LineSummaryRow) => r.ledger_name === val,
+        render: (v: string) => <Text type="secondary" style={{ fontSize: 11 }}>{v || '—'}</Text>,
       },
       {
         title: <span style={{ color: REDWOOD.info }}>Total DR</span>,
@@ -1268,6 +1281,26 @@ const TrialBalance: React.FC = () => {
                 }
               />
             </Col>
+            {ledgers.length > 0 && (
+              <Col>
+                <Text style={{ fontSize: 11, color: REDWOOD.textSecondary, display: 'block', marginBottom: 2 }}>
+                  Ledger
+                </Text>
+                <Select
+                  style={{ minWidth: 160 }}
+                  size="small"
+                  placeholder="All ledgers"
+                  value={lsLedger ?? undefined}
+                  onChange={v => setLsLedger(v || null)}
+                  allowClear
+                  showSearch
+                >
+                  {ledgers.map(l => (
+                    <Select.Option key={l} value={l}>{l}</Select.Option>
+                  ))}
+                </Select>
+              </Col>
+            )}
             <Col style={{ marginTop: 18 }}>
               <Button
                 type="primary" size="small" icon={<BarChartOutlined />}
@@ -1295,6 +1328,7 @@ const TrialBalance: React.FC = () => {
                       'Sub Acc':    r.seg5_sub_account,
                       'Analysis':   r.seg6_analysis,
                       'IC':         r.seg7_intercompany,
+                      'Ledger':     r.ledger_name,
                       'Period':     r.period_name,
                       'Total DR':   r.total_dr,
                       'Total CR':   r.total_cr,
