@@ -2648,47 +2648,44 @@ const SyncData: React.FC = () => {
       );
       syncResult = { inserted: result.insertedLines, errors: result.errors, type: 'lines' };
     } else {
-      // GL Journals Sync
-      setProgress({
-        status: 'fetching_batches',
-        totalBatches: 0,
-        processedBatches: 0,
-        currentBatchId: null,
-        currentBatchName: '',
-        totalHeaders: 0,
-        processedHeaders: 0,
-        currentHeaderId: null,
-        currentHeaderName: '',
-        totalLines: 0,
-        processedLines: 0,
-        totalBatchesInserted: 0,
-        totalHeadersInserted: 0,
-        totalLinesInserted: 0,
-        errors: 0,
-        lastError: '',
-        startTime: new Date(),
-        endTime: null,
-      });
-
-      const modeLabel = testMode === 'single' ? 'SINGLE RECORD DEBUG' : (testMode ? 'TEST MODE (25 batches)' : 'FULL SYNC');
+      // GL Journals Sync — Phase 1: fetch batches, show modal
       addLog('step', '═══════════════════════════════════════════════════════════');
-      addLog('step', `  GL JOURNAL SYNC - ${modeLabel}`);
+      addLog('step', '  GL JOURNAL SYNC — Fetching Batches');
       addLog('step', '═══════════════════════════════════════════════════════════');
 
-      const result = await syncGLJournals(
+      const batches = await fetchGLJournalBatches(
         parameters,
         testMode,
         addLog,
-        (newProgress) => {
-          setProgress((prev) => ({ ...prev, ...newProgress }));
-          if (newProgress.processedBatches !== undefined && newProgress.totalBatches) {
-            notifySyncProgress(`${newProgress.processedBatches}/${newProgress.totalBatches} batches`);
-          }
-        },
         abortControllerRef.current.signal,
-        handleBatchPayload
       );
-      syncResult = { inserted: result.totalBatchesInserted + result.totalHeadersInserted + result.totalLinesInserted, errors: result.errors, type: 'records' };
+
+      if (batches.length === 0) {
+        addLog('warning', 'No batches found for the given parameters');
+        isSyncingRef.current = false;
+        return;
+      }
+
+      const doneBatchIds = loadDoneBatchIds(parameters);
+      const items: BatchListItem[] = batches.map((b: any) => {
+        const batchId = b._batchId || 0;
+        const isDone = doneBatchIds.has(batchId);
+        return {
+          batchId,
+          batchName: b.JournalBatchName || b.JournalName || `Batch ${batchId}`,
+          raw: b,
+          status: isDone ? 'done' : 'pending',
+          headersCount: 0,
+          linesCount: 0,
+          headersInserted: 0,
+          linesInserted: 0,
+        };
+      });
+
+      setBatchList(items);
+      setBatchListOpen(true);
+      isSyncingRef.current = false;
+      return; // Modal takes over from here
     }
 
     // Notify Electron of sync completion
@@ -2718,6 +2715,69 @@ const SyncData: React.FC = () => {
     }
 
     addLog('warning', '⚠ Stopping sync...');
+  };
+
+  const handleProcessBatches = async () => {
+    const parameters = getParameters();
+    setBatchSyncing(true);
+    batchAbortRef.current = new AbortController();
+    const signal = batchAbortRef.current.signal;
+
+    for (let i = 0; i < batchList.length; i++) {
+      if (signal.aborted) break;
+      const item = batchList[i];
+      if (item.status === 'done') continue; // skip already synced
+
+      // Mark as syncing
+      setBatchList(prev => prev.map((b, idx) =>
+        idx === i ? { ...b, status: 'syncing' as const } : b
+      ));
+
+      addLog('info', `Processing batch ${i + 1}/${batchList.length}: ${item.batchName}`);
+
+      try {
+        const result = await processSingleGLBatch(
+          item.raw,
+          addLog,
+          signal,
+        );
+
+        const newStatus: BatchListItem['status'] = result.errors > 0 ? 'error' : 'done';
+
+        setBatchList(prev => prev.map((b, idx) =>
+          idx === i ? {
+            ...b,
+            status: newStatus,
+            headersCount: result.headersCount,
+            linesCount: result.linesCount,
+            headersInserted: result.headersInserted,
+            linesInserted: result.linesInserted,
+            errorMsg: result.errors > 0 ? result.lastError : undefined,
+          } : b
+        ));
+
+        if (newStatus === 'done') {
+          saveDoneBatchId(parameters, item.batchId);
+          addLog('success', `✓ Batch ${item.batchName}: ${result.headersInserted} headers, ${result.linesInserted} lines`);
+        } else {
+          addLog('error', `✗ Batch ${item.batchName}: ${result.lastError}`);
+        }
+      } catch (e: any) {
+        setBatchList(prev => prev.map((b, idx) =>
+          idx === i ? { ...b, status: 'error' as const, errorMsg: String(e) } : b
+        ));
+        addLog('error', `✗ Batch ${item.batchName} error: ${e}`);
+      }
+    }
+
+    setBatchSyncing(false);
+    addLog('success', 'Batch processing complete');
+  };
+
+  const handleStopBatchSync = () => {
+    batchAbortRef.current?.abort();
+    setBatchSyncing(false);
+    addLog('warning', '⚠ Batch sync stopped');
   };
 
   const getStatusColor = (status: string) => {
@@ -6401,6 +6461,134 @@ const SyncData: React.FC = () => {
           )}
         </div>
       )}
+      {/* Batch List Modal */}
+      <Modal
+        open={batchListOpen}
+        title={
+          <Space>
+            <DatabaseOutlined />
+            <span>GL Journal Batches — {batchList.length} found</span>
+            {batchSyncing && <Tag color="processing">Syncing...</Tag>}
+          </Space>
+        }
+        onCancel={() => { if (!batchSyncing) setBatchListOpen(false); }}
+        footer={null}
+        width={900}
+        styles={{ body: { padding: '16px' } }}
+      >
+        {/* Summary row */}
+        <Row gutter={12} style={{ marginBottom: 12 }}>
+          {[
+            { label: 'Total', value: batchList.length, color: '#64748b' },
+            { label: 'Done', value: batchList.filter(b => b.status === 'done').length, color: '#22c55e' },
+            { label: 'Pending', value: batchList.filter(b => b.status === 'pending').length, color: '#f59e0b' },
+            { label: 'Error', value: batchList.filter(b => b.status === 'error').length, color: '#ef4444' },
+          ].map(kpi => (
+            <Col key={kpi.label}>
+              <Card size="small" style={{ minWidth: 80, textAlign: 'center' }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: kpi.color }}>{kpi.value}</div>
+                <div style={{ fontSize: 11, color: '#64748b' }}>{kpi.label}</div>
+              </Card>
+            </Col>
+          ))}
+          <Col flex="auto" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
+            {!batchSyncing ? (
+              <>
+                <Button
+                  size="small"
+                  onClick={() => {
+                    const parameters = getParameters();
+                    clearDoneBatchIds(parameters);
+                    setBatchList(prev => prev.map(b => ({ ...b, status: 'pending' as const })));
+                  }}
+                >
+                  Reset Progress
+                </Button>
+                <Button
+                  type="primary"
+                  icon={<PlayCircleOutlined />}
+                  onClick={handleProcessBatches}
+                  disabled={batchList.every(b => b.status === 'done')}
+                >
+                  {batchList.some(b => b.status === 'done') ? 'Resume Syncing' : 'Start Syncing'}
+                </Button>
+              </>
+            ) : (
+              <Button danger icon={<StopOutlined />} onClick={handleStopBatchSync}>
+                Stop
+              </Button>
+            )}
+          </Col>
+        </Row>
+
+        {/* Batch table */}
+        <Table
+          dataSource={batchList}
+          rowKey="batchId"
+          size="small"
+          pagination={{ pageSize: 20, showSizeChanger: false, showTotal: (t, r) => `${r[0]}-${r[1]} of ${t}` }}
+          scroll={{ y: 400 }}
+          columns={[
+            {
+              title: '',
+              key: 'status',
+              width: 36,
+              render: (_: any, r: BatchListItem) => {
+                if (r.status === 'done') return <CheckCircleOutlined style={{ color: '#22c55e', fontSize: 16 }} />;
+                if (r.status === 'error') return <CloseCircleOutlined style={{ color: '#ef4444', fontSize: 16 }} />;
+                if (r.status === 'syncing') return <SyncOutlined spin style={{ color: '#3b82f6', fontSize: 16 }} />;
+                return <ClockCircleOutlined style={{ color: '#94a3b8', fontSize: 16 }} />;
+              },
+            },
+            {
+              title: 'Batch ID',
+              dataIndex: 'batchId',
+              key: 'batchId',
+              width: 90,
+              render: (v: number) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{v}</Text>,
+            },
+            {
+              title: 'Batch Name',
+              dataIndex: 'batchName',
+              key: 'batchName',
+              ellipsis: true,
+              render: (v: string, r: BatchListItem) => (
+                <span>
+                  <Text style={{ fontSize: 12 }}>{v}</Text>
+                  {r.errorMsg && <Text type="danger" style={{ fontSize: 11, marginLeft: 8 }}>{r.errorMsg}</Text>}
+                </span>
+              ),
+            },
+            {
+              title: 'Headers',
+              key: 'headers',
+              width: 100,
+              align: 'right' as const,
+              render: (_: any, r: BatchListItem) =>
+                r.status === 'pending' ? <Text type="secondary">—</Text> :
+                <Text style={{ fontSize: 12 }}>{r.headersInserted}/{r.headersCount}</Text>,
+            },
+            {
+              title: 'Lines',
+              key: 'lines',
+              width: 100,
+              align: 'right' as const,
+              render: (_: any, r: BatchListItem) =>
+                r.status === 'pending' ? <Text type="secondary">—</Text> :
+                <Text style={{ fontSize: 12 }}>{r.linesInserted}/{r.linesCount}</Text>,
+            },
+            {
+              title: 'Status',
+              key: 'statusText',
+              width: 80,
+              render: (_: any, r: BatchListItem) => {
+                const colors = { done: 'success', error: 'error', syncing: 'processing', pending: 'default' } as const;
+                return <Tag color={colors[r.status]}>{r.status}</Tag>;
+              },
+            },
+          ]}
+        />
+      </Modal>
     </Layout>
   );
 };
