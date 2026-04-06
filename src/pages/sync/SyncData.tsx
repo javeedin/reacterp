@@ -41,10 +41,11 @@ import {
   BankOutlined,
   CloudDownloadOutlined,
   CloudUploadOutlined,
+  ClockCircleOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { SYNC_OBJECTS, PROXY_CONFIG, APEX_DB_CONFIG, type SyncObjectConfig, type ApiType } from '../../config/api.config';
-import { syncGLJournals, syncGLBatchesOnly, syncGLHeadersOnly, syncGLLinesOnly, testGLConnection, type SyncProgress, type BatchOnlySyncProgress, type HeadersOnlySyncProgress, type LinesOnlySyncProgress, type LogCallback, type BatchPayloadCallback } from '../../services/gl-sync.service';
+import { syncGLJournals, syncGLBatchesOnly, syncGLHeadersOnly, syncGLLinesOnly, testGLConnection, fetchGLJournalBatches, processSingleGLBatch, type SyncProgress, type BatchOnlySyncProgress, type HeadersOnlySyncProgress, type LinesOnlySyncProgress, type LogCallback, type BatchPayloadCallback, type SingleBatchResult } from '../../services/gl-sync.service';
 import { syncAPInvoices, testAPConnection, type APSyncProgress, type InvoicePayloadCallback } from '../../services/ap-sync.service';
 import { syncAPPayments, testAPPaymentsConnection, type APPaymentsSyncProgress, type PaymentPayloadCallback } from '../../services/ap-payments-sync.service';
 import { syncGLCodeCombinations, testGLCodeCombConnection, type CodeCombSyncProgress, type CodeCombPayloadCallback } from '../../services/gl-codecomb-sync.service';
@@ -140,6 +141,19 @@ interface PaymentPayloadLog {
 
 // Proxy status type
 type ProxyStatus = 'unknown' | 'checking' | 'online' | 'offline';
+
+// Batch list modal item (for two-phase GL Journal sync)
+interface BatchListItem {
+  batchId: number;
+  batchName: string;
+  raw: any;
+  status: 'pending' | 'syncing' | 'done' | 'error';
+  headersCount: number;
+  linesCount: number;
+  headersInserted: number;
+  linesInserted: number;
+  errorMsg?: string;
+}
 
 const SyncData: React.FC = () => {
   const [form] = Form.useForm();
@@ -826,6 +840,13 @@ const SyncData: React.FC = () => {
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const isSyncingRef = useRef(false);
+
+  // Batch list modal state (two-phase GL Journal sync)
+  const [batchListOpen,  setBatchListOpen]  = useState(false);
+  const [batchList,      setBatchList]      = useState<BatchListItem[]>([]);
+  const [batchSyncing,   setBatchSyncing]   = useState(false);
+  const batchAbortRef = useRef<AbortController | null>(null);
+
   const logCounterRef = useRef(0); // Track total logs generated for debugging
   const allLogsRef = useRef<SyncLog[]>([]); // Unbounded full log store
   const [missingLogsModalOpen, setMissingLogsModalOpen] = useState(false);
@@ -1608,6 +1629,30 @@ const SyncData: React.FC = () => {
     });
 
     return parameters;
+  };
+
+  // ── localStorage helpers for batch sync progress persistence ──────────────
+  const getBatchDoneKey = (params: Record<string, string>) =>
+    `glsync_done_${params.DefaultPeriodName || 'all'}_${params.JeBatchId || 'all'}`;
+
+  const loadDoneBatchIds = (params: Record<string, string>): Set<number> => {
+    try {
+      const raw = localStorage.getItem(getBatchDoneKey(params));
+      return raw ? new Set(JSON.parse(raw) as number[]) : new Set();
+    } catch { return new Set(); }
+  };
+
+  const saveDoneBatchId = (params: Record<string, string>, batchId: number) => {
+    try {
+      const key = getBatchDoneKey(params);
+      const existing = loadDoneBatchIds(params);
+      existing.add(batchId);
+      localStorage.setItem(key, JSON.stringify([...existing]));
+    } catch {}
+  };
+
+  const clearDoneBatchIds = (params: Record<string, string>) => {
+    try { localStorage.removeItem(getBatchDoneKey(params)); } catch {}
   };
 
   const handleTestConnection = async () => {

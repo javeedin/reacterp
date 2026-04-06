@@ -84,6 +84,209 @@ const findChildLink = (links: any[], linkName: string): string | null => {
 };
 
 
+// ── Fetch all GL Journal Batches (Phase 1 only) ──────────────────────────────
+export const fetchGLJournalBatches = async (
+  parameters: Record<string, string>,
+  testMode: boolean | 'single' = false,
+  log?: LogCallback,
+  abortSignal?: AbortSignal,
+): Promise<any[]> => {
+  const pageLimit = testMode === 'single'
+    ? ORACLE_FUSION_CONFIG.singleRecordLimit
+    : (testMode ? ORACLE_FUSION_CONFIG.testLimit : ORACLE_FUSION_CONFIG.defaultLimit);
+  const maxRecords = testMode === 'single' ? 1 : (testMode ? 25 : null);
+
+  const filters = Object.entries(parameters)
+    .filter(([, value]) => value)
+    .map(([key, value]) => `${key}=${value}`)
+    .join(';');
+
+  log?.('step', '──── Fetching Journal Batches from Oracle Fusion ────');
+  log?.('info', `Parameters: ${JSON.stringify(parameters)}`);
+
+  let batches: any[] = [];
+  let offset = 0;
+  let hasMore = true;
+  let pageNum = 0;
+
+  while (hasMore && (maxRecords === null || batches.length < maxRecords)) {
+    if (abortSignal?.aborted) break;
+    pageNum++;
+    const fetchLimit = maxRecords !== null ? Math.min(pageLimit, maxRecords - batches.length) : pageLimit;
+    const batchParams: Record<string, string> = { limit: fetchLimit.toString(), offset: offset.toString() };
+    if (filters) batchParams.q = filters;
+
+    const batchResult = await fetchFromOracle('journalBatches', batchParams, log, false);
+    const items = batchResult.items || [];
+    batches = [...batches, ...items];
+
+    const apiHasMore = batchResult.hasMore === true;
+    const gotFullPage = items.length === fetchLimit;
+    hasMore = items.length > 0 && (apiHasMore || gotFullPage);
+    offset += items.length;
+    if (maxRecords !== null && batches.length >= maxRecords) hasMore = false;
+  }
+
+  log?.('success', `Fetched ${batches.length} batches across ${pageNum} page(s)`);
+
+  // Annotate each batch with _batchId pre-computed
+  return batches.map(b => ({
+    ...b,
+    _batchId: (() => {
+      const link = Array.isArray(b.links) ? b.links.find((l: any) => l.name === 'journalHeaders' && l.rel === 'child') : null;
+      const href = link?.href || '';
+      const match = href.match(/journalBatches\/(\d+)/);
+      return match ? parseInt(match[1], 10) : 0;
+    })(),
+  }));
+};
+
+// ── Process a single batch (headers + lines) ─────────────────────────────────
+export interface SingleBatchResult {
+  batchId: number;
+  batchName: string;
+  headersCount: number;
+  linesCount: number;
+  headersInserted: number;
+  linesInserted: number;
+  errors: number;
+  lastError: string;
+}
+
+export const processSingleGLBatch = async (
+  batch: any,
+  log?: LogCallback,
+  abortSignal?: AbortSignal,
+): Promise<SingleBatchResult> => {
+  const batchId = extractBatchIdFromHref(findChildLink(batch.links, 'journalHeaders') || '') || 0;
+  const batchName = batch.JournalBatchName || batch.JournalName || `Batch ${batchId}`;
+
+  const result: SingleBatchResult = {
+    batchId, batchName, headersCount: 0, linesCount: 0,
+    headersInserted: 0, linesInserted: 0, errors: 0, lastError: '',
+  };
+
+  const headersHref = findChildLink(batch.links, 'journalHeaders');
+  if (!headersHref) {
+    result.errors++;
+    result.lastError = 'No journalHeaders link';
+    return result;
+  }
+
+  // Fetch all headers (with pagination)
+  const headers = await fetchAllFromOracleUrl(headersHref, log, false, 500, abortSignal);
+  result.headersCount = headers.length;
+
+  // Insert batch record first
+  const batchPayload = {
+    items: [{
+      JeBatchId: batchId,
+      AccountedPeriodType: batch.AccountedPeriodType,
+      DefaultPeriodName: batch.DefaultPeriodName,
+      BatchName: batch.JournalBatchName || batch.JournalName,
+      Status: batch.Status,
+      ControlTotal: batch.ControlTotal,
+      BatchDescription: batch.Description || batch.BatchDescription,
+      ErrorMessage: batch.ErrorMessage,
+      PostedDate: batch.PostedDate,
+      PostingRunId: batch.PostingRunId,
+      RequestId: batch.RequestId,
+      RunningTotalAccountedCr: batch.RunningTotalAccountedCr,
+      RunningTotalAccountedDr: batch.RunningTotalAccountedDr,
+      RunningTotalCr: batch.RunningTotalCr,
+      RunningTotalDr: batch.RunningTotalDr,
+      CreatedBy: batch.CreatedBy,
+      CreationDate: batch.CreationDate,
+      LastUpdateDate: batch.LastUpdateDate,
+      LastUpdatedBy: batch.LastUpdatedBy,
+      ActualFlagMeaning: batch.ActualFlagMeaning,
+      ApprovalStatusMeaning: batch.ApprovalStatusMeaning,
+      ApproverEmployeeName: batch.ApproverEmployeeName,
+      FundsStatusMeaning: batch.FundsStatusMeaning,
+      ParentJeBatchName: batch.ParentJeBatchName,
+      ChartOfAccountsName: batch.ChartOfAccountsName,
+      StatusMeaning: batch.StatusMeaning,
+      CompletionStatusMeaning: batch.CompletionStatusMeaning,
+      UserPeriodSetName: batch.UserPeriodSetName,
+      UserJeSourceName: batch.UserJeSourceName,
+      ReversalDate: batch.ReversalDate,
+      ReversalPeriod: batch.ReversalPeriod,
+      ReversalFlag: batch.ReversalFlag,
+      ReversalMethodMeaning: batch.ReversalMethodMeaning,
+      LedgerId: batch.LedgerId,
+      LedgerName: batch.LedgerName,
+      JournalName: batch.JournalName,
+    }],
+  };
+
+  try {
+    const batchInsertResult = await insertToApex(APEX_DB_CONFIG.endpoints.journalBatches, batchPayload, log, false);
+    if (!apexOk(batchInsertResult)) {
+      log?.('warning', `Batch insert warning: ${apexErr(batchInsertResult)}`);
+    }
+  } catch (e) {
+    log?.('warning', `Batch insert error: ${e}`);
+  }
+
+  // Process each header
+  for (const header of headers) {
+    if (abortSignal?.aborted) break;
+
+    const headerId = extractHeaderIdFromHref(findChildLink(header.links, 'journalLines') || '')
+      || extractIdFromHref(header.links?.[0]?.href || '')
+      || 0;
+
+    // Fetch lines (with pagination)
+    const linesHref = findChildLink(header.links, 'journalLines');
+    let lines: any[] = [];
+    if (linesHref) {
+      try {
+        lines = await fetchAllFromOracleUrl(linesHref, log, false, 500, abortSignal);
+        result.linesCount += lines.length;
+      } catch (e) {
+        log?.('warning', `Lines fetch error for header ${headerId}: ${e}`);
+      }
+    }
+
+    // Insert header
+    const headerPayload = { batchId, items: [{ JeHeaderId: headerId, ...header }] };
+    try {
+      const headerResult = await insertToApex(APEX_DB_CONFIG.endpoints.journalHeaders, headerPayload, log, false);
+      if (apexOk(headerResult)) {
+        result.headersInserted++;
+      } else {
+        result.errors++;
+        result.lastError = apexErr(headerResult);
+      }
+    } catch (e) {
+      result.errors++;
+      result.lastError = String(e);
+    }
+
+    // Insert lines
+    if (lines.length > 0) {
+      const linesPayload = { batchId, jeHeaderId: headerId, items: lines };
+      try {
+        const linesResult = await insertToApex(APEX_DB_CONFIG.endpoints.journalLines, linesPayload, log, false);
+        if (apexOk(linesResult)) {
+          result.linesInserted += linesResult.inserted ?? linesResult.syncedCount ?? lines.length;
+        } else {
+          result.errors++;
+          result.lastError = apexErr(linesResult);
+        }
+      } catch (e) {
+        result.errors++;
+        result.lastError = String(e);
+      }
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 50)); // small delay
+  }
+
+  return result;
+};
+
+
 // Main GL Journal Sync Function
 export const syncGLJournals = async (
   parameters: Record<string, string>,
