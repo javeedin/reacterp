@@ -708,7 +708,7 @@ const ManagePayments: React.FC = () => {
       const checkId: number | null = data1?.checkId ?? null;
       const paymentNumber: string = data1?.paymentNumber ?? (checkId ? String(checkId) : 'Unknown');
 
-      // ── Step 2: PUT /ap/createinvoice/installments — mark each pending installment Fully Paid ──
+      // ── Step 2: PUT /ap/createinvoice/installments — reduce UNPAID_AMOUNT by applyAmount ──
       const instBaseUrl = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments`;
       const instErrors: string[] = [];
       let totalInstUpdated = 0;
@@ -726,16 +726,26 @@ const ManagePayments: React.FC = () => {
           // Only update installments that still have an outstanding balance
           const pending = allInst.filter(i => (i.amount_remaining ?? i.unpaid_amount ?? 1) > 0);
 
+          // Distribute applyAmount across installments in due-date order (earliest first)
+          let remainingApply = inv.applyAmount;
+
           for (const inst of pending) {
+            if (remainingApply <= 0) break;
             const instId = inst.installment_id?.toString() || inst.key;
+            const instUnpaid = Number(inst.amount_remaining ?? inst.unpaid_amount ?? inst.UNPAID_AMOUNT ?? 0);
+            const amountApplied = Math.min(remainingApply, instUnpaid);
+            const newUnpaid = Math.max(0, instUnpaid - amountApplied);
+            const newStatus = newUnpaid <= 0 ? 'Fully Paid' : 'Partially Paid';
+            remainingApply -= amountApplied;
+
             const putRes = await fetch(instBaseUrl, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
               body: JSON.stringify({
                 InvoiceId:       inv.invoiceId,
                 InstallmentId:   instId,
-                PaymentStatus:   'Fully Paid',
-                AmountRemaining: 0,
+                PaymentStatus:   newStatus,
+                AmountRemaining: newUnpaid,
               }),
             });
             const d2 = await putRes.json().catch(() => ({}));
@@ -3998,10 +4008,11 @@ const ManagePayments: React.FC = () => {
           const instUrl = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments`;
           const exampleBody = {
             '// call once per pending installment': '',
+            '// AmountRemaining = installment.unpaid - amountApplied (0 if fully paid)': '',
             InvoiceId:       inv.invoiceId,
             InstallmentId:   '<fetched from GET installments>',
-            PaymentStatus:   'Fully Paid',
-            AmountRemaining: 0,
+            PaymentStatus:   '<Fully Paid | Partially Paid>',
+            AmountRemaining: '<unpaid balance after this payment>',
           };
           return (
             <div key={stepKey} style={{ border: `1px solid ${step2Result ? (step2Result.status === 'success' ? '#b7eb8f' : '#ffa39e') : '#d9d9d9'}`, borderRadius: 8, marginBottom: 12, overflow: 'hidden' }}>
@@ -4028,15 +4039,22 @@ const ManagePayments: React.FC = () => {
                         return;
                       }
                       const results = [];
+                      let remainingApply = inv.applyAmount;
                       for (const inst of pending) {
+                        if (remainingApply <= 0) break;
                         const instId = inst.installment_id?.toString() || inst.key;
+                        const instUnpaid = Number(inst.amount_remaining ?? inst.unpaid_amount ?? inst.UNPAID_AMOUNT ?? 0);
+                        const amountApplied = Math.min(remainingApply, instUnpaid);
+                        const newUnpaid = Math.max(0, instUnpaid - amountApplied);
+                        const newStatus = newUnpaid <= 0 ? 'Fully Paid' : 'Partially Paid';
+                        remainingApply -= amountApplied;
                         const putRes = await fetch(instUrl, {
                           method: 'PUT',
                           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-                          body: JSON.stringify({ InvoiceId: inv.invoiceId, InstallmentId: instId, PaymentStatus: 'Fully Paid', AmountRemaining: 0 }),
+                          body: JSON.stringify({ InvoiceId: inv.invoiceId, InstallmentId: instId, PaymentStatus: newStatus, AmountRemaining: newUnpaid }),
                         });
                         const d = await putRes.json().catch(() => ({}));
-                        results.push({ instId, status: putRes.ok ? 'ok' : 'error', data: d });
+                        results.push({ instId, amountApplied, newUnpaid, newStatus, status: putRes.ok ? 'ok' : 'error', data: d });
                       }
                       setApiTestResults(prev => ({ ...prev, [stepKey]: { status: results.every(r => r.status === 'ok') ? 'success' : 'error', data: results } }));
                     } catch (e: any) {
