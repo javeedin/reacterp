@@ -170,6 +170,14 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
         required: false,
         defaultValue: '',
       },
+      {
+        key: 'JeBatchId',
+        label: 'Batch ID (optional)',
+        type: 'text',
+        required: false,
+        defaultValue: '',
+        placeholder: 'e.g. 123456 — leave blank for all',
+      },
     ],
   },
   {
