@@ -3,20 +3,13 @@ import { useNavigate } from 'react-router-dom';
 
 export interface TourStep {
   id: string;
-  /** Sticky note body text */
   note: string;
-  /** Small label shown in a code-style pill, e.g. "Filling: Business Unit → BCLD" */
   fillLabel?: string;
   noteColor?: 'yellow' | 'blue' | 'green' | 'pink';
-  /** Rotation of the sticky note in degrees */
   noteRotation?: number;
-  /** Matches a [data-sat-id="..."] attribute in the DOM */
   targetId?: string;
-  /** Preferred placement of the note relative to the target */
   placement?: 'top' | 'bottom' | 'left' | 'right';
-  /** Async action executed when this step becomes active */
   action?: (ctx: { navigate: ReturnType<typeof useNavigate> }) => Promise<void>;
-  /** Auto-advance to next step after N ms (0 = manual only) */
   autoNextMs?: number;
 }
 
@@ -51,43 +44,53 @@ export const ShowAndTellProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [stepIndex, setStepIndex]   = useState(0);
   const [isRunning, setIsRunning]   = useState(false);
   const navigate = useNavigate();
+
+  // Refs keep current values accessible inside callbacks without stale closures
+  const tourRef  = useRef<Tour | null>(null);
+  const indexRef = useRef(0);
   const autoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearTimer = () => {
     if (autoTimer.current) { clearTimeout(autoTimer.current); autoTimer.current = null; }
   };
 
-  const runStep = useCallback((tour: Tour, idx: number) => {
+  const execStep = useCallback((tour: Tour, idx: number) => {
     clearTimer();
     const step = tour.steps[idx];
     if (!step) return;
     if (step.action) step.action({ navigate });
     if (step.autoNextMs && step.autoNextMs > 0) {
       autoTimer.current = setTimeout(() => {
-        setStepIndex(i => {
-          const next = i + 1;
-          if (next < tour.steps.length) {
-            runStep(tour, next);
-            return next;
-          }
-          setActiveTour(null);
+        const t = tourRef.current;
+        if (!t) return;
+        const next = indexRef.current + 1;
+        if (next >= t.steps.length) {
+          setActiveTour(null); tourRef.current = null;
+          setStepIndex(0);    indexRef.current = 0;
           setIsRunning(false);
-          return i;
-        });
+        } else {
+          setStepIndex(next); indexRef.current = next;
+          execStep(t, next);
+        }
       }, step.autoNextMs);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigate]);
 
   const startTour = useCallback((tour: Tour) => {
+    clearTimer();
+    tourRef.current  = tour;
+    indexRef.current = 0;
     setActiveTour(tour);
     setStepIndex(0);
     setIsRunning(true);
-    runStep(tour, 0);
-  }, [runStep]);
+    execStep(tour, 0);
+  }, [execStep]);
 
   const stopTour = useCallback(() => {
     clearTimer();
+    tourRef.current  = null;
+    indexRef.current = 0;
     setActiveTour(null);
     setStepIndex(0);
     setIsRunning(false);
@@ -95,25 +98,25 @@ export const ShowAndTellProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const nextStep = useCallback(() => {
     clearTimer();
-    setActiveTour(tour => {
-      if (!tour) return tour;
-      setStepIndex(i => {
-        const next = i + 1;
-        if (next >= tour.steps.length) {
-          setIsRunning(false);
-          setActiveTour(null);
-          return i;
-        }
-        runStep(tour, next);
-        return next;
-      });
-      return tour;
-    });
-  }, [runStep]);
+    const tour = tourRef.current;
+    if (!tour) return;
+    const next = indexRef.current + 1;
+    if (next >= tour.steps.length) {
+      setActiveTour(null); tourRef.current = null;
+      setStepIndex(0);    indexRef.current = 0;
+      setIsRunning(false);
+    } else {
+      indexRef.current = next;
+      setStepIndex(next);
+      execStep(tour, next);
+    }
+  }, [execStep]);
 
   const prevStep = useCallback(() => {
     clearTimer();
-    setStepIndex(i => Math.max(0, i - 1));
+    const prev = Math.max(0, indexRef.current - 1);
+    indexRef.current = prev;
+    setStepIndex(prev);
   }, []);
 
   return (
