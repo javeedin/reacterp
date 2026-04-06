@@ -310,8 +310,9 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
                 EXTRACT(MONTH FROM TO_DATE('01-' || ra.PERIOD_NAME, 'DD-Mon-RR'))  AS PERIOD_NUM,
 
                 -- Account segments: prefer data from REERP_GL_CODE_COMBINATIONS
-                -- (joined via CONCATENATED_SEGMENTS virtual column);
-                -- fall back to parsing ACCOUNT_COMBINATION directly.
+                -- (joined by inlining the segment concatenation formula — virtual
+                -- columns cannot be referenced in PL/SQL JOIN conditions);
+                -- fall back to REGEXP_SUBSTR parsing of ACCOUNT_COMBINATION.
                 NVL(cc.SEGMENT1_COMPANY,
                     NULLIF(TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,1)),
                            ''))                                    AS COMPANY,
@@ -351,7 +352,16 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
 
             FROM raw_agg ra
             LEFT JOIN REERP_GL_CODE_COMBINATIONS cc
-                   ON cc.CONCATENATED_SEGMENTS = ra.ACCOUNT_COMBINATION
+                   ON (   cc.SEGMENT1_COMPANY
+                       || '-' || cc.SEGMENT2_LOB
+                       || '-' || cc.SEGMENT3_DEPARTMENT
+                       || '-' || cc.SEGMENT4_ACCOUNT
+                       || '-' || cc.SEGMENT5_SUB_ACCOUNT
+                       || '-' || cc.SEGMENT6_ANALYSIS
+                       || '-' || cc.SEGMENT7_INTERCOMPANY
+                       || '-' || cc.SEGMENT8_FUTURE1
+                       || '-' || cc.SEGMENT9_FUTURE2
+                       ) = ra.ACCOUNT_COMBINATION
         ),
 
         -- ── 3. Compute cumulative analytics ──────────────────────────
