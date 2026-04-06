@@ -90,36 +90,42 @@ BEGIN
         p_mimes_allowed  => NULL,
         p_comments       => 'GL Lines summary by account combination',
         p_source         => q'[
-SELECT
-    lin.ACCOUNT_COMBINATION                                                  AS account_combination,
-    REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION, '[^-]+', 1, 1)                    AS seg1_company,
-    REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION, '[^-]+', 1, 2)                    AS seg2_lob,
-    REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION, '[^-]+', 1, 3)                    AS seg3_department,
-    REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION, '[^-]+', 1, 4)                    AS seg4_account,
-    REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION, '[^-]+', 1, 5)                    AS seg5_sub_account,
-    REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION, '[^-]+', 1, 6)                    AS seg6_analysis,
-    REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION, '[^-]+', 1, 7)                    AS seg7_intercompany,
-    REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION, '[^-]+', 1, 8)                    AS seg8_future1,
-    REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION, '[^-]+', 1, 9)                    AS seg9_future2,
-    hdr.LEDGER_NAME                                                           AS ledger_name,
-    hdr.PERIOD_NAME                                                           AS period_name,
-    SUM(NVL(lin.ACCOUNTED_DR, 0))                                             AS total_dr,
-    SUM(NVL(lin.ACCOUNTED_CR, 0))                                             AS total_cr,
-    SUM(NVL(lin.ACCOUNTED_DR, 0)) - SUM(NVL(lin.ACCOUNTED_CR, 0))            AS net_amount,
-    COUNT(*)                                                                  AS line_count
-FROM RR_GL_JE_LINES_ALL  lin
-JOIN RR_GL_JE_HEADERS     hdr ON hdr.JE_HEADER_ID = lin.JE_HEADER_ID
-WHERE lin.ACCOUNT_COMBINATION IS NOT NULL
-  AND (NULLIF(:period_name, '') IS NULL OR UPPER(hdr.PERIOD_NAME) = UPPER(:period_name))
-  AND (NULLIF(:company, '')     IS NULL OR UPPER(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION, '[^-]+', 1, 1)) = UPPER(:company))
-GROUP BY
-    lin.ACCOUNT_COMBINATION,
-    hdr.LEDGER_NAME,
-    hdr.PERIOD_NAME
-ORDER BY
-    REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION, '[^-]+', 1, 1),
-    REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION, '[^-]+', 1, 4),
-    lin.ACCOUNT_COMBINATION
+SELECT *
+FROM (
+    SELECT
+        lin.ACCOUNT_COMBINATION                                             AS account_combination,
+        REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION, '[^-]+', 1, 1)              AS seg1_company,
+        REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION, '[^-]+', 1, 2)              AS seg2_lob,
+        REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION, '[^-]+', 1, 3)              AS seg3_department,
+        REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION, '[^-]+', 1, 4)              AS seg4_account,
+        REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION, '[^-]+', 1, 5)              AS seg5_sub_account,
+        REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION, '[^-]+', 1, 6)              AS seg6_analysis,
+        REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION, '[^-]+', 1, 7)              AS seg7_intercompany,
+        REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION, '[^-]+', 1, 8)              AS seg8_future1,
+        REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION, '[^-]+', 1, 9)              AS seg9_future2,
+        hdr.LEDGER_NAME                                                     AS ledger_name,
+        hdr.PERIOD_NAME                                                     AS period_name,
+        SUM(NVL(lin.ACCOUNTED_DR, 0))                                       AS total_dr,
+        SUM(NVL(lin.ACCOUNTED_CR, 0))                                       AS total_cr,
+        SUM(NVL(lin.ACCOUNTED_DR, 0)) - SUM(NVL(lin.ACCOUNTED_CR, 0))      AS net_amount,
+        COUNT(*)                                                            AS line_count
+    FROM RR_GL_JE_LINES_ALL  lin
+    JOIN RR_GL_JE_HEADERS     hdr ON hdr.JE_HEADER_ID = lin.JE_HEADER_ID
+    WHERE lin.ACCOUNT_COMBINATION IS NOT NULL
+      AND (
+            NULLIF(:period_name, '') IS NULL
+            OR UPPER(hdr.PERIOD_NAME) = UPPER(:period_name)
+          )
+      AND (
+            NULLIF(:company, '') IS NULL
+            OR UPPER(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION, '[^-]+', 1, 1)) = UPPER(:company)
+          )
+    GROUP BY
+        lin.ACCOUNT_COMBINATION,
+        hdr.LEDGER_NAME,
+        hdr.PERIOD_NAME
+)
+ORDER BY seg1_company, seg4_account, account_combination
 ]'
     );
     COMMIT;
