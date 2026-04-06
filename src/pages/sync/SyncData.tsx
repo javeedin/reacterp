@@ -740,7 +740,8 @@ const SyncData: React.FC = () => {
   const isGLBatchesOnly = selectedObject?.id === 'gl-batches-only';
   const isGLHeadersOnly = selectedObject?.id === 'gl-headers-only';
   const isGLLinesOnly = selectedObject?.id === 'gl-lines-only';
-  const isGLBalances = selectedObject?.id === 'gl-balances-soap';
+  const isGLBalances  = selectedObject?.id === 'gl-balances-soap';
+  const isGLJournals  = selectedObject?.id === 'gl-journal-batches';
 
   // Web Worker for background sync
   const handleWorkerProgress = useCallback((progress: WorkerSyncProgress) => {
@@ -842,6 +843,7 @@ const SyncData: React.FC = () => {
   const isSyncingRef = useRef(false);
 
   // Batch list modal state (two-phase GL Journal sync)
+  const [glSyncMode,     setGlSyncMode]     = useState<'chain' | 'batch-popup'>('chain');
   const [batchListOpen,  setBatchListOpen]  = useState(false);
   const [batchList,      setBatchList]      = useState<BatchListItem[]>([]);
   const [batchSyncing,   setBatchSyncing]   = useState(false);
@@ -2647,10 +2649,10 @@ const SyncData: React.FC = () => {
         abortControllerRef.current.signal
       );
       syncResult = { inserted: result.insertedLines, errors: result.errors, type: 'lines' };
-    } else {
-      // GL Journals Sync — Phase 1: fetch batches, show modal
+    } else if (glSyncMode === 'batch-popup') {
+      // GL Journals — Batch Popup mode: fetch batches then show modal
       addLog('step', '═══════════════════════════════════════════════════════════');
-      addLog('step', '  GL JOURNAL SYNC — Fetching Batches');
+      addLog('step', '  GL JOURNAL SYNC — Fetching Batches (Batch Popup Mode)');
       addLog('step', '═══════════════════════════════════════════════════════════');
 
       const batches = await fetchGLJournalBatches(
@@ -2686,6 +2688,49 @@ const SyncData: React.FC = () => {
       setBatchListOpen(true);
       isSyncingRef.current = false;
       return; // Modal takes over from here
+
+    } else {
+      // GL Journals — Chain mode: auto process everything in sequence
+      setProgress({
+        status: 'fetching_batches',
+        totalBatches: 0,
+        processedBatches: 0,
+        currentBatchId: null,
+        currentBatchName: '',
+        totalHeaders: 0,
+        processedHeaders: 0,
+        currentHeaderId: null,
+        currentHeaderName: '',
+        totalLines: 0,
+        processedLines: 0,
+        totalBatchesInserted: 0,
+        totalHeadersInserted: 0,
+        totalLinesInserted: 0,
+        errors: 0,
+        lastError: '',
+        startTime: new Date(),
+        endTime: null,
+      });
+
+      const modeLabel = testMode === 'single' ? 'SINGLE RECORD DEBUG' : (testMode ? 'TEST MODE (25 batches)' : 'FULL SYNC');
+      addLog('step', '═══════════════════════════════════════════════════════════');
+      addLog('step', `  GL JOURNAL SYNC — Chain Mode — ${modeLabel}`);
+      addLog('step', '═══════════════════════════════════════════════════════════');
+
+      const result = await syncGLJournals(
+        parameters,
+        testMode,
+        addLog,
+        (newProgress) => {
+          setProgress((prev) => ({ ...prev, ...newProgress }));
+          if (newProgress.processedBatches !== undefined && newProgress.totalBatches) {
+            notifySyncProgress(`${newProgress.processedBatches}/${newProgress.totalBatches} batches`);
+          }
+        },
+        abortControllerRef.current.signal,
+        handleBatchPayload
+      );
+      syncResult = { inserted: result.totalBatchesInserted + result.totalHeadersInserted + result.totalLinesInserted, errors: result.errors, type: 'records' };
     }
 
     // Notify Electron of sync completion
@@ -3268,6 +3313,40 @@ const SyncData: React.FC = () => {
                         <div style={{ fontSize: 11, color: '#888', marginTop: 4, marginLeft: 24 }}>
                           After batches → auto-run GL Headers → GL Lines
                         </div>
+                      </div>
+                    )}
+
+                    {isGLJournals && !isSyncing && (
+                      <div style={{
+                        padding: '10px 14px',
+                        background: REDWOOD.surfaceSecondary,
+                        borderRadius: 8,
+                        marginBottom: 4,
+                      }}>
+                        <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>Sync Mode</Text>
+                        <Space>
+                          <Button
+                            size="small"
+                            type={glSyncMode === 'chain' ? 'primary' : 'default'}
+                            onClick={() => setGlSyncMode('chain')}
+                            style={glSyncMode === 'chain' ? { background: REDWOOD.primary, borderColor: REDWOOD.primary } : {}}
+                          >
+                            Auto Chain
+                          </Button>
+                          <Button
+                            size="small"
+                            type={glSyncMode === 'batch-popup' ? 'primary' : 'default'}
+                            onClick={() => setGlSyncMode('batch-popup')}
+                            style={glSyncMode === 'batch-popup' ? { background: REDWOOD.primary, borderColor: REDWOOD.primary } : {}}
+                          >
+                            Batch Popup
+                          </Button>
+                        </Space>
+                        <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 6 }}>
+                          {glSyncMode === 'chain'
+                            ? 'Processes all batches automatically in sequence.'
+                            : 'Shows batch list — process one by one, resume after refresh.'}
+                        </Text>
                       </div>
                     )}
 
