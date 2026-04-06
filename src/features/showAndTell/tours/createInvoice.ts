@@ -29,18 +29,9 @@ export const createInvoiceTour: Tour = {
       id:        'navigate',
       note:      "Navigating to Manage Invoices — your AP invoice hub. All invoices are created, tracked, and paid from here.",
       noteColor: 'yellow',
-      autoNextMs: 1800,
+      autoNextMs: 2500,
       action:    async ({ navigate }) => {
-        navigate('/ap/manage-invoices', {
-          state: {
-            showAndTellOpen: true,
-            demoData: {
-              ...DEMO_INVOICE,
-              // dayjs objects don't survive serialisation; convert to ISO string
-              invoiceDate: DEMO_INVOICE.invoiceDate.toISOString(),
-            },
-          },
-        });
+        navigate('/ap/manage-invoices');
       },
     },
     {

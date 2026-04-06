@@ -69,6 +69,8 @@ import {
   FileZipOutlined,
 } from '@ant-design/icons';
 import { Link, useLocation } from 'react-router-dom';
+import { useShowAndTell } from '../../features/showAndTell';
+import { DEMO_INVOICE } from '../../features/showAndTell/tours/createInvoice';
 import type { ColumnsType } from 'antd/es/table';
 import FloatingMenu from '../../components/FloatingMenu';
 import Autopilot from '../../components/Autopilot';
@@ -281,6 +283,8 @@ const ManageInvoices: React.FC = () => {
   const [form] = Form.useForm();
   const location = useLocation();
   const quickCreateHandled = useRef<string | null>(null);
+  const { isRunning, activeTour } = useShowAndTell();
+  const satTabOpened = useRef(false);
   const [loading, setLoading] = useState(false);
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
@@ -910,6 +914,23 @@ const ManageInvoices: React.FC = () => {
     setActiveTab(tabKey);
   };
 
+  // Show & Tell: when the create-invoice tour navigates here, open the demo tab
+  useEffect(() => {
+    if (!isRunning || activeTour?.id !== 'create-invoice') {
+      satTabOpened.current = false;
+      return;
+    }
+    if (satTabOpened.current) return;
+    satTabOpened.current = true;
+    setTimeout(() => {
+      openCreateInvoiceTab({
+        ...DEMO_INVOICE,
+        invoiceDate: DEMO_INVOICE.invoiceDate, // already a dayjs object
+      } as any);
+    }, 400);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRunning, activeTour?.id]);
+
   // Handle quick-create from FloatingMenu or Autopilot navigation state
   useEffect(() => {
     const state = location.state as any;
@@ -918,14 +939,7 @@ const ManageInvoices: React.FC = () => {
     if (quickCreateHandled.current === location.key) return;
     quickCreateHandled.current = location.key;
 
-    if (state.showAndTellOpen && state.demoData) {
-      // Show & Tell tour: open Create Invoice tab with demo data pre-filled
-      const satData = { ...state.demoData } as InvoiceInitialData;
-      if (satData.invoiceDate && typeof satData.invoiceDate === 'string') {
-        satData.invoiceDate = dayjs(satData.invoiceDate);
-      }
-      setTimeout(() => openCreateInvoiceTab(satData), 150);
-    } else if (state.quickCreateData) {
+    if (state.quickCreateData) {
       // FloatingMenu / Autopilot flow: data already collected, open tab directly
       const qcData = { ...state.quickCreateData } as InvoiceInitialData;
       // Convert serialised date string back to dayjs (structured clone strips prototype)
