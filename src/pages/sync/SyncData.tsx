@@ -2435,8 +2435,48 @@ const SyncData: React.FC = () => {
         verboseConsole
       );
       syncResult = { inserted: result.insertedRecords + result.updatedRecords, errors: result.errors, type: 'GL balances' };
+    } else if (isGLBatchesOnly && glSyncMode === 'batch-popup') {
+      // ── GL Batches — Batch Popup mode ────────────────────────────────────
+      addLog('step', '═══════════════════════════════════════════════════════════');
+      addLog('step', '  GL BATCHES SYNC — Fetching Batches (Batch Popup Mode)');
+      addLog('step', '═══════════════════════════════════════════════════════════');
+
+      const batches = await fetchGLJournalBatches(
+        parameters,
+        testMode,
+        addLog,
+        abortControllerRef.current.signal,
+      );
+
+      if (batches.length === 0) {
+        addLog('warning', 'No batches found for the given parameters');
+        isSyncingRef.current = false;
+        return;
+      }
+
+      const doneBatchIds = loadDoneBatchIds(parameters);
+      const items: BatchListItem[] = batches.map((b: any) => {
+        const batchId = b._batchId || 0;
+        const isDone = doneBatchIds.has(batchId);
+        return {
+          batchId,
+          batchName: b.JournalBatchName || b.JournalName || `Batch ${batchId}`,
+          raw: b,
+          status: isDone ? 'done' : 'pending',
+          headersCount: 0,
+          linesCount: 0,
+          headersInserted: 0,
+          linesInserted: 0,
+        };
+      });
+
+      setBatchList(items);
+      setBatchListOpen(true);
+      isSyncingRef.current = false;
+      return; // Modal takes over
+
     } else if (isGLBatchesOnly) {
-      // ── GL Batches (+ optional chain: Headers → Lines) ────────────────────
+      // ── GL Batches — Auto Chain mode (Headers → Lines) ───────────────────
       const runChain = chainGLEnabled;
 
       if (runChain) {
@@ -3316,7 +3356,7 @@ const SyncData: React.FC = () => {
                       </div>
                     )}
 
-                    {isGLJournals && !isSyncing && (
+                    {(isGLJournals || isGLBatchesOnly) && !isSyncing && (
                       <div style={{
                         padding: '10px 14px',
                         background: REDWOOD.surfaceSecondary,
