@@ -28,6 +28,7 @@ import {
   Alert,
   Drawer,
   Descriptions,
+  Popover,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -568,6 +569,7 @@ const ManagePayments: React.FC = () => {
   const [availableInvoices, setAvailableInvoices] = useState<PaymentInvoice[]>([]);
   const [availableInvoicesLoading, setAvailableInvoicesLoading] = useState(false);
   const [selectedInvoiceKeys, setSelectedInvoiceKeys] = useState<React.Key[]>([]);
+  const [addInvoicesApiUrl, setAddInvoicesApiUrl] = useState('');
   const [invoicesToPay, setInvoicesToPay] = useState<PaymentInvoice[]>([]);
   const [supplierTotalBalance, setSupplierTotalBalance] = useState<number | null>(null);
   const [supplierBalanceLoading, setSupplierBalanceLoading] = useState(false);
@@ -837,25 +839,32 @@ const ManagePayments: React.FC = () => {
     setAvailableInvoicesLoading(true);
     try {
       const url = `${APEX_INVOICE_URL}?supplier_number=${encodeURIComponent(supplierNumber)}`;
+      setAddInvoicesApiUrl(url);
       const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       const already = new Set(invoicesToPay.map(i => i.key));
       const items = (data.items || [])
-        .map((item: any, index: number) => ({
-          key: item.invoice_id?.toString() || item.invoice_number || index.toString(),
-          invoiceId: item.invoice_id || 0,
-          invoiceNumber: item.invoice_number || '',
-          invoiceDate: item.invoice_date ? item.invoice_date.substring(0, 10) : '',
-          description: item.description || '',
-          invoiceAmount: item.invoice_amount || 0,
-          amountDue: (item.invoice_amount || 0) - (item.amount_paid || 0),
-          applyAmount: (item.invoice_amount || 0) - (item.amount_paid || 0),
-          discountAmount: 0,
-          dueDate: item.due_date ? item.due_date.substring(0, 10) : '',
-          currency: item.invoice_currency || 'AED',
-          supplierSite: item.supplier_site || '',
-        }))
+        .map((item: any, index: number) => {
+          // unpaid_amount is derived from RR_AP_PAYMENTS_RELATED_INVOICES in the API — use it as source of truth
+          const unpaid = item.unpaid_amount !== undefined && item.unpaid_amount !== null
+            ? Number(item.unpaid_amount)
+            : (item.invoice_amount || 0) - (item.amount_paid || 0);
+          return {
+            key: item.invoice_id?.toString() || item.invoice_number || index.toString(),
+            invoiceId: item.invoice_id || 0,
+            invoiceNumber: item.invoice_number || '',
+            invoiceDate: item.invoice_date ? item.invoice_date.substring(0, 10) : '',
+            description: item.description || '',
+            invoiceAmount: item.invoice_amount || 0,
+            amountDue: unpaid,
+            applyAmount: unpaid,
+            discountAmount: 0,
+            dueDate: item.due_date ? item.due_date.substring(0, 10) : '',
+            currency: item.invoice_currency || 'AED',
+            supplierSite: item.supplier_site || '',
+          };
+        })
         .filter((inv: PaymentInvoice) => inv.amountDue > 0 && !already.has(inv.key));
       setAvailableInvoices(items);
       setSelectedInvoiceKeys([]);
@@ -3002,6 +3011,35 @@ const ManagePayments: React.FC = () => {
             <Space>
               <FileTextOutlined style={{ color: REDWOOD.info }} />
               <span>Select Invoices to Pay</span>
+              {addInvoicesApiUrl && (
+                <Popover
+                  title={<Space><ApiOutlined style={{ color: '#1677ff' }} /><span>API Request</span></Space>}
+                  content={
+                    <div style={{ maxWidth: 520 }}>
+                      <div style={{ marginBottom: 6 }}>
+                        <Tag color="blue">GET</Tag>
+                        <span style={{ fontSize: 11, fontWeight: 600 }}>/ap/createinvoice</span>
+                      </div>
+                      <div style={{
+                        background: '#1e1e1e', color: '#d4d4d4', borderRadius: 6,
+                        padding: '8px 10px', fontSize: 11, fontFamily: 'monospace',
+                        wordBreak: 'break-all', maxHeight: 80, overflowY: 'auto',
+                      }}>
+                        {addInvoicesApiUrl}
+                      </div>
+                      <div style={{ marginTop: 8, fontSize: 11, color: '#555' }}>
+                        Filters: <code>unpaid_amount &gt; 0</code> (derived from <code>RR_AP_PAYMENTS_RELATED_INVOICES</code>)
+                      </div>
+                    </div>
+                  }
+                  trigger="click"
+                  placement="bottomLeft"
+                >
+                  <Tooltip title="View API details">
+                    <ApiOutlined style={{ color: '#1677ff', cursor: 'pointer', fontSize: 15 }} />
+                  </Tooltip>
+                </Popover>
+              )}
             </Space>
           }
           open={addInvoicesModalVisible}
