@@ -94,53 +94,39 @@ BEGIN
     APEX_JSON.open_object;
     APEX_JSON.open_array('items');
     FOR r IN (
-        SELECT *
-        FROM (
-            SELECT
-                lin.ACCOUNT_COMBINATION                                            AS account_combination,
-                REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,1)                AS seg1_company,
-                REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,2)                AS seg2_lob,
-                REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,3)                AS seg3_department,
-                REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,4)                AS seg4_account,
-                REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,5)                AS seg5_sub_account,
-                REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,6)                AS seg6_analysis,
-                REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,7)                AS seg7_intercompany,
-                REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,8)                AS seg8_future1,
-                REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,9)                AS seg9_future2,
-                hdr.LEDGER_NAME                                                    AS ledger_name,
-                hdr.PERIOD_NAME                                                    AS period_name,
-                hdr.CURRENCY_CODE                                                  AS currency,
-                SUM(NVL(lin.ACCOUNTED_DR,0))                                       AS total_dr,
-                SUM(NVL(lin.ACCOUNTED_CR,0))                                       AS total_cr,
-                SUM(NVL(lin.ACCOUNTED_DR,0)) - SUM(NVL(lin.ACCOUNTED_CR,0))       AS net_amount,
-                COUNT(*)                                                           AS line_count
-            FROM RR_GL_JE_LINES_ALL  lin
-            JOIN RR_GL_JE_HEADERS     hdr ON hdr.JE_HEADER_ID = lin.JE_HEADER_ID
-            WHERE lin.ACCOUNT_COMBINATION IS NOT NULL
-              AND (l_period  IS NULL OR UPPER(hdr.PERIOD_NAME) = UPPER(l_period))
-              AND (l_company IS NULL OR UPPER(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,1)) = UPPER(l_company))
-            GROUP BY lin.ACCOUNT_COMBINATION, hdr.LEDGER_NAME, hdr.PERIOD_NAME, hdr.CURRENCY_CODE
-        )
-        ORDER BY seg1_company, seg4_account, currency, account_combination
+        SELECT
+            REGEXP_SUBSTR(MIN(lin.ACCOUNT_COMBINATION),'[^-]+',1,1)                AS seg1_company,
+            REGEXP_SUBSTR(MIN(lin.ACCOUNT_COMBINATION),'[^-]+',1,4)                AS seg4_account,
+            hdr.LEDGER_NAME                                                         AS ledger_name,
+            hdr.PERIOD_NAME                                                         AS period_name,
+            hdr.CURRENCY_CODE                                                       AS currency,
+            SUM(NVL(lin.ACCOUNTED_DR,0))                                            AS total_dr,
+            SUM(NVL(lin.ACCOUNTED_CR,0))                                            AS total_cr,
+            SUM(NVL(lin.ACCOUNTED_DR,0)) - SUM(NVL(lin.ACCOUNTED_CR,0))            AS net_amount,
+            COUNT(*)                                                                AS line_count
+        FROM RR_GL_JE_LINES_ALL  lin
+        JOIN RR_GL_JE_HEADERS     hdr ON hdr.JE_HEADER_ID = lin.JE_HEADER_ID
+        WHERE lin.ACCOUNT_COMBINATION IS NOT NULL
+          AND (l_period  IS NULL OR UPPER(hdr.PERIOD_NAME) = UPPER(l_period))
+          AND (l_company IS NULL OR UPPER(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,1)) = UPPER(l_company))
+        GROUP BY
+            REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,1),
+            REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,4),
+            hdr.LEDGER_NAME,
+            hdr.PERIOD_NAME,
+            hdr.CURRENCY_CODE
+        ORDER BY seg1_company, seg4_account, currency
     ) LOOP
         APEX_JSON.open_object;
-        APEX_JSON.write('account_combination', r.account_combination);
-        APEX_JSON.write('seg1_company',        r.seg1_company);
-        APEX_JSON.write('seg2_lob',            r.seg2_lob);
-        APEX_JSON.write('seg3_department',     r.seg3_department);
-        APEX_JSON.write('seg4_account',        r.seg4_account);
-        APEX_JSON.write('seg5_sub_account',    r.seg5_sub_account);
-        APEX_JSON.write('seg6_analysis',       r.seg6_analysis);
-        APEX_JSON.write('seg7_intercompany',   r.seg7_intercompany);
-        APEX_JSON.write('seg8_future1',        r.seg8_future1);
-        APEX_JSON.write('seg9_future2',        r.seg9_future2);
-        APEX_JSON.write('ledger_name',         r.ledger_name);
-        APEX_JSON.write('period_name',         r.period_name);
-        APEX_JSON.write('currency',            r.currency);
-        APEX_JSON.write('total_dr',            r.total_dr);
-        APEX_JSON.write('total_cr',            r.total_cr);
-        APEX_JSON.write('net_amount',          r.net_amount);
-        APEX_JSON.write('line_count',          r.line_count);
+        APEX_JSON.write('seg1_company',  r.seg1_company);
+        APEX_JSON.write('seg4_account',  r.seg4_account);
+        APEX_JSON.write('ledger_name',   r.ledger_name);
+        APEX_JSON.write('period_name',   r.period_name);
+        APEX_JSON.write('currency',      r.currency);
+        APEX_JSON.write('total_dr',      r.total_dr);
+        APEX_JSON.write('total_cr',      r.total_cr);
+        APEX_JSON.write('net_amount',    r.net_amount);
+        APEX_JSON.write('line_count',    r.line_count);
         APEX_JSON.close_object;
         l_cnt := l_cnt + 1;
     END LOOP;

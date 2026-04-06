@@ -168,23 +168,15 @@ interface PivotRow {
 
 // Lines Summary types
 interface LineSummaryRow {
-  account_combination: string;
-  seg1_company:        string | null;
-  seg2_lob:            string | null;
-  seg3_department:     string | null;
-  seg4_account:        string | null;
-  seg5_sub_account:    string | null;
-  seg6_analysis:       string | null;
-  seg7_intercompany:   string | null;
-  seg8_future1:        string | null;
-  seg9_future2:        string | null;
-  ledger_name:         string | null;
-  period_name:         string | null;
-  currency:            string | null;
-  total_dr:            number;
-  total_cr:            number;
-  net_amount:          number;
-  line_count:          number;
+  seg1_company: string | null;
+  seg4_account: string | null;
+  ledger_name:  string | null;
+  period_name:  string | null;
+  currency:     string | null;
+  total_dr:     number;
+  total_cr:     number;
+  net_amount:   number;
+  line_count:   number;
 }
 
 const TrialBalance: React.FC = () => {
@@ -1211,7 +1203,7 @@ const TrialBalance: React.FC = () => {
     const fmtN = (n: number) =>
       n === 0 ? '—' : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-    // Distinct values for dropdowns
+    // Distinct values for filter dropdowns
     const companies  = [...new Set(lsData.map(r => r.seg1_company).filter(Boolean) as string[])].sort();
     const ledgers    = [...new Set(lsData.map(r => r.ledger_name).filter(Boolean)  as string[])].sort();
     const currencies = [...new Set(lsData.map(r => r.currency).filter(Boolean)     as string[])].sort();
@@ -1222,16 +1214,13 @@ const TrialBalance: React.FC = () => {
       if (lsCurrency && (r.currency    || '').toUpperCase() !== lsCurrency.toUpperCase()) return false;
       if (lsSearch) {
         const q = lsSearch.toLowerCase();
-        if (
-          !(r.account_combination || '').toLowerCase().includes(q) &&
-          !(r.seg4_account        || '').toLowerCase().includes(q) &&
-          !(r.seg1_company        || '').toLowerCase().includes(q)
-        ) return false;
+        if (!(r.seg4_account || '').toLowerCase().includes(q) &&
+            !(r.seg1_company || '').toLowerCase().includes(q)) return false;
       }
       return true;
     });
 
-    // Account-level summary — group by company|account|ledger, pull desc from open TB tab
+    // Pull account descriptions from the open TB tab for this period
     const tbDataForPeriod = tabs.find(t => t.periodName === lsPeriod)?.data || [];
     const tbDescMap = new Map<string, string>();
     for (const rec of tbDataForPeriod) {
@@ -1239,32 +1228,39 @@ const TrialBalance: React.FC = () => {
       if (!tbDescMap.has(k) && rec.account_desc) tbDescMap.set(k, rec.account_desc);
     }
 
+    // SQL already groups by account+ledger+period+currency.
+    // "By Account" mode collapses ledger/currency further → one row per company+account.
     type AcctRow = {
       rowKey: string; seg1_company: string | null; seg4_account: string | null;
       account_desc: string; ledger_name: string | null; currency: string | null;
       total_dr: number; total_cr: number; net_amount: number; line_count: number;
-      combinations: string[];
     };
     const acctMap = new Map<string, AcctRow>();
     for (const r of visibleData) {
-      const key = `${r.seg1_company}|${r.seg4_account}|${r.ledger_name}|${r.currency}`;
+      const key = `${r.seg1_company}|${r.seg4_account}`;
       if (!acctMap.has(key)) {
         acctMap.set(key, {
           rowKey: key, seg1_company: r.seg1_company, seg4_account: r.seg4_account,
           account_desc: tbDescMap.get(`${(r.seg1_company||'').trim()}|${(r.seg4_account||'').trim()}`) || '',
-          ledger_name: r.ledger_name, currency: r.currency,
-          total_dr: 0, total_cr: 0, net_amount: 0, line_count: 0, combinations: [],
+          ledger_name: null, currency: null,
+          total_dr: 0, total_cr: 0, net_amount: 0, line_count: 0,
         });
       }
       const row = acctMap.get(key)!;
-      row.total_dr    += r.total_dr;
-      row.total_cr    += r.total_cr;
-      row.net_amount  += r.net_amount;
-      row.line_count  += r.line_count;
-      row.combinations.push(r.account_combination);
+      row.total_dr   += r.total_dr;
+      row.total_cr   += r.total_cr;
+      row.net_amount += r.net_amount;
+      row.line_count += r.line_count;
     }
 
-    const displayData: any[] = lsByAccount ? [...acctMap.values()] : visibleData;
+    // Each raw row already IS account-level — just add description
+    const enrichedData: any[] = visibleData.map(r => ({
+      ...r,
+      rowKey: `${r.seg1_company}|${r.seg4_account}|${r.ledger_name}|${r.currency}`,
+      account_desc: tbDescMap.get(`${(r.seg1_company||'').trim()}|${(r.seg4_account||'').trim()}`) || '',
+    }));
+
+    const displayData: any[] = lsByAccount ? [...acctMap.values()] : enrichedData;
 
     // KPI totals (always from displayData)
     const totalDr    = displayData.reduce((s: number, r: any) => s + (r.total_dr   || 0), 0);
@@ -1280,8 +1276,9 @@ const TrialBalance: React.FC = () => {
       );
       setLsDetailRow({
         account: r.seg4_account || '', company: r.seg1_company || '',
-        ledger: r.ledger_name, accountDesc: r.account_desc || tbDescMap.get(`${(r.seg1_company||'').trim()}|${(r.seg4_account||'').trim()}`) || '',
-        combinations: r.combinations || (r.account_combination ? [r.account_combination] : []),
+        ledger: r.ledger_name || null,
+        accountDesc: r.account_desc || tbDescMap.get(`${(r.seg1_company||'').trim()}|${(r.seg4_account||'').trim()}`) || '',
+        combinations: [],
         lsDr: r.total_dr, lsCr: r.total_cr, lsNet: r.net_amount, lsLines: r.line_count,
         tbRecords: tbRecs,
       });
@@ -1350,13 +1347,13 @@ const TrialBalance: React.FC = () => {
         onFilter: (val: any, r: any) => r.seg1_company === val },
       { title: 'Account', dataIndex: 'seg4_account', key: 'seg4_account', width: 100,
         sorter: (a: any, b: any) => (a.seg4_account||'').localeCompare(b.seg4_account||''),
-        render: (v: string) => <Text strong style={{ fontFamily: 'monospace', fontSize: 12 }}>{v}</Text> },
-      { title: 'LOB',  dataIndex: 'seg2_lob',        key: 'seg2_lob',        width: 60,
-        render: (v: string) => <Text type="secondary" style={{ fontSize: 11 }}>{v||'—'}</Text> },
-      { title: 'Dept', dataIndex: 'seg3_department',  key: 'seg3_department', width: 60,
-        render: (v: string) => <Text type="secondary" style={{ fontSize: 11 }}>{v||'—'}</Text> },
-      { title: 'Account Combination', dataIndex: 'account_combination', key: 'account_combination', ellipsis: true,
-        render: (v: string) => <Tooltip title={v}><Text code style={{ fontSize: 11 }}>{v}</Text></Tooltip> },
+        render: (v: string, r: any) => (
+          <span style={{ cursor: 'pointer' }} onClick={() => openDetail(r)}>
+            <Text strong style={{ fontFamily: 'monospace', fontSize: 12 }}>{v}</Text>
+          </span>
+        ) },
+      { title: 'Description', dataIndex: 'account_desc', key: 'account_desc', ellipsis: true,
+        render: (v: string) => <Text style={{ fontSize: 12 }}>{v || <Text type="secondary">—</Text>}</Text> },
       { title: 'Ledger', dataIndex: 'ledger_name', key: 'ledger_name', width: 130, ellipsis: true,
         filters: ledgers.map(l => ({ text: l, value: l })),
         onFilter: (val: any, r: any) => r.ledger_name === val,
@@ -1483,21 +1480,17 @@ const TrialBalance: React.FC = () => {
                   style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}
                   onClick={() => {
                     if (!visibleData.length) return;
-                    const rows = visibleData.map(r => ({
-                      'Account Combination': r.account_combination,
-                      'Company':    r.seg1_company,
-                      'LOB':        r.seg2_lob,
-                      'Department': r.seg3_department,
-                      'Account':    r.seg4_account,
-                      'Sub Acc':    r.seg5_sub_account,
-                      'Analysis':   r.seg6_analysis,
-                      'IC':         r.seg7_intercompany,
-                      'Ledger':     r.ledger_name,
-                      'Period':     r.period_name,
-                      'Total DR':   r.total_dr,
-                      'Total CR':   r.total_cr,
-                      'Net':        r.net_amount,
-                      'Lines':      r.line_count,
+                    const rows = displayData.map((r: any) => ({
+                      'Company':  r.seg1_company,
+                      'Account':  r.seg4_account,
+                      'Description': r.account_desc || '',
+                      'Ledger':   r.ledger_name,
+                      'Currency': r.currency,
+                      'Period':   r.period_name,
+                      'PTD DR':   r.total_dr,
+                      'PTD CR':   r.total_cr,
+                      'Net':      r.net_amount,
+                      'Lines':    r.line_count,
                     }));
                     const ws = XLSX.utils.json_to_sheet(rows);
                     const wb = XLSX.utils.book_new();
@@ -1595,7 +1588,7 @@ const TrialBalance: React.FC = () => {
         <Table
           columns={columns}
           dataSource={displayData}
-          rowKey={(r: any) => lsByAccount ? r.rowKey : `${r.account_combination}||${r.ledger_name}||${r.period_name}`}
+          rowKey={(r: any) => r.rowKey || `${r.seg1_company}|${r.seg4_account}|${r.ledger_name}|${r.currency}`}
           size="small"
           loading={lsLoading}
           scroll={{ x: 1000 }}
@@ -1765,12 +1758,12 @@ const TrialBalance: React.FC = () => {
                 <Table
                   size="small"
                   dataSource={filteredLs}
-                  rowKey={(r: LineSummaryRow) => `${r.account_combination}|${r.currency}`}
+                  rowKey={(r: LineSummaryRow) => `${r.seg4_account}|${r.ledger_name}|${r.currency}`}
                   pagination={false}
                   style={{ marginBottom: 16 }}
                   columns={[
-                    { title: 'Combination', dataIndex: 'account_combination', ellipsis: true,
-                      render: (v: string) => <Text code style={{ fontSize: 10 }}>{v}</Text> },
+                    { title: 'Ledger', dataIndex: 'ledger_name', width: 140, ellipsis: true,
+                      render: (v: string) => <Text type="secondary" style={{ fontSize: 11 }}>{v || '—'}</Text> },
                     { title: 'CCY', dataIndex: 'currency', width: 55,
                       render: (v: string) => <Tag style={{ fontSize: 10 }}>{v}</Tag> },
                     { title: 'PTD DR', dataIndex: 'total_dr', align: 'right' as const, width: 120,
