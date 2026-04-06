@@ -516,6 +516,75 @@ END;
 END;
 /
 
+
+-- =====================================================
+-- GET /ap/createinvoice/installments?P_INVOICE_ID=...
+-- Returns installments with effective unpaid amount
+-- derived from RR_AP_PAYMENTS_RELATED_INVOICES (source of truth).
+-- amount_remaining = GROSS_AMOUNT - SUM(payments paid against invoice)
+-- payment_status   = derived live, not from stale stored column
+-- =====================================================
+BEGIN
+    ORDS.DEFINE_HANDLER(
+        p_module_name   => 'ap',
+        p_pattern       => 'createinvoice/installments',
+        p_method        => 'GET',
+        p_source_type   => 'json/collection',
+        p_mimes_allowed => NULL,
+        p_comments      => 'Get installments for invoice with live unpaid amount from payments',
+        p_source        => q'[
+SELECT
+    inst.INSTALLMENT_ID                                        AS installment_id,
+    inst.INVOICE_ID                                            AS invoice_id,
+    inst.INSTALLMENT_NUMBER                                    AS installment_number,
+    TO_CHAR(inst.DUE_DATE, 'DD-MON-YYYY')                     AS due_date,
+    inst.GROSS_AMOUNT                                          AS gross_amount,
+    NVL(
+        (SELECT SUM(NVL(rel.AMOUNT_PAID_PAYMENT_CURRENCY, 0))
+         FROM   RR_AP_PAYMENTS_RELATED_INVOICES rel
+         WHERE  rel.INVOICE_ID = inst.INVOICE_ID),
+        0
+    )                                                          AS total_paid,
+    GREATEST(0,
+        inst.GROSS_AMOUNT -
+        NVL(
+            (SELECT SUM(NVL(rel.AMOUNT_PAID_PAYMENT_CURRENCY, 0))
+             FROM   RR_AP_PAYMENTS_RELATED_INVOICES rel
+             WHERE  rel.INVOICE_ID = inst.INVOICE_ID),
+            inst.UNPAID_AMOUNT
+        )
+    )                                                          AS amount_remaining,
+    CASE
+        WHEN GREATEST(0,
+                 inst.GROSS_AMOUNT -
+                 NVL(
+                     (SELECT SUM(NVL(rel.AMOUNT_PAID_PAYMENT_CURRENCY, 0))
+                      FROM   RR_AP_PAYMENTS_RELATED_INVOICES rel
+                      WHERE  rel.INVOICE_ID = inst.INVOICE_ID),
+                     inst.UNPAID_AMOUNT
+                 )
+             ) <= 0
+            THEN 'Fully Paid'
+        WHEN NVL(
+                (SELECT SUM(NVL(rel.AMOUNT_PAID_PAYMENT_CURRENCY, 0))
+                 FROM   RR_AP_PAYMENTS_RELATED_INVOICES rel
+                 WHERE  rel.INVOICE_ID = inst.INVOICE_ID),
+             0) > 0
+            THEN 'Partially Paid'
+        ELSE NVL(inst.PAYMENT_STATUS, 'Unpaid')
+    END                                                        AS payment_status,
+    inst.PAYMENT_PRIORITY                                      AS payment_priority,
+    inst.PAYMENT_METHOD                                        AS payment_method,
+    inst.BANK_ACCOUNT                                          AS bank_account
+FROM  RR_AP_INVOICE_INSTALLMENTS inst
+WHERE inst.INVOICE_ID = :P_INVOICE_ID
+ORDER BY inst.INSTALLMENT_NUMBER
+]'
+    );
+    COMMIT;
+END;
+/
+
 -- =====================================================
 -- PUT /ap/createinvoice/installments
 -- Updates PaymentStatus and UnpaidAmount (AmountRemaining)
