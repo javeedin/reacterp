@@ -19,6 +19,7 @@ import {
   Empty,
   Modal,
   Input,
+  AutoComplete,
   message,
 } from 'antd';
 import {
@@ -1250,15 +1251,22 @@ const TrialBalance: React.FC = () => {
               </Select>
             </Col>
             <Col>
-              <Text style={{ fontSize: 11, color: REDWOOD.textSecondary, display: 'block', marginBottom: 2 }}>Company (Seg 1)</Text>
-              <Select
-                style={{ width: 120 }} size="small" placeholder="All companies"
+              <Text style={{ fontSize: 11, color: REDWOOD.textSecondary, display: 'block', marginBottom: 2 }}>
+                Company (Seg 1)
+                <Text type="secondary" style={{ fontSize: 10, marginLeft: 4 }}>type or select</Text>
+              </Text>
+              <AutoComplete
+                style={{ width: 140 }}
+                size="small"
+                placeholder="All  /  type code"
                 value={lsCompany ?? undefined}
-                onChange={v => setLsCompany(v ?? null)}
+                onChange={v => setLsCompany(v || null)}
                 allowClear
-              >
-                {companies.map(c => <Select.Option key={c} value={c}>{c}</Select.Option>)}
-              </Select>
+                options={companies.map(c => ({ value: c, label: c }))}
+                filterOption={(input, opt) =>
+                  (opt?.value as string)?.toLowerCase().includes(input.toLowerCase())
+                }
+              />
             </Col>
             <Col style={{ marginTop: 18 }}>
               <Button
@@ -1305,16 +1313,45 @@ const TrialBalance: React.FC = () => {
                 </Button>
               </Col>
             )}
-            {lsApiUrl && (
-              <Col flex="auto" style={{ marginTop: 18, textAlign: 'right' }}>
-                <Tooltip title={lsApiUrl}>
-                  <Text code style={{ fontSize: 10, color: REDWOOD.textSecondary }}>
-                    {APEX_DB_CONFIG.endpoints.glLinesSummary}
-                  </Text>
-                </Tooltip>
-              </Col>
-            )}
           </Row>
+          {/* API URL row — always visible once a period is chosen */}
+          {(lsPeriod || lsApiUrl) && (
+            <Row style={{ marginTop: 8, borderTop: '1px solid #f0f0f0', paddingTop: 8 }} align="middle" gutter={8}>
+              <Col flex="none">
+                <Tag color="green" style={{ fontFamily: 'monospace', fontSize: 10 }}>GET</Tag>
+              </Col>
+              <Col flex="auto">
+                <Input
+                  size="small"
+                  readOnly
+                  value={lsApiUrl || (() => {
+                    const p = new URLSearchParams({ period_name: lsPeriod || '', limit: '5000' });
+                    if (lsCompany) p.set('company', lsCompany);
+                    return `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.glLinesSummary}?${p}`;
+                  })()}
+                  style={{ fontFamily: 'monospace', fontSize: 10, color: REDWOOD.textSecondary, background: '#fafafa' }}
+                  onClick={e => (e.target as HTMLInputElement).select()}
+                />
+              </Col>
+              <Col flex="none">
+                <Button
+                  size="small"
+                  type="text"
+                  style={{ fontSize: 10, color: REDWOOD.info }}
+                  onClick={() => {
+                    const url = lsApiUrl || (() => {
+                      const p = new URLSearchParams({ period_name: lsPeriod || '', limit: '5000' });
+                      if (lsCompany) p.set('company', lsCompany);
+                      return `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.glLinesSummary}?${p}`;
+                    })();
+                    navigator.clipboard?.writeText(url).then(() => message.success('URL copied'));
+                  }}
+                >
+                  Copy
+                </Button>
+              </Col>
+            </Row>
+          )}
         </Card>
 
         {/* Error */}
