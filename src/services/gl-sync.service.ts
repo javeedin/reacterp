@@ -1,5 +1,5 @@
 import { ORACLE_FUSION_CONFIG, APEX_DB_CONFIG } from '../config/api.config';
-import { fetchFromOracle, fetchFromOracleUrl, insertToApex, fetchFromApex } from './sync-http';
+import { fetchFromOracle, fetchFromOracleUrl, fetchAllFromOracleUrl, insertToApex, fetchFromApex } from './sync-http';
 
 // Handles multiple APEX response formats:
 //   {success:true, inserted:N}           — new handlers (11_fix_gl_sync_rest_handlers.sql)
@@ -324,8 +324,7 @@ export const syncGLJournals = async (
       // ========================================
       updateProgress({ status: 'fetching_headers' });
 
-      const headersResult = await fetchFromOracleUrl(headersHref, log, verbose);
-      const headers = headersResult.items || [];
+      const headers = await fetchAllFromOracleUrl(headersHref, log, verbose, 500);
 
       updateProgress({ totalHeaders: progress.totalHeaders + headers.length });
       if (verbose) {
@@ -366,8 +365,7 @@ export const syncGLJournals = async (
           updateProgress({ status: 'fetching_lines' });
 
           try {
-            const linesResult = await fetchFromOracleUrl(linesHref, log, verbose);
-            lines = linesResult.items || [];
+            lines = await fetchAllFromOracleUrl(linesHref, log, verbose, 500);
 
             updateProgress({ totalLines: progress.totalLines + lines.length });
             if (verbose) {
@@ -997,8 +995,7 @@ export const syncGLHeadersOnly = async (
       const headersUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/journalBatches/${batchId}/child/journalHeaders`;
 
       try {
-        const headersResult = await fetchFromOracleUrl(headersUrl, log, false);
-        const headers = headersResult.items || [];
+        const headers = await fetchAllFromOracleUrl(headersUrl, log, false, 500);
 
         if (headers.length === 0) {
           log?.('info', `  No headers found for batch ${batchId}`);
@@ -1197,8 +1194,7 @@ export const syncGLLinesOnly = async (
       const linesUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/journalBatches/${batchId}/child/journalHeaders/${headerId}/child/journalLines`;
 
       try {
-        const linesResult = await fetchFromOracleUrl(linesUrl, log, false);
-        const lines = linesResult.items || [];
+        const lines = await fetchAllFromOracleUrl(linesUrl, log, false, 500);
 
         if (lines.length === 0) {
           log?.('info', `  No lines found for header ${headerId}`);

@@ -96,6 +96,55 @@ export const fetchFromOracleUrl = async (
   }
 };
 
+// ── Oracle Fusion (full URL, all pages via pagination) ────────────────────────
+// Always requests `pageSize` records per page and follows hasMore / full-page
+// heuristic until all records are retrieved. Strips any existing limit/offset
+// from the URL so they don't conflict.
+
+export const fetchAllFromOracleUrl = async (
+  baseUrl: string,
+  log?: LogCallback,
+  verbose = false,
+  pageSize = 500,
+): Promise<any[]> => {
+  const allItems: any[] = [];
+  let offset = 0;
+  let pageNum = 0;
+  let hasMore = true;
+
+  // Preserve any existing query params (e.g. filters) but override limit/offset
+  const [urlBase, existingQuery] = baseUrl.split('?');
+  const qp = new URLSearchParams(existingQuery || '');
+  qp.delete('limit');
+  qp.delete('offset');
+  const baseQuery = qp.toString();
+
+  while (hasMore) {
+    pageNum++;
+    const pageQp = new URLSearchParams(baseQuery);
+    pageQp.set('limit', pageSize.toString());
+    pageQp.set('offset', offset.toString());
+    const url = `${urlBase}?${pageQp.toString()}`;
+
+    if (verbose) log?.('info', `  Fetching page ${pageNum} (offset ${offset}, limit ${pageSize})…`);
+
+    const result = await fetchFromOracleUrl(url, log, verbose);
+    const items: any[] = result.items || [];
+    allItems.push(...items);
+
+    const apiHasMore   = result.hasMore === true;
+    const gotFullPage  = items.length === pageSize;
+    hasMore = items.length > 0 && (apiHasMore || gotFullPage);
+    offset += items.length;
+  }
+
+  if (pageNum > 1 || verbose) {
+    log?.('success', `  Total fetched: ${allItems.length} records across ${pageNum} page${pageNum > 1 ? 's' : ''}`);
+  }
+
+  return allItems;
+};
+
 // ── Oracle Fusion (full path) ─────────────────────────────────────────────────
 
 export const fetchFromFusion = async (
