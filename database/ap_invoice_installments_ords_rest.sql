@@ -567,7 +567,7 @@ SELECT
                   FROM   RR_AP_PAYMENTS_RELATED_INVOICES rel
                   WHERE  rel.INVOICE_ID = inst.INVOICE_ID), 0) > 0
             THEN 'Partially Paid'
-        ELSE NVL(inst.PAYMENT_STATUS, 'Unpaid')
+        ELSE 'Unpaid'
     END                                                             AS PAYMENT_STATUS,
     inst.FIRST_DISCOUNT_AMOUNT,
     TO_CHAR(inst.FIRST_DISCOUNT_DATE, 'DD-MON-YYYY')               AS FIRST_DISCOUNT_DATE,
