@@ -70,7 +70,6 @@ import {
 } from '@ant-design/icons';
 import { Link, useLocation } from 'react-router-dom';
 import { useShowAndTell } from '../../features/showAndTell';
-import { DEMO_INVOICE } from '../../features/showAndTell/tours/createInvoice';
 import type { ColumnsType } from 'antd/es/table';
 import FloatingMenu from '../../components/FloatingMenu';
 import Autopilot from '../../components/Autopilot';
@@ -922,12 +921,8 @@ const ManageInvoices: React.FC = () => {
     }
     if (satTabOpened.current) return;
     satTabOpened.current = true;
-    setTimeout(() => {
-      openCreateInvoiceTab({
-        ...DEMO_INVOICE,
-        invoiceDate: DEMO_INVOICE.invoiceDate, // already a dayjs object
-      } as any);
-    }, 400);
+    // Open a blank form — the tour guides the user to fill each field interactively
+    setTimeout(() => openCreateInvoiceTab(), 400);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRunning, activeTour?.id]);
 

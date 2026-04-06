@@ -9,6 +9,8 @@ export interface TourStep {
   noteRotation?: number;
   targetId?: string;
   placement?: 'top' | 'bottom' | 'left' | 'right';
+  /** CSS selector auto-clicked when this step activates — opens dropdowns, modals, etc. */
+  autoClick?: string;
   action?: (ctx: { navigate: ReturnType<typeof useNavigate> }) => Promise<void>;
   autoNextMs?: number;
 }

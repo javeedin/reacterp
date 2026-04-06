@@ -19,6 +19,16 @@ export const ShowAndTellOverlay: React.FC = () => {
   const rotation   = step?.noteRotation ?? (stepIndex % 2 === 0 ? -1.5 : 1.5);
   const totalSteps = activeTour?.steps.length ?? 0;
 
+  // Auto-click (open dropdown / modal) when step activates
+  useEffect(() => {
+    if (!step?.autoClick) return;
+    const t = setTimeout(() => {
+      const el = document.querySelector(step.autoClick!) as HTMLElement | null;
+      el?.click();
+    }, 350); // small delay so the element is fully rendered
+    return () => clearTimeout(t);
+  }, [step?.autoClick, stepIndex]);
+
   // Track the highlighted target element
   useEffect(() => {
     if (!step?.targetId) { setTarget(null); return; }
