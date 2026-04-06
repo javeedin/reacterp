@@ -125,7 +125,7 @@ BEGIN
         APEX_JSON.write('seg4_account',  r.seg4_account);
         APEX_JSON.write('ledger_name',   r.ledger_name);
         APEX_JSON.write('period_name',   r.period_name);
-        APEX_JSON.write('currency',      r.currency);
+        APEX_JSON.write('currency',      NVL(r.currency, ''));
         APEX_JSON.write('total_dr',      r.total_dr);
         APEX_JSON.write('total_cr',      r.total_cr);
         APEX_JSON.write('net_amount',    r.net_amount);
