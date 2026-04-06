@@ -21,6 +21,8 @@ import {
   Input,
   AutoComplete,
   message,
+  Switch,
+  Descriptions,
 } from 'antd';
 import {
   HomeOutlined,
@@ -216,8 +218,15 @@ const TrialBalance: React.FC = () => {
   const [lsSearch,   setLsSearch]   = useState('');
   const [lsApiUrl,   setLsApiUrl]   = useState('');
   const [lsError,    setLsError]    = useState<string | null>(null);
-  const [lsReconMap, setLsReconMap] = useState<Map<string, { tbDr: number; tbCr: number; matched: boolean }>>(new Map());
+  const [lsReconMap,  setLsReconMap]  = useState<Map<string, { tbDr: number; tbCr: number; matched: boolean }>>(new Map());
   const [lsReconDone, setLsReconDone] = useState(false);
+  const [lsByAccount, setLsByAccount] = useState(true);
+  const [lsDetailRow, setLsDetailRow] = useState<{
+    account: string; company: string; ledger: string | null;
+    accountDesc: string; combinations: string[];
+    lsDr: number; lsCr: number; lsNet: number; lsLines: number;
+    tbRecords: GLBalanceRecord[];
+  } | null>(null);
 
   // Get unique years from periods
   const availableYears = useMemo(() => {
@@ -421,26 +430,28 @@ const TrialBalance: React.FC = () => {
     // Build TB map: company|account → { dr, cr }
     const tbMap = new Map<string, { dr: number; cr: number }>();
     for (const rec of tbTab.data) {
-      const key = `${(rec.company || '').trim()}|${(rec.account || '').trim()}`;
+      const key  = `${(rec.company || '').trim()}|${(rec.account || '').trim()}`;
       const prev = tbMap.get(key) ?? { dr: 0, cr: 0 };
-      tbMap.set(key, {
-        dr: prev.dr + (rec.debit  || 0),
-        cr: prev.cr + (rec.credit || 0),
-      });
+      tbMap.set(key, { dr: prev.dr + (rec.debit || 0), cr: prev.cr + (rec.credit || 0) });
     }
 
-    // Compare each Lines Summary row with TB
-    const newMap = new Map<string, { tbDr: number; tbCr: number; matched: boolean }>();
+    // Aggregate LS data at account level: company|account|ledger → totals
+    const lsAcctMap = new Map<string, { dr: number; cr: number }>();
     for (const row of lsData) {
-      const tbKey  = `${(row.seg1_company || '').trim()}|${(row.seg4_account || '').trim()}`;
-      const rowKey = `${row.account_combination}||${row.ledger_name}||${row.period_name}`;
-      const tb     = tbMap.get(tbKey);
+      const key  = `${(row.seg1_company || '').trim()}|${(row.seg4_account || '').trim()}|${(row.ledger_name || '').trim()}`;
+      const prev = lsAcctMap.get(key) ?? { dr: 0, cr: 0 };
+      lsAcctMap.set(key, { dr: prev.dr + row.total_dr, cr: prev.cr + row.total_cr });
+    }
+
+    // Build recon map keyed by company|account|ledger
+    const newMap = new Map<string, { tbDr: number; tbCr: number; matched: boolean }>();
+    for (const [key, ls] of lsAcctMap) {
+      const [company, account] = key.split('|');
+      const tb = tbMap.get(`${company}|${account}`);
       if (!tb) {
-        newMap.set(rowKey, { tbDr: 0, tbCr: 0, matched: false });
+        newMap.set(key, { tbDr: 0, tbCr: 0, matched: false });
       } else {
-        const drOk = Math.abs(tb.dr - row.total_dr) < 0.01;
-        const crOk = Math.abs(tb.cr - row.total_cr) < 0.01;
-        newMap.set(rowKey, { tbDr: tb.dr, tbCr: tb.cr, matched: drOk && crOk });
+        newMap.set(key, { tbDr: tb.dr, tbCr: tb.cr, matched: Math.abs(tb.dr - ls.dr) < 0.01 && Math.abs(tb.cr - ls.cr) < 0.01 });
       }
     }
 
@@ -1188,7 +1199,7 @@ const TrialBalance: React.FC = () => {
     const fmtN = (n: number) =>
       n === 0 ? '—' : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-    // Distinct values from loaded data (for filter dropdowns)
+    // Distinct values for dropdowns
     const companies = [...new Set(lsData.map(r => r.seg1_company).filter(Boolean) as string[])].sort();
     const ledgers   = [...new Set(lsData.map(r => r.ledger_name).filter(Boolean)  as string[])].sort();
 
@@ -1206,115 +1217,138 @@ const TrialBalance: React.FC = () => {
       return true;
     });
 
-    // KPI totals
-    const totalDr    = visibleData.reduce((s, r) => s + r.total_dr,   0);
-    const totalCr    = visibleData.reduce((s, r) => s + r.total_cr,   0);
-    const totalNet   = visibleData.reduce((s, r) => s + r.net_amount, 0);
-    const totalLines = visibleData.reduce((s, r) => s + r.line_count, 0);
+    // Account-level summary — group by company|account|ledger, pull desc from open TB tab
+    const tbDataForPeriod = tabs.find(t => t.periodName === lsPeriod)?.data || [];
+    const tbDescMap = new Map<string, string>();
+    for (const rec of tbDataForPeriod) {
+      const k = `${(rec.company||'').trim()}|${(rec.account||'').trim()}`;
+      if (!tbDescMap.has(k) && rec.account_desc) tbDescMap.set(k, rec.account_desc);
+    }
 
-    const columns = [
-      {
-        title: 'Company', dataIndex: 'seg1_company', key: 'seg1_company', width: 80,
+    type AcctRow = {
+      rowKey: string; seg1_company: string | null; seg4_account: string | null;
+      account_desc: string; ledger_name: string | null;
+      total_dr: number; total_cr: number; net_amount: number; line_count: number;
+      combinations: string[];
+    };
+    const acctMap = new Map<string, AcctRow>();
+    for (const r of visibleData) {
+      const key = `${r.seg1_company}|${r.seg4_account}|${r.ledger_name}`;
+      if (!acctMap.has(key)) {
+        acctMap.set(key, {
+          rowKey: key, seg1_company: r.seg1_company, seg4_account: r.seg4_account,
+          account_desc: tbDescMap.get(`${(r.seg1_company||'').trim()}|${(r.seg4_account||'').trim()}`) || '',
+          ledger_name: r.ledger_name,
+          total_dr: 0, total_cr: 0, net_amount: 0, line_count: 0, combinations: [],
+        });
+      }
+      const row = acctMap.get(key)!;
+      row.total_dr    += r.total_dr;
+      row.total_cr    += r.total_cr;
+      row.net_amount  += r.net_amount;
+      row.line_count  += r.line_count;
+      row.combinations.push(r.account_combination);
+    }
+
+    const displayData: any[] = lsByAccount ? [...acctMap.values()] : visibleData;
+
+    // KPI totals (always from displayData)
+    const totalDr    = displayData.reduce((s: number, r: any) => s + (r.total_dr   || 0), 0);
+    const totalCr    = displayData.reduce((s: number, r: any) => s + (r.total_cr   || 0), 0);
+    const totalNet   = displayData.reduce((s: number, r: any) => s + (r.net_amount || 0), 0);
+    const totalLines = displayData.reduce((s: number, r: any) => s + (r.line_count || 0), 0);
+
+    // Open detail popup for a row
+    const openDetail = (r: any) => {
+      const tbRecs = tbDataForPeriod.filter(t =>
+        (t.company || '').trim() === (r.seg1_company || '').trim() &&
+        (t.account || '').trim() === (r.seg4_account || '').trim()
+      );
+      setLsDetailRow({
+        account: r.seg4_account || '', company: r.seg1_company || '',
+        ledger: r.ledger_name, accountDesc: r.account_desc || tbDescMap.get(`${(r.seg1_company||'').trim()}|${(r.seg4_account||'').trim()}`) || '',
+        combinations: r.combinations || (r.account_combination ? [r.account_combination] : []),
+        lsDr: r.total_dr, lsCr: r.total_cr, lsNet: r.net_amount, lsLines: r.line_count,
+        tbRecords: tbRecs,
+      });
+    };
+
+    // Shared columns
+    const numCol = (title: React.ReactNode, key: string, color: string) => ({
+      title,
+      dataIndex: key,
+      key,
+      align: 'right' as const,
+      width: 130,
+      sorter: (a: any, b: any) => (a[key] || 0) - (b[key] || 0),
+      render: (v: number) => (
+        <Text style={{ fontFamily: 'monospace', fontSize: 12, color: v !== 0 ? color : REDWOOD.textSecondary }}>
+          {fmtN(v)}
+        </Text>
+      ),
+    });
+
+    const reconCol = lsReconDone ? [{
+      title: <Tooltip title="Click to view TB detail"><CheckCircleOutlined style={{ color: REDWOOD.success }} /> Recon</Tooltip>,
+      key: 'recon', width: 72, align: 'center' as const, fixed: 'right' as const,
+      render: (_: any, r: any) => {
+        const mapKey = `${(r.seg1_company||'').trim()}|${(r.seg4_account||'').trim()}|${(r.ledger_name||'').trim()}`;
+        const res = lsReconMap.get(mapKey);
+        const icon = !res
+          ? <Tag color="orange" style={{ fontSize: 10, cursor: 'pointer' }}>No TB</Tag>
+          : res.matched
+            ? <CheckCircleOutlined style={{ color: REDWOOD.success, fontSize: 16, cursor: 'pointer' }} />
+            : <CloseCircleOutlined style={{ color: REDWOOD.primary,  fontSize: 16, cursor: 'pointer' }} />;
+        return <span onClick={() => openDetail(r)} style={{ cursor: 'pointer' }}>{icon}</span>;
+      },
+    }] : [];
+
+    const columns = lsByAccount ? [
+      { title: 'Co.', dataIndex: 'seg1_company', key: 'seg1_company', width: 55,
+        render: (v: string) => <Tag style={{ fontSize: 11 }}>{v || '—'}</Tag> },
+      { title: 'Account', dataIndex: 'seg4_account', key: 'seg4_account', width: 100,
+        sorter: (a: any, b: any) => (a.seg4_account||'').localeCompare(b.seg4_account||''),
+        render: (v: string, r: any) => (
+          <span style={{ cursor: 'pointer' }} onClick={() => openDetail(r)}>
+            <Text strong style={{ fontFamily: 'monospace', fontSize: 12 }}>{v}</Text>
+          </span>
+        ) },
+      { title: 'Description', dataIndex: 'account_desc', key: 'account_desc', ellipsis: true,
+        render: (v: string) => <Text style={{ fontSize: 12 }}>{v || <Text type="secondary">—</Text>}</Text> },
+      { title: 'Ledger', dataIndex: 'ledger_name', key: 'ledger_name', width: 140, ellipsis: true,
+        filters: ledgers.map(l => ({ text: l, value: l })),
+        onFilter: (val: any, r: any) => r.ledger_name === val,
+        render: (v: string) => <Text type="secondary" style={{ fontSize: 11 }}>{v || '—'}</Text> },
+      numCol(<span style={{ color: REDWOOD.info }}>Total DR</span>,   'total_dr',   REDWOOD.info),
+      numCol(<span style={{ color: REDWOOD.primary }}>Total CR</span>, 'total_cr',   REDWOOD.primary),
+      numCol('Net (Dr−Cr)', 'net_amount', ''),
+      { title: 'Lines', dataIndex: 'line_count', key: 'line_count', align: 'right' as const, width: 60,
+        render: (v: number) => <Text type="secondary" style={{ fontSize: 11 }}>{v}</Text> },
+      ...reconCol,
+    ] : [
+      { title: 'Co.', dataIndex: 'seg1_company', key: 'seg1_company', width: 55,
         render: (v: string) => <Tag style={{ fontSize: 11 }}>{v || '—'}</Tag>,
         filters: companies.map(c => ({ text: c, value: c })),
-        onFilter: (val: any, r: LineSummaryRow) => r.seg1_company === val,
-      },
-      {
-        title: 'Account', dataIndex: 'seg4_account', key: 'seg4_account', width: 100,
-        sorter: (a: LineSummaryRow, b: LineSummaryRow) =>
-          (a.seg4_account || '').localeCompare(b.seg4_account || ''),
-        render: (v: string) => <Text strong style={{ fontFamily: 'monospace', fontSize: 12 }}>{v}</Text>,
-      },
-      {
-        title: 'LOB', dataIndex: 'seg2_lob', key: 'seg2_lob', width: 70,
-        render: (v: string) => <Text type="secondary" style={{ fontSize: 11 }}>{v || '—'}</Text>,
-      },
-      {
-        title: 'Dept', dataIndex: 'seg3_department', key: 'seg3_department', width: 70,
-        render: (v: string) => <Text type="secondary" style={{ fontSize: 11 }}>{v || '—'}</Text>,
-      },
-      {
-        title: 'Sub Acc', dataIndex: 'seg5_sub_account', key: 'seg5_sub_account', width: 80,
-        render: (v: string) => <Text type="secondary" style={{ fontSize: 11 }}>{v || '—'}</Text>,
-      },
-      {
-        title: 'Account Combination', dataIndex: 'account_combination', key: 'account_combination',
-        ellipsis: true,
-        render: (v: string) => (
-          <Tooltip title={v}>
-            <Text code style={{ fontSize: 11 }}>{v}</Text>
-          </Tooltip>
-        ),
-      },
-      {
-        title: 'Ledger', dataIndex: 'ledger_name', key: 'ledger_name', width: 130, ellipsis: true,
+        onFilter: (val: any, r: any) => r.seg1_company === val },
+      { title: 'Account', dataIndex: 'seg4_account', key: 'seg4_account', width: 100,
+        sorter: (a: any, b: any) => (a.seg4_account||'').localeCompare(b.seg4_account||''),
+        render: (v: string) => <Text strong style={{ fontFamily: 'monospace', fontSize: 12 }}>{v}</Text> },
+      { title: 'LOB',  dataIndex: 'seg2_lob',        key: 'seg2_lob',        width: 60,
+        render: (v: string) => <Text type="secondary" style={{ fontSize: 11 }}>{v||'—'}</Text> },
+      { title: 'Dept', dataIndex: 'seg3_department',  key: 'seg3_department', width: 60,
+        render: (v: string) => <Text type="secondary" style={{ fontSize: 11 }}>{v||'—'}</Text> },
+      { title: 'Account Combination', dataIndex: 'account_combination', key: 'account_combination', ellipsis: true,
+        render: (v: string) => <Tooltip title={v}><Text code style={{ fontSize: 11 }}>{v}</Text></Tooltip> },
+      { title: 'Ledger', dataIndex: 'ledger_name', key: 'ledger_name', width: 130, ellipsis: true,
         filters: ledgers.map(l => ({ text: l, value: l })),
-        onFilter: (val: any, r: LineSummaryRow) => r.ledger_name === val,
-        render: (v: string) => <Text type="secondary" style={{ fontSize: 11 }}>{v || '—'}</Text>,
-      },
-      {
-        title: <span style={{ color: REDWOOD.info }}>Total DR</span>,
-        dataIndex: 'total_dr', key: 'total_dr', align: 'right' as const, width: 120,
-        sorter: (a: LineSummaryRow, b: LineSummaryRow) => a.total_dr - b.total_dr,
-        render: (v: number) => (
-          <Text style={{ fontFamily: 'monospace', fontSize: 12, color: v > 0 ? REDWOOD.info : REDWOOD.textSecondary }}>
-            {fmtN(v)}
-          </Text>
-        ),
-      },
-      {
-        title: <span style={{ color: REDWOOD.primary }}>Total CR</span>,
-        dataIndex: 'total_cr', key: 'total_cr', align: 'right' as const, width: 120,
-        sorter: (a: LineSummaryRow, b: LineSummaryRow) => a.total_cr - b.total_cr,
-        render: (v: number) => (
-          <Text style={{ fontFamily: 'monospace', fontSize: 12, color: v > 0 ? REDWOOD.primary : REDWOOD.textSecondary }}>
-            {fmtN(v)}
-          </Text>
-        ),
-      },
-      {
-        title: 'Net (Dr−Cr)', dataIndex: 'net_amount', key: 'net_amount', align: 'right' as const, width: 120,
-        sorter: (a: LineSummaryRow, b: LineSummaryRow) => a.net_amount - b.net_amount,
-        render: (v: number) => (
-          <Text strong style={{
-            fontFamily: 'monospace', fontSize: 12,
-            color: v > 0 ? REDWOOD.info : v < 0 ? REDWOOD.primary : REDWOOD.textSecondary,
-          }}>
-            {v === 0 ? '—' : (v > 0 ? '+' : '') + fmtN(v)}
-          </Text>
-        ),
-      },
-      {
-        title: 'Lines', dataIndex: 'line_count', key: 'line_count', align: 'right' as const, width: 65,
-        sorter: (a: LineSummaryRow, b: LineSummaryRow) => a.line_count - b.line_count,
-        render: (v: number) => <Text type="secondary" style={{ fontSize: 11 }}>{v}</Text>,
-      },
-      ...(lsReconDone ? [{
-        title: <Tooltip title="Reconciled against GL Trial Balance PTD"><CheckCircleOutlined style={{ color: REDWOOD.success }} /> TB Recon</Tooltip>,
-        key: 'recon',
-        width: 90,
-        align: 'center' as const,
-        fixed: 'right' as const,
-        render: (_: any, r: LineSummaryRow) => {
-          const res = lsReconMap.get(`${r.account_combination}||${r.ledger_name}||${r.period_name}`);
-          if (!res) return <Tag style={{ fontSize: 10 }} color="orange">No TB</Tag>;
-          if (res.matched) {
-            return <CheckCircleOutlined style={{ color: REDWOOD.success, fontSize: 16 }} />;
-          }
-          return (
-            <Tooltip title={
-              <span>
-                TB PTD DR: {res.tbDr.toFixed(2)}<br />
-                LS Total DR: {r.total_dr.toFixed(2)}<br />
-                TB PTD CR: {res.tbCr.toFixed(2)}<br />
-                LS Total CR: {r.total_cr.toFixed(2)}
-              </span>
-            }>
-              <CloseCircleOutlined style={{ color: REDWOOD.primary, fontSize: 16 }} />
-            </Tooltip>
-          );
-        },
-      }] : []),
+        onFilter: (val: any, r: any) => r.ledger_name === val,
+        render: (v: string) => <Text type="secondary" style={{ fontSize: 11 }}>{v||'—'}</Text> },
+      numCol(<span style={{ color: REDWOOD.info }}>Total DR</span>,   'total_dr',   REDWOOD.info),
+      numCol(<span style={{ color: REDWOOD.primary }}>Total CR</span>, 'total_cr',   REDWOOD.primary),
+      numCol('Net (Dr−Cr)', 'net_amount', ''),
+      { title: 'Lines', dataIndex: 'line_count', key: 'line_count', align: 'right' as const, width: 60,
+        render: (v: number) => <Text type="secondary" style={{ fontSize: 11 }}>{v}</Text> },
+      ...reconCol,
     ];
 
     return (
@@ -1373,6 +1407,10 @@ const TrialBalance: React.FC = () => {
                 </Select>
               </Col>
             )}
+            <Col>
+              <Text style={{ fontSize: 11, color: REDWOOD.textSecondary, display: 'block', marginBottom: 4 }}>By Account</Text>
+              <Switch size="small" checked={lsByAccount} onChange={setLsByAccount} />
+            </Col>
             <Col style={{ marginTop: 18 }}>
               <Button
                 type="primary" size="small" icon={<BarChartOutlined />}
@@ -1517,59 +1555,143 @@ const TrialBalance: React.FC = () => {
         )}
 
         {/* Table */}
-        <Table<LineSummaryRow>
+        <Table
           columns={columns}
-          dataSource={visibleData}
-          rowKey={(r: LineSummaryRow) => `${r.account_combination}||${r.ledger_name}||${r.period_name}`}
+          dataSource={displayData}
+          rowKey={(r: any) => lsByAccount ? r.rowKey : `${r.account_combination}||${r.ledger_name}||${r.period_name}`}
           size="small"
           loading={lsLoading}
-          scroll={{ x: 1100 }}
+          scroll={{ x: 1000 }}
           sticky
-          pagination={{
-            pageSize: 100,
-            showSizeChanger: true,
-            pageSizeOptions: ['50', '100', '250'],
-            showTotal: (total, range) => `${range[0]}-${range[1]} of ${total}`,
-          }}
-          locale={{
-            emptyText: lsLoading ? <Spin /> : (
-              <Empty description={
-                lsPeriod
-                  ? 'Click Fetch to load journal lines for this period'
-                  : 'Select a period and click Fetch'
-              } />
-            ),
-          }}
+          pagination={{ pageSize: 100, showSizeChanger: true, pageSizeOptions: ['50','100','250'],
+            showTotal: (total, range) => `${range[0]}-${range[1]} of ${total}` }}
+          locale={{ emptyText: lsLoading ? <Spin /> : <Empty description={lsPeriod ? 'Click Fetch to load' : 'Select a period'} /> }}
           summary={() =>
-            visibleData.length > 0 ? (
+            displayData.length > 0 ? (
               <Table.Summary.Row style={{ background: REDWOOD.surfaceSecondary }}>
-                <Table.Summary.Cell index={0} colSpan={6}>
-                  <Text strong style={{ fontSize: 11 }}>TOTAL ({visibleData.length} accounts)</Text>
+                <Table.Summary.Cell index={0} colSpan={lsByAccount ? 4 : 6}>
+                  <Text strong style={{ fontSize: 11 }}>TOTAL ({displayData.length} rows)</Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={6} align="right">
+                <Table.Summary.Cell index={1} align="right">
                   <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info }}>
                     {totalDr.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                   </Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={7} align="right">
+                <Table.Summary.Cell index={2} align="right">
                   <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.primary }}>
                     {totalCr.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                   </Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={8} align="right">
+                <Table.Summary.Cell index={3} align="right">
                   <Text strong style={{ fontFamily: 'monospace', fontSize: 11,
                     color: totalNet > 0 ? REDWOOD.info : totalNet < 0 ? REDWOOD.primary : REDWOOD.textSecondary }}>
-                    {totalNet === 0 ? '—' : (totalNet > 0 ? '+' : '') +
-                      totalNet.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    {totalNet === 0 ? '—' : (totalNet > 0 ? '+' : '') + totalNet.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                   </Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={9} align="right">
+                <Table.Summary.Cell index={4} align="right">
                   <Text strong style={{ fontSize: 11 }}>{totalLines.toLocaleString()}</Text>
                 </Table.Summary.Cell>
               </Table.Summary.Row>
             ) : null
           }
         />
+
+        {/* Account Detail Modal */}
+        <Modal
+          open={!!lsDetailRow}
+          onCancel={() => setLsDetailRow(null)}
+          footer={[
+            <Button key="tb" type="primary"
+              style={{ background: REDWOOD.primary, borderColor: REDWOOD.primaryDark }}
+              onClick={() => {
+                setLsDetailRow(null);
+                const tbTab = tabs.find(t => t.periodName === lsPeriod);
+                if (tbTab) { setActiveTab(tbTab.key); }
+                else message.warning(`Open the GL Trial Balance tab for ${lsPeriod} first`);
+              }}
+            >
+              Go to TB Tab — {lsPeriod}
+            </Button>,
+            <Button key="close" onClick={() => setLsDetailRow(null)}>Close</Button>,
+          ]}
+          width={760}
+          title={
+            <span>
+              <BarsOutlined style={{ marginRight: 8, color: REDWOOD.primary }} />
+              Account {lsDetailRow?.account}
+              {lsDetailRow?.accountDesc && <Text type="secondary" style={{ marginLeft: 8, fontSize: 13 }}>{lsDetailRow.accountDesc}</Text>}
+              <Tag style={{ marginLeft: 8 }} color="blue">{lsPeriod}</Tag>
+            </span>
+          }
+        >
+          {lsDetailRow && (() => {
+            const tbDr  = lsDetailRow.tbRecords.reduce((s, r) => s + (r.debit  || 0), 0);
+            const tbCr  = lsDetailRow.tbRecords.reduce((s, r) => s + (r.credit || 0), 0);
+            const varDr = lsDetailRow.lsDr - tbDr;
+            const varCr = lsDetailRow.lsCr - tbCr;
+            const fmt   = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            return (
+              <div>
+                <Descriptions size="small" column={3} bordered style={{ marginBottom: 16 }}>
+                  <Descriptions.Item label="Company">{lsDetailRow.company}</Descriptions.Item>
+                  <Descriptions.Item label="Account">{lsDetailRow.account}</Descriptions.Item>
+                  <Descriptions.Item label="Ledger">{lsDetailRow.ledger || '—'}</Descriptions.Item>
+                </Descriptions>
+
+                <Row gutter={12} style={{ marginBottom: 16 }}>
+                  {[
+                    { label: 'Lines Summary DR', value: lsDetailRow.lsDr, color: REDWOOD.info },
+                    { label: 'Lines Summary CR', value: lsDetailRow.lsCr, color: REDWOOD.primary },
+                    { label: 'TB Debit',  value: tbDr, color: REDWOOD.info },
+                    { label: 'TB Credit', value: tbCr, color: REDWOOD.primary },
+                    { label: 'Variance DR', value: varDr, color: Math.abs(varDr) < 0.01 ? REDWOOD.success : '#f5222d' },
+                    { label: 'Variance CR', value: varCr, color: Math.abs(varCr) < 0.01 ? REDWOOD.success : '#f5222d' },
+                  ].map(k => (
+                    <Col span={4} key={k.label}>
+                      <Card size="small" bodyStyle={{ padding: '6px 10px', textAlign: 'right' }}>
+                        <Text type="secondary" style={{ fontSize: 10, display: 'block' }}>{k.label}</Text>
+                        <Text strong style={{ fontFamily: 'monospace', fontSize: 12, color: k.color }}>{fmt(k.value)}</Text>
+                      </Card>
+                    </Col>
+                  ))}
+                </Row>
+
+                {lsDetailRow.tbRecords.length > 0 ? (
+                  <Table
+                    size="small"
+                    dataSource={lsDetailRow.tbRecords}
+                    rowKey={(r: GLBalanceRecord) => `${r.period_name}|${r.company}|${r.account}|${r.currency}`}
+                    pagination={false}
+                    columns={[
+                      { title: 'Period',   dataIndex: 'period_name',     width: 90 },
+                      { title: 'Currency', dataIndex: 'currency',        width: 75 },
+                      { title: 'Type',     dataIndex: 'account_type',    width: 55 },
+                      { title: 'Opening',  dataIndex: 'opening_balance', align: 'right' as const, width: 110,
+                        render: (v: number) => <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{fmt(v || 0)}</Text> },
+                      { title: 'Debit',    dataIndex: 'debit',  align: 'right' as const, width: 110,
+                        render: (v: number) => <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info }}>{fmt(v || 0)}</Text> },
+                      { title: 'Credit',   dataIndex: 'credit', align: 'right' as const, width: 110,
+                        render: (v: number) => <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.primary }}>{fmt(v || 0)}</Text> },
+                      { title: 'Closing',  dataIndex: 'closing_balance', align: 'right' as const, width: 110,
+                        render: (v: number) => <Text strong style={{ fontFamily: 'monospace', fontSize: 11 }}>{fmt(v || 0)}</Text> },
+                    ]}
+                  />
+                ) : (
+                  <Alert type="warning" message="No GL Trial Balance records found for this account. Open the TB tab for this period first." />
+                )}
+
+                {lsDetailRow.combinations.length > 1 && (
+                  <div style={{ marginTop: 12 }}>
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      Aggregated from {lsDetailRow.combinations.length} combinations:&nbsp;
+                      {lsDetailRow.combinations.map(c => <Tag key={c} style={{ fontSize: 10 }}>{c}</Tag>)}
+                    </Text>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </Modal>
       </div>
     );
   };
