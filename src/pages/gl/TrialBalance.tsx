@@ -40,6 +40,8 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   LoadingOutlined,
+  BarsOutlined,
+  BarChartOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../../config/api.config';
@@ -156,9 +158,29 @@ interface PivotRow {
   debit: number;
   credit: number;
   closing_balance: number;
-  segmentCount: number; // Number of segment combinations for this account
-  rawRows: GLBalanceRecord[]; // Raw data rows for detail popup
+  segmentCount: number;
+  rawRows: GLBalanceRecord[];
   [key: string]: string | number | GLBalanceRecord[];
+}
+
+// Lines Summary types
+interface LineSummaryRow {
+  account_combination: string;
+  seg1_company:        string | null;
+  seg2_lob:            string | null;
+  seg3_department:     string | null;
+  seg4_account:        string | null;
+  seg5_sub_account:    string | null;
+  seg6_analysis:       string | null;
+  seg7_intercompany:   string | null;
+  seg8_future1:        string | null;
+  seg9_future2:        string | null;
+  ledger_name:         string | null;
+  period_name:         string | null;
+  total_dr:            number;
+  total_cr:            number;
+  net_amount:          number;
+  line_count:          number;
 }
 
 const TrialBalance: React.FC = () => {
@@ -182,6 +204,16 @@ const TrialBalance: React.FC = () => {
     periods:      { label: 'Periods', url: '', method: 'GET', status: null, ok: null, durationMs: null, running: false, body: '' },
     trialBalance: { label: 'Trial Balance', url: '', method: 'GET', status: null, ok: null, durationMs: null, running: false, body: '' },
   });
+
+  // Lines Summary state
+  const [lsVisible,  setLsVisible]  = useState(false);
+  const [lsLoading,  setLsLoading]  = useState(false);
+  const [lsData,     setLsData]     = useState<LineSummaryRow[]>([]);
+  const [lsPeriod,   setLsPeriod]   = useState<string | null>(null);
+  const [lsCompany,  setLsCompany]  = useState<string | null>(null);
+  const [lsSearch,   setLsSearch]   = useState('');
+  const [lsApiUrl,   setLsApiUrl]   = useState('');
+  const [lsError,    setLsError]    = useState<string | null>(null);
 
   // Get unique years from periods
   const availableYears = useMemo(() => {
@@ -333,11 +365,43 @@ const TrialBalance: React.FC = () => {
 
   // Close a tab
   const closeTab = useCallback((tabKey: string) => {
-    setTabs(prev => prev.filter(t => t.key !== tabKey));
-    if (activeTab === tabKey) {
-      setActiveTab('periods');
+    if (tabKey === 'lines-summary') {
+      setLsVisible(false);
+      if (activeTab === 'lines-summary') setActiveTab('periods');
+      return;
     }
+    setTabs(prev => prev.filter(t => t.key !== tabKey));
+    if (activeTab === tabKey) setActiveTab('periods');
   }, [activeTab]);
+
+  // ── Lines Summary ────────────────────────────────────────
+  const fetchLinesSummary = useCallback(async (period: string | null, company: string | null) => {
+    if (!period) { message.warning('Select a period first'); return; }
+    setLsLoading(true);
+    setLsError(null);
+    const params = new URLSearchParams({ period_name: period, limit: '5000' });
+    if (company) params.set('company', company);
+    const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.glLinesSummary}?${params}`;
+    setLsApiUrl(url);
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      const json = await res.json();
+      setLsData(json.items || []);
+    } catch (e: any) {
+      setLsError(e.message);
+    } finally {
+      setLsLoading(false);
+    }
+  }, []);
+
+  const handleOpenLinesSummary = useCallback(() => {
+    const activeTBTab = tabs.find(t => t.key === activeTab);
+    const periodHint  = activeTBTab?.periodName ?? null;
+    if (periodHint && !lsPeriod) setLsPeriod(periodHint);
+    setLsVisible(true);
+    setActiveTab('lines-summary');
+  }, [tabs, activeTab, lsPeriod]);
 
   // Update tab filter
   const updateTabFilter = useCallback((tabKey: string, field: 'selectedCompany' | 'selectedCurrency', value: string | null) => {
@@ -1071,6 +1135,285 @@ const TrialBalance: React.FC = () => {
     );
   };
 
+  // ── Lines Summary Tab ────────────────────────────────────
+  const renderLinesSummaryTab = () => {
+    const fmtN = (n: number) =>
+      n === 0 ? '—' : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    // Client-side search filter
+    const visibleData = lsSearch
+      ? lsData.filter(r =>
+          (r.account_combination || '').toLowerCase().includes(lsSearch.toLowerCase()) ||
+          (r.seg4_account        || '').toLowerCase().includes(lsSearch.toLowerCase()) ||
+          (r.seg1_company        || '').toLowerCase().includes(lsSearch.toLowerCase())
+        )
+      : lsData;
+
+    // Distinct companies from loaded data
+    const companies = [...new Set(lsData.map(r => r.seg1_company).filter(Boolean) as string[])].sort();
+
+    // KPI totals
+    const totalDr    = visibleData.reduce((s, r) => s + r.total_dr,   0);
+    const totalCr    = visibleData.reduce((s, r) => s + r.total_cr,   0);
+    const totalNet   = visibleData.reduce((s, r) => s + r.net_amount, 0);
+    const totalLines = visibleData.reduce((s, r) => s + r.line_count, 0);
+
+    const columns = [
+      {
+        title: 'Company', dataIndex: 'seg1_company', key: 'seg1_company', width: 80,
+        render: (v: string) => <Tag style={{ fontSize: 11 }}>{v || '—'}</Tag>,
+        filters: companies.map(c => ({ text: c, value: c })),
+        onFilter: (val: any, r: LineSummaryRow) => r.seg1_company === val,
+      },
+      {
+        title: 'Account', dataIndex: 'seg4_account', key: 'seg4_account', width: 100,
+        sorter: (a: LineSummaryRow, b: LineSummaryRow) =>
+          (a.seg4_account || '').localeCompare(b.seg4_account || ''),
+        render: (v: string) => <Text strong style={{ fontFamily: 'monospace', fontSize: 12 }}>{v}</Text>,
+      },
+      {
+        title: 'LOB', dataIndex: 'seg2_lob', key: 'seg2_lob', width: 70,
+        render: (v: string) => <Text type="secondary" style={{ fontSize: 11 }}>{v || '—'}</Text>,
+      },
+      {
+        title: 'Dept', dataIndex: 'seg3_department', key: 'seg3_department', width: 70,
+        render: (v: string) => <Text type="secondary" style={{ fontSize: 11 }}>{v || '—'}</Text>,
+      },
+      {
+        title: 'Sub Acc', dataIndex: 'seg5_sub_account', key: 'seg5_sub_account', width: 80,
+        render: (v: string) => <Text type="secondary" style={{ fontSize: 11 }}>{v || '—'}</Text>,
+      },
+      {
+        title: 'Account Combination', dataIndex: 'account_combination', key: 'account_combination',
+        ellipsis: true,
+        render: (v: string) => (
+          <Tooltip title={v}>
+            <Text code style={{ fontSize: 11 }}>{v}</Text>
+          </Tooltip>
+        ),
+      },
+      {
+        title: <span style={{ color: REDWOOD.info }}>Total DR</span>,
+        dataIndex: 'total_dr', key: 'total_dr', align: 'right' as const, width: 120,
+        sorter: (a: LineSummaryRow, b: LineSummaryRow) => a.total_dr - b.total_dr,
+        render: (v: number) => (
+          <Text style={{ fontFamily: 'monospace', fontSize: 12, color: v > 0 ? REDWOOD.info : REDWOOD.textSecondary }}>
+            {fmtN(v)}
+          </Text>
+        ),
+      },
+      {
+        title: <span style={{ color: REDWOOD.primary }}>Total CR</span>,
+        dataIndex: 'total_cr', key: 'total_cr', align: 'right' as const, width: 120,
+        sorter: (a: LineSummaryRow, b: LineSummaryRow) => a.total_cr - b.total_cr,
+        render: (v: number) => (
+          <Text style={{ fontFamily: 'monospace', fontSize: 12, color: v > 0 ? REDWOOD.primary : REDWOOD.textSecondary }}>
+            {fmtN(v)}
+          </Text>
+        ),
+      },
+      {
+        title: 'Net (Dr−Cr)', dataIndex: 'net_amount', key: 'net_amount', align: 'right' as const, width: 120,
+        sorter: (a: LineSummaryRow, b: LineSummaryRow) => a.net_amount - b.net_amount,
+        render: (v: number) => (
+          <Text strong style={{
+            fontFamily: 'monospace', fontSize: 12,
+            color: v > 0 ? REDWOOD.info : v < 0 ? REDWOOD.primary : REDWOOD.textSecondary,
+          }}>
+            {v === 0 ? '—' : (v > 0 ? '+' : '') + fmtN(v)}
+          </Text>
+        ),
+      },
+      {
+        title: 'Lines', dataIndex: 'line_count', key: 'line_count', align: 'right' as const, width: 65,
+        sorter: (a: LineSummaryRow, b: LineSummaryRow) => a.line_count - b.line_count,
+        render: (v: number) => <Text type="secondary" style={{ fontSize: 11 }}>{v}</Text>,
+      },
+    ];
+
+    return (
+      <div>
+        {/* Parameter bar */}
+        <Card size="small" style={{ marginBottom: 12, borderColor: REDWOOD.border }} bodyStyle={{ padding: '10px 16px' }}>
+          <Row gutter={10} align="middle" wrap>
+            <Col>
+              <Text style={{ fontSize: 11, color: REDWOOD.textSecondary, display: 'block', marginBottom: 2 }}>Period</Text>
+              <Select
+                style={{ width: 130 }} size="small" placeholder="Select period"
+                value={lsPeriod ?? undefined}
+                onChange={v => setLsPeriod(v)}
+                showSearch
+              >
+                {filteredPeriods.map(p => (
+                  <Select.Option key={p.period_name_id} value={p.period_name}>{p.period_name}</Select.Option>
+                ))}
+              </Select>
+            </Col>
+            <Col>
+              <Text style={{ fontSize: 11, color: REDWOOD.textSecondary, display: 'block', marginBottom: 2 }}>Company (Seg 1)</Text>
+              <Select
+                style={{ width: 120 }} size="small" placeholder="All companies"
+                value={lsCompany ?? undefined}
+                onChange={v => setLsCompany(v ?? null)}
+                allowClear
+              >
+                {companies.map(c => <Select.Option key={c} value={c}>{c}</Select.Option>)}
+              </Select>
+            </Col>
+            <Col style={{ marginTop: 18 }}>
+              <Button
+                type="primary" size="small" icon={<BarChartOutlined />}
+                loading={lsLoading}
+                onClick={() => fetchLinesSummary(lsPeriod, lsCompany)}
+                disabled={!lsPeriod}
+                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primaryDark }}
+              >
+                Fetch
+              </Button>
+            </Col>
+            {lsData.length > 0 && (
+              <Col style={{ marginTop: 18 }}>
+                <Button
+                  size="small" icon={<FileExcelOutlined />}
+                  style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}
+                  onClick={() => {
+                    if (!visibleData.length) return;
+                    const rows = visibleData.map(r => ({
+                      'Account Combination': r.account_combination,
+                      'Company':    r.seg1_company,
+                      'LOB':        r.seg2_lob,
+                      'Department': r.seg3_department,
+                      'Account':    r.seg4_account,
+                      'Sub Acc':    r.seg5_sub_account,
+                      'Analysis':   r.seg6_analysis,
+                      'IC':         r.seg7_intercompany,
+                      'Period':     r.period_name,
+                      'Total DR':   r.total_dr,
+                      'Total CR':   r.total_cr,
+                      'Net':        r.net_amount,
+                      'Lines':      r.line_count,
+                    }));
+                    const ws = XLSX.utils.json_to_sheet(rows);
+                    const wb = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(wb, ws, 'Lines Summary');
+                    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+                    saveAs(new Blob([buf], { type: 'application/octet-stream' }),
+                      `LinesSummary_${lsPeriod || 'All'}.xlsx`);
+                  }}
+                >
+                  Excel
+                </Button>
+              </Col>
+            )}
+            {lsApiUrl && (
+              <Col flex="auto" style={{ marginTop: 18, textAlign: 'right' }}>
+                <Tooltip title={lsApiUrl}>
+                  <Text code style={{ fontSize: 10, color: REDWOOD.textSecondary }}>
+                    {APEX_DB_CONFIG.endpoints.glLinesSummary}
+                  </Text>
+                </Tooltip>
+              </Col>
+            )}
+          </Row>
+        </Card>
+
+        {/* Error */}
+        {lsError && <Alert type="error" message={lsError} style={{ marginBottom: 12 }} />}
+
+        {/* KPI row */}
+        {lsData.length > 0 && (
+          <Row gutter={10} style={{ marginBottom: 12 }}>
+            {[
+              { label: 'Accounts',   value: visibleData.length,                 isCcy: false, color: REDWOOD.neutral600 },
+              { label: 'Line Count', value: totalLines,                          isCcy: false, color: REDWOOD.neutral600 },
+              { label: 'Total DR',   value: totalDr,                            isCcy: true,  color: REDWOOD.info        },
+              { label: 'Total CR',   value: totalCr,                            isCcy: true,  color: REDWOOD.primary     },
+              { label: 'Net (Dr−Cr)',value: totalNet, isCcy: true,
+                color: totalNet > 0 ? REDWOOD.info : totalNet < 0 ? REDWOOD.primary : REDWOOD.neutral600 },
+            ].map(k => (
+              <Col key={k.label}>
+                <Card size="small" bodyStyle={{ padding: '8px 14px', textAlign: 'center' }}
+                  style={{ minWidth: 120, borderColor: REDWOOD.border }}>
+                  <div style={{ fontSize: 10, color: REDWOOD.textSecondary }}>{k.label}</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: k.color }}>
+                    {k.isCcy
+                      ? (k.value as number).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                      : (k.value as number).toLocaleString()}
+                  </div>
+                </Card>
+              </Col>
+            ))}
+            <Col flex="auto" style={{ display: 'flex', alignItems: 'center' }}>
+              <Input
+                prefix={<SearchOutlined style={{ color: REDWOOD.textSecondary }} />}
+                placeholder="Search account, combination…"
+                size="small" allowClear
+                style={{ maxWidth: 280 }}
+                value={lsSearch}
+                onChange={e => setLsSearch(e.target.value)}
+              />
+            </Col>
+          </Row>
+        )}
+
+        {/* Table */}
+        <Table<LineSummaryRow>
+          columns={columns}
+          dataSource={visibleData}
+          rowKey="account_combination"
+          size="small"
+          loading={lsLoading}
+          scroll={{ x: 1100 }}
+          sticky
+          pagination={{
+            pageSize: 100,
+            showSizeChanger: true,
+            pageSizeOptions: ['50', '100', '250'],
+            showTotal: (total, range) => `${range[0]}-${range[1]} of ${total}`,
+          }}
+          locale={{
+            emptyText: lsLoading ? <Spin /> : (
+              <Empty description={
+                lsPeriod
+                  ? 'Click Fetch to load journal lines for this period'
+                  : 'Select a period and click Fetch'
+              } />
+            ),
+          }}
+          summary={() =>
+            visibleData.length > 0 ? (
+              <Table.Summary.Row style={{ background: REDWOOD.surfaceSecondary }}>
+                <Table.Summary.Cell index={0} colSpan={6}>
+                  <Text strong style={{ fontSize: 11 }}>TOTAL ({visibleData.length} accounts)</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={6} align="right">
+                  <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info }}>
+                    {totalDr.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  </Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={7} align="right">
+                  <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.primary }}>
+                    {totalCr.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  </Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={8} align="right">
+                  <Text strong style={{ fontFamily: 'monospace', fontSize: 11,
+                    color: totalNet > 0 ? REDWOOD.info : totalNet < 0 ? REDWOOD.primary : REDWOOD.textSecondary }}>
+                    {totalNet === 0 ? '—' : (totalNet > 0 ? '+' : '') +
+                      totalNet.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  </Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={9} align="right">
+                  <Text strong style={{ fontSize: 11 }}>{totalLines.toLocaleString()}</Text>
+                </Table.Summary.Cell>
+              </Table.Summary.Row>
+            ) : null
+          }
+        />
+      </div>
+    );
+  };
+
   // Build tab items
   const tabItems = [
     {
@@ -1095,6 +1438,18 @@ const TrialBalance: React.FC = () => {
       children: renderTBTab(tab),
       closable: true,
     })),
+    ...(lsVisible ? [{
+      key: 'lines-summary',
+      label: (
+        <span>
+          <BarsOutlined style={{ marginRight: 6, color: REDWOOD.primary }} />
+          Lines Summary
+          {lsPeriod && <Tag style={{ marginLeft: 6, fontSize: 10 }}>{lsPeriod}</Tag>}
+        </span>
+      ),
+      children: renderLinesSummaryTab(),
+      closable: true,
+    }] : []),
   ];
 
   return (
@@ -1122,17 +1477,26 @@ const TrialBalance: React.FC = () => {
               </Text>
             </Col>
             <Col>
-              <Button
-                icon={<ApiOutlined />}
-                type={apiPanelVisible ? 'primary' : 'default'}
-                style={apiPanelVisible
-                  ? { background: REDWOOD.info, borderColor: REDWOOD.info }
-                  : { borderColor: REDWOOD.info, color: REDWOOD.info }
-                }
-                onClick={() => setApiPanelVisible(v => !v)}
-              >
-                API
-              </Button>
+              <Space>
+                <Button
+                  icon={<BarsOutlined />}
+                  onClick={handleOpenLinesSummary}
+                  style={{ borderColor: REDWOOD.primary, color: REDWOOD.primary }}
+                >
+                  Lines Summary
+                </Button>
+                <Button
+                  icon={<ApiOutlined />}
+                  type={apiPanelVisible ? 'primary' : 'default'}
+                  style={apiPanelVisible
+                    ? { background: REDWOOD.info, borderColor: REDWOOD.info }
+                    : { borderColor: REDWOOD.info, color: REDWOOD.info }
+                  }
+                  onClick={() => setApiPanelVisible(v => !v)}
+                >
+                  API
+                </Button>
+              </Space>
             </Col>
           </Row>
 
