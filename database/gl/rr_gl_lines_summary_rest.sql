@@ -87,8 +87,9 @@ BEGIN
 DECLARE
     l_period  VARCHAR2(100) := NULLIF(TRIM(:period_name), '');
     l_company VARCHAR2(100) := NULLIF(TRIM(:company), '');
+    c         SYS_REFCURSOR;
 BEGIN
-    OPEN :result_set FOR
+    OPEN c FOR
         SELECT *
         FROM (
             SELECT
@@ -119,24 +120,9 @@ BEGIN
                 hdr.PERIOD_NAME
         )
         ORDER BY seg1_company, seg4_account, account_combination;
+    DBMS_SQL.RETURN_RESULT(c);
 END;
 ]'
-    );
-    COMMIT;
-END;
-/
-
-BEGIN
-    ORDS.DEFINE_PARAMETER(
-        p_module_name        => 'reerp',
-        p_pattern            => 'gl/lines-summary',
-        p_method             => 'GET',
-        p_name               => 'result_set',
-        p_bind_variable_name => 'result_set',
-        p_source_type        => 'RESPONSE',
-        p_param_type         => 'RESULTSET',
-        p_access_method      => 'OUT',
-        p_comments           => NULL
     );
     COMMIT;
 END;
@@ -155,8 +141,10 @@ BEGIN
         p_mimes_allowed  => NULL,
         p_comments       => 'Diagnostic rows for GL lines summary',
         p_source         => q'[
+DECLARE
+    c SYS_REFCURSOR;
 BEGIN
-    OPEN :result_set FOR
+    OPEN c FOR
         SELECT 'TABLE_COUNT' AS check_type, 'RR_GL_JE_LINES_ALL' AS detail, TO_CHAR(COUNT(*)) AS value
         FROM RR_GL_JE_LINES_ALL
         UNION ALL
@@ -173,24 +161,9 @@ BEGIN
         SELECT 'ACCT_COMBO_SAMPLE', ACCOUNT_COMBINATION, TO_CHAR(ROWNUM)
         FROM (SELECT DISTINCT ACCOUNT_COMBINATION FROM RR_GL_JE_LINES_ALL WHERE ACCOUNT_COMBINATION IS NOT NULL ORDER BY ACCOUNT_COMBINATION)
         WHERE ROWNUM <= 5;
+    DBMS_SQL.RETURN_RESULT(c);
 END;
 ]'
-    );
-    COMMIT;
-END;
-/
-
-BEGIN
-    ORDS.DEFINE_PARAMETER(
-        p_module_name        => 'reerp',
-        p_pattern            => 'gl/lines-summary/diag',
-        p_method             => 'GET',
-        p_name               => 'result_set',
-        p_bind_variable_name => 'result_set',
-        p_source_type        => 'RESPONSE',
-        p_param_type         => 'RESULTSET',
-        p_access_method      => 'OUT',
-        p_comments           => NULL
     );
     COMMIT;
 END;
