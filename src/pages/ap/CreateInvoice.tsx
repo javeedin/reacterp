@@ -4376,20 +4376,37 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                             ))}
                           </Select>
                         </Form.Item>
-                        <Form.Item
-                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Amount</Text>}
-                          name="invoiceAmount"
-                          rules={[{ required: true, message: 'Required' }]}
-                          style={{ marginBottom: 4 }}
-                          data-sat-id="invoice-amount"
-                        >
-                          <InputNumber
-                            style={{ width: '100%' }}
-                            placeholder="0.00"
-                            precision={2}
-                            formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-                            parser={(value) => value!.replace(/,/g, '') as any}
-                          />
+                        <Form.Item shouldUpdate={(prev, curr) => prev.invoiceType !== curr.invoiceType} noStyle>
+                          {() => {
+                            const isCreditMemo = form.getFieldValue('invoiceType') === 'Credit Memo';
+                            return (
+                              <Form.Item
+                                label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Amount</Text>}
+                                name="invoiceAmount"
+                                rules={[
+                                  { required: true, message: 'Required' },
+                                  {
+                                    validator: (_, value) => {
+                                      if (isCreditMemo && value !== undefined && value !== null && value >= 0) {
+                                        return Promise.reject('Credit Memo amount must be negative');
+                                      }
+                                      return Promise.resolve();
+                                    },
+                                  },
+                                ]}
+                                style={{ marginBottom: 4 }}
+                                data-sat-id="invoice-amount"
+                              >
+                                <InputNumber
+                                  style={{ width: '100%' }}
+                                  placeholder="0.00"
+                                  precision={2}
+                                  formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                                  parser={(value) => value!.replace(/,/g, '') as any}
+                                />
+                              </Form.Item>
+                            );
+                          }}
                         </Form.Item>
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Invoice Date</Text>}
@@ -4509,7 +4526,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           rules={[{ required: true, message: 'Required' }]}
                           style={{ marginBottom: 4 }}
                         >
-                          <Select>
+                          <Select
+                            onChange={(val) => {
+                              if (val === 'Credit Memo') {
+                                const currentAmt = form.getFieldValue('invoiceAmount');
+                                if (currentAmt !== undefined && currentAmt > 0) {
+                                  form.setFieldValue('invoiceAmount', -currentAmt);
+                                }
+                              }
+                            }}
+                          >
                             <Option value="Standard">Standard</Option>
                             <Option value="Prepayment">Prepayment</Option>
                             <Option value="Debit Memo">Debit Memo</Option>
