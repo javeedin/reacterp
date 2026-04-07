@@ -62,47 +62,21 @@ SELECT
     i.pay_group,
     i.payment_terms,
     i.payment_method,
-    -- Amount paid: SUM from RR_AP_PAYMENTS_RELATED_INVOICES (actual payments posted against invoice).
-    -- Falls back to stored amount_paid if no payment records exist yet.
-    NVL(
-        (SELECT SUM(NVL(rel.AMOUNT_PAID_PAYMENT_CURRENCY, 0))
-         FROM   RR_AP_PAYMENTS_RELATED_INVOICES rel
-         WHERE  rel.INVOICE_ID = i.invoice_id),
-        NVL(i.amount_paid, 0)
-    ) AS amount_paid,
-    -- Unpaid amount: invoice_amount minus total actually paid (from payments table).
-    -- Falls back to installments SUM, then to full invoice_amount when nothing recorded.
+    -- amount_paid = cash payments + applied prepayments
+    NVL(pay.total_paid, NVL(i.amount_paid, 0)) + NVL(prep.total_prep, 0)  AS amount_paid,
+    -- unpaid = invoice minus (cash payments + applied prepayments)
     GREATEST(0,
-        NVL(i.invoice_amount, 0) -
-        NVL(
-            (SELECT SUM(NVL(rel.AMOUNT_PAID_PAYMENT_CURRENCY, 0))
-             FROM   RR_AP_PAYMENTS_RELATED_INVOICES rel
-             WHERE  rel.INVOICE_ID = i.invoice_id),
-            NVL(
-                (SELECT SUM(NVL(inst.GROSS_AMOUNT, 0)) - SUM(NVL(inst.UNPAID_AMOUNT, 0))
-                 FROM   RR_AP_INVOICE_INSTALLMENTS inst
-                 WHERE  inst.INVOICE_ID = i.invoice_id),
-                NVL(i.amount_paid, 0)
-            )
-        )
+        NVL(i.invoice_amount, 0)
+        - NVL(pay.total_paid, NVL(i.amount_paid, 0))
+        - NVL(prep.total_prep, 0)
     ) AS unpaid_amount,
-    -- Paid status: derived from actual payments vs invoice amount.
+    -- paid status considers both cash payments and prepayment applications
     CASE
         WHEN NVL(i.invoice_amount, 0) = 0 THEN NVL(i.paid_status, 'Unpaid')
-        WHEN NVL(
-                (SELECT SUM(NVL(rel.AMOUNT_PAID_PAYMENT_CURRENCY, 0))
-                 FROM   RR_AP_PAYMENTS_RELATED_INVOICES rel
-                 WHERE  rel.INVOICE_ID = i.invoice_id),
-             NVL(i.amount_paid, 0)
-             ) >= NVL(i.invoice_amount, 0)
-            THEN 'Fully Paid'
-        WHEN NVL(
-                (SELECT SUM(NVL(rel.AMOUNT_PAID_PAYMENT_CURRENCY, 0))
-                 FROM   RR_AP_PAYMENTS_RELATED_INVOICES rel
-                 WHERE  rel.INVOICE_ID = i.invoice_id),
-             NVL(i.amount_paid, 0)
-             ) > 0
-            THEN 'Partially Paid'
+        WHEN (NVL(pay.total_paid, NVL(i.amount_paid, 0)) + NVL(prep.total_prep, 0))
+             >= NVL(i.invoice_amount, 0)                                   THEN 'Fully Paid'
+        WHEN (NVL(pay.total_paid, NVL(i.amount_paid, 0)) + NVL(prep.total_prep, 0))
+             > 0                                                            THEN 'Partially Paid'
         ELSE NVL(i.paid_status, 'Unpaid')
     END AS paid_status,
     i.validation_status,
@@ -114,14 +88,23 @@ SELECT
      ORDER BY h.header_id DESC
      FETCH FIRST 1 ROWS ONLY)                      AS accounting_status,
     TO_CHAR(i.apply_after_date, 'YYYY-MM-DD')    AS apply_after_date,
-    NVL(
-        (SELECT SUM(ap.applied_amount)
-         FROM   RR_AP_APPLIED_PREPAYMENTS ap
-         WHERE  ap.invoice_id = i.invoice_id
-         AND    ap.status     = 'Applied'),
-        0
-    ) AS applied_prepayments
+    NVL(prep.total_prep, 0)                       AS applied_prepayments
 FROM  RR_AP_INVOICES_ALL i
+-- Cash payments rolled up per invoice
+LEFT JOIN (
+    SELECT INVOICE_ID,
+           SUM(NVL(AMOUNT_PAID_PAYMENT_CURRENCY, 0)) AS total_paid
+    FROM   RR_AP_PAYMENTS_RELATED_INVOICES
+    GROUP BY INVOICE_ID
+) pay  ON pay.INVOICE_ID  = i.invoice_id
+-- Prepayment applications rolled up per invoice
+LEFT JOIN (
+    SELECT INVOICE_ID,
+           SUM(NVL(applied_amount, 0)) AS total_prep
+    FROM   RR_AP_APPLIED_PREPAYMENTS
+    WHERE  status = 'Applied'
+    GROUP BY INVOICE_ID
+) prep ON prep.INVOICE_ID = i.invoice_id
 WHERE (i.supplier_number  = :supplier_number  OR :supplier_number  IS NULL)
   AND (i.business_unit    = :business_unit    OR :business_unit    IS NULL)
   AND (UPPER(i.invoice_number) LIKE '%' || UPPER(:invoice_number) || '%'
