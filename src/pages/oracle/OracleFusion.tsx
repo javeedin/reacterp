@@ -1224,6 +1224,7 @@ const OracleFusion: React.FC = () => {
             src={url}
             // @ts-ignore
             disablewebsecurity="true"
+            // @ts-ignore
             allowpopups="true"
             style={{ flex: 1, minWidth: 0 }}
           />

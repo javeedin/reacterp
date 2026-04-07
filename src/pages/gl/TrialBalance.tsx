@@ -1507,12 +1507,12 @@ const TrialBalance: React.FC = () => {
         {lsData.length > 0 && (
           <Row gutter={10} style={{ marginBottom: 12 }}>
             {[
-              { label: 'Accounts',   value: visibleData.length,                 isCcy: false, color: REDWOOD.neutral600 },
-              { label: 'Line Count', value: totalLines,                          isCcy: false, color: REDWOOD.neutral600 },
+              { label: 'Accounts',   value: visibleData.length,                 isCcy: false, color: REDWOOD.neutral },
+              { label: 'Line Count', value: totalLines,                          isCcy: false, color: REDWOOD.neutral },
               { label: 'Total DR',   value: totalDr,                            isCcy: true,  color: REDWOOD.info        },
               { label: 'Total CR',   value: totalCr,                            isCcy: true,  color: REDWOOD.primary     },
               { label: 'Net (Dr−Cr)',value: totalNet, isCcy: true,
-                color: totalNet > 0 ? REDWOOD.info : totalNet < 0 ? REDWOOD.primary : REDWOOD.neutral600 },
+                color: totalNet > 0 ? REDWOOD.info : totalNet < 0 ? REDWOOD.primary : REDWOOD.neutral },
             ].map(k => (
               <Col key={k.label}>
                 <Card size="small" bodyStyle={{ padding: '8px 14px', textAlign: 'center' }}
