@@ -174,7 +174,7 @@ const SyncData: React.FC = () => {
   const [, setApiType] = useState<ApiType>('REST');
 
   // API-driven select options cache: paramKey → { loading, items }
-  const [apiSelectOptions, setApiSelectOptions] = useState<Record<string, { loading: boolean; items: { label: string; value: string; count?: number }[] }>>({});
+  const [apiSelectOptions, setApiSelectOptions] = useState<Record<string, { loading: boolean; items: { label: string; value: string; subLabel?: string; count?: number }[] }>>({});
   const [logs, setLogs] = useState<SyncLog[]>([]);
   const [isTesting, setIsTesting] = useState(false);
   const [testMode, setTestMode] = useState<boolean | 'single'>(true); // true=25, false=full, 'single'=1
@@ -1672,7 +1672,7 @@ const SyncData: React.FC = () => {
       // Fetch options for any api-select parameters
       object.parameters.forEach((param) => {
         if (param.type === 'api-select' && param.apiUrl) {
-          fetchApiSelectOptions(param.key, param.apiUrl, param.apiLabelKey!, param.apiValueKey!, param.apiCountKey);
+          fetchApiSelectOptions(param.key, param.apiUrl, param.apiLabelKey!, param.apiValueKey!, param.apiCountKey, undefined, undefined, param.apiSubLabelKey);
         }
       });
     }
@@ -1686,6 +1686,7 @@ const SyncData: React.FC = () => {
     countKey?: string,
     filterParam?: string,
     filterValue?: string,
+    subLabelKey?: string,
   ) => {
     setApiSelectOptions(prev => ({ ...prev, [paramKey]: { loading: true, items: prev[paramKey]?.items || [] } }));
     try {
@@ -1699,6 +1700,7 @@ const SyncData: React.FC = () => {
       const items = rawItems.map((item: any) => ({
         label: String(item[labelKey] ?? ''),
         value: String(item[valueKey] ?? ''),
+        subLabel: subLabelKey ? String(item[subLabelKey] ?? '') : undefined,
         count: countKey ? Number(item[countKey]) : undefined,
       }));
       setApiSelectOptions(prev => ({ ...prev, [paramKey]: { loading: false, items } }));
@@ -3277,6 +3279,7 @@ const SyncData: React.FC = () => {
                           param.apiCountKey,
                           param.apiFilterParam,
                           changedValues[changedKey] || undefined,
+                          param.apiSubLabelKey,
                         );
                       }
                     });
@@ -3394,16 +3397,27 @@ const SyncData: React.FC = () => {
                             placeholder={param.placeholder || `Select ${param.label}`}
                             disabled={isSyncing || isTesting}
                             loading={apiSelectOptions[param.key]?.loading}
-                            filterOption={(input, option) =>
-                              String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-                            }
+                            filterOption={(input, option) => {
+                              const lc = input.toLowerCase();
+                              return (
+                                String(option?.label ?? '').toLowerCase().includes(lc) ||
+                                String((option as any)?.subLabel ?? '').toLowerCase().includes(lc)
+                              );
+                            }}
                             notFoundContent={
                               apiSelectOptions[param.key]?.loading ? 'Loading…' : 'No results found'
                             }
                           >
                             {(apiSelectOptions[param.key]?.items || []).map((opt) => (
-                              <Option key={opt.value} value={opt.value} label={opt.label}>
-                                <span style={{ fontWeight: 600 }}>{opt.label}</span>
+                              <Option key={opt.value} value={opt.value} label={opt.label} subLabel={opt.subLabel}>
+                                {opt.subLabel ? (
+                                  <div style={{ lineHeight: 1.3 }}>
+                                    <div style={{ fontWeight: 600, fontSize: 13 }}>{opt.label}</div>
+                                    <div style={{ color: '#888', fontSize: 11 }}>{opt.subLabel}</div>
+                                  </div>
+                                ) : (
+                                  <span style={{ fontWeight: 600 }}>{opt.label}</span>
+                                )}
                                 {opt.count !== undefined && (
                                   <span style={{ float: 'right', color: '#888', fontSize: 12 }}>
                                     {opt.count.toLocaleString()} batches

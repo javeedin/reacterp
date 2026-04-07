@@ -107,6 +107,7 @@ export interface ParameterConfig {
   apiUrl?: string;           // for type='api-select': URL to fetch options from
   apiLabelKey?: string;      // response item key to use as label
   apiValueKey?: string;      // response item key to use as value
+  apiSubLabelKey?: string;   // optional secondary label shown below the main label
   apiCountKey?: string;      // optional count key to show alongside label
   dependsOn?: string;        // re-fetch when this other param key changes
   apiFilterParam?: string;   // query-string param name to pass the dependsOn value as a filter
@@ -276,8 +277,9 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
         type: 'api-select',
         required: false,
         apiUrl: 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/suppliers',
-        apiLabelKey: 'supplier',
+        apiLabelKey: 'supplier_number',
         apiValueKey: 'supplier_number',
+        apiSubLabelKey: 'supplier',
         dependsOn: 'BusinessUnit',
         apiFilterParam: 'P_BUSINESS_UNIT',
         placeholder: 'All suppliers',
