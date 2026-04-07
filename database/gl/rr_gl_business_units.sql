@@ -211,19 +211,30 @@ END;
         p_comments       => 'Return all Business Units',
         p_source         => q'[
 SELECT
-    BUSINESS_UNIT_ID,
-    BUSINESS_UNIT_NAME,
-    ACTIVE_FLAG,
-    PRIMARY_LEDGER_ID,
-    LOCATION_ID,
-    MANAGER_ID,
-    LEGAL_ENTITY_ID,
-    PROFIT_CENTER_FLAG,
-    COMPANY,
-    SYNC_DATE
-FROM RR_GL_BUSINESS_UNITS
-WHERE ACTIVE_FLAG = 'Y'
-ORDER BY BUSINESS_UNIT_NAME
+    bu.BUSINESS_UNIT_ID,
+    bu.BUSINESS_UNIT_NAME,
+    bu.ACTIVE_FLAG,
+    bu.PRIMARY_LEDGER_ID,
+    bu.LOCATION_ID,
+    bu.MANAGER_ID,
+    bu.LEGAL_ENTITY_ID,
+    bu.PROFIT_CENTER_FLAG,
+    -- COMPANY: use stored value if set, otherwise derive from first segment
+    -- of LIABILITY_DISTRIBUTION on a site assignment for this BU
+    NVL(
+        bu.COMPANY,
+        (SELECT SUBSTR(ssa.LIABILITY_DISTRIBUTION, 1,
+                       INSTR(ssa.LIABILITY_DISTRIBUTION || '-', '-') - 1)
+         FROM   RR_SUPPLIER_SITE_ASSIGNMENTS ssa
+         JOIN   RR_SUPPLIER_SITES            ss  ON ss.SUPPLIER_SITE_ID = ssa.SUPPLIER_SITE_ID
+         WHERE  ss.PROCUREMENT_BU          = bu.BUSINESS_UNIT_NAME
+           AND  ssa.LIABILITY_DISTRIBUTION IS NOT NULL
+           AND  ROWNUM                     = 1)
+    ) AS COMPANY,
+    bu.SYNC_DATE
+FROM RR_GL_BUSINESS_UNITS bu
+WHERE bu.ACTIVE_FLAG = 'Y'
+ORDER BY bu.BUSINESS_UNIT_NAME
 ]'
     );
 
@@ -258,18 +269,27 @@ BEGIN
         p_comments       => 'All Business Units (active + inactive)',
         p_source         => q'[
 SELECT
-    BUSINESS_UNIT_ID,
-    BUSINESS_UNIT_NAME,
-    ACTIVE_FLAG,
-    PRIMARY_LEDGER_ID,
-    LOCATION_ID,
-    MANAGER_ID,
-    LEGAL_ENTITY_ID,
-    PROFIT_CENTER_FLAG,
-    COMPANY,
-    SYNC_DATE
-FROM RR_GL_BUSINESS_UNITS
-ORDER BY BUSINESS_UNIT_NAME
+    bu.BUSINESS_UNIT_ID,
+    bu.BUSINESS_UNIT_NAME,
+    bu.ACTIVE_FLAG,
+    bu.PRIMARY_LEDGER_ID,
+    bu.LOCATION_ID,
+    bu.MANAGER_ID,
+    bu.LEGAL_ENTITY_ID,
+    bu.PROFIT_CENTER_FLAG,
+    NVL(
+        bu.COMPANY,
+        (SELECT SUBSTR(ssa.LIABILITY_DISTRIBUTION, 1,
+                       INSTR(ssa.LIABILITY_DISTRIBUTION || '-', '-') - 1)
+         FROM   RR_SUPPLIER_SITE_ASSIGNMENTS ssa
+         JOIN   RR_SUPPLIER_SITES            ss  ON ss.SUPPLIER_SITE_ID = ssa.SUPPLIER_SITE_ID
+         WHERE  ss.PROCUREMENT_BU          = bu.BUSINESS_UNIT_NAME
+           AND  ssa.LIABILITY_DISTRIBUTION IS NOT NULL
+           AND  ROWNUM                     = 1)
+    ) AS COMPANY,
+    bu.SYNC_DATE
+FROM RR_GL_BUSINESS_UNITS bu
+ORDER BY bu.BUSINESS_UNIT_NAME
 ]'
     );
 
