@@ -4406,37 +4406,31 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                             ))}
                           </Select>
                         </Form.Item>
-                        <Form.Item shouldUpdate={(prev, curr) => prev.invoiceType !== curr.invoiceType} noStyle>
-                          {() => {
-                            const isCreditMemo = form.getFieldValue('invoiceType') === 'Credit Memo';
-                            return (
-                              <Form.Item
-                                label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Amount</Text>}
-                                name="invoiceAmount"
-                                rules={[
-                                  { required: true, message: 'Required' },
-                                  {
-                                    validator: (_, value) => {
-                                      if (isCreditMemo && value !== undefined && value !== null && value >= 0) {
-                                        return Promise.reject('Credit Memo amount must be negative');
-                                      }
-                                      return Promise.resolve();
-                                    },
-                                  },
-                                ]}
-                                style={{ marginBottom: 4 }}
-                                data-sat-id="invoice-amount"
-                              >
-                                <InputNumber
-                                  style={{ width: '100%' }}
-                                  placeholder="0.00"
-                                  precision={2}
-                                  formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-                                  parser={(value) => value!.replace(/,/g, '') as any}
-                                />
-                              </Form.Item>
-                            );
-                          }}
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Amount</Text>}
+                          name="invoiceAmount"
+                          dependencies={['invoiceType']}
+                          rules={[
+                            { required: true, message: 'Required' },
+                            ({ getFieldValue }) => ({
+                              validator(_, value) {
+                                if (getFieldValue('invoiceType') === 'Credit Memo' && value !== undefined && value !== null && value >= 0) {
+                                  return Promise.reject('Credit Memo amount must be negative');
+                                }
+                                return Promise.resolve();
+                              },
+                            }),
+                          ]}
+                          style={{ marginBottom: 4 }}
+                          data-sat-id="invoice-amount"
+                        >
+                          <InputNumber
+                            style={{ width: '100%' }}
+                            placeholder="0.00"
+                            precision={2}
+                            formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                            parser={(value) => value!.replace(/,/g, '') as any}
+                          />
                         </Form.Item>
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Invoice Date</Text>}
@@ -4598,10 +4592,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           <Select
                             onChange={(val) => {
                               if (val === 'Credit Memo') {
+                                // Auto-negate invoice amount
                                 const currentAmt = form.getFieldValue('invoiceAmount');
-                                if (currentAmt !== undefined && currentAmt > 0) {
+                                if (currentAmt !== undefined && currentAmt !== null && currentAmt > 0) {
                                   form.setFieldValue('invoiceAmount', -currentAmt);
                                 }
+                                // Auto-negate all line amounts
+                                setLines((prev) => prev.map((line) => ({
+                                  ...line,
+                                  amount: line.amount > 0 ? -line.amount : line.amount,
+                                })));
                               }
                             }}
                           >

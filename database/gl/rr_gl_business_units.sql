@@ -223,13 +223,12 @@ SELECT
     -- of LIABILITY_DISTRIBUTION on a site assignment for this BU
     NVL(
         bu.COMPANY,
-        (SELECT SUBSTR(ssa.LIABILITY_DISTRIBUTION, 1,
-                       INSTR(ssa.LIABILITY_DISTRIBUTION || '-', '-') - 1)
-         FROM   RR_SUPPLIER_SITE_ASSIGNMENTS ssa
-         JOIN   RR_SUPPLIER_SITES            ss  ON ss.SUPPLIER_SITE_ID = ssa.SUPPLIER_SITE_ID
-         WHERE  ss.PROCUREMENT_BU          = bu.BUSINESS_UNIT_NAME
-           AND  ssa.LIABILITY_DISTRIBUTION IS NOT NULL
-           AND  ROWNUM                     = 1)
+        (SELECT REGEXP_SUBSTR(jl.account_combination, '[^-]+', 1, 1)
+         FROM   RR_SLA_ACCOUNTING_HEADERS sh
+         JOIN   RR_SLA_JOURNAL_LINES      jl ON jl.header_id = sh.header_id
+         WHERE  sh.ledger_id              = bu.PRIMARY_LEDGER_ID
+           AND  jl.account_combination   IS NOT NULL
+           AND  ROWNUM                    = 1)
     ) AS COMPANY,
     bu.SYNC_DATE
 FROM RR_GL_BUSINESS_UNITS bu
@@ -279,13 +278,12 @@ SELECT
     bu.PROFIT_CENTER_FLAG,
     NVL(
         bu.COMPANY,
-        (SELECT SUBSTR(ssa.LIABILITY_DISTRIBUTION, 1,
-                       INSTR(ssa.LIABILITY_DISTRIBUTION || '-', '-') - 1)
-         FROM   RR_SUPPLIER_SITE_ASSIGNMENTS ssa
-         JOIN   RR_SUPPLIER_SITES            ss  ON ss.SUPPLIER_SITE_ID = ssa.SUPPLIER_SITE_ID
-         WHERE  ss.PROCUREMENT_BU          = bu.BUSINESS_UNIT_NAME
-           AND  ssa.LIABILITY_DISTRIBUTION IS NOT NULL
-           AND  ROWNUM                     = 1)
+        (SELECT REGEXP_SUBSTR(jl.account_combination, '[^-]+', 1, 1)
+         FROM   RR_SLA_ACCOUNTING_HEADERS sh
+         JOIN   RR_SLA_JOURNAL_LINES      jl ON jl.header_id = sh.header_id
+         WHERE  sh.ledger_id              = bu.PRIMARY_LEDGER_ID
+           AND  jl.account_combination   IS NOT NULL
+           AND  ROWNUM                    = 1)
     ) AS COMPANY,
     bu.SYNC_DATE
 FROM RR_GL_BUSINESS_UNITS bu
