@@ -4535,6 +4535,53 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                                 />
                               </Badge>
                             </Tooltip>
+                            <Tooltip title="View supplier webservice URL">
+                              <Button
+                                icon={<ApiOutlined />}
+                                onClick={() => {
+                                  const bu = form.getFieldValue('businessUnit') || '';
+                                  const url = bu
+                                    ? `${APEX_SUPPLIERS_URL}&P_BUSINESS_UNIT=${encodeURIComponent(bu)}`
+                                    : APEX_SUPPLIERS_URL;
+                                  Modal.info({
+                                    title: 'Supplier List Webservice',
+                                    width: 600,
+                                    content: (
+                                      <div>
+                                        <Text type="secondary" style={{ fontSize: 12 }}>Endpoint called to populate supplier dropdown:</Text>
+                                        <div style={{
+                                          marginTop: 8,
+                                          padding: '10px 14px',
+                                          background: '#f5f5f5',
+                                          borderRadius: 6,
+                                          fontFamily: 'monospace',
+                                          fontSize: 12,
+                                          wordBreak: 'break-all',
+                                          color: REDWOOD.primary,
+                                        }}>
+                                          {url}
+                                        </div>
+                                        {bu && (
+                                          <Text type="secondary" style={{ fontSize: 12, marginTop: 8, display: 'block' }}>
+                                            Filtered by Business Unit: <strong>{bu}</strong>
+                                          </Text>
+                                        )}
+                                        <div style={{ marginTop: 12 }}>
+                                          <Button
+                                            size="small"
+                                            icon={<CopyOutlined />}
+                                            onClick={() => { navigator.clipboard.writeText(url); }}
+                                          >
+                                            Copy URL
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    ),
+                                  });
+                                }}
+                                style={{ borderColor: REDWOOD.neutral300, color: REDWOOD.neutral600 }}
+                              />
+                            </Tooltip>
                           </Space.Compact>
                         </Form.Item>
                         <Form.Item name="supplierNumber" hidden>
