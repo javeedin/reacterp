@@ -88,7 +88,8 @@ SELECT
      ORDER BY h.header_id DESC
      FETCH FIRST 1 ROWS ONLY)                      AS accounting_status,
     TO_CHAR(i.apply_after_date, 'YYYY-MM-DD')    AS apply_after_date,
-    NVL(prep.total_prep, 0)                       AS applied_prepayments
+    NVL(prep.total_prep, 0)                       AS applied_prepayments,
+    i.liability_distribution
 FROM  RR_AP_INVOICES_ALL i
 -- Cash payments rolled up per invoice
 LEFT JOIN (

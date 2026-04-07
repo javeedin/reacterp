@@ -440,6 +440,7 @@ export interface InvoiceInitialData {
   invoiceGroup?: string;
   termsDate?: string;
   goodsReceivedDate?: string;
+  liabilityDistribution?: string;
   // Synced invoice (from Oracle Fusion) — read-only except Pay in Full
   isSynced?: boolean;
 }
@@ -1841,6 +1842,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       if (initialData.invoiceGroup) formValues.invoiceGroup = initialData.invoiceGroup;
       if (initialData.termsDate) formValues.termsDate = dayjs(initialData.termsDate, ['YYYY-MM-DD', 'DD-MMM-YYYY', 'DD MMM YYYY']);
       if (initialData.goodsReceivedDate) formValues.goodsReceivedDate = dayjs(initialData.goodsReceivedDate, ['YYYY-MM-DD', 'DD-MMM-YYYY', 'DD MMM YYYY']);
+      if (initialData.liabilityDistribution) formValues.liabilityDistribution = initialData.liabilityDistribution;
       form.setFieldsValue(formValues);
       setHeaderValues((prev) => ({ ...prev, ...formValues }));
 
@@ -3556,19 +3558,27 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       key: 'amount',
       width: 130,
       align: 'right',
-      render: (val: number, record: InvoiceLine) => (
-        <InputNumber
-          size="small"
-          value={val}
-          onChange={(v) => updateLine(record.key, 'amount', v || 0)}
-          min={0}
-          precision={2}
-          style={{ width: '100%', fontWeight: 600, textAlign: 'right' }}
-          styles={{ input: { textAlign: 'right' } }}
-          variant="borderless"
-          disabled={isReadOnly}
-        />
-      ),
+      render: (val: number, record: InvoiceLine) => {
+        const isCreditMemoLine = headerValues.invoiceType === 'Credit Memo';
+        return (
+          <InputNumber
+            size="small"
+            value={val}
+            onChange={(v) => {
+              const entered = v || 0;
+              // Auto-negate: in Credit Memo mode, positive entries become negative
+              const finalVal = isCreditMemoLine && entered > 0 ? -entered : entered;
+              updateLine(record.key, 'amount', finalVal);
+            }}
+            min={isCreditMemoLine ? undefined : 0}
+            precision={2}
+            style={{ width: '100%', fontWeight: 600, textAlign: 'right' }}
+            styles={{ input: { textAlign: 'right' } }}
+            variant="borderless"
+            disabled={isReadOnly}
+          />
+        );
+      },
     },
     {
       title: 'Distribution Set',
