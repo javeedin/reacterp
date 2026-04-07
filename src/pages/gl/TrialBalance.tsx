@@ -1343,7 +1343,7 @@ const TrialBalance: React.FC = () => {
                 showSearch
               >
                 {filteredPeriods.map(p => (
-                  <Select.Option key={p.period_name_id} value={p.period_name}>{p.period_name}</Select.Option>
+                  <Select.Option key={p.period_name_id} value={p.period_name_id}>{p.period_name_id}</Select.Option>
                 ))}
               </Select>
             </Col>

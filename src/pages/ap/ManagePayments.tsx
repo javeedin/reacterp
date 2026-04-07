@@ -4076,7 +4076,7 @@ const ManagePayments: React.FC = () => {
                         setApiTestResults(prev => ({ ...prev, [stepKey]: { status: 'success', data: { message: 'No pending installments found', total: allInst.length } } }));
                         return;
                       }
-                      const results = [];
+                      const results: Array<{ status: string; [key: string]: any }> = [];
                       let remainingApply = inv.applyAmount;
                       for (const inst of pending) {
                         if (remainingApply <= 0) break;

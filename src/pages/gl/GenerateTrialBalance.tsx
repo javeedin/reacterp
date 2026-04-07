@@ -817,7 +817,7 @@ const GenerateTrialBalance: React.FC = () => {
         {/* ── How It Works ───────────────────────────────────── */}
         <Card
           size="small"
-          style={{ marginTop: 12, borderColor: REDWOOD.neutral200, background: '#fffbe6', borderColor: '#ffe58f' }}
+          style={{ marginTop: 12, background: '#fffbe6', borderColor: '#ffe58f' }}
           bodyStyle={{ padding: '10px 16px' }}
         >
           <Space align="start">
