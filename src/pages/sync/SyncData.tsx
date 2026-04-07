@@ -19,6 +19,7 @@ import {
   Tooltip,
   Modal,
   Checkbox,
+  Switch,
 } from 'antd';
 import {
   SyncOutlined,
@@ -141,6 +142,17 @@ interface PaymentPayloadLog {
 
 // Proxy status type
 type ProxyStatus = 'unknown' | 'checking' | 'online' | 'offline';
+
+// Interface for All Suppliers batch sync
+interface SupplierSyncItem {
+  supplierNumber: string;
+  supplierName: string;
+  status: 'pending' | 'syncing' | 'done' | 'error';
+  invoicesInserted: number;
+  paymentsInserted: number;
+  errors: number;
+  errorMsg?: string;
+}
 
 // Batch list modal item (for two-phase GL Journal sync)
 interface BatchListItem {
@@ -849,6 +861,14 @@ const SyncData: React.FC = () => {
   const [batchSyncing,   setBatchSyncing]   = useState(false);
   const batchAbortRef = useRef<AbortController | null>(null);
 
+  // ── AP Invoices chain + All Suppliers state ───────────────────────────────
+  const [chainAPPayments, setChainAPPayments] = useState(false);
+  const [allSuppliersMode, setAllSuppliersMode] = useState(false);
+  const [supplierSyncOpen, setSupplierSyncOpen] = useState(false);
+  const [supplierSyncList, setSupplierSyncList] = useState<SupplierSyncItem[]>([]);
+  const [supplierSyncing, setSupplierSyncing] = useState(false);
+  const supplierAbortRef = useRef<AbortController | null>(null);
+
   const logCounterRef = useRef(0); // Track total logs generated for debugging
   const allLogsRef = useRef<SyncLog[]>([]); // Unbounded full log store
   const [missingLogsModalOpen, setMissingLogsModalOpen] = useState(false);
@@ -1126,6 +1146,66 @@ const SyncData: React.FC = () => {
       }
     });
   }, []);
+
+  // ── All Suppliers batch sync handler ─────────────────────────────────────
+  const handleProcessAllSuppliers = async () => {
+    setSupplierSyncing(true);
+    supplierAbortRef.current = new AbortController();
+    const signal = supplierAbortRef.current.signal;
+    const baseParameters = getParameters();
+
+    for (let i = 0; i < supplierSyncList.length; i++) {
+      if (signal.aborted) break;
+      const supplier = supplierSyncList[i];
+      if (supplier.status === 'done') continue;
+
+      setSupplierSyncList(prev => prev.map((s, idx) =>
+        idx === i ? { ...s, status: 'syncing' as const } : s
+      ));
+
+      try {
+        const supplierParams = { ...baseParameters, SupplierNumber: supplier.supplierNumber };
+
+        const invResult = await syncAPInvoices(
+          supplierParams,
+          false,
+          addLog,
+          undefined,
+          signal,
+          undefined
+        );
+        let paymentsInserted = 0;
+
+        if (!signal.aborted && chainAPPayments) {
+          const payResult = await syncAPPayments(
+            supplierParams,
+            false,
+            addLog,
+            undefined,
+            signal,
+            undefined
+          );
+          paymentsInserted = payResult.insertedPayments || 0;
+        }
+
+        setSupplierSyncList(prev => prev.map((s, idx) =>
+          idx === i ? {
+            ...s,
+            status: (invResult.errors > 0 ? 'error' : 'done') as const,
+            invoicesInserted: invResult.insertedInvoices || 0,
+            paymentsInserted,
+            errors: invResult.errors,
+            errorMsg: invResult.errors > 0 ? invResult.lastError : undefined,
+          } : s
+        ));
+      } catch (e: any) {
+        setSupplierSyncList(prev => prev.map((s, idx) =>
+          idx === i ? { ...s, status: 'error' as const, errorMsg: String(e) } : s
+        ));
+      }
+    }
+    setSupplierSyncing(false);
+  };
 
   // Code Combination payload callback handler
   const handleCodeCombPayload: CodeCombPayloadCallback = useCallback((ccId, concatenatedSegments, payload, result, error) => {
@@ -1869,6 +1949,26 @@ const SyncData: React.FC = () => {
       syncResult = { inserted: result.insertedPayments, errors: result.errors, type: 'payments' };
     } else if (isAPInvoices) {
       // AP Invoices Sync
+      if (allSuppliersMode) {
+        // Fetch all suppliers and open the batch modal
+        addLog('step', '─── Fetching all suppliers ───');
+        const suppliersResp = await fetch('https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/ap/suppliers');
+        const suppliersData = await suppliersResp.json();
+        const suppliers: SupplierSyncItem[] = (suppliersData.items || []).map((s: any) => ({
+          supplierNumber: s.supplier_number,
+          supplierName: s.supplier_name,
+          status: 'pending' as const,
+          invoicesInserted: 0,
+          paymentsInserted: 0,
+          errors: 0,
+        }));
+        addLog('info', `Found ${suppliers.length} suppliers`);
+        setSupplierSyncList(suppliers);
+        setSupplierSyncOpen(true);
+        isSyncingRef.current = false;
+        return; // Modal takes over
+      }
+
       setApProgress({
         status: 'fetching',
         totalInvoices: 0,
@@ -1904,7 +2004,28 @@ const SyncData: React.FC = () => {
         abortControllerRef.current.signal,
         handleInvoicePayload
       );
-      syncResult = { inserted: result.insertedInvoices, errors: result.errors, type: 'invoices' };
+
+      // Chain AP Payments if enabled
+      if (chainAPPayments && !abortControllerRef.current?.signal.aborted) {
+        addLog('step', '─── Chain: Syncing AP Payments ───');
+        const paymentsResult = await syncAPPayments(
+          parameters,
+          testMode,
+          addLog,
+          (newProgress) => {
+            setApPaymentsProgress((prev) => ({ ...prev, ...newProgress }));
+          },
+          abortControllerRef.current.signal,
+          handlePaymentPayload
+        );
+        syncResult = {
+          inserted: result.insertedInvoices + paymentsResult.insertedPayments,
+          errors: result.errors + paymentsResult.errors,
+          type: 'invoices + payments',
+        };
+      } else {
+        syncResult = { inserted: result.insertedInvoices, errors: result.errors, type: 'invoices' };
+      }
     } else if (isGLCodeComb) {
       // GL Code Combinations Sync
       setCodeCombProgress({
@@ -3352,6 +3473,25 @@ const SyncData: React.FC = () => {
                         </Checkbox>
                         <div style={{ fontSize: 11, color: '#888', marginTop: 4, marginLeft: 24 }}>
                           After batches → auto-run GL Headers → GL Lines
+                        </div>
+                      </div>
+                    )}
+
+                    {isAPInvoices && !isSyncing && (
+                      <div style={{ padding: '10px 14px', background: REDWOOD.surfaceSecondary, borderRadius: 8, marginBottom: 4 }}>
+                        <Space>
+                          <Switch size="small" checked={allSuppliersMode} onChange={setAllSuppliersMode} />
+                          <Text strong style={{ fontSize: 12 }}>Sync All Suppliers</Text>
+                        </Space>
+                        {allSuppliersMode && (
+                          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
+                            Will fetch all suppliers and sync AP Invoices{chainAPPayments ? ' + AP Payments' : ''} for each.
+                          </Text>
+                        )}
+                        <div style={{ marginTop: 8 }}>
+                          <Checkbox checked={chainAPPayments} onChange={e => setChainAPPayments(e.target.checked)}>
+                            <Text style={{ fontSize: 12 }}>Also sync AP Payments after invoices</Text>
+                          </Checkbox>
                         </div>
                       </div>
                     )}
@@ -6580,6 +6720,112 @@ const SyncData: React.FC = () => {
           )}
         </div>
       )}
+      {/* All Suppliers Sync Modal */}
+      <Modal
+        open={supplierSyncOpen}
+        title={
+          <Space>
+            <DatabaseOutlined />
+            <span>All Suppliers Sync — {supplierSyncList.length} suppliers</span>
+            {supplierSyncing && <Tag color="processing">Syncing...</Tag>}
+          </Space>
+        }
+        onCancel={() => { if (!supplierSyncing) setSupplierSyncOpen(false); }}
+        footer={null}
+        width={800}
+        styles={{ body: { padding: '16px' } }}
+      >
+        <Row gutter={12} style={{ marginBottom: 12 }}>
+          {[
+            { label: 'Total',   value: supplierSyncList.length,                                          color: '#64748b' },
+            { label: 'Done',    value: supplierSyncList.filter(s => s.status === 'done').length,    color: '#22c55e' },
+            { label: 'Pending', value: supplierSyncList.filter(s => s.status === 'pending').length, color: '#f59e0b' },
+            { label: 'Error',   value: supplierSyncList.filter(s => s.status === 'error').length,   color: '#ef4444' },
+          ].map(kpi => (
+            <Col key={kpi.label}>
+              <Card size="small" style={{ minWidth: 80, textAlign: 'center' }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: kpi.color }}>{kpi.value}</div>
+                <div style={{ fontSize: 11, color: '#64748b' }}>{kpi.label}</div>
+              </Card>
+            </Col>
+          ))}
+          <Col flex="auto" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
+            {!supplierSyncing ? (
+              <Button
+                type="primary"
+                icon={<PlayCircleOutlined />}
+                onClick={handleProcessAllSuppliers}
+                disabled={supplierSyncList.every(s => s.status === 'done')}
+              >
+                {supplierSyncList.some(s => s.status === 'done') ? 'Resume' : 'Start Syncing'}
+              </Button>
+            ) : (
+              <Button danger icon={<StopOutlined />} onClick={() => { supplierAbortRef.current?.abort(); setSupplierSyncing(false); }}>
+                Stop
+              </Button>
+            )}
+          </Col>
+        </Row>
+        <Table
+          dataSource={supplierSyncList}
+          rowKey="supplierNumber"
+          size="small"
+          pagination={{ pageSize: 20 }}
+          scroll={{ y: 380 }}
+          columns={[
+            {
+              title: '',
+              key: 'icon',
+              width: 36,
+              render: (_: any, r: SupplierSyncItem) => {
+                if (r.status === 'done')    return <CheckCircleOutlined style={{ color: '#22c55e', fontSize: 16 }} />;
+                if (r.status === 'error')   return <CloseCircleOutlined style={{ color: '#ef4444', fontSize: 16 }} />;
+                if (r.status === 'syncing') return <SyncOutlined spin style={{ color: '#3b82f6', fontSize: 16 }} />;
+                return <ClockCircleOutlined style={{ color: '#94a3b8', fontSize: 16 }} />;
+              },
+            },
+            {
+              title: 'Supplier No.',
+              dataIndex: 'supplierNumber',
+              key: 'supplierNumber',
+              width: 120,
+              render: (v: string) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{v}</Text>,
+            },
+            { title: 'Supplier Name', dataIndex: 'supplierName', key: 'supplierName', ellipsis: true },
+            {
+              title: 'Invoices',
+              key: 'inv',
+              width: 80,
+              align: 'right' as const,
+              render: (_: any, r: SupplierSyncItem) => r.status === 'pending' ? '—' : <Text style={{ fontSize: 12 }}>{r.invoicesInserted}</Text>,
+            },
+            {
+              title: 'Payments',
+              key: 'pay',
+              width: 80,
+              align: 'right' as const,
+              render: (_: any, r: SupplierSyncItem) => r.status === 'pending' ? '—' : <Text style={{ fontSize: 12 }}>{r.paymentsInserted}</Text>,
+            },
+            {
+              title: 'Status',
+              key: 'statusTag',
+              width: 90,
+              render: (_: any, r: SupplierSyncItem) => {
+                const colors = { done: 'success', error: 'error', syncing: 'processing', pending: 'default' } as const;
+                return <Tag color={colors[r.status]}>{r.status}</Tag>;
+              },
+            },
+            {
+              title: 'Error',
+              dataIndex: 'errorMsg',
+              key: 'errorMsg',
+              ellipsis: true,
+              render: (v: string) => v ? <Text type="danger" style={{ fontSize: 11 }}>{v}</Text> : null,
+            },
+          ]}
+        />
+      </Modal>
+
       {/* Batch List Modal */}
       <Modal
         open={batchListOpen}

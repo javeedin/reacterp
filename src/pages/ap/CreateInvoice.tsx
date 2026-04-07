@@ -969,24 +969,26 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     const currency = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
     const exchangeRate = 1;
     const supplierId = Number(form.getFieldValue('supplierId')) || null;
-    const activeLines = lines.filter(l => l.amount > 0);
+    const invoiceType = form.getFieldValue('invoiceType') || '';
+    const isCreditMemo = invoiceType === 'Credit Memo';
+    const activeLines = lines.filter(l => Math.abs(l.amount || 0) > 0);
     const result: any[] = [];
     let lineNum = 1;
 
     activeLines.forEach((l) => {
-      const amt = l.amount || 0;
+      const amt = Math.abs(l.amount || 0);
       const isMpa = !!(l.startDate && l.endDate && l.accrualAccount);
       const drAccount = isMpa ? l.accrualAccount : (l.distributionCombination || l.distributionSet || '');
-      // DR line
+      // DR line (for credit memo this becomes CR)
       result.push({
         lineNumber: lineNum++,
-        lineType: 'DR',
+        lineType: isCreditMemo ? 'CR' : 'DR',
         accountingClass: isMpa ? 'PREPAYMENT' : 'EXPENSE',
         accountCombination: drAccount,
-        enteredDr: amt,
-        enteredCr: 0,
-        accountedDr: Math.round(amt * exchangeRate * 100) / 100,
-        accountedCr: 0,
+        enteredDr:   isCreditMemo ? 0   : amt,
+        enteredCr:   isCreditMemo ? amt : 0,
+        accountedDr: isCreditMemo ? 0   : Math.round(amt * exchangeRate * 100) / 100,
+        accountedCr: isCreditMemo ? Math.round(amt * exchangeRate * 100) / 100 : 0,
         currencyCode: currency,
         exchangeRate,
         description: l.description || `Line ${l.lineNumber} – ${l.type || 'Item'}`,
@@ -995,19 +997,19 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         partyId: supplierId || null,
         partyType: 'SUPPLIER',
       });
-      // Tax DR (if applicable)
+      // Tax line (DR in standard, CR in credit memo)
       const taxRate = getTaxRateForClassification(l.taxClassification);
       if (taxRate > 0) {
         const taxAmt = Math.round(amt * taxRate / 100 * 100) / 100;
         result.push({
           lineNumber: lineNum++,
-          lineType: 'DR',
+          lineType: isCreditMemo ? 'CR' : 'DR',
           accountingClass: 'TAX',
           accountCombination: 'Tax Recoverable',
-          enteredDr: taxAmt,
-          enteredCr: 0,
-          accountedDr: taxAmt,
-          accountedCr: 0,
+          enteredDr:   isCreditMemo ? 0       : taxAmt,
+          enteredCr:   isCreditMemo ? taxAmt  : 0,
+          accountedDr: isCreditMemo ? 0       : taxAmt,
+          accountedCr: isCreditMemo ? taxAmt  : 0,
           currencyCode: currency,
           exchangeRate,
           description: `Input VAT – ${l.taxClassification || ''}`,
@@ -1016,18 +1018,18 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       }
     });
 
-    // CR lines: one per invoice line against liability account
+    // Liability lines: CR in standard, DR in credit memo
     activeLines.forEach((l) => {
-      const amt = l.amount || 0;
+      const amt = Math.abs(l.amount || 0);
       result.push({
         lineNumber: lineNum++,
-        lineType: 'CR',
+        lineType: isCreditMemo ? 'DR' : 'CR',
         accountingClass: 'LIABILITY',
         accountCombination: liabilityDist,
-        enteredDr: 0,
-        enteredCr: amt,
-        accountedDr: 0,
-        accountedCr: Math.round(amt * exchangeRate * 100) / 100,
+        enteredDr:   isCreditMemo ? amt : 0,
+        enteredCr:   isCreditMemo ? 0   : amt,
+        accountedDr: isCreditMemo ? Math.round(amt * exchangeRate * 100) / 100 : 0,
+        accountedCr: isCreditMemo ? 0   : Math.round(amt * exchangeRate * 100) / 100,
         currencyCode: currency,
         exchangeRate,
         description: l.description || `Line ${l.lineNumber}`,
@@ -1041,13 +1043,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         const taxAmt = Math.round(amt * taxRate / 100 * 100) / 100;
         result.push({
           lineNumber: lineNum++,
-          lineType: 'CR',
+          lineType: isCreditMemo ? 'DR' : 'CR',
           accountingClass: 'LIABILITY',
           accountCombination: liabilityDist,
-          enteredDr: 0,
-          enteredCr: taxAmt,
-          accountedDr: 0,
-          accountedCr: taxAmt,
+          enteredDr:   isCreditMemo ? taxAmt : 0,
+          enteredCr:   isCreditMemo ? 0      : taxAmt,
+          accountedDr: isCreditMemo ? taxAmt : 0,
+          accountedCr: isCreditMemo ? 0      : taxAmt,
           currencyCode: currency,
           exchangeRate,
           description: `AP Liability – Input VAT`,

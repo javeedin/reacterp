@@ -266,9 +266,13 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
       },
       {
         key: 'SupplierNumber',
-        label: 'Supplier Number',
-        type: 'text',
+        label: 'Supplier',
+        type: 'api-select',
         required: false,
+        apiUrl: 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/ap/suppliers',
+        apiLabelKey: 'supplier_name',
+        apiValueKey: 'supplier_number',
+        placeholder: 'All suppliers',
       },
       {
         key: 'InvoiceDateFrom',
