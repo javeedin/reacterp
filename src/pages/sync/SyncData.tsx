@@ -31,6 +31,7 @@ import {
   InfoCircleOutlined,
   WarningOutlined,
   ApiOutlined,
+  CopyOutlined,
   DatabaseOutlined,
   FileTextOutlined,
   UnorderedListOutlined,
@@ -3315,7 +3316,63 @@ const SyncData: React.FC = () => {
                   {selectedObject?.parameters.map((param) => (
                     <React.Fragment key={param.key}>
                       <Form.Item
-                        label={<Text strong>{param.label}</Text>}
+                        label={
+                          <Space size={6}>
+                            <Text strong>{param.label}</Text>
+                            {param.type === 'api-select' && param.apiUrl && (
+                              <Tooltip title="View webservice URL">
+                                <ApiOutlined
+                                  style={{ color: '#888', cursor: 'pointer', fontSize: 13 }}
+                                  onClick={() => {
+                                    const dependsValue = param.dependsOn ? form.getFieldValue(param.dependsOn) : undefined;
+                                    let url = param.apiUrl!;
+                                    if (param.apiFilterParam && dependsValue) {
+                                      url += (url.includes('?') ? '&' : '?') + `${param.apiFilterParam}=${encodeURIComponent(dependsValue)}`;
+                                    }
+                                    Modal.info({
+                                      title: `${param.label} — Webservice URL`,
+                                      width: 620,
+                                      content: (
+                                        <div>
+                                          <Text type="secondary" style={{ fontSize: 12 }}>
+                                            URL called to populate this dropdown:
+                                          </Text>
+                                          <div style={{
+                                            marginTop: 8,
+                                            padding: '10px 14px',
+                                            background: '#f5f5f5',
+                                            borderRadius: 6,
+                                            fontFamily: 'monospace',
+                                            fontSize: 12,
+                                            wordBreak: 'break-all',
+                                            color: '#C74634',
+                                          }}>
+                                            {url}
+                                          </div>
+                                          {param.dependsOn && (
+                                            <Text type="secondary" style={{ fontSize: 12, marginTop: 8, display: 'block' }}>
+                                              Depends on: <strong>{param.dependsOn}</strong>
+                                              {dependsValue ? ` = "${dependsValue}"` : ' (not selected yet)'}
+                                            </Text>
+                                          )}
+                                          <div style={{ marginTop: 12 }}>
+                                            <Button
+                                              size="small"
+                                              icon={<CopyOutlined />}
+                                              onClick={() => navigator.clipboard.writeText(url)}
+                                            >
+                                              Copy URL
+                                            </Button>
+                                          </div>
+                                        </div>
+                                      ),
+                                    });
+                                  }}
+                                />
+                              </Tooltip>
+                            )}
+                          </Space>
+                        }
                         name={param.key}
                         rules={[{ required: param.required, message: `Please enter ${param.label}` }]}
                         initialValue={param.defaultValue}
