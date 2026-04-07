@@ -1959,11 +1959,15 @@ const SyncData: React.FC = () => {
       if (allSuppliersMode) {
         // Fetch all suppliers and open the batch modal
         addLog('step', '─── Fetching all suppliers ───');
-        const suppliersResp = await fetch('https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/ap/suppliers');
+        const buParam = getParameters()['BusinessUnit'];
+        const suppliersUrl = buParam
+          ? `https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/suppliers?P_BUSINESS_UNIT=${encodeURIComponent(buParam)}`
+          : 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/suppliers';
+        const suppliersResp = await fetch(suppliersUrl);
         const suppliersData = await suppliersResp.json();
         const suppliers: SupplierSyncItem[] = (suppliersData.items || []).map((s: any) => ({
           supplierNumber: s.supplier_number,
-          supplierName: s.supplier_name,
+          supplierName: s.supplier,
           status: 'pending' as const,
           invoicesInserted: 0,
           paymentsInserted: 0,
@@ -3414,20 +3418,42 @@ const SyncData: React.FC = () => {
                       </Form.Item>
                       {param.key === 'SupplierNumber' && isAPInvoices && !isSyncing && (
                         <div style={{ padding: '10px 14px', background: REDWOOD.surfaceSecondary, borderRadius: 8, marginBottom: 12 }}>
-                          <Space>
-                            <Switch size="small" checked={allSuppliersMode} onChange={setAllSuppliersMode} />
-                            <Text strong style={{ fontSize: 12 }}>Sync All Suppliers</Text>
-                          </Space>
-                          {allSuppliersMode && (
-                            <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
-                              Will fetch all suppliers and sync AP Invoices{chainAPPayments ? ' + AP Payments' : ''} for each.
-                            </Text>
-                          )}
-                          <div style={{ marginTop: 8 }}>
+                          <div style={{ marginBottom: 8 }}>
                             <Checkbox checked={chainAPPayments} onChange={e => setChainAPPayments(e.target.checked)}>
                               <Text style={{ fontSize: 12 }}>Also sync AP Payments after invoices</Text>
                             </Checkbox>
                           </div>
+                          <Button
+                            size="small"
+                            type="primary"
+                            icon={<DatabaseOutlined />}
+                            style={{ width: '100%' }}
+                            onClick={async () => {
+                              const buParam = form.getFieldValue('BusinessUnit');
+                              const url = buParam
+                                ? `https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/suppliers?P_BUSINESS_UNIT=${encodeURIComponent(buParam)}`
+                                : 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/suppliers';
+                              try {
+                                const resp = await fetch(url);
+                                const data = await resp.json();
+                                const list: SupplierSyncItem[] = (data.items || []).map((s: any) => ({
+                                  supplierNumber: s.supplier_number,
+                                  supplierName: s.supplier,
+                                  status: 'pending' as const,
+                                  invoicesInserted: 0,
+                                  paymentsInserted: 0,
+                                  errors: 0,
+                                }));
+                                setSupplierSyncList(list);
+                                setAllSuppliersMode(true);
+                                setSupplierSyncOpen(true);
+                              } catch {
+                                Modal.error({ title: 'Failed to fetch suppliers', content: 'Check your connection and try again.' });
+                              }
+                            }}
+                          >
+                            Sync All Suppliers
+                          </Button>
                         </div>
                       )}
                     </React.Fragment>

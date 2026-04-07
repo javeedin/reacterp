@@ -4467,6 +4467,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           data-sat-id="invoice-supplier"
                           required
                           style={{ marginBottom: 4 }}
+                          extra={selectedSupplierInfo ? (
+                            <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>
+                              # {selectedSupplierInfo.number}
+                            </Text>
+                          ) : undefined}
                         >
                           <Space.Compact style={{ width: '100%' }}>
                             <Form.Item name="supplier" noStyle rules={[{ required: true, message: 'Required' }]}>
@@ -4475,19 +4480,6 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                                 readOnly
                                 suffix={
                                   <Space size={4}>
-                                    {selectedSupplierInfo && (
-                                      <Tooltip
-                                        title={
-                                          <div>
-                                            <div><strong>Supplier #:</strong> {selectedSupplierInfo.number}</div>
-                                            <div><strong>Supplier ID:</strong> {selectedSupplierInfo.id}</div>
-                                          </div>
-                                        }
-                                        placement="bottom"
-                                      >
-                                        <InfoCircleOutlined style={{ color: REDWOOD.info, fontSize: 13 }} />
-                                      </Tooltip>
-                                    )}
                                     <SearchOutlined
                                       style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 14 }}
                                       onClick={openSupplierModal}
