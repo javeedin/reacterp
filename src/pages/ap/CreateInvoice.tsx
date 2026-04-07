@@ -1147,8 +1147,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           const invoiceNumber = form.getFieldValue('invoiceNumber');
           const bu            = form.getFieldValue('businessUnit') || '';
           const liabilityDist = form.getFieldValue('liabilityDistribution') || '';
-          const firstSeg      = liabilityDist.split('-')[0] || '02';
-          const prepaymentDist = `${firstSeg}-00-00-1223108-0000-000-00-000-000`;
+          const firstSeg      = liabilityDist.split('-')[0] || '';
+          const prepaymentDist = firstSeg ? `${firstSeg}-00-00-1223108-0000-000-00-000-000` : '';
           const currency      = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
           const supplierId    = Number(form.getFieldValue('supplierId')) || null;
           const ledgerInfo    = await fetchLedgerByBusinessUnit(bu);
@@ -1912,8 +1912,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         firstLine.startDate = formattedDate;
         firstLine.endDate = getEndOfMonth(formattedDate);
       }
-      // Default accrual account from liability distribution
-      firstLine.accrualAccount = '02-00-00-2313101-0000-000-00-000-000';
+      // Default accrual account from liability distribution (set later when BU is selected)
+      firstLine.accrualAccount = form.getFieldValue('liabilityDistribution') || '';
       setLines([firstLine]);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -4270,7 +4270,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               payGroup: '',
               payAlone: 'No',
               calculateTax: 'Yes',
-              liabilityDistribution: '02-00-00-2313101-0000-000-00-000-000',
+              liabilityDistribution: '',
               invoiceDate: initialData?.invoiceId ? undefined : dayjs(),
             }}
             onValuesChange={(changedValues, allValues) => {
@@ -4313,8 +4313,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   form.setFieldValue('applyAfterDate', invoiceDateVal);
                 }
                 const liabilityDist = form.getFieldValue('liabilityDistribution') || '';
-                const firstSeg = liabilityDist.split('-')[0] || '02';
-                const prepaymentDist = `${firstSeg}-00-00-1223108-0000-000-00-000-000`;
+                const firstSeg = liabilityDist.split('-')[0] || '';
+                const prepaymentDist = firstSeg ? `${firstSeg}-00-00-1223108-0000-000-00-000-000` : '';
                 setLines((prev) => prev.map((line) => ({
                   ...line,
                   distributionCombination: line.distributionCombination || prepaymentDist,
@@ -4323,8 +4323,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               // When liability distribution changes for Prepayment, update line distribution first segment
               if ('liabilityDistribution' in changedValues && allValues.invoiceType === 'Prepayment') {
                 const liabilityDist = changedValues.liabilityDistribution || '';
-                const firstSeg = liabilityDist.split('-')[0] || '02';
-                const prepaymentDist = `${firstSeg}-00-00-1223108-0000-000-00-000-000`;
+                const firstSeg = liabilityDist.split('-')[0] || '';
+                const prepaymentDist = firstSeg ? `${firstSeg}-00-00-1223108-0000-000-00-000-000` : '';
                 setLines((prev) => prev.map((line) => ({
                   ...line,
                   distributionCombination: prepaymentDist,
@@ -4343,14 +4343,22 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 if (selectedBU?.company) {
                   const currentLiability = form.getFieldValue('liabilityDistribution') || '';
                   const parts = currentLiability.split('-');
-                  parts[0] = selectedBU.company;
-                  // Ensure at least 9 segments (pad remaining with defaults)
-                  const newLiability = parts.length >= 2
-                    ? parts.join('-')
-                    : `${selectedBU.company}-00-00-2313101-0000-000-00-000-000`;
-                  form.setFieldValue('liabilityDistribution', newLiability);
-                  setHeaderValues((prev) => ({ ...prev, liabilityDistribution: newLiability }));
-                  setLines((prev) => prev.map((line) => ({ ...line, accrualAccount: newLiability })));
+                  // Replace first segment with company from BU; if no existing account, leave rest empty
+                  // so user must pick via account selector
+                  if (parts.length >= 2) {
+                    parts[0] = selectedBU.company;
+                    const newLiability = parts.join('-');
+                    form.setFieldValue('liabilityDistribution', newLiability);
+                    setHeaderValues((prev) => ({ ...prev, liabilityDistribution: newLiability }));
+                    setLines((prev) => prev.map((line) => ({ ...line, accrualAccount: newLiability })));
+                  }
+                  // If no existing liability distribution yet, just set the company segment
+                  // so user knows which company is active (they complete via account selector)
+                  if (!currentLiability) {
+                    const placeholder = selectedBU.company;
+                    form.setFieldValue('liabilityDistribution', placeholder);
+                    setHeaderValues((prev) => ({ ...prev, liabilityDistribution: placeholder }));
+                  }
                 }
               }
               // Copy liability distribution to all lines' accrual account
@@ -4713,7 +4721,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           <Space.Compact style={{ width: '100%' }}>
                             <Form.Item name="liabilityDistribution" noStyle rules={[{ required: true, message: 'Required' }]}>
                               <Input
-                                placeholder="e.g. 02-00-00-2313101-0000-000-00-000-000"
+                                placeholder="Select account via the search button →"
                                 readOnly
                                 style={{ cursor: isReadOnly ? 'default' : 'pointer' }}
                                 onClick={() => !isReadOnly && openAccountSelector('__liability__', form.getFieldValue('liabilityDistribution'))}
@@ -9206,8 +9214,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     const invoiceNumber  = form.getFieldValue('invoiceNumber');
                     const bu             = form.getFieldValue('businessUnit') || '';
                     const liabilityDist_ = form.getFieldValue('liabilityDistribution') || '';
-                    const firstSeg_      = liabilityDist_.split('-')[0] || '02';
-                    const prepayDist_    = `${firstSeg_}-00-00-1223108-0000-000-00-000-000`;
+                    const firstSeg_      = liabilityDist_.split('-')[0] || '';
+                    const prepayDist_    = firstSeg_ ? `${firstSeg_}-00-00-1223108-0000-000-00-000-000` : '';
                     const currency_      = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
                     const acctDate_      = record.applicationAccountingDate
                       ? dayjs(record.applicationAccountingDate).format('YYYY-MM-DD')
