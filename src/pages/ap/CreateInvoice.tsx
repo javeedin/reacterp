@@ -4337,28 +4337,15 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   description: line.description ? line.description : (changedValues.description || ''),
                 })));
               }
-              // When business unit changes, update company (first segment) of liability distribution
+              // When business unit changes, build liability distribution:
+              // segment 1 = company from BU webservice; rest is fixed
               if ('businessUnit' in changedValues && changedValues.businessUnit) {
                 const selectedBU = businessUnits.find(bu => bu.name === changedValues.businessUnit);
                 if (selectedBU?.company) {
-                  const currentLiability = form.getFieldValue('liabilityDistribution') || '';
-                  const parts = currentLiability.split('-');
-                  // Replace first segment with company from BU; if no existing account, leave rest empty
-                  // so user must pick via account selector
-                  if (parts.length >= 2) {
-                    parts[0] = selectedBU.company;
-                    const newLiability = parts.join('-');
-                    form.setFieldValue('liabilityDistribution', newLiability);
-                    setHeaderValues((prev) => ({ ...prev, liabilityDistribution: newLiability }));
-                    setLines((prev) => prev.map((line) => ({ ...line, accrualAccount: newLiability })));
-                  }
-                  // If no existing liability distribution yet, just set the company segment
-                  // so user knows which company is active (they complete via account selector)
-                  if (!currentLiability) {
-                    const placeholder = selectedBU.company;
-                    form.setFieldValue('liabilityDistribution', placeholder);
-                    setHeaderValues((prev) => ({ ...prev, liabilityDistribution: placeholder }));
-                  }
+                  const newLiability = `${selectedBU.company}-00-00-2313101-0000-000-00-000-000`;
+                  form.setFieldValue('liabilityDistribution', newLiability);
+                  setHeaderValues((prev) => ({ ...prev, liabilityDistribution: newLiability }));
+                  setLines((prev) => prev.map((line) => ({ ...line, accrualAccount: newLiability })));
                 }
               }
               // Copy liability distribution to all lines' accrual account
