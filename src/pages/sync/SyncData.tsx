@@ -3281,48 +3281,67 @@ const SyncData: React.FC = () => {
                   </Form.Item>
 
                   {selectedObject?.parameters.map((param) => (
-                    <Form.Item
-                      key={param.key}
-                      label={<Text strong>{param.label}</Text>}
-                      name={param.key}
-                      rules={[{ required: param.required, message: `Please enter ${param.label}` }]}
-                      initialValue={param.defaultValue}
-                    >
-                      {param.type === 'select' && param.options ? (
-                        <Select placeholder={param.placeholder || `Select ${param.label}`} disabled={isSyncing || isTesting}>
-                          {param.options.map((opt) => (
-                            <Option key={opt.value} value={opt.value}>{opt.label}</Option>
-                          ))}
-                        </Select>
-                      ) : param.type === 'api-select' ? (
-                        <Select
-                          showSearch
-                          allowClear
-                          placeholder={param.placeholder || `Select ${param.label}`}
-                          disabled={isSyncing || isTesting}
-                          loading={apiSelectOptions[param.key]?.loading}
-                          filterOption={(input, option) =>
-                            String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-                          }
-                          notFoundContent={
-                            apiSelectOptions[param.key]?.loading ? 'Loading periods…' : 'No periods found'
-                          }
-                        >
-                          {(apiSelectOptions[param.key]?.items || []).map((opt) => (
-                            <Option key={opt.value} value={opt.value} label={opt.label}>
-                              <span style={{ fontWeight: 600 }}>{opt.label}</span>
-                              {opt.count !== undefined && (
-                                <span style={{ float: 'right', color: '#888', fontSize: 12 }}>
-                                  {opt.count.toLocaleString()} batches
-                                </span>
-                              )}
-                            </Option>
-                          ))}
-                        </Select>
-                      ) : (
-                        <Input placeholder={param.placeholder || `Enter ${param.label}`} disabled={isSyncing || isTesting} />
+                    <React.Fragment key={param.key}>
+                      <Form.Item
+                        label={<Text strong>{param.label}</Text>}
+                        name={param.key}
+                        rules={[{ required: param.required, message: `Please enter ${param.label}` }]}
+                        initialValue={param.defaultValue}
+                      >
+                        {param.type === 'select' && param.options ? (
+                          <Select placeholder={param.placeholder || `Select ${param.label}`} disabled={isSyncing || isTesting}>
+                            {param.options.map((opt) => (
+                              <Option key={opt.value} value={opt.value}>{opt.label}</Option>
+                            ))}
+                          </Select>
+                        ) : param.type === 'api-select' ? (
+                          <Select
+                            showSearch
+                            allowClear
+                            placeholder={param.placeholder || `Select ${param.label}`}
+                            disabled={isSyncing || isTesting}
+                            loading={apiSelectOptions[param.key]?.loading}
+                            filterOption={(input, option) =>
+                              String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                            }
+                            notFoundContent={
+                              apiSelectOptions[param.key]?.loading ? 'Loading…' : 'No results found'
+                            }
+                          >
+                            {(apiSelectOptions[param.key]?.items || []).map((opt) => (
+                              <Option key={opt.value} value={opt.value} label={opt.label}>
+                                <span style={{ fontWeight: 600 }}>{opt.label}</span>
+                                {opt.count !== undefined && (
+                                  <span style={{ float: 'right', color: '#888', fontSize: 12 }}>
+                                    {opt.count.toLocaleString()} batches
+                                  </span>
+                                )}
+                              </Option>
+                            ))}
+                          </Select>
+                        ) : (
+                          <Input placeholder={param.placeholder || `Enter ${param.label}`} disabled={isSyncing || isTesting} />
+                        )}
+                      </Form.Item>
+                      {param.key === 'SupplierNumber' && isAPInvoices && !isSyncing && (
+                        <div style={{ padding: '10px 14px', background: REDWOOD.surfaceSecondary, borderRadius: 8, marginBottom: 12 }}>
+                          <Space>
+                            <Switch size="small" checked={allSuppliersMode} onChange={setAllSuppliersMode} />
+                            <Text strong style={{ fontSize: 12 }}>Sync All Suppliers</Text>
+                          </Space>
+                          {allSuppliersMode && (
+                            <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
+                              Will fetch all suppliers and sync AP Invoices{chainAPPayments ? ' + AP Payments' : ''} for each.
+                            </Text>
+                          )}
+                          <div style={{ marginTop: 8 }}>
+                            <Checkbox checked={chainAPPayments} onChange={e => setChainAPPayments(e.target.checked)}>
+                              <Text style={{ fontSize: 12 }}>Also sync AP Payments after invoices</Text>
+                            </Checkbox>
+                          </div>
+                        </div>
                       )}
-                    </Form.Item>
+                    </React.Fragment>
                   ))}
 
                   <Divider style={{ margin: '16px 0' }} />
@@ -3473,25 +3492,6 @@ const SyncData: React.FC = () => {
                         </Checkbox>
                         <div style={{ fontSize: 11, color: '#888', marginTop: 4, marginLeft: 24 }}>
                           After batches → auto-run GL Headers → GL Lines
-                        </div>
-                      </div>
-                    )}
-
-                    {isAPInvoices && !isSyncing && (
-                      <div style={{ padding: '10px 14px', background: REDWOOD.surfaceSecondary, borderRadius: 8, marginBottom: 4 }}>
-                        <Space>
-                          <Switch size="small" checked={allSuppliersMode} onChange={setAllSuppliersMode} />
-                          <Text strong style={{ fontSize: 12 }}>Sync All Suppliers</Text>
-                        </Space>
-                        {allSuppliersMode && (
-                          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
-                            Will fetch all suppliers and sync AP Invoices{chainAPPayments ? ' + AP Payments' : ''} for each.
-                          </Text>
-                        )}
-                        <div style={{ marginTop: 8 }}>
-                          <Checkbox checked={chainAPPayments} onChange={e => setChainAPPayments(e.target.checked)}>
-                            <Text style={{ fontSize: 12 }}>Also sync AP Payments after invoices</Text>
-                          </Checkbox>
                         </div>
                       </div>
                     )}
