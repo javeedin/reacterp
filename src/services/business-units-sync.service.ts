@@ -196,6 +196,7 @@ export const syncBusinessUnits = async (
           ManagerId:         item.ManagerId,
           LegalEntityId:     item.LegalEntityId,
           ProfitCenterFlag:  item.ProfitCenterFlag,
+          Company:           item.Company,
         })),
       };
 

@@ -1683,10 +1683,16 @@ const SyncData: React.FC = () => {
     labelKey: string,
     valueKey: string,
     countKey?: string,
+    filterParam?: string,
+    filterValue?: string,
   ) => {
     setApiSelectOptions(prev => ({ ...prev, [paramKey]: { loading: true, items: prev[paramKey]?.items || [] } }));
     try {
-      const res = await fetch(apiUrl);
+      let url = apiUrl;
+      if (filterParam && filterValue) {
+        url += (url.includes('?') ? '&' : '?') + `${filterParam}=${encodeURIComponent(filterValue)}`;
+      }
+      const res = await fetch(url);
       const data = await res.json();
       const rawItems: any[] = data.items || data || [];
       const items = rawItems.map((item: any) => ({
@@ -3244,7 +3250,33 @@ const SyncData: React.FC = () => {
                   Configuration
                 </Title>
 
-                <Form form={form} layout="vertical">
+                <Form
+                  form={form}
+                  layout="vertical"
+                  onValuesChange={(changedValues) => {
+                    // Re-fetch dependent api-select dropdowns when their dependency changes
+                    if (!selectedObject) return;
+                    const changedKey = Object.keys(changedValues)[0];
+                    if (!changedKey) return;
+                    selectedObject.parameters.forEach((param) => {
+                      if (
+                        param.type === 'api-select' &&
+                        param.apiUrl &&
+                        param.dependsOn === changedKey
+                      ) {
+                        fetchApiSelectOptions(
+                          param.key,
+                          param.apiUrl,
+                          param.apiLabelKey!,
+                          param.apiValueKey!,
+                          param.apiCountKey,
+                          param.apiFilterParam,
+                          changedValues[changedKey] || undefined,
+                        );
+                      }
+                    });
+                  }}
+                >
                   <Form.Item
                     label={<Text strong>Sync Object</Text>}
                     name="syncObject"

@@ -14,10 +14,19 @@ CREATE TABLE RR_GL_BUSINESS_UNITS (
     MANAGER_ID              NUMBER,
     LEGAL_ENTITY_ID         NUMBER,
     PROFIT_CENTER_FLAG      VARCHAR2(1),            -- 'Y' / 'N'  (from boolean ProfitCenterFlag)
+    COMPANY                 VARCHAR2(30),           -- COA Segment 1 company code for this BU
     -- Audit
     SYNC_DATE               TIMESTAMP DEFAULT SYSTIMESTAMP,
     CONSTRAINT UK_RR_GL_BU_ID UNIQUE (BUSINESS_UNIT_ID)
 );
+
+-- Add COMPANY column if the table already exists (safe re-run)
+BEGIN
+    EXECUTE IMMEDIATE 'ALTER TABLE RR_GL_BUSINESS_UNITS ADD (COMPANY VARCHAR2(30))';
+EXCEPTION
+    WHEN OTHERS THEN NULL; -- column already exists
+END;
+/
 
 -- Indexes
 CREATE INDEX IDX_RR_GL_BU_NAME        ON RR_GL_BUSINESS_UNITS(BUSINESS_UNIT_NAME);
@@ -57,6 +66,7 @@ CREATE OR REPLACE PROCEDURE RR_SYNC_BUSINESS_UNITS (
     v_manager_id         NUMBER;
     v_legal_entity_id    NUMBER;
     v_profit_center_flag VARCHAR2(1);
+    v_company            VARCHAR2(30);
 BEGIN
     p_count := 0;
     p_error := NULL;
@@ -73,7 +83,8 @@ BEGIN
                 location_id         NUMBER        PATH '$.LocationId',
                 manager_id          NUMBER        PATH '$.ManagerId',
                 legal_entity_id     NUMBER        PATH '$.LegalEntityId',
-                profit_center_raw   VARCHAR2(10)  PATH '$.ProfitCenterFlag'
+                profit_center_raw   VARCHAR2(10)  PATH '$.ProfitCenterFlag',
+                company             VARCHAR2(30)  PATH '$.Company'
             )
         )
     ) LOOP
@@ -85,6 +96,7 @@ BEGIN
         v_manager_id         := rec.manager_id;
         v_legal_entity_id    := rec.legal_entity_id;
         v_profit_center_flag := CASE WHEN LOWER(rec.profit_center_raw) = 'true' THEN 'Y' ELSE 'N' END;
+        v_company            := rec.company;
 
         MERGE INTO RR_GL_BUSINESS_UNITS tgt
         USING (SELECT v_business_unit_id AS business_unit_id FROM DUAL) src
@@ -98,6 +110,7 @@ BEGIN
                 tgt.MANAGER_ID          = v_manager_id,
                 tgt.LEGAL_ENTITY_ID     = v_legal_entity_id,
                 tgt.PROFIT_CENTER_FLAG  = v_profit_center_flag,
+                tgt.COMPANY             = NVL(v_company, tgt.COMPANY),
                 tgt.SYNC_DATE           = SYSTIMESTAMP
         WHEN NOT MATCHED THEN
             INSERT (
@@ -109,6 +122,7 @@ BEGIN
                 MANAGER_ID,
                 LEGAL_ENTITY_ID,
                 PROFIT_CENTER_FLAG,
+                COMPANY,
                 SYNC_DATE
             ) VALUES (
                 v_business_unit_id,
@@ -119,6 +133,7 @@ BEGIN
                 v_manager_id,
                 v_legal_entity_id,
                 v_profit_center_flag,
+                v_company,
                 SYSTIMESTAMP
             );
 
@@ -204,6 +219,7 @@ SELECT
     MANAGER_ID,
     LEGAL_ENTITY_ID,
     PROFIT_CENTER_FLAG,
+    COMPANY,
     SYNC_DATE
 FROM RR_GL_BUSINESS_UNITS
 WHERE ACTIVE_FLAG = 'Y'
@@ -250,6 +266,7 @@ SELECT
     MANAGER_ID,
     LEGAL_ENTITY_ID,
     PROFIT_CENTER_FLAG,
+    COMPANY,
     SYNC_DATE
 FROM RR_GL_BUSINESS_UNITS
 ORDER BY BUSINESS_UNIT_NAME

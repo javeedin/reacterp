@@ -30,12 +30,21 @@ BEGIN
         p_items_per_page => 0,
         p_comments       => 'Return all active suppliers ordered by name',
         p_source         => q'[
-SELECT
+SELECT DISTINCT
     s.supplier_number,
-    s.supplier        AS supplier_name,
+    s.supplier AS supplier_name,
     s.status
 FROM RR_SUPPLIER_MASTER s
 WHERE NVL(s.status, 'Active') = 'Active'
+  AND (
+    :business_unit IS NULL
+    OR EXISTS (
+        SELECT 1
+        FROM RR_SUPPLIER_SITES ss
+        WHERE ss.SUPPLIER_ID = s.SUPPLIER_ID
+          AND ss.PROCUREMENT_BU = :business_unit
+    )
+  )
 ORDER BY s.supplier
 ]'
     );

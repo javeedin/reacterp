@@ -108,6 +108,8 @@ export interface ParameterConfig {
   apiLabelKey?: string;      // response item key to use as label
   apiValueKey?: string;      // response item key to use as value
   apiCountKey?: string;      // optional count key to show alongside label
+  dependsOn?: string;        // re-fetch when this other param key changes
+  apiFilterParam?: string;   // query-string param name to pass the dependsOn value as a filter
   defaultValue?: string;
   placeholder?: string;
 }
@@ -261,8 +263,12 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
       {
         key: 'BusinessUnit',
         label: 'Business Unit',
-        type: 'text',
+        type: 'api-select',
         required: false,
+        apiUrl: 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/gl/businessunits',
+        apiLabelKey: 'business_unit_name',
+        apiValueKey: 'business_unit_name',
+        placeholder: 'All business units',
       },
       {
         key: 'SupplierNumber',
@@ -272,6 +278,8 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
         apiUrl: 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/ap/suppliers',
         apiLabelKey: 'supplier_name',
         apiValueKey: 'supplier_number',
+        dependsOn: 'BusinessUnit',
+        apiFilterParam: 'business_unit',
         placeholder: 'All suppliers',
       },
       {

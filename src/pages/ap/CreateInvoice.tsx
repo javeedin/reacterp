@@ -466,7 +466,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [supplierLoading, setSupplierLoading] = useState(false);
   const [supplierSearchText, setSupplierSearchText] = useState('');
   const [selectedSupplierInfo, setSelectedSupplierInfo] = useState<{ number: string; id: number } | null>(null);
-  const [businessUnits, setBusinessUnits] = useState<string[]>([]);
+  const [businessUnits, setBusinessUnits] = useState<{ name: string; company: string }[]>([]);
 
   // Supplier sites
   const [supplierSites, setSupplierSites] = useState<SupplierSiteRecord[]>([]);
@@ -1812,12 +1812,19 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch Procurement Business Units from DB on mount; fall back to known values if endpoint not yet deployed
-  const FALLBACK_BUSINESS_UNITS = ['BUIMERC CORP FZE_JAFZA', 'BUIMERC CORP_DIFC_INVST', 'BUIMERC CORP FZE', 'BUIMERC CORP DIFC'];
+  const FALLBACK_BUSINESS_UNITS = [
+    { name: 'BUIMERC CORP FZE_JAFZA',   company: '' },
+    { name: 'BUIMERC CORP_DIFC_INVST',  company: '' },
+    { name: 'BUIMERC CORP FZE',         company: '' },
+    { name: 'BUIMERC CORP DIFC',        company: '' },
+  ];
   useEffect(() => {
     fetch(APEX_BUSINESS_UNITS_URL, { headers: { Accept: 'application/json' } })
       .then(r => r.json())
       .then(data => {
-        const items: string[] = (data?.items ?? []).map((i: any) => i.business_unit_name).filter(Boolean);
+        const items = (data?.items ?? [])
+          .filter((i: any) => i.business_unit_name)
+          .map((i: any) => ({ name: i.business_unit_name as string, company: (i.company || '') as string }));
         setBusinessUnits(items.length > 0 ? items : FALLBACK_BUSINESS_UNITS);
       })
       .catch(() => setBusinessUnits(FALLBACK_BUSINESS_UNITS));
@@ -4330,6 +4337,22 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   description: line.description ? line.description : (changedValues.description || ''),
                 })));
               }
+              // When business unit changes, update company (first segment) of liability distribution
+              if ('businessUnit' in changedValues && changedValues.businessUnit) {
+                const selectedBU = businessUnits.find(bu => bu.name === changedValues.businessUnit);
+                if (selectedBU?.company) {
+                  const currentLiability = form.getFieldValue('liabilityDistribution') || '';
+                  const parts = currentLiability.split('-');
+                  parts[0] = selectedBU.company;
+                  // Ensure at least 9 segments (pad remaining with defaults)
+                  const newLiability = parts.length >= 2
+                    ? parts.join('-')
+                    : `${selectedBU.company}-00-00-2313101-0000-000-00-000-000`;
+                  form.setFieldValue('liabilityDistribution', newLiability);
+                  setHeaderValues((prev) => ({ ...prev, liabilityDistribution: newLiability }));
+                  setLines((prev) => prev.map((line) => ({ ...line, accrualAccount: newLiability })));
+                }
+              }
               // Copy liability distribution to all lines' accrual account
               if ('liabilityDistribution' in changedValues) {
                 const accrual = changedValues.liabilityDistribution || '';
@@ -4363,7 +4386,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                         >
                           <Select placeholder="Select Business Unit" showSearch allowClear>
                             {businessUnits.map(bu => (
-                              <Option key={bu} value={bu}>{bu}</Option>
+                              <Option key={bu.name} value={bu.name}>{bu.name}</Option>
                             ))}
                           </Select>
                         </Form.Item>
