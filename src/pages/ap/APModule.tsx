@@ -196,8 +196,8 @@ const APModule: React.FC = () => {
       const params = new URLSearchParams();
       if (selectedBU) params.set('P_BUSINESS_UNIT', selectedBU);
       const qs = params.toString();
-      // URL matches ORDS module 'ap' with pattern 'invoices/outstanding-by-supplier'
-      const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/outstanding-by-supplier${qs ? '?' + qs : ''}`;
+      // endpoint registered without 'ap/' prefix in this ORDS environment
+      const url = `${APEX_DB_CONFIG.baseUrl}/invoices/outstanding-by-supplier${qs ? '?' + qs : ''}`;
       const res = await fetch(url);
       const text = await res.text();
       if (!text.trim()) throw new Error('Empty response from server');
