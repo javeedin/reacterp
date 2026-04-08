@@ -118,6 +118,7 @@ WHERE (i.supplier_number  = :supplier_number  OR :supplier_number  IS NULL)
   AND (i.supplier_site    = :supplier_site    OR :supplier_site    IS NULL)
   AND (UPPER(i.invoice_group) LIKE '%' || UPPER(:invoice_group) || '%'
        OR :invoice_group IS NULL)
+  AND (i.invoice_id       = :invoice_id       OR :invoice_id       IS NULL)
 ORDER BY i.invoice_date DESC, i.invoice_id DESC
 ]'
     );

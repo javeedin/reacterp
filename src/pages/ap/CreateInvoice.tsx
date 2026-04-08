@@ -655,6 +655,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // Saved invoice state — tracks whether we're in create or update mode
   const [savedInvoiceId, setSavedInvoiceId] = useState<number | null>(initialData?.invoiceId || null);
 
+  // Live status — refreshable without closing/reopening the invoice
+  const [liveHoldPaidStatus,   setLiveHoldPaidStatus]   = useState(initialData?.holdPaidStatus   || '');
+  const [liveValidationStatus, setLiveValidationStatus] = useState(initialData?.validationStatus || '');
+  const [liveApprovalStatus,   setLiveApprovalStatus]   = useState(initialData?.approvalStatus   || '');
+  const [statusRefreshing,     setStatusRefreshing]     = useState(false);
+
   const openPrepaymentAPIDrawer = useCallback(async () => {
     const supplierId = form.getFieldValue('supplierId');
     const invoiceId = savedInvoiceId ?? initialData?.invoiceId ?? null;
@@ -822,6 +828,31 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       setInvoiceBalanceLoading(false);
     }
   }, []);
+
+  // Refresh invoice status (holdPaidStatus, validationStatus) + balance + payments without reopening
+  const handleRefreshStatus = useCallback(async () => {
+    const invoiceId = savedInvoiceId || initialData?.invoiceId;
+    if (!invoiceId) return;
+    setStatusRefreshing(true);
+    try {
+      const [statusRes] = await Promise.all([
+        fetch(`${APEX_DB_CONFIG.baseUrl}/ap/createinvoice?invoice_id=${invoiceId}`, { headers: { Accept: 'application/json' } }),
+        fetchInvoiceBalance(invoiceId),
+        fetchInvoicePayments(invoiceId),
+      ]);
+      if (statusRes.ok) {
+        const data = await statusRes.json();
+        const item = (data.items || data)?.[0];
+        if (item) {
+          setLiveHoldPaidStatus(item.paid_status   || '');
+          setLiveValidationStatus(item.validation_status || '');
+          setLiveApprovalStatus(item.approval_status   || '');
+        }
+      }
+    } finally {
+      setStatusRefreshing(false);
+    }
+  }, [savedInvoiceId, initialData, fetchInvoiceBalance, fetchInvoicePayments]);
 
   // Open void modal from invoice edit (Payments tab or Invoice Actions)
   const openInvoiceVoidModal = async (
@@ -4070,10 +4101,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           {isEditMode && isReadOnly && (
             <Tag color="warning" style={{ fontSize: 12 }}>Read-Only</Tag>
           )}
-          {isEditMode && initialData?.holdPaidStatus && (
+          {isEditMode && liveHoldPaidStatus && (
             <Tag
               color={(() => {
-                const s = (initialData.holdPaidStatus || '').toLowerCase();
+                const s = liveHoldPaidStatus.toLowerCase();
                 if (s === 'fully paid' || s === 'paid') return 'green';
                 if (s.includes('partial')) return 'warning';
                 if (s === 'available') return 'cyan';
@@ -4081,11 +4112,22 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               })()}
               style={{ fontSize: 12 }}
             >
-              {initialData.holdPaidStatus}
+              {liveHoldPaidStatus}
             </Tag>
           )}
-          {isEditMode && initialData?.validationStatus && !((hasAnyPayment || isPaid || isPostedToGL) && initialData.validationStatus === 'Needs Revalidation') && (
-            <Tag color="green" style={{ fontSize: 12 }}>{initialData.validationStatus}</Tag>
+          {isEditMode && liveValidationStatus && !((hasAnyPayment || isPaid || isPostedToGL) && liveValidationStatus === 'Needs Revalidation') && (
+            <Tag color="green" style={{ fontSize: 12 }}>{liveValidationStatus}</Tag>
+          )}
+          {isEditMode && (
+            <Tooltip title="Refresh status">
+              <Button
+                icon={<ReloadOutlined spin={statusRefreshing} />}
+                size="small"
+                onClick={handleRefreshStatus}
+                loading={statusRefreshing}
+                style={{ fontSize: 12 }}
+              />
+            </Tooltip>
           )}
         </Space>
 
