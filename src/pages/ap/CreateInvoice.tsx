@@ -6854,7 +6854,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             })}
           </div>
         ) : (
-          <div style={{ color: REDWOOD.neutral500, textAlign: 'center', padding: 32 }}>
+          <div style={{ color: REDWOOD.neutral400, textAlign: 'center', padding: 32 }}>
             Click the refresh button (⟳) first to see the API call details.
           </div>
         )}
