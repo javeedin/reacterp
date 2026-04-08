@@ -664,7 +664,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [refreshApiLogVisible, setRefreshApiLogVisible] = useState(false);
 
   const openPrepaymentAPIDrawer = useCallback(async () => {
-    const supplierId = form.getFieldValue('supplierId');
+    const supplierId = selectedSupplierInfo?.id || initialData?.supplierId || form.getFieldValue('supplierId');
     const invoiceId = savedInvoiceId ?? initialData?.invoiceId ?? null;
     if (!supplierId) { message.warning('Select a supplier first.'); return; }
 
@@ -2259,11 +2259,15 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   // Open the prepayment modal — load available + applied in parallel
   const openPrepaymentModal = useCallback(async () => {
-    const supplierName   = form.getFieldValue('supplier') || '';
-    const supplierNumber = form.getFieldValue('supplierNumber') || '';
-    const supplierId = form.getFieldValue('supplierId')
-      || suppliers.find(s => supplierNumber && s.supplierNumber === supplierNumber)?.supplierId
-      || suppliers.find(s => supplierName && (s.supplier === supplierName || supplierName.startsWith(s.supplier)))?.supplierId;
+    const supplierId = selectedSupplierInfo?.id
+      || initialData?.supplierId
+      || form.getFieldValue('supplierId')
+      || (() => {
+        const supplierNumber = form.getFieldValue('supplierNumber') || '';
+        const supplierName   = form.getFieldValue('supplier') || '';
+        return suppliers.find(s => supplierNumber && s.supplierNumber === supplierNumber)?.supplierId
+          || suppliers.find(s => supplierName && (s.supplier === supplierName || supplierName.startsWith(s.supplier)))?.supplierId;
+      })();
     const invoiceId = savedInvoiceId || initialData?.invoiceId;
     if (!supplierId) { message.warning('Select a supplier first.'); return; }
     if (!invoiceId) { message.warning('Please save the invoice before applying a prepayment.'); return; }
@@ -2287,7 +2291,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     } finally {
       setPrepaymentLoading(false);
     }
-  }, [form, savedInvoiceId, initialData, fetchAvailablePrepayments, fetchAppliedPrepayments, suppliers, invoiceBalance, loadAppSlaStatuses]);
+  }, [form, savedInvoiceId, initialData, selectedSupplierInfo, fetchAvailablePrepayments, fetchAppliedPrepayments, suppliers, invoiceBalance, loadAppSlaStatuses]);
 
   const filteredSuppliers = useMemo(() => {
     if (!supplierSearchText) return suppliers;
@@ -8707,7 +8711,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                       <div style={{ marginBottom: 8 }}>
                         <Tag color="green" style={{ fontFamily: 'monospace', fontSize: 12 }}>GET</Tag>
                         <Text code style={{ fontSize: 11, wordBreak: 'break-all' }}>
-                          {APEX_DB_CONFIG.baseUrl}/ap/prepayments/available?P_SUPPLIER_ID={form.getFieldValue('supplierId') ?? '<supplier_id>'}
+                          {APEX_DB_CONFIG.baseUrl}/ap/prepayments/available?P_SUPPLIER_ID={selectedSupplierInfo?.id ?? initialData?.supplierId ?? form.getFieldValue('supplierId') ?? '<supplier_id>'}
                         </Text>
                       </div>
                       {/* GET Applied */}
