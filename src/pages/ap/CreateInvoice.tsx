@@ -2642,6 +2642,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // Invoice Actions dropdown menu items
   // For synced invoices: only show View Accounting, Manage Installments, Pay in Full (if unpaid)
   // Create Accounting is NOT available for synced invoices (they are accounted in Oracle Fusion)
+  const isCreditMemoType = headerValues.invoiceType === 'Credit Memo';
   const invoiceActionItems: MenuProps['items'] = isInvoiceSynced
     ? [
         {
@@ -2655,7 +2656,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           icon: <ScheduleOutlined />,
           label: 'Manage Installments',
         },
-        ...(!isPaid ? [
+        ...(!isPaid && !isCreditMemoType ? [
           { type: 'divider' as const },
           {
             key: 'payInFull',
@@ -2677,11 +2678,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           label: 'Calculate Tax',
         },
         { type: 'divider' as const },
-        {
+        ...(!isCreditMemoType ? [{
           key: 'payInFull',
           icon: <CreditCardOutlined />,
           label: 'Pay in Full',
-        },
+        }] : []),
         {
           key: 'applyPrepayment',
           icon: <DollarOutlined />,
@@ -2983,7 +2984,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         message.info('Calculating tax...');
         break;
       case 'payInFull':
-        if (!isEditMode) { message.warning('Save the invoice first before making a payment.'); return; }
+        if (!(savedInvoiceId || initialData?.invoiceId)) { message.warning('Save the invoice first before making a payment.'); return; }
         // Re-fetch balance from API before opening modal
         (async () => {
           const invoiceId = savedInvoiceId || initialData?.invoiceId;
