@@ -107,8 +107,8 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CANCEL_INVOICE_PKG AS
         -- Check 1: not already cancelled
         c_not_cancelled := (v_canceled_flag != 'Y');
 
-        -- Check 2: not paid
-        c_not_paid := v_paid_status NOT IN ('Fully Paid', 'Partial');
+        -- Check 2: not paid (covers 'Paid', 'Fully Paid', 'Partial')
+        c_not_paid := NVL(v_paid_status, 'Unpaid') NOT IN ('Paid', 'Fully Paid', 'Partial');
 
         -- Check 3: no active prepayment applications against this invoice (as target)
         SELECT COUNT(*) INTO v_applied_count

@@ -10063,9 +10063,21 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                       {c.passed
                         ? <CheckCircleOutlined style={{ color: REDWOOD.success, marginTop: 2, flexShrink: 0 }} />
                         : <CloseCircleOutlined style={{ color: REDWOOD.error,   marginTop: 2, flexShrink: 0 }} />}
-                      <div>
-                        <div style={{ fontWeight: 500 }}>{c.check}</div>
-                        {c.detail && <div style={{ color: REDWOOD.neutral600, marginTop: 2 }}>{c.detail}</div>}
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontWeight: 600, fontSize: 12 }}>{c.check}</span>
+                          {!c.passed && <Tag color="error" style={{ fontSize: 10, lineHeight: '16px', margin: 0 }}>Failed</Tag>}
+                        </div>
+                        {c.detail && (
+                          <div style={{
+                            color:      c.passed ? REDWOOD.neutral600 : REDWOOD.error,
+                            fontWeight: c.passed ? 400 : 600,
+                            marginTop:  3,
+                            fontSize:   12,
+                          }}>
+                            {!c.passed && '→ '}{c.detail}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}
