@@ -4791,21 +4791,19 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                             <Option value="Credit Memo">Credit Memo</Option>
                           </Select>
                         </Form.Item>
-                        <Form.Item shouldUpdate={(prev, curr) => prev.invoiceType !== curr.invoiceType} noStyle>
-                          {() => form.getFieldValue('invoiceType') === 'Prepayment' ? (
-                            <Form.Item
-                              label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Apply After Date</Text>}
-                              name="applyAfterDate"
-                              style={{ marginBottom: 4 }}
-                            >
-                              <DatePicker
-                                format="DD-MMM-YYYY"
-                                style={{ width: '100%' }}
-                                disabled={isReadOnly}
-                              />
-                            </Form.Item>
-                          ) : null}
-                        </Form.Item>
+                        {headerValues.invoiceType === 'Prepayment' && (
+                          <Form.Item
+                            label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Apply After Date</Text>}
+                            name="applyAfterDate"
+                            style={{ marginBottom: 4 }}
+                          >
+                            <DatePicker
+                              format="DD-MMM-YYYY"
+                              style={{ width: '100%' }}
+                              disabled={isReadOnly}
+                            />
+                          </Form.Item>
+                        )}
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Payment Currency</Text>}
                           name="paymentCurrency"
