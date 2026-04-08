@@ -835,24 +835,32 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     if (!invoiceId) return;
     setStatusRefreshing(true);
     try {
+      // Use invoice_number filter — same parameter the ManageInvoices search uses
+      const invoiceNumber = form.getFieldValue('invoiceNumber') || initialData?.invoiceNumber || '';
+      const params = new URLSearchParams();
+      if (invoiceNumber) params.set('invoice_number', invoiceNumber);
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice${params.toString() ? '?' + params.toString() : ''}`;
+
       const [statusRes] = await Promise.all([
-        fetch(`${APEX_DB_CONFIG.baseUrl}/ap/createinvoice?invoice_id=${invoiceId}`, { headers: { Accept: 'application/json' } }),
+        fetch(url, { headers: { Accept: 'application/json' } }),
         fetchInvoiceBalance(invoiceId),
         fetchInvoicePayments(invoiceId),
       ]);
       if (statusRes.ok) {
         const data = await statusRes.json();
-        const item = (data.items || data)?.[0];
+        // Match by invoice_id since invoice_number search may return partial matches
+        const items: any[] = data.items || (Array.isArray(data) ? data : []);
+        const item = items.find((i: any) => i.invoice_id === invoiceId) || items[0];
         if (item) {
-          setLiveHoldPaidStatus(item.paid_status   || '');
+          setLiveHoldPaidStatus(item.paid_status        || '');
           setLiveValidationStatus(item.validation_status || '');
-          setLiveApprovalStatus(item.approval_status   || '');
+          setLiveApprovalStatus(item.approval_status    || '');
         }
       }
     } finally {
       setStatusRefreshing(false);
     }
-  }, [savedInvoiceId, initialData, fetchInvoiceBalance, fetchInvoicePayments]);
+  }, [savedInvoiceId, initialData, form, fetchInvoiceBalance, fetchInvoicePayments]);
 
   // Open void modal from invoice edit (Payments tab or Invoice Actions)
   const openInvoiceVoidModal = async (
