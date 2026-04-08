@@ -493,6 +493,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_APPLIED_PREPAYMENTS_PKG AS
                 'LastUpdateDate'          VALUE TO_CHAR(last_update_date, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM')
                 ABSENT ON NULL
             ) ORDER BY application_id
+            RETURNING CLOB
         )
         INTO v_result
         FROM RR_AP_APPLIED_PREPAYMENTS
@@ -531,6 +532,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_APPLIED_PREPAYMENTS_PKG AS
                 'Status'                   VALUE status
                 ABSENT ON NULL
             ) ORDER BY application_id
+            RETURNING CLOB
         )
         INTO v_result
         FROM RR_AP_APPLIED_PREPAYMENTS
@@ -573,6 +575,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_APPLIED_PREPAYMENTS_PKG AS
                 'ValidationStatus'       VALUE inv.validation_status
                 ABSENT ON NULL
             ) ORDER BY inv.invoice_id
+            RETURNING CLOB
         )
         INTO v_result
         FROM RR_AP_INVOICES_ALL inv
@@ -629,8 +632,10 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_APPLIED_PREPAYMENTS_PKG AS
                     'business_unit'           VALUE inv.business_unit
                     ABSENT ON NULL
                 ) ORDER BY inv.invoice_id
+                RETURNING CLOB
             ),
             'count' VALUE COUNT(*)
+            RETURNING CLOB
         )
         INTO v_result
         FROM RR_AP_INVOICES_ALL inv
@@ -688,8 +693,10 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_APPLIED_PREPAYMENTS_PKG AS
                     'status'                      VALUE status
                     ABSENT ON NULL
                 ) ORDER BY application_id
+                RETURNING CLOB
             ),
             'count' VALUE COUNT(*)
+            RETURNING CLOB
         )
         INTO v_result
         FROM RR_AP_APPLIED_PREPAYMENTS
