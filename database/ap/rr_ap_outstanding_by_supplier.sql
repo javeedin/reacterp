@@ -2,6 +2,8 @@
 -- GET /ap/invoices/outstanding-by-supplier
 -- Outstanding balance drilled down by supplier.
 -- Uses actual payment + prepayment application tables (not AMOUNT_PAID).
+-- Excludes Prepayment-type invoices (they reduce other invoices via
+-- RR_AP_APPLIED_PREPAYMENTS and must not appear as outstanding themselves).
 -- Optional: P_BUSINESS_UNIT filter
 -- =====================================================================
 
@@ -27,11 +29,14 @@ BEGIN
         p_pattern     => 'invoices/outstanding-by-supplier',
         p_method      => 'GET',
         p_source_type => 'plsql/block',
-        p_comments    => 'Returns one row per supplier with invoice count, total invoiced, paid, and outstanding',
+        p_comments    => 'Returns one row per supplier: invoice count, total invoiced, total paid, outstanding (AED)',
         p_source      => q'[
 DECLARE
-    l_rows   CLOB := '[';
+    l_rows   CLOB;
     l_first  BOOLEAN := TRUE;
+    l_len    INTEGER;
+    l_offset INTEGER;
+    l_chunk  CONSTANT INTEGER := 32000;
 
     FUNCTION jn(p IN NUMBER) RETURN VARCHAR2 IS
         v VARCHAR2(100);
@@ -50,13 +55,17 @@ DECLARE
     END;
 
 BEGIN
+    DBMS_LOB.CREATETEMPORARY(l_rows, TRUE);
+    DBMS_LOB.APPEND(l_rows, TO_CLOB('['));
+
     FOR rec IN (
         SELECT
             i.SUPPLIER_NUMBER,
             NVL(sm.SUPPLIER, i.SUPPLIER_NUMBER)                                  AS SUPPLIER_NAME,
             COUNT(i.INVOICE_ID)                                                  AS INVOICE_COUNT,
             SUM(NVL(i.INVOICE_AMOUNT, 0))                                        AS TOTAL_INVOICE_AMOUNT,
-            SUM(NVL(pay_sum.total_paid, 0) + NVL(prep_sum.total_applied, 0))     AS TOTAL_PAID,
+            SUM(NVL(pay_sum.total_paid,     0)
+              + NVL(prep_sum.total_applied, 0))                                  AS TOTAL_PAID,
             SUM(GREATEST(0,
                     NVL(i.INVOICE_AMOUNT, 0)
                   - NVL(pay_sum.total_paid,     0)
@@ -82,7 +91,10 @@ BEGIN
             GROUP BY ap.INVOICE_ID
         ) prep_sum ON prep_sum.INVOICE_ID = i.INVOICE_ID
         WHERE NVL(i.CANCELED_FLAG,  'N') != 'Y'
-        AND   NVL(i.PAID_STATUS, 'Unpaid') NOT IN ('Paid', 'Cancelled')
+        -- exclude prepayment-type invoices: they are advances already paid to supplier
+        -- and their balance is tracked separately via RR_AP_APPLIED_PREPAYMENTS
+        AND   NVL(i.INVOICE_TYPE, 'Standard') != 'Prepayment'
+        AND   NVL(i.PAID_STATUS,  'Unpaid')   NOT IN ('Paid', 'Cancelled')
         AND   (:P_BUSINESS_UNIT IS NULL OR i.BUSINESS_UNIT = :P_BUSINESS_UNIT)
         GROUP BY i.SUPPLIER_NUMBER,
                  NVL(sm.SUPPLIER, i.SUPPLIER_NUMBER)
@@ -98,21 +110,28 @@ BEGIN
         l_first := FALSE;
 
         DBMS_LOB.APPEND(l_rows, TO_CLOB(
-            '{"supplier_number":'        || js(rec.SUPPLIER_NUMBER)                           || ',' ||
-            '"supplier_name":'           || js(rec.SUPPLIER_NAME)                             || ',' ||
-            '"invoice_count":'           || rec.INVOICE_COUNT                                 || ',' ||
-            '"total_invoice_amount":'    || jn(rec.TOTAL_INVOICE_AMOUNT)                      || ',' ||
-            '"total_paid":'              || jn(rec.TOTAL_PAID)                                || ',' ||
-            '"outstanding_amount":'      || jn(rec.OUTSTANDING_AMOUNT)                        ||
+            '{"supplier_number":'     || js(rec.SUPPLIER_NUMBER)     || ',' ||
+            '"supplier_name":'        || js(rec.SUPPLIER_NAME)        || ',' ||
+            '"invoice_count":'        || rec.INVOICE_COUNT            || ',' ||
+            '"total_invoice_amount":' || jn(rec.TOTAL_INVOICE_AMOUNT) || ',' ||
+            '"total_paid":'           || jn(rec.TOTAL_PAID)           || ',' ||
+            '"outstanding_amount":'   || jn(rec.OUTSTANDING_AMOUNT)   ||
             '}'
         ));
     END LOOP;
 
     DBMS_LOB.APPEND(l_rows, TO_CLOB(']'));
 
+    -- Output in 32 KB chunks — HTP.PRN accepts VARCHAR2 only (max 32767)
+    -- a direct HTP.PRN(CLOB) silently truncates / raises ORA-06502 for large results
     OWA_UTIL.MIME_HEADER('application/json', TRUE);
     HTP.PRN('{"items":');
-    HTP.PRN(l_rows);
+    l_len    := NVL(DBMS_LOB.GETLENGTH(l_rows), 0);
+    l_offset := 1;
+    WHILE l_offset <= l_len LOOP
+        HTP.prn(DBMS_LOB.SUBSTR(l_rows, l_chunk, l_offset));
+        l_offset := l_offset + l_chunk;
+    END LOOP;
     HTP.PRN('}');
 
 EXCEPTION WHEN OTHERS THEN

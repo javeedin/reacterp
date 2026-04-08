@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Layout, Typography, Card, Breadcrumb, Space, Tooltip, Row, Col, Statistic, Input, Select, Button, Form, DatePicker, Spin, Tag, Modal, Table } from 'antd';
+import { Layout, Typography, Card, Breadcrumb, Space, Tooltip, Row, Col, Statistic, Input, Select, Button, Form, DatePicker, Spin, Tag, Modal, Table, message } from 'antd';
 import {
   HomeOutlined,
   FileTextOutlined,
@@ -196,9 +196,13 @@ const APModule: React.FC = () => {
       const params = new URLSearchParams();
       if (selectedBU) params.set('P_BUSINESS_UNIT', selectedBU);
       const qs = params.toString();
+      // URL matches ORDS module 'ap' with pattern 'invoices/outstanding-by-supplier'
       const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/outstanding-by-supplier${qs ? '?' + qs : ''}`;
       const res = await fetch(url);
-      const data = await res.json();
+      const text = await res.text();
+      if (!text.trim()) throw new Error('Empty response from server');
+      const data = JSON.parse(text);
+      if (data.error) throw new Error(data.error);
       const items: any[] = Array.isArray(data.items) ? data.items : (Array.isArray(data) ? data : []);
       setDrillRows(items.map((r: any) => ({
         supplierNumber:     r.supplier_number     || '',
@@ -209,7 +213,10 @@ const APModule: React.FC = () => {
         outstandingAmount:  Number(r.outstanding_amount   ?? 0),
       })));
     } catch (err) {
-      console.error('Failed to load drill-down', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      // Import message from antd is already in scope
+      message.error(`Failed to load outstanding: ${msg}`);
+      console.error('Drill-down error:', msg);
     } finally {
       setDrillLoading(false);
     }
