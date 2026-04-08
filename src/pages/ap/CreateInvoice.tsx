@@ -660,7 +660,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [liveValidationStatus, setLiveValidationStatus] = useState(initialData?.validationStatus || '');
   const [liveApprovalStatus,   setLiveApprovalStatus]   = useState(initialData?.approvalStatus   || '');
   const [statusRefreshing,     setStatusRefreshing]     = useState(false);
-  const [refreshApiLog,        setRefreshApiLog]        = useState<{ url: string; status: number; response: string } | null>(null);
+  const [refreshApiLog,        setRefreshApiLog]        = useState<{ label: string; url: string; status: number; response: string }[]>([]);
   const [refreshApiLogVisible, setRefreshApiLogVisible] = useState(false);
 
   const openPrepaymentAPIDrawer = useCallback(async () => {
@@ -831,40 +831,142 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     }
   }, []);
 
-  // Refresh invoice status (holdPaidStatus, validationStatus) + balance + payments without reopening
+  // Refresh — runs every webservice that fires when an invoice is opened for editing
   const handleRefreshStatus = useCallback(async () => {
     const invoiceId = savedInvoiceId || initialData?.invoiceId;
     if (!invoiceId) return;
     setStatusRefreshing(true);
-    try {
-      // Use invoice_number filter — same parameter the ManageInvoices search uses
-      const invoiceNumber = form.getFieldValue('invoiceNumber') || initialData?.invoiceNumber || '';
-      const params = new URLSearchParams();
-      if (invoiceNumber) params.set('invoice_number', invoiceNumber);
-      const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice${params.toString() ? '?' + params.toString() : ''}`;
 
-      const [statusRes] = await Promise.all([
-        fetch(url, { headers: { Accept: 'application/json' } }),
-        fetchInvoiceBalance(invoiceId),
-        fetchInvoicePayments(invoiceId),
-      ]);
-      const rawText = await statusRes.text();
-      setRefreshApiLog({ url, status: statusRes.status, response: rawText });
-      if (statusRes.ok) {
-        const data = JSON.parse(rawText);
-        // Match by invoice_id since invoice_number search may return partial matches
-        const items: any[] = data.items || (Array.isArray(data) ? data : []);
-        const item = items.find((i: any) => i.invoice_id === invoiceId) || items[0];
-        if (item) {
-          setLiveHoldPaidStatus(item.paid_status        || '');
-          setLiveValidationStatus(item.validation_status || '');
-          setLiveApprovalStatus(item.approval_status    || '');
-        }
+    const logs: { label: string; url: string; status: number; response: string }[] = [];
+    const hit = async (label: string, url: string) => {
+      try {
+        const res = await fetch(url, { headers: { Accept: 'application/json' } });
+        const text = await res.text();
+        logs.push({ label, url, status: res.status, response: text });
+        return { ok: res.ok, text };
+      } catch (err: any) {
+        logs.push({ label, url, status: 0, response: String(err) });
+        return { ok: false, text: '' };
       }
+    };
+
+    try {
+      // 1. Invoice header — paid_status, validation_status, approval_status
+      const invoiceNumber = form.getFieldValue('invoiceNumber') || initialData?.invoiceNumber || '';
+      const statusUrl = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice${invoiceNumber ? `?invoice_number=${encodeURIComponent(invoiceNumber)}` : ''}`;
+      const { ok: statusOk, text: statusText } = await hit('Invoice Header (status)', statusUrl);
+      if (statusOk) {
+        try {
+          const data = JSON.parse(statusText);
+          const items: any[] = data.items || (Array.isArray(data) ? data : []);
+          const item = items.find((i: any) => i.invoice_id === invoiceId) || items[0];
+          if (item) {
+            setLiveHoldPaidStatus(item.paid_status        || '');
+            setLiveValidationStatus(item.validation_status || '');
+            setLiveApprovalStatus(item.approval_status    || '');
+          }
+        } catch { /* parse error logged */ }
+      }
+
+      // 2–9. Run the same calls as the edit-mode useEffect — all in parallel
+      const invoiceType = form.getFieldValue('invoiceType') || initialData?.invoiceType || '';
+      const isPrepayment = invoiceType.toLowerCase() === 'prepayment';
+
+      await Promise.all([
+        // Balance
+        (async () => {
+          const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/${invoiceId}/net-balance`;
+          const { ok, text } = await hit('Net Balance', url);
+          if (ok) { try { const d = JSON.parse(text); setInvoiceBalance(d.netBalance ?? d.balance ?? null); } catch {} }
+        })(),
+        // Payments
+        (async () => {
+          const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/payments?P_INVOICE_ID=${invoiceId}`;
+          const { ok, text } = await hit('Payments', url);
+          if (ok) { try {
+            const items = JSON.parse(text).items || [];
+            setInvoicePayments(items.map((item: any, idx: number) => ({
+              key: (item.id ?? idx).toString(), checkId: Number(item.id ?? item.check_id ?? 0),
+              number: (item.paper_document_number ?? item.id ?? '').toString(),
+              paymentDocument: item.invoice_number ?? '', status: item.payment_status ?? '',
+              reconciled: item.reconciled_flag === 'Y' ? 'Yes' : item.reconciled_flag === 'N' ? 'No' : (item.reconciled_flag ?? ''),
+              currentPayeeName: item.invoice_business_unit ?? '',
+              paymentDate: formatDateStr(item.creation_date ?? ''),
+              paidAmount: Number(item.amount_paid_payment_currency ?? 0),
+              currency: item.invoice_currency ?? '', address: '', remitToAccount: '',
+            })));
+          } catch {} }
+        })(),
+        // Installments
+        (async () => {
+          const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments?P_INVOICE_ID=${invoiceId}`;
+          const { ok, text } = await hit('Installments', url);
+          if (ok) { try {
+            const items = JSON.parse(text).items || JSON.parse(text).installments || JSON.parse(text) || [];
+            setInvoiceInstallments(items.map((item: any, idx: number) => ({
+              key: item.installment_id?.toString() || idx.toString(),
+              installmentNumber: item.installment_number || idx + 1,
+              dueDate: formatDateStr(item.due_date), grossAmount: item.gross_amount || 0,
+              unpaidAmount: item.amount_remaining || item.unpaid_amount || 0,
+              paymentPriority: item.payment_priority || 0,
+              paymentMethod: item.payment_method || '', bankAccount: item.bank_account || item.bank_account_name || '',
+            })));
+          } catch {} }
+        })(),
+        // Holds
+        (async () => {
+          const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoice-holds?invoice_id=${invoiceId}`;
+          const { ok, text } = await hit('Invoice Holds', url);
+          if (ok) { try {
+            const items = JSON.parse(text).items || JSON.parse(text) || [];
+            setInvoiceHolds(items.map((item: any, idx: number) => ({
+              key: item.hold_id?.toString() || idx.toString(),
+              holdName: item.hold_lookup_code || item.hold_name || '',
+              holdReason: item.hold_reason || item.description || '',
+              holdDate: formatDateStr(item.hold_date || item.creation_date),
+              heldBy: item.held_by || item.created_by || '',
+              releaseDate: formatDateStr(item.release_date), releasedBy: item.released_by || '',
+            })));
+          } catch {} }
+        })(),
+        // Applied prepayments
+        (async () => {
+          const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/appliedprepayments?P_INVOICE_ID=${invoiceId}`;
+          const { ok, text } = await hit('Applied Prepayments', url);
+          if (ok) { try {
+            const list = JSON.parse(text).items || JSON.parse(text) || [];
+            setAppliedPrepaymentsList(list);
+            loadAppSlaStatuses(list);
+          } catch {} }
+        })(),
+        // SLA / accounting header
+        (async () => {
+          const url = `${APEX_DB_CONFIG.baseUrl}/sla/accounting/exists?sourceTable=AP_INVOICES&sourceId=${invoiceId}`;
+          await hit('SLA Accounting Status', url);
+          // Let fetchSlaHeader handle the full state update
+          fetchSlaHeader(invoiceId);
+        })(),
+        // Prepayment-specific calls
+        ...(isPrepayment ? [
+          (async () => {
+            const url = `${APEX_DB_CONFIG.baseUrl}/ap/applied-prepayments/balances?prepayment_invoice_id=${invoiceId}`;
+            await hit('Prepayment Balance', url);
+            fetchPrepaymentBalance(invoiceId);
+          })(),
+          (async () => {
+            const url = `${APEX_DB_CONFIG.baseUrl}/ap/applied-prepayments/by-prepayment/${invoiceId}`;
+            await hit('Applied Invoices', url);
+            fetchAppliedInvoices(invoiceId);
+          })(),
+        ] : []),
+      ]);
     } finally {
+      setRefreshApiLog(logs);
       setStatusRefreshing(false);
     }
-  }, [savedInvoiceId, initialData, form, fetchInvoiceBalance, fetchInvoicePayments]);
+  }, [savedInvoiceId, initialData, form, fetchInvoiceBalance, fetchInvoicePayments,
+      fetchInvoiceHolds, fetchInvoiceInstallments, fetchSlaHeader,
+      fetchAppliedPrepayments, fetchPrepaymentBalance, fetchAppliedInvoices, loadAppSlaStatuses]);
 
   // Open void modal from invoice edit (Payments tab or Invoice Actions)
   const openInvoiceVoidModal = async (
@@ -4146,11 +4248,19 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   style={{ fontSize: 12 }}
                 />
               </Tooltip>
-              <Tooltip title={refreshApiLog ? `Last call: ${refreshApiLog.status}` : 'No refresh called yet'}>
+              <Tooltip title={refreshApiLog.length > 0 ? `${refreshApiLog.length} calls — click to view` : 'No refresh called yet'}>
                 <Button
                   icon={<ApiOutlined />}
                   size="small"
-                  style={{ fontSize: 12, color: refreshApiLog ? (refreshApiLog.status === 200 ? REDWOOD.success : REDWOOD.error) : '#aaa', borderColor: refreshApiLog ? (refreshApiLog.status === 200 ? REDWOOD.success : REDWOOD.error) : '#d9d9d9' }}
+                  style={{
+                    fontSize: 12,
+                    color: refreshApiLog.length > 0
+                      ? (refreshApiLog.every(r => r.status >= 200 && r.status < 300) ? REDWOOD.success : REDWOOD.error)
+                      : '#aaa',
+                    borderColor: refreshApiLog.length > 0
+                      ? (refreshApiLog.every(r => r.status >= 200 && r.status < 300) ? REDWOOD.success : REDWOOD.error)
+                      : '#d9d9d9',
+                  }}
                   onClick={() => setRefreshApiLogVisible(true)}
                 />
               </Tooltip>
@@ -6677,11 +6787,15 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       <Modal
         title={
           <Space>
-            <ApiOutlined style={{ color: refreshApiLog?.status === 200 ? REDWOOD.success : REDWOOD.error }} />
-            <span>Refresh Status — API Call</span>
-            {refreshApiLog && (
-              <Tag color={refreshApiLog.status === 200 ? 'success' : 'error'}>
-                HTTP {refreshApiLog.status}
+            <ApiOutlined style={{
+              color: refreshApiLog.length > 0
+                ? (refreshApiLog.every(r => r.status >= 200 && r.status < 300) ? REDWOOD.success : REDWOOD.error)
+                : '#aaa',
+            }} />
+            <span>Refresh Status — API Calls</span>
+            {refreshApiLog.length > 0 && (
+              <Tag color={refreshApiLog.every(r => r.status >= 200 && r.status < 300) ? 'success' : 'error'}>
+                {refreshApiLog.length} calls
               </Tag>
             )}
           </Space>
@@ -6689,35 +6803,56 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         open={refreshApiLogVisible}
         onCancel={() => setRefreshApiLogVisible(false)}
         footer={<Button onClick={() => setRefreshApiLogVisible(false)}>Close</Button>}
-        width={760}
-        styles={{ body: { padding: '16px 24px' } }}
+        width={820}
+        styles={{ body: { padding: '12px 20px', maxHeight: '72vh', overflowY: 'auto' } }}
       >
-        {refreshApiLog ? (
-          <>
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 4 }}>GET URL</div>
-              <div style={{
-                background: '#f5f5f5', borderRadius: 6, padding: '8px 12px',
-                fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all',
-                border: '1px solid #e8e8e8',
-              }}>
-                <span style={{ color: '#1677ff', fontWeight: 700, marginRight: 8 }}>GET</span>
-                {refreshApiLog.url}
-              </div>
-            </div>
-            <div>
-              <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 4 }}>
-                Response (HTTP {refreshApiLog.status})
-              </div>
-              <pre style={{
-                background: '#1a1a2e', color: '#e2e8f0', borderRadius: 6,
-                padding: '12px', fontSize: 11, maxHeight: 420,
-                overflowY: 'auto', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-              }}>
-                {(() => { try { return JSON.stringify(JSON.parse(refreshApiLog.response), null, 2); } catch { return refreshApiLog.response; } })()}
-              </pre>
-            </div>
-          </>
+        {refreshApiLog.length > 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {refreshApiLog.map((entry, idx) => {
+              const httpOk = entry.status >= 200 && entry.status < 300;
+              const prettyJson = (() => {
+                try { return JSON.stringify(JSON.parse(entry.response), null, 2); }
+                catch { return entry.response; }
+              })();
+              return (
+                <div key={idx} style={{
+                  border: `1px solid ${httpOk ? '#b7eb8f' : '#ffccc7'}`,
+                  borderRadius: 8, overflow: 'hidden',
+                }}>
+                  {/* Header row */}
+                  <div style={{
+                    background: httpOk ? '#f6ffed' : '#fff2f0',
+                    padding: '6px 12px',
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    borderBottom: `1px solid ${httpOk ? '#b7eb8f' : '#ffccc7'}`,
+                  }}>
+                    <Tag color={httpOk ? 'success' : 'error'} style={{ margin: 0, fontWeight: 700, fontSize: 11 }}>
+                      {entry.status || 'ERR'}
+                    </Tag>
+                    <span style={{ fontWeight: 600, fontSize: 12 }}>{entry.label}</span>
+                  </div>
+                  {/* URL row */}
+                  <div style={{
+                    background: '#f5f5f5', padding: '6px 12px',
+                    fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all',
+                    borderBottom: '1px solid #e8e8e8',
+                    display: 'flex', gap: 6, alignItems: 'flex-start',
+                  }}>
+                    <span style={{ color: '#1677ff', fontWeight: 700, flexShrink: 0 }}>GET</span>
+                    <span style={{ color: '#444' }}>{entry.url}</span>
+                  </div>
+                  {/* Response body */}
+                  <pre style={{
+                    background: '#1a1a2e', color: '#e2e8f0',
+                    padding: '8px 12px', fontSize: 10, maxHeight: 200,
+                    overflowY: 'auto', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                  }}>
+                    {prettyJson}
+                  </pre>
+                </div>
+              );
+            })}
+          </div>
         ) : (
           <div style={{ color: REDWOOD.neutral500, textAlign: 'center', padding: 32 }}>
             Click the refresh button (⟳) first to see the API call details.
