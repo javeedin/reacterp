@@ -240,7 +240,9 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
                    SUM(ri.AMOUNT_PAID_INVOICE_CURRENCY) AS total_paid
             FROM   RR_AP_PAYMENTS_RELATED_INVOICES ri
             JOIN   RR_AP_PAYMENTS_ALL              p ON p.CHECK_ID = ri.CHECK_ID
-            WHERE  NVL(p.PAYMENT_STATUS, 'Active') != 'Voided'
+            WHERE  NVL(p.PAYMENT_STATUS,           'Active') != 'Voided'
+            AND    NVL(ri.INVOICE_PAYMENT_STATUS,  'Active') != 'Voided'
+            AND    ri.AMOUNT_PAID_INVOICE_CURRENCY > 0
             GROUP BY ri.INVOICE_ID
         ) pay_sum  ON pay_sum.INVOICE_ID  = i.INVOICE_ID
         LEFT JOIN (
@@ -896,7 +898,9 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
                    SUM(ri.AMOUNT_PAID_INVOICE_CURRENCY) AS total_paid
             FROM   RR_AP_PAYMENTS_RELATED_INVOICES ri
             JOIN   RR_AP_PAYMENTS_ALL              p ON p.CHECK_ID = ri.CHECK_ID
-            WHERE  NVL(p.PAYMENT_STATUS, 'Active') != 'Voided'
+            WHERE  NVL(p.PAYMENT_STATUS,           'Active') != 'Voided'
+            AND    NVL(ri.INVOICE_PAYMENT_STATUS,  'Active') != 'Voided'
+            AND    ri.AMOUNT_PAID_INVOICE_CURRENCY > 0
             GROUP BY ri.INVOICE_ID
         ) pay_sum  ON pay_sum.INVOICE_ID  = i.INVOICE_ID
         LEFT JOIN (
