@@ -1209,8 +1209,8 @@ const SyncData: React.FC = () => {
           (p) => {
             if (p.status === 'fetching') {
               updateRow({ currentStep: 'inv-fetch', invTotal: p.totalInvoices, invProcessed: p.processedInvoices });
-            } else if (p.status === 'inserting' || p.insertedInvoices > 0) {
-              updateRow({ currentStep: 'inv-insert', invTotal: p.totalInvoices, invProcessed: p.insertedInvoices });
+            } else if (p.status === 'inserting' || (p.insertedInvoices ?? 0) > 0) {
+              updateRow({ currentStep: 'inv-insert', invTotal: p.totalInvoices, invProcessed: p.insertedInvoices ?? 0 });
             }
           },
           signal,
@@ -1229,8 +1229,8 @@ const SyncData: React.FC = () => {
             (p) => {
               if (p.status === 'fetching') {
                 updateRow({ currentStep: 'pay-fetch', payTotal: p.totalPayments, payProcessed: p.processedPayments });
-              } else if (p.status === 'inserting' || p.insertedPayments > 0) {
-                updateRow({ currentStep: 'pay-insert', payTotal: p.totalPayments, payProcessed: p.insertedPayments });
+              } else if (p.status === 'inserting' || (p.insertedPayments ?? 0) > 0) {
+                updateRow({ currentStep: 'pay-insert', payTotal: p.totalPayments, payProcessed: p.insertedPayments ?? 0 });
               }
             },
             signal,
@@ -1240,7 +1240,7 @@ const SyncData: React.FC = () => {
         }
 
         updateRow({
-          status: (invResult.errors > 0 ? 'error' : 'done') as const,
+          status: invResult.errors > 0 ? 'error' as const : 'done' as const,
           invoicesInserted: invResult.insertedInvoices || 0,
           paymentsInserted,
           errors: invResult.errors,

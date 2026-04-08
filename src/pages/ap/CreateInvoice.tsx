@@ -4632,7 +4632,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                         >
                           <Select placeholder="Select entity" allowClear showSearch>
                             {businessUnits.map(bu => (
-                              <Option key={bu} value={bu}>{bu}</Option>
+                              <Option key={bu.name} value={bu.name}>{bu.name}</Option>
                             ))}
                           </Select>
                         </Form.Item>
