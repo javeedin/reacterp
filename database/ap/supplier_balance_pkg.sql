@@ -227,16 +227,31 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
         l_unpaid_count      NUMBER := 0;
         l_balance           NUMBER := 0;
     BEGIN
-        -- Get invoice totals
+        -- Get invoice totals — actual amounts from payment and prepayment tables
         SELECT
-            NVL(SUM(INVOICE_AMOUNT), 0),
+            NVL(SUM(i.INVOICE_AMOUNT), 0),
             COUNT(*),
-            NVL(SUM(AMOUNT_PAID), 0),
-            COUNT(CASE WHEN NVL(PAID_STATUS, 'Unpaid') != 'Paid' THEN 1 END)
+            NVL(SUM(NVL(pay_sum.total_paid, 0) + NVL(prep_sum.total_applied, 0)), 0),
+            COUNT(CASE WHEN NVL(i.PAID_STATUS, 'Unpaid') NOT IN ('Paid', 'Cancelled') THEN 1 END)
         INTO l_total_invoices, l_invoice_count, l_total_paid, l_unpaid_count
-        FROM RR_AP_INVOICES_ALL
-        WHERE SUPPLIER_NUMBER = p_supplier_number
-        AND NVL(CANCELED_FLAG, 'N') != 'Y';
+        FROM RR_AP_INVOICES_ALL i
+        LEFT JOIN (
+            SELECT ri.INVOICE_ID,
+                   SUM(ri.AMOUNT_PAID_INVOICE_CURRENCY) AS total_paid
+            FROM   RR_AP_PAYMENTS_RELATED_INVOICES ri
+            JOIN   RR_AP_PAYMENTS_ALL              p ON p.CHECK_ID = ri.CHECK_ID
+            WHERE  NVL(p.PAYMENT_STATUS, 'Active') != 'Voided'
+            GROUP BY ri.INVOICE_ID
+        ) pay_sum  ON pay_sum.INVOICE_ID  = i.INVOICE_ID
+        LEFT JOIN (
+            SELECT ap.INVOICE_ID,
+                   SUM(ap.APPLIED_AMOUNT) AS total_applied
+            FROM   RR_AP_APPLIED_PREPAYMENTS ap
+            WHERE  NVL(ap.STATUS, 'Applied') != 'Cancelled'
+            GROUP BY ap.INVOICE_ID
+        ) prep_sum ON prep_sum.INVOICE_ID = i.INVOICE_ID
+        WHERE i.SUPPLIER_NUMBER = p_supplier_number
+        AND NVL(i.CANCELED_FLAG, 'N') != 'Y';
 
         -- Get payment count
         SELECT COUNT(DISTINCT CHECK_ID)
@@ -327,16 +342,31 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
         l_pct_91_120        NUMBER := 0;
         l_pct_over_120      NUMBER := 0;
     BEGIN
-        -- Calculate aging based on invoice date and unpaid amount
+        -- Calculate aging based on invoice date and actual unpaid amount
         FOR rec IN (
             SELECT
-                INVOICE_AMOUNT,
-                NVL(AMOUNT_PAID, 0) AS AMOUNT_PAID,
-                INVOICE_DATE
-            FROM RR_AP_INVOICES_ALL
-            WHERE SUPPLIER_NUMBER = p_supplier_number
-            AND NVL(CANCELED_FLAG, 'N') != 'Y'
-            AND NVL(PAID_STATUS, 'Unpaid') != 'Paid'
+                i.INVOICE_AMOUNT,
+                NVL(pay_sum.total_paid, 0) + NVL(prep_sum.total_applied, 0) AS AMOUNT_PAID,
+                i.INVOICE_DATE
+            FROM RR_AP_INVOICES_ALL i
+            LEFT JOIN (
+                SELECT ri.INVOICE_ID,
+                       SUM(ri.AMOUNT_PAID_INVOICE_CURRENCY) AS total_paid
+                FROM   RR_AP_PAYMENTS_RELATED_INVOICES ri
+                JOIN   RR_AP_PAYMENTS_ALL              p ON p.CHECK_ID = ri.CHECK_ID
+                WHERE  NVL(p.PAYMENT_STATUS, 'Active') != 'Voided'
+                GROUP BY ri.INVOICE_ID
+            ) pay_sum  ON pay_sum.INVOICE_ID  = i.INVOICE_ID
+            LEFT JOIN (
+                SELECT ap.INVOICE_ID,
+                       SUM(ap.APPLIED_AMOUNT) AS total_applied
+                FROM   RR_AP_APPLIED_PREPAYMENTS ap
+                WHERE  NVL(ap.STATUS, 'Applied') != 'Cancelled'
+                GROUP BY ap.INVOICE_ID
+            ) prep_sum ON prep_sum.INVOICE_ID = i.INVOICE_ID
+            WHERE i.SUPPLIER_NUMBER = p_supplier_number
+            AND NVL(i.CANCELED_FLAG, 'N') != 'Y'
+            AND NVL(i.PAID_STATUS, 'Unpaid') NOT IN ('Paid', 'Cancelled')
         ) LOOP
             DECLARE
                 l_invoice_date DATE;
@@ -441,12 +471,14 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
                     i.INVOICE_ID,
                     i.INVOICE_NUMBER,
                     i.INVOICE_DATE,
-                    NVL(i.INVOICE_AMOUNT, 0)                             AS INVOICE_AMOUNT,
-                    NVL(i.AMOUNT_PAID, 0)                                AS AMOUNT_PAID,
-                    NVL(i.INVOICE_AMOUNT, 0) - NVL(i.AMOUNT_PAID, 0)    AS BALANCE_DUE,
+                    NVL(i.INVOICE_AMOUNT, 0)                                              AS INVOICE_AMOUNT,
+                    NVL(pay_sum.total_paid, 0) + NVL(prep_sum.total_applied, 0)           AS AMOUNT_PAID,
+                    GREATEST(0, NVL(i.INVOICE_AMOUNT, 0)
+                                - NVL(pay_sum.total_paid,    0)
+                                - NVL(prep_sum.total_applied, 0))                         AS BALANCE_DUE,
                     i.INVOICE_CURRENCY,
                     i.INVOICE_TYPE,
-                    SUBSTR(i.DESCRIPTION, 1, 4000)                       AS DESCRIPTION,
+                    SUBSTR(i.DESCRIPTION, 1, 4000)                                        AS DESCRIPTION,
                     i.VALIDATION_STATUS,
                     i.APPROVAL_STATUS,
                     i.PAID_STATUS,
@@ -454,13 +486,28 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
                     i.PAYMENT_TERMS,
                     i.ACCOUNTING_DATE,
                     i.BUSINESS_UNIT,
-                    ROW_NUMBER() OVER (ORDER BY i.INVOICE_ID DESC)       AS RN
+                    ROW_NUMBER() OVER (ORDER BY i.INVOICE_ID DESC)                        AS RN
                 FROM RR_AP_INVOICES_ALL i
+                LEFT JOIN (
+                    SELECT ri.INVOICE_ID,
+                           SUM(ri.AMOUNT_PAID_INVOICE_CURRENCY) AS total_paid
+                    FROM   RR_AP_PAYMENTS_RELATED_INVOICES ri
+                    JOIN   RR_AP_PAYMENTS_ALL              p ON p.CHECK_ID = ri.CHECK_ID
+                    WHERE  NVL(p.PAYMENT_STATUS, 'Active') != 'Voided'
+                    GROUP BY ri.INVOICE_ID
+                ) pay_sum  ON pay_sum.INVOICE_ID  = i.INVOICE_ID
+                LEFT JOIN (
+                    SELECT ap.INVOICE_ID,
+                           SUM(ap.APPLIED_AMOUNT) AS total_applied
+                    FROM   RR_AP_APPLIED_PREPAYMENTS ap
+                    WHERE  NVL(ap.STATUS, 'Applied') != 'Cancelled'
+                    GROUP BY ap.INVOICE_ID
+                ) prep_sum ON prep_sum.INVOICE_ID = i.INVOICE_ID
                 WHERE i.SUPPLIER_NUMBER = p_supplier_number
                 AND NVL(i.CANCELED_FLAG, 'N') != 'Y'
                 AND (p_status = 'All'
-                     OR (p_status = 'Paid' AND i.PAID_STATUS = 'Paid')
-                     OR (p_status = 'Unpaid' AND NVL(i.PAID_STATUS, 'Unpaid') != 'Paid'))
+                     OR (p_status = 'Paid'   AND i.PAID_STATUS = 'Paid')
+                     OR (p_status = 'Unpaid' AND NVL(i.PAID_STATUS, 'Unpaid') NOT IN ('Paid', 'Cancelled')))
             )
             WHERE RN > p_offset AND RN <= (p_offset + p_limit);
     BEGIN
@@ -472,8 +519,8 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
             WHERE SUPPLIER_NUMBER = p_supplier_number
             AND NVL(CANCELED_FLAG, 'N') != 'Y'
             AND (p_status = 'All'
-                 OR (p_status = 'Paid' AND PAID_STATUS = 'Paid')
-                 OR (p_status = 'Unpaid' AND NVL(PAID_STATUS, 'Unpaid') != 'Paid'));
+                 OR (p_status = 'Paid'   AND PAID_STATUS = 'Paid')
+                 OR (p_status = 'Unpaid' AND NVL(PAID_STATUS, 'Unpaid') NOT IN ('Paid', 'Cancelled')));
         EXCEPTION
             WHEN OTHERS THEN l_total_count := 0;
         END;
@@ -832,16 +879,31 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
         -- Get address
         l_address := get_address_json(l_supplier_id);
 
-        -- Get invoice summary
+        -- Get invoice summary — actual amounts from payment and prepayment tables
         SELECT
-            NVL(SUM(INVOICE_AMOUNT), 0),
+            NVL(SUM(i.INVOICE_AMOUNT), 0),
             COUNT(*),
-            NVL(SUM(AMOUNT_PAID), 0),
-            COUNT(CASE WHEN NVL(PAID_STATUS, 'Unpaid') != 'Paid' THEN 1 END)
+            NVL(SUM(NVL(pay_sum.total_paid, 0) + NVL(prep_sum.total_applied, 0)), 0),
+            COUNT(CASE WHEN NVL(i.PAID_STATUS, 'Unpaid') NOT IN ('Paid', 'Cancelled') THEN 1 END)
         INTO l_total_invoices, l_invoice_count, l_total_paid, l_unpaid_count
-        FROM RR_AP_INVOICES_ALL
-        WHERE SUPPLIER_NUMBER = p_supplier_number
-        AND NVL(CANCELED_FLAG, 'N') != 'Y';
+        FROM RR_AP_INVOICES_ALL i
+        LEFT JOIN (
+            SELECT ri.INVOICE_ID,
+                   SUM(ri.AMOUNT_PAID_INVOICE_CURRENCY) AS total_paid
+            FROM   RR_AP_PAYMENTS_RELATED_INVOICES ri
+            JOIN   RR_AP_PAYMENTS_ALL              p ON p.CHECK_ID = ri.CHECK_ID
+            WHERE  NVL(p.PAYMENT_STATUS, 'Active') != 'Voided'
+            GROUP BY ri.INVOICE_ID
+        ) pay_sum  ON pay_sum.INVOICE_ID  = i.INVOICE_ID
+        LEFT JOIN (
+            SELECT ap.INVOICE_ID,
+                   SUM(ap.APPLIED_AMOUNT) AS total_applied
+            FROM   RR_AP_APPLIED_PREPAYMENTS ap
+            WHERE  NVL(ap.STATUS, 'Applied') != 'Cancelled'
+            GROUP BY ap.INVOICE_ID
+        ) prep_sum ON prep_sum.INVOICE_ID = i.INVOICE_ID
+        WHERE i.SUPPLIER_NUMBER = p_supplier_number
+        AND NVL(i.CANCELED_FLAG, 'N') != 'Y';
 
         l_balance := l_total_invoices - l_total_paid;
 
@@ -851,13 +913,31 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
         FROM RR_AP_PAYMENTS_ALL
         WHERE SUPPLIER_NUMBER = p_supplier_number;
 
-        -- Calculate aging
+        -- Calculate aging with actual payment amounts
         FOR rec IN (
-            SELECT INVOICE_AMOUNT, NVL(AMOUNT_PAID, 0) AS AMOUNT_PAID, INVOICE_DATE
-            FROM RR_AP_INVOICES_ALL
-            WHERE SUPPLIER_NUMBER = p_supplier_number
-            AND NVL(CANCELED_FLAG, 'N') != 'Y'
-            AND NVL(PAID_STATUS, 'Unpaid') != 'Paid'
+            SELECT
+                i.INVOICE_AMOUNT,
+                NVL(pay_sum.total_paid, 0) + NVL(prep_sum.total_applied, 0) AS AMOUNT_PAID,
+                i.INVOICE_DATE
+            FROM RR_AP_INVOICES_ALL i
+            LEFT JOIN (
+                SELECT ri.INVOICE_ID,
+                       SUM(ri.AMOUNT_PAID_INVOICE_CURRENCY) AS total_paid
+                FROM   RR_AP_PAYMENTS_RELATED_INVOICES ri
+                JOIN   RR_AP_PAYMENTS_ALL              p ON p.CHECK_ID = ri.CHECK_ID
+                WHERE  NVL(p.PAYMENT_STATUS, 'Active') != 'Voided'
+                GROUP BY ri.INVOICE_ID
+            ) pay_sum  ON pay_sum.INVOICE_ID  = i.INVOICE_ID
+            LEFT JOIN (
+                SELECT ap.INVOICE_ID,
+                       SUM(ap.APPLIED_AMOUNT) AS total_applied
+                FROM   RR_AP_APPLIED_PREPAYMENTS ap
+                WHERE  NVL(ap.STATUS, 'Applied') != 'Cancelled'
+                GROUP BY ap.INVOICE_ID
+            ) prep_sum ON prep_sum.INVOICE_ID = i.INVOICE_ID
+            WHERE i.SUPPLIER_NUMBER = p_supplier_number
+            AND NVL(i.CANCELED_FLAG, 'N') != 'Y'
+            AND NVL(i.PAID_STATUS, 'Unpaid') NOT IN ('Paid', 'Cancelled')
         ) LOOP
             DECLARE
                 l_invoice_date DATE;
