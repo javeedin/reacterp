@@ -110,11 +110,12 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CANCEL_INVOICE_PKG AS
         -- Check 2: not paid (covers 'Paid', 'Fully Paid', 'Partial')
         c_not_paid := NVL(v_paid_status, 'Unpaid') NOT IN ('Paid', 'Fully Paid', 'Partial');
 
-        -- Check 3: no active prepayment applications against this invoice (as target)
+        -- Check 3: no ACTIVE prepayment applications against this invoice (as target)
+        -- Status = 'Unapplied' means it was previously applied then reversed — not blocking
         SELECT COUNT(*) INTO v_applied_count
         FROM   RR_AP_APPLIED_PREPAYMENTS
         WHERE  invoice_id = p_invoice_id
-          AND  NVL(status, 'Applied') != 'Cancelled';
+          AND  NVL(status, 'Applied') = 'Applied';
         c_no_applied := (v_applied_count = 0);
 
         -- Check 4 (Prepayment only): not yet applied to any invoice
@@ -122,7 +123,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CANCEL_INVOICE_PKG AS
             SELECT COUNT(*) INTO v_prepay_used
             FROM   RR_AP_APPLIED_PREPAYMENTS
             WHERE  prepayment_invoice_id = p_invoice_id
-              AND  NVL(status, 'Applied') != 'Cancelled';
+              AND  NVL(status, 'Applied') = 'Applied';
             c_prepay_ok := (v_prepay_used = 0);
         END IF;
 
