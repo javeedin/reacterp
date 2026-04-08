@@ -614,6 +614,20 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [prepaymentLoading, setPrepaymentLoading] = useState(false);
   const [prepaymentApplying, setPrepaymentApplying] = useState(false);
   const [supplierHasPrepayments, setSupplierHasPrepayments] = useState(false);
+
+  // Cancel Invoice modal state
+  const [cancelModalOpen, setCancelModalOpen]     = useState(false);
+  const [cancelEligLoading, setCancelEligLoading] = useState(false);
+  const [cancelExecuting, setCancelExecuting]     = useState(false);
+  const [cancelDone, setCancelDone]               = useState(false);
+  const [cancelStep, setCancelStep]               = useState<'eligibility' | 'confirm'>('eligibility');
+  const [cancelEligibility, setCancelEligibility] = useState<{
+    eligible: boolean;
+    invoiceNumber: string;
+    invoiceType: string;
+    paidStatus: string;
+    checks: { check: string; passed: boolean; detail?: string }[];
+  } | null>(null);
   const [selectedAvailKeys, setSelectedAvailKeys] = useState<React.Key[]>([]);
 
   // Un-apply modal state
@@ -2293,6 +2307,62 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     }
   }, [form, savedInvoiceId, initialData, selectedSupplierInfo, fetchAvailablePrepayments, fetchAppliedPrepayments, suppliers, invoiceBalance, loadAppSlaStatuses]);
 
+  // Open the cancel invoice modal — fetch eligibility first
+  const openCancelModal = useCallback(async () => {
+    const invoiceId = savedInvoiceId || initialData?.invoiceId;
+    if (!invoiceId) { message.warning('Save the invoice before cancelling.'); return; }
+    setCancelStep('eligibility');
+    setCancelEligibility(null);
+    setCancelDone(false);
+    setCancelEligLoading(true);
+    setCancelModalOpen(true);
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/${invoiceId}/cancel-eligibility`;
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      const data = await res.json();
+      setCancelEligibility({
+        eligible:      data.eligible      ?? false,
+        invoiceNumber: data.invoiceNumber ?? '',
+        invoiceType:   data.invoiceType   ?? '',
+        paidStatus:    data.paidStatus    ?? '',
+        checks:        Array.isArray(data.checks) ? data.checks : [],
+      });
+    } catch (err) {
+      message.error(`Failed to check eligibility: ${err instanceof Error ? err.message : String(err)}`);
+      setCancelModalOpen(false);
+    } finally {
+      setCancelEligLoading(false);
+    }
+  }, [savedInvoiceId, initialData]);
+
+  // Execute the cancellation
+  const executeCancelInvoice = useCallback(async () => {
+    const invoiceId = savedInvoiceId || initialData?.invoiceId;
+    if (!invoiceId) return;
+    setCancelExecuting(true);
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/${invoiceId}/cancel`;
+      const res = await fetch(url, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body:    JSON.stringify({ cancelledBy: user?.username || 'SYSTEM' }),
+      });
+      const data = await res.json();
+      if (data.success === false || (res.status >= 400)) {
+        message.error(data.message || data.error || 'Cancellation failed');
+        return;
+      }
+      setCancelDone(true);
+      setLiveHoldPaidStatus('Cancelled');
+      message.success('Invoice cancelled successfully');
+      handleRefreshStatus();
+    } catch (err) {
+      message.error(`Cancellation error: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setCancelExecuting(false);
+    }
+  }, [savedInvoiceId, initialData, user, handleRefreshStatus]);
+
   const filteredSuppliers = useMemo(() => {
     if (!supplierSearchText) return suppliers;
     const search = supplierSearchText.toLowerCase();
@@ -3172,7 +3242,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         message.info('Initiating approval...');
         break;
       case 'cancelInvoice':
-        message.warning('Cancel invoice...');
+        openCancelModal();
         break;
       case 'reverseInvoice':
         message.warning('Reverse invoice...');
@@ -9903,6 +9973,135 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         )}
       </Modal>
       {/* ── End Prepayment API Explorer Modal ────────────────────────────── */}
+
+      {/* ── Cancel Invoice Modal ─────────────────────────────────────────── */}
+      <Modal
+        open={cancelModalOpen}
+        onCancel={() => { if (!cancelExecuting) setCancelModalOpen(false); }}
+        title={
+          <Space>
+            <StopOutlined style={{ color: REDWOOD.error }} />
+            <span style={{ fontWeight: 700, color: REDWOOD.error }}>Cancel Invoice</span>
+          </Space>
+        }
+        footer={
+          cancelDone ? (
+            <Button type="primary" onClick={() => setCancelModalOpen(false)}>Close</Button>
+          ) : cancelStep === 'eligibility' ? (
+            <Space>
+              <Button onClick={() => setCancelModalOpen(false)}>Close</Button>
+              <Button
+                type="primary"
+                danger
+                disabled={!cancelEligibility?.eligible || cancelEligLoading}
+                onClick={() => setCancelStep('confirm')}
+              >
+                Proceed to Confirm
+              </Button>
+            </Space>
+          ) : (
+            <Space>
+              <Button onClick={() => setCancelStep('eligibility')} disabled={cancelExecuting}>Back</Button>
+              <Button
+                type="primary"
+                danger
+                loading={cancelExecuting}
+                icon={<StopOutlined />}
+                onClick={executeCancelInvoice}
+              >
+                Confirm Cancel Invoice
+              </Button>
+            </Space>
+          )
+        }
+        width={520}
+        destroyOnClose
+      >
+        {cancelEligLoading ? (
+          <div style={{ textAlign: 'center', padding: '32px 0' }}>
+            <Spin size="large" />
+            <div style={{ marginTop: 12, color: REDWOOD.neutral600, fontSize: 13 }}>Checking eligibility…</div>
+          </div>
+        ) : cancelDone ? (
+          <div style={{ textAlign: 'center', padding: '24px 0' }}>
+            <CheckCircleOutlined style={{ fontSize: 48, color: REDWOOD.success }} />
+            <div style={{ marginTop: 12, fontSize: 16, fontWeight: 600, color: REDWOOD.success }}>
+              Invoice Cancelled
+            </div>
+            <div style={{ marginTop: 6, color: REDWOOD.neutral600, fontSize: 13 }}>
+              Invoice <strong>{cancelEligibility?.invoiceNumber}</strong> has been cancelled successfully.
+            </div>
+          </div>
+        ) : cancelStep === 'eligibility' ? (
+          <div>
+            {cancelEligibility && (
+              <>
+                <Descriptions size="small" column={2} style={{ marginBottom: 16 }}>
+                  <Descriptions.Item label="Invoice #">{cancelEligibility.invoiceNumber}</Descriptions.Item>
+                  <Descriptions.Item label="Type">{cancelEligibility.invoiceType}</Descriptions.Item>
+                  <Descriptions.Item label="Status">{cancelEligibility.paidStatus}</Descriptions.Item>
+                  <Descriptions.Item label="Eligible">
+                    {cancelEligibility.eligible
+                      ? <Tag color="success" icon={<CheckCircleOutlined />}>Yes</Tag>
+                      : <Tag color="error"   icon={<CloseCircleOutlined />}>No</Tag>}
+                  </Descriptions.Item>
+                </Descriptions>
+                <Divider style={{ margin: '8px 0 12px' }} />
+                <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 13 }}>Eligibility Checks</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {cancelEligibility.checks.map((c, idx) => (
+                    <div key={idx} style={{
+                      display:      'flex',
+                      alignItems:   'flex-start',
+                      gap:          8,
+                      padding:      '6px 10px',
+                      background:   c.passed ? '#f6ffed' : '#fff2f0',
+                      border:       `1px solid ${c.passed ? '#b7eb8f' : '#ffccc7'}`,
+                      borderRadius: 6,
+                      fontSize:     12,
+                    }}>
+                      {c.passed
+                        ? <CheckCircleOutlined style={{ color: REDWOOD.success, marginTop: 2, flexShrink: 0 }} />
+                        : <CloseCircleOutlined style={{ color: REDWOOD.error,   marginTop: 2, flexShrink: 0 }} />}
+                      <div>
+                        <div style={{ fontWeight: 500 }}>{c.check}</div>
+                        {c.detail && <div style={{ color: REDWOOD.neutral600, marginTop: 2 }}>{c.detail}</div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {!cancelEligibility.eligible && (
+                  <Alert
+                    type="error"
+                    showIcon
+                    message="This invoice cannot be cancelled"
+                    description="One or more eligibility checks failed. Review the checks above."
+                    style={{ marginTop: 14 }}
+                  />
+                )}
+              </>
+            )}
+          </div>
+        ) : (
+          /* confirm step */
+          <div>
+            <Alert
+              type="warning"
+              showIcon
+              icon={<ExclamationCircleOutlined />}
+              message="Are you sure you want to cancel this invoice?"
+              description={
+                <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12 }}>
+                  <li>Invoice <strong>{cancelEligibility?.invoiceNumber}</strong> will be marked as <strong>Cancelled</strong>.</li>
+                  <li>If accounting has already been posted to the GL, a reversal journal will be created automatically.</li>
+                  <li>This action cannot be undone.</li>
+                </ul>
+              }
+            />
+          </div>
+        )}
+      </Modal>
+      {/* ── End Cancel Invoice Modal ──────────────────────────────────────── */}
 
       <style>{`
         .ant-table-thead > tr > th {
