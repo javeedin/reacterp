@@ -3328,6 +3328,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       // Store invoice ID — switch to update mode
       if (!isUpdate && invoiceId) {
         setSavedInvoiceId(invoiceId);
+        // Seed live status for a freshly created invoice so the refresh button works immediately
+        setLiveHoldPaidStatus('Unpaid');
+        setLiveValidationStatus('Never Validated');
+        fetchInvoiceBalance(invoiceId);
+        fetchInvoicePayments(invoiceId);
       }
 
       message.success(data.message || `Invoice ${isUpdate ? 'updated' : 'created'} (ID: ${invoiceId})`);
@@ -4126,7 +4131,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           {isEditMode && liveValidationStatus && !((hasAnyPayment || isPaid || isPostedToGL) && liveValidationStatus === 'Needs Revalidation') && (
             <Tag color="green" style={{ fontSize: 12 }}>{liveValidationStatus}</Tag>
           )}
-          {isEditMode && (
+          {(isEditMode || !!savedInvoiceId) && (
             <Tooltip title="Refresh status">
               <Button
                 icon={<ReloadOutlined spin={statusRefreshing} />}
@@ -7395,8 +7400,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
               // ── All done ───────────────────────────────────────────────────
               message.success('Payment submitted successfully!');
-              fetchInvoiceBalance(invoiceId!);
-              fetchInvoicePayments(invoiceId!);
+              handleRefreshStatus();
 
             } finally {
               setPayInFullSubmitting(false);
