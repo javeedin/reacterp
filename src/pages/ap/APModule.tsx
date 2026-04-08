@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Layout, Typography, Card, Breadcrumb, Space, Tooltip, Row, Col, Statistic, Input, Select, Button, Form, DatePicker, Spin, Tag, Modal } from 'antd';
+import { Layout, Typography, Card, Breadcrumb, Space, Tooltip, Row, Col, Statistic, Input, Select, Button, Form, DatePicker, Spin, Tag, Modal, Table } from 'antd';
 import {
   HomeOutlined,
   FileTextOutlined,
@@ -37,6 +37,7 @@ import {
   ApiOutlined,
   CopyOutlined,
   CheckOutlined,
+  TableOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import Autopilot from '../../components/Autopilot';
@@ -162,6 +163,15 @@ const DEFAULT_KPI: KpiData = {
   lastSync: '—',
 };
 
+interface SupplierOutstanding {
+  supplierNumber: string;
+  supplierName:   string;
+  invoiceCount:   number;
+  totalInvoiceAmount: number;
+  totalPaid:      number;
+  outstandingAmount: number;
+}
+
 const APModule: React.FC = () => {
   const navigate = useNavigate();
   const [kpi, setKpi] = useState<KpiData>(DEFAULT_KPI);
@@ -170,6 +180,40 @@ const APModule: React.FC = () => {
   const [selectedBU, setSelectedBU] = useState<string>('');   // '' = All
   const [apiModalVisible, setApiModalVisible] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
+
+  // Drill-down: outstanding by supplier
+  const [drillModalOpen,   setDrillModalOpen]   = useState(false);
+  const [drillLoading,     setDrillLoading]     = useState(false);
+  const [drillRows,        setDrillRows]        = useState<SupplierOutstanding[]>([]);
+  const [drillSearch,      setDrillSearch]      = useState('');
+
+  const openDrillDown = async () => {
+    setDrillModalOpen(true);
+    setDrillLoading(true);
+    setDrillRows([]);
+    setDrillSearch('');
+    try {
+      const params = new URLSearchParams();
+      if (selectedBU) params.set('P_BUSINESS_UNIT', selectedBU);
+      const qs = params.toString();
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/outstanding-by-supplier${qs ? '?' + qs : ''}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      const items: any[] = Array.isArray(data.items) ? data.items : (Array.isArray(data) ? data : []);
+      setDrillRows(items.map((r: any) => ({
+        supplierNumber:     r.supplier_number     || '',
+        supplierName:       r.supplier_name       || r.supplier_number || '',
+        invoiceCount:       Number(r.invoice_count        ?? 0),
+        totalInvoiceAmount: Number(r.total_invoice_amount ?? 0),
+        totalPaid:          Number(r.total_paid           ?? 0),
+        outstandingAmount:  Number(r.outstanding_amount   ?? 0),
+      })));
+    } catch (err) {
+      console.error('Failed to load drill-down', err);
+    } finally {
+      setDrillLoading(false);
+    }
+  };
 
   const copyUrl = (url: string) => {
     navigator.clipboard.writeText(url);
@@ -480,15 +524,20 @@ const APModule: React.FC = () => {
             <Row gutter={[16, 16]} style={{ marginBottom: 32 }}>
               <Col xs={24} lg={12}>
                 <Card
-                  style={{ borderRadius: 12, border: 'none', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
+                  style={{ borderRadius: 12, border: 'none', boxShadow: '0 2px 8px rgba(0,0,0,0.06)', cursor: 'pointer' }}
                   bodyStyle={{ padding: 20 }}
+                  onClick={openDrillDown}
+                  hoverable
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                     <Text strong style={{ fontSize: 15 }}>Total Outstanding Payables</Text>
-                    <Text type="secondary">Current Period</Text>
+                    <Space>
+                      <Text type="secondary" style={{ fontSize: 12 }}>Click to drill down</Text>
+                      <TableOutlined style={{ color: REDWOOD.info }} />
+                    </Space>
                   </div>
                   <Text style={{ fontSize: 32, fontWeight: 600, color: REDWOOD.neutral900 }}>
-                    ${kpi.totalPayables.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    AED {kpi.totalPayables.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                   </Text>
                 </Card>
               </Col>
@@ -574,6 +623,137 @@ const APModule: React.FC = () => {
         </div>
 
       </Content>
+
+      {/* Outstanding by Supplier Drill-down Modal */}
+      <Modal
+        open={drillModalOpen}
+        onCancel={() => setDrillModalOpen(false)}
+        title={
+          <Space>
+            <TableOutlined style={{ color: REDWOOD.info }} />
+            <span>Outstanding Payables by Supplier</span>
+            {selectedBU && <Tag color="blue">{selectedBU}</Tag>}
+          </Space>
+        }
+        footer={<Button onClick={() => setDrillModalOpen(false)}>Close</Button>}
+        width={880}
+        destroyOnClose
+      >
+        <div style={{ marginBottom: 12 }}>
+          <Input
+            placeholder="Search supplier name or number…"
+            prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
+            value={drillSearch}
+            onChange={e => setDrillSearch(e.target.value)}
+            allowClear
+            style={{ maxWidth: 320 }}
+          />
+        </div>
+        <Table<SupplierOutstanding>
+          loading={drillLoading}
+          rowKey="supplierNumber"
+          size="small"
+          pagination={{ pageSize: 15, showSizeChanger: false, showTotal: (t) => `${t} suppliers` }}
+          dataSource={
+            drillRows.filter(r =>
+              !drillSearch ||
+              r.supplierName.toLowerCase().includes(drillSearch.toLowerCase()) ||
+              r.supplierNumber.toLowerCase().includes(drillSearch.toLowerCase())
+            )
+          }
+          summary={rows => {
+            const visible = rows as unknown as SupplierOutstanding[];
+            const totalOut = visible.reduce((s, r) => s + r.outstandingAmount, 0);
+            return (
+              <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 600 }}>
+                <Table.Summary.Cell index={0} colSpan={3}>
+                  <Text strong>Total ({visible.length} suppliers)</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={3} />
+                <Table.Summary.Cell index={4} />
+                <Table.Summary.Cell index={5}>
+                  <Text strong style={{ color: REDWOOD.primary }}>
+                    AED {totalOut.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  </Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={6} />
+              </Table.Summary.Row>
+            );
+          }}
+          columns={[
+            {
+              title: 'Supplier',
+              dataIndex: 'supplierName',
+              ellipsis: true,
+              render: (name, rec) => (
+                <div>
+                  <div style={{ fontWeight: 500, fontSize: 13 }}>{name}</div>
+                  <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{rec.supplierNumber}</div>
+                </div>
+              ),
+            },
+            {
+              title: 'Invoices',
+              dataIndex: 'invoiceCount',
+              width: 80,
+              align: 'center' as const,
+              render: (v: number) => <Tag>{v}</Tag>,
+            },
+            {
+              title: 'Invoice Amount (AED)',
+              dataIndex: 'totalInvoiceAmount',
+              width: 170,
+              align: 'right' as const,
+              render: (v: number) => v.toLocaleString('en-US', { minimumFractionDigits: 2 }),
+              sorter: (a, b) => a.totalInvoiceAmount - b.totalInvoiceAmount,
+            },
+            {
+              title: 'Total Paid (AED)',
+              dataIndex: 'totalPaid',
+              width: 150,
+              align: 'right' as const,
+              render: (v: number) => (
+                <span style={{ color: REDWOOD.success }}>
+                  {v.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                </span>
+              ),
+              sorter: (a, b) => a.totalPaid - b.totalPaid,
+            },
+            {
+              title: 'Outstanding (AED)',
+              dataIndex: 'outstandingAmount',
+              width: 160,
+              align: 'right' as const,
+              defaultSortOrder: 'descend' as const,
+              sorter: (a, b) => a.outstandingAmount - b.outstandingAmount,
+              render: (v: number) => (
+                <Text strong style={{ color: v > 0 ? REDWOOD.primary : REDWOOD.success }}>
+                  {v.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                </Text>
+              ),
+            },
+            {
+              title: '',
+              width: 60,
+              align: 'center' as const,
+              render: (_: any, rec: SupplierOutstanding) => (
+                <Tooltip title="View invoices">
+                  <Button
+                    type="link"
+                    size="small"
+                    icon={<FileTextOutlined />}
+                    onClick={() => {
+                      setDrillModalOpen(false);
+                      navigate('/ap/manage-invoices', { state: { filterSupplierNumber: rec.supplierNumber } });
+                    }}
+                  />
+                </Tooltip>
+              ),
+            },
+          ]}
+        />
+      </Modal>
+      {/* End Outstanding Drill-down Modal */}
 
       {/* API Endpoints Modal */}
       <Modal
