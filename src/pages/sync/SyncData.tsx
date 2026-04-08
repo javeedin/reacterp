@@ -1957,31 +1957,7 @@ const SyncData: React.FC = () => {
       );
       syncResult = { inserted: result.insertedPayments, errors: result.errors, type: 'payments' };
     } else if (isAPInvoices) {
-      // AP Invoices Sync
-      if (allSuppliersMode) {
-        // Fetch all suppliers and open the batch modal
-        addLog('step', '─── Fetching all suppliers ───');
-        const buParam = getParameters()['BusinessUnit'];
-        const suppliersUrl = buParam
-          ? `https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/suppliers?P_BUSINESS_UNIT=${encodeURIComponent(buParam)}`
-          : 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/suppliers';
-        const suppliersResp = await fetch(suppliersUrl);
-        const suppliersData = await suppliersResp.json();
-        const suppliers: SupplierSyncItem[] = (suppliersData.items || []).map((s: any) => ({
-          supplierNumber: s.supplier_number,
-          supplierName: s.supplier,
-          status: 'pending' as const,
-          invoicesInserted: 0,
-          paymentsInserted: 0,
-          errors: 0,
-        }));
-        addLog('info', `Found ${suppliers.length} suppliers`);
-        setSupplierSyncList(suppliers);
-        setSupplierSyncOpen(true);
-        isSyncingRef.current = false;
-        return; // Modal takes over
-      }
-
+      // AP Invoices Sync — syncs selected supplier (or all if no supplier selected)
       setApProgress({
         status: 'fetching',
         totalInvoices: 0,
@@ -6879,6 +6855,13 @@ const SyncData: React.FC = () => {
             </Col>
           ))}
           <Col flex="auto" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
+            <Checkbox
+              checked={chainAPPayments}
+              onChange={e => setChainAPPayments(e.target.checked)}
+              disabled={supplierSyncing}
+            >
+              <Text style={{ fontSize: 12 }}>Also sync AP Payments</Text>
+            </Checkbox>
             {!supplierSyncing ? (
               <Button
                 type="primary"
