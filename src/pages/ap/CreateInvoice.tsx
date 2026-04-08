@@ -628,6 +628,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     paidStatus: string;
     checks: { check: string; passed: boolean; detail?: string }[];
   } | null>(null);
+  const [cancelApiExpanded, setCancelApiExpanded]   = useState(false);
+  const [cancelApiTesting,  setCancelApiTesting]    = useState(false);
+  const [cancelApiResult,   setCancelApiResult]     = useState<string | null>(null);
   const [selectedAvailKeys, setSelectedAvailKeys] = useState<React.Key[]>([]);
 
   // Un-apply modal state
@@ -2314,6 +2317,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     setCancelStep('eligibility');
     setCancelEligibility(null);
     setCancelDone(false);
+    setCancelApiExpanded(false);
+    setCancelApiResult(null);
     setCancelEligLoading(true);
     setCancelModalOpen(true);
     try {
@@ -10091,6 +10096,103 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     style={{ marginTop: 14 }}
                   />
                 )}
+
+                {/* ── API Info Panel ─────────────────────────────────── */}
+                <div style={{ marginTop: 14 }}>
+                  <div
+                    onClick={() => { setCancelApiExpanded(v => !v); setCancelApiResult(null); }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+                      padding: '5px 8px', borderRadius: 6,
+                      background: '#f0f5ff', border: '1px solid #adc6ff',
+                      fontSize: 12, color: '#2f54eb', userSelect: 'none',
+                    }}
+                  >
+                    <ApiOutlined style={{ fontSize: 13 }} />
+                    <span style={{ fontWeight: 600 }}>API Info</span>
+                    <span style={{ marginLeft: 'auto', fontSize: 11 }}>{cancelApiExpanded ? '▲ Hide' : '▼ Show'}</span>
+                  </div>
+
+                  {cancelApiExpanded && (() => {
+                    const invoiceId = savedInvoiceId || initialData?.invoiceId;
+                    const eligUrl = `${APEX_DB_CONFIG.baseUrl}/invoices/${invoiceId}/cancel-eligibility`;
+                    return (
+                      <div style={{
+                        marginTop: 6, padding: '10px 12px', borderRadius: 6,
+                        background: '#fafafa', border: '1px solid #d9d9d9', fontSize: 12,
+                      }}>
+                        <div style={{ marginBottom: 6 }}>
+                          <span style={{ color: '#8c8c8c', fontSize: 11 }}>GET — Eligibility check</span>
+                        </div>
+                        <div style={{
+                          display: 'flex', alignItems: 'center', gap: 6,
+                          background: '#fff', border: '1px solid #e0e0e0',
+                          borderRadius: 4, padding: '4px 8px',
+                        }}>
+                          <code style={{ flex: 1, fontSize: 11, wordBreak: 'break-all', color: '#1d39c4' }}>
+                            {eligUrl}
+                          </code>
+                          <Tooltip title="Copy URL">
+                            <CopyOutlined
+                              style={{ flexShrink: 0, cursor: 'pointer', color: '#595959' }}
+                              onClick={() => { navigator.clipboard.writeText(eligUrl); message.success('URL copied'); }}
+                            />
+                          </Tooltip>
+                        </div>
+
+                        <div style={{ marginTop: 8, display: 'flex', gap: 6, alignItems: 'center' }}>
+                          <Button
+                            size="small"
+                            type="primary"
+                            ghost
+                            icon={<ApiOutlined />}
+                            loading={cancelApiTesting}
+                            onClick={async () => {
+                              setCancelApiTesting(true);
+                              setCancelApiResult(null);
+                              try {
+                                const res = await fetch(eligUrl, { headers: { Accept: 'application/json' } });
+                                const text = await res.text();
+                                try {
+                                  setCancelApiResult(JSON.stringify(JSON.parse(text), null, 2));
+                                } catch {
+                                  setCancelApiResult(text);
+                                }
+                              } catch (e: any) {
+                                setCancelApiResult(`Error: ${e.message}`);
+                              } finally {
+                                setCancelApiTesting(false);
+                              }
+                            }}
+                          >
+                            Test
+                          </Button>
+                          {cancelApiResult && (
+                            <Tooltip title="Copy response">
+                              <CopyOutlined
+                                style={{ cursor: 'pointer', color: '#595959' }}
+                                onClick={() => { navigator.clipboard.writeText(cancelApiResult!); message.success('Response copied'); }}
+                              />
+                            </Tooltip>
+                          )}
+                        </div>
+
+                        {cancelApiResult && (
+                          <pre style={{
+                            marginTop: 8, padding: '8px 10px',
+                            background: '#1e1e1e', color: '#d4d4d4',
+                            borderRadius: 4, fontSize: 11,
+                            maxHeight: 200, overflow: 'auto',
+                            whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                          }}>
+                            {cancelApiResult}
+                          </pre>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+                {/* ── End API Info Panel ─────────────────────────────── */}
               </>
             )}
           </div>
