@@ -954,7 +954,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   // ── Applied Prepayment SLA: load per-row accounting status ───────────────
   const loadAppSlaStatuses = useCallback(async (applications: AppliedPrepayment[]) => {
-    if (applications.length === 0) return;
+    if (!Array.isArray(applications) || applications.length === 0) return;
     const results = await Promise.all(
       applications.map(async (a) => {
         try {
@@ -2224,7 +2224,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/appliedprepayments?P_INVOICE_ID=${invoiceId}`;
           const { ok, text } = await hit('Applied Prepayments', url);
           if (ok) { try {
-            const list = JSON.parse(text).items || JSON.parse(text) || [];
+            const d = JSON.parse(text);
+            const list: AppliedPrepayment[] = Array.isArray(d.items) ? d.items : Array.isArray(d) ? d : [];
             setAppliedPrepaymentsList(list);
             loadAppSlaStatuses(list);
           } catch {} }
