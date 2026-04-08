@@ -153,6 +153,12 @@ interface SupplierSyncItem {
   paymentsInserted: number;
   errors: number;
   errorMsg?: string;
+  // Live progress
+  currentStep?: 'inv-fetch' | 'inv-insert' | 'pay-fetch' | 'pay-insert';
+  invTotal?: number;
+  invProcessed?: number;
+  payTotal?: number;
+  payProcessed?: number;
 }
 
 // Batch list modal item (for two-phase GL Journal sync)
@@ -1167,38 +1173,59 @@ const SyncData: React.FC = () => {
       try {
         const supplierParams = { ...baseParameters, SupplierNumber: supplier.supplierNumber };
 
+        const updateRow = (patch: Partial<SupplierSyncItem>) =>
+          setSupplierSyncList(prev => prev.map((s, idx) => idx === i ? { ...s, ...patch } : s));
+
+        // Invoices: mark fetch phase, then track progress
+        updateRow({ currentStep: 'inv-fetch', invTotal: 0, invProcessed: 0 });
+
         const invResult = await syncAPInvoices(
           supplierParams,
           false,
           addLog,
-          undefined,
+          (p) => {
+            if (p.status === 'fetching') {
+              updateRow({ currentStep: 'inv-fetch', invTotal: p.totalInvoices, invProcessed: p.processedInvoices });
+            } else if (p.status === 'inserting' || p.insertedInvoices > 0) {
+              updateRow({ currentStep: 'inv-insert', invTotal: p.totalInvoices, invProcessed: p.insertedInvoices });
+            }
+          },
           signal,
           undefined
         );
+
         let paymentsInserted = 0;
 
         if (!signal.aborted && chainAPPayments) {
+          updateRow({ currentStep: 'pay-fetch', payTotal: 0, payProcessed: 0 });
+
           const payResult = await syncAPPayments(
             supplierParams,
             false,
             addLog,
-            undefined,
+            (p) => {
+              if (p.status === 'fetching') {
+                updateRow({ currentStep: 'pay-fetch', payTotal: p.totalPayments, payProcessed: p.processedPayments });
+              } else if (p.status === 'inserting' || p.insertedPayments > 0) {
+                updateRow({ currentStep: 'pay-insert', payTotal: p.totalPayments, payProcessed: p.insertedPayments });
+              }
+            },
             signal,
             undefined
           );
           paymentsInserted = payResult.insertedPayments || 0;
         }
 
-        setSupplierSyncList(prev => prev.map((s, idx) =>
-          idx === i ? {
-            ...s,
-            status: (invResult.errors > 0 ? 'error' : 'done') as const,
-            invoicesInserted: invResult.insertedInvoices || 0,
-            paymentsInserted,
-            errors: invResult.errors,
-            errorMsg: invResult.errors > 0 ? invResult.lastError : undefined,
-          } : s
-        ));
+        updateRow({
+          status: (invResult.errors > 0 ? 'error' : 'done') as const,
+          invoicesInserted: invResult.insertedInvoices || 0,
+          paymentsInserted,
+          errors: invResult.errors,
+          errorMsg: invResult.errors > 0 ? invResult.lastError : undefined,
+          currentStep: undefined,
+          invTotal: undefined, invProcessed: undefined,
+          payTotal: undefined, payProcessed: undefined,
+        });
       } catch (e: any) {
         setSupplierSyncList(prev => prev.map((s, idx) =>
           idx === i ? { ...s, status: 'error' as const, errorMsg: String(e) } : s
@@ -6837,7 +6864,7 @@ const SyncData: React.FC = () => {
         }
         onCancel={() => { if (!supplierSyncing) setSupplierSyncOpen(false); }}
         footer={null}
-        width={800}
+        width={960}
         styles={{ body: { padding: '16px' } }}
       >
         <Row gutter={12} style={{ marginBottom: 12 }}>
@@ -6905,18 +6932,58 @@ const SyncData: React.FC = () => {
             },
             { title: 'Supplier Name', dataIndex: 'supplierName', key: 'supplierName', ellipsis: true },
             {
-              title: 'Invoices',
+              title: 'AP Invoices',
               key: 'inv',
-              width: 80,
-              align: 'right' as const,
-              render: (_: any, r: SupplierSyncItem) => r.status === 'pending' ? '—' : <Text style={{ fontSize: 12 }}>{r.invoicesInserted}</Text>,
+              width: 160,
+              render: (_: any, r: SupplierSyncItem) => {
+                if (r.status === 'pending') return <Text style={{ color: '#94a3b8', fontSize: 12 }}>—</Text>;
+                if (r.status === 'syncing' && (r.currentStep === 'inv-fetch' || r.currentStep === 'inv-insert')) {
+                  const label = r.currentStep === 'inv-fetch' ? 'Fetching' : 'Inserting';
+                  const prog = r.invProcessed ?? 0;
+                  const total = r.invTotal ?? 0;
+                  return (
+                    <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                      <Space size={4}>
+                        <SyncOutlined spin style={{ color: '#3b82f6', fontSize: 11 }} />
+                        <Text style={{ fontSize: 11, color: '#3b82f6' }}>{label}</Text>
+                        {total > 0 && <Text style={{ fontSize: 11 }}>{prog}/{total}</Text>}
+                      </Space>
+                      {total > 0 && <Progress percent={Math.round((prog / total) * 100)} size="small" showInfo={false} strokeColor="#3b82f6" style={{ margin: 0 }} />}
+                    </Space>
+                  );
+                }
+                const color = r.status === 'error' ? '#ef4444' : '#22c55e';
+                return <Text style={{ fontSize: 12, color }}>{r.invoicesInserted} inserted</Text>;
+              },
             },
             {
-              title: 'Payments',
+              title: 'AP Payments',
               key: 'pay',
-              width: 80,
-              align: 'right' as const,
-              render: (_: any, r: SupplierSyncItem) => r.status === 'pending' ? '—' : <Text style={{ fontSize: 12 }}>{r.paymentsInserted}</Text>,
+              width: 160,
+              render: (_: any, r: SupplierSyncItem) => {
+                if (r.status === 'pending') return <Text style={{ color: '#94a3b8', fontSize: 12 }}>—</Text>;
+                if (!chainAPPayments && r.status !== 'done') return <Text style={{ color: '#94a3b8', fontSize: 12 }}>skipped</Text>;
+                if (r.status === 'syncing' && (r.currentStep === 'pay-fetch' || r.currentStep === 'pay-insert')) {
+                  const label = r.currentStep === 'pay-fetch' ? 'Fetching' : 'Inserting';
+                  const prog = r.payProcessed ?? 0;
+                  const total = r.payTotal ?? 0;
+                  return (
+                    <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                      <Space size={4}>
+                        <SyncOutlined spin style={{ color: '#8b5cf6', fontSize: 11 }} />
+                        <Text style={{ fontSize: 11, color: '#8b5cf6' }}>{label}</Text>
+                        {total > 0 && <Text style={{ fontSize: 11 }}>{prog}/{total}</Text>}
+                      </Space>
+                      {total > 0 && <Progress percent={Math.round((prog / total) * 100)} size="small" showInfo={false} strokeColor="#8b5cf6" style={{ margin: 0 }} />}
+                    </Space>
+                  );
+                }
+                if (r.status === 'syncing' && (r.currentStep === 'inv-fetch' || r.currentStep === 'inv-insert')) {
+                  return <Text style={{ color: '#94a3b8', fontSize: 12 }}>waiting…</Text>;
+                }
+                if (!chainAPPayments) return <Text style={{ color: '#94a3b8', fontSize: 12 }}>skipped</Text>;
+                return <Text style={{ fontSize: 12, color: '#22c55e' }}>{r.paymentsInserted} inserted</Text>;
+              },
             },
             {
               title: 'Status',
