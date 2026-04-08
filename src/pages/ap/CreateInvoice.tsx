@@ -660,6 +660,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [liveValidationStatus, setLiveValidationStatus] = useState(initialData?.validationStatus || '');
   const [liveApprovalStatus,   setLiveApprovalStatus]   = useState(initialData?.approvalStatus   || '');
   const [statusRefreshing,     setStatusRefreshing]     = useState(false);
+  const [refreshApiLog,        setRefreshApiLog]        = useState<{ url: string; status: number; response: string } | null>(null);
+  const [refreshApiLogVisible, setRefreshApiLogVisible] = useState(false);
 
   const openPrepaymentAPIDrawer = useCallback(async () => {
     const supplierId = form.getFieldValue('supplierId');
@@ -846,8 +848,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         fetchInvoiceBalance(invoiceId),
         fetchInvoicePayments(invoiceId),
       ]);
+      const rawText = await statusRes.text();
+      setRefreshApiLog({ url, status: statusRes.status, response: rawText });
       if (statusRes.ok) {
-        const data = await statusRes.json();
+        const data = JSON.parse(rawText);
         // Match by invoice_id since invoice_number search may return partial matches
         const items: any[] = data.items || (Array.isArray(data) ? data : []);
         const item = items.find((i: any) => i.invoice_id === invoiceId) || items[0];
@@ -4132,15 +4136,25 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             <Tag color="green" style={{ fontSize: 12 }}>{liveValidationStatus}</Tag>
           )}
           {(isEditMode || !!savedInvoiceId) && (
-            <Tooltip title="Refresh status">
-              <Button
-                icon={<ReloadOutlined spin={statusRefreshing} />}
-                size="small"
-                onClick={handleRefreshStatus}
-                loading={statusRefreshing}
-                style={{ fontSize: 12 }}
-              />
-            </Tooltip>
+            <Space size={4}>
+              <Tooltip title="Refresh status">
+                <Button
+                  icon={<ReloadOutlined spin={statusRefreshing} />}
+                  size="small"
+                  onClick={handleRefreshStatus}
+                  loading={statusRefreshing}
+                  style={{ fontSize: 12 }}
+                />
+              </Tooltip>
+              <Tooltip title={refreshApiLog ? `Last call: ${refreshApiLog.status}` : 'No refresh called yet'}>
+                <Button
+                  icon={<ApiOutlined />}
+                  size="small"
+                  style={{ fontSize: 12, color: refreshApiLog ? (refreshApiLog.status === 200 ? REDWOOD.success : REDWOOD.error) : '#aaa', borderColor: refreshApiLog ? (refreshApiLog.status === 200 ? REDWOOD.success : REDWOOD.error) : '#d9d9d9' }}
+                  onClick={() => setRefreshApiLogVisible(true)}
+                />
+              </Tooltip>
+            </Space>
           )}
         </Space>
 
@@ -6657,6 +6671,58 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             />
           );
         })()}
+      </Modal>
+
+      {/* Refresh Status API Log Modal */}
+      <Modal
+        title={
+          <Space>
+            <ApiOutlined style={{ color: refreshApiLog?.status === 200 ? REDWOOD.success : REDWOOD.error }} />
+            <span>Refresh Status — API Call</span>
+            {refreshApiLog && (
+              <Tag color={refreshApiLog.status === 200 ? 'success' : 'error'}>
+                HTTP {refreshApiLog.status}
+              </Tag>
+            )}
+          </Space>
+        }
+        open={refreshApiLogVisible}
+        onCancel={() => setRefreshApiLogVisible(false)}
+        footer={<Button onClick={() => setRefreshApiLogVisible(false)}>Close</Button>}
+        width={760}
+        styles={{ body: { padding: '16px 24px' } }}
+      >
+        {refreshApiLog ? (
+          <>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 4 }}>GET URL</div>
+              <div style={{
+                background: '#f5f5f5', borderRadius: 6, padding: '8px 12px',
+                fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all',
+                border: '1px solid #e8e8e8',
+              }}>
+                <span style={{ color: '#1677ff', fontWeight: 700, marginRight: 8 }}>GET</span>
+                {refreshApiLog.url}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 4 }}>
+                Response (HTTP {refreshApiLog.status})
+              </div>
+              <pre style={{
+                background: '#1a1a2e', color: '#e2e8f0', borderRadius: 6,
+                padding: '12px', fontSize: 11, maxHeight: 420,
+                overflowY: 'auto', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+              }}>
+                {(() => { try { return JSON.stringify(JSON.parse(refreshApiLog.response), null, 2); } catch { return refreshApiLog.response; } })()}
+              </pre>
+            </div>
+          </>
+        ) : (
+          <div style={{ color: REDWOOD.neutral500, textAlign: 'center', padding: 32 }}>
+            Click the refresh button (⟳) first to see the API call details.
+          </div>
+        )}
       </Modal>
 
       {/* API Preview Modal */}
