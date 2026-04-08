@@ -44,6 +44,7 @@ import {
   CloudDownloadOutlined,
   CloudUploadOutlined,
   ClockCircleOutlined,
+  MinusCircleOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { SYNC_OBJECTS, PROXY_CONFIG, APEX_DB_CONFIG, type SyncObjectConfig, type ApiType } from '../../config/api.config';
@@ -159,6 +160,19 @@ interface SupplierSyncItem {
   invProcessed?: number;
   payTotal?: number;
   payProcessed?: number;
+}
+
+// Single-supplier sync progress popup item
+interface SingleSupplierSyncItem {
+  key: string;
+  label: string;
+  status: 'pending' | 'syncing' | 'done' | 'error' | 'skipped';
+  step?: string;         // 'Fetching' | 'Inserting'
+  total?: number;
+  processed?: number;
+  inserted: number;
+  errors: number;
+  errorMsg?: string;
 }
 
 // Batch list modal item (for two-phase GL Journal sync)
@@ -870,6 +884,8 @@ const SyncData: React.FC = () => {
 
   // ── AP Invoices chain + All Suppliers state ───────────────────────────────
   const [chainAPPayments, setChainAPPayments] = useState(false);
+  const [singleSyncOpen,  setSingleSyncOpen]  = useState(false);
+  const [singleSyncItems, setSingleSyncItems] = useState<SingleSupplierSyncItem[]>([]);
   const [allSuppliersMode, setAllSuppliersMode] = useState(false);
   const [supplierSyncOpen, setSupplierSyncOpen] = useState(false);
   const [supplierSyncList, setSupplierSyncList] = useState<SupplierSyncItem[]>([]);
@@ -1984,56 +2000,87 @@ const SyncData: React.FC = () => {
       );
       syncResult = { inserted: result.insertedPayments, errors: result.errors, type: 'payments' };
     } else if (isAPInvoices) {
-      // AP Invoices Sync — syncs selected supplier (or all if no supplier selected)
+      // AP Invoices Sync — open progress popup showing each object's status
+      const initialItems: SingleSupplierSyncItem[] = [
+        { key: 'invoices', label: 'AP Invoices', status: 'pending', inserted: 0, errors: 0 },
+        ...(chainAPPayments
+          ? [{ key: 'payments', label: 'AP Payments', status: 'pending' as const, inserted: 0, errors: 0 }]
+          : []),
+      ];
+      setSingleSyncItems(initialItems);
+      setSingleSyncOpen(true);
+
+      const updateItem = (key: string, patch: Partial<SingleSupplierSyncItem>) =>
+        setSingleSyncItems(prev => prev.map(it => it.key === key ? { ...it, ...patch } : it));
+
+      // ── AP Invoices ──
+      updateItem('invoices', { status: 'syncing', step: 'Fetching' });
       setApProgress({
         status: 'fetching',
-        totalInvoices: 0,
-        processedInvoices: 0,
-        insertedInvoices: 0,
+        totalInvoices: 0, processedInvoices: 0, insertedInvoices: 0,
         currentInvoiceNumber: '',
-        totalHeaders: 0,
-        processedHeaders: 0,
-        totalLines: 0,
-        processedLines: 0,
-        totalDistributions: 0,
-        processedDistributions: 0,
-        totalInstallments: 0,
-        processedInstallments: 0,
-        currentPage: 0,
-        totalPages: 0,
-        errors: 0,
-        lastError: '',
-        startTime: new Date(),
-        endTime: null,
+        totalHeaders: 0, processedHeaders: 0,
+        totalLines: 0, processedLines: 0,
+        totalDistributions: 0, processedDistributions: 0,
+        totalInstallments: 0, processedInstallments: 0,
+        currentPage: 0, totalPages: 0,
+        errors: 0, lastError: '',
+        startTime: new Date(), endTime: null,
       });
 
       const result = await syncAPInvoices(
         parameters,
         testMode,
         addLog,
-        (newProgress) => {
-          setApProgress((prev) => ({ ...prev, ...newProgress }));
-          if (newProgress.processedInvoices !== undefined && newProgress.totalInvoices) {
-            notifySyncProgress(`${newProgress.processedInvoices}/${newProgress.totalInvoices} invoices`);
+        (p) => {
+          setApProgress((prev) => ({ ...prev, ...p }));
+          if (p.status === 'fetching') {
+            updateItem('invoices', { step: 'Fetching', total: p.totalInvoices, processed: p.processedInvoices });
+          } else if (p.insertedInvoices !== undefined) {
+            updateItem('invoices', { step: 'Inserting', total: p.totalInvoices, processed: p.insertedInvoices });
+          }
+          if (p.processedInvoices !== undefined && p.totalInvoices) {
+            notifySyncProgress(`${p.processedInvoices}/${p.totalInvoices} invoices`);
           }
         },
         abortControllerRef.current.signal,
         handleInvoicePayload
       );
+      updateItem('invoices', {
+        status: result.errors > 0 ? 'error' : 'done',
+        inserted: result.insertedInvoices,
+        errors: result.errors,
+        errorMsg: result.errors > 0 ? result.lastError : undefined,
+        step: undefined, total: undefined, processed: undefined,
+      });
 
-      // Chain AP Payments if enabled
+      // ── AP Payments (chained) ──
       if (chainAPPayments && !abortControllerRef.current?.signal.aborted) {
         addLog('step', '─── Chain: Syncing AP Payments ───');
+        updateItem('payments', { status: 'syncing', step: 'Fetching' });
+
         const paymentsResult = await syncAPPayments(
           parameters,
           testMode,
           addLog,
-          (newProgress) => {
-            setApPaymentsProgress((prev) => ({ ...prev, ...newProgress }));
+          (p) => {
+            setApPaymentsProgress((prev) => ({ ...prev, ...p }));
+            if (p.status === 'fetching') {
+              updateItem('payments', { step: 'Fetching', total: p.totalPayments, processed: p.processedPayments });
+            } else if (p.insertedPayments !== undefined) {
+              updateItem('payments', { step: 'Inserting', total: p.totalPayments, processed: p.insertedPayments });
+            }
           },
           abortControllerRef.current.signal,
           handlePaymentPayload
         );
+        updateItem('payments', {
+          status: paymentsResult.errors > 0 ? 'error' : 'done',
+          inserted: paymentsResult.insertedPayments,
+          errors: paymentsResult.errors,
+          errorMsg: paymentsResult.errors > 0 ? paymentsResult.lastError : undefined,
+          step: undefined, total: undefined, processed: undefined,
+        });
         syncResult = {
           inserted: result.insertedInvoices + paymentsResult.insertedPayments,
           errors: result.errors + paymentsResult.errors,
@@ -6852,6 +6899,96 @@ const SyncData: React.FC = () => {
           )}
         </div>
       )}
+      {/* Single Supplier Sync Progress Modal */}
+      <Modal
+        open={singleSyncOpen}
+        title={
+          <Space>
+            <DatabaseOutlined />
+            <span>AP Sync{form.getFieldValue('SupplierNumber') ? ` — ${form.getFieldValue('SupplierNumber')}` : ''}</span>
+            {isSyncing && <Tag color="processing">Syncing...</Tag>}
+          </Space>
+        }
+        onCancel={() => { if (!isSyncing) setSingleSyncOpen(false); }}
+        footer={
+          <Button onClick={() => setSingleSyncOpen(false)} disabled={isSyncing}>
+            Close
+          </Button>
+        }
+        width={700}
+        styles={{ body: { padding: '16px' } }}
+      >
+        <Table
+          dataSource={singleSyncItems}
+          rowKey="key"
+          size="small"
+          pagination={false}
+          columns={[
+            {
+              title: '',
+              key: 'icon',
+              width: 36,
+              render: (_: any, r: SingleSupplierSyncItem) => {
+                if (r.status === 'done')    return <CheckCircleOutlined style={{ color: '#22c55e', fontSize: 16 }} />;
+                if (r.status === 'error')   return <CloseCircleOutlined style={{ color: '#ef4444', fontSize: 16 }} />;
+                if (r.status === 'syncing') return <SyncOutlined spin style={{ color: '#3b82f6', fontSize: 16 }} />;
+                if (r.status === 'skipped') return <MinusCircleOutlined style={{ color: '#94a3b8', fontSize: 16 }} />;
+                return <ClockCircleOutlined style={{ color: '#94a3b8', fontSize: 16 }} />;
+              },
+            },
+            {
+              title: 'Object',
+              dataIndex: 'label',
+              key: 'label',
+              width: 140,
+              render: (v: string) => <Text strong style={{ fontSize: 13 }}>{v}</Text>,
+            },
+            {
+              title: 'Progress',
+              key: 'progress',
+              render: (_: any, r: SingleSupplierSyncItem) => {
+                if (r.status === 'pending') return <Text style={{ color: '#94a3b8', fontSize: 12 }}>Waiting…</Text>;
+                if (r.status === 'skipped') return <Text style={{ color: '#94a3b8', fontSize: 12 }}>Skipped</Text>;
+                if (r.status === 'syncing' && r.step) {
+                  const prog = r.processed ?? 0;
+                  const total = r.total ?? 0;
+                  return (
+                    <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                      <Space size={6}>
+                        <Text style={{ fontSize: 12, color: '#3b82f6', fontWeight: 600 }}>{r.step}</Text>
+                        {total > 0 && <Text style={{ fontSize: 12 }}>{prog} / {total}</Text>}
+                      </Space>
+                      {total > 0 && (
+                        <Progress
+                          percent={Math.round((prog / total) * 100)}
+                          size="small"
+                          showInfo={false}
+                          strokeColor={r.key === 'payments' ? '#8b5cf6' : '#3b82f6'}
+                          style={{ margin: 0, minWidth: 200 }}
+                        />
+                      )}
+                    </Space>
+                  );
+                }
+                if (r.status === 'done') {
+                  return <Text style={{ fontSize: 12, color: '#22c55e' }}>✓ {r.inserted} inserted</Text>;
+                }
+                return <Text type="danger" style={{ fontSize: 12 }}>{r.errorMsg || 'Error'}</Text>;
+              },
+            },
+            {
+              title: 'Status',
+              key: 'statusTag',
+              width: 100,
+              render: (_: any, r: SingleSupplierSyncItem) => {
+                const map = { done: 'success', error: 'error', syncing: 'processing', pending: 'default', skipped: 'default' } as const;
+                return <Tag color={map[r.status]}>{r.status}</Tag>;
+              },
+            },
+          ]}
+        />
+      </Modal>
+
       {/* All Suppliers Sync Modal */}
       <Modal
         open={supplierSyncOpen}
