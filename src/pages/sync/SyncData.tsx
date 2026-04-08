@@ -162,19 +162,6 @@ interface SupplierSyncItem {
   payProcessed?: number;
 }
 
-// Single-supplier sync progress popup item
-interface SingleSupplierSyncItem {
-  key: string;
-  label: string;
-  status: 'pending' | 'syncing' | 'done' | 'error' | 'skipped';
-  step?: string;         // 'Fetching' | 'Inserting'
-  total?: number;
-  processed?: number;
-  inserted: number;
-  errors: number;
-  errorMsg?: string;
-}
-
 // Batch list modal item (for two-phase GL Journal sync)
 interface BatchListItem {
   batchId: number;
@@ -884,8 +871,28 @@ const SyncData: React.FC = () => {
 
   // ── AP Invoices chain + All Suppliers state ───────────────────────────────
   const [chainAPPayments, setChainAPPayments] = useState(false);
-  const [singleSyncOpen,  setSingleSyncOpen]  = useState(false);
-  const [singleSyncItems, setSingleSyncItems] = useState<SingleSupplierSyncItem[]>([]);
+  type ChainAPStepStatus = 'idle' | 'running' | 'success' | 'error' | 'skipped';
+  interface ChainAPStatus {
+    invoices:        ChainAPStepStatus;
+    payments:        ChainAPStepStatus;
+    invoicesInserted: number;
+    paymentsInserted: number;
+    invoicesErrors:   number;
+    paymentsErrors:   number;
+    invStep?:   string;   // 'Fetching' | 'Inserting'
+    invTotal?:  number;
+    invDone?:   number;
+    payStep?:   string;
+    payTotal?:  number;
+    payDone?:   number;
+    visible: boolean;
+  }
+  const [chainAPStatus, setChainAPStatus] = useState<ChainAPStatus>({
+    invoices: 'idle', payments: 'idle',
+    invoicesInserted: 0, paymentsInserted: 0,
+    invoicesErrors: 0,  paymentsErrors: 0,
+    visible: false,
+  });
   const [allSuppliersMode, setAllSuppliersMode] = useState(false);
   const [supplierSyncOpen, setSupplierSyncOpen] = useState(false);
   const [supplierSyncList, setSupplierSyncList] = useState<SupplierSyncItem[]>([]);
@@ -2000,21 +2007,16 @@ const SyncData: React.FC = () => {
       );
       syncResult = { inserted: result.insertedPayments, errors: result.errors, type: 'payments' };
     } else if (isAPInvoices) {
-      // AP Invoices Sync — open progress popup showing each object's status
-      const initialItems: SingleSupplierSyncItem[] = [
-        { key: 'invoices', label: 'AP Invoices', status: 'pending', inserted: 0, errors: 0 },
-        ...(chainAPPayments
-          ? [{ key: 'payments', label: 'AP Payments', status: 'pending' as const, inserted: 0, errors: 0 }]
-          : []),
-      ];
-      setSingleSyncItems(initialItems);
-      setSingleSyncOpen(true);
+      // AP Invoices Sync — show chain-style floating popup (like GL chain)
+      setChainAPStatus({
+        invoices: 'running', payments: chainAPPayments ? 'idle' : 'skipped',
+        invoicesInserted: 0, paymentsInserted: 0,
+        invoicesErrors: 0,   paymentsErrors: 0,
+        invStep: 'Fetching', invTotal: 0, invDone: 0,
+        visible: true,
+      });
 
-      const updateItem = (key: string, patch: Partial<SingleSupplierSyncItem>) =>
-        setSingleSyncItems(prev => prev.map(it => it.key === key ? { ...it, ...patch } : it));
-
-      // ── AP Invoices ──
-      updateItem('invoices', { status: 'syncing', step: 'Fetching' });
+      // ── Step 1: AP Invoices ──
       setApProgress({
         status: 'fetching',
         totalInvoices: 0, processedInvoices: 0, insertedInvoices: 0,
@@ -2034,30 +2036,36 @@ const SyncData: React.FC = () => {
         addLog,
         (p) => {
           setApProgress((prev) => ({ ...prev, ...p }));
-          if (p.status === 'fetching') {
-            updateItem('invoices', { step: 'Fetching', total: p.totalInvoices, processed: p.processedInvoices });
-          } else if (p.insertedInvoices !== undefined) {
-            updateItem('invoices', { step: 'Inserting', total: p.totalInvoices, processed: p.insertedInvoices });
-          }
-          if (p.processedInvoices !== undefined && p.totalInvoices) {
+          setChainAPStatus((prev) => ({
+            ...prev,
+            invoicesInserted: p.insertedInvoices ?? prev.invoicesInserted,
+            invoicesErrors:   p.errors ?? prev.invoicesErrors,
+            invStep:  p.status === 'fetching' ? 'Fetching' : 'Inserting',
+            invTotal: p.totalInvoices   ?? prev.invTotal,
+            invDone:  p.status === 'fetching' ? (p.processedInvoices ?? prev.invDone) : (p.insertedInvoices ?? prev.invDone),
+          }));
+          if (p.processedInvoices && p.totalInvoices)
             notifySyncProgress(`${p.processedInvoices}/${p.totalInvoices} invoices`);
-          }
         },
         abortControllerRef.current.signal,
         handleInvoicePayload
       );
-      updateItem('invoices', {
-        status: result.errors > 0 ? 'error' : 'done',
-        inserted: result.insertedInvoices,
-        errors: result.errors,
-        errorMsg: result.errors > 0 ? result.lastError : undefined,
-        step: undefined, total: undefined, processed: undefined,
-      });
 
-      // ── AP Payments (chained) ──
+      const invFailed = result.errors > 0;
+      setChainAPStatus((prev) => ({
+        ...prev,
+        invoices:         invFailed ? 'error' : 'success',
+        invoicesInserted: result.insertedInvoices,
+        invoicesErrors:   result.errors,
+        invStep: undefined, invTotal: undefined, invDone: undefined,
+        payments: chainAPPayments && !abortControllerRef.current?.signal.aborted ? 'running' : prev.payments,
+        payStep:  chainAPPayments ? 'Fetching' : undefined,
+        payTotal: 0, payDone: 0,
+      }));
+
+      // ── Step 2: AP Payments (chained) ──
       if (chainAPPayments && !abortControllerRef.current?.signal.aborted) {
         addLog('step', '─── Chain: Syncing AP Payments ───');
-        updateItem('payments', { status: 'syncing', step: 'Fetching' });
 
         const paymentsResult = await syncAPPayments(
           parameters,
@@ -2065,22 +2073,27 @@ const SyncData: React.FC = () => {
           addLog,
           (p) => {
             setApPaymentsProgress((prev) => ({ ...prev, ...p }));
-            if (p.status === 'fetching') {
-              updateItem('payments', { step: 'Fetching', total: p.totalPayments, processed: p.processedPayments });
-            } else if (p.insertedPayments !== undefined) {
-              updateItem('payments', { step: 'Inserting', total: p.totalPayments, processed: p.insertedPayments });
-            }
+            setChainAPStatus((prev) => ({
+              ...prev,
+              paymentsInserted: p.insertedPayments ?? prev.paymentsInserted,
+              paymentsErrors:   p.errors ?? prev.paymentsErrors,
+              payStep:  p.status === 'fetching' ? 'Fetching' : 'Inserting',
+              payTotal: p.totalPayments  ?? prev.payTotal,
+              payDone:  p.status === 'fetching' ? (p.processedPayments ?? prev.payDone) : (p.insertedPayments ?? prev.payDone),
+            }));
           },
           abortControllerRef.current.signal,
           handlePaymentPayload
         );
-        updateItem('payments', {
-          status: paymentsResult.errors > 0 ? 'error' : 'done',
-          inserted: paymentsResult.insertedPayments,
-          errors: paymentsResult.errors,
-          errorMsg: paymentsResult.errors > 0 ? paymentsResult.lastError : undefined,
-          step: undefined, total: undefined, processed: undefined,
-        });
+
+        setChainAPStatus((prev) => ({
+          ...prev,
+          payments:         paymentsResult.errors > 0 ? 'error' : 'success',
+          paymentsInserted: paymentsResult.insertedPayments,
+          paymentsErrors:   paymentsResult.errors,
+          payStep: undefined, payTotal: undefined, payDone: undefined,
+        }));
+
         syncResult = {
           inserted: result.insertedInvoices + paymentsResult.insertedPayments,
           errors: result.errors + paymentsResult.errors,
@@ -6899,95 +6912,153 @@ const SyncData: React.FC = () => {
           )}
         </div>
       )}
-      {/* Single Supplier Sync Progress Modal */}
-      <Modal
-        open={singleSyncOpen}
-        title={
-          <Space>
-            <DatabaseOutlined />
-            <span>AP Sync{form.getFieldValue('SupplierNumber') ? ` — ${form.getFieldValue('SupplierNumber')}` : ''}</span>
-            {isSyncing && <Tag color="processing">Syncing...</Tag>}
-          </Space>
-        }
-        onCancel={() => { if (!isSyncing) setSingleSyncOpen(false); }}
-        footer={
-          <Button onClick={() => setSingleSyncOpen(false)} disabled={isSyncing}>
-            Close
-          </Button>
-        }
-        width={700}
-        styles={{ body: { padding: '16px' } }}
-      >
-        <Table
-          dataSource={singleSyncItems}
-          rowKey="key"
-          size="small"
-          pagination={false}
-          columns={[
+      {/* AP Chain Sync — floating progress popup (same style as GL chain) */}
+      {chainAPStatus.visible && (
+        <div style={{
+          position: 'fixed', bottom: 24, left: 24, zIndex: 9998,
+          width: 340, background: '#fff', borderRadius: 12,
+          boxShadow: '0 8px 32px rgba(0,0,0,0.18)', border: '1px solid #e8e8e8',
+          overflow: 'hidden',
+        }}>
+          {/* Header */}
+          <div style={{
+            background: '#1a1a2e', padding: '10px 16px',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          }}>
+            <Space size={8}>
+              <SyncOutlined
+                spin={chainAPStatus.invoices === 'running' || chainAPStatus.payments === 'running'}
+                style={{ color: '#fff', fontSize: 15 }}
+              />
+              <span style={{ color: '#fff', fontWeight: 700, fontSize: 13 }}>AP Chain Sync</span>
+            </Space>
+            <Space size={6}>
+              {chainAPStatus.invoices !== 'running' && chainAPStatus.payments !== 'running' && (
+                <Tag
+                  color={
+                    chainAPStatus.invoices === 'error' || chainAPStatus.payments === 'error' ? 'error' :
+                    chainAPStatus.invoices === 'success' ? 'success' : 'default'
+                  }
+                  style={{ margin: 0, fontSize: 10 }}
+                >
+                  {chainAPStatus.invoices === 'success' && (chainAPStatus.payments === 'success' || chainAPStatus.payments === 'skipped') ? 'Complete' : 'Done'}
+                </Tag>
+              )}
+              <Button
+                type="text" size="small"
+                style={{ color: '#aaa', padding: 0, height: 20, lineHeight: '20px' }}
+                onClick={() => setChainAPStatus(prev => ({ ...prev, visible: false }))}
+              >✕</Button>
+            </Space>
+          </div>
+
+          {/* Steps */}
+          {([
             {
-              title: '',
-              key: 'icon',
-              width: 36,
-              render: (_: any, r: SingleSupplierSyncItem) => {
-                if (r.status === 'done')    return <CheckCircleOutlined style={{ color: '#22c55e', fontSize: 16 }} />;
-                if (r.status === 'error')   return <CloseCircleOutlined style={{ color: '#ef4444', fontSize: 16 }} />;
-                if (r.status === 'syncing') return <SyncOutlined spin style={{ color: '#3b82f6', fontSize: 16 }} />;
-                if (r.status === 'skipped') return <MinusCircleOutlined style={{ color: '#94a3b8', fontSize: 16 }} />;
-                return <ClockCircleOutlined style={{ color: '#94a3b8', fontSize: 16 }} />;
-              },
+              key: 'invoices',
+              label: 'AP Invoices',
+              icon: '🧾',
+              status: chainAPStatus.invoices,
+              inserted: chainAPStatus.invoicesInserted,
+              errors:   chainAPStatus.invoicesErrors,
+              step:     chainAPStatus.invStep,
+              done:     chainAPStatus.invDone,
+              total:    chainAPStatus.invTotal,
+              color:    '#1677ff',
             },
             {
-              title: 'Object',
-              dataIndex: 'label',
-              key: 'label',
-              width: 140,
-              render: (v: string) => <Text strong style={{ fontSize: 13 }}>{v}</Text>,
+              key: 'payments',
+              label: 'AP Payments',
+              icon: '💳',
+              status: chainAPStatus.payments,
+              inserted: chainAPStatus.paymentsInserted,
+              errors:   chainAPStatus.paymentsErrors,
+              step:     chainAPStatus.payStep,
+              done:     chainAPStatus.payDone,
+              total:    chainAPStatus.payTotal,
+              color:    '#7c3aed',
             },
-            {
-              title: 'Progress',
-              key: 'progress',
-              render: (_: any, r: SingleSupplierSyncItem) => {
-                if (r.status === 'pending') return <Text style={{ color: '#94a3b8', fontSize: 12 }}>Waiting…</Text>;
-                if (r.status === 'skipped') return <Text style={{ color: '#94a3b8', fontSize: 12 }}>Skipped</Text>;
-                if (r.status === 'syncing' && r.step) {
-                  const prog = r.processed ?? 0;
-                  const total = r.total ?? 0;
-                  return (
-                    <Space direction="vertical" size={4} style={{ width: '100%' }}>
-                      <Space size={6}>
-                        <Text style={{ fontSize: 12, color: '#3b82f6', fontWeight: 600 }}>{r.step}</Text>
-                        {total > 0 && <Text style={{ fontSize: 12 }}>{prog} / {total}</Text>}
-                      </Space>
-                      {total > 0 && (
+          ] as const).map((s, idx) => {
+            const statusColor =
+              s.status === 'running' ? s.color :
+              s.status === 'success' ? '#52c41a' :
+              s.status === 'error'   ? '#ff4d4f' :
+              s.status === 'skipped' ? '#bbb' : '#d9d9d9';
+            const statusBg =
+              s.status === 'running' ? (s.key === 'invoices' ? '#e6f4ff' : '#f5f0ff') :
+              s.status === 'success' ? '#f6ffed' :
+              s.status === 'error'   ? '#fff2f0' : '#fafafa';
+            return (
+              <div key={s.key} style={{
+                display: 'flex', alignItems: 'flex-start',
+                padding: '10px 16px', background: statusBg,
+                borderBottom: idx === 0 ? '1px solid #f0f0f0' : undefined,
+                gap: 10,
+              }}>
+                {/* Step badge */}
+                <div style={{
+                  width: 24, height: 24, borderRadius: '50%', flexShrink: 0, marginTop: 2,
+                  background: statusColor, color: '#fff',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 11, fontWeight: 700,
+                }}>
+                  {s.status === 'success' ? '✓' : s.status === 'error' ? '✗' : idx + 1}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a' }}>
+                      {s.icon} {s.label}
+                    </span>
+                    {s.status === 'running' && <SyncOutlined spin style={{ color: statusColor, fontSize: 13 }} />}
+                    {s.status === 'idle'    && <span style={{ fontSize: 10, color: '#bbb' }}>Waiting</span>}
+                    {s.status === 'skipped' && <Tag style={{ fontSize: 10, margin: 0 }}>Skipped</Tag>}
+                  </div>
+                  {/* Running: step label + count + progress bar */}
+                  {s.status === 'running' && s.step && (
+                    <div style={{ marginTop: 4 }}>
+                      <div style={{ fontSize: 11, color: statusColor, fontWeight: 600, marginBottom: 3 }}>
+                        {s.step}{s.total ? ` — ${s.done ?? 0} / ${s.total}` : '…'}
+                      </div>
+                      {(s.total ?? 0) > 0 && (
                         <Progress
-                          percent={Math.round((prog / total) * 100)}
-                          size="small"
-                          showInfo={false}
-                          strokeColor={r.key === 'payments' ? '#8b5cf6' : '#3b82f6'}
-                          style={{ margin: 0, minWidth: 200 }}
+                          percent={Math.round(((s.done ?? 0) / s.total!) * 100)}
+                          size="small" showInfo={false}
+                          strokeColor={statusColor}
+                          style={{ margin: 0 }}
                         />
                       )}
-                    </Space>
-                  );
-                }
-                if (r.status === 'done') {
-                  return <Text style={{ fontSize: 12, color: '#22c55e' }}>✓ {r.inserted} inserted</Text>;
-                }
-                return <Text type="danger" style={{ fontSize: 12 }}>{r.errorMsg || 'Error'}</Text>;
-              },
-            },
-            {
-              title: 'Status',
-              key: 'statusTag',
-              width: 100,
-              render: (_: any, r: SingleSupplierSyncItem) => {
-                const map = { done: 'success', error: 'error', syncing: 'processing', pending: 'default', skipped: 'default' } as const;
-                return <Tag color={map[r.status]}>{r.status}</Tag>;
-              },
-            },
-          ]}
-        />
-      </Modal>
+                    </div>
+                  )}
+                  {/* Done/error: inserted count */}
+                  {(s.status === 'success' || s.status === 'error') && (
+                    <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>
+                      <span style={{ color: '#52c41a', fontWeight: 600 }}>{s.inserted.toLocaleString()} inserted</span>
+                      {s.errors > 0 && <span style={{ color: '#ff4d4f', marginLeft: 8 }}>{s.errors} errors</span>}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Summary footer */}
+          {(chainAPStatus.invoices === 'success' || chainAPStatus.invoices === 'error') && (
+            <div style={{ padding: '8px 16px', background: '#fafafa', borderTop: '1px solid #f0f0f0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-around', textAlign: 'center' }}>
+                {[
+                  { label: 'Invoices', val: chainAPStatus.invoicesInserted },
+                  { label: 'Payments', val: chainAPStatus.paymentsInserted },
+                ].map(k => (
+                  <div key={k.label}>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: '#1a1a2e' }}>{k.val.toLocaleString()}</div>
+                    <div style={{ fontSize: 10, color: '#888' }}>{k.label}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* All Suppliers Sync Modal */}
       <Modal
