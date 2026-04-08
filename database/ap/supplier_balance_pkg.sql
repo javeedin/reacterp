@@ -251,7 +251,8 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
             GROUP BY ap.INVOICE_ID
         ) prep_sum ON prep_sum.INVOICE_ID = i.INVOICE_ID
         WHERE i.SUPPLIER_NUMBER = p_supplier_number
-        AND NVL(i.CANCELED_FLAG, 'N') != 'Y';
+        AND NVL(i.CANCELED_FLAG,  'N')      != 'Y'
+        AND NVL(i.INVOICE_TYPE, 'Standard') != 'Prepayment';
 
         -- Get payment count
         SELECT COUNT(DISTINCT CHECK_ID)
@@ -365,7 +366,8 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
                 GROUP BY ap.INVOICE_ID
             ) prep_sum ON prep_sum.INVOICE_ID = i.INVOICE_ID
             WHERE i.SUPPLIER_NUMBER = p_supplier_number
-            AND NVL(i.CANCELED_FLAG, 'N') != 'Y'
+            AND NVL(i.CANCELED_FLAG,  'N')      != 'Y'
+            AND NVL(i.INVOICE_TYPE, 'Standard') != 'Prepayment'
             AND NVL(i.PAID_STATUS, 'Unpaid') NOT IN ('Paid', 'Cancelled')
         ) LOOP
             DECLARE
@@ -504,7 +506,8 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
                     GROUP BY ap.INVOICE_ID
                 ) prep_sum ON prep_sum.INVOICE_ID = i.INVOICE_ID
                 WHERE i.SUPPLIER_NUMBER = p_supplier_number
-                AND NVL(i.CANCELED_FLAG, 'N') != 'Y'
+                AND NVL(i.CANCELED_FLAG,  'N')      != 'Y'
+                AND NVL(i.INVOICE_TYPE, 'Standard') != 'Prepayment'
                 AND (p_status = 'All'
                      OR (p_status = 'Paid'   AND i.PAID_STATUS = 'Paid')
                      OR (p_status = 'Unpaid' AND NVL(i.PAID_STATUS, 'Unpaid') NOT IN ('Paid', 'Cancelled')))
@@ -517,7 +520,8 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
             INTO l_total_count
             FROM RR_AP_INVOICES_ALL
             WHERE SUPPLIER_NUMBER = p_supplier_number
-            AND NVL(CANCELED_FLAG, 'N') != 'Y'
+            AND NVL(CANCELED_FLAG,  'N')      != 'Y'
+            AND NVL(INVOICE_TYPE, 'Standard') != 'Prepayment'
             AND (p_status = 'All'
                  OR (p_status = 'Paid'   AND PAID_STATUS = 'Paid')
                  OR (p_status = 'Unpaid' AND NVL(PAID_STATUS, 'Unpaid') NOT IN ('Paid', 'Cancelled')));
@@ -903,7 +907,8 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
             GROUP BY ap.INVOICE_ID
         ) prep_sum ON prep_sum.INVOICE_ID = i.INVOICE_ID
         WHERE i.SUPPLIER_NUMBER = p_supplier_number
-        AND NVL(i.CANCELED_FLAG, 'N') != 'Y';
+        AND NVL(i.CANCELED_FLAG,  'N')      != 'Y'
+        AND NVL(i.INVOICE_TYPE, 'Standard') != 'Prepayment';
 
         l_balance := l_total_invoices - l_total_paid;
 
@@ -936,7 +941,8 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
                 GROUP BY ap.INVOICE_ID
             ) prep_sum ON prep_sum.INVOICE_ID = i.INVOICE_ID
             WHERE i.SUPPLIER_NUMBER = p_supplier_number
-            AND NVL(i.CANCELED_FLAG, 'N') != 'Y'
+            AND NVL(i.CANCELED_FLAG,  'N')      != 'Y'
+            AND NVL(i.INVOICE_TYPE, 'Standard') != 'Prepayment'
             AND NVL(i.PAID_STATUS, 'Unpaid') NOT IN ('Paid', 'Cancelled')
         ) LOOP
             DECLARE

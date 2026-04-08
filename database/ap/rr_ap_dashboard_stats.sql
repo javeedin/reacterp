@@ -1,8 +1,10 @@
 -- =====================================================
--- GET /ap/invoices/stats
+-- GET /invoices/stats   (module 'ap' has no URI prefix in this env)
 -- Payables Dashboard KPI statistics from RR_AP_INVOICES_ALL
 -- Outstanding balance computed from actual payment and prepayment
 -- application tables (not the denormalized AMOUNT_PAID column).
+-- Prepayment-type invoices are excluded: they are advances already
+-- paid to the supplier and must not appear as outstanding payables.
 -- =====================================================
 
 BEGIN
@@ -82,7 +84,9 @@ BEGIN
         WHERE  NVL(ap.STATUS, 'Applied') != 'Cancelled'
         GROUP BY ap.INVOICE_ID
     ) prep_sum ON prep_sum.INVOICE_ID = i.INVOICE_ID
-    WHERE NVL(i.CANCELED_FLAG, 'N') != 'Y'
+    WHERE NVL(i.CANCELED_FLAG,  'N')         != 'Y'
+    -- exclude prepayment-type invoices: they are advances already paid
+    AND   NVL(i.INVOICE_TYPE, 'Standard')    != 'Prepayment'
     AND (:P_BUSINESS_UNIT IS NULL OR i.business_unit = :P_BUSINESS_UNIT);
 
     OWA_UTIL.MIME_HEADER('application/json', TRUE);
