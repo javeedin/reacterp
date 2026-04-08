@@ -7165,21 +7165,35 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         onCancel={() => { setPayInFullOpen(false); payInFullForm.resetFields(); setPayInFullStepStatus([]); setStep1CheckId(null); }}
         width={960}
         destroyOnClose
-        footer={[
-          <Button key="cancel" onClick={() => { setPayInFullOpen(false); payInFullForm.resetFields(); }}>
-            Cancel
-          </Button>,
-          <Button
-            key="submit"
-            type="primary"
-            loading={payInFullSubmitting}
-            icon={<CreditCardOutlined />}
-            style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
-            onClick={() => payInFullForm.submit()}
-          >
-            Confirm Payment
-          </Button>,
-        ]}
+        footer={(() => {
+          const paymentDone = payInFullStepStatus.length > 0 &&
+            payInFullStepStatus.every(s => s.status === 'success');
+          return paymentDone ? [
+            <Button
+              key="close"
+              type="primary"
+              icon={<CheckCircleOutlined />}
+              style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+              onClick={() => { setPayInFullOpen(false); payInFullForm.resetFields(); setPayInFullStepStatus([]); setStep1CheckId(null); }}
+            >
+              Close
+            </Button>,
+          ] : [
+            <Button key="cancel" onClick={() => { setPayInFullOpen(false); payInFullForm.resetFields(); }}>
+              Cancel
+            </Button>,
+            <Button
+              key="submit"
+              type="primary"
+              loading={payInFullSubmitting}
+              icon={<CreditCardOutlined />}
+              style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+              onClick={() => payInFullForm.submit()}
+            >
+              Confirm Payment
+            </Button>,
+          ];
+        })()}
       >
         <Form
           form={payInFullForm}
