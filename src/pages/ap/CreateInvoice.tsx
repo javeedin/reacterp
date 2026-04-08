@@ -831,143 +831,6 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     }
   }, []);
 
-  // Refresh — runs every webservice that fires when an invoice is opened for editing
-  const handleRefreshStatus = useCallback(async () => {
-    const invoiceId = savedInvoiceId || initialData?.invoiceId;
-    if (!invoiceId) return;
-    setStatusRefreshing(true);
-
-    const logs: { label: string; url: string; status: number; response: string }[] = [];
-    const hit = async (label: string, url: string) => {
-      try {
-        const res = await fetch(url, { headers: { Accept: 'application/json' } });
-        const text = await res.text();
-        logs.push({ label, url, status: res.status, response: text });
-        return { ok: res.ok, text };
-      } catch (err: any) {
-        logs.push({ label, url, status: 0, response: String(err) });
-        return { ok: false, text: '' };
-      }
-    };
-
-    try {
-      // 1. Invoice header — paid_status, validation_status, approval_status
-      const invoiceNumber = form.getFieldValue('invoiceNumber') || initialData?.invoiceNumber || '';
-      const statusUrl = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice${invoiceNumber ? `?invoice_number=${encodeURIComponent(invoiceNumber)}` : ''}`;
-      const { ok: statusOk, text: statusText } = await hit('Invoice Header (status)', statusUrl);
-      if (statusOk) {
-        try {
-          const data = JSON.parse(statusText);
-          const items: any[] = data.items || (Array.isArray(data) ? data : []);
-          const item = items.find((i: any) => i.invoice_id === invoiceId) || items[0];
-          if (item) {
-            setLiveHoldPaidStatus(item.paid_status        || '');
-            setLiveValidationStatus(item.validation_status || '');
-            setLiveApprovalStatus(item.approval_status    || '');
-          }
-        } catch { /* parse error logged */ }
-      }
-
-      // 2–9. Run the same calls as the edit-mode useEffect — all in parallel
-      const invoiceType = form.getFieldValue('invoiceType') || initialData?.invoiceType || '';
-      const isPrepayment = invoiceType.toLowerCase() === 'prepayment';
-
-      await Promise.all([
-        // Balance
-        (async () => {
-          const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/${invoiceId}/net-balance`;
-          const { ok, text } = await hit('Net Balance', url);
-          if (ok) { try { const d = JSON.parse(text); setInvoiceBalance(d.netBalance ?? d.balance ?? null); } catch {} }
-        })(),
-        // Payments
-        (async () => {
-          const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/payments?P_INVOICE_ID=${invoiceId}`;
-          const { ok, text } = await hit('Payments', url);
-          if (ok) { try {
-            const items = JSON.parse(text).items || [];
-            setInvoicePayments(items.map((item: any, idx: number) => ({
-              key: (item.id ?? idx).toString(), checkId: Number(item.id ?? item.check_id ?? 0),
-              number: (item.paper_document_number ?? item.id ?? '').toString(),
-              paymentDocument: item.invoice_number ?? '', status: item.payment_status ?? '',
-              reconciled: item.reconciled_flag === 'Y' ? 'Yes' : item.reconciled_flag === 'N' ? 'No' : (item.reconciled_flag ?? ''),
-              currentPayeeName: item.invoice_business_unit ?? '',
-              paymentDate: formatDateStr(item.creation_date ?? ''),
-              paidAmount: Number(item.amount_paid_payment_currency ?? 0),
-              currency: item.invoice_currency ?? '', address: '', remitToAccount: '',
-            })));
-          } catch {} }
-        })(),
-        // Installments
-        (async () => {
-          const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments?P_INVOICE_ID=${invoiceId}`;
-          const { ok, text } = await hit('Installments', url);
-          if (ok) { try {
-            const items = JSON.parse(text).items || JSON.parse(text).installments || JSON.parse(text) || [];
-            setInvoiceInstallments(items.map((item: any, idx: number) => ({
-              key: item.installment_id?.toString() || idx.toString(),
-              installmentNumber: item.installment_number || idx + 1,
-              dueDate: formatDateStr(item.due_date), grossAmount: item.gross_amount || 0,
-              unpaidAmount: item.amount_remaining || item.unpaid_amount || 0,
-              paymentPriority: item.payment_priority || 0,
-              paymentMethod: item.payment_method || '', bankAccount: item.bank_account || item.bank_account_name || '',
-            })));
-          } catch {} }
-        })(),
-        // Holds
-        (async () => {
-          const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoice-holds?invoice_id=${invoiceId}`;
-          const { ok, text } = await hit('Invoice Holds', url);
-          if (ok) { try {
-            const items = JSON.parse(text).items || JSON.parse(text) || [];
-            setInvoiceHolds(items.map((item: any, idx: number) => ({
-              key: item.hold_id?.toString() || idx.toString(),
-              holdName: item.hold_lookup_code || item.hold_name || '',
-              holdReason: item.hold_reason || item.description || '',
-              holdDate: formatDateStr(item.hold_date || item.creation_date),
-              heldBy: item.held_by || item.created_by || '',
-              releaseDate: formatDateStr(item.release_date), releasedBy: item.released_by || '',
-            })));
-          } catch {} }
-        })(),
-        // Applied prepayments
-        (async () => {
-          const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/appliedprepayments?P_INVOICE_ID=${invoiceId}`;
-          const { ok, text } = await hit('Applied Prepayments', url);
-          if (ok) { try {
-            const list = JSON.parse(text).items || JSON.parse(text) || [];
-            setAppliedPrepaymentsList(list);
-            loadAppSlaStatuses(list);
-          } catch {} }
-        })(),
-        // SLA / accounting header
-        (async () => {
-          const url = `${APEX_DB_CONFIG.baseUrl}/sla/accounting/exists?sourceTable=AP_INVOICES&sourceId=${invoiceId}`;
-          await hit('SLA Accounting Status', url);
-          // Let fetchSlaHeader handle the full state update
-          fetchSlaHeader(invoiceId);
-        })(),
-        // Prepayment-specific calls
-        ...(isPrepayment ? [
-          (async () => {
-            const url = `${APEX_DB_CONFIG.baseUrl}/ap/applied-prepayments/balances?prepayment_invoice_id=${invoiceId}`;
-            await hit('Prepayment Balance', url);
-            fetchPrepaymentBalance(invoiceId);
-          })(),
-          (async () => {
-            const url = `${APEX_DB_CONFIG.baseUrl}/ap/applied-prepayments/by-prepayment/${invoiceId}`;
-            await hit('Applied Invoices', url);
-            fetchAppliedInvoices(invoiceId);
-          })(),
-        ] : []),
-      ]);
-    } finally {
-      setRefreshApiLog(logs);
-      setStatusRefreshing(false);
-    }
-  }, [savedInvoiceId, initialData, form, fetchInvoiceBalance, fetchInvoicePayments,
-      fetchInvoiceHolds, fetchInvoiceInstallments, fetchSlaHeader,
-      fetchAppliedPrepayments, fetchPrepaymentBalance, fetchAppliedInvoices, loadAppSlaStatuses]);
-
   // Open void modal from invoice edit (Payments tab or Invoice Actions)
   const openInvoiceVoidModal = async (
     checkId: number,
@@ -2256,6 +2119,142 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       })));
     } catch { /* silent */ }
   }, []);
+
+  // Refresh — runs every webservice that fires when an invoice is opened for editing
+  // Must be defined after fetchSlaHeader, fetchPrepaymentBalance, fetchAppliedInvoices, loadAppSlaStatuses
+  const handleRefreshStatus = useCallback(async () => {
+    const invoiceId = savedInvoiceId || initialData?.invoiceId;
+    if (!invoiceId) return;
+    setStatusRefreshing(true);
+
+    const logs: { label: string; url: string; status: number; response: string }[] = [];
+    const hit = async (label: string, url: string) => {
+      try {
+        const res = await fetch(url, { headers: { Accept: 'application/json' } });
+        const text = await res.text();
+        logs.push({ label, url, status: res.status, response: text });
+        return { ok: res.ok, text };
+      } catch (err: any) {
+        logs.push({ label, url, status: 0, response: String(err) });
+        return { ok: false, text: '' };
+      }
+    };
+
+    try {
+      // 1. Invoice header — paid_status, validation_status, approval_status
+      const invoiceNumber = form.getFieldValue('invoiceNumber') || initialData?.invoiceNumber || '';
+      const statusUrl = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice${invoiceNumber ? `?invoice_number=${encodeURIComponent(invoiceNumber)}` : ''}`;
+      const { ok: statusOk, text: statusText } = await hit('Invoice Header (status)', statusUrl);
+      if (statusOk) {
+        try {
+          const data = JSON.parse(statusText);
+          const items: any[] = data.items || (Array.isArray(data) ? data : []);
+          const item = items.find((i: any) => i.invoice_id === invoiceId) || items[0];
+          if (item) {
+            setLiveHoldPaidStatus(item.paid_status        || '');
+            setLiveValidationStatus(item.validation_status || '');
+            setLiveApprovalStatus(item.approval_status    || '');
+          }
+        } catch { /* parse error logged */ }
+      }
+
+      // 2–9. Run the same calls as the edit-mode useEffect — all in parallel
+      const invoiceType = form.getFieldValue('invoiceType') || initialData?.invoiceType || '';
+      const isPrepayment = invoiceType.toLowerCase() === 'prepayment';
+
+      await Promise.all([
+        // Balance
+        (async () => {
+          const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/${invoiceId}/net-balance`;
+          const { ok, text } = await hit('Net Balance', url);
+          if (ok) { try { const d = JSON.parse(text); setInvoiceBalance(d.netBalance ?? d.balance ?? null); } catch {} }
+        })(),
+        // Payments
+        (async () => {
+          const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/payments?P_INVOICE_ID=${invoiceId}`;
+          const { ok, text } = await hit('Payments', url);
+          if (ok) { try {
+            const items = JSON.parse(text).items || [];
+            setInvoicePayments(items.map((item: any, idx: number) => ({
+              key: (item.id ?? idx).toString(), checkId: Number(item.id ?? item.check_id ?? 0),
+              number: (item.paper_document_number ?? item.id ?? '').toString(),
+              paymentDocument: item.invoice_number ?? '', status: item.payment_status ?? '',
+              reconciled: item.reconciled_flag === 'Y' ? 'Yes' : item.reconciled_flag === 'N' ? 'No' : (item.reconciled_flag ?? ''),
+              currentPayeeName: item.invoice_business_unit ?? '',
+              paymentDate: formatDateStr(item.creation_date ?? ''),
+              paidAmount: Number(item.amount_paid_payment_currency ?? 0),
+              currency: item.invoice_currency ?? '', address: '', remitToAccount: '',
+            })));
+          } catch {} }
+        })(),
+        // Installments
+        (async () => {
+          const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments?P_INVOICE_ID=${invoiceId}`;
+          const { ok, text } = await hit('Installments', url);
+          if (ok) { try {
+            const items = JSON.parse(text).items || JSON.parse(text).installments || JSON.parse(text) || [];
+            setInvoiceInstallments(items.map((item: any, idx: number) => ({
+              key: item.installment_id?.toString() || idx.toString(),
+              installmentNumber: item.installment_number || idx + 1,
+              dueDate: formatDateStr(item.due_date), grossAmount: item.gross_amount || 0,
+              unpaidAmount: item.amount_remaining || item.unpaid_amount || 0,
+              paymentPriority: item.payment_priority || 0,
+              paymentMethod: item.payment_method || '', bankAccount: item.bank_account || item.bank_account_name || '',
+            })));
+          } catch {} }
+        })(),
+        // Holds
+        (async () => {
+          const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoice-holds?invoice_id=${invoiceId}`;
+          const { ok, text } = await hit('Invoice Holds', url);
+          if (ok) { try {
+            const items = JSON.parse(text).items || JSON.parse(text) || [];
+            setInvoiceHolds(items.map((item: any, idx: number) => ({
+              key: item.hold_id?.toString() || idx.toString(),
+              holdName: item.hold_lookup_code || item.hold_name || '',
+              holdReason: item.hold_reason || item.description || '',
+              holdDate: formatDateStr(item.hold_date || item.creation_date),
+              heldBy: item.held_by || item.created_by || '',
+              releaseDate: formatDateStr(item.release_date), releasedBy: item.released_by || '',
+            })));
+          } catch {} }
+        })(),
+        // Applied prepayments
+        (async () => {
+          const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/appliedprepayments?P_INVOICE_ID=${invoiceId}`;
+          const { ok, text } = await hit('Applied Prepayments', url);
+          if (ok) { try {
+            const list = JSON.parse(text).items || JSON.parse(text) || [];
+            setAppliedPrepaymentsList(list);
+            loadAppSlaStatuses(list);
+          } catch {} }
+        })(),
+        // SLA / accounting header
+        (async () => {
+          const url = `${APEX_DB_CONFIG.baseUrl}/sla/accounting/exists?sourceTable=AP_INVOICES&sourceId=${invoiceId}`;
+          await hit('SLA Accounting Status', url);
+          fetchSlaHeader(invoiceId);
+        })(),
+        // Prepayment-specific calls
+        ...(isPrepayment ? [
+          (async () => {
+            const url = `${APEX_DB_CONFIG.baseUrl}/ap/applied-prepayments/balances?prepayment_invoice_id=${invoiceId}`;
+            await hit('Prepayment Balance', url);
+            fetchPrepaymentBalance(invoiceId);
+          })(),
+          (async () => {
+            const url = `${APEX_DB_CONFIG.baseUrl}/ap/applied-prepayments/by-prepayment/${invoiceId}`;
+            await hit('Applied Invoices', url);
+            fetchAppliedInvoices(invoiceId);
+          })(),
+        ] : []),
+      ]);
+    } finally {
+      setRefreshApiLog(logs);
+      setStatusRefreshing(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedInvoiceId, initialData, form, fetchSlaHeader, fetchPrepaymentBalance, fetchAppliedInvoices, loadAppSlaStatuses]);
 
   // Open the prepayment modal — load available + applied in parallel
   const openPrepaymentModal = useCallback(async () => {
