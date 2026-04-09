@@ -77,7 +77,14 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CANCEL_INVOICE_PKG AS
         v_invoice_type    VARCHAR2(50);
         v_paid_status     VARCHAR2(50);
         v_canceled_flag   VARCHAR2(1);
-        v_applied_count   NUMBER := 0;
+        v_invoice_amount  NUMBER := 0;
+
+        -- balance calculation
+        v_cash_paid       NUMBER := 0;   -- non-voided, positive payments
+        v_prepay_net      NUMBER := 0;   -- net prepayment amount still active
+        v_outstanding     NUMBER := 0;   -- invoice_amount - cash_paid - prepay_net
+
+        v_applied_count   NUMBER := 0;   -- for display only
         v_prepay_used     NUMBER := 0;
 
         c_not_cancelled   BOOLEAN;
@@ -88,13 +95,15 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CANCEL_INVOICE_PKG AS
         v_checks          VARCHAR2(4000) := '';
         v_eligible        BOOLEAN;
     BEGIN
-        -- Fetch invoice
+        -- Fetch invoice header
         BEGIN
             SELECT invoice_number, invoice_type,
                    NVL(paid_status, 'Unpaid'),
-                   NVL(canceled_flag, 'N')
+                   NVL(canceled_flag, 'N'),
+                   NVL(invoice_amount, 0)
             INTO   v_invoice_number, v_invoice_type,
-                   v_paid_status, v_canceled_flag
+                   v_paid_status, v_canceled_flag,
+                   v_invoice_amount
             FROM   RR_AP_INVOICES_ALL
             WHERE  invoice_id = p_invoice_id;
         EXCEPTION
@@ -104,21 +113,53 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CANCEL_INVOICE_PKG AS
                     || ']}';
         END;
 
-        -- Check 1: not already cancelled
-        c_not_cancelled := (v_canceled_flag != 'Y');
+        -- Calculate net cash paid (exclude voided payments and negative reversals)
+        SELECT NVL(SUM(ri.AMOUNT_PAID_INVOICE_CURRENCY), 0)
+        INTO   v_cash_paid
+        FROM   RR_AP_PAYMENTS_RELATED_INVOICES ri
+        WHERE  ri.invoice_id = p_invoice_id
+          AND  NVL(ri.INVOICE_PAYMENT_STATUS, 'Active') != 'Voided'
+          AND  ri.AMOUNT_PAID_INVOICE_CURRENCY > 0;
 
-        -- Check 2: not paid (covers 'Paid', 'Fully Paid', 'Partial')
-        c_not_paid := NVL(v_paid_status, 'Unpaid') NOT IN ('Paid', 'Fully Paid', 'Partial');
+        -- Calculate net prepayment applied:
+        -- A prepayment application is "voided" when its payment record is voided.
+        -- We only count applications whose underlying prepayment payment is still active.
+        SELECT NVL(SUM(ap.applied_amount), 0)
+        INTO   v_prepay_net
+        FROM   RR_AP_APPLIED_PREPAYMENTS ap
+        WHERE  ap.invoice_id = p_invoice_id
+          AND  NVL(ap.status, 'Applied') != 'Cancelled'
+          AND  EXISTS (
+              -- The prepayment's payment must be non-voided and positive
+              SELECT 1
+              FROM   RR_AP_PAYMENTS_RELATED_INVOICES pr
+              WHERE  pr.invoice_id = ap.prepayment_invoice_id
+                AND  NVL(pr.INVOICE_PAYMENT_STATUS, 'Active') != 'Voided'
+                AND  pr.AMOUNT_PAID_INVOICE_CURRENCY > 0
+          );
 
-        -- Check 3: no ACTIVE prepayment applications against this invoice (as target)
-        -- Status = 'Unapplied' means it was previously applied then reversed — not blocking
+        -- Row count for display (any record with status=Applied regardless of payment state)
         SELECT COUNT(*) INTO v_applied_count
         FROM   RR_AP_APPLIED_PREPAYMENTS
         WHERE  invoice_id = p_invoice_id
           AND  NVL(status, 'Applied') = 'Applied';
-        c_no_applied := (v_applied_count = 0);
 
-        -- Check 4 (Prepayment only): not yet applied to any invoice
+        -- Outstanding balance: if = invoice amount, nothing is effectively paid/applied
+        v_outstanding := v_invoice_amount - v_cash_paid - v_prepay_net;
+
+        -- Check 1: not already cancelled
+        c_not_cancelled := (v_canceled_flag != 'Y');
+
+        -- Check 2: no effective cash payments
+        -- Pass if outstanding balance = invoice amount (all payments voided/reversed)
+        c_not_paid := (v_cash_paid <= 0.005)
+                      AND NVL(v_paid_status, 'Unpaid') NOT IN ('Paid', 'Fully Paid', 'Partial');
+
+        -- Check 3: no effective prepayment applications
+        -- Pass if net active prepay applied = 0 (voided prepayments don't count)
+        c_no_applied := (v_prepay_net <= 0.005);
+
+        -- Check 4 (Prepayment only): not applied to any invoice
         IF v_invoice_type = 'Prepayment' THEN
             SELECT COUNT(*) INTO v_prepay_used
             FROM   RR_AP_APPLIED_PREPAYMENTS
@@ -133,12 +174,15 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CANCEL_INVOICE_PKG AS
         v_checks := jcheck('Not already cancelled', c_not_cancelled,
                         CASE WHEN NOT c_not_cancelled THEN 'Invoice is already cancelled' END);
         v_checks := v_checks || ','
-                 || jcheck('No active payments', c_not_paid,
-                        CASE WHEN NOT c_not_paid THEN 'Invoice has payments: ' || v_paid_status END);
+                 || jcheck('No effective cash payments', c_not_paid,
+                        CASE WHEN NOT c_not_paid
+                             THEN 'Invoice has active payments (paid status: ' || v_paid_status || ')'
+                        END);
         v_checks := v_checks || ','
-                 || jcheck('No applied prepayments', c_no_applied,
+                 || jcheck('No effective prepayment applications', c_no_applied,
                         CASE WHEN NOT c_no_applied
-                             THEN v_applied_count || ' active prepayment application(s) on this invoice'
+                             THEN TO_CHAR(v_applied_count) || ' prepayment application(s) — net applied: '
+                                  || TO_CHAR(v_prepay_net, 'FM999,999,990.00')
                         END);
         IF v_invoice_type = 'Prepayment' THEN
             v_checks := v_checks || ','
@@ -152,6 +196,8 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CANCEL_INVOICE_PKG AS
             || ',"invoiceNumber":"' || REPLACE(v_invoice_number,'"','\"') || '"'
             || ',"invoiceType":"'   || REPLACE(v_invoice_type,  '"','\"') || '"'
             || ',"paidStatus":"'    || REPLACE(v_paid_status,   '"','\"') || '"'
+            || ',"invoiceAmount":'  || TO_CHAR(v_invoice_amount)
+            || ',"outstanding":'    || TO_CHAR(v_outstanding)
             || ',"checks":[' || v_checks || ']}';
 
     EXCEPTION

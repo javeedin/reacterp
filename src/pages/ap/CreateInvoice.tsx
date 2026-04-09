@@ -626,6 +626,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     invoiceNumber: string;
     invoiceType: string;
     paidStatus: string;
+    invoiceAmount?: number;
+    outstanding?: number;
     checks: { check: string; passed: boolean; detail?: string }[];
   } | null>(null);
   const [cancelApiExpanded, setCancelApiExpanded]   = useState(false);
@@ -2330,6 +2332,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         invoiceNumber: data.invoiceNumber ?? '',
         invoiceType:   data.invoiceType   ?? '',
         paidStatus:    data.paidStatus    ?? '',
+        invoiceAmount: data.invoiceAmount,
+        outstanding:   data.outstanding,
         checks:        Array.isArray(data.checks) ? data.checks : [],
       });
     } catch (err) {
@@ -10044,12 +10048,34 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 <Descriptions size="small" column={2} style={{ marginBottom: 16 }}>
                   <Descriptions.Item label="Invoice #">{cancelEligibility.invoiceNumber}</Descriptions.Item>
                   <Descriptions.Item label="Type">{cancelEligibility.invoiceType}</Descriptions.Item>
-                  <Descriptions.Item label="Status">{cancelEligibility.paidStatus}</Descriptions.Item>
+                  <Descriptions.Item label="Paid Status">{cancelEligibility.paidStatus}</Descriptions.Item>
                   <Descriptions.Item label="Eligible">
                     {cancelEligibility.eligible
                       ? <Tag color="success" icon={<CheckCircleOutlined />}>Yes</Tag>
                       : <Tag color="error"   icon={<CloseCircleOutlined />}>No</Tag>}
                   </Descriptions.Item>
+                  {cancelEligibility.invoiceAmount !== undefined && (
+                    <Descriptions.Item label="Invoice Amount">
+                      <span style={{ fontWeight: 600 }}>
+                        {cancelEligibility.invoiceAmount.toLocaleString('en-AE', { minimumFractionDigits: 2 })}
+                      </span>
+                    </Descriptions.Item>
+                  )}
+                  {cancelEligibility.outstanding !== undefined && (
+                    <Descriptions.Item label="Outstanding Balance">
+                      <span style={{
+                        fontWeight: 600,
+                        color: Math.abs(cancelEligibility.outstanding - (cancelEligibility.invoiceAmount ?? 0)) < 0.01
+                          ? REDWOOD.success   /* balance = invoice amount = fully open */
+                          : REDWOOD.error,
+                      }}>
+                        {cancelEligibility.outstanding.toLocaleString('en-AE', { minimumFractionDigits: 2 })}
+                        {Math.abs(cancelEligibility.outstanding - (cancelEligibility.invoiceAmount ?? 0)) < 0.01 && (
+                          <Tag color="success" style={{ marginLeft: 6, fontSize: 10 }}>Fully Open</Tag>
+                        )}
+                      </span>
+                    </Descriptions.Item>
+                  )}
                 </Descriptions>
                 <Divider style={{ margin: '8px 0 12px' }} />
                 <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 13 }}>Eligibility Checks</div>
