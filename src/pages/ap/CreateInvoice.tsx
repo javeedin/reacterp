@@ -633,6 +633,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [cancelApiExpanded, setCancelApiExpanded]   = useState(false);
   const [cancelApiTesting,  setCancelApiTesting]    = useState(false);
   const [cancelApiResult,   setCancelApiResult]     = useState<string | null>(null);
+  const [cancelPostExpanded, setCancelPostExpanded] = useState(false);
+  const [cancelPostTesting,  setCancelPostTesting]  = useState(false);
+  const [cancelPostResult,   setCancelPostResult]   = useState<string | null>(null);
   const [selectedAvailKeys, setSelectedAvailKeys] = useState<React.Key[]>([]);
 
   // Un-apply modal state
@@ -2321,6 +2324,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     setCancelDone(false);
     setCancelApiExpanded(false);
     setCancelApiResult(null);
+    setCancelPostExpanded(false);
+    setCancelPostResult(null);
     setCancelEligLoading(true);
     setCancelModalOpen(true);
     try {
@@ -10238,6 +10243,132 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 </ul>
               }
             />
+
+            {/* ── API Info Panel (POST cancel) ──────────────────────── */}
+            {(() => {
+              const invoiceId = savedInvoiceId || initialData?.invoiceId;
+              const cancelUrl = `${APEX_DB_CONFIG.baseUrl}/invoices/${invoiceId}/cancel`;
+              const cancelBody = JSON.stringify({ cancelledBy: user?.username || 'SYSTEM' }, null, 2);
+              return (
+                <div style={{ marginTop: 14 }}>
+                  <div
+                    onClick={() => { setCancelPostExpanded(v => !v); setCancelPostResult(null); }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+                      padding: '5px 8px', borderRadius: 6,
+                      background: '#fff7e6', border: '1px solid #ffd591',
+                      fontSize: 12, color: '#d46b08', userSelect: 'none',
+                    }}
+                  >
+                    <ApiOutlined style={{ fontSize: 13 }} />
+                    <span style={{ fontWeight: 600 }}>API Info — Cancel Request</span>
+                    <span style={{ marginLeft: 'auto', fontSize: 11 }}>{cancelPostExpanded ? '▲ Hide' : '▼ Show'}</span>
+                  </div>
+
+                  {cancelPostExpanded && (
+                    <div style={{
+                      marginTop: 6, padding: '10px 12px', borderRadius: 6,
+                      background: '#fafafa', border: '1px solid #d9d9d9', fontSize: 12,
+                    }}>
+                      {/* Method + URL */}
+                      <div style={{ marginBottom: 4, color: '#8c8c8c', fontSize: 11 }}>POST — Cancel invoice</div>
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        background: '#fff', border: '1px solid #e0e0e0',
+                        borderRadius: 4, padding: '4px 8px', marginBottom: 8,
+                      }}>
+                        <Tag color="blue" style={{ margin: 0, fontSize: 10 }}>POST</Tag>
+                        <code style={{ flex: 1, fontSize: 11, wordBreak: 'break-all', color: '#1d39c4' }}>
+                          {cancelUrl}
+                        </code>
+                        <Tooltip title="Copy URL">
+                          <CopyOutlined
+                            style={{ flexShrink: 0, cursor: 'pointer', color: '#595959' }}
+                            onClick={() => { navigator.clipboard.writeText(cancelUrl); message.success('URL copied'); }}
+                          />
+                        </Tooltip>
+                      </div>
+
+                      {/* Request body */}
+                      <div style={{ marginBottom: 4, color: '#8c8c8c', fontSize: 11 }}>Request Body (JSON)</div>
+                      <div style={{ position: 'relative' }}>
+                        <pre style={{
+                          margin: 0, padding: '6px 32px 6px 8px',
+                          background: '#1e1e1e', color: '#ce9178',
+                          borderRadius: 4, fontSize: 11,
+                          whiteSpace: 'pre-wrap',
+                        }}>
+                          {cancelBody}
+                        </pre>
+                        <Tooltip title="Copy body">
+                          <CopyOutlined
+                            style={{
+                              position: 'absolute', top: 6, right: 8,
+                              cursor: 'pointer', color: '#888',
+                            }}
+                            onClick={() => { navigator.clipboard.writeText(cancelBody); message.success('Body copied'); }}
+                          />
+                        </Tooltip>
+                      </div>
+
+                      {/* Test button */}
+                      <div style={{ marginTop: 8, display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <Button
+                          size="small"
+                          type="primary"
+                          danger
+                          ghost
+                          icon={<ApiOutlined />}
+                          loading={cancelPostTesting}
+                          onClick={async () => {
+                            setCancelPostTesting(true);
+                            setCancelPostResult(null);
+                            try {
+                              const res = await fetch(cancelUrl, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                                body: JSON.stringify({ cancelledBy: user?.username || 'SYSTEM' }),
+                              });
+                              const text = await res.text();
+                              try { setCancelPostResult(JSON.stringify(JSON.parse(text), null, 2)); }
+                              catch { setCancelPostResult(text); }
+                            } catch (e: any) {
+                              setCancelPostResult(`Error: ${e.message}`);
+                            } finally {
+                              setCancelPostTesting(false);
+                            }
+                          }}
+                        >
+                          Test POST
+                        </Button>
+                        <span style={{ fontSize: 11, color: '#ff4d4f' }}>⚠ This will actually cancel the invoice</span>
+                        {cancelPostResult && (
+                          <Tooltip title="Copy response">
+                            <CopyOutlined
+                              style={{ cursor: 'pointer', color: '#595959' }}
+                              onClick={() => { navigator.clipboard.writeText(cancelPostResult!); message.success('Response copied'); }}
+                            />
+                          </Tooltip>
+                        )}
+                      </div>
+
+                      {cancelPostResult && (
+                        <pre style={{
+                          marginTop: 8, padding: '8px 10px',
+                          background: '#1e1e1e', color: '#d4d4d4',
+                          borderRadius: 4, fontSize: 11,
+                          maxHeight: 200, overflow: 'auto',
+                          whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                        }}>
+                          {cancelPostResult}
+                        </pre>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+            {/* ── End API Info Panel ────────────────────────────────── */}
           </div>
         )}
       </Modal>
