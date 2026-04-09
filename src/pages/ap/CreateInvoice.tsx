@@ -2324,7 +2324,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     setCancelEligLoading(true);
     setCancelModalOpen(true);
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/${invoiceId}/cancel-eligibility`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/invoices/${invoiceId}/cancel-eligibility`;
       const res = await fetch(url, { headers: { Accept: 'application/json' } });
       const data = await res.json();
       setCancelEligibility({
@@ -2350,7 +2350,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     if (!invoiceId) return;
     setCancelExecuting(true);
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/${invoiceId}/cancel`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/invoices/${invoiceId}/cancel`;
       const res = await fetch(url, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
