@@ -127,10 +127,35 @@ const AVAILABLE_SEGMENTS: SegmentConfig[] = [
   { key: 'intercompany', label: 'Intercompany' },
 ];
 
+interface RrTBRecord {
+  account_combination: string;
+  company: string;
+  lob: string;
+  department: string;
+  account: string;
+  account_desc: string;
+  sub_account: string;
+  analysis: string;
+  intercompany: string;
+  account_type: string;   // A / L / O / R / E
+  currency_code: string;
+  opening_dr: number;
+  opening_cr: number;
+  ptd_dr: number;
+  ptd_cr: number;
+  ytd_dr: number;
+  ytd_cr: number;
+  closing_dr: number;
+  closing_cr: number;
+}
+
 interface TabData {
   key: string;
   periodName: string;
+  tabType: 'fusion' | 'reerp';
   data: GLBalanceRecord[];
+  rrData: RrTBRecord[];
+  rrGenerating: boolean;
   loading: boolean;
   error: string | null;
   companies: string[];
@@ -321,7 +346,10 @@ const TrialBalance: React.FC = () => {
     const newTab: TabData = {
       key: tabKey,
       periodName,
+      tabType: 'fusion',
       data: [],
+      rrData: [],
+      rrGenerating: false,
       loading: true,
       error: null,
       companies: [],
@@ -366,6 +394,78 @@ const TrialBalance: React.FC = () => {
         t.key === tabKey
           ? { ...t, loading: false, error: errorMsg }
           : t
+      ));
+    }
+  }, [tabs]);
+
+  // Fetch + generate ReERP Trial Balance for a period
+  const fetchRrTrialBalance = useCallback(async (record: PeriodInfo) => {
+    const tabKey = `rr-${record.period_name_id}`;
+
+    const existingTab = tabs.find(t => t.key === tabKey);
+    if (existingTab) { setActiveTab(tabKey); return; }
+
+    const newTab: TabData = {
+      key: tabKey,
+      periodName: `ReERP: ${record.period_name_id}`,
+      tabType: 'reerp',
+      data: [],
+      rrData: [],
+      rrGenerating: true,
+      loading: true,
+      error: null,
+      companies: [],
+      currencies: [],
+      selectedCompany: null,
+      selectedCurrency: null,
+      segmentsBefore: [],
+      segmentsAfter: [],
+      gridSearch: '',
+    };
+
+    setTabs(prev => [...prev, newTab]);
+    setActiveTab(tabKey);
+
+    try {
+      // Step 1: Generate TB for this period
+      const genUrl = `${APEX_DB_CONFIG.baseUrl}/gl/rr-trialbalance/generate`;
+      const genRes = await fetch(genUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          p_ledger_name: record.ledger_name,
+          p_period_year: record.period_year,
+          p_period_name: record.period_name_id,
+        }),
+      });
+      const genData = await genRes.json();
+      if (genData.status === 'error') throw new Error(genData.message || 'Generation failed');
+
+      setTabs(prev => prev.map(t =>
+        t.key === tabKey ? { ...t, rrGenerating: false } : t
+      ));
+
+      // Step 2: Fetch the generated rows
+      const fetchUrl = `${APEX_DB_CONFIG.baseUrl}/gl/rr-trialbalance`
+        + `?ledger_name=${encodeURIComponent(record.ledger_name)}`
+        + `&period_name=${encodeURIComponent(record.period_name_id)}`
+        + `&limit=5000`;
+      const res = await fetch(fetchUrl, { headers: { Accept: 'application/json' } });
+      const data = await res.json();
+      const items: RrTBRecord[] = (data.items || []) as RrTBRecord[];
+
+      const companies = [...new Set(items.map(i => i.company).filter(Boolean))].sort();
+      const currencies = [...new Set(items.map(i => i.currency_code).filter(Boolean))].sort();
+
+      setTabs(prev => prev.map(t =>
+        t.key === tabKey
+          ? { ...t, rrData: items, loading: false, companies, currencies }
+          : t
+      ));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to generate ReERP TB';
+      setTabs(prev => prev.map(t =>
+        t.key === tabKey ? { ...t, loading: false, rrGenerating: false, error: msg } : t
       ));
     }
   }, [tabs]);
@@ -651,21 +751,36 @@ const TrialBalance: React.FC = () => {
     {
       title: 'Action',
       key: 'action',
-      width: 100,
+      width: 200,
       render: (_: unknown, record: PeriodInfo) => (
-        <Button
-          type="primary"
-          icon={<TableOutlined />}
-          size="small"
-          onClick={() => fetchTrialBalance(record.period_name_id)}
-          style={{
-            background: REDWOOD.primary,
-            borderColor: REDWOOD.primary,
-            borderRadius: 6,
-          }}
-        >
-          TB
-        </Button>
+        <Space size={4}>
+          <Button
+            type="primary"
+            icon={<TableOutlined />}
+            size="small"
+            onClick={() => fetchTrialBalance(record.period_name_id)}
+            style={{
+              background: REDWOOD.primary,
+              borderColor: REDWOOD.primary,
+              borderRadius: 6,
+            }}
+          >
+            Fusion TB
+          </Button>
+          <Button
+            type="primary"
+            icon={<BarChartOutlined />}
+            size="small"
+            onClick={() => fetchRrTrialBalance(record)}
+            style={{
+              background: REDWOOD.success,
+              borderColor: REDWOOD.success,
+              borderRadius: 6,
+            }}
+          >
+            ReERP TB
+          </Button>
+        </Space>
       ),
     },
   ];
@@ -1769,6 +1884,157 @@ const TrialBalance: React.FC = () => {
     );
   };
 
+  // Render a ReERP TB tab (uses RrTBRecord with separate DR/CR columns)
+  const renderRrTBTab = (tab: TabData) => {
+    if (tab.loading || tab.rrGenerating) {
+      return (
+        <div style={{ textAlign: 'center', padding: '60px 0' }}>
+          <Spin size="large" />
+          <div style={{ marginTop: 16, color: REDWOOD.textSecondary, fontSize: 13 }}>
+            {tab.rrGenerating ? 'Generating ReERP Trial Balance…' : 'Loading…'}
+          </div>
+        </div>
+      );
+    }
+    if (tab.error) {
+      return <Alert type="error" showIcon message="Error" description={tab.error} />;
+    }
+
+    const fmt = (n: number) => new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+    const accountTypeColor: Record<string, string> = { A: '#e6f7ff', L: '#fff7e6', O: '#f6ffed', R: '#fff0f6', E: '#f9f0ff' };
+    const accountTypeLabel: Record<string, string> = { A: 'Asset', L: 'Liability', O: 'Equity', R: 'Revenue', E: 'Expense' };
+
+    // Filter
+    let rows = tab.rrData.filter(r => {
+      if (tab.selectedCompany && r.company !== tab.selectedCompany) return false;
+      if (tab.selectedCurrency && r.currency_code !== tab.selectedCurrency) return false;
+      return true;
+    });
+
+    if (tab.gridSearch.trim()) {
+      const lc = tab.gridSearch.toLowerCase();
+      rows = rows.filter(r =>
+        r.account.toLowerCase().includes(lc) ||
+        r.account_desc?.toLowerCase().includes(lc) ||
+        r.account_combination?.toLowerCase().includes(lc) ||
+        r.company?.toLowerCase().includes(lc)
+      );
+    }
+
+    // Group by account for summary
+    const grouped = new Map<string, { account: string; account_desc: string; account_type: string;
+      open_dr: number; open_cr: number; ptd_dr: number; ptd_cr: number;
+      ytd_dr: number; ytd_cr: number; cls_dr: number; cls_cr: number }>();
+    rows.forEach(r => {
+      const k = r.account;
+      if (!grouped.has(k)) grouped.set(k, { account: r.account, account_desc: r.account_desc,
+        account_type: r.account_type, open_dr: 0, open_cr: 0, ptd_dr: 0, ptd_cr: 0,
+        ytd_dr: 0, ytd_cr: 0, cls_dr: 0, cls_cr: 0 });
+      const g = grouped.get(k)!;
+      g.open_dr += r.opening_dr || 0;  g.open_cr += r.opening_cr || 0;
+      g.ptd_dr  += r.ptd_dr    || 0;  g.ptd_cr  += r.ptd_cr    || 0;
+      g.ytd_dr  += r.ytd_dr    || 0;  g.ytd_cr  += r.ytd_cr    || 0;
+      g.cls_dr  += r.closing_dr || 0; g.cls_cr  += r.closing_cr || 0;
+    });
+    const tableRows = Array.from(grouped.values()).sort((a, b) => a.account.localeCompare(b.account));
+
+    const totals = tableRows.reduce((acc, r) => ({
+      open_dr: acc.open_dr + r.open_dr, open_cr: acc.open_cr + r.open_cr,
+      ptd_dr:  acc.ptd_dr  + r.ptd_dr,  ptd_cr:  acc.ptd_cr  + r.ptd_cr,
+      ytd_dr:  acc.ytd_dr  + r.ytd_dr,  ytd_cr:  acc.ytd_cr  + r.ytd_cr,
+      cls_dr:  acc.cls_dr  + r.cls_dr,  cls_cr:  acc.cls_cr  + r.cls_cr,
+    }), { open_dr: 0, open_cr: 0, ptd_dr: 0, ptd_cr: 0, ytd_dr: 0, ytd_cr: 0, cls_dr: 0, cls_cr: 0 });
+
+    const amtCol = (title: string, drKey: string, crKey: string, drColor?: string, crColor?: string) => ([
+      { title: `${title} DR`, dataIndex: drKey, key: drKey, align: 'right' as const, width: 110,
+        render: (v: number) => <Text style={{ fontFamily: 'monospace', fontSize: 11, color: drColor }}>{fmt(v || 0)}</Text> },
+      { title: `${title} CR`, dataIndex: crKey, key: crKey, align: 'right' as const, width: 110,
+        render: (v: number) => <Text style={{ fontFamily: 'monospace', fontSize: 11, color: crColor || REDWOOD.primary }}>{fmt(v || 0)}</Text> },
+    ]);
+
+    const columns = [
+      { title: 'Type', dataIndex: 'account_type', key: 'account_type', width: 60, align: 'center' as const,
+        render: (t: string) => <Tag color={t === 'A' ? 'blue' : t === 'L' ? 'orange' : t === 'O' ? 'green' : t === 'R' ? 'magenta' : 'purple'} style={{ fontSize: 10 }}>{t}</Tag> },
+      { title: 'Account', dataIndex: 'account', key: 'account', width: 120, sorter: (a: any, b: any) => a.account.localeCompare(b.account), defaultSortOrder: 'ascend' as const,
+        render: (v: string) => <Text strong style={{ fontFamily: 'monospace' }}>{v}</Text> },
+      { title: 'Description', dataIndex: 'account_desc', key: 'account_desc', ellipsis: true,
+        render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text> },
+      ...amtCol('Opening', 'open_dr', 'open_cr', '#595959', '#595959'),
+      ...amtCol('PTD', 'ptd_dr', 'ptd_cr', REDWOOD.info, REDWOOD.primary),
+      ...amtCol('YTD', 'ytd_dr', 'ytd_cr', '#237804', '#ad6800'),
+      ...amtCol('Closing', 'cls_dr', 'cls_cr', REDWOOD.neutral, REDWOOD.neutral),
+    ];
+
+    const summaryRow = () => (
+      <Table.Summary fixed>
+        <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 700 }}>
+          <Table.Summary.Cell index={0} colSpan={3} align="right">
+            <Text strong>TOTAL</Text>
+          </Table.Summary.Cell>
+          {[totals.open_dr, totals.open_cr, totals.ptd_dr, totals.ptd_cr,
+            totals.ytd_dr, totals.ytd_cr, totals.cls_dr, totals.cls_cr].map((v, i) => (
+            <Table.Summary.Cell key={i} index={i + 3} align="right">
+              <Text strong style={{ fontFamily: 'monospace', fontSize: 11 }}>{fmt(v)}</Text>
+            </Table.Summary.Cell>
+          ))}
+        </Table.Summary.Row>
+      </Table.Summary>
+    );
+
+    return (
+      <div>
+        {/* Filters */}
+        <Row gutter={12} style={{ marginBottom: 12 }}>
+          <Col span={6}>
+            <Select placeholder="All Companies" allowClear style={{ width: '100%' }}
+              value={tab.selectedCompany}
+              onChange={v => updateTabFilter(tab.key, 'selectedCompany', v ?? null)}
+              options={tab.companies.map(c => ({ value: c, label: c }))}
+            />
+          </Col>
+          <Col span={6}>
+            <Select placeholder="All Currencies" allowClear style={{ width: '100%' }}
+              value={tab.selectedCurrency}
+              onChange={v => updateTabFilter(tab.key, 'selectedCurrency', v ?? null)}
+              options={tab.currencies.map(c => ({ value: c, label: c }))}
+            />
+          </Col>
+          <Col span={8}>
+            <Input.Search placeholder="Search account / description…"
+              value={tab.gridSearch}
+              onChange={e => updateTabSearch(tab.key, e.target.value)}
+              allowClear
+            />
+          </Col>
+          <Col span={4}>
+            <Tag color="blue" style={{ lineHeight: '30px', fontSize: 12 }}>{tableRows.length} accounts</Tag>
+          </Col>
+        </Row>
+
+        {/* Account type legend */}
+        <Space style={{ marginBottom: 10 }} wrap>
+          {Object.entries(accountTypeLabel).map(([k, v]) => (
+            <Tag key={k} style={{ background: accountTypeColor[k], fontSize: 11 }}>
+              <strong>{k}</strong> = {v}{k === 'R' || k === 'E' ? ' (P&L — resets Jan)' : ' (BS — carries fwd)'}
+            </Tag>
+          ))}
+        </Space>
+
+        <Table
+          dataSource={tableRows}
+          columns={columns}
+          rowKey="account"
+          size="small"
+          pagination={{ pageSize: 50, showSizeChanger: true }}
+          scroll={{ x: 1200 }}
+          summary={summaryRow}
+          rowClassName={(r: any) => ''}
+          onRow={(r: any) => ({ style: { background: accountTypeColor[r.account_type] || '#fff' } })}
+        />
+      </div>
+    );
+  };
+
   // Build tab items
   const tabItems = [
     {
@@ -1786,11 +2052,13 @@ const TrialBalance: React.FC = () => {
       key: tab.key,
       label: (
         <span>
-          <TableOutlined style={{ marginRight: 8 }} />
+          {tab.tabType === 'reerp'
+            ? <BarChartOutlined style={{ marginRight: 6, color: REDWOOD.success }} />
+            : <TableOutlined style={{ marginRight: 8 }} />}
           {tab.periodName}
         </span>
       ),
-      children: renderTBTab(tab),
+      children: tab.tabType === 'reerp' ? renderRrTBTab(tab) : renderTBTab(tab),
       closable: true,
     })),
     ...(lsVisible ? [{
