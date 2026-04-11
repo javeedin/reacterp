@@ -51,14 +51,13 @@ const FA_REPORTS = [
 interface TabState {
   loading: boolean;
   error: string | null;
-  rawErrorDetail: string | null;   // raw SOAP error body / details
+  rawErrorDetail: string | null;
   columns: string[];
   rows: Record<string, string>[];
   duration: number | null;
   gridSearch: string;
-  rawEnvelope: string | null;      // the exact XML sent to BIP
+  rawEnvelope: string | null;
   soapUrl: string;
-  apiExpanded: boolean;
 }
 
 const buildSoapEnvelope = (
@@ -136,8 +135,9 @@ const FixedAssetsSync: React.FC<Props> = ({ open, onClose }) => {
   const [activeTab, setActiveTab]   = useState<string>('');
   const [tabStates, setTabStates]   = useState<Record<string, TabState>>({});
   const [sideSearch, setSideSearch] = useState('');
-  const [colModal, setColModal]     = useState<{ reportId: string; columns: string[] } | null>(null);
-  const [colCopyFmt, setColCopyFmt] = useState<'list' | 'ddl' | 'insert' | 'select'>('list');
+  const [colModal, setColModal]       = useState<{ reportId: string; columns: string[] } | null>(null);
+  const [colCopyFmt, setColCopyFmt]   = useState<'list' | 'ddl' | 'insert' | 'select'>('list');
+  const [apiExpanded, setApiExpanded] = useState<Record<string, boolean>>({});
 
   const openReport = (reportId: string) => {
     if (!openTabs.includes(reportId)) {
@@ -170,7 +170,6 @@ const FixedAssetsSync: React.FC<Props> = ({ open, onClose }) => {
         columns: [], rows: [], duration: null, gridSearch: '',
         rawEnvelope: displayEnvelope,
         soapUrl: env.baseUrl,
-        apiExpanded: prev[reportId]?.apiExpanded ?? false,
       },
     }));
 
@@ -343,12 +342,8 @@ const FixedAssetsSync: React.FC<Props> = ({ open, onClose }) => {
       reportPath, {},
       ORACLE_SOAP_CONFIG.prod.username, '••••••••',
     );
-    const expanded   = state?.apiExpanded ?? false;
-
-    const toggle = () => setTabStates(prev => ({
-      ...prev,
-      [reportId]: { ...prev[reportId], apiExpanded: !expanded },
-    }));
+    const expanded = apiExpanded[reportId] ?? false;
+    const toggle   = () => setApiExpanded(prev => ({ ...prev, [reportId]: !prev[reportId] }));
 
     return (
       <div style={{ marginBottom: 12 }}>
