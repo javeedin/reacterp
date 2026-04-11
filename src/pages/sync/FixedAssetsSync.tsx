@@ -618,6 +618,7 @@ const FixedAssetsSync: React.FC<Props> = ({ open, onClose }) => {
   });
 
   return (
+    <>
     <Modal
       open={open}
       onCancel={onClose}
@@ -724,6 +725,7 @@ const FixedAssetsSync: React.FC<Props> = ({ open, onClose }) => {
 
     {/* Columns viewer modal */}
     {renderColModal()}
+    </>
   );
 };
 
