@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useRef } from 'react';
+import FixedAssetsSync from './FixedAssetsSync';
 import {
   Layout,
   Card,
@@ -179,6 +180,7 @@ const SyncData: React.FC = () => {
   const [form] = Form.useForm();
   const [selectedObject, setSelectedObject] = useState<SyncObjectConfig | null>(null);
   const [, setApiType] = useState<ApiType>('REST');
+  const [faModalOpen, setFaModalOpen] = useState(false);
 
   // API-driven select options cache: paramKey → { loading, items }
   const [apiSelectOptions, setApiSelectOptions] = useState<Record<string, { loading: boolean; items: { label: string; value: string; subLabel?: string; count?: number }[] }>>({});
@@ -3303,6 +3305,36 @@ const SyncData: React.FC = () => {
               <Tag color={REDWOOD.primary} style={{ marginLeft: 16 }}>v{SYNC_VERSION}</Tag>
             </Space>
           </div>
+
+          {/* ── Module Quick-Access Cards ──────────────────────────────── */}
+          <div style={{ marginBottom: 20 }}>
+            <Text type="secondary" style={{ fontSize: 12, marginBottom: 8, display: 'block' }}>
+              Specialised Sync Modules
+            </Text>
+            <Space wrap>
+              <Card
+                hoverable
+                size="small"
+                onClick={() => setFaModalOpen(true)}
+                style={{
+                  width: 200, borderRadius: 10,
+                  border: '1px solid #ffd591',
+                  background: 'linear-gradient(135deg, #fff7e6 0%, #ffe7ba 100%)',
+                  cursor: 'pointer',
+                }}
+                bodyStyle={{ padding: '12px 16px' }}
+              >
+                <Space>
+                  <span style={{ fontSize: 22 }}>🏗️</span>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 13 }}>Fixed Assets</div>
+                    <div style={{ fontSize: 11, color: '#8c8c8c' }}>26 BIP Reports</div>
+                  </div>
+                </Space>
+              </Card>
+            </Space>
+          </div>
+          {/* ── End Module Quick-Access Cards ─────────────────────────── */}
 
           <Row gutter={24}>
             {/* Left Panel - Configuration */}
@@ -7342,6 +7374,9 @@ const SyncData: React.FC = () => {
         />
       </Modal>
     </Layout>
+
+    {/* ── Fixed Assets BIP Reports Modal ────────────────────────────── */}
+    <FixedAssetsSync open={faModalOpen} onClose={() => setFaModalOpen(false)} />
   );
 };
 
