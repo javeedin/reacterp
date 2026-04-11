@@ -1,12 +1,12 @@
 import React, { useState, useCallback } from 'react';
 import {
   Modal, Layout, Tabs, Button, Table, Space, Tag, Spin,
-  Alert, Tooltip, Typography, Badge, Divider, Input,
+  Alert, Tooltip, Typography, Badge, Divider, Input, message,
 } from 'antd';
 import {
   AuditOutlined, CloudDownloadOutlined, FileExcelOutlined,
-  CloseOutlined, SyncOutlined, InfoCircleOutlined, SearchOutlined,
-  CheckCircleOutlined, ClockCircleOutlined,
+  SyncOutlined, InfoCircleOutlined, SearchOutlined,
+  CheckCircleOutlined, ClockCircleOutlined, ApiOutlined, CopyOutlined,
 } from '@ant-design/icons';
 import { ORACLE_SOAP_CONFIG } from '../../config/api.config';
 import { callSoapBip } from '../../services/sync-http';
@@ -50,10 +50,14 @@ const FA_REPORTS = [
 interface TabState {
   loading: boolean;
   error: string | null;
+  rawErrorDetail: string | null;   // raw SOAP error body / details
   columns: string[];
   rows: Record<string, string>[];
   duration: number | null;
   gridSearch: string;
+  rawEnvelope: string | null;      // the exact XML sent to BIP
+  soapUrl: string;
+  apiExpanded: boolean;
 }
 
 const buildSoapEnvelope = (
@@ -147,14 +151,25 @@ const FixedAssetsSync: React.FC<Props> = ({ open, onClose }) => {
   };
 
   const fetchReport = useCallback(async (reportId: string) => {
+    const reportPath = `${FA_BASE_PATH}/${reportId}_BIP.xdo`;
+    const env        = ORACLE_SOAP_CONFIG.prod;
+    const envelope   = buildSoapEnvelope(reportPath, {}, env.username, env.password);
+    // Mask password in the displayed envelope
+    const displayEnvelope = envelope.replace(
+      /<v2:password>[^<]*<\/v2:password>/,
+      '<v2:password>••••••••</v2:password>',
+    );
+
     setTabStates(prev => ({
       ...prev,
-      [reportId]: { loading: true, error: null, columns: [], rows: [], duration: null, gridSearch: '' },
+      [reportId]: {
+        loading: true, error: null, rawErrorDetail: null,
+        columns: [], rows: [], duration: null, gridSearch: '',
+        rawEnvelope: displayEnvelope,
+        soapUrl: env.baseUrl,
+        apiExpanded: prev[reportId]?.apiExpanded ?? false,
+      },
     }));
-
-    const reportPath = `${FA_BASE_PATH}/${reportId}_BIP.xdo`;
-    const env = ORACLE_SOAP_CONFIG.prod;
-    const envelope = buildSoapEnvelope(reportPath, {}, env.username, env.password);
 
     const result = await callSoapBip(env.baseUrl, envelope);
 
@@ -162,9 +177,11 @@ const FixedAssetsSync: React.FC<Props> = ({ open, onClose }) => {
       setTabStates(prev => ({
         ...prev,
         [reportId]: {
+          ...prev[reportId],
           loading: false,
           error: result.error || 'SOAP call failed — no data returned',
-          columns: [], rows: [], duration: result.duration ?? null, gridSearch: '',
+          rawErrorDetail: (result as any).details || null,
+          duration: result.duration ?? null,
         },
       }));
       return;
@@ -174,10 +191,10 @@ const FixedAssetsSync: React.FC<Props> = ({ open, onClose }) => {
     setTabStates(prev => ({
       ...prev,
       [reportId]: {
-        loading: false, error: null,
+        ...prev[reportId],
+        loading: false, error: null, rawErrorDetail: null,
         columns, rows,
         duration: result.duration ?? null,
-        gridSearch: '',
       },
     }));
   }, []);
@@ -200,41 +217,132 @@ const FixedAssetsSync: React.FC<Props> = ({ open, onClose }) => {
     }
   };
 
+  // Reusable API info panel shown on every tab state
+  const renderApiPanel = (reportId: string) => {
+    const state = tabStates[reportId];
+    const reportPath = `${FA_BASE_PATH}/${reportId}_BIP.xdo`;
+    const soapUrl    = state?.soapUrl || ORACLE_SOAP_CONFIG.prod.baseUrl;
+    const envelope   = state?.rawEnvelope || buildSoapEnvelope(
+      reportPath, {},
+      ORACLE_SOAP_CONFIG.prod.username, '••••••••',
+    );
+    const expanded   = state?.apiExpanded ?? false;
+
+    const toggle = () => setTabStates(prev => ({
+      ...prev,
+      [reportId]: { ...prev[reportId], apiExpanded: !expanded },
+    }));
+
+    return (
+      <div style={{ marginBottom: 12 }}>
+        <div
+          onClick={toggle}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+            padding: '5px 10px', borderRadius: 6,
+            background: '#f0f5ff', border: '1px solid #adc6ff',
+            fontSize: 12, color: '#2f54eb', userSelect: 'none',
+          }}
+        >
+          <ApiOutlined style={{ fontSize: 13 }} />
+          <span style={{ fontWeight: 600 }}>API Info — SOAP Payload</span>
+          <Tag color="blue" style={{ marginLeft: 4, fontSize: 10 }}>POST</Tag>
+          <code style={{ flex: 1, fontSize: 10, color: '#595959', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {soapUrl}
+          </code>
+          <span style={{ fontSize: 11, flexShrink: 0 }}>{expanded ? '▲ Hide' : '▼ Show'}</span>
+        </div>
+
+        {expanded && (
+          <div style={{
+            marginTop: 6, padding: '10px 12px', borderRadius: 6,
+            background: '#fafafa', border: '1px solid #d9d9d9', fontSize: 12,
+          }}>
+            {/* Endpoint */}
+            <div style={{ marginBottom: 6 }}>
+              <Text type="secondary" style={{ fontSize: 11 }}>Endpoint (SOAPAction: "runReport")</Text>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 6, marginTop: 2,
+                background: '#fff', border: '1px solid #e0e0e0', borderRadius: 4, padding: '4px 8px',
+              }}>
+                <code style={{ flex: 1, fontSize: 11, wordBreak: 'break-all', color: '#1d39c4' }}>{soapUrl}</code>
+                <Tooltip title="Copy URL">
+                  <CopyOutlined style={{ cursor: 'pointer', color: '#595959', flexShrink: 0 }}
+                    onClick={() => { navigator.clipboard.writeText(soapUrl); message.success('URL copied'); }} />
+                </Tooltip>
+              </div>
+            </div>
+
+            {/* Report path */}
+            <div style={{ marginBottom: 6 }}>
+              <Text type="secondary" style={{ fontSize: 11 }}>Report Path (reportAbsolutePath)</Text>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 6, marginTop: 2,
+                background: '#fff', border: '1px solid #e0e0e0', borderRadius: 4, padding: '4px 8px',
+              }}>
+                <code style={{ flex: 1, fontSize: 11, color: '#d46b08' }}>{reportPath}</code>
+                <Tooltip title="Copy path">
+                  <CopyOutlined style={{ cursor: 'pointer', color: '#595959', flexShrink: 0 }}
+                    onClick={() => { navigator.clipboard.writeText(reportPath); message.success('Path copied'); }} />
+                </Tooltip>
+              </div>
+            </div>
+
+            {/* Full XML envelope */}
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <Text type="secondary" style={{ fontSize: 11 }}>Full XML Payload (password masked)</Text>
+                <Tooltip title="Copy XML">
+                  <CopyOutlined style={{ cursor: 'pointer', color: '#595959', fontSize: 12 }}
+                    onClick={() => { navigator.clipboard.writeText(envelope); message.success('XML copied'); }} />
+                </Tooltip>
+              </div>
+              <pre style={{
+                margin: 0, padding: '8px 10px',
+                background: '#1e1e1e', color: '#9cdcfe',
+                borderRadius: 4, fontSize: 10,
+                maxHeight: 260, overflow: 'auto',
+                whiteSpace: 'pre', wordBreak: 'normal',
+                lineHeight: 1.5,
+              }}>
+                {envelope}
+              </pre>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderTabContent = (reportId: string) => {
     const report = FA_REPORTS.find(r => r.id === reportId)!;
     const state  = tabStates[reportId];
 
     if (!state) {
       return (
-        <div style={{ padding: 32, textAlign: 'center' }}>
-          <AuditOutlined style={{ fontSize: 48, color: '#d9d9d9', marginBottom: 16 }} />
-          <div style={{ color: '#8c8c8c', marginBottom: 24 }}>
-            Click <strong>Fetch Data</strong> to run the BIP report
+        <div>
+          {renderApiPanel(reportId)}
+          <div style={{ padding: 32, textAlign: 'center' }}>
+            <AuditOutlined style={{ fontSize: 48, color: '#d9d9d9', marginBottom: 16 }} />
+            <div style={{ color: '#8c8c8c', marginBottom: 24 }}>
+              Click <strong>Fetch Data</strong> to run the BIP report
+            </div>
+            <Button type="primary" icon={<CloudDownloadOutlined />} size="large"
+              onClick={() => fetchReport(reportId)}>
+              Fetch Data
+            </Button>
           </div>
-          <div style={{ marginBottom: 8, fontSize: 12, color: '#aaa', fontFamily: 'monospace' }}>
-            {FA_BASE_PATH}/{reportId}_BIP.xdo
-          </div>
-          <Button
-            type="primary"
-            icon={<CloudDownloadOutlined />}
-            size="large"
-            onClick={() => fetchReport(reportId)}
-          >
-            Fetch Data
-          </Button>
         </div>
       );
     }
 
     if (state.loading) {
       return (
-        <div style={{ padding: 48, textAlign: 'center' }}>
-          <Spin size="large" />
-          <div style={{ marginTop: 16, color: '#8c8c8c' }}>
-            Running SOAP call to Oracle BI Publisher…
-          </div>
-          <div style={{ marginTop: 8, fontSize: 11, color: '#aaa', fontFamily: 'monospace' }}>
-            {FA_BASE_PATH}/{reportId}_BIP.xdo
+        <div>
+          {renderApiPanel(reportId)}
+          <div style={{ padding: 48, textAlign: 'center' }}>
+            <Spin size="large" />
+            <div style={{ marginTop: 16, color: '#8c8c8c' }}>Running SOAP call to Oracle BI Publisher…</div>
           </div>
         </div>
       );
@@ -242,16 +350,36 @@ const FixedAssetsSync: React.FC<Props> = ({ open, onClose }) => {
 
     if (state.error) {
       return (
-        <div style={{ padding: 24 }}>
-          <Alert type="error" showIcon message="SOAP Call Failed" description={state.error}
-            style={{ marginBottom: 16 }} />
-          <Button icon={<CloudDownloadOutlined />} onClick={() => fetchReport(reportId)}>
-            Retry
-          </Button>
+        <div style={{ padding: 0 }}>
+          {renderApiPanel(reportId)}
+          <Alert
+            type="error" showIcon
+            message={`SOAP Call Failed — ${state.error}`}
+            description={
+              state.rawErrorDetail
+                ? <pre style={{ fontSize: 11, maxHeight: 120, overflow: 'auto', whiteSpace: 'pre-wrap', marginTop: 8 }}>
+                    {state.rawErrorDetail}
+                  </pre>
+                : 'Check the XML payload above — verify the report path exists in Oracle BIP and credentials are correct.'
+            }
+            style={{ marginBottom: 12 }}
+          />
+          <Button icon={<CloudDownloadOutlined />} onClick={() => fetchReport(reportId)}>Retry</Button>
         </div>
       );
     }
 
+    // Success state — show API panel collapsed by default, then toolbar + grid
+    return (
+      <div>
+        {renderApiPanel(reportId)}
+        {renderSuccessContent(reportId, report, state)}
+      </div>
+    );
+  };
+
+  // Success grid + toolbar extracted to avoid nesting issues
+  const renderSuccessContent = (reportId: string, report: typeof FA_REPORTS[0], state: TabState) => {
     // Filter rows by grid search
     const search = state.gridSearch.toLowerCase();
     const filtered = search
