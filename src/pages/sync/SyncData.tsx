@@ -3265,6 +3265,7 @@ const SyncData: React.FC = () => {
     : 0;
 
   return (
+    <>
     <Layout style={{ minHeight: 'calc(100vh - 64px)', background: REDWOOD.surfaceSecondary }}>
       <Content>
         {/* Header */}
@@ -7377,6 +7378,7 @@ const SyncData: React.FC = () => {
 
     {/* ── Fixed Assets BIP Reports Modal ────────────────────────────── */}
     <FixedAssetsSync open={faModalOpen} onClose={() => setFaModalOpen(false)} />
+    </>
   );
 };
 
