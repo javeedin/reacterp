@@ -135,9 +135,11 @@ const FixedAssetsSync: React.FC<Props> = ({ open, onClose }) => {
   const [activeTab, setActiveTab]   = useState<string>('');
   const [tabStates, setTabStates]   = useState<Record<string, TabState>>({});
   const [sideSearch, setSideSearch] = useState('');
-  const [colModal, setColModal]       = useState<{ reportId: string; columns: string[] } | null>(null);
-  const [colCopyFmt, setColCopyFmt]   = useState<'list' | 'ddl' | 'insert' | 'select'>('list');
-  const [apiExpanded, setApiExpanded] = useState<Record<string, boolean>>({});
+  const [colModal, setColModal]         = useState<{ reportId: string; columns: string[] } | null>(null);
+  const [colCopyFmt, setColCopyFmt]     = useState<'list' | 'ddl' | 'insert' | 'select'>('list');
+  const [apiExpanded, setApiExpanded]   = useState<Record<string, boolean>>({});
+  const [fetchingAll, setFetchingAll]   = useState(false);
+  const [fetchAllProgress, setFetchAllProgress] = useState<{ done: number; total: number } | null>(null);
 
   const openReport = (reportId: string) => {
     if (!openTabs.includes(reportId)) {
@@ -200,6 +202,94 @@ const FixedAssetsSync: React.FC<Props> = ({ open, onClose }) => {
       },
     }));
   }, []);
+
+  // Fetch all 26 reports sequentially
+  const fetchAllReports = useCallback(async () => {
+    setFetchingAll(true);
+    setFetchAllProgress({ done: 0, total: FA_REPORTS.length });
+
+    // Open all tabs first
+    setOpenTabs(FA_REPORTS.map(r => r.id));
+    setActiveTab(FA_REPORTS[0].id);
+
+    for (let i = 0; i < FA_REPORTS.length; i++) {
+      const { id } = FA_REPORTS[i];
+      setActiveTab(id);
+
+      const reportPath  = `${FA_BASE_PATH}/${id}_BIP.xdo`;
+      const env         = ORACLE_SOAP_CONFIG.prod;
+      const envelope    = buildSoapEnvelope(reportPath, {}, env.username, env.password);
+      const displayEnv  = envelope.replace(
+        /<v2:password>[^<]*<\/v2:password>/,
+        '<v2:password>••••••••</v2:password>',
+      );
+
+      setTabStates(prev => ({
+        ...prev,
+        [id]: {
+          loading: true, error: null, rawErrorDetail: null,
+          columns: [], rows: [], duration: null, gridSearch: '',
+          rawEnvelope: displayEnv, soapUrl: env.baseUrl,
+        },
+      }));
+
+      const result = await callSoapBip(env.baseUrl, envelope);
+
+      if (!result.success || !result.decodedXml) {
+        setTabStates(prev => ({
+          ...prev,
+          [id]: {
+            ...prev[id],
+            loading: false,
+            error: result.error || 'SOAP call failed',
+            rawErrorDetail: (result as any).details || null,
+            duration: result.duration ?? null,
+          },
+        }));
+      } else {
+        const { columns, rows } = parseGenericXml(result.decodedXml);
+        setTabStates(prev => ({
+          ...prev,
+          [id]: {
+            ...prev[id],
+            loading: false, error: null, rawErrorDetail: null,
+            columns, rows, duration: result.duration ?? null,
+          },
+        }));
+      }
+
+      setFetchAllProgress({ done: i + 1, total: FA_REPORTS.length });
+    }
+
+    setFetchingAll(false);
+    message.success(`Fetched all ${FA_REPORTS.length} FA reports`);
+  }, [fetchReport]);
+
+  // Copy all CREATE TABLE scripts for fetched reports
+  const copyAllTableScripts = useCallback(() => {
+    const fetched = FA_REPORTS.filter(r => {
+      const s = tabStates[r.id];
+      return s && !s.loading && !s.error && s.columns.length > 0;
+    });
+
+    if (fetched.length === 0) {
+      message.warning('No reports fetched yet. Run Fetch All first.');
+      return;
+    }
+
+    const scripts = fetched.map(r => {
+      const cols = tabStates[r.id].columns;
+      return [
+        `-- ${r.description}`,
+        `CREATE TABLE RR_FA_${r.id} (`,
+        cols.map((c, i) => `  ${c.padEnd(40)} VARCHAR2(400)${i < cols.length - 1 ? ',' : ''}`).join('\n'),
+        `);`,
+      ].join('\n');
+    }).join('\n\n');
+
+    navigator.clipboard.writeText(scripts);
+    message.success(`Copied CREATE TABLE scripts for ${fetched.length} reports`);
+  }, [tabStates]);
 
   const exportToExcel = (reportId: string) => {
     const state = tabStates[reportId];
@@ -622,12 +712,43 @@ const FixedAssetsSync: React.FC<Props> = ({ open, onClose }) => {
       style={{ top: 20 }}
       styles={{ body: { padding: 0, height: '85vh', overflow: 'hidden' } }}
       title={
-        <Space>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <AuditOutlined style={{ color: '#C74634', fontSize: 18 }} />
           <span style={{ fontWeight: 700 }}>Fixed Assets — BIP Reports</span>
           <Tag color="orange">{FA_REPORTS.length} Reports</Tag>
           <Tag color="blue" style={{ fontFamily: 'monospace', fontSize: 11 }}>{FA_BASE_PATH}</Tag>
-        </Space>
+
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+            {/* Progress indicator */}
+            {fetchAllProgress && fetchingAll && (
+              <Tag color="processing">
+                {fetchAllProgress.done} / {fetchAllProgress.total}
+              </Tag>
+            )}
+
+            {/* Fetch All */}
+            <Button
+              type="primary"
+              icon={fetchingAll ? <SyncOutlined spin /> : <CloudDownloadOutlined />}
+              loading={fetchingAll}
+              onClick={fetchAllReports}
+              size="small"
+              style={{ background: '#C74634', borderColor: '#C74634' }}
+            >
+              Fetch All Reports
+            </Button>
+
+            {/* Copy All Table Scripts */}
+            <Button
+              icon={<CopyOutlined />}
+              onClick={copyAllTableScripts}
+              size="small"
+              style={{ borderColor: '#722ed1', color: '#722ed1' }}
+            >
+              Copy All Table Scripts
+            </Button>
+          </div>
+        </div>
       }
       destroyOnClose
     >
