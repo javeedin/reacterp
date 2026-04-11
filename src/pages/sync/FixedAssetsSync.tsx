@@ -1,12 +1,13 @@
 import React, { useState, useCallback } from 'react';
 import {
   Modal, Layout, Tabs, Button, Table, Space, Tag, Spin,
-  Alert, Tooltip, Typography, Badge, Divider, Input, message,
+  Alert, Tooltip, Typography, Badge, Divider, Input, message, Select,
 } from 'antd';
 import {
   AuditOutlined, CloudDownloadOutlined, FileExcelOutlined,
   SyncOutlined, InfoCircleOutlined, SearchOutlined,
   CheckCircleOutlined, ClockCircleOutlined, ApiOutlined, CopyOutlined,
+  UnorderedListOutlined, TableOutlined,
 } from '@ant-design/icons';
 import { ORACLE_SOAP_CONFIG } from '../../config/api.config';
 import { callSoapBip } from '../../services/sync-http';
@@ -131,10 +132,12 @@ const parseGenericXml = (xmlString: string): { columns: string[]; rows: Record<s
 interface Props { open: boolean; onClose: () => void; }
 
 const FixedAssetsSync: React.FC<Props> = ({ open, onClose }) => {
-  const [openTabs, setOpenTabs]   = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<string>('');
-  const [tabStates, setTabStates] = useState<Record<string, TabState>>({});
+  const [openTabs, setOpenTabs]     = useState<string[]>([]);
+  const [activeTab, setActiveTab]   = useState<string>('');
+  const [tabStates, setTabStates]   = useState<Record<string, TabState>>({});
   const [sideSearch, setSideSearch] = useState('');
+  const [colModal, setColModal]     = useState<{ reportId: string; columns: string[] } | null>(null);
+  const [colCopyFmt, setColCopyFmt] = useState<'list' | 'ddl' | 'insert' | 'select'>('list');
 
   const openReport = (reportId: string) => {
     if (!openTabs.includes(reportId)) {
@@ -215,6 +218,120 @@ const FixedAssetsSync: React.FC<Props> = ({ open, onClose }) => {
         `${reportId}.xlsx`,
       );
     }
+  };
+
+  // Build copy text for column modal
+  const buildColCopyText = (reportId: string, columns: string[], fmt: typeof colCopyFmt): string => {
+    const tbl = reportId.toLowerCase();
+    switch (fmt) {
+      case 'list':
+        return columns.join('\n');
+      case 'ddl':
+        return [
+          `CREATE TABLE RR_FA_${reportId} (`,
+          columns.map((c, i) =>
+            `  ${c.padEnd(40)} VARCHAR2(400)${i < columns.length - 1 ? ',' : ''}`
+          ).join('\n'),
+          `);`,
+        ].join('\n');
+      case 'insert':
+        return [
+          `INSERT INTO RR_FA_${reportId} (`,
+          `  ${columns.join(',\n  ')}`,
+          `) VALUES (`,
+          `  ${columns.map(c => `:${c.toLowerCase()}`).join(',\n  ')}`,
+          `);`,
+        ].join('\n');
+      case 'select':
+        return `SELECT\n  ${columns.join(',\n  ')}\nFROM RR_FA_${reportId};`;
+      default:
+        return columns.join('\n');
+    }
+  };
+
+  // Columns viewer modal
+  const renderColModal = () => {
+    if (!colModal) return null;
+    const { reportId, columns } = colModal;
+    const copyText = buildColCopyText(reportId, columns, colCopyFmt);
+
+    const fmtOptions = [
+      { value: 'list',   label: 'Plain List' },
+      { value: 'ddl',    label: 'CREATE TABLE DDL' },
+      { value: 'insert', label: 'INSERT INTO template' },
+      { value: 'select', label: 'SELECT statement' },
+    ];
+
+    return (
+      <Modal
+        open
+        onCancel={() => setColModal(null)}
+        footer={null}
+        width={760}
+        title={
+          <Space>
+            <UnorderedListOutlined style={{ color: '#C74634' }} />
+            <span>All Columns — <code style={{ fontSize: 13 }}>{reportId}</code></span>
+            <Tag color="blue">{columns.length} columns</Tag>
+          </Space>
+        }
+      >
+        {/* Format selector + copy */}
+        <Space style={{ marginBottom: 12 }} wrap>
+          <span style={{ fontSize: 12, color: '#595959' }}>Copy as:</span>
+          <Select
+            value={colCopyFmt}
+            onChange={v => setColCopyFmt(v)}
+            size="small"
+            style={{ width: 200 }}
+            options={fmtOptions}
+          />
+          <Button
+            icon={<CopyOutlined />}
+            size="small"
+            type="primary"
+            onClick={() => { navigator.clipboard.writeText(copyText); message.success('Copied!'); }}
+          >
+            Copy
+          </Button>
+        </Space>
+
+        {/* Generated text preview */}
+        <pre style={{
+          background: '#1e1e1e', color: '#9cdcfe',
+          borderRadius: 6, padding: '10px 14px',
+          fontSize: 11, maxHeight: 260, overflow: 'auto',
+          whiteSpace: 'pre', marginBottom: 16,
+          lineHeight: 1.6,
+        }}>
+          {copyText}
+        </pre>
+
+        <Divider style={{ margin: '8px 0 12px' }} />
+
+        {/* Full column list as tags */}
+        <div style={{ marginBottom: 6, fontSize: 12, color: '#595959', fontWeight: 600 }}>
+          <TableOutlined style={{ marginRight: 4 }} />
+          All {columns.length} columns:
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, maxHeight: 300, overflowY: 'auto' }}>
+          {columns.map((col, i) => (
+            <Tag
+              key={col}
+              style={{ fontFamily: 'monospace', fontSize: 11, cursor: 'pointer', marginBottom: 2 }}
+              onClick={() => { navigator.clipboard.writeText(col); message.success(`Copied: ${col}`); }}
+              title="Click to copy"
+            >
+              <span style={{ color: '#8c8c8c', marginRight: 4 }}>{i + 1}.</span>
+              {col}
+            </Tag>
+          ))}
+        </div>
+        <div style={{ marginTop: 8, fontSize: 11, color: '#aaa' }}>
+          Click any column tag to copy its name individually.
+        </div>
+      </Modal>
+    );
   };
 
   // Reusable API info panel shown on every tab state
@@ -418,6 +535,13 @@ const FixedAssetsSync: React.FC<Props> = ({ open, onClose }) => {
             Export Excel
           </Button>
           <Button
+            icon={<UnorderedListOutlined />}
+            onClick={() => setColModal({ reportId, columns: state.columns })}
+            style={{ borderColor: '#722ed1', color: '#722ed1' }}
+          >
+            Columns ({state.columns.length})
+          </Button>
+          <Button
             icon={<SyncOutlined />}
             disabled
             title="Sync to APEX — coming soon"
@@ -597,6 +721,9 @@ const FixedAssetsSync: React.FC<Props> = ({ open, onClose }) => {
         </Content>
       </Layout>
     </Modal>
+
+    {/* Columns viewer modal */}
+    {renderColModal()}
   );
 };
 
