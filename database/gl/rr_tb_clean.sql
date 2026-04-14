@@ -5,11 +5,16 @@
 -- for any ledger + period directly from journal lines.
 --
 -- Parameters (set before running):
---   :ledger_name  REQUIRED  e.g.  'BUIMERC LEDGER'
---   :period_name  optional  e.g.  'Sep-23'  (Mon-YY) — NULL = all periods
---   :period_year  optional  e.g.  '2024'    (fiscal year as text) — NULL = all years
---   :company      optional  e.g.  '100'     (segment 1)   — NULL = all companies
+--   :ledger_name   REQUIRED  e.g.  'BUIMERC LEDGER'
+--   :period_name   optional  e.g.  'Sep-23'  (Mon-YY) — NULL = all periods
+--   :period_year   optional  e.g.  '2024'    (fiscal year as text) — NULL = all years
+--   :company       optional  e.g.  '100'     (segment 1)   — NULL = all companies
 --   :currency_code optional  e.g.  'AED'                  — NULL = all currencies
+--
+-- Account list is driven from RR_VALUE_SET_VALUES (the account master).
+-- An account only appears in a period if it has ACTUAL journal activity
+-- (PTD_DR > 0 or PTD_CR > 0) in that period.  Zero-amount GL lines
+-- and account combinations not in the master are excluded.
 --
 -- How opening balance works:
 --   Balance Sheet (Asset / Liability / Equity):
@@ -23,26 +28,54 @@
 WITH
 
 -- ────────────────────────────────────────────────────────────
--- Step 1 — PTD (Period-to-Date) amounts per account per period
+-- Step 1 — Account master from the Chart of Accounts value set
 --
--- Aggregate debit and credit totals from every journal line.
--- IMPORTANT: No period filter here — we need the full history
--- so opening balances for early periods are computed correctly.
+-- This is the authoritative source for:
+--   ACCOUNT      = the natural account code (segment 4)
+--   ACCOUNT_TYPE = A/L/O/R/E
+--   ACCOUNT_DESC = description
+--
+-- Only accounts present here will appear in the trial balance.
+-- ────────────────────────────────────────────────────────────
+accounts AS (
+    SELECT
+        VALUE           AS ACCOUNT,
+        ACCOUNT_TYPE,
+        DESCRIPTION     AS ACCOUNT_DESC
+    FROM RR_VALUE_SET_VALUES
+    WHERE VALUE_SET_CODE = 'BUIMERC_FIN_GLB_COA_ACCOUNT'
+),
+
+-- ────────────────────────────────────────────────────────────
+-- Step 2 — PTD (Period-to-Date) amounts per account per period
+--
+-- Aggregate ALL history from journal lines (no period filter)
+-- so opening balances for any period are correctly computed.
+--
+-- INNER JOIN to the account master ensures:
+--   • Only valid master accounts appear (no spurious GL combos)
+-- HAVING clause ensures:
+--   • Zero-amount GL lines are excluded — an account only
+--     appears in a period when real activity exists
 -- ────────────────────────────────────────────────────────────
 ptd AS (
     SELECT
         hdr.LEDGER_NAME,
         hdr.PERIOD_NAME,
-        NVL(lin.CURRENCY_CODE, hdr.LEDGER_CURRENCY_CODE)  AS CURRENCY_CODE,
+        NVL(lin.CURRENCY_CODE, hdr.LEDGER_CURRENCY_CODE)           AS CURRENCY_CODE,
         lin.ACCOUNT_COMBINATION,
-        SUM(NVL(lin.ACCOUNTED_DR, 0))                     AS PTD_DR,
-        SUM(NVL(lin.ACCOUNTED_CR, 0))                     AS PTD_CR
+        TRIM(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,1))   AS COMPANY,
+        TRIM(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,4))   AS ACCOUNT,
+        SUM(NVL(lin.ACCOUNTED_DR, 0))                              AS PTD_DR,
+        SUM(NVL(lin.ACCOUNTED_CR, 0))                              AS PTD_CR
     FROM RR_GL_JE_LINES_ALL  lin
     JOIN RR_GL_JE_HEADERS    hdr  ON hdr.JE_HEADER_ID = lin.JE_HEADER_ID
+    -- INNER JOIN: only account combos whose segment-4 exists in the master
+    JOIN accounts            acc
+      ON acc.ACCOUNT = TRIM(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,4))
     WHERE hdr.LEDGER_NAME         = :ledger_name
       AND hdr.PERIOD_NAME         IS NOT NULL
       AND lin.ACCOUNT_COMBINATION IS NOT NULL
-      -- Optional filters applied early for efficiency
       AND (:company IS NULL OR
            TRIM(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,1)) = :company)
       AND (:currency_code IS NULL OR
@@ -51,21 +84,25 @@ ptd AS (
         hdr.LEDGER_NAME,
         hdr.PERIOD_NAME,
         NVL(lin.CURRENCY_CODE, hdr.LEDGER_CURRENCY_CODE),
-        lin.ACCOUNT_COMBINATION
+        lin.ACCOUNT_COMBINATION,
+        TRIM(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,1)),
+        TRIM(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,4))
+    -- Exclude zero-amount rows: an account only appears in a period
+    -- when it has actual debit or credit activity
+    HAVING SUM(NVL(lin.ACCOUNTED_DR, 0)) > 0
+        OR SUM(NVL(lin.ACCOUNTED_CR, 0)) > 0
 ),
 
 -- ────────────────────────────────────────────────────────────
--- Step 2 — Enrich each row with fiscal calendar + account info
+-- Step 3 — Enrich with fiscal calendar and account details
 --
--- IMPORTANT: RR_V_GL_FISCAL_PERIODS may have multiple rows for
--- the same PERIOD_NAME (one per ledger config in the underlying
--- RR_ACCOUNTING_PERIODS_STATUS table).  Without collapsing to
--- one row per PERIOD_NAME the join fans out — each account row
--- in ptd is duplicated N times — and the window functions in
--- Step 3 then see those duplicates as separate periods, making
--- opening balance non-zero even for the very first period.
--- Fix: GROUP BY PERIOD_NAME in the subquery guarantees exactly
--- one fiscal-calendar row per period before the join.
+-- Fiscal year/period come from RR_V_GL_FISCAL_PERIODS.
+-- Account type and description come from the accounts CTE
+-- (already joined in Step 2 via the INNER JOIN to accounts).
+--
+-- The view is collapsed to ONE row per PERIOD_NAME with GROUP BY
+-- to prevent fan-out when multiple ledger configs exist in the
+-- underlying RR_ACCOUNTING_PERIODS_STATUS table.
 -- ────────────────────────────────────────────────────────────
 enriched AS (
     SELECT
@@ -73,8 +110,12 @@ enriched AS (
         p.PERIOD_NAME,
         p.CURRENCY_CODE,
         p.ACCOUNT_COMBINATION,
+        p.COMPANY,
+        p.ACCOUNT,
+        acc.ACCOUNT_TYPE,
+        acc.ACCOUNT_DESC,
 
-        -- Fiscal year: from view (one row guaranteed), else calendar year fallback
+        -- Fiscal year: from view, else calendar year fallback
         CASE
             WHEN fp.FISCAL_YEAR IS NOT NULL
             THEN TO_NUMBER(fp.FISCAL_YEAR)
@@ -88,26 +129,16 @@ enriched AS (
             ELSE EXTRACT(MONTH FROM TO_DATE('01-' || p.PERIOD_NAME, 'DD-Mon-RR'))
         END  AS FISCAL_PERIOD,
 
-        -- Segment 1 = company
-        TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION, '[^-]+', 1, 1))   AS COMPANY,
-
-        -- Segment 4 = natural account code
-        TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION, '[^-]+', 1, 4))   AS ACCOUNT,
-
-        -- A=Asset  L=Liability  O=Equity  R=Revenue  E=Expense
-        NVL(vsv.ACCOUNT_TYPE, 'E')                                  AS ACCOUNT_TYPE,
-        vsv.DESCRIPTION                                             AS ACCOUNT_DESC,
-
-        -- Period activity
         p.PTD_DR,
         p.PTD_CR,
-        p.PTD_DR - p.PTD_CR                                         AS PTD_NET
+        p.PTD_DR - p.PTD_CR   AS PTD_NET
 
     FROM ptd p
 
-    -- Collapse view to ONE row per PERIOD_NAME before joining.
-    -- MAX() picks any consistent row — all rows for the same period
-    -- have the same FISCAL_YEAR / FISCAL_PERIOD values anyway.
+    -- Account master: type and description (already validated by INNER JOIN in ptd)
+    JOIN accounts acc ON acc.ACCOUNT = p.ACCOUNT
+
+    -- Fiscal calendar collapsed to one row per PERIOD_NAME
     LEFT JOIN (
         SELECT
             PERIOD_NAME,
@@ -118,24 +149,18 @@ enriched AS (
           AND TO_CHAR(ADJ_FLAG)    = 'N'
         GROUP BY PERIOD_NAME
     ) fp ON fp.PERIOD_NAME = p.PERIOD_NAME
-
-    -- Account type and description from Chart of Accounts value set
-    LEFT JOIN RR_VALUE_SET_VALUES vsv
-           ON vsv.VALUE_SET_CODE = 'BUIMERC_FIN_GLB_COA_ACCOUNT'
-          AND vsv.VALUE = TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION, '[^-]+', 1, 4))
 ),
 
 -- ────────────────────────────────────────────────────────────
--- Step 3 — Calculate opening balance using window functions
+-- Step 4 — Calculate opening balance using window functions
 --
 -- BS_OPENING (Balance Sheet: A / L / O):
---   Sum all prior periods across ALL fiscal years.
---   Order by (FISCAL_YEAR * 100 + FISCAL_PERIOD) — both are
---   guaranteed NUMBER from Step 2, so no ORA-01722 here.
+--   Cumulative net of ALL history before this period.
+--   Carries across fiscal year boundaries.
 --
 -- PL_OPENING (P&L: R / E):
---   Sum prior periods within the SAME fiscal year only.
---   Resets to zero at fiscal year start.
+--   Cumulative net of prior periods in the SAME fiscal year.
+--   Resets to zero at the start of each fiscal year.
 -- ────────────────────────────────────────────────────────────
 calc AS (
     SELECT
@@ -164,11 +189,7 @@ calc AS (
 )
 
 -- ────────────────────────────────────────────────────────────
--- Final — Filter to the requested period and output results
---
--- :period_year compared as string (TO_CHAR) to avoid
--- TO_NUMBER(:period_year) which can raise ORA-01722 when
--- Oracle evaluates the expression before the IS NULL check.
+-- Final — Filter to requested period and output results
 -- ────────────────────────────────────────────────────────────
 SELECT
     c.LEDGER_NAME,
@@ -188,7 +209,6 @@ SELECT
          ELSE c.PL_OPENING
     END                  AS OPENING,
 
-    -- Period activity
     c.PTD_DR             AS DEBIT,
     c.PTD_CR             AS CREDIT,
 
