@@ -139,14 +139,12 @@ interface RrTBRecord {
   intercompany: string;
   account_type: string;   // A / L / O / R / E
   currency_code: string;
-  opening_dr: number;
-  opening_cr: number;
-  ptd_dr: number;
-  ptd_cr: number;
-  ytd_dr: number;
-  ytd_cr: number;
-  closing_dr: number;
-  closing_cr: number;
+  // Standard TB format (from /standard endpoint)
+  opening: number;
+  debit: number;
+  credit: number;
+  closing: number;
+  ytd_net: number;
 }
 
 interface TabData {
@@ -478,12 +476,12 @@ const TrialBalance: React.FC = () => {
         t.key === tabKey ? { ...t, rrGenerating: false } : t
       ));
 
-      // Step 2: Fetch the generated rows
-      const fetchUrl = `${APEX_DB_CONFIG.baseUrl}/gl/rr-trialbalance`
+      // Step 2: Fetch the generated rows in standard TB format
+      const fetchUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceStandard}`
         + `?ledger_name=${encodeURIComponent(record.ledger_name)}`
         + `&period_name=${encodeURIComponent(record.period_name_id)}`
         + `&limit=5000`;
-      const t0fetch = trackCall('rrFetch', `GET RR TB — ${record.period_name_id}`, fetchUrl);
+      const t0fetch = trackCall('rrFetch', `GET RR TB Standard — ${record.period_name_id}`, fetchUrl);
       const res = await fetch(fetchUrl, { headers: { Accept: 'application/json' } });
       const data = await res.json();
       resolveCall('rrFetch', t0fetch, res.status, res.ok, `${(data.items || []).length} rows`);
@@ -1948,7 +1946,7 @@ const TrialBalance: React.FC = () => {
     );
   };
 
-  // Render a ReERP TB tab (uses RrTBRecord with separate DR/CR columns)
+  // Render a ReERP TB tab — Standard format: Opening / Debit / Credit / Closing (net)
   const renderRrTBTab = (tab: TabData) => {
     if (tab.loading || tab.rrGenerating) {
       return (
@@ -1964,9 +1962,28 @@ const TrialBalance: React.FC = () => {
       return <Alert type="error" showIcon message="Error" description={tab.error} />;
     }
 
-    const fmt = (n: number) => new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+    const fmtAbs = (n: number) =>
+      new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(n));
+
+    // Net amount renderer: positive = Dr (blue), negative = Cr shown in brackets (red)
+    const fmtNet = (n: number) => {
+      if (n === 0) return <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.textSecondary }}>—</Text>;
+      return n > 0
+        ? <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info }}>{fmtAbs(n)}</Text>
+        : <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.primary }}>({fmtAbs(n)})</Text>;
+    };
+
+    const fmtDr = (n: number) =>
+      n ? <Text style={{ fontFamily: 'monospace', fontSize: 11, color: '#237804' }}>{fmtAbs(n)}</Text>
+        : <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.textSecondary }}>—</Text>;
+
+    const fmtCr = (n: number) =>
+      n ? <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.primary }}>{fmtAbs(n)}</Text>
+        : <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.textSecondary }}>—</Text>;
+
     const accountTypeColor: Record<string, string> = { A: '#e6f7ff', L: '#fff7e6', O: '#f6ffed', R: '#fff0f6', E: '#f9f0ff' };
     const accountTypeLabel: Record<string, string> = { A: 'Asset', L: 'Liability', O: 'Equity', R: 'Revenue', E: 'Expense' };
+    const typeTagColor: Record<string, string> = { A: 'blue', L: 'orange', O: 'green', R: 'magenta', E: 'purple' };
 
     // Filter
     let rows = tab.rrData.filter(r => {
@@ -1978,67 +1995,112 @@ const TrialBalance: React.FC = () => {
     if (tab.gridSearch.trim()) {
       const lc = tab.gridSearch.toLowerCase();
       rows = rows.filter(r =>
-        r.account.toLowerCase().includes(lc) ||
+        r.account?.toLowerCase().includes(lc) ||
         r.account_desc?.toLowerCase().includes(lc) ||
         r.account_combination?.toLowerCase().includes(lc) ||
         r.company?.toLowerCase().includes(lc)
       );
     }
 
-    // Group by account for summary
-    const grouped = new Map<string, { account: string; account_desc: string; account_type: string;
-      open_dr: number; open_cr: number; ptd_dr: number; ptd_cr: number;
-      ytd_dr: number; ytd_cr: number; cls_dr: number; cls_cr: number }>();
+    // Group by account — sum net amounts across companies/currencies
+    type GroupRow = {
+      account: string; account_desc: string; account_type: string;
+      opening: number; debit: number; credit: number; closing: number; ytd_net: number;
+    };
+    const grouped = new Map<string, GroupRow>();
     rows.forEach(r => {
       const k = r.account;
-      if (!grouped.has(k)) grouped.set(k, { account: r.account, account_desc: r.account_desc,
-        account_type: r.account_type, open_dr: 0, open_cr: 0, ptd_dr: 0, ptd_cr: 0,
-        ytd_dr: 0, ytd_cr: 0, cls_dr: 0, cls_cr: 0 });
+      if (!grouped.has(k)) {
+        grouped.set(k, {
+          account: r.account, account_desc: r.account_desc, account_type: r.account_type,
+          opening: 0, debit: 0, credit: 0, closing: 0, ytd_net: 0,
+        });
+      }
       const g = grouped.get(k)!;
-      g.open_dr += r.opening_dr || 0;  g.open_cr += r.opening_cr || 0;
-      g.ptd_dr  += r.ptd_dr    || 0;  g.ptd_cr  += r.ptd_cr    || 0;
-      g.ytd_dr  += r.ytd_dr    || 0;  g.ytd_cr  += r.ytd_cr    || 0;
-      g.cls_dr  += r.closing_dr || 0; g.cls_cr  += r.closing_cr || 0;
+      g.opening += r.opening  || 0;
+      g.debit   += r.debit    || 0;
+      g.credit  += r.credit   || 0;
+      g.closing += r.closing  || 0;
+      g.ytd_net += r.ytd_net  || 0;
     });
+
     const tableRows = Array.from(grouped.values()).sort((a, b) => a.account.localeCompare(b.account));
 
-    const totals = tableRows.reduce((acc, r) => ({
-      open_dr: acc.open_dr + r.open_dr, open_cr: acc.open_cr + r.open_cr,
-      ptd_dr:  acc.ptd_dr  + r.ptd_dr,  ptd_cr:  acc.ptd_cr  + r.ptd_cr,
-      ytd_dr:  acc.ytd_dr  + r.ytd_dr,  ytd_cr:  acc.ytd_cr  + r.ytd_cr,
-      cls_dr:  acc.cls_dr  + r.cls_dr,  cls_cr:  acc.cls_cr  + r.cls_cr,
-    }), { open_dr: 0, open_cr: 0, ptd_dr: 0, ptd_cr: 0, ytd_dr: 0, ytd_cr: 0, cls_dr: 0, cls_cr: 0 });
-
-    const amtCol = (title: string, drKey: string, crKey: string, drColor?: string, crColor?: string) => ([
-      { title: `${title} DR`, dataIndex: drKey, key: drKey, align: 'right' as const, width: 110,
-        render: (v: number) => <Text style={{ fontFamily: 'monospace', fontSize: 11, color: drColor }}>{fmt(v || 0)}</Text> },
-      { title: `${title} CR`, dataIndex: crKey, key: crKey, align: 'right' as const, width: 110,
-        render: (v: number) => <Text style={{ fontFamily: 'monospace', fontSize: 11, color: crColor || REDWOOD.primary }}>{fmt(v || 0)}</Text> },
-    ]);
+    const totals = tableRows.reduce(
+      (acc, r) => ({
+        opening: acc.opening + r.opening,
+        debit:   acc.debit   + r.debit,
+        credit:  acc.credit  + r.credit,
+        closing: acc.closing + r.closing,
+        ytd_net: acc.ytd_net + r.ytd_net,
+      }),
+      { opening: 0, debit: 0, credit: 0, closing: 0, ytd_net: 0 }
+    );
 
     const columns = [
-      { title: 'Type', dataIndex: 'account_type', key: 'account_type', width: 60, align: 'center' as const,
-        render: (t: string) => <Tag color={t === 'A' ? 'blue' : t === 'L' ? 'orange' : t === 'O' ? 'green' : t === 'R' ? 'magenta' : 'purple'} style={{ fontSize: 10 }}>{t}</Tag> },
-      { title: 'Account', dataIndex: 'account', key: 'account', width: 120, sorter: (a: any, b: any) => a.account.localeCompare(b.account), defaultSortOrder: 'ascend' as const,
-        render: (v: string) => <Text strong style={{ fontFamily: 'monospace' }}>{v}</Text> },
-      { title: 'Description', dataIndex: 'account_desc', key: 'account_desc', ellipsis: true,
-        render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text> },
-      ...amtCol('Opening', 'open_dr', 'open_cr', '#595959', '#595959'),
-      ...amtCol('PTD', 'ptd_dr', 'ptd_cr', REDWOOD.info, REDWOOD.primary),
-      ...amtCol('YTD', 'ytd_dr', 'ytd_cr', '#237804', '#ad6800'),
-      ...amtCol('Closing', 'cls_dr', 'cls_cr', REDWOOD.neutral, REDWOOD.neutral),
+      {
+        title: 'Type', dataIndex: 'account_type', key: 'account_type',
+        width: 62, align: 'center' as const,
+        render: (t: string) => (
+          <Tag color={typeTagColor[t] || 'default'} style={{ fontSize: 10, margin: 0 }}>
+            {accountTypeLabel[t] || t}
+          </Tag>
+        ),
+      },
+      {
+        title: 'Account', dataIndex: 'account', key: 'account', width: 120,
+        sorter: (a: GroupRow, b: GroupRow) => a.account.localeCompare(b.account),
+        defaultSortOrder: 'ascend' as const,
+        render: (v: string) => <Text strong style={{ fontFamily: 'monospace' }}>{v}</Text>,
+      },
+      {
+        title: 'Description', dataIndex: 'account_desc', key: 'account_desc',
+        ellipsis: true,
+        render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text>,
+      },
+      {
+        title: 'Opening', dataIndex: 'opening', key: 'opening',
+        align: 'right' as const, width: 130,
+        sorter: (a: GroupRow, b: GroupRow) => a.opening - b.opening,
+        render: fmtNet,
+      },
+      {
+        title: 'Debit', dataIndex: 'debit', key: 'debit',
+        align: 'right' as const, width: 130,
+        sorter: (a: GroupRow, b: GroupRow) => a.debit - b.debit,
+        render: fmtDr,
+      },
+      {
+        title: 'Credit', dataIndex: 'credit', key: 'credit',
+        align: 'right' as const, width: 130,
+        sorter: (a: GroupRow, b: GroupRow) => a.credit - b.credit,
+        render: fmtCr,
+      },
+      {
+        title: 'Closing', dataIndex: 'closing', key: 'closing',
+        align: 'right' as const, width: 130,
+        sorter: (a: GroupRow, b: GroupRow) => a.closing - b.closing,
+        render: fmtNet,
+      },
+      {
+        title: 'YTD Net', dataIndex: 'ytd_net', key: 'ytd_net',
+        align: 'right' as const, width: 130,
+        sorter: (a: GroupRow, b: GroupRow) => a.ytd_net - b.ytd_net,
+        render: fmtNet,
+      },
     ];
 
     const summaryRow = () => (
       <Table.Summary fixed>
-        <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 700 }}>
+        <Table.Summary.Row style={{ background: '#f0f0f0', fontWeight: 700 }}>
           <Table.Summary.Cell index={0} colSpan={3} align="right">
-            <Text strong>TOTAL</Text>
+            <Text strong style={{ fontSize: 12 }}>TOTAL</Text>
           </Table.Summary.Cell>
-          {[totals.open_dr, totals.open_cr, totals.ptd_dr, totals.ptd_cr,
-            totals.ytd_dr, totals.ytd_cr, totals.cls_dr, totals.cls_cr].map((v, i) => (
+          {[totals.opening, totals.debit, totals.credit, totals.closing, totals.ytd_net].map((v, i) => (
             <Table.Summary.Cell key={i} index={i + 3} align="right">
-              <Text strong style={{ fontFamily: 'monospace', fontSize: 11 }}>{fmt(v)}</Text>
+              <Text strong style={{ fontFamily: 'monospace', fontSize: 11 }}>
+                {new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v)}
+              </Text>
             </Table.Summary.Cell>
           ))}
         </Table.Summary.Row>
@@ -2078,10 +2140,12 @@ const TrialBalance: React.FC = () => {
         {/* Account type legend */}
         <Space style={{ marginBottom: 10 }} wrap>
           {Object.entries(accountTypeLabel).map(([k, v]) => (
-            <Tag key={k} style={{ background: accountTypeColor[k], fontSize: 11 }}>
-              <strong>{k}</strong> = {v}{k === 'R' || k === 'E' ? ' (P&L — resets Jan)' : ' (BS — carries fwd)'}
+            <Tag key={k} color={typeTagColor[k]} style={{ fontSize: 11 }}>
+              {v}{k === 'R' || k === 'E' ? ' — P&L (resets Jan)' : ' — BS (carries fwd)'}
             </Tag>
           ))}
+          <Tag style={{ fontSize: 11, color: REDWOOD.info, borderColor: REDWOOD.info }}>positive = Dr balance</Tag>
+          <Tag style={{ fontSize: 11, color: REDWOOD.primary, borderColor: REDWOOD.primary }}>(brackets) = Cr balance</Tag>
         </Space>
 
         <Table
@@ -2089,10 +2153,9 @@ const TrialBalance: React.FC = () => {
           columns={columns}
           rowKey="account"
           size="small"
-          pagination={{ pageSize: 50, showSizeChanger: true }}
-          scroll={{ x: 1200 }}
+          pagination={{ pageSize: 50, showSizeChanger: true, pageSizeOptions: ['25', '50', '100'] }}
+          scroll={{ x: 900 }}
           summary={summaryRow}
-          rowClassName={(r: any) => ''}
           onRow={(r: any) => ({ style: { background: accountTypeColor[r.account_type] || '#fff' } })}
         />
       </div>
