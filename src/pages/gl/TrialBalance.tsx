@@ -219,11 +219,20 @@ const TrialBalance: React.FC = () => {
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [detailModalData, setDetailModalData] = useState<{ account: string; account_desc: string; rows: GLBalanceRecord[] } | null>(null);
 
+  // Ledger state
+  const [ledgerOptions, setLedgerOptions] = useState<string[]>([]);
+  const [loadingLedgers, setLoadingLedgers] = useState(false);
+  const [selectedLedger, setSelectedLedger] = useState<string>('BUIMERC LEDGER');
+
   // API panel state
   const [apiPanelVisible, setApiPanelVisible] = useState(false);
   const [apiCalls, setApiCalls] = useState<Record<string, ApiCallInfo>>({
-    periods:      { label: 'Periods', url: '', method: 'GET', status: null, ok: null, durationMs: null, running: false, body: '' },
-    trialBalance: { label: 'Trial Balance', url: '', method: 'GET', status: null, ok: null, durationMs: null, running: false, body: '' },
+    ledgers:      { label: 'GET Ledgers',            url: '', method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
+    periods:      { label: 'GET Periods',             url: '', method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
+    trialBalance: { label: 'GET Trial Balance',       url: '', method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
+    rrGenerate:   { label: 'POST RR TB Generate',     url: '', method: 'POST', status: null, ok: null, durationMs: null, running: false, body: '' },
+    rrFetch:      { label: 'GET RR Trial Balance',    url: '', method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
+    linesSummary: { label: 'GET Lines Summary',       url: '', method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
   });
 
   // Lines Summary state
@@ -285,6 +294,27 @@ const TrialBalance: React.FC = () => {
     }
   };
 
+  // Fetch ledger list from APEX
+  const fetchLedgers = useCallback(async () => {
+    setLoadingLedgers(true);
+    const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceLedgers}`;
+    const t0 = trackCall('ledgers', 'GET Ledgers', url);
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+      const names: string[] = (data.items || []).map((i: any) => i.ledger_name).filter(Boolean);
+      resolveCall('ledgers', t0, res.status, res.ok, `${names.length} ledgers`);
+      setLedgerOptions(names);
+      if (names.length > 0 && !names.includes(selectedLedger)) {
+        setSelectedLedger(names[0]);
+      }
+    } catch (e: any) {
+      resolveCall('ledgers', t0, 0, false, e.message);
+    } finally {
+      setLoadingLedgers(false);
+    }
+  }, [selectedLedger]);
+
   // Fetch periods list from APEX periods status endpoint
   const fetchPeriods = useCallback(async () => {
     setLoadingPeriods(true);
@@ -293,10 +323,10 @@ const TrialBalance: React.FC = () => {
     try {
       const params = new URLSearchParams({
         'P_APPLICATION_NAME': 'General Ledger',
-        'P_LEDGER_NAME': 'BUIMERC LEDGER',
+        'P_LEDGER_NAME': selectedLedger,
       });
       const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.periodsStatus}?${params}`;
-      const t0 = trackCall('periods', 'GET Periods', url);
+      const t0 = trackCall('periods', `GET Periods — ${selectedLedger}`, url);
       const response = await fetch(url);
 
       if (!response.ok) {
@@ -329,7 +359,7 @@ const TrialBalance: React.FC = () => {
     } finally {
       setLoadingPeriods(false);
     }
-  }, [selectedYear]);
+  }, [selectedYear, selectedLedger]);
 
   // Fetch trial balance data for a specific period
   const fetchTrialBalance = useCallback(async (periodName: string) => {
@@ -429,6 +459,8 @@ const TrialBalance: React.FC = () => {
     try {
       // Step 1: Generate TB for this period
       const genUrl = `${APEX_DB_CONFIG.baseUrl}/gl/rr-trialbalance/generate`;
+      const t0gen = trackCall('rrGenerate', `POST RR TB Generate — ${record.period_name_id}`, genUrl);
+      setApiCalls(prev => ({ ...prev, rrGenerate: { ...prev.rrGenerate, method: 'POST' } }));
       const genRes = await fetch(genUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -439,6 +471,7 @@ const TrialBalance: React.FC = () => {
         }),
       });
       const genData = await genRes.json();
+      resolveCall('rrGenerate', t0gen, genRes.status, genRes.ok, genData.status || '');
       if (genData.status === 'error') throw new Error(genData.message || 'Generation failed');
 
       setTabs(prev => prev.map(t =>
@@ -450,8 +483,10 @@ const TrialBalance: React.FC = () => {
         + `?ledger_name=${encodeURIComponent(record.ledger_name)}`
         + `&period_name=${encodeURIComponent(record.period_name_id)}`
         + `&limit=5000`;
+      const t0fetch = trackCall('rrFetch', `GET RR TB — ${record.period_name_id}`, fetchUrl);
       const res = await fetch(fetchUrl, { headers: { Accept: 'application/json' } });
       const data = await res.json();
+      resolveCall('rrFetch', t0fetch, res.status, res.ok, `${(data.items || []).length} rows`);
       const items: RrTBRecord[] = (data.items || []) as RrTBRecord[];
 
       const companies = [...new Set(items.map(i => i.company).filter(Boolean))].sort();
@@ -490,12 +525,15 @@ const TrialBalance: React.FC = () => {
     if (company) params.set('company', company);
     const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.glLinesSummary}?${params}`;
     setLsApiUrl(url);
+    const t0 = trackCall('linesSummary', `GET Lines Summary — ${period}`, url);
     try {
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       const json = await res.json();
+      resolveCall('linesSummary', t0, res.status, true, `${(json.items || []).length} rows`);
       setLsData(json.items || []);
     } catch (e: any) {
+      resolveCall('linesSummary', t0, 0, false, e.message);
       setLsError(e.message);
     } finally {
       setLsLoading(false);
@@ -671,8 +709,16 @@ const TrialBalance: React.FC = () => {
 
   // Initial load
   useEffect(() => {
+    fetchLedgers();
     fetchPeriods();
   }, []);
+
+  // Re-fetch periods when ledger changes
+  useEffect(() => {
+    setPeriods([]);
+    setSelectedYear(null);
+    fetchPeriods();
+  }, [selectedLedger]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Format currency
   const formatCurrency = (value: number) => {
@@ -797,6 +843,24 @@ const TrialBalance: React.FC = () => {
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={8}>
           <Select
+            placeholder={loadingLedgers ? 'Loading ledgers...' : 'Select Ledger'}
+            value={selectedLedger || undefined}
+            onChange={(val) => setSelectedLedger(val)}
+            loading={loadingLedgers}
+            style={{ width: '100%' }}
+            size="large"
+            suffixIcon={<BankOutlined />}
+          >
+            {ledgerOptions.map(l => (
+              <Select.Option key={l} value={l}>
+                <BankOutlined style={{ marginRight: 8, color: REDWOOD.info }} />
+                {l}
+              </Select.Option>
+            ))}
+          </Select>
+        </Col>
+        <Col span={8}>
+          <Select
             placeholder="Filter by Year"
             value={selectedYear}
             onChange={setSelectedYear}
@@ -812,7 +876,7 @@ const TrialBalance: React.FC = () => {
             ))}
           </Select>
         </Col>
-        <Col span={16} style={{ textAlign: 'right' }}>
+        <Col span={8} style={{ textAlign: 'right' }}>
           <Button
             icon={<ReloadOutlined />}
             onClick={fetchPeriods}
@@ -2133,16 +2197,18 @@ const TrialBalance: React.FC = () => {
               {Object.entries(apiCalls).map(([key, call]) => (
                 <div key={key} style={{ marginBottom: 12 }}>
                   <Space align="start" wrap>
-                    <Tag color="green" style={{ fontFamily: 'monospace' }}>GET</Tag>
+                    <Tag color={call.method === 'POST' ? 'blue' : 'green'} style={{ fontFamily: 'monospace' }}>{call.method}</Tag>
                     <Text strong style={{ fontSize: 12 }}>{call.label}</Text>
-                    <Button
-                      size="small"
-                      icon={call.running ? <LoadingOutlined /> : <ApiOutlined />}
-                      onClick={() => testEndpoint(key)}
-                      disabled={call.running || !call.url}
-                    >
-                      Test
-                    </Button>
+                    {call.method === 'GET' && (
+                      <Button
+                        size="small"
+                        icon={call.running ? <LoadingOutlined /> : <ApiOutlined />}
+                        onClick={() => testEndpoint(key)}
+                        disabled={call.running || !call.url}
+                      >
+                        Test
+                      </Button>
+                    )}
                     {call.status !== null && (
                       <Tag
                         color={call.ok ? 'success' : 'error'}
