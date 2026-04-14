@@ -4,9 +4,11 @@
 -- Calculates: Opening | Debit | Credit | Closing
 -- for any ledger + period directly from journal lines.
 --
--- Set these two values before running:
---   :ledger_name  e.g.  'BUIMERC LEDGER'
---   :period_name  e.g.  'Sep-23'   (Mon-YY format)
+-- Parameters (set before running):
+--   :ledger_name  REQUIRED  e.g.  'BUIMERC LEDGER'
+--   :period_name  optional  e.g.  'Sep-23'  (Mon-YY) — NULL = all periods
+--   :period_year  optional  e.g.  2024      (fiscal year) — NULL = all years
+--   :company      optional  e.g.  '100'     (segment 1)   — NULL = all companies
 --
 -- How opening balance works:
 --   Balance Sheet (Asset / Liability / Equity):
@@ -39,6 +41,9 @@ ptd AS (
     WHERE hdr.LEDGER_NAME         = :ledger_name
       AND hdr.PERIOD_NAME         IS NOT NULL
       AND lin.ACCOUNT_COMBINATION IS NOT NULL
+      -- Company filter applied early for efficiency (segment 1 of account combination)
+      AND (:company IS NULL OR
+           TRIM(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,1)) = :company)
     GROUP BY
         hdr.LEDGER_NAME,
         hdr.PERIOD_NAME,
@@ -71,6 +76,9 @@ enriched AS (
         -- Fiscal period sequence (1 = first month of the fiscal year)
         NVL(fp.FISCAL_PERIOD,
             EXTRACT(MONTH FROM TO_DATE('01-' || p.PERIOD_NAME, 'DD-Mon-RR')))  AS FISCAL_PERIOD,
+
+        -- Segment 1 = company
+        TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION, '[^-]+', 1, 1))              AS COMPANY,
 
         -- Segment 4 = natural account code
         TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION, '[^-]+', 1, 4))              AS ACCOUNT,
@@ -154,6 +162,7 @@ SELECT
     c.FISCAL_PERIOD,
     c.CURRENCY_CODE,
     c.ACCOUNT_COMBINATION,
+    c.COMPANY,
     c.ACCOUNT,
     c.ACCOUNT_TYPE,
     c.ACCOUNT_DESC,
@@ -175,8 +184,12 @@ SELECT
     END                  AS CLOSING
 
 FROM calc c
-WHERE c.PERIOD_NAME = :period_name          -- filter to the requested period
+WHERE (:period_name IS NULL OR c.PERIOD_NAME = :period_name)
+  AND (:period_year IS NULL OR c.FISCAL_YEAR  = TO_NUMBER(:period_year))
+  AND (:company     IS NULL OR c.COMPANY      = :company)
 ORDER BY
+    c.FISCAL_YEAR,
+    c.FISCAL_PERIOD,
     CASE c.ACCOUNT_TYPE
         WHEN 'A' THEN 1   -- Asset
         WHEN 'L' THEN 2   -- Liability
