@@ -8,7 +8,8 @@
 --   :ledger_name  REQUIRED  e.g.  'BUIMERC LEDGER'
 --   :period_name  optional  e.g.  'Sep-23'  (Mon-YY) — NULL = all periods
 --   :period_year  optional  e.g.  2024      (fiscal year) — NULL = all years
---   :company      optional  e.g.  '100'     (segment 1)   — NULL = all companies
+--   :company       optional  e.g.  '100'     (segment 1)   — NULL = all companies
+--   :currency_code optional  e.g.  'AED'                  — NULL = all currencies
 --
 -- How opening balance works:
 --   Balance Sheet (Asset / Liability / Equity):
@@ -41,9 +42,11 @@ ptd AS (
     WHERE hdr.LEDGER_NAME         = :ledger_name
       AND hdr.PERIOD_NAME         IS NOT NULL
       AND lin.ACCOUNT_COMBINATION IS NOT NULL
-      -- Company filter applied early for efficiency (segment 1 of account combination)
+      -- Optional filters applied early for efficiency
       AND (:company IS NULL OR
            TRIM(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,1)) = :company)
+      AND (:currency_code IS NULL OR
+           NVL(lin.CURRENCY_CODE, hdr.LEDGER_CURRENCY_CODE) = :currency_code)
     GROUP BY
         hdr.LEDGER_NAME,
         hdr.PERIOD_NAME,
@@ -184,9 +187,10 @@ SELECT
     END                  AS CLOSING
 
 FROM calc c
-WHERE (:period_name IS NULL OR c.PERIOD_NAME = :period_name)
-  AND (:period_year IS NULL OR c.FISCAL_YEAR  = TO_NUMBER(:period_year))
-  AND (:company     IS NULL OR c.COMPANY      = :company)
+WHERE (:period_name    IS NULL OR c.PERIOD_NAME   = :period_name)
+  AND (:period_year    IS NULL OR c.FISCAL_YEAR   = TO_NUMBER(:period_year))
+  AND (:company        IS NULL OR c.COMPANY       = :company)
+  AND (:currency_code  IS NULL OR c.CURRENCY_CODE = :currency_code)
 ORDER BY
     c.FISCAL_YEAR,
     c.FISCAL_PERIOD,
