@@ -49,7 +49,7 @@ import {
 import { Link } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import { Divider } from 'antd';
-import { exportRrTBToExcel, exportFusionTBToExcel } from '../../utils/tbExcelExport';
+import { exportRrTBToExcel, exportFusionTBToExcel, exportBothTBToExcel } from '../../utils/tbExcelExport';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -1074,6 +1074,79 @@ const TrialBalance: React.FC = () => {
       message.error({ content: `Export failed: ${e.message}`, key: 'xl' });
     }
   };
+
+  // Export both Fusion TB + ReERP TB into one workbook (two sheets)
+  const handleExportBoth = useCallback(async (rrTab: TabData) => {
+    const periodName = rrTab.periodName.replace(/^ReERP:\s*/, '');
+    const fusionTab  = tabs.find(t => t.tabType === 'fusion' && t.periodName === periodName);
+
+    if (!fusionTab) {
+      message.warning(`Open "Fusion TB" for ${periodName} first, then export both`, 4);
+      return;
+    }
+
+    // ── Fusion: filter + pivot (flat, no segment grouping) ──
+    const fusionFiltered = fusionTab.data.filter(item => {
+      if (rrTab.selectedCompany  && item.company !== rrTab.selectedCompany) return false;
+      if (rrTab.selectedCurrency && (item.currency || item.currency_code) !== rrTab.selectedCurrency) return false;
+      return true;
+    });
+    const fusionPivot  = generatePivotData(fusionFiltered, [], []);
+    const fusionTotals = fusionPivot.reduce(
+      (acc, r) => ({
+        opening: acc.opening + (r.opening_balance || 0),
+        debit:   acc.debit   + (r.debit           || 0),
+        credit:  acc.credit  + (r.credit          || 0),
+        closing: acc.closing + (r.closing_balance || 0),
+      }),
+      { opening: 0, debit: 0, credit: 0, closing: 0 },
+    );
+
+    // ── ReERP: filter + group by account ──
+    const rrFiltered = rrTab.rrData.filter(r => {
+      if (rrTab.selectedCompany  && r.company      !== rrTab.selectedCompany)  return false;
+      if (rrTab.selectedCurrency && r.currency_code !== rrTab.selectedCurrency) return false;
+      return true;
+    });
+    type GR = { account: string; account_desc: string; account_type: string;
+                opening: number; debit: number; credit: number; closing: number; ytd_net: number };
+    const rrMap = new Map<string, GR>();
+    rrFiltered.forEach(r => {
+      if (!rrMap.has(r.account)) {
+        rrMap.set(r.account, { account: r.account, account_desc: r.account_desc,
+          account_type: r.account_type, opening: 0, debit: 0, credit: 0, closing: 0, ytd_net: 0 });
+      }
+      const g = rrMap.get(r.account)!;
+      g.opening += r.opening || 0;  g.debit   += r.debit   || 0;
+      g.credit  += r.credit  || 0;  g.closing += r.closing || 0;
+      g.ytd_net += r.ytd_net || 0;
+    });
+    const rrRows   = Array.from(rrMap.values()).sort((a, b) => a.account.localeCompare(b.account));
+    const rrTotals = rrRows.reduce(
+      (acc, r) => ({
+        opening: acc.opening + r.opening, debit:   acc.debit   + r.debit,
+        credit:  acc.credit  + r.credit,  closing: acc.closing + r.closing, ytd_net: acc.ytd_net + r.ytd_net,
+      }),
+      { opening: 0, debit: 0, credit: 0, closing: 0, ytd_net: 0 },
+    );
+
+    message.loading({ content: 'Building combined Excel…', key: 'xl', duration: 0 });
+    try {
+      await exportBothTBToExcel({
+        ledger:   selectedLedger          || 'All',
+        company:  rrTab.selectedCompany   || 'All',
+        period:   periodName,
+        currency: rrTab.selectedCurrency  || 'All',
+        fusionRows:   fusionPivot as any,
+        fusionTotals,
+        rrRows,
+        rrTotals,
+      });
+      message.success({ content: 'Combined Excel exported', key: 'xl' });
+    } catch (e: any) {
+      message.error({ content: `Export failed: ${e.message}`, key: 'xl' });
+    }
+  }, [tabs, selectedLedger]);
 
   // Render trial balance tab content
   const renderTBTab = (tab: TabData) => {
@@ -2283,6 +2356,20 @@ const TrialBalance: React.FC = () => {
             >
               Reconcile
             </Button>
+            <Tooltip title={
+              tabs.find(t => t.tabType === 'fusion' && t.periodName === tab.periodName.replace(/^ReERP:\s*/, ''))
+                ? 'Export Fusion TB + ReERP TB to one Excel file (2 sheets)'
+                : 'Open Fusion TB for this period first'
+            }>
+              <Button
+                icon={<FileExcelOutlined />}
+                size="small"
+                onClick={() => handleExportBoth(tab)}
+                style={{ background: REDWOOD.success, borderColor: REDWOOD.success, color: '#fff' }}
+              >
+                Export Both
+              </Button>
+            </Tooltip>
           </Col>
         </Row>
 
