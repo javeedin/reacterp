@@ -703,15 +703,19 @@ const TrialBalance: React.FC = () => {
 
     const TOLERANCE = 0.005;
 
-    // Reconciliation is always AED only
-    const RECON_CURRENCY = 'AED';
+    // Fusion TB stores everything in functional currency (AED) → filter to AED.
+    // Dynamic TB uses ENTERED currency codes (e.g. INR for Indian entries) even
+    // though the ACCOUNTED amounts are already in the functional currency (AED).
+    // So we must NOT filter the ReERP side by currency — sum all currencies,
+    // which gives the same total as Fusion AED.
+    const FUSION_CURRENCY = 'AED';
 
-    // Aggregate Fusion TB by account — AED currency only
+    // Aggregate Fusion TB by account — AED (functional currency) only
     type Agg = { opening: number; debit: number; credit: number; closing: number; desc: string };
     const fusionMap = new Map<string, Agg>();
     fusionTab.data.forEach(r => {
       if (tab.selectedCompany && r.company !== tab.selectedCompany) return;
-      if ((r.currency || r.currency_code) !== RECON_CURRENCY) return;
+      if ((r.currency || r.currency_code) !== FUSION_CURRENCY) return;
       const prev = fusionMap.get(r.account) ?? { opening: 0, debit: 0, credit: 0, closing: 0, desc: r.account_desc || '' };
       fusionMap.set(r.account, {
         opening: prev.opening + (r.opening_balance || 0),
@@ -722,11 +726,12 @@ const TrialBalance: React.FC = () => {
       });
     });
 
-    // Aggregate ReERP TB by account — AED currency only
+    // Aggregate ReERP TB by account — ALL currencies summed
+    // (accounted amounts are already in functional currency regardless of the
+    // entered currency code stored on the line)
     const rrMap = new Map<string, Agg>();
     tab.rrData.forEach(r => {
       if (tab.selectedCompany && r.company !== tab.selectedCompany) return;
-      if (r.currency_code !== RECON_CURRENCY) return;
       const prev = rrMap.get(r.account) ?? { opening: 0, debit: 0, credit: 0, closing: 0, desc: r.account_desc || '' };
       rrMap.set(r.account, {
         opening: prev.opening + (r.opening || 0),
@@ -2826,7 +2831,7 @@ const TrialBalance: React.FC = () => {
               <CheckCircleOutlined style={{ color: REDWOOD.info }} />
               <span>Reconciliation — Fusion TB vs ReERP TB</span>
               {reconPeriod && <Tag color="blue">{reconPeriod}</Tag>}
-              <Tag color="gold">AED only</Tag>
+              <Tag color="gold">Fusion: AED | ReERP: all currencies</Tag>
             </Space>
           }
           open={reconVisible}
