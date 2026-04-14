@@ -42,43 +42,46 @@ BEGIN
         p_comments       => 'Retrieve RR Trial Balance rows with optional filters',
         p_source         => q'[
 SELECT
-    tb_id,
-    ledger_name,
-    period_name,
-    period_year,
-    period_num,
-    currency_code,
-    account_combination,
-    company,
-    lob,
-    department,
-    account,
-    account_desc,
-    sub_account,
-    analysis,
-    intercompany,
-    future1,
-    future2,
-    account_type,
-    NVL(opening_dr, 0)  AS opening_dr,
-    NVL(opening_cr, 0)  AS opening_cr,
-    NVL(ptd_dr, 0)      AS ptd_dr,
-    NVL(ptd_cr, 0)      AS ptd_cr,
-    NVL(ytd_dr, 0)      AS ytd_dr,
-    NVL(ytd_cr, 0)      AS ytd_cr,
-    NVL(closing_dr, 0)  AS closing_dr,
-    NVL(closing_cr, 0)  AS closing_cr,
-    TO_CHAR(run_date, 'YYYY-MM-DD HH24:MI:SS') AS run_date
-FROM rr_erp_trialbalance
-WHERE (:ledger_name IS NULL OR ledger_name = :ledger_name)
-  AND (:period_year IS NULL OR period_year = TO_NUMBER(:period_year))
-  AND (:period_name IS NULL OR period_name = :period_name)
-  AND (:account_type IS NULL OR account_type = :account_type)
-  AND (:company IS NULL OR company = :company)
+    tb.tb_id,
+    tb.ledger_name,
+    tb.period_name,
+    tb.period_year,
+    tb.period_num,
+    tb.currency_code,
+    tb.account_combination,
+    tb.company,
+    tb.lob,
+    tb.department,
+    tb.account,
+    NVL(vsv.description, tb.account_desc) AS account_desc,
+    tb.sub_account,
+    tb.analysis,
+    tb.intercompany,
+    tb.future1,
+    tb.future2,
+    tb.account_type,
+    NVL(tb.opening_dr, 0)  AS opening_dr,
+    NVL(tb.opening_cr, 0)  AS opening_cr,
+    NVL(tb.ptd_dr, 0)      AS ptd_dr,
+    NVL(tb.ptd_cr, 0)      AS ptd_cr,
+    NVL(tb.ytd_dr, 0)      AS ytd_dr,
+    NVL(tb.ytd_cr, 0)      AS ytd_cr,
+    NVL(tb.closing_dr, 0)  AS closing_dr,
+    NVL(tb.closing_cr, 0)  AS closing_cr,
+    TO_CHAR(tb.run_date, 'YYYY-MM-DD HH24:MI:SS') AS run_date
+FROM rr_erp_trialbalance tb
+LEFT JOIN rr_value_set_values vsv
+       ON vsv.value_set_code = 'BUIMERC_FIN_GLB_COA_ACCOUNT'
+      AND vsv.value          = tb.account
+WHERE (:ledger_name IS NULL OR tb.ledger_name = :ledger_name)
+  AND (:period_year IS NULL OR tb.period_year = TO_NUMBER(:period_year))
+  AND (:period_name IS NULL OR tb.period_name = :period_name)
+  AND (:account_type IS NULL OR tb.account_type = :account_type)
+  AND (:company IS NULL OR tb.company = :company)
 ORDER BY
-    period_year,
-    period_num,
-    CASE account_type
+    tb.period_year,
+    tb.period_num,
+    CASE tb.account_type
         WHEN 'A' THEN 1   -- Asset
         WHEN 'L' THEN 2   -- Liability
         WHEN 'O' THEN 3   -- Equity
@@ -86,9 +89,9 @@ ORDER BY
         WHEN 'E' THEN 5   -- Expense
         ELSE 6
     END,
-    account,
-    company,
-    department
+    tb.account,
+    tb.company,
+    tb.department
 ]'
     );
     COMMIT;

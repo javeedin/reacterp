@@ -331,7 +331,8 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
                 NVL(cc."buimercFinGlbCoaAccount",
                     NULLIF(TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,4)),
                            ''))                                    AS ACCOUNT,
-                cc."FinancialCategory"                             AS ACCOUNT_DESC,
+                -- Description from value set (more reliable than COA combinations)
+                vsv.DESCRIPTION                                    AS ACCOUNT_DESC,
                 NVL(cc."buimercFinGlbCoaSubAcc",
                     NULLIF(TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,5)),
                            ''))                                    AS SUB_ACCOUNT,
