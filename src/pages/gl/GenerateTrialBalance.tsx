@@ -124,36 +124,81 @@ const GenerateTrialBalance: React.FC = () => {
   const [filterSearch,  setFilterSearch]  = useState('');
 
   // API panel
-  const [apiUrl, setApiUrl] = useState('');
-  const [apiGenUrl, setApiGenUrl] = useState('');
+  const [apiPanelVisible, setApiPanelVisible] = useState(false);
+  const [apiCalls, setApiCalls] = useState<Record<string, {
+    label: string; url: string; method: string;
+    status: number | null; ok: boolean | null; durationMs: number | null; running: boolean; body: string;
+  }>>({
+    ledgers: { label: 'GET Ledgers',       url: `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceLedgers}`, method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
+    periods: { label: 'GET Periods',       url: '',                                                                             method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
+    fetch:   { label: 'GET Trial Balance', url: '',                                                                             method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
+    generate:{ label: 'POST Generate TB',  url: `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceGenerate}`,method: 'POST', status: null, ok: null, durationMs: null, running: false, body: '' },
+  });
+
+  const trackCall = (key: string, url: string) => {
+    setApiCalls(prev => ({ ...prev, [key]: { ...prev[key], url, status: null, ok: null, durationMs: null, running: true, body: '' } }));
+    return performance.now();
+  };
+  const resolveCall = (key: string, t0: number, status: number, ok: boolean, body: string) => {
+    setApiCalls(prev => ({ ...prev, [key]: { ...prev[key], status, ok, durationMs: Math.round(performance.now() - t0), running: false, body } }));
+  };
+  const testEndpoint = async (key: string) => {
+    const call = apiCalls[key];
+    if (!call.url || call.method !== 'GET') return;
+    const t0 = trackCall(key, call.url);
+    try {
+      const res = await fetch(call.url);
+      const text = await res.text();
+      let pretty = text;
+      try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch (_) {}
+      resolveCall(key, t0, res.status, res.ok, pretty.slice(0, 1000));
+    } catch (e: any) {
+      resolveCall(key, t0, 0, false, e.message);
+    }
+  };
 
   // ── Fetch ledger options ─────────────────────────────────
   const fetchLedgers = useCallback(async () => {
+    const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceLedgers}`;
+    const t0 = trackCall('ledgers', url);
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceLedgers}`;
       const res = await fetch(url);
-      if (!res.ok) return;
-      const json = await res.json();
+      const text = await res.text();
+      if (!res.ok) {
+        resolveCall('ledgers', t0, res.status, false, text);
+        message.error(`Failed to load ledgers: HTTP ${res.status}`);
+        return;
+      }
+      const json = JSON.parse(text);
       const names = (json.items || []).map((r: LedgerOption) => r.ledger_name).filter(Boolean);
+      resolveCall('ledgers', t0, res.status, true, `${names.length} ledgers returned`);
       setLedgers(names);
-      if (names.length === 1) setLedgerName(names[0]);
-    } catch (_) {}
-  }, []);
+      if (names.length > 0) setLedgerName(names[0]);
+    } catch (e: any) {
+      resolveCall('ledgers', t0, 0, false, e.message);
+      message.error(`Failed to load ledgers: ${e.message}`);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Fetch period options ─────────────────────────────────
   const fetchPeriods = useCallback(async (ledger: string, year: number | null) => {
     if (!ledger) return;
+    const params = new URLSearchParams();
+    params.set('ledger_name', ledger);
+    if (year) params.set('period_year', String(year));
+    const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalancePeriods}?${params}`;
+    const t0 = trackCall('periods', url);
     try {
-      const params = new URLSearchParams();
-      params.set('ledger_name', ledger);
-      if (year) params.set('period_year', String(year));
-      const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalancePeriods}?${params}`;
       const res = await fetch(url);
-      if (!res.ok) return;
-      const json = await res.json();
+      const text = await res.text();
+      if (!res.ok) { resolveCall('periods', t0, res.status, false, text); return; }
+      const json = JSON.parse(text);
+      resolveCall('periods', t0, res.status, true, `${(json.items || []).length} periods`);
       setPeriods(json.items || []);
-    } catch (_) {}
-  }, []);
+    } catch (e: any) {
+      resolveCall('periods', t0, 0, false, e.message);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { fetchLedgers(); }, [fetchLedgers]);
 
@@ -174,10 +219,11 @@ const GenerateTrialBalance: React.FC = () => {
       if (filterCompany) params.set('company', filterCompany);
       params.set('limit', '10000');
       const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalance}?${params}`;
-      setApiUrl(url);
+      const t0 = trackCall('fetch', url);
       const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) { resolveCall('fetch', t0, res.status, false, res.statusText); throw new Error(`HTTP ${res.status}`); }
       const json = await res.json();
+      resolveCall('fetch', t0, res.status, true, `${(json.items || []).length} rows`);
       setData(json.items || []);
     } catch (e: any) {
       message.error('Failed to load TB data: ' + e.message);
@@ -198,13 +244,14 @@ const GenerateTrialBalance: React.FC = () => {
         p_period_name: periodName || null,
       };
       const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceGenerate}`;
-      setApiGenUrl(url);
+      const t0 = trackCall('generate', url);
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
       const json: GenerateResult = await res.json();
+      resolveCall('generate', t0, res.status, res.ok, json.message || '');
       setGenResult(json);
       if (json.success || json.inserted > 0 || json.updated > 0) {
         message.success(json.message || 'Trial Balance generated');
@@ -516,30 +563,67 @@ const GenerateTrialBalance: React.FC = () => {
             </Text>
           </div>
           <Space>
-            {apiUrl && (
-              <Popover
-                title="API Endpoints"
-                trigger="click"
-                content={
-                  <div style={{ maxWidth: 480 }}>
-                    {apiGenUrl && (
-                      <div style={{ marginBottom: 8 }}>
-                        <Tag color="orange">POST</Tag>
-                        <Text code style={{ fontSize: 11, wordBreak: 'break-all' }}>{apiGenUrl}</Text>
-                      </div>
-                    )}
-                    <div>
-                      <Tag color="blue">GET</Tag>
-                      <Text code style={{ fontSize: 11, wordBreak: 'break-all' }}>{apiUrl}</Text>
-                    </div>
-                  </div>
-                }
-              >
-                <Button icon={<ApiOutlined />} size="small" type="text" style={{ color: REDWOOD.info }} />
-              </Popover>
-            )}
+            <Button
+              icon={<ApiOutlined />}
+              size="small"
+              type={apiPanelVisible ? 'primary' : 'default'}
+              style={apiPanelVisible
+                ? { background: REDWOOD.info, borderColor: REDWOOD.info }
+                : { borderColor: REDWOOD.info, color: REDWOOD.info }}
+              onClick={() => setApiPanelVisible(v => !v)}
+            >
+              API
+            </Button>
           </Space>
         </div>
+
+        {/* ── API Panel ───────────────────────────────────── */}
+        {apiPanelVisible && (
+          <Card
+            size="small"
+            style={{ marginBottom: 12, background: '#f0f5ff', border: `1px solid ${REDWOOD.info}`, borderRadius: 8 }}
+            title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>API Endpoints</Text></Space>}
+            extra={<Button size="small" type="text" onClick={() => setApiPanelVisible(false)}>✕</Button>}
+          >
+            {Object.entries(apiCalls).map(([key, call]) => (
+              <div key={key} style={{ marginBottom: 10 }}>
+                <Space align="start" wrap>
+                  <Tag color={call.method === 'POST' ? 'blue' : 'green'} style={{ fontFamily: 'monospace', minWidth: 42, textAlign: 'center' }}>{call.method}</Tag>
+                  <Text strong style={{ fontSize: 12 }}>{call.label}</Text>
+                  {call.method === 'GET' && call.url && (
+                    <Button
+                      size="small"
+                      icon={call.running ? <LoadingOutlined /> : <ApiOutlined />}
+                      onClick={() => testEndpoint(key)}
+                      disabled={call.running}
+                    >
+                      Test
+                    </Button>
+                  )}
+                  {call.status !== null && (
+                    <Tag
+                      color={call.ok ? 'success' : 'error'}
+                      icon={call.ok ? <CheckCircleOutlined /> : <CloseCircleOutlined />}
+                    >
+                      {call.status} · {call.durationMs}ms
+                    </Tag>
+                  )}
+                  {call.running && <Tag icon={<LoadingOutlined />} color="processing">Running…</Tag>}
+                </Space>
+                {call.url && (
+                  <div style={{ marginTop: 2, marginLeft: 52 }}>
+                    <Text code style={{ fontSize: 11, wordBreak: 'break-all' }}>{call.url}</Text>
+                  </div>
+                )}
+                {call.body && (
+                  <pre style={{ fontSize: 11, background: '#fff', border: '1px solid #e5e5e5', padding: 6, borderRadius: 4, maxHeight: 80, overflow: 'auto', marginTop: 4, marginLeft: 52 }}>
+                    {call.body}
+                  </pre>
+                )}
+              </div>
+            ))}
+          </Card>
+        )}
 
         {/* ── Parameters Card ─────────────────────────────── */}
         <Card
