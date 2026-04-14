@@ -57,14 +57,15 @@ ptd AS (
 -- ────────────────────────────────────────────────────────────
 -- Step 2 — Enrich each row with fiscal calendar + account info
 --
--- ORA-01722 defence:
---   RR_V_GL_FISCAL_PERIODS may expose FISCAL_YEAR / FISCAL_PERIOD
---   as VARCHAR2.  NVL inherits the first-argument type, so
---   NVL(varchar2_col, number_expr) stays VARCHAR2 and later
---   arithmetic (FISCAL_YEAR * 100) blows up.
---   Fix: CASE separates the two branches so only the matched
---   branch is evaluated; explicit TO_NUMBER on the VARCHAR2
---   branch keeps the result numeric.
+-- IMPORTANT: RR_V_GL_FISCAL_PERIODS may have multiple rows for
+-- the same PERIOD_NAME (one per ledger config in the underlying
+-- RR_ACCOUNTING_PERIODS_STATUS table).  Without collapsing to
+-- one row per PERIOD_NAME the join fans out — each account row
+-- in ptd is duplicated N times — and the window functions in
+-- Step 3 then see those duplicates as separate periods, making
+-- opening balance non-zero even for the very first period.
+-- Fix: GROUP BY PERIOD_NAME in the subquery guarantees exactly
+-- one fiscal-calendar row per period before the join.
 -- ────────────────────────────────────────────────────────────
 enriched AS (
     SELECT
@@ -73,14 +74,14 @@ enriched AS (
         p.CURRENCY_CODE,
         p.ACCOUNT_COMBINATION,
 
-        -- Fiscal year — CASE avoids NVL type-propagation issue
+        -- Fiscal year: from view (one row guaranteed), else calendar year fallback
         CASE
             WHEN fp.FISCAL_YEAR IS NOT NULL
             THEN TO_NUMBER(fp.FISCAL_YEAR)
             ELSE EXTRACT(YEAR  FROM TO_DATE('01-' || p.PERIOD_NAME, 'DD-Mon-RR'))
         END  AS FISCAL_YEAR,
 
-        -- Fiscal period (1 = first month of fiscal year)
+        -- Fiscal period (1 = first month of fiscal year): from view, else calendar month
         CASE
             WHEN fp.FISCAL_PERIOD IS NOT NULL
             THEN TO_NUMBER(fp.FISCAL_PERIOD)
@@ -104,13 +105,19 @@ enriched AS (
 
     FROM ptd p
 
-    -- Fiscal calendar: PERIOD_NAME 'Mon-YY' matches directly (e.g. 'Jul-23')
-    -- ADJ_FLAG compared with TO_CHAR() in case the view stores it as NUMBER
-    LEFT JOIN RR_V_GL_FISCAL_PERIODS fp
-           ON fp.PERIOD_NAME       = p.PERIOD_NAME
-          --AND fp.LEDGER_NAME     = p.LEDGER_NAME
-          AND TO_CHAR(fp.APPLICATION) = 'GL'
-          AND TO_CHAR(fp.ADJ_FLAG)    = 'N'
+    -- Collapse view to ONE row per PERIOD_NAME before joining.
+    -- MAX() picks any consistent row — all rows for the same period
+    -- have the same FISCAL_YEAR / FISCAL_PERIOD values anyway.
+    LEFT JOIN (
+        SELECT
+            PERIOD_NAME,
+            MAX(TO_NUMBER(FISCAL_YEAR))   AS FISCAL_YEAR,
+            MAX(TO_NUMBER(FISCAL_PERIOD)) AS FISCAL_PERIOD
+        FROM RR_V_GL_FISCAL_PERIODS
+        WHERE TO_CHAR(APPLICATION) = 'GL'
+          AND TO_CHAR(ADJ_FLAG)    = 'N'
+        GROUP BY PERIOD_NAME
+    ) fp ON fp.PERIOD_NAME = p.PERIOD_NAME
 
     -- Account type and description from Chart of Accounts value set
     LEFT JOIN RR_VALUE_SET_VALUES vsv
