@@ -201,6 +201,18 @@ interface LineSummaryRow {
   line_count:   number;
 }
 
+// ReERP vs Fusion reconciliation row
+interface ReconRecord {
+  account:      string;
+  account_desc: string;
+  fusionOpening: number; fusionDebit: number; fusionCredit: number; fusionClosing: number;
+  rrOpening:    number; rrDebit:    number; rrCredit:    number; rrClosing:    number;
+  diffOpening:  number; diffDebit:  number; diffCredit:  number; diffClosing:  number;
+  matched:  boolean;
+  inFusion: boolean;
+  inRr:     boolean;
+}
+
 const TrialBalance: React.FC = () => {
   // Periods list state
   const [periods, setPeriods] = useState<PeriodInfo[]>([]);
@@ -252,6 +264,13 @@ const TrialBalance: React.FC = () => {
     tbRecords: GLBalanceRecord[];
   } | null>(null);
   const [lsDetailCcy, setLsDetailCcy] = useState<string | null>(null);
+
+  // ReERP ↔ Fusion reconciliation state
+  const [reconVisible,  setReconVisible]  = useState(false);
+  const [reconData,     setReconData]     = useState<ReconRecord[]>([]);
+  const [reconPeriod,   setReconPeriod]   = useState('');
+  const [reconFilter,   setReconFilter]   = useState<'all' | 'diff' | 'matched'>('all');
+  const [reconSearch,   setReconSearch]   = useState('');
 
   // Get unique years from periods
   const availableYears = useMemo(() => {
@@ -590,6 +609,95 @@ const TrialBalance: React.FC = () => {
     const unmatched = newMap.size - matched;
     message.info(`Reconciliation: ${matched} matched ✓, ${unmatched} unmatched ✗`);
   }, [lsPeriod, lsData, tabs]);
+
+  // ── ReERP ↔ Fusion account-level reconciliation ────────────────────────
+  const handleRrReconcile = useCallback((tab: TabData) => {
+    const periodName = tab.periodName.replace(/^ReERP:\s*/, '');
+
+    // Find the Fusion TB tab for this period
+    const fusionTab = tabs.find(t => t.tabType === 'fusion' && t.periodName === periodName);
+    if (!fusionTab) {
+      message.warning(
+        `Open "Fusion TB" for ${periodName} first, then click Reconcile`,
+        4,
+      );
+      return;
+    }
+    if (!fusionTab.data.length) {
+      message.warning('Fusion TB has no data loaded for this period');
+      return;
+    }
+
+    const TOLERANCE = 0.005;
+
+    // Aggregate Fusion TB by account (respect same company/currency filter)
+    type Agg = { opening: number; debit: number; credit: number; closing: number; desc: string };
+    const fusionMap = new Map<string, Agg>();
+    fusionTab.data.forEach(r => {
+      if (tab.selectedCompany  && r.company !== tab.selectedCompany)  return;
+      if (tab.selectedCurrency && (r.currency || r.currency_code) !== tab.selectedCurrency) return;
+      const prev = fusionMap.get(r.account) ?? { opening: 0, debit: 0, credit: 0, closing: 0, desc: r.account_desc || '' };
+      fusionMap.set(r.account, {
+        opening: prev.opening + (r.opening_balance || 0),
+        debit:   prev.debit   + (r.debit           || 0),
+        credit:  prev.credit  + (r.credit          || 0),
+        closing: prev.closing + (r.closing_balance || 0),
+        desc:    r.account_desc || prev.desc,
+      });
+    });
+
+    // Aggregate ReERP TB by account
+    const rrMap = new Map<string, Agg>();
+    tab.rrData.forEach(r => {
+      if (tab.selectedCompany  && r.company      !== tab.selectedCompany)  return;
+      if (tab.selectedCurrency && r.currency_code !== tab.selectedCurrency) return;
+      const prev = rrMap.get(r.account) ?? { opening: 0, debit: 0, credit: 0, closing: 0, desc: r.account_desc || '' };
+      rrMap.set(r.account, {
+        opening: prev.opening + (r.opening || 0),
+        debit:   prev.debit   + (r.debit   || 0),
+        credit:  prev.credit  + (r.credit  || 0),
+        closing: prev.closing + (r.closing || 0),
+        desc:    r.account_desc || prev.desc,
+      });
+    });
+
+    const allAccounts = new Set([...fusionMap.keys(), ...rrMap.keys()]);
+    const records: ReconRecord[] = Array.from(allAccounts)
+      .map(account => {
+        const f  = fusionMap.get(account) ?? { opening: 0, debit: 0, credit: 0, closing: 0, desc: '' };
+        const rr = rrMap.get(account)     ?? { opening: 0, debit: 0, credit: 0, closing: 0, desc: '' };
+        const dO = rr.opening - f.opening;
+        const dD = rr.debit   - f.debit;
+        const dC = rr.credit  - f.credit;
+        const dCl= rr.closing - f.closing;
+        return {
+          account,
+          account_desc:  rr.desc || f.desc,
+          fusionOpening: f.opening,  fusionDebit: f.debit,  fusionCredit: f.credit,  fusionClosing: f.closing,
+          rrOpening:    rr.opening,  rrDebit:    rr.debit,  rrCredit:    rr.credit,  rrClosing:    rr.closing,
+          diffOpening:   dO,  diffDebit: dD,  diffCredit: dC,  diffClosing: dCl,
+          matched:  Math.abs(dO) < TOLERANCE && Math.abs(dD) < TOLERANCE &&
+                    Math.abs(dC) < TOLERANCE && Math.abs(dCl) < TOLERANCE,
+          inFusion: fusionMap.has(account),
+          inRr:     rrMap.has(account),
+        };
+      })
+      .sort((a, b) => a.account.localeCompare(b.account));
+
+    setReconData(records);
+    setReconPeriod(periodName);
+    setReconFilter('all');
+    setReconSearch('');
+    setReconVisible(true);
+
+    const matchedCount = records.filter(r => r.matched).length;
+    const diffCount    = records.length - matchedCount;
+    if (diffCount === 0) {
+      message.success(`All ${matchedCount} accounts reconcile perfectly ✓`);
+    } else {
+      message.warning(`${diffCount} account(s) have differences — see reconciliation panel`);
+    }
+  }, [tabs]);
 
   // Update tab filter
   const updateTabFilter = useCallback((tabKey: string, field: 'selectedCompany' | 'selectedCurrency', value: string | null) => {
@@ -2150,14 +2258,14 @@ const TrialBalance: React.FC = () => {
               options={tab.currencies.map(c => ({ value: c, label: c }))}
             />
           </Col>
-          <Col span={8}>
+          <Col span={6}>
             <Input.Search placeholder="Search account / description…"
               value={tab.gridSearch}
               onChange={e => updateTabSearch(tab.key, e.target.value)}
               allowClear
             />
           </Col>
-          <Col span={4} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Col span={6} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <Tag color="blue" style={{ lineHeight: '30px', fontSize: 12 }}>{tableRows.length} accounts</Tag>
             <Button
               icon={<FileExcelOutlined />}
@@ -2166,6 +2274,14 @@ const TrialBalance: React.FC = () => {
               style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}
             >
               Excel
+            </Button>
+            <Button
+              icon={<CheckCircleOutlined />}
+              size="small"
+              onClick={() => handleRrReconcile(tab)}
+              style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
+            >
+              Reconcile
             </Button>
           </Col>
         </Row>
@@ -2186,8 +2302,8 @@ const TrialBalance: React.FC = () => {
           columns={columns}
           rowKey="account"
           size="small"
-          pagination={{ pageSize: 50, showSizeChanger: true, pageSizeOptions: ['25', '50', '100'] }}
-          scroll={{ x: 900 }}
+          pagination={false}
+          scroll={{ x: 900, y: 'calc(100vh - 360px)' }}
           summary={summaryRow}
           onRow={(r: any) => ({ style: { background: accountTypeColor[r.account_type] || '#fff' } })}
         />
@@ -2504,6 +2620,164 @@ const TrialBalance: React.FC = () => {
               }}
             />
           )}
+        </Modal>
+
+        {/* ── ReERP ↔ Fusion Reconciliation Modal ──────────────────────── */}
+        <Modal
+          title={
+            <Space>
+              <CheckCircleOutlined style={{ color: REDWOOD.info }} />
+              <span>Reconciliation — Fusion TB vs ReERP TB</span>
+              {reconPeriod && <Tag color="blue">{reconPeriod}</Tag>}
+            </Space>
+          }
+          open={reconVisible}
+          onCancel={() => setReconVisible(false)}
+          footer={null}
+          width="96vw"
+          style={{ top: 20 }}
+          bodyStyle={{ padding: '12px 16px' }}
+        >
+          {(() => {
+            const fmt = (n: number) =>
+              new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+            const fmtDiff = (n: number) => {
+              if (Math.abs(n) < 0.005) return <Text style={{ color: REDWOOD.success, fontFamily: 'monospace', fontSize: 11 }}>—</Text>;
+              return <Text style={{ color: REDWOOD.primary, fontFamily: 'monospace', fontSize: 11, fontWeight: 600 }}>
+                {n > 0 ? '+' : ''}{fmt(n)}
+              </Text>;
+            };
+
+            const matchedCount = reconData.filter(r => r.matched).length;
+            const diffCount    = reconData.length - matchedCount;
+
+            let visible = reconData;
+            if (reconFilter === 'diff')    visible = reconData.filter(r => !r.matched);
+            if (reconFilter === 'matched') visible = reconData.filter(r =>  r.matched);
+            if (reconSearch.trim()) {
+              const lc = reconSearch.toLowerCase();
+              visible = visible.filter(r =>
+                r.account.toLowerCase().includes(lc) ||
+                r.account_desc?.toLowerCase().includes(lc)
+              );
+            }
+
+            const amtCell = (f: number, r: number) => (
+              <Space direction="vertical" size={0} style={{ width: '100%' }}>
+                <Text style={{ fontFamily: 'monospace', fontSize: 10, color: REDWOOD.textSecondary }}>F: {fmt(f)}</Text>
+                <Text style={{ fontFamily: 'monospace', fontSize: 10, color: REDWOOD.info }}>R: {fmt(r)}</Text>
+                <Divider style={{ margin: '2px 0' }} />
+                {fmtDiff(r - f)}
+              </Space>
+            );
+
+            const reconColumns = [
+              {
+                title: 'Account', dataIndex: 'account', key: 'account', width: 110, fixed: 'left' as const,
+                sorter: (a: ReconRecord, b: ReconRecord) => a.account.localeCompare(b.account),
+                defaultSortOrder: 'ascend' as const,
+                render: (v: string) => <Text strong style={{ fontFamily: 'monospace' }}>{v}</Text>,
+              },
+              {
+                title: 'Description', dataIndex: 'account_desc', key: 'account_desc', width: 200, ellipsis: true,
+                render: (v: string) => <Text style={{ fontSize: 11 }}>{v || '—'}</Text>,
+              },
+              {
+                title: 'Status', key: 'status', width: 80, align: 'center' as const, fixed: 'left' as const,
+                filters: [{ text: 'Matched', value: true }, { text: 'Difference', value: false }],
+                onFilter: (value: any, record: ReconRecord) => record.matched === value,
+                render: (_: any, r: ReconRecord) => r.matched
+                  ? <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: 10 }}>Match</Tag>
+                  : <Tag color="error"   icon={<CloseCircleOutlined />} style={{ fontSize: 10 }}>Diff</Tag>,
+              },
+              {
+                title: 'Opening', key: 'opening', width: 140, align: 'center' as const,
+                render: (_: any, r: ReconRecord) => amtCell(r.fusionOpening, r.rrOpening),
+                sorter: (a: ReconRecord, b: ReconRecord) => Math.abs(a.diffOpening) - Math.abs(b.diffOpening),
+              },
+              {
+                title: 'Debit (PTD)', key: 'debit', width: 140, align: 'center' as const,
+                render: (_: any, r: ReconRecord) => amtCell(r.fusionDebit, r.rrDebit),
+                sorter: (a: ReconRecord, b: ReconRecord) => Math.abs(a.diffDebit) - Math.abs(b.diffDebit),
+              },
+              {
+                title: 'Credit (PTD)', key: 'credit', width: 140, align: 'center' as const,
+                render: (_: any, r: ReconRecord) => amtCell(r.fusionCredit, r.rrCredit),
+                sorter: (a: ReconRecord, b: ReconRecord) => Math.abs(a.diffCredit) - Math.abs(b.diffCredit),
+              },
+              {
+                title: 'Closing', key: 'closing', width: 140, align: 'center' as const,
+                render: (_: any, r: ReconRecord) => amtCell(r.fusionClosing, r.rrClosing),
+                sorter: (a: ReconRecord, b: ReconRecord) => Math.abs(a.diffClosing) - Math.abs(b.diffClosing),
+              },
+              {
+                title: 'In', key: 'in', width: 80, align: 'center' as const,
+                render: (_: any, r: ReconRecord) => (
+                  <Space direction="vertical" size={0}>
+                    <Tag color={r.inFusion ? 'blue'  : 'default'} style={{ fontSize: 9, marginBottom: 2 }}>Fusion</Tag>
+                    <Tag color={r.inRr     ? 'green' : 'default'} style={{ fontSize: 9 }}>ReERP</Tag>
+                  </Space>
+                ),
+              },
+            ];
+
+            return (
+              <>
+                {/* Summary bar */}
+                <Row gutter={12} style={{ marginBottom: 12 }}>
+                  <Col span={4}>
+                    <Card size="small" style={{ textAlign: 'center', borderColor: REDWOOD.success, background: '#f6ffed' }}>
+                      <div style={{ fontSize: 22, fontWeight: 700, color: REDWOOD.success }}>{matchedCount}</div>
+                      <div style={{ fontSize: 11, color: REDWOOD.textSecondary }}>Matched</div>
+                    </Card>
+                  </Col>
+                  <Col span={4}>
+                    <Card size="small" style={{ textAlign: 'center', borderColor: diffCount ? REDWOOD.error : REDWOOD.border, background: diffCount ? '#fff2f0' : '#fff' }}>
+                      <div style={{ fontSize: 22, fontWeight: 700, color: diffCount ? REDWOOD.error : REDWOOD.textSecondary }}>{diffCount}</div>
+                      <div style={{ fontSize: 11, color: REDWOOD.textSecondary }}>Differences</div>
+                    </Card>
+                  </Col>
+                  <Col span={4}>
+                    <Card size="small" style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: 22, fontWeight: 700, color: REDWOOD.neutral }}>{reconData.length}</div>
+                      <div style={{ fontSize: 11, color: REDWOOD.textSecondary }}>Total Accounts</div>
+                    </Card>
+                  </Col>
+                  <Col span={6} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Button size="small" type={reconFilter === 'all'     ? 'primary' : 'default'} onClick={() => setReconFilter('all')}>All</Button>
+                    <Button size="small" type={reconFilter === 'diff'    ? 'primary' : 'default'} onClick={() => setReconFilter('diff')}    danger={reconFilter !== 'diff'    && diffCount > 0}>Differences ({diffCount})</Button>
+                    <Button size="small" type={reconFilter === 'matched' ? 'primary' : 'default'} onClick={() => setReconFilter('matched')}>Matched ({matchedCount})</Button>
+                  </Col>
+                  <Col span={6}>
+                    <Input.Search
+                      placeholder="Search account…"
+                      value={reconSearch}
+                      onChange={e => setReconSearch(e.target.value)}
+                      allowClear
+                      size="small"
+                    />
+                  </Col>
+                </Row>
+
+                <div style={{ fontSize: 11, color: REDWOOD.textSecondary, marginBottom: 8 }}>
+                  <strong>F</strong> = Fusion TB &nbsp;|&nbsp; <strong>R</strong> = ReERP TB &nbsp;|&nbsp; Diff = R − F &nbsp;|&nbsp; Tolerance: 0.005
+                </div>
+
+                <Table
+                  dataSource={visible}
+                  columns={reconColumns}
+                  rowKey="account"
+                  size="small"
+                  pagination={false}
+                  scroll={{ x: 1000, y: 'calc(80vh - 220px)' }}
+                  rowClassName={(r: ReconRecord) => r.matched ? '' : 'recon-diff-row'}
+                  onRow={(r: ReconRecord) => ({
+                    style: { background: r.matched ? '#f6ffed' : '#fff2f0' },
+                  })}
+                />
+              </>
+            );
+          })()}
         </Modal>
       </Content>
     </Layout>
