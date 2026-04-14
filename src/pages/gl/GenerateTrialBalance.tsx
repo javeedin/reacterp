@@ -239,10 +239,11 @@ const GenerateTrialBalance: React.FC = () => {
     try {
       const params = new URLSearchParams();
       params.set('ledger_name', ledgerName);
-      if (periodYear) params.set('period_year', String(periodYear));
-      if (periodName) params.set('period_name', periodName);
-      if (filterType)    params.set('account_type', filterType);
-      if (filterCompany) params.set('company', filterCompany);
+      if (periodYear)   params.set('period_year',   String(periodYear));
+      if (periodName)   params.set('period_name',   periodName);
+      if (companyName)  params.set('company',        companyName);
+      if (filterType)   params.set('account_type',  filterType);
+      if (filterCompany) params.set('company',       filterCompany); // client-side override
       params.set('limit', '10000');
       const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalance}?${params}`;
       const t0 = trackCall('fetch', url);
@@ -256,7 +257,7 @@ const GenerateTrialBalance: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [ledgerName, periodYear, periodName, filterType, filterCompany]);
+  }, [ledgerName, periodYear, periodName, companyName, filterType, filterCompany]);
 
   // ── Generate TB ──────────────────────────────────────────
   const handleGenerate = useCallback(async () => {
