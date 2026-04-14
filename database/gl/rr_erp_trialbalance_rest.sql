@@ -325,14 +325,11 @@ BEGIN
         p_mimes_allowed  => NULL,
         p_comments       => 'Distinct company values (segment 1 of account combination)',
         p_source         => q'[
-SELECT DISTINCT
-    NULLIF(TRIM(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION, '[^-]+', 1, 1)), '') AS company
-FROM RR_GL_JE_LINES_ALL  lin
-JOIN RR_GL_JE_HEADERS    hdr ON hdr.JE_HEADER_ID = lin.JE_HEADER_ID
-WHERE lin.ACCOUNT_COMBINATION IS NOT NULL
-  AND (:ledger_name IS NULL OR hdr.LEDGER_NAME = :ledger_name)
-  AND NULLIF(TRIM(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION, '[^-]+', 1, 1)), '') IS NOT NULL
-ORDER BY company
+SELECT
+    COMPANY AS company
+FROM RR_GL_LEDGER_COMPANIES
+WHERE (:ledger_name IS NULL OR LEDGER_NAME = :ledger_name)
+ORDER BY COMPANY
 ]'
     );
     COMMIT;
