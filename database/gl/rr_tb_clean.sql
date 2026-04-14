@@ -57,11 +57,14 @@ ptd AS (
 -- ────────────────────────────────────────────────────────────
 -- Step 2 — Enrich each row with fiscal calendar + account info
 --
--- Fiscal year and fiscal period come from RR_GL_FISCAL_PERIODS,
--- which is synced from Oracle Fusion via:
---   GET /reerp/periodsstatus/create?P_APPLICATION_NAME=General+Ledger
---                                   &P_LEDGER_NAME=BUIMERC LEDGER
+-- Fiscal year and fiscal period come from RR_V_GL_FISCAL_PERIODS.
 -- e.g. Jul-23 → FISCAL_YEAR=2024, FISCAL_PERIOD=1
+--
+-- TO_NUMBER() wraps are required because the view may return
+-- FISCAL_YEAR / FISCAL_PERIOD as VARCHAR2.  Without them Oracle
+-- propagates VARCHAR2 through NVL and the arithmetic in the
+-- window ORDER BY (FISCAL_YEAR * 100 + FISCAL_PERIOD) throws
+-- ORA-01722: invalid number.
 --
 -- Account type and description come from the COA value set.
 -- ────────────────────────────────────────────────────────────
@@ -72,35 +75,36 @@ enriched AS (
         p.CURRENCY_CODE,
         p.ACCOUNT_COMBINATION,
 
-        -- Fiscal year (from Oracle Fusion sync, or calendar year as fallback)
-        NVL(fp.FISCAL_YEAR,
-            EXTRACT(YEAR  FROM TO_DATE('01-' || p.PERIOD_NAME, 'DD-Mon-RR')))  AS FISCAL_YEAR,
+        -- Fiscal year — explicit TO_NUMBER prevents ORA-01722 when
+        -- the view column is VARCHAR2
+        TO_NUMBER(NVL(fp.FISCAL_YEAR,
+            EXTRACT(YEAR  FROM TO_DATE('01-' || p.PERIOD_NAME, 'DD-Mon-RR'))))  AS FISCAL_YEAR,
 
         -- Fiscal period sequence (1 = first month of the fiscal year)
-        NVL(fp.FISCAL_PERIOD,
-            EXTRACT(MONTH FROM TO_DATE('01-' || p.PERIOD_NAME, 'DD-Mon-RR')))  AS FISCAL_PERIOD,
+        TO_NUMBER(NVL(fp.FISCAL_PERIOD,
+            EXTRACT(MONTH FROM TO_DATE('01-' || p.PERIOD_NAME, 'DD-Mon-RR'))))  AS FISCAL_PERIOD,
 
         -- Segment 1 = company
-        TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION, '[^-]+', 1, 1))              AS COMPANY,
+        TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION, '[^-]+', 1, 1))               AS COMPANY,
 
         -- Segment 4 = natural account code
-        TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION, '[^-]+', 1, 4))              AS ACCOUNT,
+        TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION, '[^-]+', 1, 4))               AS ACCOUNT,
 
         -- A=Asset  L=Liability  O=Equity  R=Revenue  E=Expense
-        NVL(vsv.ACCOUNT_TYPE, 'E')                                             AS ACCOUNT_TYPE,
-        vsv.DESCRIPTION                                                        AS ACCOUNT_DESC,
+        NVL(vsv.ACCOUNT_TYPE, 'E')                                              AS ACCOUNT_TYPE,
+        vsv.DESCRIPTION                                                         AS ACCOUNT_DESC,
 
         -- Period activity
         p.PTD_DR,
         p.PTD_CR,
-        p.PTD_DR - p.PTD_CR                                                    AS PTD_NET
+        p.PTD_DR - p.PTD_CR                                                     AS PTD_NET
 
     FROM ptd p
 
     -- Fiscal calendar: PERIOD_NAME 'Mon-YY' matches directly (e.g. 'Jul-23')
-    LEFT JOIN RR_GL_FISCAL_PERIODS fp
+    LEFT JOIN RR_V_GL_FISCAL_PERIODS fp
            ON fp.PERIOD_NAME = p.PERIOD_NAME
-          AND fp.LEDGER_NAME = p.LEDGER_NAME
+          --AND fp.LEDGER_NAME = p.LEDGER_NAME
           AND fp.APPLICATION = 'GL'
           AND fp.ADJ_FLAG    = 'N'
 
