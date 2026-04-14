@@ -2262,7 +2262,7 @@ const TrialBalance: React.FC = () => {
 
     // Net amount renderer: positive = Dr (blue), negative = Cr shown in brackets (red)
     const fmtNet = (n: number) => {
-      if (n === 0) return <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.textSecondary }}>—</Text>;
+      if (!n) return <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.textSecondary }}>0.00</Text>;
       return n > 0
         ? <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info }}>{fmtAbs(n)}</Text>
         : <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.primary }}>({fmtAbs(n)})</Text>;
@@ -2270,11 +2270,11 @@ const TrialBalance: React.FC = () => {
 
     const fmtDr = (n: number) =>
       n ? <Text style={{ fontFamily: 'monospace', fontSize: 11, color: '#237804' }}>{fmtAbs(n)}</Text>
-        : <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.textSecondary }}>—</Text>;
+        : <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.textSecondary }}>0.00</Text>;
 
     const fmtCr = (n: number) =>
       n ? <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.primary }}>{fmtAbs(n)}</Text>
-        : <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.textSecondary }}>—</Text>;
+        : <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.textSecondary }}>0.00</Text>;
 
     const accountTypeColor: Record<string, string> = { A: '#e6f7ff', L: '#fff7e6', O: '#f6ffed', R: '#fff0f6', E: '#f9f0ff' };
     const accountTypeLabel: Record<string, string> = { A: 'Asset', L: 'Liability', O: 'Equity', R: 'Revenue', E: 'Expense' };
