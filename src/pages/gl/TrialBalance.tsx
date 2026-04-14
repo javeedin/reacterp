@@ -150,6 +150,7 @@ interface RrTBRecord {
 interface TabData {
   key: string;
   periodName: string;
+  ledgerName: string;
   tabType: 'fusion' | 'reerp' | 'reerp-dynamic';
   data: GLBalanceRecord[];
   rrData: RrTBRecord[];
@@ -394,6 +395,7 @@ const TrialBalance: React.FC = () => {
     const newTab: TabData = {
       key: tabKey,
       periodName,
+      ledgerName: selectedLedger,
       tabType: 'fusion',
       data: [],
       rrData: [],
@@ -456,6 +458,7 @@ const TrialBalance: React.FC = () => {
     const newTab: TabData = {
       key: tabKey,
       periodName: `ReERP: ${record.period_name_id}`,
+      ledgerName: record.ledger_name,
       tabType: 'reerp',
       data: [],
       rrData: [],
@@ -540,6 +543,7 @@ const TrialBalance: React.FC = () => {
     const newTab: TabData = {
       key: tabKey,
       periodName: `Dynamic: ${record.period_name_id}`,
+      ledgerName: record.ledger_name,
       tabType: 'reerp-dynamic',
       data: [],
       rrData: [],
@@ -559,11 +563,14 @@ const TrialBalance: React.FC = () => {
     setActiveTab(tabKey);
 
     try {
+      // Drop period_year: PeriodInfo.period_year is the calendar year but the
+      // view uses FISCAL_YEAR (e.g. Jul-23 → calendar 2023, fiscal 2024).
+      // period_name is already unique per month, so filtering by it alone
+      // is sufficient and avoids the fiscal/calendar year mismatch.
       const fetchUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceStandard}`
         + `?ledger_name=${encodeURIComponent(record.ledger_name)}`
         + `&period_name=${encodeURIComponent(record.period_name_id)}`
-        + `&period_year=${encodeURIComponent(String(record.period_year))}`
-        + `&limit=5000`;
+        + `&limit=10000`;
       const t0 = trackCall('rrDynamic', `GET RR Dynamic TB — ${record.period_name_id}`, fetchUrl);
       const res = await fetch(fetchUrl, { headers: { Accept: 'application/json' } });
       const data = await res.json();
@@ -2302,11 +2309,11 @@ const TrialBalance: React.FC = () => {
         });
       }
       const g = grouped.get(k)!;
-      g.opening += r.opening  || 0;
-      g.debit   += r.debit    || 0;
-      g.credit  += r.credit   || 0;
-      g.closing += r.closing  || 0;
-      g.ytd_net += r.ytd_net  || 0;
+      g.opening += r.opening   || 0;
+      g.debit   += r.debit     || 0;
+      g.credit  += r.credit    || 0;
+      g.closing += r.closing   || 0;
+      g.ytd_net += r.ytd_net   || 0;  // ytd_net absent from view — defaults to 0
     });
 
     const tableRows = Array.from(grouped.values()).sort((a, b) => a.account.localeCompare(b.account));
@@ -2394,6 +2401,25 @@ const TrialBalance: React.FC = () => {
 
     return (
       <div>
+        {/* Ledger / period info bar */}
+        <Row gutter={8} style={{ marginBottom: 8 }}>
+          <Col>
+            <Tag icon={<BankOutlined />} color="geekblue" style={{ fontSize: 12, padding: '2px 8px' }}>
+              {tab.ledgerName}
+            </Tag>
+          </Col>
+          <Col>
+            <Tag color="purple" style={{ fontSize: 12, padding: '2px 8px' }}>
+              {tab.periodName.replace(/^(?:ReERP|Dynamic):\s*/, '')}
+            </Tag>
+          </Col>
+          <Col>
+            <Tag color="default" style={{ fontSize: 12, padding: '2px 8px' }}>
+              {tableRows.length} accounts
+            </Tag>
+          </Col>
+        </Row>
+
         {/* Filters */}
         <Row gutter={12} style={{ marginBottom: 12 }}>
           <Col span={6}>
@@ -2469,7 +2495,7 @@ const TrialBalance: React.FC = () => {
           rowKey="account"
           size="small"
           pagination={false}
-          scroll={{ x: 900, y: 'calc(100vh - 360px)' }}
+          scroll={{ x: 900 }}
           summary={summaryRow}
           onRow={(r: any) => ({ style: { background: accountTypeColor[r.account_type] || '#fff' } })}
         />
