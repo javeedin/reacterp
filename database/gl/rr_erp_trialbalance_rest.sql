@@ -404,15 +404,10 @@ END;
 -- ─────────────────────────────────────────────────────────────
 -- 12. GET /reerp/gl/rr-trialbalance/standard
 --
---  Live Trial Balance: Opening / Debit / Credit / Closing
---  computed directly from RR_GL_JE_LINES_ALL (no stored table).
---
---  Every account that ever had activity appears in every period:
---    Jul-23 closing=100, no Aug-23 activity →
---    Aug-23: opening=100, debit=0, credit=0, closing=100
---
---  B/S accounts (A/L/O): opening carries across fiscal years
---  P&L accounts (R/E):   opening resets to 0 each fiscal year
+--  Live Trial Balance via RR_V_STANDARD_TB view.
+--  The view handles all CTE logic (cross-join dense matrix,
+--  window-function opening balances, zero-suppression).
+--  This handler only adds the caller-side WHERE filters.
 --
 --  Params:
 --    ledger_name   REQUIRED
@@ -429,165 +424,40 @@ BEGIN
         p_method         => 'GET',
         p_source_type    => 'json/collection',
         p_mimes_allowed  => NULL,
-        p_comments       => 'Live TB: Opening/Debit/Credit/Closing from journal lines — every account in every period',
+        p_comments       => 'Live TB via RR_V_STANDARD_TB — Opening/Debit/Credit/Closing with optional filters',
         p_source         => q'[
--- All valid accounts from master
-WITH accounts AS (
-    SELECT VALUE AS ACCOUNT, ACCOUNT_TYPE, DESCRIPTION AS ACCOUNT_DESC
-    FROM RR_VALUE_SET_VALUES
-    WHERE VALUE_SET_CODE = 'BUIMERC_FIN_GLB_COA_ACCOUNT'
-),
--- Every distinct (account_combination, currency) ever used — master-validated
-all_combos AS (
-    SELECT DISTINCT
-        hdr.LEDGER_NAME,
-        lin.ACCOUNT_COMBINATION,
-        NVL(lin.CURRENCY_CODE, hdr.LEDGER_CURRENCY_CODE)  AS CURRENCY_CODE
-    FROM RR_GL_JE_LINES_ALL  lin
-    JOIN RR_GL_JE_HEADERS    hdr  ON hdr.JE_HEADER_ID = lin.JE_HEADER_ID
-    JOIN accounts            acc
-      ON acc.ACCOUNT = TRIM(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,4))
-    WHERE hdr.LEDGER_NAME         = :ledger_name
-      AND lin.ACCOUNT_COMBINATION IS NOT NULL
-      AND (:company IS NULL OR
-           TRIM(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,1)) = :company)
-      AND (:currency_code IS NULL OR
-           NVL(lin.CURRENCY_CODE, hdr.LEDGER_CURRENCY_CODE) = :currency_code)
-),
--- Every distinct period for this ledger
-all_periods AS (
-    SELECT DISTINCT PERIOD_NAME
-    FROM RR_GL_JE_HEADERS
-    WHERE LEDGER_NAME = :ledger_name
-      AND PERIOD_NAME IS NOT NULL
-),
--- Actual PTD per (combination, period) — ALL history, no period filter
-ptd_actual AS (
-    SELECT
-        hdr.LEDGER_NAME,
-        hdr.PERIOD_NAME,
-        NVL(lin.CURRENCY_CODE, hdr.LEDGER_CURRENCY_CODE)  AS CURRENCY_CODE,
-        lin.ACCOUNT_COMBINATION,
-        SUM(NVL(lin.ACCOUNTED_DR, 0))                     AS PTD_DR,
-        SUM(NVL(lin.ACCOUNTED_CR, 0))                     AS PTD_CR
-    FROM RR_GL_JE_LINES_ALL  lin
-    JOIN RR_GL_JE_HEADERS    hdr  ON hdr.JE_HEADER_ID = lin.JE_HEADER_ID
-    WHERE hdr.LEDGER_NAME         = :ledger_name
-      AND hdr.PERIOD_NAME         IS NOT NULL
-      AND lin.ACCOUNT_COMBINATION IS NOT NULL
-    GROUP BY
-        hdr.LEDGER_NAME,
-        hdr.PERIOD_NAME,
-        NVL(lin.CURRENCY_CODE, hdr.LEDGER_CURRENCY_CODE),
-        lin.ACCOUNT_COMBINATION
-),
--- Dense: every combo × every period; 0 PTD where no activity
-ptd AS (
-    SELECT
-        ac.LEDGER_NAME,
-        ap.PERIOD_NAME,
-        ac.CURRENCY_CODE,
-        ac.ACCOUNT_COMBINATION,
-        NVL(pa.PTD_DR, 0)  AS PTD_DR,
-        NVL(pa.PTD_CR, 0)  AS PTD_CR
-    FROM       all_combos  ac
-    CROSS JOIN all_periods ap
-    LEFT JOIN  ptd_actual  pa
-           ON pa.LEDGER_NAME         = ac.LEDGER_NAME
-          AND pa.ACCOUNT_COMBINATION = ac.ACCOUNT_COMBINATION
-          AND pa.CURRENCY_CODE       = ac.CURRENCY_CODE
-          AND pa.PERIOD_NAME         = ap.PERIOD_NAME
-),
--- Enrich with fiscal calendar and account details
-enriched AS (
-    SELECT
-        p.LEDGER_NAME,
-        p.PERIOD_NAME,
-        p.CURRENCY_CODE,
-        p.ACCOUNT_COMBINATION,
-        TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION,'[^-]+',1,1))  AS COMPANY,
-        acc.ACCOUNT,
-        acc.ACCOUNT_TYPE,
-        acc.ACCOUNT_DESC,
-        -- CASE avoids NVL type-propagation ORA-01722 when fp columns are VARCHAR2
-        CASE WHEN fp.FISCAL_YEAR   IS NOT NULL THEN TO_NUMBER(fp.FISCAL_YEAR)
-             ELSE EXTRACT(YEAR  FROM TO_DATE('01-'||p.PERIOD_NAME,'DD-Mon-RR'))
-        END  AS FISCAL_YEAR,
-        CASE WHEN fp.FISCAL_PERIOD IS NOT NULL THEN TO_NUMBER(fp.FISCAL_PERIOD)
-             ELSE EXTRACT(MONTH FROM TO_DATE('01-'||p.PERIOD_NAME,'DD-Mon-RR'))
-        END  AS FISCAL_PERIOD,
-        p.PTD_DR,
-        p.PTD_CR,
-        p.PTD_DR - p.PTD_CR  AS PTD_NET
-    FROM ptd p
-    JOIN accounts acc
-      ON acc.ACCOUNT = TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION,'[^-]+',1,4))
-    -- GROUP BY collapses to one row per period — prevents fan-out
-    LEFT JOIN (
-        SELECT PERIOD_NAME,
-               MAX(TO_NUMBER(FISCAL_YEAR))   AS FISCAL_YEAR,
-               MAX(TO_NUMBER(FISCAL_PERIOD)) AS FISCAL_PERIOD
-        FROM RR_GL_FISCAL_PERIODS
-        WHERE APPLICATION = 'GL' AND ADJ_FLAG = 'N'
-        GROUP BY PERIOD_NAME
-    ) fp ON fp.PERIOD_NAME = p.PERIOD_NAME
-),
--- Opening balance via window functions
-calc AS (
-    SELECT
-        e.*,
-        NVL(SUM(e.PTD_NET) OVER (
-            PARTITION BY e.LEDGER_NAME, e.ACCOUNT_COMBINATION, e.CURRENCY_CODE
-            ORDER BY (e.FISCAL_YEAR * 100 + e.FISCAL_PERIOD)
-            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
-        ), 0)  AS BS_OPENING,
-        NVL(SUM(e.PTD_NET) OVER (
-            PARTITION BY e.LEDGER_NAME, e.ACCOUNT_COMBINATION, e.CURRENCY_CODE,
-                         e.FISCAL_YEAR
-            ORDER BY e.FISCAL_PERIOD
-            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
-        ), 0)  AS PL_OPENING
-    FROM enriched e
-)
 SELECT
-    c.LEDGER_NAME,
-    c.PERIOD_NAME,
-    c.FISCAL_YEAR,
-    c.FISCAL_PERIOD,
-    c.CURRENCY_CODE,
-    c.ACCOUNT_COMBINATION,
-    c.COMPANY,
-    c.ACCOUNT,
-    c.ACCOUNT_TYPE,
-    c.ACCOUNT_DESC,
-    CASE WHEN c.ACCOUNT_TYPE IN ('A','L','O') THEN c.BS_OPENING
-         ELSE c.PL_OPENING END                                     AS OPENING,
-    c.PTD_DR                                                       AS DEBIT,
-    c.PTD_CR                                                       AS CREDIT,
-    CASE WHEN c.ACCOUNT_TYPE IN ('A','L','O') THEN c.BS_OPENING + c.PTD_NET
-         ELSE c.PL_OPENING + c.PTD_NET END                         AS CLOSING
-FROM calc c
-WHERE (:period_name    IS NULL OR c.PERIOD_NAME          = :period_name)
-  AND (:period_year    IS NULL OR TO_CHAR(c.FISCAL_YEAR) = :period_year)
-  AND (:account_type   IS NULL OR c.ACCOUNT_TYPE         = :account_type)
-  AND (:company        IS NULL OR c.COMPANY              = :company)
-  AND (:currency_code  IS NULL OR c.CURRENCY_CODE        = :currency_code)
-  AND (
-      CASE WHEN c.ACCOUNT_TYPE IN ('A','L','O') THEN c.BS_OPENING
-           ELSE c.PL_OPENING END <> 0
-      OR c.PTD_DR <> 0
-      OR c.PTD_CR <> 0
-  )
+    ledger_name,
+    period_name,
+    fiscal_year,
+    fiscal_period,
+    currency_code,
+    account_combination,
+    company,
+    account,
+    account_type,
+    account_desc,
+    opening,
+    debit,
+    credit,
+    closing
+FROM RR_V_STANDARD_TB
+WHERE ledger_name          = :ledger_name
+  AND (:period_name   IS NULL OR period_name          = :period_name)
+  AND (:period_year   IS NULL OR TO_CHAR(fiscal_year) = :period_year)
+  AND (:account_type  IS NULL OR account_type         = :account_type)
+  AND (:company       IS NULL OR company              = :company)
+  AND (:currency_code IS NULL OR currency_code        = :currency_code)
 ORDER BY
-    c.FISCAL_YEAR,
-    c.FISCAL_PERIOD,
-    CASE c.ACCOUNT_TYPE
+    fiscal_year,
+    fiscal_period,
+    CASE account_type
         WHEN 'A' THEN 1 WHEN 'L' THEN 2 WHEN 'O' THEN 3
         WHEN 'R' THEN 4 WHEN 'E' THEN 5 ELSE 6
     END,
-    c.ACCOUNT,
-    c.ACCOUNT_COMBINATION,
-    c.CURRENCY_CODE
+    account,
+    account_combination,
+    currency_code
 ]'
     );
     COMMIT;
