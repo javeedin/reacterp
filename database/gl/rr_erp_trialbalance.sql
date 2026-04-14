@@ -347,10 +347,12 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
                 NVL(cc."buimercFinGlbCoaFut2",
                     NULLIF(TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,9)),
                            ''))                                    AS FUTURE2,
-                -- Account type (determines opening balance carry-forward rule)
-                -- A=Asset  L=Liability  O=Owner's Equity → Balance Sheet (carry forward)
-                -- R=Revenue  E=Expense                   → P&L (reset each fiscal year)
-                NVL(cc."AccountType", 'E')                        AS ACCOUNT_TYPE,
+
+                -- Account type sourced from RR_VALUE_SET_VALUES
+                -- (VALUE_SET_CODE = 'BUIMERC_FIN_GLB_COA_ACCOUNT', VALUE = segment 4)
+                -- A=Asset  L=Liability  O=Owner's Equity  R=Revenue  E=Expense
+                -- Defaults to 'E' when no match found.
+                NVL(vsv.ACCOUNT_TYPE, 'E')                        AS ACCOUNT_TYPE,
 
                 ra.PTD_DR,
                 ra.PTD_CR,
@@ -368,6 +370,10 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
                        || '-' || cc."buimercFinGlbCoaFut1"
                        || '-' || cc."buimercFinGlbCoaFut2"
                        ) = ra.ACCOUNT_COMBINATION
+            LEFT JOIN RR_VALUE_SET_VALUES vsv
+                   ON vsv.VALUE_SET_CODE = 'BUIMERC_FIN_GLB_COA_ACCOUNT'
+                  AND vsv.VALUE = NULLIF(
+                          TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,4)), '')
         ),
 
         -- ── 3. Compute cumulative analytics ──────────────────────────
