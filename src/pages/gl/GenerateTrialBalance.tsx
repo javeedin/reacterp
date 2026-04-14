@@ -107,10 +107,12 @@ const GenerateTrialBalance: React.FC = () => {
   const [ledgerName, setLedgerName]   = useState<string>('');
   const [periodYear, setPeriodYear]   = useState<number | null>(new Date().getFullYear());
   const [periodName, setPeriodName]   = useState<string | null>(null); // null = all periods
+  const [companyName, setCompanyName] = useState<string | null>(null); // null = all companies
 
   // Dropdowns
-  const [ledgers,  setLedgers]  = useState<string[]>([]);
-  const [periods,  setPeriods]  = useState<PeriodOption[]>([]);
+  const [ledgers,        setLedgers]        = useState<string[]>([]);
+  const [periods,        setPeriods]        = useState<PeriodOption[]>([]);
+  const [companyOptions, setCompanyOptions] = useState<string[]>([]);
 
   // Data
   const [data,     setData]     = useState<TBRow[]>([]);
@@ -129,10 +131,11 @@ const GenerateTrialBalance: React.FC = () => {
     label: string; url: string; method: string;
     status: number | null; ok: boolean | null; durationMs: number | null; running: boolean; body: string;
   }>>({
-    ledgers: { label: 'GET Ledgers',       url: `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.getLedgerName}`,        method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
-    periods: { label: 'GET Periods',       url: '',                                                                             method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
-    fetch:   { label: 'GET Trial Balance', url: '',                                                                             method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
-    generate:{ label: 'POST Generate TB',  url: `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceGenerate}`,method: 'POST', status: null, ok: null, durationMs: null, running: false, body: '' },
+    ledgers:   { label: 'GET Ledgers',       url: `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.getLedgerName}`,            method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
+    companies: { label: 'GET Companies',    url: '',                                                                                 method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
+    periods:   { label: 'GET Periods',      url: '',                                                                                 method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
+    fetch:     { label: 'GET Trial Balance',url: '',                                                                                 method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
+    generate:  { label: 'POST Generate TB', url: `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceGenerate}`,    method: 'POST', status: null, ok: null, durationMs: null, running: false, body: '' },
   });
 
   const trackCall = (key: string, url: string) => {
@@ -200,11 +203,33 @@ const GenerateTrialBalance: React.FC = () => {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Fetch company options ────────────────────────────────
+  const fetchCompanies = useCallback(async (ledger: string) => {
+    if (!ledger) return;
+    const params = new URLSearchParams({ ledger_name: ledger });
+    const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceCompanies}?${params}`;
+    const t0 = trackCall('companies', url);
+    try {
+      const res = await fetch(url);
+      const text = await res.text();
+      if (!res.ok) { resolveCall('companies', t0, res.status, false, text); return; }
+      const json = JSON.parse(text);
+      const names = (json.items || []).map((r: any) => r.company).filter(Boolean);
+      resolveCall('companies', t0, res.status, true, `${names.length} companies`);
+      setCompanyOptions(names);
+    } catch (e: any) {
+      resolveCall('companies', t0, 0, false, e.message);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => { fetchLedgers(); }, [fetchLedgers]);
 
   useEffect(() => {
-    if (ledgerName) fetchPeriods(ledgerName, periodYear);
-  }, [ledgerName, periodYear, fetchPeriods]);
+    if (ledgerName) {
+      fetchPeriods(ledgerName, periodYear);
+      fetchCompanies(ledgerName);
+    }
+  }, [ledgerName, periodYear, fetchPeriods, fetchCompanies]);
 
   // ── Fetch TB data ────────────────────────────────────────
   const fetchTB = useCallback(async () => {
@@ -242,15 +267,22 @@ const GenerateTrialBalance: React.FC = () => {
         p_ledger_name: ledgerName || null,
         p_period_year: periodYear || null,
         p_period_name: periodName || null,
+        p_company:     companyName || null,
       };
       const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceGenerate}`;
       const t0 = trackCall('generate', url);
       const res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(body),
       });
-      const json: GenerateResult = await res.json();
+      const text = await res.text();
+      let json: GenerateResult;
+      try {
+        json = JSON.parse(text);
+      } catch (_) {
+        throw new Error(`Server returned non-JSON (HTTP ${res.status}): ${text.slice(0, 200)}`);
+      }
       resolveCall('generate', t0, res.status, res.ok, json.message || '');
       setGenResult(json);
       if (json.success || json.inserted > 0 || json.updated > 0) {
@@ -658,6 +690,24 @@ const GenerateTrialBalance: React.FC = () => {
                   const y = new Date().getFullYear() - i;
                   return <Option key={y} value={y}>{y}</Option>;
                 })}
+              </Select>
+            </Col>
+            <Col>
+              <Text style={{ fontSize: 11, color: REDWOOD.textSecondary, display: 'block', marginBottom: 2 }}>
+                Company <Text type="secondary" style={{ fontSize: 10 }}>(optional)</Text>
+              </Text>
+              <Select
+                style={{ width: 130 }}
+                placeholder="All companies"
+                value={companyName ?? undefined}
+                onChange={v => setCompanyName(v ?? null)}
+                allowClear
+                size="small"
+                showSearch
+              >
+                {companyOptions.map(c => (
+                  <Option key={c} value={c}>{c}</Option>
+                ))}
               </Select>
             </Col>
             <Col>

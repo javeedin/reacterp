@@ -132,6 +132,7 @@ DECLARE
     v_ledger_name   VARCHAR2(240);
     v_period_year   NUMBER;
     v_period_name   VARCHAR2(30);
+    v_company       VARCHAR2(30);
     v_inserted      NUMBER := 0;
     v_updated       NUMBER := 0;
     v_errors        NUMBER := 0;
@@ -144,12 +145,14 @@ BEGIN
     v_ledger_name := JSON_VALUE(v_body, '$.p_ledger_name');
     v_period_year := TO_NUMBER(JSON_VALUE(v_body, '$.p_period_year'));
     v_period_name := JSON_VALUE(v_body, '$.p_period_name');
+    v_company     := JSON_VALUE(v_body, '$.p_company');
 
     -- Run the generation procedure
     RR_ERP_TB_PKG.GENERATE_TB(
         p_ledger_name => v_ledger_name,
         p_period_year => v_period_year,
         p_period_name => v_period_name,
+        p_company     => v_company,
         p_inserted    => v_inserted,
         p_updated     => v_updated,
         p_errors      => v_errors,
@@ -177,6 +180,7 @@ BEGIN
     APEX_JSON.WRITE('ledger_name',  v_ledger_name);
     APEX_JSON.WRITE('period_year',  v_period_year);
     APEX_JSON.WRITE('period_name',  v_period_name);
+    APEX_JSON.WRITE('company',      v_company);
     APEX_JSON.CLOSE_OBJECT;
 
 EXCEPTION
@@ -263,6 +267,7 @@ END;
 --    Params: ledger_name, period_year (optional)
 --    Returns distinct period names sorted chronologically
 -- ─────────────────────────────────────────────────────────────
+
 BEGIN
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'reerp',
@@ -282,6 +287,52 @@ WHERE hdr.PERIOD_NAME IS NOT NULL
   AND (:period_year IS NULL OR
        EXTRACT(YEAR FROM TO_DATE('01-' || hdr.PERIOD_NAME, 'DD-Mon-RR')) = TO_NUMBER(:period_year))
 ORDER BY period_year DESC, period_num DESC
+]'
+    );
+    COMMIT;
+END;
+/
+
+-- ─────────────────────────────────────────────────────────────
+-- 9. TEMPLATE: gl/rr-trialbalance/companies
+-- ─────────────────────────────────────────────────────────────
+BEGIN
+    ORDS.DEFINE_TEMPLATE(
+        p_module_name    => 'reerp',
+        p_pattern        => 'gl/rr-trialbalance/companies',
+        p_priority       => 0,
+        p_etag_type      => 'HASH',
+        p_comments       => 'Distinct company (segment 1) values from journal lines'
+    );
+    COMMIT;
+EXCEPTION
+    WHEN OTHERS THEN
+        IF SQLCODE = -20001 THEN NULL; ELSE RAISE; END IF;
+END;
+/
+
+-- ─────────────────────────────────────────────────────────────
+-- 10. GET /reerp/gl/rr-trialbalance/companies
+--     Param: ledger_name (optional)
+--     Returns distinct Segment 1 (Company) values from journal lines
+-- ─────────────────────────────────────────────────────────────
+BEGIN
+    ORDS.DEFINE_HANDLER(
+        p_module_name    => 'reerp',
+        p_pattern        => 'gl/rr-trialbalance/companies',
+        p_method         => 'GET',
+        p_source_type    => 'json/collection',
+        p_mimes_allowed  => NULL,
+        p_comments       => 'Distinct company values (segment 1 of account combination)',
+        p_source         => q'[
+SELECT DISTINCT
+    NULLIF(TRIM(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION, '[^-]+', 1, 1)), '') AS company
+FROM RR_GL_JE_LINES_ALL  lin
+JOIN RR_GL_JE_HEADERS    hdr ON hdr.JE_HEADER_ID = lin.JE_HEADER_ID
+WHERE lin.ACCOUNT_COMBINATION IS NOT NULL
+  AND (:ledger_name IS NULL OR hdr.LEDGER_NAME = :ledger_name)
+  AND NULLIF(TRIM(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION, '[^-]+', 1, 1)), '') IS NOT NULL
+ORDER BY company
 ]'
     );
     COMMIT;

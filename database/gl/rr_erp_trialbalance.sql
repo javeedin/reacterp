@@ -127,6 +127,7 @@ CREATE OR REPLACE PACKAGE RR_ERP_TB_PKG AS
         p_ledger_name   IN  VARCHAR2 DEFAULT NULL,
         p_period_year   IN  NUMBER   DEFAULT NULL,
         p_period_name   IN  VARCHAR2 DEFAULT NULL,
+        p_company       IN  VARCHAR2 DEFAULT NULL,
         p_inserted      OUT NUMBER,
         p_updated       OUT NUMBER,
         p_errors        OUT NUMBER,
@@ -141,6 +142,7 @@ CREATE OR REPLACE PACKAGE RR_ERP_TB_PKG AS
     PROCEDURE GENERATE_FULL_YEAR (
         p_ledger_name   IN  VARCHAR2,
         p_period_year   IN  NUMBER,
+        p_company       IN  VARCHAR2 DEFAULT NULL,
         p_inserted      OUT NUMBER,
         p_updated       OUT NUMBER,
         p_errors        OUT NUMBER,
@@ -156,6 +158,7 @@ CREATE OR REPLACE PACKAGE RR_ERP_TB_PKG AS
         p_ledger_name   IN  VARCHAR2 DEFAULT NULL,
         p_period_year   IN  NUMBER   DEFAULT NULL,
         p_period_name   IN  VARCHAR2 DEFAULT NULL,
+        p_company       IN  VARCHAR2 DEFAULT NULL,
         p_deleted       OUT NUMBER
     );
 
@@ -217,6 +220,7 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
         p_ledger_name   IN  VARCHAR2 DEFAULT NULL,
         p_period_year   IN  NUMBER   DEFAULT NULL,
         p_period_name   IN  VARCHAR2 DEFAULT NULL,
+        p_company       IN  VARCHAR2 DEFAULT NULL,
         p_inserted      OUT NUMBER,
         p_updated       OUT NUMBER,
         p_errors        OUT NUMBER,
@@ -237,7 +241,8 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
         DELETE FROM RR_ERP_TRIALBALANCE
         WHERE (p_ledger_name IS NULL OR LEDGER_NAME = p_ledger_name)
           AND (p_period_year IS NULL OR PERIOD_YEAR  = p_period_year)
-          AND (p_period_name IS NULL OR PERIOD_NAME  = p_period_name);
+          AND (p_period_name IS NULL OR PERIOD_NAME  = p_period_name)
+          AND (p_company     IS NULL OR COMPANY      = p_company);
 
         p_updated := SQL%ROWCOUNT;   -- rows that "existed" and are now replaced
 
@@ -287,9 +292,11 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
               ON hdr.JE_HEADER_ID = lin.JE_HEADER_ID
             WHERE hdr.PERIOD_NAME         IS NOT NULL
               AND lin.ACCOUNT_COMBINATION IS NOT NULL
-              -- Ledger filter applied here for efficiency when p_ledger_name given;
+              -- Ledger and company filters applied here for efficiency;
               -- period filter is NOT applied here so opening balances are correct.
               AND (p_ledger_name IS NULL OR hdr.LEDGER_NAME = p_ledger_name)
+              AND (p_company IS NULL OR
+                   NULLIF(TRIM(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,1)),'') = p_company)
             GROUP BY
                 hdr.LEDGER_NAME,
                 hdr.PERIOD_NAME,
@@ -478,7 +485,8 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
 
         FROM final_tb ft
         WHERE (p_period_year IS NULL OR ft.PERIOD_YEAR = p_period_year)
-          AND (p_period_name IS NULL OR ft.PERIOD_NAME = p_period_name);
+          AND (p_period_name IS NULL OR ft.PERIOD_NAME = p_period_name)
+          AND (p_company     IS NULL OR ft.COMPANY     = p_company);
 
         p_inserted := SQL%ROWCOUNT;
         COMMIT;
@@ -497,6 +505,7 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
     PROCEDURE GENERATE_FULL_YEAR (
         p_ledger_name   IN  VARCHAR2,
         p_period_year   IN  NUMBER,
+        p_company       IN  VARCHAR2 DEFAULT NULL,
         p_inserted      OUT NUMBER,
         p_updated       OUT NUMBER,
         p_errors        OUT NUMBER,
@@ -507,6 +516,7 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
             p_ledger_name => p_ledger_name,
             p_period_year => p_period_year,
             p_period_name => NULL,
+            p_company     => p_company,
             p_inserted    => p_inserted,
             p_updated     => p_updated,
             p_errors      => p_errors,
@@ -522,13 +532,15 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
         p_ledger_name   IN  VARCHAR2 DEFAULT NULL,
         p_period_year   IN  NUMBER   DEFAULT NULL,
         p_period_name   IN  VARCHAR2 DEFAULT NULL,
+        p_company       IN  VARCHAR2 DEFAULT NULL,
         p_deleted       OUT NUMBER
     ) IS
     BEGIN
         DELETE FROM RR_ERP_TRIALBALANCE
         WHERE (p_ledger_name IS NULL OR LEDGER_NAME = p_ledger_name)
           AND (p_period_year IS NULL OR PERIOD_YEAR  = p_period_year)
-          AND (p_period_name IS NULL OR PERIOD_NAME  = p_period_name);
+          AND (p_period_name IS NULL OR PERIOD_NAME  = p_period_name)
+          AND (p_company     IS NULL OR COMPANY      = p_company);
 
         p_deleted := SQL%ROWCOUNT;
         COMMIT;
