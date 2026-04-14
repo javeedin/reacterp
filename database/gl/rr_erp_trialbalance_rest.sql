@@ -212,9 +212,10 @@ BEGIN
     APEX_JSON.WRITE('error_msg',    v_error_msg);
     APEX_JSON.WRITE('message',      v_msg);
     APEX_JSON.WRITE('elapsed_sec',  v_elapsed_sec);
-    APEX_JSON.WRITE('ledger_name',  v_ledger_name);
-    APEX_JSON.WRITE('period_year',  v_period_year);
-    APEX_JSON.WRITE('period_name',  v_period_name);
+    APEX_JSON.WRITE('ledger_name',   v_ledger_name);
+    APEX_JSON.WRITE('fiscal_year',   v_fiscal_year);
+    APEX_JSON.WRITE('fiscal_period', v_fiscal_period);
+    APEX_JSON.WRITE('period_name',   v_period_name);
     APEX_JSON.WRITE('company',      v_company);
     APEX_JSON.CLOSE_OBJECT;
 
@@ -403,14 +404,20 @@ END;
 -- ─────────────────────────────────────────────────────────────
 -- 12. GET /reerp/gl/rr-trialbalance/standard
 --
---  Standard Trial Balance format:
---    Opening  = opening_dr  - opening_cr   (+ = Dr balance, - = Cr balance)
---    Debit    = ptd_dr      (current period debits)
---    Credit   = ptd_cr      (current period credits)
---    Closing  = closing_dr  - closing_cr   (+ = Dr balance, - = Cr balance)
+--  Computes Opening / Debit / Credit / Closing directly from
+--  RR_GL_JE_LINES_ALL journal lines (no dependency on the
+--  stored RR_ERP_TRIALBALANCE table).
 --
---  Same filters as the main endpoint:
---    ledger_name, period_year, period_name, account_type, company
+--  Opening  = sum of all prior-period net activity
+--             B/S accounts (A/L/O): carries across fiscal years
+--             P&L accounts (R/E):   resets at fiscal year start
+--  Debit    = current period accounted debits
+--  Credit   = current period accounted credits
+--  Closing  = Opening + Debit - Credit
+--             (positive = Dr balance, negative = Cr balance)
+--
+--  Params: ledger_name (required), period_name (required),
+--          account_type (optional), company (optional)
 -- ─────────────────────────────────────────────────────────────
 BEGIN
     ORDS.DEFINE_HANDLER(
@@ -419,56 +426,112 @@ BEGIN
         p_method         => 'GET',
         p_source_type    => 'json/collection',
         p_mimes_allowed  => NULL,
-        p_comments       => 'Standard TB: Opening / Debit (PTD) / Credit (PTD) / Closing — net amounts',
+        p_comments       => 'Standard TB: Opening / Debit / Credit / Closing — computed live from journal lines',
         p_source         => q'[
+-- ── Step 1: PTD amounts for ALL periods (needed for correct opening balances) ──
+WITH ptd AS (
+    SELECT
+        hdr.LEDGER_NAME,
+        hdr.PERIOD_NAME,
+        NVL(lin.CURRENCY_CODE, hdr.LEDGER_CURRENCY_CODE)  AS CURRENCY_CODE,
+        lin.ACCOUNT_COMBINATION,
+        SUM(NVL(lin.ACCOUNTED_DR, 0))                     AS PTD_DR,
+        SUM(NVL(lin.ACCOUNTED_CR, 0))                     AS PTD_CR
+    FROM RR_GL_JE_LINES_ALL  lin
+    JOIN RR_GL_JE_HEADERS    hdr  ON hdr.JE_HEADER_ID = lin.JE_HEADER_ID
+    WHERE hdr.LEDGER_NAME         = :ledger_name
+      AND hdr.PERIOD_NAME         IS NOT NULL
+      AND lin.ACCOUNT_COMBINATION IS NOT NULL
+      AND (:company IS NULL OR
+           TRIM(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,1)) = :company)
+    GROUP BY
+        hdr.LEDGER_NAME,
+        hdr.PERIOD_NAME,
+        NVL(lin.CURRENCY_CODE, hdr.LEDGER_CURRENCY_CODE),
+        lin.ACCOUNT_COMBINATION
+),
+-- ── Step 2: Add fiscal year/period and account type ──────────────────────────
+enriched AS (
+    SELECT
+        p.LEDGER_NAME,
+        p.PERIOD_NAME,
+        p.CURRENCY_CODE,
+        p.ACCOUNT_COMBINATION,
+        NVL(fp.FISCAL_YEAR,
+            EXTRACT(YEAR  FROM TO_DATE('01-'||p.PERIOD_NAME,'DD-Mon-RR')))  AS FISCAL_YEAR,
+        NVL(fp.FISCAL_PERIOD,
+            EXTRACT(MONTH FROM TO_DATE('01-'||p.PERIOD_NAME,'DD-Mon-RR')))  AS FISCAL_PERIOD,
+        TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION,'[^-]+',1,1))              AS COMPANY,
+        TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION,'[^-]+',1,4))              AS ACCOUNT,
+        NVL(vsv.ACCOUNT_TYPE,'E')                                           AS ACCOUNT_TYPE,
+        vsv.DESCRIPTION                                                     AS ACCOUNT_DESC,
+        p.PTD_DR,
+        p.PTD_CR,
+        p.PTD_DR - p.PTD_CR                                                 AS PTD_NET
+    FROM ptd p
+    LEFT JOIN RR_GL_FISCAL_PERIODS fp
+           ON fp.PERIOD_NAME = p.PERIOD_NAME
+          AND fp.LEDGER_NAME = p.LEDGER_NAME
+          AND fp.APPLICATION = 'GL'
+          AND fp.ADJ_FLAG    = 'N'
+    LEFT JOIN RR_VALUE_SET_VALUES vsv
+           ON vsv.VALUE_SET_CODE = 'BUIMERC_FIN_GLB_COA_ACCOUNT'
+          AND vsv.VALUE = TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION,'[^-]+',1,4))
+),
+-- ── Step 3: Window functions for opening balance ─────────────────────────────
+calc AS (
+    SELECT
+        e.*,
+        -- B/S opening: cumulative net of ALL history before this period
+        NVL(SUM(e.PTD_NET) OVER (
+            PARTITION BY e.LEDGER_NAME, e.ACCOUNT_COMBINATION, e.CURRENCY_CODE
+            ORDER BY (e.FISCAL_YEAR * 100 + e.FISCAL_PERIOD)
+            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+        ), 0)  AS BS_OPENING,
+        -- P&L opening: cumulative net within the same fiscal year before this period
+        NVL(SUM(e.PTD_NET) OVER (
+            PARTITION BY e.LEDGER_NAME, e.ACCOUNT_COMBINATION, e.CURRENCY_CODE,
+                         e.FISCAL_YEAR
+            ORDER BY e.FISCAL_PERIOD
+            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+        ), 0)  AS PL_OPENING
+    FROM enriched e
+)
+-- ── Final: filter to requested period, output Opening/Debit/Credit/Closing ───
 SELECT
-    tb.tb_id,
-    tb.ledger_name,
-    tb.period_name,
-    tb.period_year,
-    tb.period_num,
-    tb.currency_code,
-    tb.account_combination,
-    tb.company,
-    tb.lob,
-    tb.department,
-    tb.account,
-    NVL(vsv.description, tb.account_desc)           AS account_desc,
-    tb.sub_account,
-    tb.analysis,
-    tb.intercompany,
-    tb.account_type,
-    -- Standard TB columns (net: positive = Dr balance, negative = Cr balance)
-    NVL(tb.opening_dr, 0) - NVL(tb.opening_cr, 0)  AS opening,
-    NVL(tb.ptd_dr, 0)                               AS debit,
-    NVL(tb.ptd_cr, 0)                               AS credit,
-    NVL(tb.closing_dr, 0) - NVL(tb.closing_cr, 0)  AS closing,
-    -- YTD net (for reference)
-    NVL(tb.ytd_dr, 0)     - NVL(tb.ytd_cr, 0)      AS ytd_net,
-    TO_CHAR(tb.run_date, 'YYYY-MM-DD HH24:MI:SS')   AS run_date
-FROM rr_erp_trialbalance tb
-LEFT JOIN rr_value_set_values vsv
-       ON vsv.value_set_code = 'BUIMERC_FIN_GLB_COA_ACCOUNT'
-      AND vsv.value          = tb.account
-WHERE (:ledger_name IS NULL OR tb.ledger_name  = :ledger_name)
-  AND (:period_year IS NULL OR tb.period_year  = TO_NUMBER(:period_year))
-  AND (:period_name IS NULL OR tb.period_name  = :period_name)
-  AND (:account_type IS NULL OR tb.account_type = :account_type)
-  AND (:company IS NULL OR tb.company          = :company)
+    c.LEDGER_NAME,
+    c.PERIOD_NAME,
+    c.FISCAL_YEAR,
+    c.FISCAL_PERIOD,
+    c.CURRENCY_CODE,
+    c.ACCOUNT_COMBINATION,
+    c.COMPANY,
+    c.ACCOUNT,
+    c.ACCOUNT_TYPE,
+    c.ACCOUNT_DESC,
+    CASE WHEN c.ACCOUNT_TYPE IN ('A','L','O') THEN c.BS_OPENING
+         ELSE c.PL_OPENING
+    END                  AS OPENING,
+    c.PTD_DR             AS DEBIT,
+    c.PTD_CR             AS CREDIT,
+    CASE WHEN c.ACCOUNT_TYPE IN ('A','L','O') THEN c.BS_OPENING + c.PTD_NET
+         ELSE c.PL_OPENING + c.PTD_NET
+    END                  AS CLOSING
+FROM calc c
+WHERE c.PERIOD_NAME = :period_name
+  AND (:account_type IS NULL OR c.ACCOUNT_TYPE = :account_type)
 ORDER BY
-    tb.period_year,
-    tb.period_num,
-    CASE tb.account_type
-        WHEN 'A' THEN 1   -- Asset
-        WHEN 'L' THEN 2   -- Liability
-        WHEN 'O' THEN 3   -- Equity
-        WHEN 'R' THEN 4   -- Revenue
-        WHEN 'E' THEN 5   -- Expense
+    CASE c.ACCOUNT_TYPE
+        WHEN 'A' THEN 1
+        WHEN 'L' THEN 2
+        WHEN 'O' THEN 3
+        WHEN 'R' THEN 4
+        WHEN 'E' THEN 5
         ELSE 6
     END,
-    tb.account,
-    tb.company,
-    tb.department
+    c.ACCOUNT,
+    c.ACCOUNT_COMBINATION,
+    c.CURRENCY_CODE
 ]'
     );
     COMMIT;
