@@ -253,16 +253,20 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
         -- ── Step 2: Compute and insert trial balance ──────────────────
         --
         -- CTE structure:
-        --   raw_agg       → aggregate PTD DR/CR per (ledger, period, account, currency)
-        --   enriched      → add year/num derived from period name + COA segments
+        --   all_combos    → every distinct (account_combination, currency) ever used
+        --   all_periods   → every distinct period for this ledger
+        --   ptd_actual    → aggregate PTD DR/CR per (ledger, period, account, currency)
+        --   ptd           → CROSS JOIN all_combos × all_periods, LEFT JOIN ptd_actual
+        --                   → 0 PTD for inactive periods (carries opening forward)
+        --   enriched      → add fiscal year/num, COA segments, account type/desc
         --   with_analytics→ add cumulative window-function columns
         --   final_tb      → split net amounts into DR/CR columns
         --
-        -- NOTE: The analytics CTEs intentionally include ALL historical
-        -- journal data (not just the requested period/year) so that
-        -- opening balances are computed correctly from the very first
-        -- period in the database.  Filtering is applied last so only
-        -- the requested rows are inserted.
+        -- KEY DESIGN: The cross join ensures every account appears in every period.
+        -- An account with Jul-23 closing=100 and no Aug-23 activity will correctly
+        -- show in Aug-23 as: opening=100, debit=0, credit=0, closing=100.
+        --
+        -- Filtering is applied last so only the requested rows are inserted.
         -- ─────────────────────────────────────────────────────────────
         INSERT INTO RR_ERP_TRIALBALANCE (
             LEDGER_NAME,
@@ -281,12 +285,39 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
             RUN_DATE,      CREATED_BY,    CREATION_DATE
         )
         WITH
-        -- ── 1. Aggregate journal lines by period / account / currency ──
-        raw_agg AS (
+        -- ── 1a. All distinct (account_combination, currency) ever used ──
+        -- INNER JOIN to RR_VALUE_SET_VALUES ensures only master accounts appear.
+        all_combos AS (
+            SELECT DISTINCT
+                hdr.LEDGER_NAME,
+                lin.ACCOUNT_COMBINATION,
+                NVL(lin.CURRENCY_CODE, hdr.LEDGER_CURRENCY_CODE)  AS CURRENCY_CODE
+            FROM RR_GL_JE_LINES_ALL  lin
+            JOIN RR_GL_JE_HEADERS    hdr
+              ON hdr.JE_HEADER_ID = lin.JE_HEADER_ID
+            JOIN RR_VALUE_SET_VALUES vsv_m
+              ON vsv_m.VALUE_SET_CODE = 'BUIMERC_FIN_GLB_COA_ACCOUNT'
+             AND vsv_m.VALUE = NULLIF(TRIM(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,4)),'')
+            WHERE lin.ACCOUNT_COMBINATION IS NOT NULL
+              AND (p_ledger_name IS NULL OR hdr.LEDGER_NAME = p_ledger_name)
+              AND (p_company IS NULL OR
+                   NULLIF(TRIM(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,1)),'') = p_company)
+        ),
+
+        -- ── 1b. All distinct periods for this ledger ───────────────────
+        all_periods AS (
+            SELECT DISTINCT PERIOD_NAME
+            FROM RR_GL_JE_HEADERS
+            WHERE PERIOD_NAME IS NOT NULL
+              AND (p_ledger_name IS NULL OR LEDGER_NAME = p_ledger_name)
+        ),
+
+        -- ── 1c. Actual PTD per (combination, period) — ALL history ─────
+        -- No period filter here: needed for correct opening balances.
+        ptd_actual AS (
             SELECT
                 hdr.LEDGER_NAME,
                 hdr.PERIOD_NAME,
-                -- Prefer entered currency; fall back to ledger currency
                 NVL(lin.CURRENCY_CODE, hdr.LEDGER_CURRENCY_CODE)  AS CURRENCY_CODE,
                 lin.ACCOUNT_COMBINATION,
                 SUM(NVL(lin.ACCOUNTED_DR, 0))                     AS PTD_DR,
@@ -296,8 +327,6 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
               ON hdr.JE_HEADER_ID = lin.JE_HEADER_ID
             WHERE hdr.PERIOD_NAME         IS NOT NULL
               AND lin.ACCOUNT_COMBINATION IS NOT NULL
-              -- Ledger and company filters applied here for efficiency;
-              -- period filter is NOT applied here so opening balances are correct.
               AND (p_ledger_name IS NULL OR hdr.LEDGER_NAME = p_ledger_name)
               AND (p_company IS NULL OR
                    NULLIF(TRIM(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,1)),'') = p_company)
@@ -308,68 +337,89 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
                 lin.ACCOUNT_COMBINATION
         ),
 
-        -- ── 2. Enrich with period year/num and COA segments ───────────
+        -- ── 1d. Dense PTD: every combination × every period ───────────
+        -- LEFT JOIN gives 0 for periods with no activity, ensuring an
+        -- account with Jul-23 closing=100 still appears in Aug-23 with
+        -- opening=100, debit=0, credit=0, closing=100.
+        ptd AS (
+            SELECT
+                ac.LEDGER_NAME,
+                ap.PERIOD_NAME,
+                ac.CURRENCY_CODE,
+                ac.ACCOUNT_COMBINATION,
+                NVL(pa.PTD_DR, 0)  AS PTD_DR,
+                NVL(pa.PTD_CR, 0)  AS PTD_CR
+            FROM       all_combos  ac
+            CROSS JOIN all_periods ap
+            LEFT JOIN  ptd_actual  pa
+                   ON pa.LEDGER_NAME         = ac.LEDGER_NAME
+                  AND pa.ACCOUNT_COMBINATION = ac.ACCOUNT_COMBINATION
+                  AND pa.CURRENCY_CODE       = ac.CURRENCY_CODE
+                  AND pa.PERIOD_NAME         = ap.PERIOD_NAME
+        ),
+
+        -- ── 2. Enrich with fiscal year/num and COA segments ───────────
         enriched AS (
             SELECT
-                ra.LEDGER_NAME,
-                ra.PERIOD_NAME,
-                ra.CURRENCY_CODE,
-                ra.ACCOUNT_COMBINATION,
+                p.LEDGER_NAME,
+                p.PERIOD_NAME,
+                p.CURRENCY_CODE,
+                p.ACCOUNT_COMBINATION,
 
-                -- Derive fiscal period identifiers from RR_GL_FISCAL_PERIODS.
-                -- Oracle Fusion supplies the correct fiscal PERIOD_YEAR and PERIOD_NUM
-                -- via the periodsstatus/create sync endpoint.
-                -- e.g., Jul-23 → fiscal year 2024, period 1 for a July fiscal start.
-                -- Calendar year/month are used only as a fallback when no match exists.
-                NVL(fp.FISCAL_YEAR,
-                    EXTRACT(YEAR  FROM TO_DATE('01-' || ra.PERIOD_NAME, 'DD-Mon-RR')))  AS PERIOD_YEAR,
-                NVL(fp.FISCAL_PERIOD,
-                    EXTRACT(MONTH FROM TO_DATE('01-' || ra.PERIOD_NAME, 'DD-Mon-RR')))  AS PERIOD_NUM,
+                -- Fiscal year/period from RR_GL_FISCAL_PERIODS (synced from Fusion).
+                -- CASE avoids NVL type-propagation: if fp columns are VARCHAR2,
+                -- NVL would keep VARCHAR2 and later arithmetic would ORA-01722.
+                CASE
+                    WHEN fp.FISCAL_YEAR IS NOT NULL
+                    THEN TO_NUMBER(fp.FISCAL_YEAR)
+                    ELSE EXTRACT(YEAR  FROM TO_DATE('01-' || p.PERIOD_NAME, 'DD-Mon-RR'))
+                END                                                AS PERIOD_YEAR,
+                CASE
+                    WHEN fp.FISCAL_PERIOD IS NOT NULL
+                    THEN TO_NUMBER(fp.FISCAL_PERIOD)
+                    ELSE EXTRACT(MONTH FROM TO_DATE('01-' || p.PERIOD_NAME, 'DD-Mon-RR'))
+                END                                                AS PERIOD_NUM,
 
-                -- Account segments: REERP_GL_CODE_COMBINATIONS uses the v2 schema
-                -- with quoted mixed-case column names ("buimercFinGlb..." prefix).
+                -- Account segments from REERP_GL_CODE_COMBINATIONS (COA master).
                 -- Fall back to REGEXP_SUBSTR when no COA match is found.
                 NVL(cc."buimercFinGlbCoaCo",
-                    NULLIF(TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,1)),
+                    NULLIF(TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION,'[^-]+',1,1)),
                            ''))                                    AS COMPANY,
                 NVL(cc."buimercFinGlbCoaLob",
-                    NULLIF(TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,2)),
+                    NULLIF(TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION,'[^-]+',1,2)),
                            ''))                                    AS LOB,
                 NVL(cc."buimercFinGlbCoaDepartment",
-                    NULLIF(TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,3)),
+                    NULLIF(TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION,'[^-]+',1,3)),
                            ''))                                    AS DEPARTMENT,
                 NVL(cc."buimercFinGlbCoaAccount",
-                    NULLIF(TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,4)),
+                    NULLIF(TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION,'[^-]+',1,4)),
                            ''))                                    AS ACCOUNT,
-                -- Description from value set (more reliable than COA combinations)
                 vsv.DESCRIPTION                                    AS ACCOUNT_DESC,
                 NVL(cc."buimercFinGlbCoaSubAcc",
-                    NULLIF(TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,5)),
+                    NULLIF(TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION,'[^-]+',1,5)),
                            ''))                                    AS SUB_ACCOUNT,
                 NVL(cc."buimercFinGlbCoaAlys",
-                    NULLIF(TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,6)),
+                    NULLIF(TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION,'[^-]+',1,6)),
                            ''))                                    AS ANALYSIS,
                 NVL(cc."buimercFinGlbCoaIc",
-                    NULLIF(TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,7)),
+                    NULLIF(TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION,'[^-]+',1,7)),
                            ''))                                    AS INTERCOMPANY,
                 NVL(cc."buimercFinGlbCoaFut1",
-                    NULLIF(TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,8)),
+                    NULLIF(TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION,'[^-]+',1,8)),
                            ''))                                    AS FUTURE1,
                 NVL(cc."buimercFinGlbCoaFut2",
-                    NULLIF(TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,9)),
+                    NULLIF(TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION,'[^-]+',1,9)),
                            ''))                                    AS FUTURE2,
 
-                -- Account type sourced from RR_VALUE_SET_VALUES
-                -- (VALUE_SET_CODE = 'BUIMERC_FIN_GLB_COA_ACCOUNT', VALUE = segment 4)
-                -- A=Asset  L=Liability  O=Owner's Equity  R=Revenue  E=Expense
-                -- Defaults to 'E' when no match found.
+                -- Account type from value set (A/L/O/R/E).
+                -- Already validated by INNER JOIN in all_combos so vsv always matches.
                 NVL(vsv.ACCOUNT_TYPE, 'E')                        AS ACCOUNT_TYPE,
 
-                ra.PTD_DR,
-                ra.PTD_CR,
-                (ra.PTD_DR - ra.PTD_CR)                           AS PTD_NET
+                p.PTD_DR,
+                p.PTD_CR,
+                (p.PTD_DR - p.PTD_CR)                             AS PTD_NET
 
-            FROM raw_agg ra
+            FROM ptd p
             LEFT JOIN REERP_GL_CODE_COMBINATIONS cc
                    ON (   cc."buimercFinGlbCoaCo"
                        || '-' || cc."buimercFinGlbCoaLob"
@@ -380,36 +430,36 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
                        || '-' || cc."buimercFinGlbCoaIc"
                        || '-' || cc."buimercFinGlbCoaFut1"
                        || '-' || cc."buimercFinGlbCoaFut2"
-                       ) = ra.ACCOUNT_COMBINATION
+                       ) = p.ACCOUNT_COMBINATION
             LEFT JOIN RR_VALUE_SET_VALUES vsv
                    ON vsv.VALUE_SET_CODE = 'BUIMERC_FIN_GLB_COA_ACCOUNT'
                   AND vsv.VALUE = NULLIF(
-                          TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,4)), '')
-            -- Fiscal calendar: RR_GL_FISCAL_PERIODS is populated by calling
-            --   GET /reerp/periodsstatus/create?P_APPLICATION_NAME=General+Ledger
-            --                                  &P_LEDGER_NAME=<ledger>
-            -- PERIOD_NAME = 'May-26' (Mon-YY) matches directly, so no date conversion needed.
-            -- ADJ_FLAG='N' excludes adjustment (13th period) rows.
-            LEFT JOIN RR_GL_FISCAL_PERIODS fp
-                   ON fp.PERIOD_NAME  = ra.PERIOD_NAME
-                  AND fp.LEDGER_NAME  = ra.LEDGER_NAME
-                  AND fp.APPLICATION  = 'GL'
-                  AND fp.ADJ_FLAG     = 'N'
+                          TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION,'[^-]+',1,4)), '')
+            -- Fiscal calendar: collapsed to one row per period to prevent fan-out
+            -- when RR_GL_FISCAL_PERIODS has multiple rows for the same period.
+            LEFT JOIN (
+                SELECT
+                    PERIOD_NAME,
+                    MAX(FISCAL_YEAR)   AS FISCAL_YEAR,
+                    MAX(FISCAL_PERIOD) AS FISCAL_PERIOD
+                FROM RR_GL_FISCAL_PERIODS
+                WHERE APPLICATION = 'GL'
+                  AND ADJ_FLAG    = 'N'
+                GROUP BY PERIOD_NAME
+            ) fp ON fp.PERIOD_NAME = p.PERIOD_NAME
         ),
 
         -- ── 3. Compute cumulative analytics ──────────────────────────
         --
-        -- PERIOD_YEAR / PERIOD_NUM in enriched are now FISCAL values from
-        -- RR_ACCOUNTING_PERIODS_STATUS (e.g., Jul-23 → year=2024, period=1
-        -- for a July fiscal year start).  The window functions below rely
-        -- on this so that P&L resets happen at the fiscal year boundary,
-        -- not the calendar year boundary.
+        -- PERIOD_YEAR / PERIOD_NUM are now fiscal values (e.g., Jul-23 →
+        -- year=2024, period=1 for a July fiscal year start) so P&L resets
+        -- happen at the fiscal year boundary, not the calendar year boundary.
         --
         -- YTD  : rolling sum within the fiscal year, current period inclusive
-        -- Opening (B/S): cumulative net of ALL history up to (but NOT including)
-        --                current period — carries across fiscal year boundaries
-        -- Opening (P&L): cumulative net within the SAME fiscal year up to (but
-        --                NOT including) current period — resets at fiscal year start
+        -- Opening (B/S): cumulative net of ALL history before current period
+        --                — carries across fiscal year boundaries
+        -- Opening (P&L): cumulative net within the SAME fiscal year before
+        --                current period — resets to 0 at fiscal year start
         -- ─────────────────────────────────────────────────────────────
         with_analytics AS (
             SELECT
@@ -519,7 +569,11 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
         FROM final_tb ft
         WHERE (p_period_year IS NULL OR ft.PERIOD_YEAR = p_period_year)
           AND (p_period_name IS NULL OR ft.PERIOD_NAME = p_period_name)
-          AND (p_company     IS NULL OR ft.COMPANY     = p_company);
+          AND (p_company     IS NULL OR ft.COMPANY     = p_company)
+          -- Suppress fully-zero rows: periods before an account's first
+          -- ever transaction have opening=0, PTD=0, closing=0 and are
+          -- not useful in the stored trial balance.
+          AND (ft.OPENING_NET <> 0 OR ft.PTD_DR <> 0 OR ft.PTD_CR <> 0);
 
         p_inserted := SQL%ROWCOUNT;
         COMMIT;
