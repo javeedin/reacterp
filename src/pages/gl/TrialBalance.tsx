@@ -913,25 +913,140 @@ const TrialBalance: React.FC = () => {
     </Card>
   );
 
-  // Export current tab data to Excel
+  // Export Fusion TB to Excel — structured layout with header block
   const exportTabToExcel = async (tab: TabData, pivotData: PivotRow[]) => {
     if (!pivotData.length) { message.warning('No data to export'); return; }
-    const exportRows = pivotData.map(r => ({
-      'Account':         r.account,
-      'Description':     r.account_desc,
-      ...tab.segmentsBefore.reduce((acc, s) => ({ ...acc, [getSegmentLabel(s)]: r[s] }), {}),
-      ...tab.segmentsAfter.reduce((acc, s) => ({ ...acc, [getSegmentLabel(s)]: r[s] }), {}),
-      'Opening Balance': r.opening_balance,
-      'Debit':           r.debit,
-      'Credit':          r.credit,
-      'Closing Balance': r.closing_balance,
-    }));
-    const ws = XLSX.utils.json_to_sheet(exportRows);
-    ws['!cols'] = [{ wch: 16 }, { wch: 40 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 16 }];
+
+    const ledger   = selectedLedger || 'All';
+    const company  = tab.selectedCompany || 'All';
+    const currency = tab.selectedCurrency || 'All';
+    const today    = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    const segCols  = [
+      ...tab.segmentsBefore.map(s => getSegmentLabel(s)),
+      ...tab.segmentsAfter.map(s => getSegmentLabel(s)),
+    ];
+
+    const totals = pivotData.reduce(
+      (acc, r) => ({
+        opening: acc.opening + (r.opening_balance || 0),
+        debit:   acc.debit   + (r.debit || 0),
+        credit:  acc.credit  + (r.credit || 0),
+        closing: acc.closing + (r.closing_balance || 0),
+      }),
+      { opening: 0, debit: 0, credit: 0, closing: 0 }
+    );
+
+    const aoa: any[][] = [
+      ['ORACLE GL TRIAL BALANCE'],
+      [],
+      ['Ledger:',    ledger],
+      ['Company:',   company],
+      ['Period:',    tab.periodName],
+      ['Currency:',  currency],
+      ['Generated:', today],
+      [],
+      // Column headers
+      ['Account', 'Description', ...segCols, 'Opening Balance', 'Debit', 'Credit', 'Closing Balance'],
+      // Data rows
+      ...pivotData.map(r => [
+        r.account,
+        r.account_desc || '',
+        ...tab.segmentsBefore.map(s => (r[s] as string) || ''),
+        ...tab.segmentsAfter.map(s => (r[s] as string) || ''),
+        r.opening_balance || 0,
+        r.debit   || 0,
+        r.credit  || 0,
+        r.closing_balance || 0,
+      ]),
+      [],
+      // Totals row
+      ['', 'TOTAL', ...segCols.map(() => ''), totals.opening, totals.debit, totals.credit, totals.closing],
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = [
+      { wch: 14 }, // Account
+      { wch: 42 }, // Description
+      ...segCols.map(() => ({ wch: 12 })),
+      { wch: 18 }, // Opening
+      { wch: 18 }, // Debit
+      { wch: 18 }, // Credit
+      { wch: 18 }, // Closing
+    ];
+
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, `TB-${tab.periodName}`);
-    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    const filename = `TrialBalance_${tab.periodName}.xlsx`;
+    XLSX.utils.book_append_sheet(wb, ws, `TB ${tab.periodName}`.slice(0, 31));
+    const buf      = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const filename = `TrialBalance_${tab.periodName.replace(/[^a-zA-Z0-9-]/g, '_')}.xlsx`;
+    const eAPI = (window as any).electronAPI;
+    if (eAPI?.openExcel) {
+      await eAPI.openExcel(buf, filename);
+      message.success('Excel opened');
+    } else {
+      saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), filename);
+      message.success('Exported to Excel');
+    }
+  };
+
+  // Export ReERP standard TB to Excel — structured layout with header block
+  const exportRrTBToExcel = async (
+    tab:       TabData,
+    tableRows: { account: string; account_desc: string; account_type: string;
+                 opening: number; debit: number; credit: number; closing: number; ytd_net: number }[],
+    totals:    { opening: number; debit: number; credit: number; closing: number; ytd_net: number }
+  ) => {
+    if (!tableRows.length) { message.warning('No data to export'); return; }
+
+    const periodName  = tab.periodName.replace(/^ReERP:\s*/, '');
+    const ledger      = selectedLedger || 'All';
+    const company     = tab.selectedCompany  || 'All';
+    const currency    = tab.selectedCurrency || 'All';
+    const today       = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    const typeLabels: Record<string, string> = { A: 'Asset', L: 'Liability', O: 'Equity', R: 'Revenue', E: 'Expense' };
+
+    const aoa: any[][] = [
+      ['REERP TRIAL BALANCE'],
+      [],
+      ['Ledger:',    ledger],
+      ['Company:',   company],
+      ['Period:',    periodName],
+      ['Currency:',  currency],
+      ['Generated:', today],
+      [],
+      // Column headers
+      ['Type', 'Account', 'Description', 'Opening', 'Debit', 'Credit', 'Closing', 'YTD Net'],
+      // Data rows
+      ...tableRows.map(r => [
+        typeLabels[r.account_type] || r.account_type,
+        r.account,
+        r.account_desc || '',
+        r.opening,
+        r.debit,
+        r.credit,
+        r.closing,
+        r.ytd_net,
+      ]),
+      [],
+      // Totals row
+      ['', '', 'TOTAL', totals.opening, totals.debit, totals.credit, totals.closing, totals.ytd_net],
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = [
+      { wch: 12 }, // Type
+      { wch: 14 }, // Account
+      { wch: 42 }, // Description
+      { wch: 18 }, // Opening
+      { wch: 18 }, // Debit
+      { wch: 18 }, // Credit
+      { wch: 18 }, // Closing
+      { wch: 18 }, // YTD Net
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, `RR TB ${periodName}`.slice(0, 31));
+    const buf      = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const filename = `RR_TrialBalance_${periodName.replace(/[^a-zA-Z0-9-]/g, '_')}.xlsx`;
     const eAPI = (window as any).electronAPI;
     if (eAPI?.openExcel) {
       await eAPI.openExcel(buf, filename);
@@ -2132,8 +2247,16 @@ const TrialBalance: React.FC = () => {
               allowClear
             />
           </Col>
-          <Col span={4}>
+          <Col span={4} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Tag color="blue" style={{ lineHeight: '30px', fontSize: 12 }}>{tableRows.length} accounts</Tag>
+            <Button
+              icon={<FileExcelOutlined />}
+              size="small"
+              onClick={() => exportRrTBToExcel(tab, tableRows, totals)}
+              style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}
+            >
+              Excel
+            </Button>
           </Col>
         </Row>
 
