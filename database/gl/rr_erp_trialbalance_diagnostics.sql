@@ -4,7 +4,12 @@
 -- PURPOSE:
 --   Step-by-step SQL to test the opening balance calculation
 --   in GENERATE_TB, specifically around the fiscal year bug
---   (calendar year vs fiscal year from RR_ACCOUNTING_PERIODS_STATUS).
+--   (calendar year vs fiscal year from RR_GL_FISCAL_PERIODS).
+--
+-- PREREQUISITE:
+--   Sync fiscal periods first:
+--   GET /reerp/periodsstatus/create
+--       ?P_APPLICATION_NAME=General+Ledger&P_LEDGER_NAME=BUIMERC+LEDGER
 --
 -- HOW TO USE:
 --   Replace the :p_* bind variables at the top of each query
@@ -19,23 +24,24 @@
 
 
 -- ============================================================
--- QUERY 1 — Verify period table data
--- Shows what RR_ACCOUNTING_PERIODS_STATUS contains.
--- Confirm that period_year / period_number reflect your FISCAL
+-- QUERY 1 — Verify fiscal period table data
+-- Shows what RR_GL_FISCAL_PERIODS contains after sync.
+-- Confirm that fiscal_year / fiscal_period reflect your FISCAL
 -- calendar (e.g., Jul-23 should show fiscal_year=2024, period=1
 -- for a July fiscal year start).
 -- ============================================================
 SELECT
-    TO_CHAR(ps.start_date, 'Mon-RR')  AS period_name,
-    ps.period_year                     AS fiscal_year,
-    ps.period_number                   AS fiscal_period_num,
-    ps.effective_period_number,
-    ps.closing_status,
-    ps.ledger_id
-FROM rr_accounting_periods_status ps
-WHERE ps.application_id        = 101   -- GL
-  AND ps.adjustment_period_flag = 'N'
-ORDER BY ps.effective_period_number;
+    fp.PERIOD_NAME,
+    fp.LEDGER_NAME,
+    fp.FISCAL_YEAR,
+    fp.FISCAL_PERIOD,
+    fp.STATUS,
+    fp.START_DATE,
+    fp.END_DATE
+FROM RR_GL_FISCAL_PERIODS fp
+WHERE fp.APPLICATION = 'GL'
+  AND fp.ADJ_FLAG    = 'N'
+ORDER BY fp.LEDGER_NAME, fp.FISCAL_YEAR, fp.FISCAL_PERIOD;
 
 
 -- ============================================================
@@ -47,33 +53,27 @@ ORDER BY ps.effective_period_number;
 -- ============================================================
 SELECT DISTINCT
     hdr.PERIOD_NAME,
-    -- ── current package logic (calendar year) ──────────────
+    -- ── current (calendar) logic ────────────────────────────
     EXTRACT(YEAR  FROM TO_DATE('01-'||hdr.PERIOD_NAME,'DD-Mon-RR'))  AS current_year,
     EXTRACT(MONTH FROM TO_DATE('01-'||hdr.PERIOD_NAME,'DD-Mon-RR'))  AS current_period_num,
-    -- ── correct fiscal values from accounting periods ───────
-    ps.period_year                                                     AS fiscal_year,
-    ps.period_number                                                   AS fiscal_period_num,
+    -- ── correct fiscal values from RR_GL_FISCAL_PERIODS ─────
+    fp.FISCAL_YEAR,
+    fp.FISCAL_PERIOD,
     -- ── flag mismatches ─────────────────────────────────────
     CASE
-        WHEN EXTRACT(YEAR FROM TO_DATE('01-'||hdr.PERIOD_NAME,'DD-Mon-RR')) != ps.period_year
-          OR EXTRACT(MONTH FROM TO_DATE('01-'||hdr.PERIOD_NAME,'DD-Mon-RR')) != ps.period_number
+        WHEN EXTRACT(YEAR  FROM TO_DATE('01-'||hdr.PERIOD_NAME,'DD-Mon-RR')) != fp.FISCAL_YEAR
+          OR EXTRACT(MONTH FROM TO_DATE('01-'||hdr.PERIOD_NAME,'DD-Mon-RR')) != fp.FISCAL_PERIOD
         THEN '*** MISMATCH ***'
         ELSE 'OK'
     END                                                                AS status
 FROM RR_GL_JE_HEADERS hdr
-LEFT JOIN (
-    SELECT DISTINCT
-        TRUNC(start_date, 'MM')  AS period_month,
-        period_year,
-        period_number,
-        effective_period_number
-    FROM rr_accounting_periods_status
-    WHERE application_id        = 101
-      AND adjustment_period_flag = 'N'
-) ps
-  ON ps.period_month = TO_DATE('01-'||hdr.PERIOD_NAME,'DD-Mon-RR')
+LEFT JOIN RR_GL_FISCAL_PERIODS fp
+       ON fp.PERIOD_NAME = hdr.PERIOD_NAME
+      AND fp.LEDGER_NAME = hdr.LEDGER_NAME
+      AND fp.APPLICATION = 'GL'
+      AND fp.ADJ_FLAG    = 'N'
 WHERE hdr.LEDGER_NAME = :p_ledger_name
-ORDER BY ps.effective_period_number;
+ORDER BY fp.FISCAL_YEAR, fp.FISCAL_PERIOD;
 
 
 -- ============================================================
@@ -89,8 +89,8 @@ SELECT
     EXTRACT(YEAR  FROM TO_DATE('01-'||hdr.PERIOD_NAME,'DD-Mon-RR'))  AS cal_year,
     EXTRACT(MONTH FROM TO_DATE('01-'||hdr.PERIOD_NAME,'DD-Mon-RR'))  AS cal_month,
     -- correct fiscal identifiers
-    ps.period_year                                                     AS fiscal_year,
-    ps.period_number                                                   AS fiscal_period_num,
+    fp.FISCAL_YEAR,
+    fp.FISCAL_PERIOD,
     lin.ACCOUNT_COMBINATION,
     NVL(lin.CURRENCY_CODE, hdr.LEDGER_CURRENCY_CODE)                 AS CURRENCY_CODE,
     SUM(NVL(lin.ACCOUNTED_DR,0))                                     AS PTD_DR,
@@ -101,23 +101,17 @@ SELECT
         OVER (
             PARTITION BY lin.ACCOUNT_COMBINATION,
                          NVL(lin.CURRENCY_CODE, hdr.LEDGER_CURRENCY_CODE)
-            ORDER BY ps.effective_period_number
+            ORDER BY fp.FISCAL_YEAR * 100 + fp.FISCAL_PERIOD
             ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
         )                                                              AS running_balance
 FROM RR_GL_JE_LINES_ALL   lin
 JOIN  RR_GL_JE_HEADERS    hdr
   ON  hdr.JE_HEADER_ID    = lin.JE_HEADER_ID
-LEFT JOIN (
-    SELECT DISTINCT
-        TRUNC(start_date, 'MM')  AS period_month,
-        period_year,
-        period_number,
-        effective_period_number
-    FROM rr_accounting_periods_status
-    WHERE application_id        = 101
-      AND adjustment_period_flag = 'N'
-) ps
-  ON ps.period_month = TO_DATE('01-'||hdr.PERIOD_NAME,'DD-Mon-RR')
+LEFT JOIN RR_GL_FISCAL_PERIODS fp
+       ON fp.PERIOD_NAME = hdr.PERIOD_NAME
+      AND fp.LEDGER_NAME = hdr.LEDGER_NAME
+      AND fp.APPLICATION = 'GL'
+      AND fp.ADJ_FLAG    = 'N'
 WHERE hdr.LEDGER_NAME                                            = :p_ledger_name
   AND REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,4)        = :p_account_seg4
   AND NVL(lin.CURRENCY_CODE, hdr.LEDGER_CURRENCY_CODE)          = :p_currency
@@ -126,10 +120,10 @@ GROUP BY
     hdr.PERIOD_NAME,
     EXTRACT(YEAR  FROM TO_DATE('01-'||hdr.PERIOD_NAME,'DD-Mon-RR')),
     EXTRACT(MONTH FROM TO_DATE('01-'||hdr.PERIOD_NAME,'DD-Mon-RR')),
-    ps.period_year, ps.period_number, ps.effective_period_number,
+    fp.FISCAL_YEAR, fp.FISCAL_PERIOD,
     lin.ACCOUNT_COMBINATION,
     NVL(lin.CURRENCY_CODE, hdr.LEDGER_CURRENCY_CODE)
-ORDER BY ps.effective_period_number;
+ORDER BY fp.FISCAL_YEAR, fp.FISCAL_PERIOD;
 
 
 -- ============================================================
@@ -209,7 +203,7 @@ ORDER BY a.PERIOD_YEAR * 100 + a.PERIOD_NUM;
 
 -- ============================================================
 -- QUERY 5 — Full opening balance trace: FIXED logic (fiscal)
--- Uses RR_ACCOUNTING_PERIODS_STATUS for fiscal year/period.
+-- Uses RR_GL_FISCAL_PERIODS for fiscal year/period.
 -- P&L opening now resets correctly at the fiscal year boundary.
 -- ============================================================
 WITH raw_agg AS (
@@ -233,28 +227,23 @@ WITH raw_agg AS (
 enriched_fixed AS (
     SELECT
         ra.*,
-        -- FIXED: fiscal year/period from RR_ACCOUNTING_PERIODS_STATUS
-        NVL(ps.period_year,
+        -- FIXED: fiscal year/period from RR_GL_FISCAL_PERIODS
+        NVL(fp.FISCAL_YEAR,
             EXTRACT(YEAR  FROM TO_DATE('01-'||ra.PERIOD_NAME,'DD-Mon-RR'))) AS PERIOD_YEAR,
-        NVL(ps.period_number,
+        NVL(fp.FISCAL_PERIOD,
             EXTRACT(MONTH FROM TO_DATE('01-'||ra.PERIOD_NAME,'DD-Mon-RR'))) AS PERIOD_NUM,
-        NVL(ps.effective_period_number,
-            EXTRACT(YEAR  FROM TO_DATE('01-'||ra.PERIOD_NAME,'DD-Mon-RR')) * 100
-          + EXTRACT(MONTH FROM TO_DATE('01-'||ra.PERIOD_NAME,'DD-Mon-RR')))  AS SORT_KEY,
+        NVL(fp.FISCAL_YEAR,
+            EXTRACT(YEAR  FROM TO_DATE('01-'||ra.PERIOD_NAME,'DD-Mon-RR'))) * 100
+          + NVL(fp.FISCAL_PERIOD,
+            EXTRACT(MONTH FROM TO_DATE('01-'||ra.PERIOD_NAME,'DD-Mon-RR')))  AS SORT_KEY,
         NVL(vsv.ACCOUNT_TYPE,'E')                                             AS ACCOUNT_TYPE,
         (ra.PTD_DR - ra.PTD_CR)                                               AS PTD_NET
     FROM raw_agg ra
-    LEFT JOIN (
-        SELECT DISTINCT
-            TRUNC(start_date,'MM')   AS period_month,
-            period_year,
-            period_number,
-            effective_period_number
-        FROM rr_accounting_periods_status
-        WHERE application_id        = 101
-          AND adjustment_period_flag = 'N'
-    ) ps
-      ON ps.period_month = TO_DATE('01-'||ra.PERIOD_NAME,'DD-Mon-RR')
+    LEFT JOIN RR_GL_FISCAL_PERIODS fp
+           ON fp.PERIOD_NAME = ra.PERIOD_NAME
+          AND fp.LEDGER_NAME = ra.LEDGER_NAME
+          AND fp.APPLICATION = 'GL'
+          AND fp.ADJ_FLAG    = 'N'
     LEFT JOIN RR_VALUE_SET_VALUES vsv
            ON vsv.VALUE_SET_CODE = 'BUIMERC_FIN_GLB_COA_ACCOUNT'
           AND vsv.VALUE = NULLIF(TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,4)),'')
@@ -324,31 +313,25 @@ WITH raw_agg AS (
         NVL(lin.CURRENCY_CODE, hdr.LEDGER_CURRENCY_CODE),
         lin.ACCOUNT_COMBINATION
 ),
-periods AS (
-    SELECT DISTINCT
-        TRUNC(start_date,'MM')  AS period_month,
-        period_year,
-        period_number,
-        NVL(effective_period_number,
-            EXTRACT(YEAR FROM start_date)*100+EXTRACT(MONTH FROM start_date)) AS sort_key
-    FROM rr_accounting_periods_status
-    WHERE application_id = 101 AND adjustment_period_flag = 'N'
-),
 enriched AS (
     SELECT
         ra.*,
-        -- calendar
+        -- calendar (current/broken)
         EXTRACT(YEAR  FROM TO_DATE('01-'||ra.PERIOD_NAME,'DD-Mon-RR')) AS cal_year,
         EXTRACT(MONTH FROM TO_DATE('01-'||ra.PERIOD_NAME,'DD-Mon-RR')) AS cal_month,
-        -- fiscal
-        NVL(ps.period_year,  EXTRACT(YEAR  FROM TO_DATE('01-'||ra.PERIOD_NAME,'DD-Mon-RR'))) AS fiscal_year,
-        NVL(ps.period_number,EXTRACT(MONTH FROM TO_DATE('01-'||ra.PERIOD_NAME,'DD-Mon-RR'))) AS fiscal_period,
-        NVL(ps.sort_key,
-            EXTRACT(YEAR FROM TO_DATE('01-'||ra.PERIOD_NAME,'DD-Mon-RR'))*100
-          + EXTRACT(MONTH FROM TO_DATE('01-'||ra.PERIOD_NAME,'DD-Mon-RR')))                  AS sort_key,
+        -- fiscal (from RR_GL_FISCAL_PERIODS)
+        NVL(fp.FISCAL_YEAR,  EXTRACT(YEAR  FROM TO_DATE('01-'||ra.PERIOD_NAME,'DD-Mon-RR'))) AS fiscal_year,
+        NVL(fp.FISCAL_PERIOD,EXTRACT(MONTH FROM TO_DATE('01-'||ra.PERIOD_NAME,'DD-Mon-RR'))) AS fiscal_period,
+        NVL(fp.FISCAL_YEAR,  EXTRACT(YEAR  FROM TO_DATE('01-'||ra.PERIOD_NAME,'DD-Mon-RR')))*100
+          + NVL(fp.FISCAL_PERIOD,
+            EXTRACT(MONTH FROM TO_DATE('01-'||ra.PERIOD_NAME,'DD-Mon-RR')))                  AS sort_key,
         NVL(vsv.ACCOUNT_TYPE,'E') AS account_type
     FROM raw_agg ra
-    LEFT JOIN periods ps ON ps.period_month = TO_DATE('01-'||ra.PERIOD_NAME,'DD-Mon-RR')
+    LEFT JOIN RR_GL_FISCAL_PERIODS fp
+           ON fp.PERIOD_NAME = ra.PERIOD_NAME
+          AND fp.LEDGER_NAME = ra.LEDGER_NAME
+          AND fp.APPLICATION = 'GL'
+          AND fp.ADJ_FLAG    = 'N'
     LEFT JOIN RR_VALUE_SET_VALUES vsv
            ON vsv.VALUE_SET_CODE='BUIMERC_FIN_GLB_COA_ACCOUNT'
           AND vsv.VALUE=NULLIF(TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,4)),'')

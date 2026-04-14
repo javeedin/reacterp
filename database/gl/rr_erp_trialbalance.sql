@@ -316,13 +316,14 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
                 ra.CURRENCY_CODE,
                 ra.ACCOUNT_COMBINATION,
 
-                -- Derive fiscal period identifiers from RR_ACCOUNTING_PERIODS_STATUS.
+                -- Derive fiscal period identifiers from RR_GL_FISCAL_PERIODS.
                 -- Oracle Fusion supplies the correct fiscal PERIOD_YEAR and PERIOD_NUM
-                -- (e.g., Jul-23 → fiscal year 2024, period 1 for a July fiscal start).
+                -- via the periodsstatus/create sync endpoint.
+                -- e.g., Jul-23 → fiscal year 2024, period 1 for a July fiscal start.
                 -- Calendar year/month are used only as a fallback when no match exists.
-                NVL(ps.PERIOD_YEAR,
+                NVL(fp.FISCAL_YEAR,
                     EXTRACT(YEAR  FROM TO_DATE('01-' || ra.PERIOD_NAME, 'DD-Mon-RR')))  AS PERIOD_YEAR,
-                NVL(ps.PERIOD_NUMBER,
+                NVL(fp.FISCAL_PERIOD,
                     EXTRACT(MONTH FROM TO_DATE('01-' || ra.PERIOD_NAME, 'DD-Mon-RR')))  AS PERIOD_NUM,
 
                 -- Account segments: REERP_GL_CODE_COMBINATIONS uses the v2 schema
@@ -384,19 +385,16 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
                    ON vsv.VALUE_SET_CODE = 'BUIMERC_FIN_GLB_COA_ACCOUNT'
                   AND vsv.VALUE = NULLIF(
                           TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,4)), '')
-            -- Fiscal calendar: Oracle Fusion supplies the true fiscal year and period
-            -- number through the accounting periods sync.  application_id=101 = GL.
-            -- The subquery collapses duplicate ledger rows so the join is always 1:1.
-            LEFT JOIN (
-                SELECT DISTINCT
-                    TRUNC(start_date, 'MM')  AS period_month,
-                    period_year,
-                    period_number
-                FROM rr_accounting_periods_status
-                WHERE application_id        = 101
-                  AND adjustment_period_flag = 'N'
-            ) ps
-               ON ps.period_month = TO_DATE('01-' || ra.PERIOD_NAME, 'DD-Mon-RR')
+            -- Fiscal calendar: RR_GL_FISCAL_PERIODS is populated by calling
+            --   GET /reerp/periodsstatus/create?P_APPLICATION_NAME=General+Ledger
+            --                                  &P_LEDGER_NAME=<ledger>
+            -- PERIOD_NAME = 'May-26' (Mon-YY) matches directly, so no date conversion needed.
+            -- ADJ_FLAG='N' excludes adjustment (13th period) rows.
+            LEFT JOIN RR_GL_FISCAL_PERIODS fp
+                   ON fp.PERIOD_NAME  = ra.PERIOD_NAME
+                  AND fp.LEDGER_NAME  = ra.LEDGER_NAME
+                  AND fp.APPLICATION  = 'GL'
+                  AND fp.ADJ_FLAG     = 'N'
         ),
 
         -- ── 3. Compute cumulative analytics ──────────────────────────
