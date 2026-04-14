@@ -703,12 +703,15 @@ const TrialBalance: React.FC = () => {
 
     const TOLERANCE = 0.005;
 
-    // Aggregate Fusion TB by account (respect same company/currency filter)
+    // Reconciliation is always AED only
+    const RECON_CURRENCY = 'AED';
+
+    // Aggregate Fusion TB by account — AED currency only
     type Agg = { opening: number; debit: number; credit: number; closing: number; desc: string };
     const fusionMap = new Map<string, Agg>();
     fusionTab.data.forEach(r => {
-      if (tab.selectedCompany  && r.company !== tab.selectedCompany)  return;
-      if (tab.selectedCurrency && (r.currency || r.currency_code) !== tab.selectedCurrency) return;
+      if (tab.selectedCompany && r.company !== tab.selectedCompany) return;
+      if ((r.currency || r.currency_code) !== RECON_CURRENCY) return;
       const prev = fusionMap.get(r.account) ?? { opening: 0, debit: 0, credit: 0, closing: 0, desc: r.account_desc || '' };
       fusionMap.set(r.account, {
         opening: prev.opening + (r.opening_balance || 0),
@@ -719,11 +722,11 @@ const TrialBalance: React.FC = () => {
       });
     });
 
-    // Aggregate ReERP TB by account
+    // Aggregate ReERP TB by account — AED currency only
     const rrMap = new Map<string, Agg>();
     tab.rrData.forEach(r => {
-      if (tab.selectedCompany  && r.company      !== tab.selectedCompany)  return;
-      if (tab.selectedCurrency && r.currency_code !== tab.selectedCurrency) return;
+      if (tab.selectedCompany && r.company !== tab.selectedCompany) return;
+      if (r.currency_code !== RECON_CURRENCY) return;
       const prev = rrMap.get(r.account) ?? { opening: 0, debit: 0, credit: 0, closing: 0, desc: r.account_desc || '' };
       rrMap.set(r.account, {
         opening: prev.opening + (r.opening || 0),
@@ -2823,6 +2826,7 @@ const TrialBalance: React.FC = () => {
               <CheckCircleOutlined style={{ color: REDWOOD.info }} />
               <span>Reconciliation — Fusion TB vs ReERP TB</span>
               {reconPeriod && <Tag color="blue">{reconPeriod}</Tag>}
+              <Tag color="gold">AED only</Tag>
             </Space>
           }
           open={reconVisible}
