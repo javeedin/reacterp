@@ -7,8 +7,8 @@
 -- Parameters (set before running):
 --   :ledger_name  REQUIRED  e.g.  'BUIMERC LEDGER'
 --   :period_name  optional  e.g.  'Sep-23'  (Mon-YY) — NULL = all periods
---   :period_year  optional  e.g.  2024      (fiscal year) — NULL = all years
---   :company       optional  e.g.  '100'     (segment 1)   — NULL = all companies
+--   :period_year  optional  e.g.  '2024'    (fiscal year as text) — NULL = all years
+--   :company      optional  e.g.  '100'     (segment 1)   — NULL = all companies
 --   :currency_code optional  e.g.  'AED'                  — NULL = all currencies
 --
 -- How opening balance works:
@@ -57,16 +57,14 @@ ptd AS (
 -- ────────────────────────────────────────────────────────────
 -- Step 2 — Enrich each row with fiscal calendar + account info
 --
--- Fiscal year and fiscal period come from RR_V_GL_FISCAL_PERIODS.
--- e.g. Jul-23 → FISCAL_YEAR=2024, FISCAL_PERIOD=1
---
--- TO_NUMBER() wraps are required because the view may return
--- FISCAL_YEAR / FISCAL_PERIOD as VARCHAR2.  Without them Oracle
--- propagates VARCHAR2 through NVL and the arithmetic in the
--- window ORDER BY (FISCAL_YEAR * 100 + FISCAL_PERIOD) throws
--- ORA-01722: invalid number.
---
--- Account type and description come from the COA value set.
+-- ORA-01722 defence:
+--   RR_V_GL_FISCAL_PERIODS may expose FISCAL_YEAR / FISCAL_PERIOD
+--   as VARCHAR2.  NVL inherits the first-argument type, so
+--   NVL(varchar2_col, number_expr) stays VARCHAR2 and later
+--   arithmetic (FISCAL_YEAR * 100) blows up.
+--   Fix: CASE separates the two branches so only the matched
+--   branch is evaluated; explicit TO_NUMBER on the VARCHAR2
+--   branch keeps the result numeric.
 -- ────────────────────────────────────────────────────────────
 enriched AS (
     SELECT
@@ -75,38 +73,44 @@ enriched AS (
         p.CURRENCY_CODE,
         p.ACCOUNT_COMBINATION,
 
-        -- Fiscal year — explicit TO_NUMBER prevents ORA-01722 when
-        -- the view column is VARCHAR2
-        TO_NUMBER(NVL(fp.FISCAL_YEAR,
-            EXTRACT(YEAR  FROM TO_DATE('01-' || p.PERIOD_NAME, 'DD-Mon-RR'))))  AS FISCAL_YEAR,
+        -- Fiscal year — CASE avoids NVL type-propagation issue
+        CASE
+            WHEN fp.FISCAL_YEAR IS NOT NULL
+            THEN TO_NUMBER(fp.FISCAL_YEAR)
+            ELSE EXTRACT(YEAR  FROM TO_DATE('01-' || p.PERIOD_NAME, 'DD-Mon-RR'))
+        END  AS FISCAL_YEAR,
 
-        -- Fiscal period sequence (1 = first month of the fiscal year)
-        TO_NUMBER(NVL(fp.FISCAL_PERIOD,
-            EXTRACT(MONTH FROM TO_DATE('01-' || p.PERIOD_NAME, 'DD-Mon-RR'))))  AS FISCAL_PERIOD,
+        -- Fiscal period (1 = first month of fiscal year)
+        CASE
+            WHEN fp.FISCAL_PERIOD IS NOT NULL
+            THEN TO_NUMBER(fp.FISCAL_PERIOD)
+            ELSE EXTRACT(MONTH FROM TO_DATE('01-' || p.PERIOD_NAME, 'DD-Mon-RR'))
+        END  AS FISCAL_PERIOD,
 
         -- Segment 1 = company
-        TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION, '[^-]+', 1, 1))               AS COMPANY,
+        TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION, '[^-]+', 1, 1))   AS COMPANY,
 
         -- Segment 4 = natural account code
-        TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION, '[^-]+', 1, 4))               AS ACCOUNT,
+        TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION, '[^-]+', 1, 4))   AS ACCOUNT,
 
         -- A=Asset  L=Liability  O=Equity  R=Revenue  E=Expense
-        NVL(vsv.ACCOUNT_TYPE, 'E')                                              AS ACCOUNT_TYPE,
-        vsv.DESCRIPTION                                                         AS ACCOUNT_DESC,
+        NVL(vsv.ACCOUNT_TYPE, 'E')                                  AS ACCOUNT_TYPE,
+        vsv.DESCRIPTION                                             AS ACCOUNT_DESC,
 
         -- Period activity
         p.PTD_DR,
         p.PTD_CR,
-        p.PTD_DR - p.PTD_CR                                                     AS PTD_NET
+        p.PTD_DR - p.PTD_CR                                         AS PTD_NET
 
     FROM ptd p
 
     -- Fiscal calendar: PERIOD_NAME 'Mon-YY' matches directly (e.g. 'Jul-23')
+    -- ADJ_FLAG compared with TO_CHAR() in case the view stores it as NUMBER
     LEFT JOIN RR_V_GL_FISCAL_PERIODS fp
-           ON fp.PERIOD_NAME = p.PERIOD_NAME
-          --AND fp.LEDGER_NAME = p.LEDGER_NAME
-          AND fp.APPLICATION = 'GL'
-          AND fp.ADJ_FLAG    = 'N'
+           ON fp.PERIOD_NAME       = p.PERIOD_NAME
+          --AND fp.LEDGER_NAME     = p.LEDGER_NAME
+          AND TO_CHAR(fp.APPLICATION) = 'GL'
+          AND TO_CHAR(fp.ADJ_FLAG)    = 'N'
 
     -- Account type and description from Chart of Accounts value set
     LEFT JOIN RR_VALUE_SET_VALUES vsv
@@ -119,14 +123,12 @@ enriched AS (
 --
 -- BS_OPENING (Balance Sheet: A / L / O):
 --   Sum all prior periods across ALL fiscal years.
---   The account balance carries forward from year to year.
---   Order by (fiscal_year * 100 + fiscal_period) ensures
---   chronological order even across year boundaries.
+--   Order by (FISCAL_YEAR * 100 + FISCAL_PERIOD) — both are
+--   guaranteed NUMBER from Step 2, so no ORA-01722 here.
 --
 -- PL_OPENING (P&L: R / E):
 --   Sum prior periods within the SAME fiscal year only.
---   At the start of a new fiscal year, this resets to zero.
---   Partitioning by FISCAL_YEAR achieves the reset.
+--   Resets to zero at fiscal year start.
 -- ────────────────────────────────────────────────────────────
 calc AS (
     SELECT
@@ -157,10 +159,9 @@ calc AS (
 -- ────────────────────────────────────────────────────────────
 -- Final — Filter to the requested period and output results
 --
--- Opening:  BS_OPENING for Balance Sheet accounts
---           PL_OPENING for P&L accounts
--- Closing:  Opening + Debit - Credit
---           (positive = Dr balance, negative = Cr balance)
+-- :period_year compared as string (TO_CHAR) to avoid
+-- TO_NUMBER(:period_year) which can raise ORA-01722 when
+-- Oracle evaluates the expression before the IS NULL check.
 -- ────────────────────────────────────────────────────────────
 SELECT
     c.LEDGER_NAME,
@@ -191,10 +192,10 @@ SELECT
     END                  AS CLOSING
 
 FROM calc c
-WHERE (:period_name    IS NULL OR c.PERIOD_NAME   = :period_name)
-  AND (:period_year    IS NULL OR c.FISCAL_YEAR   = TO_NUMBER(:period_year))
-  AND (:company        IS NULL OR c.COMPANY       = :company)
-  AND (:currency_code  IS NULL OR c.CURRENCY_CODE = :currency_code)
+WHERE (:period_name    IS NULL OR c.PERIOD_NAME          = :period_name)
+  AND (:period_year    IS NULL OR TO_CHAR(c.FISCAL_YEAR) = :period_year)
+  AND (:company        IS NULL OR c.COMPANY              = :company)
+  AND (:currency_code  IS NULL OR c.CURRENCY_CODE        = :currency_code)
 ORDER BY
     c.FISCAL_YEAR,
     c.FISCAL_PERIOD,
