@@ -45,6 +45,7 @@ import {
   LoadingOutlined,
   BarsOutlined,
   BarChartOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../../config/api.config';
@@ -149,7 +150,7 @@ interface RrTBRecord {
 interface TabData {
   key: string;
   periodName: string;
-  tabType: 'fusion' | 'reerp';
+  tabType: 'fusion' | 'reerp' | 'reerp-dynamic';
   data: GLBalanceRecord[];
   rrData: RrTBRecord[];
   rrGenerating: boolean;
@@ -242,6 +243,7 @@ const TrialBalance: React.FC = () => {
     rrGenerate:   { label: 'POST RR TB Generate',     url: '', method: 'POST', status: null, ok: null, durationMs: null, running: false, body: '' },
     rrFetch:      { label: 'GET RR Trial Balance',    url: '', method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
     linesSummary: { label: 'GET Lines Summary',       url: '', method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
+    rrDynamic:    { label: 'GET RR Dynamic TB',        url: '', method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
   });
 
   // Lines Summary state
@@ -528,6 +530,63 @@ const TrialBalance: React.FC = () => {
     }
   }, [tabs]);
 
+  // Fetch ReERP Dynamic TB — calls /standard directly (no generate step)
+  const fetchDynamicTB = useCallback(async (record: PeriodInfo) => {
+    const tabKey = `rr-dyn-${record.period_name_id}`;
+
+    const existingTab = tabs.find(t => t.key === tabKey);
+    if (existingTab) { setActiveTab(tabKey); return; }
+
+    const newTab: TabData = {
+      key: tabKey,
+      periodName: `Dynamic: ${record.period_name_id}`,
+      tabType: 'reerp-dynamic',
+      data: [],
+      rrData: [],
+      rrGenerating: false,
+      loading: true,
+      error: null,
+      companies: [],
+      currencies: [],
+      selectedCompany: null,
+      selectedCurrency: null,
+      segmentsBefore: [],
+      segmentsAfter: [],
+      gridSearch: '',
+    };
+
+    setTabs(prev => [...prev, newTab]);
+    setActiveTab(tabKey);
+
+    try {
+      const fetchUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceStandard}`
+        + `?ledger_name=${encodeURIComponent(record.ledger_name)}`
+        + `&period_name=${encodeURIComponent(record.period_name_id)}`
+        + `&period_year=${encodeURIComponent(String(record.period_year))}`
+        + `&limit=5000`;
+      const t0 = trackCall('rrDynamic', `GET RR Dynamic TB — ${record.period_name_id}`, fetchUrl);
+      const res = await fetch(fetchUrl, { headers: { Accept: 'application/json' } });
+      const data = await res.json();
+      resolveCall('rrDynamic', t0, res.status, res.ok, `${(data.items || []).length} rows`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      const items: RrTBRecord[] = (data.items || []) as RrTBRecord[];
+
+      const companies = [...new Set(items.map(i => i.company).filter(Boolean))].sort();
+      const currencies = [...new Set(items.map(i => i.currency_code).filter(Boolean))].sort();
+
+      setTabs(prev => prev.map(t =>
+        t.key === tabKey
+          ? { ...t, rrData: items, loading: false, companies, currencies }
+          : t
+      ));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to fetch Dynamic TB';
+      setTabs(prev => prev.map(t =>
+        t.key === tabKey ? { ...t, loading: false, error: msg } : t
+      ));
+    }
+  }, [tabs]);
+
   // Close a tab
   const closeTab = useCallback((tabKey: string) => {
     if (tabKey === 'lines-summary') {
@@ -619,7 +678,7 @@ const TrialBalance: React.FC = () => {
 
   // ── ReERP ↔ Fusion account-level reconciliation ────────────────────────
   const handleRrReconcile = useCallback((tab: TabData) => {
-    const periodName = tab.periodName.replace(/^ReERP:\s*/, '');
+    const periodName = tab.periodName.replace(/^(?:ReERP|Dynamic):\s*/, '');
 
     // Find the Fusion TB tab for this period
     const fusionTab = tabs.find(t => t.tabType === 'fusion' && t.periodName === periodName);
@@ -938,6 +997,19 @@ const TrialBalance: React.FC = () => {
           >
             ReERP TB
           </Button>
+          <Button
+            type="primary"
+            icon={<ThunderboltOutlined />}
+            size="small"
+            onClick={() => fetchDynamicTB(record)}
+            style={{
+              background: '#722ed1',
+              borderColor: '#722ed1',
+              borderRadius: 6,
+            }}
+          >
+            Dynamic TB
+          </Button>
         </Space>
       ),
     },
@@ -1084,7 +1156,7 @@ const TrialBalance: React.FC = () => {
 
   // Export both Fusion TB + ReERP TB into one workbook (two sheets)
   const handleExportBoth = useCallback(async (rrTab: TabData) => {
-    const periodName = rrTab.periodName.replace(/^ReERP:\s*/, '');
+    const periodName = rrTab.periodName.replace(/^(?:ReERP|Dynamic):\s*/, '');
     const fusionTab  = tabs.find(t => t.tabType === 'fusion' && t.periodName === periodName);
 
     if (!fusionTab) {
@@ -2364,7 +2436,7 @@ const TrialBalance: React.FC = () => {
               Reconcile
             </Button>
             <Tooltip title={
-              tabs.find(t => t.tabType === 'fusion' && t.periodName === tab.periodName.replace(/^ReERP:\s*/, ''))
+              tabs.find(t => t.tabType === 'fusion' && t.periodName === tab.periodName.replace(/^(?:ReERP|Dynamic):\s*/, ''))
                 ? 'Export Fusion TB + ReERP TB to one Excel file (2 sheets)'
                 : 'Open Fusion TB for this period first'
             }>
@@ -2424,11 +2496,13 @@ const TrialBalance: React.FC = () => {
         <span>
           {tab.tabType === 'reerp'
             ? <BarChartOutlined style={{ marginRight: 6, color: REDWOOD.success }} />
+            : tab.tabType === 'reerp-dynamic'
+            ? <ThunderboltOutlined style={{ marginRight: 6, color: '#722ed1' }} />
             : <TableOutlined style={{ marginRight: 8 }} />}
           {tab.periodName}
         </span>
       ),
-      children: tab.tabType === 'reerp' ? renderRrTBTab(tab) : renderTBTab(tab),
+      children: (tab.tabType === 'reerp' || tab.tabType === 'reerp-dynamic') ? renderRrTBTab(tab) : renderTBTab(tab),
       closable: true,
     })),
     ...(lsVisible ? [{
