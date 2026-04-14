@@ -28,7 +28,7 @@ CREATE TABLE RR_ERP_TRIALBALANCE (
     LEDGER_NAME         VARCHAR2(240)   NOT NULL,
     PERIOD_NAME         VARCHAR2(30)    NOT NULL,
     PERIOD_YEAR         NUMBER(4)       NOT NULL,
-    PERIOD_NUM          NUMBER(2)       NOT NULL,   -- 1=Jan ... 12=Dec
+    PERIOD_NUM          NUMBER(2)       NOT NULL,   -- fiscal period (1=first month of fiscal year)
 
     -- Currency
     CURRENCY_CODE       VARCHAR2(15),
@@ -190,9 +190,11 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
 
 
     -- ──────────────────────────────────────────────────────────────────
-    -- Internal helper: derive calendar year from period name.
+    -- Internal helper: derive CALENDAR year from period name.
     -- Supports 'Mon-YY' format (e.g. 'Mar-25' → 2025).
     -- Uses RR format model so two-digit years 00-49 → 2000-2049.
+    -- NOTE: GENERATE_TB uses RR_ACCOUNTING_PERIODS_STATUS for the
+    -- correct FISCAL year — these helpers are calendar-only fallbacks.
     -- ──────────────────────────────────────────────────────────────────
     FUNCTION PERIOD_YEAR (p_period_name IN VARCHAR2) RETURN NUMBER IS
     BEGIN
@@ -203,7 +205,9 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
 
 
     -- ──────────────────────────────────────────────────────────────────
-    -- Internal helper: derive period number (month 1-12) from period name.
+    -- Internal helper: derive calendar month number (1-12) from period name.
+    -- NOTE: GENERATE_TB uses RR_ACCOUNTING_PERIODS_STATUS for the
+    -- correct FISCAL period number — this helper is a fallback only.
     -- ──────────────────────────────────────────────────────────────────
     FUNCTION PERIOD_NUM (p_period_name IN VARCHAR2) RETURN NUMBER IS
     BEGIN
@@ -312,9 +316,14 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
                 ra.CURRENCY_CODE,
                 ra.ACCOUNT_COMBINATION,
 
-                -- Derive sortable period identifiers
-                EXTRACT(YEAR  FROM TO_DATE('01-' || ra.PERIOD_NAME, 'DD-Mon-RR'))  AS PERIOD_YEAR,
-                EXTRACT(MONTH FROM TO_DATE('01-' || ra.PERIOD_NAME, 'DD-Mon-RR'))  AS PERIOD_NUM,
+                -- Derive fiscal period identifiers from RR_ACCOUNTING_PERIODS_STATUS.
+                -- Oracle Fusion supplies the correct fiscal PERIOD_YEAR and PERIOD_NUM
+                -- (e.g., Jul-23 → fiscal year 2024, period 1 for a July fiscal start).
+                -- Calendar year/month are used only as a fallback when no match exists.
+                NVL(ps.PERIOD_YEAR,
+                    EXTRACT(YEAR  FROM TO_DATE('01-' || ra.PERIOD_NAME, 'DD-Mon-RR')))  AS PERIOD_YEAR,
+                NVL(ps.PERIOD_NUMBER,
+                    EXTRACT(MONTH FROM TO_DATE('01-' || ra.PERIOD_NAME, 'DD-Mon-RR')))  AS PERIOD_NUM,
 
                 -- Account segments: REERP_GL_CODE_COMBINATIONS uses the v2 schema
                 -- with quoted mixed-case column names ("buimercFinGlb..." prefix).
@@ -375,15 +384,34 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
                    ON vsv.VALUE_SET_CODE = 'BUIMERC_FIN_GLB_COA_ACCOUNT'
                   AND vsv.VALUE = NULLIF(
                           TRIM(REGEXP_SUBSTR(ra.ACCOUNT_COMBINATION,'[^-]+',1,4)), '')
+            -- Fiscal calendar: Oracle Fusion supplies the true fiscal year and period
+            -- number through the accounting periods sync.  application_id=101 = GL.
+            -- The subquery collapses duplicate ledger rows so the join is always 1:1.
+            LEFT JOIN (
+                SELECT DISTINCT
+                    TRUNC(start_date, 'MM')  AS period_month,
+                    period_year,
+                    period_number
+                FROM rr_accounting_periods_status
+                WHERE application_id        = 101
+                  AND adjustment_period_flag = 'N'
+            ) ps
+               ON ps.period_month = TO_DATE('01-' || ra.PERIOD_NAME, 'DD-Mon-RR')
         ),
 
         -- ── 3. Compute cumulative analytics ──────────────────────────
+        --
+        -- PERIOD_YEAR / PERIOD_NUM in enriched are now FISCAL values from
+        -- RR_ACCOUNTING_PERIODS_STATUS (e.g., Jul-23 → year=2024, period=1
+        -- for a July fiscal year start).  The window functions below rely
+        -- on this so that P&L resets happen at the fiscal year boundary,
+        -- not the calendar year boundary.
         --
         -- YTD  : rolling sum within the fiscal year, current period inclusive
         -- Opening (B/S): cumulative net of ALL history up to (but NOT including)
         --                current period — carries across fiscal year boundaries
         -- Opening (P&L): cumulative net within the SAME fiscal year up to (but
-        --                NOT including) current period — resets each year
+        --                NOT including) current period — resets at fiscal year start
         -- ─────────────────────────────────────────────────────────────
         with_analytics AS (
             SELECT
