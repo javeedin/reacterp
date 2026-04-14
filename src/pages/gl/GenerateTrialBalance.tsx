@@ -129,17 +129,18 @@ const GenerateTrialBalance: React.FC = () => {
   const [apiPanelVisible, setApiPanelVisible] = useState(false);
   const [apiCalls, setApiCalls] = useState<Record<string, {
     label: string; url: string; method: string;
-    status: number | null; ok: boolean | null; durationMs: number | null; running: boolean; body: string;
+    status: number | null; ok: boolean | null; durationMs: number | null; running: boolean;
+    body: string; requestBody: string;
   }>>({
-    ledgers:   { label: 'GET Ledgers',       url: `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.getLedgerName}`,            method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
-    companies: { label: 'GET Companies',    url: '',                                                                                 method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
-    periods:   { label: 'GET Periods',      url: '',                                                                                 method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
-    fetch:     { label: 'GET Trial Balance',url: '',                                                                                 method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
-    generate:  { label: 'POST Generate TB', url: `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceGenerate}`,    method: 'POST', status: null, ok: null, durationMs: null, running: false, body: '' },
+    ledgers:   { label: 'GET Ledgers',       url: `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.getLedgerName}`,            method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '', requestBody: '' },
+    companies: { label: 'GET Companies',    url: '',                                                                                 method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '', requestBody: '' },
+    periods:   { label: 'GET Periods',      url: '',                                                                                 method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '', requestBody: '' },
+    fetch:     { label: 'GET Trial Balance',url: '',                                                                                 method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '', requestBody: '' },
+    generate:  { label: 'POST Generate TB', url: `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceGenerate}`,    method: 'POST', status: null, ok: null, durationMs: null, running: false, body: '', requestBody: '' },
   });
 
-  const trackCall = (key: string, url: string) => {
-    setApiCalls(prev => ({ ...prev, [key]: { ...prev[key], url, status: null, ok: null, durationMs: null, running: true, body: '' } }));
+  const trackCall = (key: string, url: string, requestBody: string = '') => {
+    setApiCalls(prev => ({ ...prev, [key]: { ...prev[key], url, status: null, ok: null, durationMs: null, running: true, body: '', requestBody } }));
     return performance.now();
   };
   const resolveCall = (key: string, t0: number, status: number, ok: boolean, body: string) => {
@@ -270,7 +271,7 @@ const GenerateTrialBalance: React.FC = () => {
         p_company:     companyName || null,
       };
       const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceGenerate}`;
-      const t0 = trackCall('generate', url);
+      const t0 = trackCall('generate', url, JSON.stringify(body, null, 2));
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -647,10 +648,21 @@ const GenerateTrialBalance: React.FC = () => {
                     <Text code style={{ fontSize: 11, wordBreak: 'break-all' }}>{call.url}</Text>
                   </div>
                 )}
+                {call.requestBody && (
+                  <div style={{ marginTop: 4, marginLeft: 52 }}>
+                    <Text type="secondary" style={{ fontSize: 10 }}>Request body:</Text>
+                    <pre style={{ fontSize: 11, background: '#1a1a2e', color: '#a8d8ff', border: '1px solid #334', padding: 6, borderRadius: 4, maxHeight: 100, overflow: 'auto', marginTop: 2 }}>
+                      {call.requestBody}
+                    </pre>
+                  </div>
+                )}
                 {call.body && (
-                  <pre style={{ fontSize: 11, background: '#fff', border: '1px solid #e5e5e5', padding: 6, borderRadius: 4, maxHeight: 80, overflow: 'auto', marginTop: 4, marginLeft: 52 }}>
-                    {call.body}
-                  </pre>
+                  <div style={{ marginTop: 4, marginLeft: 52 }}>
+                    <Text type="secondary" style={{ fontSize: 10 }}>Response:</Text>
+                    <pre style={{ fontSize: 11, background: '#fff', border: '1px solid #e5e5e5', padding: 6, borderRadius: 4, maxHeight: 80, overflow: 'auto', marginTop: 2 }}>
+                      {call.body}
+                    </pre>
+                  </div>
                 )}
               </div>
             ))}
