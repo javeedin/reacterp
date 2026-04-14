@@ -338,3 +338,96 @@ ORDER BY COMPANY
     COMMIT;
 END;
 /
+
+-- ─────────────────────────────────────────────────────────────
+-- 11. TEMPLATE: gl/rr-trialbalance/standard
+-- ─────────────────────────────────────────────────────────────
+BEGIN
+    ORDS.DEFINE_TEMPLATE(
+        p_module_name    => 'reerp',
+        p_pattern        => 'gl/rr-trialbalance/standard',
+        p_priority       => 0,
+        p_etag_type      => 'HASH',
+        p_comments       => 'Standard TB format: Opening / Debit / Credit / Closing (net)'
+    );
+    COMMIT;
+EXCEPTION
+    WHEN OTHERS THEN
+        IF SQLCODE = -20001 THEN NULL; ELSE RAISE; END IF;
+END;
+/
+
+-- ─────────────────────────────────────────────────────────────
+-- 12. GET /reerp/gl/rr-trialbalance/standard
+--
+--  Standard Trial Balance format:
+--    Opening  = opening_dr  - opening_cr   (+ = Dr balance, - = Cr balance)
+--    Debit    = ptd_dr      (current period debits)
+--    Credit   = ptd_cr      (current period credits)
+--    Closing  = closing_dr  - closing_cr   (+ = Dr balance, - = Cr balance)
+--
+--  Same filters as the main endpoint:
+--    ledger_name, period_year, period_name, account_type, company
+-- ─────────────────────────────────────────────────────────────
+BEGIN
+    ORDS.DEFINE_HANDLER(
+        p_module_name    => 'reerp',
+        p_pattern        => 'gl/rr-trialbalance/standard',
+        p_method         => 'GET',
+        p_source_type    => 'json/collection',
+        p_mimes_allowed  => NULL,
+        p_comments       => 'Standard TB: Opening / Debit (PTD) / Credit (PTD) / Closing — net amounts',
+        p_source         => q'[
+SELECT
+    tb.tb_id,
+    tb.ledger_name,
+    tb.period_name,
+    tb.period_year,
+    tb.period_num,
+    tb.currency_code,
+    tb.account_combination,
+    tb.company,
+    tb.lob,
+    tb.department,
+    tb.account,
+    NVL(vsv.description, tb.account_desc)           AS account_desc,
+    tb.sub_account,
+    tb.analysis,
+    tb.intercompany,
+    tb.account_type,
+    -- Standard TB columns (net: positive = Dr balance, negative = Cr balance)
+    NVL(tb.opening_dr, 0) - NVL(tb.opening_cr, 0)  AS opening,
+    NVL(tb.ptd_dr, 0)                               AS debit,
+    NVL(tb.ptd_cr, 0)                               AS credit,
+    NVL(tb.closing_dr, 0) - NVL(tb.closing_cr, 0)  AS closing,
+    -- YTD net (for reference)
+    NVL(tb.ytd_dr, 0)     - NVL(tb.ytd_cr, 0)      AS ytd_net,
+    TO_CHAR(tb.run_date, 'YYYY-MM-DD HH24:MI:SS')   AS run_date
+FROM rr_erp_trialbalance tb
+LEFT JOIN rr_value_set_values vsv
+       ON vsv.value_set_code = 'BUIMERC_FIN_GLB_COA_ACCOUNT'
+      AND vsv.value          = tb.account
+WHERE (:ledger_name IS NULL OR tb.ledger_name  = :ledger_name)
+  AND (:period_year IS NULL OR tb.period_year  = TO_NUMBER(:period_year))
+  AND (:period_name IS NULL OR tb.period_name  = :period_name)
+  AND (:account_type IS NULL OR tb.account_type = :account_type)
+  AND (:company IS NULL OR tb.company          = :company)
+ORDER BY
+    tb.period_year,
+    tb.period_num,
+    CASE tb.account_type
+        WHEN 'A' THEN 1   -- Asset
+        WHEN 'L' THEN 2   -- Liability
+        WHEN 'O' THEN 3   -- Equity
+        WHEN 'R' THEN 4   -- Revenue
+        WHEN 'E' THEN 5   -- Expense
+        ELSE 6
+    END,
+    tb.account,
+    tb.company,
+    tb.department
+]'
+    );
+    COMMIT;
+END;
+/
