@@ -129,7 +129,7 @@ const GenerateTrialBalance: React.FC = () => {
     label: string; url: string; method: string;
     status: number | null; ok: boolean | null; durationMs: number | null; running: boolean; body: string;
   }>>({
-    ledgers: { label: 'GET Ledgers',       url: `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceLedgers}`, method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
+    ledgers: { label: 'GET Ledgers',       url: `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.getLedgerName}`,        method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
     periods: { label: 'GET Periods',       url: '',                                                                             method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
     fetch:   { label: 'GET Trial Balance', url: '',                                                                             method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
     generate:{ label: 'POST Generate TB',  url: `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceGenerate}`,method: 'POST', status: null, ok: null, durationMs: null, running: false, body: '' },
@@ -159,7 +159,7 @@ const GenerateTrialBalance: React.FC = () => {
 
   // ── Fetch ledger options ─────────────────────────────────
   const fetchLedgers = useCallback(async () => {
-    const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceLedgers}`;
+    const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.getLedgerName}`;
     const t0 = trackCall('ledgers', url);
     try {
       const res = await fetch(url);

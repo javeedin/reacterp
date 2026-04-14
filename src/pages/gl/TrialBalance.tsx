@@ -297,7 +297,7 @@ const TrialBalance: React.FC = () => {
   // Fetch ledger list from APEX
   const fetchLedgers = useCallback(async () => {
     setLoadingLedgers(true);
-    const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceLedgers}`;
+    const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.getLedgerName}`;
     const t0 = trackCall('ledgers', 'GET Ledgers', url);
     try {
       const res = await fetch(url);
