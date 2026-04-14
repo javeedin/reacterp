@@ -131,29 +131,61 @@ BEGIN
         p_comments       => 'Generate RR Trial Balance from journal lines',
         p_source         => q'[
 DECLARE
-    v_body          CLOB := :body_text;
-    v_ledger_name   VARCHAR2(240);
-    v_period_year   NUMBER;
-    v_period_name   VARCHAR2(30);
-    v_company       VARCHAR2(30);
-    v_inserted      NUMBER := 0;
-    v_updated       NUMBER := 0;
-    v_errors        NUMBER := 0;
-    v_error_msg     VARCHAR2(4000);
-    v_msg           VARCHAR2(500);
-    v_start         TIMESTAMP := SYSTIMESTAMP;
-    v_elapsed_sec   NUMBER;
+    v_body           CLOB := :body_text;
+    v_ledger_name    VARCHAR2(240);
+    v_period_name    VARCHAR2(30);
+    v_company        VARCHAR2(30);
+    v_fiscal_year    NUMBER;
+    v_fiscal_period  NUMBER;
+    v_inserted       NUMBER := 0;
+    v_updated        NUMBER := 0;
+    v_errors         NUMBER := 0;
+    v_error_msg      VARCHAR2(4000);
+    v_msg            VARCHAR2(500);
+    v_start          TIMESTAMP := SYSTIMESTAMP;
+    v_elapsed_sec    NUMBER;
 BEGIN
     -- Parse JSON body
-    v_ledger_name := JSON_VALUE(v_body, '$.p_ledger_name');
-    v_period_year := TO_NUMBER(JSON_VALUE(v_body, '$.p_period_year'));
-    v_period_name := JSON_VALUE(v_body, '$.p_period_name');
-    v_company     := JSON_VALUE(v_body, '$.p_company');
+    v_ledger_name   := JSON_VALUE(v_body, '$.p_ledger_name');
+    v_period_name   := JSON_VALUE(v_body, '$.p_period_name');
+    v_company       := JSON_VALUE(v_body, '$.p_company');
+    v_fiscal_year   := TO_NUMBER(JSON_VALUE(v_body, '$.p_fiscal_year'));
+    v_fiscal_period := TO_NUMBER(JSON_VALUE(v_body, '$.p_fiscal_period'));
 
-    -- Run the generation procedure
+    -- Sync fiscal period into RR_GL_FISCAL_PERIODS so GENERATE_TB can join it.
+    -- This ensures the table is always current before we compute the trial balance.
+    IF v_ledger_name IS NOT NULL AND v_period_name IS NOT NULL
+       AND v_fiscal_year IS NOT NULL AND v_fiscal_period IS NOT NULL
+    THEN
+        MERGE INTO RR_GL_FISCAL_PERIODS tgt
+        USING (
+            SELECT v_period_name AS period_name,
+                   v_ledger_name AS ledger_name,
+                   'GL'          AS application
+            FROM DUAL
+        ) src
+        ON (    tgt.PERIOD_NAME = src.period_name
+            AND tgt.LEDGER_NAME = src.ledger_name
+            AND tgt.APPLICATION = src.application)
+        WHEN MATCHED THEN
+            UPDATE SET
+                tgt.FISCAL_YEAR   = v_fiscal_year,
+                tgt.FISCAL_PERIOD = v_fiscal_period,
+                tgt.ADJ_FLAG      = 'N',
+                tgt.SYNC_DATE     = SYSTIMESTAMP
+        WHEN NOT MATCHED THEN
+            INSERT (PERIOD_NAME, LEDGER_NAME, APPLICATION, FISCAL_YEAR, FISCAL_PERIOD, ADJ_FLAG)
+            VALUES (v_period_name, v_ledger_name, 'GL', v_fiscal_year, v_fiscal_period, 'N');
+        COMMIT;
+    END IF;
+
+    -- Run the generation procedure.
+    -- Pass p_period_name only (not p_period_year) so GENERATE_TB uses the
+    -- fiscal year it just read from RR_GL_FISCAL_PERIODS rather than any
+    -- calendar-year fallback, and uses PERIOD_NAME as the sole output filter.
     RR_ERP_TB_PKG.GENERATE_TB(
         p_ledger_name => v_ledger_name,
-        p_period_year => v_period_year,
+        p_period_year => NULL,           -- let package derive from RR_GL_FISCAL_PERIODS
         p_period_name => v_period_name,
         p_company     => v_company,
         p_inserted    => v_inserted,
@@ -280,15 +312,26 @@ BEGIN
         p_mimes_allowed  => NULL,
         p_comments       => 'Distinct period names from journal headers for a given ledger/year',
         p_source         => q'[
+-- Fiscal year and period number come from RR_GL_FISCAL_PERIODS (synced from
+-- Oracle Fusion via periodsstatus/create).  Calendar year/month are used only
+-- as a fallback when no match exists in the fiscal periods table.
 SELECT DISTINCT
-    hdr.PERIOD_NAME   AS period_name,
-    EXTRACT(YEAR  FROM TO_DATE('01-' || hdr.PERIOD_NAME, 'DD-Mon-RR'))  AS period_year,
-    EXTRACT(MONTH FROM TO_DATE('01-' || hdr.PERIOD_NAME, 'DD-Mon-RR'))  AS period_num
+    hdr.PERIOD_NAME                                                                 AS period_name,
+    NVL(fp.FISCAL_YEAR,
+        EXTRACT(YEAR  FROM TO_DATE('01-'||hdr.PERIOD_NAME,'DD-Mon-RR')))            AS period_year,
+    NVL(fp.FISCAL_PERIOD,
+        EXTRACT(MONTH FROM TO_DATE('01-'||hdr.PERIOD_NAME,'DD-Mon-RR')))            AS period_num
 FROM RR_GL_JE_HEADERS hdr
+LEFT JOIN RR_GL_FISCAL_PERIODS fp
+       ON fp.PERIOD_NAME = hdr.PERIOD_NAME
+      AND fp.LEDGER_NAME = hdr.LEDGER_NAME
+      AND fp.APPLICATION = 'GL'
+      AND fp.ADJ_FLAG    = 'N'
 WHERE hdr.PERIOD_NAME IS NOT NULL
   AND (:ledger_name IS NULL OR hdr.LEDGER_NAME = :ledger_name)
   AND (:period_year IS NULL OR
-       EXTRACT(YEAR FROM TO_DATE('01-' || hdr.PERIOD_NAME, 'DD-Mon-RR')) = TO_NUMBER(:period_year))
+       NVL(fp.FISCAL_YEAR,
+           EXTRACT(YEAR FROM TO_DATE('01-'||hdr.PERIOD_NAME,'DD-Mon-RR'))) = TO_NUMBER(:period_year))
 ORDER BY period_year DESC, period_num DESC
 ]'
     );

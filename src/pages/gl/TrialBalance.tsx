@@ -474,21 +474,28 @@ const TrialBalance: React.FC = () => {
 
     try {
       // Step 1: Generate TB for this period
-      const genUrl = `${APEX_DB_CONFIG.baseUrl}/gl/rr-trialbalance/generate`;
+      // Pass fiscal_year / fiscal_period from the period record so the
+      // ORDS handler can sync RR_GL_FISCAL_PERIODS before calling GENERATE_TB.
+      // Do NOT pass p_period_year — GENERATE_TB derives fiscal year from the
+      // periods table; passing a fiscal year here would mismatch the calendar
+      // fallback if the table isn't populated yet.
+      const genUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceGenerate}`;
       const t0gen = trackCall('rrGenerate', `POST RR TB Generate — ${record.period_name_id}`, genUrl);
       setApiCalls(prev => ({ ...prev, rrGenerate: { ...prev.rrGenerate, method: 'POST' } }));
       const genRes = await fetch(genUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
-          p_ledger_name: record.ledger_name,
-          p_period_year: record.period_year,
-          p_period_name: record.period_name_id,
+          p_ledger_name:   record.ledger_name,
+          p_period_name:   record.period_name_id,
+          p_fiscal_year:   record.period_year,
+          p_fiscal_period: record.period_number,
         }),
       });
       const genData = await genRes.json();
-      resolveCall('rrGenerate', t0gen, genRes.status, genRes.ok, genData.status || '');
-      if (genData.status === 'error') throw new Error(genData.message || 'Generation failed');
+      resolveCall('rrGenerate', t0gen, genRes.status, genRes.ok,
+        genData.message || (genData.success === false ? (genData.error_msg || 'Generation failed') : JSON.stringify(genData).slice(0, 300)));
+      if (genData.success === false) throw new Error(genData.error_msg || genData.message || 'Generation failed');
 
       setTabs(prev => prev.map(t =>
         t.key === tabKey ? { ...t, rrGenerating: false } : t
