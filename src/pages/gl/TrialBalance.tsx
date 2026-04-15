@@ -52,6 +52,8 @@ import {
 import { Link } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import { Divider } from 'antd';
+import * as XLSX from 'xlsx';
+import { saveAs } from 'file-saver';
 import { exportRrTBToExcel, exportFusionTBToExcel, exportBothTBToExcel } from '../../utils/tbExcelExport';
 
 const { Content } = Layout;
