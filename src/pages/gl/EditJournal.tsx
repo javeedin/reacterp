@@ -35,10 +35,13 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   PrinterOutlined,
+  ApiOutlined,
+  CheckSquareOutlined,
 } from '@ant-design/icons';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
-import { PROXY_CONFIG, ORACLE_FUSION_CONFIG } from '../../config/api.config';
+import { PROXY_CONFIG, ORACLE_FUSION_CONFIG, APEX_DB_CONFIG } from '../../config/api.config';
+import { postJournal } from '../../services/manage-journals.service';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -233,6 +236,7 @@ const EditJournal: React.FC = () => {
   const [, /* form */] = Form.useForm();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [posting, setPosting] = useState(false);
   const [selectedLineKeys, setSelectedLineKeys] = useState<React.Key[]>([]);
 
   // Get data passed from ManageJournals
@@ -491,17 +495,26 @@ const EditJournal: React.FC = () => {
     }
   };
 
-  // Post handler
+  // Post handler — calls PUT gl/journals/:jeBatchId/post
   const handlePost = async () => {
-    setSaving(true);
+    const jeBatchId = currentJournal?.jeBatchId;
+    if (!jeBatchId) {
+      message.warning('No batch ID found for this journal');
+      return;
+    }
+    setPosting(true);
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      message.success('Journal posted successfully');
-      navigate('/gl/manage-journals');
+      const result = await postJournal(jeBatchId);
+      if (result.success) {
+        message.success('Journal posted successfully');
+        navigate('/gl/manage-journals');
+      } else {
+        message.error(`Post failed: ${result.error || 'Unknown error'}`);
+      }
     } catch (error) {
       message.error('Failed to post journal');
     } finally {
-      setSaving(false);
+      setPosting(false);
     }
   };
 
@@ -1273,15 +1286,18 @@ const EditJournal: React.FC = () => {
             >
               <SaveOutlined /> Save
             </Dropdown.Button>
-            <Dropdown.Button
+            <Button
               size="small"
-              menu={{ items: postMenu }}
               onClick={handlePost}
-              loading={saving}
+              loading={posting}
               style={{ background: '#D4A800', borderColor: '#D4A800', color: '#fff' }}
+              icon={posting ? undefined : <CheckSquareOutlined />}
             >
               Post
-            </Dropdown.Button>
+            </Button>
+            <Tooltip title={`PUT ${APEX_DB_CONFIG.baseUrl}/gl/journals/{jeBatchId}/post`} placement="bottom">
+              <ApiOutlined style={{ color: '#0572CE', fontSize: 14, cursor: 'pointer' }} />
+            </Tooltip>
             <Button
               size="small"
               icon={<CloseOutlined />}

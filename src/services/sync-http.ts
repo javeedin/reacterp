@@ -267,6 +267,42 @@ export const insertToApex = async (
   }
 };
 
+// ── APEX PUT ──────────────────────────────────────────────────────────────────
+
+export const putToApex = async (
+  endpoint: string,
+  payload: any = {},
+  log?: LogCallback,
+  verbose = true
+): Promise<any> => {
+  try {
+    const url = `${APEX_DB_CONFIG.baseUrl}/${endpoint}`;
+    if (verbose) {
+      log?.('step', '──── [PUT] APEX Database ────');
+      log?.('info', `APEX URL: ${url}`);
+    }
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const responseText = await response.text();
+    let data: any;
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      log?.('error', `PUT non-JSON response (HTTP ${response.status}): ${responseText.substring(0, 300)}`);
+      return { success: false, error: `HTTP ${response.status}: ${responseText.substring(0, 200)}` };
+    }
+    if (verbose) log?.('success', `PUT Response: ${JSON.stringify(data).substring(0, 200)}`);
+    return data;
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    log?.('error', `PUT Error: ${errorMsg}`);
+    throw error;
+  }
+};
+
 // ── APEX GET ──────────────────────────────────────────────────────────────────
 
 export const fetchFromApex = async (

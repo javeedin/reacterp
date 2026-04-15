@@ -3,7 +3,10 @@
  * Service for querying journals from APEX REST API
  */
 
-import { fetchFromApex } from './sync-http';
+import { fetchFromApex, putToApex } from './sync-http';
+
+// Endpoint constant for posting a journal batch (used in API icon tooltips)
+export const POST_JOURNAL_ENDPOINT = 'gl/journals/{jeBatchId}/post';
 
 // Types
 export interface JournalSearchParams {
@@ -219,4 +222,22 @@ export const formatDate = (dateString: string): string => {
     month: 'short',
     year: 'numeric',
   });
+};
+
+/**
+ * Post a journal batch — updates STATUS to 'P' / 'Posted'
+ */
+export const postJournal = async (
+  jeBatchId: number
+): Promise<{ success: boolean; message?: string; error?: string }> => {
+  try {
+    const endpoint = `gl/journals/${jeBatchId}/post`;
+    const data = await putToApex(endpoint);
+    return data;
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
 };

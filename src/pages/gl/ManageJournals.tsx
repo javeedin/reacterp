@@ -23,6 +23,7 @@ import {
   Descriptions,
 } from 'antd';
 import { APEX_DB_CONFIG } from '../../config/api.config';
+import { postJournal } from '../../services/manage-journals.service';
 import type { MenuProps } from 'antd';
 import {
   HomeOutlined,
@@ -1079,12 +1080,21 @@ const ManageJournals: React.FC = () => {
       setActiveDetailTabState(prev => ({ ...prev, [tabKey]: tab }));
     };
 
-    // Post handler for this journal tab
+    // Post handler for this journal tab — calls PUT gl/journals/:jeBatchId/post
     const handlePostJournal = async () => {
+      const jeBatchId = journal.jeBatchId;
+      if (!jeBatchId) {
+        message.warning('No batch ID found for this journal');
+        return;
+      }
       try {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        message.success('Journal posted successfully');
-        closeJournalTab(tabKey);
+        const result = await postJournal(jeBatchId);
+        if (result.success) {
+          message.success('Journal posted successfully');
+          closeJournalTab(tabKey);
+        } else {
+          message.error(`Post failed: ${result.error || 'Unknown error'}`);
+        }
       } catch (error) {
         message.error('Failed to post journal');
       }
@@ -1437,9 +1447,13 @@ const ManageJournals: React.FC = () => {
                 size="small"
                 style={{ fontSize: 10, background: REDWOOD.warning, color: '#fff', borderColor: REDWOOD.warning }}
                 onClick={handlePostJournal}
+                icon={<CheckOutlined />}
               >
                 Post
               </Button>
+              <Tooltip title={`PUT ${APEX_DB_CONFIG.baseUrl}/gl/journals/${journal.jeBatchId}/post`} placement="bottom">
+                <ApiOutlined style={{ color: REDWOOD.info, fontSize: 13, cursor: 'pointer' }} />
+              </Tooltip>
             </Space>
           </div>
 
