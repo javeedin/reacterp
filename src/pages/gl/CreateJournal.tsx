@@ -38,6 +38,8 @@ import {
   SearchOutlined,
   InfoCircleOutlined,
   FilePdfOutlined,
+  ApiOutlined,
+  CheckSquareOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -910,6 +912,9 @@ const CreateJournal: React.FC = () => {
     if (!journalData.category) {
       return { valid: false, message: 'Please select a Category' };
     }
+    if (lines.length === 0) {
+      return { valid: false, message: 'Journal must have at least one line. Please add journal lines before saving.' };
+    }
     return { valid: true, message: '' };
   };
 
@@ -982,13 +987,14 @@ const CreateJournal: React.FC = () => {
   const handleSave = async () => {
     const validation = validateMandatoryFields();
     if (!validation.valid) {
-      message.warning(validation.message);
+      message.error(validation.message);
       return;
     }
 
-    // Check balance and show warning if not balanced
+    // Block save if debits and credits don't balance
     if (!isBalanced) {
-      message.warning(`Total Debit (${formatNumber(lineTotals.enteredDr)}) and Total Credit (${formatNumber(lineTotals.enteredCr)}) are not equal. Journal will be saved as unbalanced.`);
+      message.error(`Cannot save: Total Debit (${formatNumber(lineTotals.enteredDr)}) must equal Total Credit (${formatNumber(lineTotals.enteredCr)}). Difference: ${formatNumber(Math.abs(lineTotals.enteredDr - lineTotals.enteredCr))}`);
+      return;
     }
 
     // Build payload and show preview
@@ -1040,26 +1046,44 @@ const CreateJournal: React.FC = () => {
     setSaveResponse(null);
   };
 
-  // Handle Post - requires balanced journal
+  // Handle Post - requires balanced journal with lines
+  // Calls POST reerp/journals/create with status='P' (creates journal as Posted)
   const handlePost = async () => {
     const validation = validateMandatoryFields();
     if (!validation.valid) {
-      message.warning(validation.message);
+      message.error(validation.message);
       return;
     }
 
     if (!isBalanced) {
-      message.error(`Cannot post: Total Debit (${formatNumber(lineTotals.enteredDr)}) must equal Total Credit (${formatNumber(lineTotals.enteredCr)})`);
+      message.error(`Cannot post: Total Debit (${formatNumber(lineTotals.enteredDr)}) must equal Total Credit (${formatNumber(lineTotals.enteredCr)}). Difference: ${formatNumber(Math.abs(lineTotals.enteredDr - lineTotals.enteredCr))}`);
       return;
     }
 
     setSaving(true);
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const payload = buildJsonPayload();
+      // Override status to 'P' so the journal is created directly as Posted
+      payload.batch.status = 'P';
+
+      const response = await fetch(
+        'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/journals/create',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
       message.success('Journal posted successfully');
       navigate('/gl/manage-journals');
-    } catch (error) {
-      message.error('Failed to post journal');
+    } catch (error: any) {
+      message.error(`Failed to post journal: ${error.message || 'Unknown error'}`);
     } finally {
       setSaving(false);
     }
@@ -1859,6 +1883,19 @@ const CreateJournal: React.FC = () => {
             >
               <SaveOutlined /> Save
             </Dropdown.Button>
+            <Tooltip
+              title={
+                <div style={{ fontSize: 11 }}>
+                  <div><b>Save endpoint</b></div>
+                  <div>POST reerp/journals/create</div>
+                  <div style={{ color: '#aaa', marginTop: 4 }}>Creates journal with status=NEW</div>
+                  <div style={{ color: '#aaa' }}>Validates: lines &gt; 0, Dr = Cr</div>
+                </div>
+              }
+              placement="bottom"
+            >
+              <ApiOutlined style={{ color: REDWOOD.info, fontSize: 14, cursor: 'pointer' }} />
+            </Tooltip>
             <Dropdown.Button
               size="small"
               menu={{ items: completeMenu }}
@@ -1867,15 +1904,28 @@ const CreateJournal: React.FC = () => {
             >
               Complete
             </Dropdown.Button>
-            <Dropdown.Button
+            <Button
               size="small"
-              menu={{ items: postMenu }}
-              type="primary"
-              style={{ background: REDWOOD.warning }}
               onClick={handlePost}
+              loading={saving}
+              icon={<CheckSquareOutlined />}
+              style={{ background: REDWOOD.warning, borderColor: REDWOOD.warning, color: '#fff' }}
             >
               Post
-            </Dropdown.Button>
+            </Button>
+            <Tooltip
+              title={
+                <div style={{ fontSize: 11 }}>
+                  <div><b>Post endpoint</b></div>
+                  <div>POST reerp/journals/create</div>
+                  <div style={{ color: '#aaa', marginTop: 4 }}>Creates journal with status=P (Posted)</div>
+                  <div style={{ color: '#aaa' }}>Validates: lines &gt; 0, Dr = Cr (strict)</div>
+                </div>
+              }
+              placement="bottom"
+            >
+              <ApiOutlined style={{ color: REDWOOD.info, fontSize: 14, cursor: 'pointer' }} />
+            </Tooltip>
             <Button
               size="small"
               onClick={handleCancel}
