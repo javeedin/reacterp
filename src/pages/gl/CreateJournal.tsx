@@ -265,7 +265,12 @@ const createNewJournal = (id: string): JournalEntry => ({
   lines: createDefaultLines(),
 });
 
-const CreateJournal: React.FC = () => {
+interface CreateJournalProps {
+  embeddedMode?: boolean;   // true = rendered inside ManageJournals tab
+  onSaved?: () => void;     // called after save/post/cancel so parent can close the tab
+}
+
+const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onSaved }) => {
   const navigate = useNavigate();
   const [saving, setSaving] = useState(false);
 
@@ -1039,11 +1044,13 @@ const CreateJournal: React.FC = () => {
     }
   };
 
-  // Close JSON modal and reset
+  // Close JSON modal and reset — if save succeeded in embedded mode, close the tab
   const handleCloseJsonModal = () => {
+    const wasSuccessful = saveResponse && !saveResponse.error;
     setJsonPreviewVisible(false);
     setJsonPayload(null);
     setSaveResponse(null);
+    if (wasSuccessful && embeddedMode && onSaved) { onSaved(); }
   };
 
   // Handle Post - requires balanced journal with lines
@@ -1081,7 +1088,7 @@ const CreateJournal: React.FC = () => {
       }
 
       message.success('Journal posted successfully');
-      navigate('/gl/manage-journals');
+      if (embeddedMode && onSaved) { onSaved(); } else { navigate('/gl/manage-journals'); }
     } catch (error: any) {
       message.error(`Failed to post journal: ${error.message || 'Unknown error'}`);
     } finally {
@@ -1091,7 +1098,7 @@ const CreateJournal: React.FC = () => {
 
   // Cancel handler
   const handleCancel = () => {
-    navigate(-1);  // Go back to previous page
+    if (embeddedMode && onSaved) { onSaved(); } else { navigate(-1); }
   };
 
   // Batch Actions menu
@@ -1831,7 +1838,7 @@ const CreateJournal: React.FC = () => {
   );
 
   return (
-    <Layout style={{ minHeight: '100vh', background: REDWOOD.neutral100 }}>
+    <Layout style={{ minHeight: embeddedMode ? 'auto' : '100vh', background: REDWOOD.neutral100 }}>
       <Content>
         {/* Select Ledger Header */}
         <div style={{ padding: '6px 24px', background: REDWOOD.neutral100, fontSize: 12, color: REDWOOD.neutral600, display: 'flex', alignItems: 'center', gap: 8 }}>

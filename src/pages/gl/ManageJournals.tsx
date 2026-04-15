@@ -66,6 +66,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 import Autopilot from '../../components/Autopilot';
 import { validateAccountCode } from '../../components/AccountSelector';
+import CreateJournal from './CreateJournal';
 
 const { Content } = Layout;
 const { Text } = Typography;
@@ -254,6 +255,7 @@ const ManageJournals: React.FC = () => {
   // Tab management state
   const [activeTabKey, setActiveTabKey] = useState('search');
   const [openJournalTabs, setOpenJournalTabs] = useState<OpenJournalTab[]>([]);
+  const [createJournalTabOpen, setCreateJournalTabOpen] = useState(false);
 
   // Journal panel expanded/collapsed state per tab (for Show More/Show Less)
   const [journalExpandedState, setJournalExpandedState] = useState<Record<string, boolean>>({});
@@ -505,8 +507,19 @@ const ManageJournals: React.FC = () => {
   // Handle tab edit (close)
   const onTabEdit = (targetKey: React.MouseEvent | React.KeyboardEvent | string, action: 'add' | 'remove') => {
     if (action === 'remove' && typeof targetKey === 'string') {
-      closeJournalTab(targetKey);
+      if (targetKey === 'create-journal') {
+        setCreateJournalTabOpen(false);
+        setActiveTabKey('search');
+      } else {
+        closeJournalTab(targetKey);
+      }
     }
+  };
+
+  // Open the Create Journal in-app tab
+  const openCreateJournalTab = () => {
+    setCreateJournalTabOpen(true);
+    setActiveTabKey('create-journal');
   };
 
   // Add debug log helper
@@ -1714,7 +1727,7 @@ const ManageJournals: React.FC = () => {
               type="primary"
               icon={<PlusOutlined />}
               style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
-              onClick={() => window.open('/gl/create-journal', '_blank')}
+              onClick={openCreateJournalTab}
             >
               Create Journal
             </Button>
@@ -1939,7 +1952,7 @@ const ManageJournals: React.FC = () => {
                   </Button>
                 </Dropdown>
                 <Tooltip title="Create Journal">
-                  <Button size="small" icon={<PlusOutlined />} onClick={() => navigate('/gl/create-journal')} />
+                  <Button size="small" icon={<PlusOutlined />} onClick={openCreateJournalTab} />
                 </Tooltip>
                 <Tooltip title="Edit">
                   <Button
@@ -2001,7 +2014,32 @@ const ManageJournals: React.FC = () => {
                 </div>
               ),
             },
-            // Dynamic journal tabs
+            // Create Journal tab (inline, opens when + or Create Journal button clicked)
+            ...(createJournalTabOpen ? [{
+              key: 'create-journal',
+              label: (
+                <span style={{
+                  fontSize: 12,
+                  fontWeight: activeTabKey === 'create-journal' ? 600 : 400,
+                  color: activeTabKey === 'create-journal' ? REDWOOD.primary : REDWOOD.neutral600,
+                  padding: '4px 8px',
+                }}>
+                  <PlusOutlined style={{ marginRight: 6, color: REDWOOD.primary }} />
+                  Create Journal
+                </span>
+              ),
+              closable: true,
+              children: (
+                <CreateJournal
+                  embeddedMode
+                  onSaved={() => {
+                    setCreateJournalTabOpen(false);
+                    setActiveTabKey('search');
+                  }}
+                />
+              ),
+            }] : []),
+            // Dynamic journal edit tabs
             ...openJournalTabs.map(tab => ({
               key: tab.key,
               label: (
