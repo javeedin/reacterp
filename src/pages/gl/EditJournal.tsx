@@ -491,6 +491,20 @@ const EditJournal: React.FC = () => {
     }
   };
 
+  // Post handler
+  const handlePost = async () => {
+    setSaving(true);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      message.success('Journal posted successfully');
+      navigate('/gl/manage-journals');
+    } catch (error) {
+      message.error('Failed to post journal');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // Cancel handler
   const handleCancel = () => {
     navigate('/gl/manage-journals');
@@ -1262,6 +1276,9 @@ const EditJournal: React.FC = () => {
             <Dropdown.Button
               size="small"
               menu={{ items: postMenu }}
+              onClick={handlePost}
+              loading={saving}
+              style={{ background: '#D4A800', borderColor: '#D4A800', color: '#fff' }}
             >
               Post
             </Dropdown.Button>

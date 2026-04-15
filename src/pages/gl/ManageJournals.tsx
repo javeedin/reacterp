@@ -1079,6 +1079,17 @@ const ManageJournals: React.FC = () => {
       setActiveDetailTabState(prev => ({ ...prev, [tabKey]: tab }));
     };
 
+    // Post handler for this journal tab
+    const handlePostJournal = async () => {
+      try {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        message.success('Journal posted successfully');
+        closeJournalTab(tabKey);
+      } catch (error) {
+        message.error('Failed to post journal');
+      }
+    };
+
     // Render expanded tabs (full details)
     const renderDetailTabs = () => (
       <Tabs
@@ -1422,7 +1433,11 @@ const ManageJournals: React.FC = () => {
               >
                 Save
               </Dropdown.Button>
-              <Button size="small" style={{ fontSize: 10 }}>
+              <Button
+                size="small"
+                style={{ fontSize: 10, background: REDWOOD.warning, color: '#fff', borderColor: REDWOOD.warning }}
+                onClick={handlePostJournal}
+              >
                 Post
               </Button>
             </Space>
@@ -1679,6 +1694,17 @@ const ManageJournals: React.FC = () => {
               { title: 'Manage Journals' },
             ]}
           />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+            <Text strong style={{ fontSize: 16 }}>Manage Journals</Text>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+              onClick={() => window.open('/gl/create-journal', '_blank')}
+            >
+              Create Journal
+            </Button>
+          </div>
         </div>
 
         {/* Tabbed Content */}
