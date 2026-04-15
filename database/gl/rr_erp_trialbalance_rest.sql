@@ -463,3 +463,84 @@ ORDER BY
     COMMIT;
 END;
 /
+
+-- ─────────────────────────────────────────────────────────────
+-- 13. TEMPLATE: gl/rr-trialbalance/lines
+-- ─────────────────────────────────────────────────────────────
+BEGIN
+    ORDS.DEFINE_TEMPLATE(
+        p_module_name    => 'reerp',
+        p_pattern        => 'gl/rr-trialbalance/lines',
+        p_priority       => 0,
+        p_etag_type      => 'HASH',
+        p_comments       => 'GL journal lines for a specific account + period (TB drill-down)'
+    );
+    COMMIT;
+EXCEPTION
+    WHEN OTHERS THEN
+        IF SQLCODE = -20001 THEN NULL; ELSE RAISE; END IF;
+END;
+/
+
+-- ─────────────────────────────────────────────────────────────
+-- 14. GET /reerp/gl/rr-trialbalance/lines
+--
+--  Returns individual GL journal lines for drill-down from the
+--  trial balance.  Joins RR_GL_JE_LINES_ALL → RR_GL_JE_HEADERS.
+--
+--  Params:
+--    ledger_name         REQUIRED
+--    period_name         REQUIRED  e.g. 'Jul-23'
+--    account             REQUIRED  segment 4 value, e.g. '1134100'
+--    account_combination optional  full combination — narrows to one row
+--    company             optional  segment 1 value
+-- ─────────────────────────────────────────────────────────────
+BEGIN
+    ORDS.DEFINE_HANDLER(
+        p_module_name    => 'reerp',
+        p_pattern        => 'gl/rr-trialbalance/lines',
+        p_method         => 'GET',
+        p_source_type    => 'json/collection',
+        p_items_per_page => 0,
+        p_mimes_allowed  => NULL,
+        p_comments       => 'GL journal lines for TB drill-down by account + period',
+        p_source         => q'[
+SELECT
+    lin.LINE_ID                                                      AS line_id,
+    lin.JE_LINE_NUMBER                                               AS line_num,
+    hdr.JE_HEADER_ID                                                 AS je_header_id,
+    hdr.NAME                                                         AS je_name,
+    hdr.DESCRIPTION                                                  AS je_description,
+    hdr.PERIOD_NAME                                                  AS period_name,
+    hdr.LEDGER_NAME                                                  AS ledger_name,
+    hdr.USER_JE_SOURCE_NAME                                          AS source,
+    hdr.USER_JE_CATEGORY_NAME                                        AS category,
+    hdr.STATUS                                                       AS status,
+    hdr.EFFECTIVE_DATE                                               AS effective_date,
+    lin.ACCOUNT_COMBINATION                                          AS account_combination,
+    TRIM(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,1))         AS company,
+    TRIM(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,4))         AS account,
+    NVL(lin.CURRENCY_CODE, hdr.LEDGER_CURRENCY_CODE)                 AS currency_code,
+    NVL(lin.ENTERED_DR,   0)                                         AS entered_dr,
+    NVL(lin.ENTERED_CR,   0)                                         AS entered_cr,
+    NVL(lin.ACCOUNTED_DR, 0)                                         AS accounted_dr,
+    NVL(lin.ACCOUNTED_CR, 0)                                         AS accounted_cr,
+    lin.DESCRIPTION                                                  AS line_description
+FROM RR_GL_JE_LINES_ALL  lin
+JOIN RR_GL_JE_HEADERS    hdr  ON hdr.JE_HEADER_ID = lin.JE_HEADER_ID
+WHERE hdr.LEDGER_NAME  = :ledger_name
+  AND hdr.PERIOD_NAME  = :period_name
+  AND TRIM(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,4)) = :account
+  AND (:account_combination IS NULL OR lin.ACCOUNT_COMBINATION = :account_combination)
+  AND (:company             IS NULL OR
+       TRIM(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,1)) = :company)
+ORDER BY
+    lin.ACCOUNT_COMBINATION,
+    hdr.EFFECTIVE_DATE,
+    hdr.JE_HEADER_ID,
+    lin.JE_LINE_NUMBER
+]'
+    );
+    COMMIT;
+END;
+/

@@ -46,6 +46,8 @@ import {
   BarsOutlined,
   BarChartOutlined,
   ThunderboltOutlined,
+  ApartmentOutlined,
+  UnorderedListOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../../config/api.config';
@@ -267,6 +269,47 @@ const TrialBalance: React.FC = () => {
     tbRecords: GLBalanceRecord[];
   } | null>(null);
   const [lsDetailCcy, setLsDetailCcy] = useState<string | null>(null);
+
+  // ── TB Drill-down: Combinations modal ────────────────────
+  const [drillComboVisible, setDrillComboVisible] = useState(false);
+  const [drillComboRows,    setDrillComboRows]    = useState<RrTBRecord[]>([]);
+  const [drillComboAccount, setDrillComboAccount] = useState('');
+  const [drillComboSearch,  setDrillComboSearch]  = useState('');
+  const [drillComboLedger,  setDrillComboLedger]  = useState('');
+  const [drillComboPeriod,  setDrillComboPeriod]  = useState('');
+
+  // ── TB Drill-down: Journal Lines modal ───────────────────
+  interface JournalLine {
+    line_id: number;
+    line_num: number;
+    je_header_id: number;
+    je_name: string;
+    je_description: string;
+    period_name: string;
+    ledger_name: string;
+    source: string;
+    category: string;
+    status: string;
+    effective_date: string;
+    account_combination: string;
+    company: string;
+    account: string;
+    currency_code: string;
+    entered_dr: number;
+    entered_cr: number;
+    accounted_dr: number;
+    accounted_cr: number;
+    line_description: string;
+  }
+  const [drillJnlVisible,  setDrillJnlVisible]  = useState(false);
+  const [drillJnlLoading,  setDrillJnlLoading]  = useState(false);
+  const [drillJnlData,     setDrillJnlData]     = useState<JournalLine[]>([]);
+  const [drillJnlAccount,  setDrillJnlAccount]  = useState('');
+  const [drillJnlCombo,    setDrillJnlCombo]    = useState('');
+  const [drillJnlPeriod,   setDrillJnlPeriod]   = useState('');
+  const [drillJnlLedger,   setDrillJnlLedger]   = useState('');
+  const [drillJnlSearch,   setDrillJnlSearch]   = useState('');
+  const [drillJnlError,    setDrillJnlError]    = useState<string | null>(null);
 
   // ReERP ↔ Fusion reconciliation state
   const [reconVisible,  setReconVisible]  = useState(false);
@@ -604,6 +647,58 @@ const TrialBalance: React.FC = () => {
     setTabs(prev => prev.filter(t => t.key !== tabKey));
     if (activeTab === tabKey) setActiveTab('periods');
   }, [activeTab]);
+
+  // ── TB Drill: open Combinations modal ───────────────────
+  const openDrillCombo = useCallback((
+    account: string,
+    rrData: RrTBRecord[],
+    ledgerName: string,
+    periodName: string,
+  ) => {
+    setDrillComboAccount(account);
+    setDrillComboRows(rrData.filter(r => r.account === account));
+    setDrillComboLedger(ledgerName);
+    setDrillComboPeriod(periodName);
+    setDrillComboSearch('');
+    setDrillComboVisible(true);
+  }, []);
+
+  // ── TB Drill: fetch Journal Lines for an account + period ─
+  const fetchDrillJournalLines = useCallback(async (
+    ledgerName: string,
+    periodName: string,
+    account: string,
+    accountCombination: string | null,
+  ) => {
+    setDrillJnlLedger(ledgerName);
+    setDrillJnlPeriod(periodName);
+    setDrillJnlAccount(account);
+    setDrillJnlCombo(accountCombination || '');
+    setDrillJnlSearch('');
+    setDrillJnlError(null);
+    setDrillJnlData([]);
+    setDrillJnlLoading(true);
+    setDrillJnlVisible(true);
+
+    try {
+      const params = new URLSearchParams({
+        ledger_name: ledgerName,
+        period_name: periodName,
+        account,
+        limit: '5000',
+      });
+      if (accountCombination) params.set('account_combination', accountCombination);
+      const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceLines}?${params}`;
+      const res  = await fetch(url, { headers: { Accept: 'application/json' } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      setDrillJnlData((data.items || []) as any[]);
+    } catch (err) {
+      setDrillJnlError(err instanceof Error ? err.message : 'Failed to load journal lines');
+    } finally {
+      setDrillJnlLoading(false);
+    }
+  }, []);
 
   // ── Lines Summary ────────────────────────────────────────
   const fetchLinesSummary = useCallback(async (period: string | null, company: string | null) => {
@@ -2348,10 +2443,37 @@ const TrialBalance: React.FC = () => {
         ),
       },
       {
-        title: 'Account', dataIndex: 'account', key: 'account', width: 120,
+        title: 'Account', dataIndex: 'account', key: 'account', width: 160,
         sorter: (a: GroupRow, b: GroupRow) => a.account.localeCompare(b.account),
         defaultSortOrder: 'ascend' as const,
-        render: (v: string) => <Text strong style={{ fontFamily: 'monospace' }}>{v}</Text>,
+        render: (v: string) => (
+          <Space size={4}>
+            <Text
+              strong
+              style={{ fontFamily: 'monospace', cursor: 'pointer', color: REDWOOD.info }}
+              onClick={() => openDrillCombo(v, tab.rrData, tab.ledgerName, tab.periodName.replace(/^(?:ReERP|Dynamic):\s*/, ''))}
+            >
+              {v}
+            </Text>
+            <Tooltip title="View combinations">
+              <ApartmentOutlined
+                style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 13 }}
+                onClick={() => openDrillCombo(v, tab.rrData, tab.ledgerName, tab.periodName.replace(/^(?:ReERP|Dynamic):\s*/, ''))}
+              />
+            </Tooltip>
+            <Tooltip title="View journal lines">
+              <UnorderedListOutlined
+                style={{ color: '#722ed1', cursor: 'pointer', fontSize: 13 }}
+                onClick={() => fetchDrillJournalLines(
+                  tab.ledgerName,
+                  tab.periodName.replace(/^(?:ReERP|Dynamic):\s*/, ''),
+                  v,
+                  null,
+                )}
+              />
+            </Tooltip>
+          </Space>
+        ),
       },
       {
         title: 'Description', dataIndex: 'account_desc', key: 'account_desc',
@@ -2508,6 +2630,184 @@ const TrialBalance: React.FC = () => {
           onRow={(r: any) => ({ style: { background: accountTypeColor[r.account_type] || '#fff' } })}
         />
       </div>
+    );
+  };
+
+  // ── Render: Combinations drill-down modal ────────────────
+  const renderDrillComboModal = () => {
+    const fmtN = (n: number) =>
+      new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+
+    const lc   = drillComboSearch.toLowerCase();
+    const rows = drillComboRows.filter(r =>
+      !lc ||
+      r.account_combination?.toLowerCase().includes(lc) ||
+      r.currency_code?.toLowerCase().includes(lc) ||
+      r.company?.toLowerCase().includes(lc)
+    );
+
+    const cols = [
+      { title: 'Combination', dataIndex: 'account_combination', key: 'account_combination',
+        render: (v: string) => (
+          <Space size={4}>
+            <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{v}</Text>
+            <Tooltip title="View journal lines for this combination">
+              <UnorderedListOutlined
+                style={{ color: '#722ed1', cursor: 'pointer' }}
+                onClick={() => {
+                  // ledger and period are stored when the combos modal was opened
+                  setDrillComboVisible(false);
+                  fetchDrillJournalLines(drillComboLedger, drillComboPeriod, drillComboAccount, v);
+                }}
+              />
+            </Tooltip>
+          </Space>
+        ),
+      },
+      { title: 'Co', dataIndex: 'company',       key: 'company',       width: 60 },
+      { title: 'Ccy', dataIndex: 'currency_code', key: 'currency_code', width: 60 },
+      { title: 'Opening', dataIndex: 'opening', key: 'opening', align: 'right' as const, width: 130,
+        render: (n: number) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{fmtN(n ?? 0)}</Text> },
+      { title: 'Debit',   dataIndex: 'debit',   key: 'debit',   align: 'right' as const, width: 130,
+        render: (n: number) => <Text style={{ fontFamily: 'monospace', fontSize: 12, color: '#237804' }}>{fmtN(n ?? 0)}</Text> },
+      { title: 'Credit',  dataIndex: 'credit',  key: 'credit',  align: 'right' as const, width: 130,
+        render: (n: number) => <Text style={{ fontFamily: 'monospace', fontSize: 12, color: REDWOOD.primary }}>{fmtN(n ?? 0)}</Text> },
+      { title: 'Closing', dataIndex: 'closing', key: 'closing', align: 'right' as const, width: 130,
+        render: (n: number) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{fmtN(n ?? 0)}</Text> },
+    ];
+
+    return (
+      <Modal
+        open={drillComboVisible}
+        onCancel={() => setDrillComboVisible(false)}
+        footer={null}
+        width={1100}
+        title={
+          <Space>
+            <ApartmentOutlined style={{ color: REDWOOD.info }} />
+            <span>Combinations — Account <Text strong style={{ fontFamily: 'monospace' }}>{drillComboAccount}</Text></span>
+            <Tag color="blue">{rows.length} rows</Tag>
+          </Space>
+        }
+      >
+        <Input.Search
+          placeholder="Search combination / currency / company…"
+          value={drillComboSearch}
+          onChange={e => setDrillComboSearch(e.target.value)}
+          allowClear
+          style={{ marginBottom: 12 }}
+        />
+        <Table
+          dataSource={rows}
+          columns={cols}
+          rowKey={r => `${r.account_combination}-${r.currency_code}`}
+          size="small"
+          pagination={false}
+          scroll={{ x: 800, y: 400 }}
+        />
+      </Modal>
+    );
+  };
+
+  // ── Render: Journal Lines drill-down modal ────────────────
+  const renderDrillJnlModal = () => {
+    const fmtN = (n: number) =>
+      new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n ?? 0);
+
+    const lc   = drillJnlSearch.toLowerCase();
+    const rows = drillJnlData.filter(r =>
+      !lc ||
+      r.je_name?.toLowerCase().includes(lc) ||
+      r.account_combination?.toLowerCase().includes(lc) ||
+      r.line_description?.toLowerCase().includes(lc) ||
+      r.je_description?.toLowerCase().includes(lc) ||
+      r.source?.toLowerCase().includes(lc) ||
+      r.category?.toLowerCase().includes(lc)
+    );
+
+    const totalDr = rows.reduce((s, r) => s + (r.accounted_dr || 0), 0);
+    const totalCr = rows.reduce((s, r) => s + (r.accounted_cr || 0), 0);
+
+    const cols = [
+      { title: 'Journal Name', dataIndex: 'je_name', key: 'je_name', width: 180, ellipsis: true,
+        render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text> },
+      { title: 'Source', dataIndex: 'source', key: 'source', width: 100, ellipsis: true },
+      { title: 'Category', dataIndex: 'category', key: 'category', width: 100, ellipsis: true },
+      { title: 'Date', dataIndex: 'effective_date', key: 'effective_date', width: 100,
+        render: (v: string) => v ? new Date(v).toLocaleDateString() : '—' },
+      { title: 'Combination', dataIndex: 'account_combination', key: 'account_combination', width: 220,
+        render: (v: string) => <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{v}</Text> },
+      { title: 'Ccy', dataIndex: 'currency_code', key: 'currency_code', width: 55 },
+      { title: 'Ent Dr', dataIndex: 'entered_dr', key: 'entered_dr', align: 'right' as const, width: 120,
+        render: (n: number) => n ? <Text style={{ fontFamily: 'monospace', fontSize: 11, color: '#237804' }}>{fmtN(n)}</Text> : <Text style={{ color: '#aaa' }}>0.00</Text> },
+      { title: 'Ent Cr', dataIndex: 'entered_cr', key: 'entered_cr', align: 'right' as const, width: 120,
+        render: (n: number) => n ? <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.primary }}>{fmtN(n)}</Text> : <Text style={{ color: '#aaa' }}>0.00</Text> },
+      { title: 'Acc Dr', dataIndex: 'accounted_dr', key: 'accounted_dr', align: 'right' as const, width: 130,
+        render: (n: number) => n ? <Text style={{ fontFamily: 'monospace', fontSize: 11, color: '#237804' }}>{fmtN(n)}</Text> : <Text style={{ color: '#aaa' }}>0.00</Text> },
+      { title: 'Acc Cr', dataIndex: 'accounted_cr', key: 'accounted_cr', align: 'right' as const, width: 130,
+        render: (n: number) => n ? <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.primary }}>{fmtN(n)}</Text> : <Text style={{ color: '#aaa' }}>0.00</Text> },
+      { title: 'Description', dataIndex: 'line_description', key: 'line_description', ellipsis: true,
+        render: (v: string) => <Text style={{ fontSize: 11 }}>{v || '—'}</Text> },
+    ];
+
+    const summary = () => (
+      <Table.Summary fixed>
+        <Table.Summary.Row style={{ background: '#f0f0f0', fontWeight: 700 }}>
+          <Table.Summary.Cell index={0} colSpan={7} align="right">
+            <Text strong style={{ fontSize: 12 }}>TOTAL ({rows.length} lines)</Text>
+          </Table.Summary.Cell>
+          <Table.Summary.Cell index={7} align="right">
+            <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: '#237804' }}>{fmtN(totalDr)}</Text>
+          </Table.Summary.Cell>
+          <Table.Summary.Cell index={8} align="right">
+            <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.primary }}>{fmtN(totalCr)}</Text>
+          </Table.Summary.Cell>
+          <Table.Summary.Cell index={9} colSpan={2} />
+        </Table.Summary.Row>
+      </Table.Summary>
+    );
+
+    return (
+      <Modal
+        open={drillJnlVisible}
+        onCancel={() => setDrillJnlVisible(false)}
+        footer={null}
+        width={1300}
+        title={
+          <Space>
+            <UnorderedListOutlined style={{ color: '#722ed1' }} />
+            <span>Journal Lines — Account <Text strong style={{ fontFamily: 'monospace' }}>{drillJnlAccount}</Text></span>
+            {drillJnlCombo && <Tag color="purple" style={{ fontFamily: 'monospace', fontSize: 11 }}>{drillJnlCombo}</Tag>}
+            <Tag color="blue">{drillJnlPeriod}</Tag>
+            {!drillJnlLoading && <Tag color="default">{rows.length} lines</Tag>}
+          </Space>
+        }
+      >
+        {drillJnlLoading ? (
+          <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" /></div>
+        ) : drillJnlError ? (
+          <Alert type="error" showIcon message={drillJnlError} />
+        ) : (
+          <>
+            <Input.Search
+              placeholder="Search journal name / description / source / category…"
+              value={drillJnlSearch}
+              onChange={e => setDrillJnlSearch(e.target.value)}
+              allowClear
+              style={{ marginBottom: 12 }}
+            />
+            <Table
+              dataSource={rows}
+              columns={cols}
+              rowKey={r => `${r.line_id}-${r.je_header_id}-${r.line_num}`}
+              size="small"
+              pagination={false}
+              scroll={{ x: 1200, y: 450 }}
+              summary={summary}
+            />
+          </>
+        )}
+      </Modal>
     );
   };
 
@@ -2823,6 +3123,10 @@ const TrialBalance: React.FC = () => {
             />
           )}
         </Modal>
+
+        {/* ── TB Drill-down modals ─────────────────────────────────────── */}
+        {renderDrillComboModal()}
+        {renderDrillJnlModal()}
 
         {/* ── ReERP ↔ Fusion Reconciliation Modal ──────────────────────── */}
         <Modal

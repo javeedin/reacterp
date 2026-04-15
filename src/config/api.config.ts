@@ -31,6 +31,7 @@ export const APEX_DB_CONFIG = {
     getLedgerName: 'gl/getledgername',
     rrTrialBalanceCompanies: 'gl/rr-trialbalance/companies',
     rrTrialBalanceStandard: 'gl/rr-trialbalance/standard',
+    rrTrialBalanceLines:    'gl/rr-trialbalance/lines',
     glLinesSummary: 'gl/lines-summary',
     // SLA Endpoints
     slaAccountingCreate:  'sla/accounting/create',
