@@ -23,6 +23,7 @@ import {
   Spin,
   Descriptions,
   Alert,
+  Progress,
 } from 'antd';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import { postJournal, updateJournal, getLookupValues } from '../../services/manage-journals.service';
@@ -63,6 +64,9 @@ import {
   ApiOutlined,
   CheckOutlined,
   CloudOutlined,
+  WarningOutlined,
+  LoadingOutlined,
+  StopOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -234,6 +238,16 @@ interface DebugLogEntry {
   data?: any;
 }
 
+// Bulk post item
+type BulkPostStatus = 'pending' | 'posting' | 'posted' | 'validation_failed' | 'failed' | 'skipped';
+interface BulkPostItem {
+  key: string;
+  journal: JournalRecord;
+  status: BulkPostStatus;
+  validationErrors: string[];
+  serverError?: string;
+}
+
 const ManageJournals: React.FC = () => {
   const navigate = useNavigate();
   const [form] = Form.useForm();
@@ -253,6 +267,12 @@ const ManageJournals: React.FC = () => {
   // Debug log state
   const [debugLogs, setDebugLogs] = useState<DebugLogEntry[]>([]);
   const [debugModalVisible, setDebugModalVisible] = useState(false);
+
+  // Bulk post state
+  const [bulkPostVisible, setBulkPostVisible] = useState(false);
+  const [bulkPostItems, setBulkPostItems] = useState<BulkPostItem[]>([]);
+  const [bulkPostRunning, setBulkPostRunning] = useState(false);
+  const [bulkPostDone, setBulkPostDone] = useState(false);
 
   // Tab management state
   const [activeTabKey, setActiveTabKey] = useState('search');
@@ -1105,6 +1125,118 @@ const ManageJournals: React.FC = () => {
   const rowSelection = {
     selectedRowKeys,
     onChange: (keys: React.Key[]) => setSelectedRowKeys(keys),
+  };
+
+  // ── Bulk Post helpers ──────────────────────────────────────────────────────
+
+  // Client-side validation for a single journal before bulk posting
+  const validateForBulkPost = (journal: JournalRecord): string[] => {
+    const errors: string[] = [];
+    const lines = journal.lines || [];
+    const fmt = (n: number) => n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    if (lines.length === 0) {
+      errors.push('No journal lines found.');
+    } else {
+      const dr = lines.reduce((s, l) => s + (l.enteredDr || 0), 0);
+      const cr = lines.reduce((s, l) => s + (l.enteredCr || 0), 0);
+      if (Math.abs(dr - cr) > 0.01) {
+        errors.push(`Out of balance — Debit ${fmt(dr)} ≠ Credit ${fmt(cr)} (diff ${fmt(Math.abs(dr - cr))}).`);
+      }
+      const blank = lines.filter(l => !l.account?.trim()).length;
+      if (blank > 0) errors.push(`${blank} line(s) have no account code.`);
+      const zero = lines.filter(l => (l.enteredDr || 0) === 0 && (l.enteredCr || 0) === 0).length;
+      if (zero > 0) errors.push(`${zero} line(s) have zero Debit and Credit.`);
+    }
+
+    const periodRecord = periods.find(p => p.period_name_id === journal.periodName);
+    if (periodRecord && periodRecord.status !== 'Open') {
+      errors.push(`Period "${journal.periodName}" is ${periodRecord.status} — must be Open.`);
+    }
+    return errors;
+  };
+
+  // Open the bulk post modal for the selected journals
+  const handleOpenBulkPost = () => {
+    const selectedJournals = journals.filter(j => selectedRowKeys.includes(j.key));
+    const items: BulkPostItem[] = selectedJournals.map(j => ({
+      key: j.key,
+      journal: j,
+      status: j.statusMeaning === 'Posted' ? 'skipped' : 'pending',
+      validationErrors: j.statusMeaning === 'Posted' ? ['Already posted — will be skipped.'] : [],
+    }));
+    setBulkPostItems(items);
+    setBulkPostRunning(false);
+    setBulkPostDone(false);
+    setBulkPostVisible(true);
+  };
+
+  // Run the bulk post sequentially
+  const handleBulkPost = async () => {
+    setBulkPostRunning(true);
+    setBulkPostDone(false);
+
+    // Step 1: validate all pending items
+    let results: BulkPostItem[] = bulkPostItems.map(item => {
+      if (item.status === 'skipped') return item;
+      const errors = validateForBulkPost(item.journal);
+      return {
+        ...item,
+        validationErrors: errors,
+        status: errors.length > 0 ? 'validation_failed' : 'pending',
+      } as BulkPostItem;
+    });
+    setBulkPostItems([...results]);
+
+    // Small pause so UI updates before API calls start
+    await new Promise(r => setTimeout(r, 80));
+
+    // Step 2: post eligible items one by one
+    for (let i = 0; i < results.length; i++) {
+      if (results[i].status !== 'pending') continue;
+
+      results[i] = { ...results[i], status: 'posting' };
+      setBulkPostItems([...results]);
+
+      try {
+        const resp = await postJournal(results[i].journal.jeBatchId);
+        if (resp.success) {
+          results[i] = { ...results[i], status: 'posted' };
+        } else {
+          const serverErrors = resp.errors || [];
+          results[i] = {
+            ...results[i],
+            status: 'failed',
+            validationErrors: [...results[i].validationErrors, ...serverErrors],
+            serverError: resp.error,
+          };
+        }
+      } catch (err) {
+        results[i] = {
+          ...results[i],
+          status: 'failed',
+          serverError: err instanceof Error ? err.message : 'Network error',
+        };
+      }
+      setBulkPostItems([...results]);
+    }
+
+    // Step 3: update the main journals table for successfully posted batches
+    const postedBatchIds = new Set(
+      results.filter(r => r.status === 'posted').map(r => r.journal.jeBatchId)
+    );
+    if (postedBatchIds.size > 0) {
+      setJournals(prev =>
+        prev.map(j =>
+          postedBatchIds.has(j.jeBatchId)
+            ? { ...j, statusMeaning: 'Posted', status: 'P' }
+            : j
+        )
+      );
+    }
+
+    setBulkPostRunning(false);
+    setBulkPostDone(true);
   };
 
   // Helper function to get currency name
@@ -2582,10 +2714,15 @@ const ManageJournals: React.FC = () => {
                 </Text>
                 <Button
                   size="small"
-                  disabled={selectedRowKeys.length === 0}
-                  style={{ fontSize: 11 }}
+                  disabled={
+                    selectedRowKeys.length === 0 ||
+                    journals.filter(j => selectedRowKeys.includes(j.key) && j.statusMeaning !== 'Posted').length === 0
+                  }
+                  style={{ fontSize: 11, background: selectedRowKeys.length > 0 ? REDWOOD.warning : undefined, color: selectedRowKeys.length > 0 ? '#fff' : undefined, borderColor: selectedRowKeys.length > 0 ? REDWOOD.warning : undefined }}
+                  icon={<CheckCircleOutlined />}
+                  onClick={handleOpenBulkPost}
                 >
-                  Post Batch
+                  Post Batch ({journals.filter(j => selectedRowKeys.includes(j.key) && j.statusMeaning !== 'Posted').length})
                 </Button>
                 <Button size="small" disabled={selectedRowKeys.length === 0} style={{ fontSize: 11 }}>
                   Reverse Batch
@@ -2963,6 +3100,250 @@ const ManageJournals: React.FC = () => {
 
       {/* Autopilot */}
       <Autopilot />
+
+      {/* ── Bulk Post Modal ─────────────────────────────────────────────────── */}
+      {(() => {
+        const posted   = bulkPostItems.filter(i => i.status === 'posted').length;
+        const failed   = bulkPostItems.filter(i => i.status === 'failed' || i.status === 'validation_failed').length;
+        const skipped  = bulkPostItems.filter(i => i.status === 'skipped').length;
+        const pending  = bulkPostItems.filter(i => i.status === 'pending').length;
+        const posting  = bulkPostItems.filter(i => i.status === 'posting').length;
+        const eligible = bulkPostItems.filter(i => i.status !== 'skipped').length;
+        const done     = posted + failed;
+        const pct      = eligible > 0 ? Math.round((done / eligible) * 100) : 0;
+
+        const statusIcon = (s: BulkPostStatus) => {
+          if (s === 'posted')           return <CheckCircleOutlined style={{ color: REDWOOD.success }} />;
+          if (s === 'posting')          return <LoadingOutlined style={{ color: REDWOOD.info }} spin />;
+          if (s === 'validation_failed') return <WarningOutlined style={{ color: REDWOOD.warning }} />;
+          if (s === 'failed')           return <CloseCircleOutlined style={{ color: REDWOOD.error }} />;
+          if (s === 'skipped')          return <StopOutlined style={{ color: REDWOOD.neutral600 }} />;
+          return <ClockCircleOutlined style={{ color: REDWOOD.neutral300 }} />;
+        };
+
+        const statusLabel = (s: BulkPostStatus) => ({
+          posted: <Tag color={REDWOOD.success}>Posted</Tag>,
+          posting: <Tag color={REDWOOD.info} icon={<LoadingOutlined />}>Posting…</Tag>,
+          validation_failed: <Tag color={REDWOOD.warning}>Validation Failed</Tag>,
+          failed: <Tag color={REDWOOD.error}>Error</Tag>,
+          skipped: <Tag color={REDWOOD.neutral600}>Skipped</Tag>,
+          pending: <Tag color={REDWOOD.neutral300}>Pending</Tag>,
+        }[s]);
+
+        return (
+          <Modal
+            title={
+              <Space>
+                <CheckCircleOutlined style={{ color: REDWOOD.warning }} />
+                <span>Bulk Post Journals</span>
+                {bulkPostRunning && <Tag color={REDWOOD.info} icon={<LoadingOutlined />}>Running…</Tag>}
+                {bulkPostDone   && <Tag color={REDWOOD.success}>Complete</Tag>}
+              </Space>
+            }
+            open={bulkPostVisible}
+            width={960}
+            maskClosable={!bulkPostRunning}
+            closable={!bulkPostRunning}
+            onCancel={() => setBulkPostVisible(false)}
+            footer={
+              bulkPostDone || !bulkPostRunning ? [
+                ...(bulkPostDone ? [] : [
+                  <Button
+                    key="post"
+                    type="primary"
+                    icon={<CheckCircleOutlined />}
+                    style={{ background: REDWOOD.warning, borderColor: REDWOOD.warning }}
+                    disabled={eligible === 0}
+                    onClick={handleBulkPost}
+                  >
+                    Post {eligible} Journal{eligible !== 1 ? 's' : ''}
+                  </Button>,
+                ]),
+                <Button key="close" onClick={() => setBulkPostVisible(false)}>
+                  {bulkPostDone ? 'Close' : 'Cancel'}
+                </Button>,
+              ] : []
+            }
+          >
+            {/* ── Summary stat cards ── */}
+            <Row gutter={12} style={{ marginBottom: 16 }}>
+              {[
+                { label: 'Selected',  value: bulkPostItems.length,  color: REDWOOD.neutral900 },
+                { label: 'Eligible',  value: eligible,              color: REDWOOD.info },
+                { label: 'Skipped',   value: skipped,               color: REDWOOD.neutral600 },
+                { label: 'Posted',    value: posted,                color: REDWOOD.success },
+                { label: 'Failed',    value: failed,                color: REDWOOD.error },
+              ].map(({ label, value, color }) => (
+                <Col key={label} span={4}>
+                  <Card
+                    size="small"
+                    bodyStyle={{ padding: '8px 12px', textAlign: 'center' }}
+                    style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
+                  >
+                    <div style={{ fontSize: 22, fontWeight: 700, color }}>{value}</div>
+                    <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{label}</div>
+                  </Card>
+                </Col>
+              ))}
+              <Col span={4}>
+                <Card
+                  size="small"
+                  bodyStyle={{ padding: '8px 12px', textAlign: 'center' }}
+                  style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
+                >
+                  <div style={{ fontSize: 22, fontWeight: 700, color: posting > 0 ? REDWOOD.info : REDWOOD.neutral600 }}>
+                    {posting > 0 ? <LoadingOutlined /> : (bulkPostDone ? '✓' : '-')}
+                  </div>
+                  <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>In Progress</div>
+                </Card>
+              </Col>
+            </Row>
+
+            {/* ── Progress bar (only while running or after completion) ── */}
+            {(bulkPostRunning || bulkPostDone) && eligible > 0 && (
+              <Progress
+                percent={pct}
+                status={bulkPostRunning ? 'active' : failed > 0 ? 'exception' : 'success'}
+                format={() => `${done} / ${eligible}`}
+                style={{ marginBottom: 12 }}
+              />
+            )}
+
+            {/* ── Journal list table ── */}
+            <Table<BulkPostItem>
+              size="small"
+              pagination={false}
+              scroll={{ y: 320 }}
+              dataSource={bulkPostItems}
+              rowKey="key"
+              bordered
+              className="compact-table"
+              columns={[
+                {
+                  title: '',
+                  key: 'icon',
+                  width: 32,
+                  align: 'center' as const,
+                  render: (_: any, item: BulkPostItem) => statusIcon(item.status),
+                },
+                {
+                  title: 'Journal',
+                  dataIndex: ['journal', 'journalName'],
+                  key: 'journal',
+                  width: 200,
+                  ellipsis: true,
+                  render: (text: string) => <Text style={{ fontSize: 11 }}>{text}</Text>,
+                },
+                {
+                  title: 'Batch',
+                  dataIndex: ['journal', 'batchName'],
+                  key: 'batch',
+                  width: 180,
+                  ellipsis: true,
+                  render: (text: string) => <Text style={{ fontSize: 11 }}>{text}</Text>,
+                },
+                {
+                  title: 'Period',
+                  dataIndex: ['journal', 'periodName'],
+                  key: 'period',
+                  width: 90,
+                  render: (text: string) => <Text style={{ fontSize: 11 }}>{text}</Text>,
+                },
+                {
+                  title: 'Debit',
+                  dataIndex: ['journal', 'enteredDebit'],
+                  key: 'dr',
+                  width: 110,
+                  align: 'right' as const,
+                  render: (v: number, item: BulkPostItem) => (
+                    <Text style={{ fontSize: 11 }}>
+                      {v?.toLocaleString('en-IN', { minimumFractionDigits: 2 })} {item.journal.currencyCode}
+                    </Text>
+                  ),
+                },
+                {
+                  title: 'Credit',
+                  dataIndex: ['journal', 'enteredCredit'],
+                  key: 'cr',
+                  width: 110,
+                  align: 'right' as const,
+                  render: (v: number, item: BulkPostItem) => (
+                    <Text style={{ fontSize: 11 }}>
+                      {v?.toLocaleString('en-IN', { minimumFractionDigits: 2 })} {item.journal.currencyCode}
+                    </Text>
+                  ),
+                },
+                {
+                  title: 'Status',
+                  key: 'status',
+                  width: 130,
+                  render: (_: any, item: BulkPostItem) => statusLabel(item.status),
+                },
+                {
+                  title: 'Issues',
+                  key: 'errors',
+                  render: (_: any, item: BulkPostItem) => {
+                    const allErrors = [
+                      ...item.validationErrors,
+                      ...(item.serverError ? [item.serverError] : []),
+                    ];
+                    if (allErrors.length === 0) {
+                      return item.status === 'posted'
+                        ? <Text style={{ fontSize: 11, color: REDWOOD.success }}>Posted successfully</Text>
+                        : null;
+                    }
+                    return (
+                      <ul style={{ margin: 0, paddingLeft: 14 }}>
+                        {allErrors.map((e, i) => (
+                          <li key={i} style={{ fontSize: 11, color: item.status === 'skipped' ? REDWOOD.neutral600 : REDWOOD.error }}>
+                            {e}
+                          </li>
+                        ))}
+                      </ul>
+                    );
+                  },
+                },
+              ]}
+              summary={() => {
+                const totalDr = bulkPostItems.reduce((s, i) => s + (i.journal.enteredDebit || 0), 0);
+                const totalCr = bulkPostItems.reduce((s, i) => s + (i.journal.enteredCredit || 0), 0);
+                return (
+                  <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
+                    <Table.Summary.Cell index={0} colSpan={4}>
+                      <Text strong style={{ fontSize: 11 }}>Total ({bulkPostItems.length} journals)</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={4} align="right">
+                      <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>
+                        {totalDr.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={5} align="right">
+                      <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>
+                        {totalCr.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={6} colSpan={2} />
+                  </Table.Summary.Row>
+                );
+              }}
+            />
+
+            {/* ── Result message after run ── */}
+            {bulkPostDone && (
+              <Alert
+                style={{ marginTop: 12 }}
+                type={failed > 0 ? 'warning' : 'success'}
+                showIcon
+                message={
+                  failed > 0
+                    ? `Completed with issues: ${posted} posted, ${failed} failed, ${skipped} skipped.`
+                    : `All ${posted} journal${posted !== 1 ? 's' : ''} posted successfully!`
+                }
+              />
+            )}
+          </Modal>
+        );
+      })()}
 
       {/* Debug Log Modal */}
       <Modal
