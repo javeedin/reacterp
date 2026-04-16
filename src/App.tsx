@@ -13,6 +13,7 @@ import Home from './pages/Home';
 // All other pages lazy-loaded — only fetched when the user navigates to them
 const GLModule                = lazy(() => import('./pages/gl/GLModule'));
 const FAModule                = lazy(() => import('./pages/fa/FAModule'));
+const ManageAssets            = lazy(() => import('./pages/fa/ManageAssets'));
 const ManageJournals          = lazy(() => import('./pages/gl/ManageJournals'));
 const EditJournal             = lazy(() => import('./pages/gl/EditJournal'));
 const CreateJournal           = lazy(() => import('./pages/gl/CreateJournal'));
@@ -143,6 +144,7 @@ function App() {
               <Route path="gl/journal-reconciliation" element={<JournalReconciliation />} />
               {/* Fixed Assets */}
               <Route path="fa"             element={<FAModule />} />
+              <Route path="fa/assets"      element={<ManageAssets />} />
               <Route path="fa/*"           element={<FAModule />} />
               <Route path="ap" element={<APModule />} />
               <Route path="ap/manage-invoices" element={<ManageInvoices />} />
