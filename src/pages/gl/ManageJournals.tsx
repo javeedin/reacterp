@@ -21,6 +21,7 @@ import {
   Modal,
   Spin,
   Descriptions,
+  Alert,
 } from 'antd';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import { postJournal } from '../../services/manage-journals.service';
@@ -900,12 +901,23 @@ const ManageJournals: React.FC = () => {
       width: 200,
       fixed: 'left',
       render: (text, record) => (
-        <a
-          style={{ color: REDWOOD.info, fontWeight: 500 }}
-          onClick={() => openJournalTab(record)}
-        >
-          {text || '-'}
-        </a>
+        record.statusMeaning === 'Posted' ? (
+          <Tooltip title="Posted — view only">
+            <a
+              style={{ color: REDWOOD.neutral600, fontWeight: 500 }}
+              onClick={() => openJournalTab(record)}
+            >
+              {text || '-'}
+            </a>
+          </Tooltip>
+        ) : (
+          <a
+            style={{ color: REDWOOD.info, fontWeight: 500 }}
+            onClick={() => openJournalTab(record)}
+          >
+            {text || '-'}
+          </a>
+        )
       ),
       sorter: (a, b) => (a.journalName || '').localeCompare(b.journalName || ''),
     },
@@ -1429,6 +1441,15 @@ const ManageJournals: React.FC = () => {
 
     return (
       <div style={{ padding: 16 }}>
+        {journal.statusMeaning === 'Posted' && (
+          <Alert
+            message="This journal is Posted and cannot be modified."
+            type="info"
+            showIcon
+            style={{ marginBottom: 12, fontSize: 12 }}
+            banner
+          />
+        )}
         {/* Journal Batch Card */}
         <Card
           style={{ marginBottom: 12, borderRadius: 6 }}
@@ -1448,25 +1469,41 @@ const ManageJournals: React.FC = () => {
               <Text strong style={{ fontSize: 11 }}>
                 Journal Batch: {journal.batchName}
               </Text>
+              <Tag
+                style={{ fontSize: 10 }}
+                color={journal.statusMeaning === 'Posted' ? REDWOOD.success : REDWOOD.warning}
+              >
+                {journal.statusMeaning}
+              </Tag>
             </Space>
             <Space size="small">
-              <Space.Compact size="small">
-                <Button size="small" icon={<SaveOutlined />}>Save</Button>
-                <Dropdown menu={{ items: [{ key: 'save', label: 'Save' }, { key: 'saveClose', label: 'Save and Close' }] }} placement="bottomRight">
-                  <Button size="small" icon={<DownOutlined />} />
-                </Dropdown>
-              </Space.Compact>
-              <Button
-                size="small"
-                style={{ fontSize: 10, background: REDWOOD.warning, color: '#fff', borderColor: REDWOOD.warning }}
-                onClick={handlePostJournal}
-                icon={<CheckOutlined />}
-              >
-                Post
-              </Button>
-              <Tooltip title={`PUT ${APEX_DB_CONFIG.baseUrl}/gl/journals/${journal.jeBatchId}/post`} placement="bottom">
-                <ApiOutlined style={{ color: REDWOOD.info, fontSize: 13, cursor: 'pointer' }} />
-              </Tooltip>
+              {journal.statusMeaning !== 'Posted' ? (
+                <>
+                  <Space.Compact size="small">
+                    <Button size="small" icon={<SaveOutlined />}>Save</Button>
+                    <Dropdown menu={{ items: [{ key: 'save', label: 'Save' }, { key: 'saveClose', label: 'Save and Close' }] }} placement="bottomRight">
+                      <Button size="small" icon={<DownOutlined />} />
+                    </Dropdown>
+                  </Space.Compact>
+                  <Button
+                    size="small"
+                    style={{ fontSize: 10, background: REDWOOD.warning, color: '#fff', borderColor: REDWOOD.warning }}
+                    onClick={handlePostJournal}
+                    icon={<CheckOutlined />}
+                  >
+                    Post
+                  </Button>
+                  <Tooltip title={`PUT ${APEX_DB_CONFIG.baseUrl}/gl/journals/${journal.jeBatchId}/post`} placement="bottom">
+                    <ApiOutlined style={{ color: REDWOOD.info, fontSize: 13, cursor: 'pointer' }} />
+                  </Tooltip>
+                </>
+              ) : (
+                <Tooltip title="Posted journals are read-only">
+                  <Tag color={REDWOOD.success} style={{ fontSize: 10 }}>
+                    <CheckCircleOutlined style={{ marginRight: 4 }} />Read Only
+                  </Tag>
+                </Tooltip>
+              )}
             </Space>
           </div>
 
@@ -1954,16 +1991,21 @@ const ManageJournals: React.FC = () => {
                 <Tooltip title="Create Journal">
                   <Button size="small" icon={<PlusOutlined />} onClick={openCreateJournalTab} />
                 </Tooltip>
-                <Tooltip title="Edit">
+                <Tooltip title={
+                  selectedRowKeys.length !== 1 ? 'Select a journal to edit' :
+                  journals.find(j => j.key === selectedRowKeys[0])?.statusMeaning === 'Posted' ? 'Posted journals cannot be edited' :
+                  'Edit'
+                }>
                   <Button
                     size="small"
                     icon={<EditOutlined />}
-                    disabled={selectedRowKeys.length !== 1}
+                    disabled={
+                      selectedRowKeys.length !== 1 ||
+                      journals.find(j => j.key === selectedRowKeys[0])?.statusMeaning === 'Posted'
+                    }
                     onClick={() => {
                       const selectedJournal = journals.find(j => j.key === selectedRowKeys[0]);
-                      if (selectedJournal) {
-                        openJournalTab(selectedJournal);
-                      }
+                      if (selectedJournal) openJournalTab(selectedJournal);
                     }}
                   />
                 </Tooltip>
