@@ -44,6 +44,8 @@ import {
 import { useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
+import customParseFormat from 'dayjs/plugin/customParseFormat';
+dayjs.extend(customParseFormat);
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
@@ -1682,8 +1684,8 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
                         onChange={(date) => setJournalData({ ...journalData, referenceDate: date?.format('D-MMM-YYYY') || '' })}
                         size="small"
                         style={{ width: '100%' }}
-                        format="dd-mmm-yyyy"
-                        placeholder="dd-mmm-yyyy"
+                        format="D-MMM-YYYY"
+                        placeholder="D-MMM-YYYY"
                       />
                     </Col>
 
