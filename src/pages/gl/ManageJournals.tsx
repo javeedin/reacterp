@@ -3282,24 +3282,25 @@ const ManageJournals: React.FC = () => {
                 {
                   title: 'Issues',
                   key: 'errors',
+                  width: 60,
+                  align: 'center' as const,
                   render: (_: any, item: BulkPostItem) => {
                     const allErrors = [
                       ...item.validationErrors,
                       ...(item.serverError ? [item.serverError] : []),
                     ];
-                    if (allErrors.length === 0) {
-                      return item.status === 'posted'
-                        ? <Text style={{ fontSize: 11, color: REDWOOD.success }}>Posted successfully</Text>
-                        : null;
-                    }
-                    return (
-                      <ul style={{ margin: 0, paddingLeft: 14 }}>
+                    if (allErrors.length === 0) return null;
+                    const tooltipContent = (
+                      <ul style={{ margin: 0, paddingLeft: 16, maxWidth: 320 }}>
                         {allErrors.map((e, i) => (
-                          <li key={i} style={{ fontSize: 11, color: item.status === 'skipped' ? REDWOOD.neutral600 : REDWOOD.error }}>
-                            {e}
-                          </li>
+                          <li key={i} style={{ fontSize: 12, marginBottom: 2 }}>{e}</li>
                         ))}
                       </ul>
+                    );
+                    return (
+                      <Tooltip title={tooltipContent} color="#fff" overlayInnerStyle={{ color: '#333' }}>
+                        <CloseCircleOutlined style={{ fontSize: 16, color: item.status === 'skipped' ? REDWOOD.neutral600 : REDWOOD.error, cursor: 'pointer' }} />
+                      </Tooltip>
                     );
                   },
                 },
