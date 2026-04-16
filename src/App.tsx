@@ -16,6 +16,7 @@ const FAModule                = lazy(() => import('./pages/fa/FAModule'));
 const ManageAssets            = lazy(() => import('./pages/fa/ManageAssets'));
 const CreateAsset             = lazy(() => import('./pages/fa/CreateAsset'));
 const Depreciation            = lazy(() => import('./pages/fa/Depreciation'));
+const FARetirements           = lazy(() => import('./pages/fa/Retirements'));
 const ManageJournals          = lazy(() => import('./pages/gl/ManageJournals'));
 const EditJournal             = lazy(() => import('./pages/gl/EditJournal'));
 const CreateJournal           = lazy(() => import('./pages/gl/CreateJournal'));
@@ -149,6 +150,7 @@ function App() {
               <Route path="fa/assets"       element={<ManageAssets />} />
               <Route path="fa/create-asset"  element={<CreateAsset />} />
               <Route path="fa/depreciation"  element={<Depreciation />} />
+              <Route path="fa/retirements"   element={<FARetirements />} />
               <Route path="fa/*"           element={<FAModule />} />
               <Route path="ap" element={<APModule />} />
               <Route path="ap/manage-invoices" element={<ManageInvoices />} />
