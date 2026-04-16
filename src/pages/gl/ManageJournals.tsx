@@ -5,6 +5,7 @@ import {
   Form,
   Select,
   Input,
+  InputNumber,
   Button,
   Space,
   Typography,
@@ -24,7 +25,7 @@ import {
   Alert,
 } from 'antd';
 import { APEX_DB_CONFIG } from '../../config/api.config';
-import { postJournal } from '../../services/manage-journals.service';
+import { postJournal, updateJournal } from '../../services/manage-journals.service';
 import type { MenuProps } from 'antd';
 import {
   HomeOutlined,
@@ -262,6 +263,15 @@ const ManageJournals: React.FC = () => {
   const [journalExpandedState, setJournalExpandedState] = useState<Record<string, boolean>>({});
   const [activeDetailTabState, setActiveDetailTabState] = useState<Record<string, string>>({});
 
+  // Per-tab editable state for unposted journals
+  const [editableLines, setEditableLines] = useState<Record<string, JournalLine[]>>({});
+  const [editableJournalFields, setEditableJournalFields] = useState<Record<string, {
+    batchDescription: string;
+    journalDescription: string;
+  }>>({});
+  const [tabSaving, setTabSaving] = useState<Record<string, boolean>>({});
+  const [selectedLinesByTab, setSelectedLinesByTab] = useState<Record<string, number[]>>({});
+
   // Journal Entry view modal state
   const [journalViewModalVisible, setJournalViewModalVisible] = useState(false);
   const [selectedJournalForView, setSelectedJournalForView] = useState<JournalRecord | null>(null);
@@ -480,6 +490,21 @@ const ManageJournals: React.FC = () => {
       return;
     }
 
+    // Initialize editable state for unposted journals
+    if (journal.statusMeaning !== 'Posted') {
+      setEditableLines(prev => ({
+        ...prev,
+        [tabKey]: JSON.parse(JSON.stringify(journal.lines || [])),
+      }));
+      setEditableJournalFields(prev => ({
+        ...prev,
+        [tabKey]: {
+          batchDescription: journal.batchDescription || '',
+          journalDescription: journal.journalDescription || '',
+        },
+      }));
+    }
+
     // Add new tab
     setOpenJournalTabs(prev => [...prev, { key: tabKey, journal }]);
     setActiveTabKey(tabKey);
@@ -489,6 +514,12 @@ const ManageJournals: React.FC = () => {
   const closeJournalTab = (tabKey: string) => {
     const newTabs = openJournalTabs.filter(tab => tab.key !== tabKey);
     setOpenJournalTabs(newTabs);
+
+    // Clean up editable state for this tab
+    setEditableLines(prev => { const n = { ...prev }; delete n[tabKey]; return n; });
+    setEditableJournalFields(prev => { const n = { ...prev }; delete n[tabKey]; return n; });
+    setTabSaving(prev => { const n = { ...prev }; delete n[tabKey]; return n; });
+    setSelectedLinesByTab(prev => { const n = { ...prev }; delete n[tabKey]; return n; });
 
     // If closing active tab, switch to search or last tab
     if (activeTabKey === tabKey) {
@@ -1036,34 +1067,6 @@ const ManageJournals: React.FC = () => {
       width: 100,
       render: (text) => <Text code>{text || '-'}</Text>,
     },
-    {
-      title: 'Actions',
-      key: 'viewJournalEntry',
-      width: 220,
-      fixed: 'right',
-      render: (_: any, record: JournalRecord) => (
-        <Space size={4}>
-          {record.statusMeaning !== 'Posted' && (
-            <Button
-              size="small"
-              icon={<EditOutlined />}
-              style={{ fontSize: 11, color: REDWOOD.primary, borderColor: REDWOOD.primary }}
-              onClick={() => openJournalTab(record)}
-            >
-              Edit
-            </Button>
-          )}
-          <Button
-            size="small"
-            icon={<EyeOutlined />}
-            style={{ fontSize: 11, color: REDWOOD.info, borderColor: REDWOOD.info }}
-            onClick={() => handleViewJournalEntry(record)}
-          >
-            View
-          </Button>
-        </Space>
-      ),
-    },
   ];
 
   // Actions dropdown menu
@@ -1103,6 +1106,18 @@ const ManageJournals: React.FC = () => {
       return num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     };
 
+    // Editable mode flag
+    const isEditable = journal.statusMeaning !== 'Posted';
+
+    // Per-tab editable state helpers
+    const lines = isEditable ? (editableLines[tabKey] || []) : (journal.lines || []);
+    const headerFields = editableJournalFields[tabKey] || {
+      batchDescription: journal.batchDescription || '',
+      journalDescription: journal.journalDescription || '',
+    };
+    const isSaving = tabSaving[tabKey] || false;
+    const selectedLineIndices = selectedLinesByTab[tabKey] || [];
+
     // Get expanded state for this tab
     const isJournalExpanded = journalExpandedState[tabKey] || false;
     const activeDetailTab = activeDetailTabState[tabKey] || 'journal';
@@ -1117,8 +1132,123 @@ const ManageJournals: React.FC = () => {
       setActiveDetailTabState(prev => ({ ...prev, [tabKey]: tab }));
     };
 
+    // Update a header field
+    const handleHeaderFieldChange = (field: 'batchDescription' | 'journalDescription', value: string) => {
+      setEditableJournalFields(prev => ({
+        ...prev,
+        [tabKey]: { ...prev[tabKey], [field]: value },
+      }));
+    };
+
+    // Update a line field
+    const handleLineChange = (lineIdx: number, field: string, value: any) => {
+      setEditableLines(prev => {
+        const currentLines = [...(prev[tabKey] || [])];
+        currentLines[lineIdx] = { ...currentLines[lineIdx], [field]: value };
+        return { ...prev, [tabKey]: currentLines };
+      });
+    };
+
+    // Add a new blank line
+    const handleAddLine = () => {
+      const currentLines = editableLines[tabKey] || [];
+      const newLine: JournalLine = {
+        lineId: 0,
+        lineNum: currentLines.length + 1,
+        account: '',
+        description: '',
+        enteredDr: 0,
+        enteredCr: 0,
+        accountedDr: 0,
+        accountedCr: 0,
+        currency: journal.currencyCode,
+      };
+      setEditableLines(prev => ({
+        ...prev,
+        [tabKey]: [...(prev[tabKey] || []), newLine],
+      }));
+    };
+
+    // Delete a specific line by index
+    const handleDeleteLine = (lineIdx: number) => {
+      setEditableLines(prev => {
+        const newLines = (prev[tabKey] || []).filter((_, i) => i !== lineIdx);
+        return { ...prev, [tabKey]: newLines.map((l, i) => ({ ...l, lineNum: i + 1 })) };
+      });
+      // Remove from selection if present
+      setSelectedLinesByTab(prev => ({
+        ...prev,
+        [tabKey]: (prev[tabKey] || []).filter(i => i !== lineIdx).map(i => i > lineIdx ? i - 1 : i),
+      }));
+    };
+
+    // Delete selected lines
+    const handleDeleteSelectedLines = () => {
+      if (selectedLineIndices.length === 0) return;
+      setEditableLines(prev => {
+        const newLines = (prev[tabKey] || []).filter((_, i) => !selectedLineIndices.includes(i));
+        return { ...prev, [tabKey]: newLines.map((l, i) => ({ ...l, lineNum: i + 1 })) };
+      });
+      setSelectedLinesByTab(prev => ({ ...prev, [tabKey]: [] }));
+    };
+
+    // Save handler — calls PUT gl/journals/:jeHeaderId
+    const handleSave = async () => {
+      const totalDr = lines.reduce((s, l) => s + (l.enteredDr || 0), 0);
+      const totalCr = lines.reduce((s, l) => s + (l.enteredCr || 0), 0);
+      if (Math.abs(totalDr - totalCr) > 0.01) {
+        message.error('Journal is out of balance. Debit must equal Credit before saving.');
+        return;
+      }
+      if (lines.length === 0) {
+        message.error('Journal must have at least one line before saving.');
+        return;
+      }
+
+      setTabSaving(prev => ({ ...prev, [tabKey]: true }));
+      try {
+        const payload = {
+          jeHeaderId: journal.jeHeaderId,
+          jeBatchId: journal.jeBatchId,
+          batchDescription: headerFields.batchDescription,
+          journalDescription: headerFields.journalDescription,
+          lines: lines.map(l => ({
+            lineId: l.lineId,
+            lineNum: l.lineNum,
+            account: l.account,
+            description: l.description,
+            enteredDr: l.enteredDr || 0,
+            enteredCr: l.enteredCr || 0,
+            accountedDr: l.accountedDr || 0,
+            accountedCr: l.accountedCr || 0,
+            currency: l.currency || journal.currencyCode,
+          })),
+        };
+        const result = await updateJournal(journal.jeHeaderId, payload);
+        if (result.success) {
+          message.success('Journal saved successfully');
+        } else {
+          message.error(`Save failed: ${result.error || 'Unknown error'}`);
+        }
+      } catch (err) {
+        message.error('Failed to save journal');
+      } finally {
+        setTabSaving(prev => ({ ...prev, [tabKey]: false }));
+      }
+    };
+
     // Post handler for this journal tab — calls PUT gl/journals/:jeBatchId/post
     const handlePostJournal = async () => {
+      const totalDr = lines.reduce((s, l) => s + (l.enteredDr || 0), 0);
+      const totalCr = lines.reduce((s, l) => s + (l.enteredCr || 0), 0);
+      if (Math.abs(totalDr - totalCr) > 0.01) {
+        message.error('Journal is out of balance. Debit must equal Credit before posting.');
+        return;
+      }
+      if (lines.length === 0) {
+        message.error('Journal must have at least one line before posting.');
+        return;
+      }
       const jeBatchId = journal.jeBatchId;
       if (!jeBatchId) {
         message.warning('No batch ID found for this journal');
@@ -1157,7 +1287,19 @@ const ManageJournals: React.FC = () => {
                       <Col span={14}><Text strong style={{ fontSize: 13 }}>{journal.journalName}</Text></Col>
 
                       <Col span={10}><Text type="secondary" style={{ fontSize: 13 }}>Description</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 13 }}>{journal.journalDescription || '-'}</Text></Col>
+                      <Col span={14}>
+                        {isEditable ? (
+                          <Input
+                            size="small"
+                            style={{ fontSize: 13 }}
+                            value={headerFields.journalDescription}
+                            onChange={e => handleHeaderFieldChange('journalDescription', e.target.value)}
+                            placeholder="Journal description"
+                          />
+                        ) : (
+                          <Text style={{ fontSize: 13 }}>{journal.journalDescription || '-'}</Text>
+                        )}
+                      </Col>
 
                       <Col span={10}><Text type="secondary" style={{ fontSize: 13 }}><span style={{ color: REDWOOD.primary }}>*</span> Ledger</Text></Col>
                       <Col span={14}><Text style={{ fontSize: 13 }}>{journal.ledgerName}</Text></Col>
@@ -1317,7 +1459,19 @@ const ManageJournals: React.FC = () => {
                       <Col span={16}><Text strong style={{ fontSize: 13 }}>{journal.journalName}</Text></Col>
 
                       <Col span={8}><Text type="secondary" style={{ fontSize: 13 }}>Description</Text></Col>
-                      <Col span={16}><Text style={{ fontSize: 13 }}>{journal.journalDescription || '-'}</Text></Col>
+                      <Col span={16}>
+                        {isEditable ? (
+                          <Input
+                            size="small"
+                            style={{ fontSize: 13 }}
+                            value={headerFields.journalDescription}
+                            onChange={e => handleHeaderFieldChange('journalDescription', e.target.value)}
+                            placeholder="Journal description"
+                          />
+                        ) : (
+                          <Text style={{ fontSize: 13 }}>{journal.journalDescription || '-'}</Text>
+                        )}
+                      </Col>
 
                       <Col span={8}><Text type="secondary" style={{ fontSize: 13 }}><span style={{ color: REDWOOD.primary }}>*</span> Ledger</Text></Col>
                       <Col span={16}><Text style={{ fontSize: 13 }}>{journal.ledgerName}</Text></Col>
@@ -1492,9 +1646,22 @@ const ManageJournals: React.FC = () => {
               {journal.statusMeaning !== 'Posted' ? (
                 <>
                   <Space.Compact size="small">
-                    <Button size="small" icon={<SaveOutlined />}>Save</Button>
-                    <Dropdown menu={{ items: [{ key: 'save', label: 'Save' }, { key: 'saveClose', label: 'Save and Close' }] }} placement="bottomRight">
-                      <Button size="small" icon={<DownOutlined />} />
+                    <Button size="small" icon={<SaveOutlined />} loading={isSaving} onClick={handleSave}>Save</Button>
+                    <Dropdown
+                      menu={{
+                        items: [
+                          { key: 'save', label: 'Save', onClick: handleSave },
+                          {
+                            key: 'saveClose', label: 'Save and Close', onClick: async () => {
+                              await handleSave();
+                              closeJournalTab(tabKey);
+                            }
+                          },
+                        ]
+                      }}
+                      placement="bottomRight"
+                    >
+                      <Button size="small" icon={<DownOutlined />} disabled={isSaving} />
                     </Dropdown>
                   </Space.Compact>
                   <Button
@@ -1507,6 +1674,9 @@ const ManageJournals: React.FC = () => {
                   </Button>
                   <Tooltip title={`PUT ${APEX_DB_CONFIG.baseUrl}/gl/journals/${journal.jeBatchId}/post`} placement="bottom">
                     <ApiOutlined style={{ color: REDWOOD.info, fontSize: 13, cursor: 'pointer' }} />
+                  </Tooltip>
+                  <Tooltip title={`PUT ${APEX_DB_CONFIG.baseUrl}/gl/journals/${journal.jeHeaderId}`} placement="bottom">
+                    <ApiOutlined style={{ color: REDWOOD.success, fontSize: 13, cursor: 'pointer' }} />
                   </Tooltip>
                 </>
               ) : (
@@ -1534,7 +1704,19 @@ const ManageJournals: React.FC = () => {
                   <Col span={16}><Text style={{ fontSize: 11 }}>{journal.batchName}</Text></Col>
 
                   <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Description</Text></Col>
-                  <Col span={16}><Text style={{ fontSize: 11 }}>{journal.batchDescription}</Text></Col>
+                  <Col span={16}>
+                    {isEditable ? (
+                      <Input
+                        size="small"
+                        style={{ fontSize: 11 }}
+                        value={headerFields.batchDescription}
+                        onChange={e => handleHeaderFieldChange('batchDescription', e.target.value)}
+                        placeholder="Batch description"
+                      />
+                    ) : (
+                      <Text style={{ fontSize: 11 }}>{journal.batchDescription}</Text>
+                    )}
+                  </Col>
 
                   <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Period</Text></Col>
                   <Col span={16}><Text style={{ fontSize: 11 }}>{journal.periodName}</Text></Col>
@@ -1619,32 +1801,68 @@ const ManageJournals: React.FC = () => {
               alignItems: 'center',
             }}
           >
-            <Text strong style={{ fontSize: 12 }}>Journal Lines</Text>
-            <Space size="small">
-              <Dropdown menu={{ items: [{ key: 'add', label: 'Add Row' }] }}>
-                <Button size="small" style={{ fontSize: 11 }}>Actions <DownOutlined /></Button>
-              </Dropdown>
-              <Button size="small" icon={<PlusOutlined />} />
-              <Button size="small" icon={<DeleteOutlined />} />
+            <Space>
+              <Text strong style={{ fontSize: 12 }}>Journal Lines</Text>
+              {isEditable && lines.length > 0 && (
+                <Text type="secondary" style={{ fontSize: 11 }}>{lines.length} line{lines.length !== 1 ? 's' : ''}</Text>
+              )}
             </Space>
+            {isEditable && (
+              <Space size="small">
+                <Dropdown menu={{
+                  items: [
+                    { key: 'add', label: 'Add Row', icon: <PlusOutlined />, onClick: handleAddLine },
+                    { key: 'deleteSelected', label: `Delete Selected (${selectedLineIndices.length})`, icon: <DeleteOutlined />, disabled: selectedLineIndices.length === 0, onClick: handleDeleteSelectedLines },
+                  ]
+                }}>
+                  <Button size="small" style={{ fontSize: 11 }}>Actions <DownOutlined /></Button>
+                </Dropdown>
+                <Tooltip title="Add line">
+                  <Button size="small" icon={<PlusOutlined />} onClick={handleAddLine} />
+                </Tooltip>
+                <Tooltip title={selectedLineIndices.length > 0 ? `Delete ${selectedLineIndices.length} selected` : 'Select lines to delete'}>
+                  <Button
+                    size="small"
+                    icon={<DeleteOutlined />}
+                    disabled={selectedLineIndices.length === 0}
+                    onClick={handleDeleteSelectedLines}
+                    danger={selectedLineIndices.length > 0}
+                  />
+                </Tooltip>
+              </Space>
+            )}
           </div>
 
           <Table
+            rowSelection={isEditable ? {
+              selectedRowKeys: selectedLineIndices,
+              onChange: (keys) => setSelectedLinesByTab(prev => ({ ...prev, [tabKey]: keys as number[] })),
+              columnWidth: 32,
+            } : undefined}
             columns={[
-              { title: 'Line', dataIndex: 'lineNum', key: 'lineNum', width: 60 },
+              { title: '#', dataIndex: 'lineNum', key: 'lineNum', width: 45 },
               {
                 title: 'Account',
                 dataIndex: 'account',
                 key: 'account',
-                width: 220,
-                render: (account: string, line: JournalLine) => {
+                width: isEditable ? 200 : 220,
+                render: (account: string, line: JournalLine, rowIdx: number) => {
+                  if (isEditable) {
+                    return (
+                      <Input
+                        size="small"
+                        style={{ fontSize: 11, fontFamily: 'monospace' }}
+                        value={account}
+                        onChange={e => handleLineChange(rowIdx, 'account', e.target.value)}
+                        placeholder="e.g. 01-000-1000-00-000"
+                      />
+                    );
+                  }
                   const desc = accountDescMap[account] || line.accountDescription || (line as any).account_description || '';
                   return (
                     <div>
                       <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{account || '-'}</span>
-                      {desc && (
-                        <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 2 }}>{desc}</div>
-                      )}
+                      {desc && <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 2 }}>{desc}</div>}
                     </div>
                   );
                 },
@@ -1654,54 +1872,112 @@ const ManageJournals: React.FC = () => {
                 dataIndex: 'description',
                 key: 'description',
                 width: 200,
-                ellipsis: true,
-                render: (text: string, line: JournalLine) => {
+                ellipsis: !isEditable,
+                render: (text: string, line: JournalLine, rowIdx: number) => {
+                  if (isEditable) {
+                    return (
+                      <Input
+                        size="small"
+                        style={{ fontSize: 11 }}
+                        value={text}
+                        onChange={e => handleLineChange(rowIdx, 'description', e.target.value)}
+                        placeholder="Line description"
+                      />
+                    );
+                  }
                   const isAP = (journal.source || '').toLowerCase() === 'payables';
                   if (isAP && text) {
                     return (
                       <Tooltip title="Click to view AP transaction">
-                        <a
-                          style={{ color: REDWOOD.info }}
-                          onClick={() => handleTransactionDrilldown(journal, line)}
-                        >
-                          {text}
-                        </a>
+                        <a style={{ color: REDWOOD.info }} onClick={() => handleTransactionDrilldown(journal, line)}>{text}</a>
                       </Tooltip>
                     );
                   }
                   return text || '-';
                 },
               },
-              { title: 'Currency', dataIndex: 'currency', key: 'currency', width: 80 },
-              { title: 'Entered Dr', dataIndex: 'enteredDr', key: 'enteredDr', width: 100, align: 'right' as const, render: (v: number) => v > 0 ? formatNumber(v) : '' },
-              { title: 'Entered Cr', dataIndex: 'enteredCr', key: 'enteredCr', width: 100, align: 'right' as const, render: (v: number) => v > 0 ? formatNumber(v) : '' },
-              { title: 'Accounted Dr', dataIndex: 'accountedDr', key: 'accountedDr', width: 100, align: 'right' as const, render: (v: number) => v > 0 ? formatNumber(v) : '' },
-              { title: 'Accounted Cr', dataIndex: 'accountedCr', key: 'accountedCr', width: 100, align: 'right' as const, render: (v: number) => v > 0 ? formatNumber(v) : '' },
-              ...((journal.source || '').toLowerCase() === 'payables' ? [{
+              { title: 'Currency', dataIndex: 'currency', key: 'currency', width: 70 },
+              {
+                title: 'Entered Dr',
+                dataIndex: 'enteredDr',
+                key: 'enteredDr',
+                width: isEditable ? 120 : 100,
+                align: 'right' as const,
+                render: (v: number, _line: JournalLine, rowIdx: number) => {
+                  if (isEditable) {
+                    return (
+                      <InputNumber
+                        size="small"
+                        style={{ fontSize: 11, width: '100%' }}
+                        value={v || 0}
+                        min={0}
+                        precision={2}
+                        onChange={val => handleLineChange(rowIdx, 'enteredDr', val || 0)}
+                      />
+                    );
+                  }
+                  return v > 0 ? formatNumber(v) : '';
+                },
+              },
+              {
+                title: 'Entered Cr',
+                dataIndex: 'enteredCr',
+                key: 'enteredCr',
+                width: isEditable ? 120 : 100,
+                align: 'right' as const,
+                render: (v: number, _line: JournalLine, rowIdx: number) => {
+                  if (isEditable) {
+                    return (
+                      <InputNumber
+                        size="small"
+                        style={{ fontSize: 11, width: '100%' }}
+                        value={v || 0}
+                        min={0}
+                        precision={2}
+                        onChange={val => handleLineChange(rowIdx, 'enteredCr', val || 0)}
+                      />
+                    );
+                  }
+                  return v > 0 ? formatNumber(v) : '';
+                },
+              },
+              { title: 'Acc Dr', dataIndex: 'accountedDr', key: 'accountedDr', width: 90, align: 'right' as const, render: (v: number) => v > 0 ? formatNumber(v) : '' },
+              { title: 'Acc Cr', dataIndex: 'accountedCr', key: 'accountedCr', width: 90, align: 'right' as const, render: (v: number) => v > 0 ? formatNumber(v) : '' },
+              ...(!isEditable && (journal.source || '').toLowerCase() === 'payables' ? [{
                 title: 'Transaction',
                 key: 'viewTransaction',
-                width: 140,
+                width: 130,
                 render: (_: any, line: JournalLine) => (
-                  <Button
-                    size="small"
-                    type="link"
-                    style={{ fontSize: 11, padding: '0 4px' }}
-                    onClick={() => handleTransactionDrilldown(journal, line)}
-                  >
+                  <Button size="small" type="link" style={{ fontSize: 11, padding: '0 4px' }} onClick={() => handleTransactionDrilldown(journal, line)}>
                     View Transaction
                   </Button>
                 ),
               }] : []),
+              ...(isEditable ? [{
+                title: '',
+                key: 'deleteLine',
+                width: 36,
+                render: (_: any, _line: JournalLine, rowIdx: number) => (
+                  <Tooltip title="Delete line">
+                    <Button
+                      size="small"
+                      type="text"
+                      danger
+                      icon={<DeleteOutlined />}
+                      onClick={() => handleDeleteLine(rowIdx)}
+                    />
+                  </Tooltip>
+                ),
+              }] : []),
             ]}
-            dataSource={journal.lines?.map((line, idx) => ({ ...line, key: idx })) || []}
+            dataSource={lines.map((line, idx) => ({ ...line, key: idx }))}
             pagination={false}
-            scroll={{ x: 1000 }}
+            scroll={{ x: isEditable ? 1200 : 1000 }}
             size="small"
             bordered
             className="compact-table"
-            locale={{ emptyText: 'No journal lines' }}
+            locale={{ emptyText: isEditable ? 'No lines — click + to add a line' : 'No journal lines' }}
             summary={() => {
-              const lines = journal.lines || [];
               const totals = lines.reduce(
                 (acc, line) => ({
                   enteredDr: acc.enteredDr + (line.enteredDr || 0),
@@ -1712,41 +1988,44 @@ const ManageJournals: React.FC = () => {
                 { enteredDr: 0, enteredCr: 0, accountedDr: 0, accountedCr: 0 }
               );
               const isBalanced = Math.abs(totals.enteredDr - totals.enteredCr) < 0.01;
+              // column offset: +1 for row-selection checkbox when editable
+              const offset = isEditable ? 1 : 0;
 
               return (
                 <Table.Summary fixed>
                   <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
-                    <Table.Summary.Cell index={0} />
-                    <Table.Summary.Cell index={1}>
+                    <Table.Summary.Cell index={0 + offset} />
+                    <Table.Summary.Cell index={1 + offset}>
                       <Text strong style={{ fontSize: 11 }}>Total</Text>
                     </Table.Summary.Cell>
-                    <Table.Summary.Cell index={2} />
-                    <Table.Summary.Cell index={3} />
-                    <Table.Summary.Cell index={4} align="right">
+                    <Table.Summary.Cell index={2 + offset} />
+                    <Table.Summary.Cell index={3 + offset} />
+                    <Table.Summary.Cell index={4 + offset} align="right">
                       <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>{formatNumber(totals.enteredDr)}</Text>
                     </Table.Summary.Cell>
-                    <Table.Summary.Cell index={5} align="right">
+                    <Table.Summary.Cell index={5 + offset} align="right">
                       <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>{formatNumber(totals.enteredCr)}</Text>
                     </Table.Summary.Cell>
-                    <Table.Summary.Cell index={6} align="right">
+                    <Table.Summary.Cell index={6 + offset} align="right">
                       <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>{formatNumber(totals.accountedDr)}</Text>
                     </Table.Summary.Cell>
-                    <Table.Summary.Cell index={7} align="right">
+                    <Table.Summary.Cell index={7 + offset} align="right">
                       <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>{formatNumber(totals.accountedCr)}</Text>
                     </Table.Summary.Cell>
+                    {isEditable && <Table.Summary.Cell index={8 + offset} />}
                   </Table.Summary.Row>
                   <Table.Summary.Row style={{ background: isBalanced ? '#e6f7e6' : '#fff2f0' }}>
-                    <Table.Summary.Cell index={0} colSpan={4}>
+                    <Table.Summary.Cell index={0 + offset} colSpan={4}>
                       <Text strong style={{ fontSize: 11 }}>
                         {isBalanced ? '✓ Balanced' : '⚠ Out of Balance'}
                       </Text>
                     </Table.Summary.Cell>
-                    <Table.Summary.Cell index={4} colSpan={2} align="right">
+                    <Table.Summary.Cell index={4 + offset} colSpan={2} align="right">
                       <Text style={{ fontSize: 11 }}>
                         Difference: {formatNumber(Math.abs(totals.enteredDr - totals.enteredCr))}
                       </Text>
                     </Table.Summary.Cell>
-                    <Table.Summary.Cell index={6} colSpan={2} align="right">
+                    <Table.Summary.Cell index={6 + offset} colSpan={isEditable ? 3 : 2} align="right">
                       <Text style={{ fontSize: 11 }}>
                         Difference: {formatNumber(Math.abs(totals.accountedDr - totals.accountedCr))}
                       </Text>

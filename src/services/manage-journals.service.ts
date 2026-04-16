@@ -241,3 +241,22 @@ export const postJournal = async (
     };
   }
 };
+
+/**
+ * Update an existing journal header and its lines
+ */
+export const updateJournal = async (
+  jeHeaderId: number,
+  payload: any
+): Promise<{ success: boolean; message?: string; error?: string }> => {
+  try {
+    const endpoint = `gl/journals/${jeHeaderId}`;
+    const data = await putToApex(endpoint, payload);
+    return data;
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+};
