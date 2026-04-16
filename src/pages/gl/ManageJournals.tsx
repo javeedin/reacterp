@@ -1450,12 +1450,12 @@ const ManageJournals: React.FC = () => {
               </Text>
             </Space>
             <Space size="small">
-              <Dropdown.Button
-                size="small"
-                style={{ }}
-              >
-                Save
-              </Dropdown.Button>
+              <Space.Compact size="small">
+                <Button size="small" icon={<SaveOutlined />}>Save</Button>
+                <Dropdown menu={{ items: [{ key: 'save', label: 'Save' }, { key: 'saveClose', label: 'Save and Close' }] }} placement="bottomRight">
+                  <Button size="small" icon={<DownOutlined />} />
+                </Dropdown>
+              </Space.Compact>
               <Button
                 size="small"
                 style={{ fontSize: 10, background: REDWOOD.warning, color: '#fff', borderColor: REDWOOD.warning }}

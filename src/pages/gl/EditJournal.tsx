@@ -1278,14 +1278,19 @@ const EditJournal: React.FC = () => {
             </Text>
           </Space>
           <Space size="small">
-            <Dropdown.Button
-              size="small"
-              menu={{ items: saveMenu }}
-              onClick={handleSave}
-              loading={saving}
-            >
-              <SaveOutlined /> Save
-            </Dropdown.Button>
+            <Space.Compact size="small">
+              <Button
+                size="small"
+                loading={saving}
+                onClick={handleSave}
+                icon={<SaveOutlined />}
+              >
+                Save
+              </Button>
+              <Dropdown menu={{ items: saveMenu }} placement="bottomRight">
+                <Button size="small" icon={<DownOutlined />} />
+              </Dropdown>
+            </Space.Compact>
             <Button
               size="small"
               onClick={handlePost}

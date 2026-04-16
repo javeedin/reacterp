@@ -1880,16 +1880,21 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
             <QuestionCircleOutlined style={{ color: REDWOOD.neutral600, cursor: 'pointer' }} />
           </Space>
           <Space size="small">
-            <Dropdown.Button
-              size="small"
-              menu={{ items: saveMenu }}
-              onClick={handleSave}
-              loading={saving}
-              style={{ background: REDWOOD.warning }}
-              type="primary"
-            >
-              <SaveOutlined /> Save
-            </Dropdown.Button>
+            <Space.Compact size="small">
+              <Button
+                type="primary"
+                size="small"
+                loading={saving}
+                style={{ background: REDWOOD.warning, borderColor: REDWOOD.warning }}
+                onClick={handleSave}
+                icon={<SaveOutlined />}
+              >
+                Save
+              </Button>
+              <Dropdown menu={{ items: saveMenu }} placement="bottomRight">
+                <Button type="primary" size="small" style={{ background: REDWOOD.warning, borderColor: REDWOOD.warning }} icon={<DownOutlined />} />
+              </Dropdown>
+            </Space.Compact>
             <Tooltip
               title={
                 <div style={{ fontSize: 11 }}>
@@ -1903,14 +1908,18 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
             >
               <ApiOutlined style={{ color: REDWOOD.info, fontSize: 14, cursor: 'pointer' }} />
             </Tooltip>
-            <Dropdown.Button
-              size="small"
-              menu={{ items: completeMenu }}
-              type="primary"
-              style={{ background: REDWOOD.success }}
-            >
-              Complete
-            </Dropdown.Button>
+            <Space.Compact size="small">
+              <Button
+                type="primary"
+                size="small"
+                style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+              >
+                Complete
+              </Button>
+              <Dropdown menu={{ items: completeMenu }} placement="bottomRight">
+                <Button type="primary" size="small" style={{ background: REDWOOD.success, borderColor: REDWOOD.success }} icon={<DownOutlined />} />
+              </Dropdown>
+            </Space.Compact>
             <Button
               size="small"
               onClick={handlePost}
