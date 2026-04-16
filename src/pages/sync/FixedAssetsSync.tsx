@@ -7,10 +7,10 @@ import {
   AuditOutlined, CloudDownloadOutlined, FileExcelOutlined,
   SyncOutlined, InfoCircleOutlined, SearchOutlined,
   CheckCircleOutlined, ClockCircleOutlined, ApiOutlined, CopyOutlined,
-  UnorderedListOutlined, TableOutlined,
+  UnorderedListOutlined, TableOutlined, CloudUploadOutlined,
 } from '@ant-design/icons';
 import { ORACLE_SOAP_CONFIG } from '../../config/api.config';
-import { callSoapBip } from '../../services/sync-http';
+import { callSoapBip, insertToApex } from '../../services/sync-http';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 
@@ -18,6 +18,32 @@ const { Sider, Content } = Layout;
 const { Text, Title } = Typography;
 
 const FA_BASE_PATH = '/Custom/FA_REPORTS/ReERPFAreports';
+
+// Maps BIP report ID → APEX REST endpoint (POST reerp/fa/<entity>)
+// Reports without a procedure are omitted (MASS_ADDITIONS, TRANSFER_DETAILS, etc.)
+const APEX_ENDPOINT_MAP: Record<string, string> = {
+  FA_ADDITIONS_B:          'fa/additions',
+  FA_ADDITIONS_TL:         'fa/additions-tl',
+  FA_ASSET_HISTORY:        'fa/asset-history',
+  FA_BOOKS:                'fa/books',
+  FA_BOOK_CONTROLS:        'fa/book-controls',
+  FA_CATEGORIES_B:         'fa/categories-b',
+  FA_CATEGORIES_TL:        'fa/categories-tl',
+  FA_CATEGORY_BOOKS:       'fa/category-books',
+  FA_DEPRN_SUMMARY:        'fa/deprn-summary',
+  FA_DEPRN_PERIODS:        'fa/deprn-periods',
+  FA_DISTRIBUTION_HISTORY: 'fa/distribution-history',
+  FA_LOCATIONS:            'fa/locations',
+  FA_RETIREMENTS:          'fa/retirements',
+  FA_TRANSACTION_HEADERS:  'fa/transaction-headers',
+  FA_DEPRN_DETAIL:         'fa/deprn-detail',
+  FA_ASSET_INVOICES:       'fa/asset-invoices',
+  FA_ADJUSTMENTS:          'fa/adjustments',
+  FA_METHODS:              'fa/methods',
+  FA_CALENDAR_PERIODS:     'fa/calendar-periods',
+  FA_CONVENTION_TYPES:     'fa/convention-types',
+  FA_BOOKS_SUMMARY:        'fa/books-summary',
+};
 
 const FA_REPORTS = [
   { id: 'FA_ADDITIONS_B',         label: 'FA_ADDITIONS_B',         description: 'Asset identity' },
@@ -140,6 +166,8 @@ const FixedAssetsSync: React.FC<Props> = ({ open, onClose }) => {
   const [apiExpanded, setApiExpanded]   = useState<Record<string, boolean>>({});
   const [fetchingAll, setFetchingAll]   = useState(false);
   const [fetchAllProgress, setFetchAllProgress] = useState<{ done: number; total: number } | null>(null);
+  const [tabSyncing, setTabSyncing]     = useState<Record<string, boolean>>({});
+  const [tabSyncResult, setTabSyncResult] = useState<Record<string, { success: boolean; message?: string; error?: string } | null>>({});
 
   const openReport = (reportId: string) => {
     if (!openTabs.includes(reportId)) {
@@ -202,6 +230,41 @@ const FixedAssetsSync: React.FC<Props> = ({ open, onClose }) => {
       },
     }));
   }, []);
+
+  // Post fetched rows to APEX for a single report
+  const syncToApex = useCallback(async (reportId: string) => {
+    const endpoint = APEX_ENDPOINT_MAP[reportId];
+    const rows     = tabStates[reportId]?.rows;
+    if (!endpoint || !rows?.length) return;
+
+    setTabSyncing(prev  => ({ ...prev, [reportId]: true }));
+    setTabSyncResult(prev => ({ ...prev, [reportId]: null }));
+
+    try {
+      // Payload = JSON array; column names are already uppercase from the BIP parser
+      const result = await insertToApex(endpoint, rows);
+      const ok = result?.success === true;
+      setTabSyncResult(prev => ({
+        ...prev,
+        [reportId]: {
+          success: ok,
+          message: ok ? (result.message || `${rows.length} rows posted to APEX`) : undefined,
+          error:   !ok ? (result?.error || 'APEX returned an error') : undefined,
+        },
+      }));
+      if (ok) {
+        message.success(`${reportId}: ${rows.length} rows posted to APEX`);
+      } else {
+        message.error(`${reportId}: ${result?.error || 'Post failed'}`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      setTabSyncResult(prev => ({ ...prev, [reportId]: { success: false, error: msg } }));
+      message.error(`${reportId}: ${msg}`);
+    } finally {
+      setTabSyncing(prev => ({ ...prev, [reportId]: false }));
+    }
+  }, [tabStates]);
 
   // Fetch all 26 reports sequentially
   const fetchAllReports = useCallback(async () => {
@@ -626,13 +689,21 @@ const FixedAssetsSync: React.FC<Props> = ({ open, onClose }) => {
           >
             Columns ({state.columns.length})
           </Button>
-          <Button
-            icon={<SyncOutlined />}
-            disabled
-            title="Sync to APEX — coming soon"
-          >
-            Sync to APEX
-          </Button>
+          {APEX_ENDPOINT_MAP[reportId] ? (
+            <Button
+              icon={tabSyncing[reportId] ? <SyncOutlined spin /> : <CloudUploadOutlined />}
+              loading={tabSyncing[reportId]}
+              disabled={!state.rows.length || tabSyncing[reportId]}
+              onClick={() => syncToApex(reportId)}
+              style={{ borderColor: '#C74634', color: '#C74634' }}
+            >
+              Post to APEX
+            </Button>
+          ) : (
+            <Tooltip title="No APEX procedure for this report">
+              <Button icon={<CloudUploadOutlined />} disabled>Post to APEX</Button>
+            </Tooltip>
+          )}
           <Input.Search
             placeholder="Search grid…"
             allowClear
@@ -654,6 +725,22 @@ const FixedAssetsSync: React.FC<Props> = ({ open, onClose }) => {
             </Tag>
           )}
         </Space>
+
+        {/* APEX sync result */}
+        {tabSyncResult[reportId] && (
+          <Alert
+            type={tabSyncResult[reportId]!.success ? 'success' : 'error'}
+            showIcon
+            closable
+            onClose={() => setTabSyncResult(prev => ({ ...prev, [reportId]: null }))}
+            message={
+              tabSyncResult[reportId]!.success
+                ? tabSyncResult[reportId]!.message
+                : `Post to APEX failed: ${tabSyncResult[reportId]!.error}`
+            }
+            style={{ marginBottom: 10, fontSize: 12 }}
+          />
+        )}
 
         {/* Report path info */}
         <div style={{ marginBottom: 8, fontSize: 11, color: '#8c8c8c', fontFamily: 'monospace' }}>
