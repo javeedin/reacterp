@@ -23,6 +23,7 @@ import {
   CloseOutlined,
   KeyOutlined,
   BugOutlined,
+  DatabaseOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import type { Module } from '../types';
@@ -63,6 +64,14 @@ const modules: Module[] = [
     icon: <AccountBookOutlined style={{ fontSize: 32 }} />,
     path: '/gl',
     color: REDWOOD.primary,
+  },
+  {
+    id: 'fa',
+    name: 'Fixed Assets',
+    description: 'Asset Register, Depreciation, Retirements, NBV',
+    icon: <DatabaseOutlined style={{ fontSize: 32 }} />,
+    path: '/fa',
+    color: '#CA7700',
   },
   {
     id: 'ap',

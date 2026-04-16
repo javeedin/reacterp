@@ -1,0 +1,388 @@
+/**
+ * Fixed Assets Service
+ * All API calls for the FA module → reerp/fa/* endpoints
+ */
+
+import { fetchFromApex, insertToApex, putToApex } from './sync-http';
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+export interface AssetSearchParams {
+  assetNumber?: string;
+  description?: string;
+  category?: string;
+  bookTypeCode?: string;
+  assetType?: string;
+  status?: 'ACTIVE' | 'RETIRED' | '';
+  offset?: number;
+  limit?: number;
+}
+
+export interface AssetRecord {
+  assetId: string;
+  assetNumber: string;
+  description: string;
+  assetType: string;
+  categoryId: string;
+  tagNumber: string;
+  serialNumber: string;
+  manufacturer: string;
+  inUseFlag: string;
+  ownedLeased: string;
+  units: string;
+  currentUnits: string;
+  capitalizedFlag: string;
+  retiredFlag: string;
+  bookTypeCode: string;
+  datePlacedInService: string;
+  cost: string;
+  adjustedCost: string;
+  salvageValue: string;
+  deprnReserve: string;
+  nbv: string;
+  creationDate: string;
+  lastUpdateDate: string;
+}
+
+export interface AssetDetail extends AssetRecord {
+  parentAssetId: string;
+  manufacturerName: string;
+  modelNumber: string;
+  newUsed: string;
+  inventorial: string;
+  pendingFlag: string;
+  propertyTypeCode: string;
+  feederSystemName: string;
+  createdBy: string;
+  lastUpdatedBy: string;
+  tlDescription: string;
+}
+
+export interface AssetBook {
+  bookTypeCode: string;
+  bookTypeName: string;
+  datePlacedInService: string;
+  dateEffective: string;
+  deprnStartDate: string;
+  cost: string;
+  originalCost: string;
+  adjustedCost: string;
+  salvageValue: string;
+  recoverableCost: string;
+  depreciateFlag: string;
+  capitalizeFlag: string;
+  dateIneffective: string;
+  retirementId: string;
+  methodId: string;
+  methodCode: string;
+  methodName: string;
+  lifeInMonths: string;
+  conventionTypeId: string;
+  rateAdjustmentFactor: string;
+  deprnReserve: string;
+  ytdDeprn: string;
+  nbv: string;
+}
+
+export interface DeprnRecord {
+  assetId: string;
+  bookTypeCode: string;
+  periodCounter: string;
+  periodName: string;
+  fiscalYear: string;
+  periodNum: string;
+  deprnRunDate: string;
+  deprnAmount: string;
+  ytdDeprn: string;
+  deprnReserve: string;
+  adjustedCost: string;
+  bonusDeprnAmount: string;
+  revalReserve: string;
+  impairmentAmount: string;
+  priorFyExpense: string;
+  deprnSourceCode: string;
+  nbv: string;
+}
+
+export interface DistributionRecord {
+  distributionId: string;
+  bookTypeCode: string;
+  unitsAssigned: string;
+  transactionUnits: string;
+  codeCombinationId: string;
+  locationId: string;
+  locationSeg1: string;
+  locationSeg2: string;
+  locationSeg3: string;
+  transactionHeaderIdIn: string;
+  transactionHeaderIdOut: string;
+  dateEffective: string;
+  dateIneffective: string;
+}
+
+export interface InvoiceRecord {
+  assetInvoiceId: string;
+  bookTypeCode: string;
+  fixedAssetsCost: string;
+  dateEffective: string;
+  invoiceTransactionIdIn: string;
+  feederSystemName: string;
+  description: string;
+  sourceLineId: string;
+  postBatchId: string;
+}
+
+export interface TransactionRecord {
+  transactionHeaderId: string;
+  bookTypeCode: string;
+  transactionTypeCode: string;
+  transactionDate: string;
+  dateEffective: string;
+  callingInterface: string;
+  creationDate: string;
+  createdBy: string;
+}
+
+export interface AssetSearchResponse {
+  success: boolean;
+  totalCount: number;
+  offset: number;
+  limit: number;
+  items: AssetRecord[];
+  error?: string;
+}
+
+export interface CategoryRecord {
+  categoryId: string;
+  segment1: string;
+  segment2: string;
+  description: string;
+  categoryType: string;
+  ownedLeased: string;
+  capitalizeFlag: string;
+  summaryFlag: string;
+  enabledFlag: string;
+}
+
+export interface MethodRecord {
+  methodId: string;
+  methodCode: string;
+  name: string;
+  lifeInMonths: string;
+  stlMethodFlag: string;
+  rateSourceRule: string;
+  deprnBasisRule: string;
+}
+
+export interface LocationRecord {
+  locationId: string;
+  segment1: string;
+  segment2: string;
+  segment3: string;
+  segment4: string;
+  fullLocation: string;
+}
+
+export interface BookControlRecord {
+  bookTypeCode: string;
+  bookTypeName: string;
+  bookClass: string;
+  deprnCalendar: string;
+  fiscalYearName: string;
+  currentFiscalYear: string;
+  deprnStatus: string;
+}
+
+export interface RetirementRecord {
+  retirementId: string;
+  bookTypeCode: string;
+  assetId: string;
+  assetNumber: string;
+  description: string;
+  dateRetired: string;
+  costRetired: string;
+  status: string;
+  nbvRetired: string;
+  gainLossAmount: string;
+  proceedsOfSale: string;
+  costOfRemoval: string;
+  retirementTypeCode: string;
+  soldTo: string;
+}
+
+export interface DeprnWorkbenchRecord {
+  assetId: string;
+  assetNumber: string;
+  description: string;
+  bookTypeCode: string;
+  periodCounter: string;
+  periodName: string;
+  fiscalYear: string;
+  deprnAmount: string;
+  ytdDeprn: string;
+  deprnReserve: string;
+  adjustedCost: string;
+  nbv: string;
+  salvageValue: string;
+  deprnRunDate: string;
+}
+
+export interface DeprnWorkbenchSummary {
+  totalCost: number;
+  totalDeprnReserve: number;
+  totalNbv: number;
+  totalDeprnAmount: number;
+}
+
+// ── Asset Search ──────────────────────────────────────────────────────────────
+
+export const searchAssets = async (
+  params: AssetSearchParams
+): Promise<AssetSearchResponse> => {
+  const q = new URLSearchParams();
+  if (params.assetNumber)  q.append('assetNumber',  params.assetNumber);
+  if (params.description)  q.append('description',  params.description);
+  if (params.category)     q.append('category',     params.category);
+  if (params.bookTypeCode) q.append('bookTypeCode', params.bookTypeCode);
+  if (params.assetType)    q.append('assetType',    params.assetType);
+  if (params.status)       q.append('status',       params.status);
+  if (params.offset !== undefined) q.append('offset', String(params.offset));
+  if (params.limit  !== undefined) q.append('limit',  String(params.limit));
+
+  const qs = q.toString();
+  try {
+    return await fetchFromApex(`fa/assets${qs ? '?' + qs : ''}`);
+  } catch (e) {
+    return { success: false, totalCount: 0, offset: 0, limit: 25, items: [],
+             error: e instanceof Error ? e.message : 'Unknown error' };
+  }
+};
+
+// ── Single Asset ──────────────────────────────────────────────────────────────
+
+export const getAssetDetail = async (assetId: string): Promise<{ success: boolean; error?: string } & Partial<AssetDetail>> => {
+  try { return await fetchFromApex(`fa/assets/${assetId}`); }
+  catch (e) { return { success: false, error: e instanceof Error ? e.message : 'Unknown error' }; }
+};
+
+export const getAssetBooks = async (assetId: string): Promise<{ success: boolean; items: AssetBook[]; error?: string }> => {
+  try { return await fetchFromApex(`fa/assets/${assetId}/books`); }
+  catch (e) { return { success: false, items: [], error: e instanceof Error ? e.message : 'Unknown error' }; }
+};
+
+export const getAssetDeprn = async (assetId: string): Promise<{ success: boolean; items: DeprnRecord[]; error?: string }> => {
+  try { return await fetchFromApex(`fa/assets/${assetId}/deprn`); }
+  catch (e) { return { success: false, items: [], error: e instanceof Error ? e.message : 'Unknown error' }; }
+};
+
+export const getAssetDistributions = async (assetId: string): Promise<{ success: boolean; items: DistributionRecord[]; error?: string }> => {
+  try { return await fetchFromApex(`fa/assets/${assetId}/distributions`); }
+  catch (e) { return { success: false, items: [], error: e instanceof Error ? e.message : 'Unknown error' }; }
+};
+
+export const getAssetInvoices = async (assetId: string): Promise<{ success: boolean; items: InvoiceRecord[]; error?: string }> => {
+  try { return await fetchFromApex(`fa/assets/${assetId}/invoices`); }
+  catch (e) { return { success: false, items: [], error: e instanceof Error ? e.message : 'Unknown error' }; }
+};
+
+export const getAssetTransactions = async (assetId: string): Promise<{ success: boolean; items: TransactionRecord[]; error?: string }> => {
+  try { return await fetchFromApex(`fa/assets/${assetId}/transactions`); }
+  catch (e) { return { success: false, items: [], error: e instanceof Error ? e.message : 'Unknown error' }; }
+};
+
+// ── Setup Lookups ─────────────────────────────────────────────────────────────
+
+export const getCategories = async (): Promise<CategoryRecord[]> => {
+  try { const d = await fetchFromApex('fa/categories'); return d.items || []; }
+  catch { return []; }
+};
+
+export const getMethods = async (): Promise<MethodRecord[]> => {
+  try { const d = await fetchFromApex('fa/methods'); return d.items || []; }
+  catch { return []; }
+};
+
+export const getLocations = async (): Promise<LocationRecord[]> => {
+  try { const d = await fetchFromApex('fa/locations'); return d.items || []; }
+  catch { return []; }
+};
+
+export const getBookControls = async (): Promise<BookControlRecord[]> => {
+  try { const d = await fetchFromApex('fa/book-controls'); return d.items || []; }
+  catch { return []; }
+};
+
+export const getDeprnPeriods = async (bookTypeCode?: string): Promise<any[]> => {
+  try {
+    const qs = bookTypeCode ? `?bookTypeCode=${encodeURIComponent(bookTypeCode)}` : '';
+    const d = await fetchFromApex(`fa/deprn-periods${qs}`);
+    return d.items || [];
+  } catch { return []; }
+};
+
+export const getRetirements = async (bookTypeCode?: string): Promise<RetirementRecord[]> => {
+  try {
+    const qs = bookTypeCode ? `?bookTypeCode=${encodeURIComponent(bookTypeCode)}` : '';
+    const d = await fetchFromApex(`fa/retirements${qs}`);
+    return d.items || [];
+  } catch { return []; }
+};
+
+// ── Depreciation Workbench ────────────────────────────────────────────────────
+
+export const getDeprnWorkbench = async (params: {
+  bookTypeCode?: string;
+  periodCounter?: string;
+  assetNumber?: string;
+  offset?: number;
+  limit?: number;
+}): Promise<{ success: boolean; totalCount: number; items: DeprnWorkbenchRecord[]; summary: DeprnWorkbenchSummary; error?: string }> => {
+  const q = new URLSearchParams();
+  if (params.bookTypeCode)  q.append('bookTypeCode',  params.bookTypeCode);
+  if (params.periodCounter) q.append('periodCounter', params.periodCounter);
+  if (params.assetNumber)   q.append('assetNumber',   params.assetNumber);
+  if (params.offset !== undefined) q.append('offset', String(params.offset));
+  if (params.limit  !== undefined) q.append('limit',  String(params.limit));
+  try {
+    const qs = q.toString();
+    return await fetchFromApex(`fa/deprn-workbench${qs ? '?' + qs : ''}`);
+  } catch (e) {
+    return { success: false, totalCount: 0, items: [],
+             summary: { totalCost: 0, totalDeprnReserve: 0, totalNbv: 0, totalDeprnAmount: 0 },
+             error: e instanceof Error ? e.message : 'Unknown error' };
+  }
+};
+
+// ── Write operations ──────────────────────────────────────────────────────────
+
+export const createAsset = async (payload: any): Promise<{ success: boolean; assetId?: string; assetNumber?: string; message?: string; error?: string }> => {
+  try { return await insertToApex('fa/assets', payload); }
+  catch (e) { return { success: false, error: e instanceof Error ? e.message : 'Unknown error' }; }
+};
+
+export const retireAsset = async (assetId: string, payload: any): Promise<{ success: boolean; message?: string; gainLoss?: string; error?: string }> => {
+  try { return await putToApex(`fa/assets/${assetId}/retire`, payload); }
+  catch (e) { return { success: false, error: e instanceof Error ? e.message : 'Unknown error' }; }
+};
+
+export const adjustAsset = async (assetId: string, payload: any): Promise<{ success: boolean; message?: string; newCost?: string; error?: string }> => {
+  try { return await putToApex(`fa/assets/${assetId}/adjust`, payload); }
+  catch (e) { return { success: false, error: e instanceof Error ? e.message : 'Unknown error' }; }
+};
+
+// ── Formatting helpers ────────────────────────────────────────────────────────
+
+export const formatCurrency = (value: string | number, decimals = 2): string => {
+  const n = typeof value === 'string' ? parseFloat(value) : value;
+  if (isNaN(n)) return '—';
+  return new Intl.NumberFormat('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(n);
+};
+
+export const assetTypeLabel = (type: string): string =>
+  ({ CAPITALIZED: 'Capitalized', CIP: 'CIP', EXPENSED: 'Expensed' }[type] || type || '—');
+
+export const assetStatusColor = (retiredFlag: string): string =>
+  retiredFlag === 'YES' ? '#cf1322' : '#1D7B4D';
+
+export const assetStatusLabel = (retiredFlag: string): string =>
+  retiredFlag === 'YES' ? 'Retired' : 'Active';

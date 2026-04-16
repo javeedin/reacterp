@@ -12,6 +12,7 @@ import Home from './pages/Home';
 
 // All other pages lazy-loaded — only fetched when the user navigates to them
 const GLModule                = lazy(() => import('./pages/gl/GLModule'));
+const FAModule                = lazy(() => import('./pages/fa/FAModule'));
 const ManageJournals          = lazy(() => import('./pages/gl/ManageJournals'));
 const EditJournal             = lazy(() => import('./pages/gl/EditJournal'));
 const CreateJournal           = lazy(() => import('./pages/gl/CreateJournal'));
@@ -140,6 +141,9 @@ function App() {
               <Route path="gl/income-statement-templates" element={<IncomeStatementTemplates />} />
               <Route path="gl/currencies" element={<Currencies />} />
               <Route path="gl/journal-reconciliation" element={<JournalReconciliation />} />
+              {/* Fixed Assets */}
+              <Route path="fa"             element={<FAModule />} />
+              <Route path="fa/*"           element={<FAModule />} />
               <Route path="ap" element={<APModule />} />
               <Route path="ap/manage-invoices" element={<ManageInvoices />} />
               <Route path="ap/manage-payments" element={<ManagePayments />} />
