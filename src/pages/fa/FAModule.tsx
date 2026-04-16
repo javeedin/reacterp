@@ -124,22 +124,22 @@ const setupMenuItems: MenuItemType[] = [
   {
     key: 'categories', icon: <TagOutlined />,
     label: 'Asset Categories', description: 'Define category segments',
-    color: FA_COLOR,
+    color: FA_COLOR, path: '/fa/setup/categories',
   },
   {
     key: 'methods', icon: <ScheduleOutlined />,
     label: 'Depreciation Methods', description: 'Configure depreciation rules',
-    color: REDWOOD.info,
+    color: REDWOOD.info, path: '/fa/setup/methods',
   },
   {
     key: 'locations', icon: <EnvironmentOutlined />,
     label: 'Locations', description: 'Manage asset location segments',
-    color: REDWOOD.success,
+    color: REDWOOD.success, path: '/fa/setup/locations',
   },
   {
     key: 'book-controls', icon: <FileTextOutlined />,
     label: 'Book Controls', description: 'Corporate and tax book settings',
-    color: REDWOOD.neutral600,
+    color: REDWOOD.neutral600, path: '/fa/setup/book-controls',
   },
 ];
 

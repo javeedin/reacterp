@@ -17,6 +17,10 @@ const ManageAssets            = lazy(() => import('./pages/fa/ManageAssets'));
 const CreateAsset             = lazy(() => import('./pages/fa/CreateAsset'));
 const Depreciation            = lazy(() => import('./pages/fa/Depreciation'));
 const FARetirements           = lazy(() => import('./pages/fa/Retirements'));
+const FAAssetCategories       = lazy(() => import('./pages/fa/setup/AssetCategories'));
+const FADeprnMethods          = lazy(() => import('./pages/fa/setup/DeprnMethods'));
+const FALocations             = lazy(() => import('./pages/fa/setup/Locations'));
+const FABookControls          = lazy(() => import('./pages/fa/setup/BookControls'));
 const ManageJournals          = lazy(() => import('./pages/gl/ManageJournals'));
 const EditJournal             = lazy(() => import('./pages/gl/EditJournal'));
 const CreateJournal           = lazy(() => import('./pages/gl/CreateJournal'));
@@ -150,7 +154,11 @@ function App() {
               <Route path="fa/assets"       element={<ManageAssets />} />
               <Route path="fa/create-asset"  element={<CreateAsset />} />
               <Route path="fa/depreciation"  element={<Depreciation />} />
-              <Route path="fa/retirements"   element={<FARetirements />} />
+              <Route path="fa/retirements"        element={<FARetirements />} />
+              <Route path="fa/setup/categories"   element={<FAAssetCategories />} />
+              <Route path="fa/setup/methods"       element={<FADeprnMethods />} />
+              <Route path="fa/setup/locations"     element={<FALocations />} />
+              <Route path="fa/setup/book-controls" element={<FABookControls />} />
               <Route path="fa/*"           element={<FAModule />} />
               <Route path="ap" element={<APModule />} />
               <Route path="ap/manage-invoices" element={<ManageInvoices />} />
