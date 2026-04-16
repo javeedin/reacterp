@@ -1039,17 +1039,29 @@ const ManageJournals: React.FC = () => {
     {
       title: 'Actions',
       key: 'viewJournalEntry',
-      width: 160,
+      width: 220,
       fixed: 'right',
       render: (_: any, record: JournalRecord) => (
-        <Button
-          size="small"
-          icon={<EyeOutlined />}
-          style={{ fontSize: 11, color: REDWOOD.info, borderColor: REDWOOD.info }}
-          onClick={() => handleViewJournalEntry(record)}
-        >
-          View Journal Entry
-        </Button>
+        <Space size={4}>
+          {record.statusMeaning !== 'Posted' && (
+            <Button
+              size="small"
+              icon={<EditOutlined />}
+              style={{ fontSize: 11, color: REDWOOD.primary, borderColor: REDWOOD.primary }}
+              onClick={() => openJournalTab(record)}
+            >
+              Edit
+            </Button>
+          )}
+          <Button
+            size="small"
+            icon={<EyeOutlined />}
+            style={{ fontSize: 11, color: REDWOOD.info, borderColor: REDWOOD.info }}
+            onClick={() => handleViewJournalEntry(record)}
+          >
+            View
+          </Button>
+        </Space>
       ),
     },
   ];
@@ -1504,6 +1516,13 @@ const ManageJournals: React.FC = () => {
                   </Tag>
                 </Tooltip>
               )}
+              <Button
+                size="small"
+                icon={<CloseOutlined />}
+                onClick={() => closeJournalTab(tabKey)}
+              >
+                Close
+              </Button>
             </Space>
           </div>
 
@@ -1992,9 +2011,9 @@ const ManageJournals: React.FC = () => {
                   <Button size="small" icon={<PlusOutlined />} onClick={openCreateJournalTab} />
                 </Tooltip>
                 <Tooltip title={
-                  selectedRowKeys.length !== 1 ? 'Select a journal to edit' :
-                  journals.find(j => j.key === selectedRowKeys[0])?.statusMeaning === 'Posted' ? 'Posted journals cannot be edited' :
-                  'Edit'
+                  journals.find(j => j.key === selectedRowKeys[0])?.statusMeaning === 'Posted'
+                    ? 'Posted journals cannot be edited'
+                    : undefined
                 }>
                   <Button
                     size="small"
@@ -2007,7 +2026,9 @@ const ManageJournals: React.FC = () => {
                       const selectedJournal = journals.find(j => j.key === selectedRowKeys[0]);
                       if (selectedJournal) openJournalTab(selectedJournal);
                     }}
-                  />
+                  >
+                    Edit
+                  </Button>
                 </Tooltip>
                 <Tooltip title="Delete">
                   <Button size="small" icon={<DeleteOutlined />} disabled={selectedRowKeys.length === 0} />
