@@ -226,10 +226,11 @@ export const formatDate = (dateString: string): string => {
 
 /**
  * Post a journal batch — updates STATUS to 'P' / 'Posted'
+ * Returns server-side validation errors in the errors[] array when validation fails.
  */
 export const postJournal = async (
   jeBatchId: number
-): Promise<{ success: boolean; message?: string; error?: string }> => {
+): Promise<{ success: boolean; message?: string; error?: string; errors?: string[] }> => {
   try {
     const endpoint = `gl/journals/${jeBatchId}/post`;
     const data = await putToApex(endpoint);

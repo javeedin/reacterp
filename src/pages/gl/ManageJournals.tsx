@@ -25,7 +25,7 @@ import {
   Alert,
 } from 'antd';
 import { APEX_DB_CONFIG } from '../../config/api.config';
-import { postJournal, updateJournal } from '../../services/manage-journals.service';
+import { postJournal, updateJournal, getLookupValues } from '../../services/manage-journals.service';
 import type { MenuProps } from 'antd';
 import {
   HomeOutlined,
@@ -268,9 +268,17 @@ const ManageJournals: React.FC = () => {
   const [editableJournalFields, setEditableJournalFields] = useState<Record<string, {
     batchDescription: string;
     journalDescription: string;
+    category: string;
+    currencyCode: string;
+    conversionRate: number;
+    conversionRateType: string;
   }>>({});
   const [tabSaving, setTabSaving] = useState<Record<string, boolean>>({});
+  const [tabPosting, setTabPosting] = useState<Record<string, boolean>>({});
   const [selectedLinesByTab, setSelectedLinesByTab] = useState<Record<string, number[]>>({});
+
+  // Lookup data for journal edit dropdowns
+  const [journalCategories, setJournalCategories] = useState<string[]>([]);
 
   // Journal Entry view modal state
   const [journalViewModalVisible, setJournalViewModalVisible] = useState(false);
@@ -375,6 +383,13 @@ const ManageJournals: React.FC = () => {
     };
     fetchPeriods();
   }, [selectedLedger]);
+
+  // Fetch journal categories for the edit dropdown
+  useEffect(() => {
+    getLookupValues('categories').then(items => {
+      setJournalCategories(items.map(i => i.label));
+    }).catch(() => {});
+  }, []);
 
   // Handle ledger selection change
   const handleLedgerChange = (ledgerName: string) => {
@@ -501,6 +516,10 @@ const ManageJournals: React.FC = () => {
         [tabKey]: {
           batchDescription: journal.batchDescription || '',
           journalDescription: journal.journalDescription || '',
+          category: journal.category || '',
+          currencyCode: journal.currencyCode || '',
+          conversionRate: 1,
+          conversionRateType: 'User',
         },
       }));
     }
@@ -519,6 +538,7 @@ const ManageJournals: React.FC = () => {
     setEditableLines(prev => { const n = { ...prev }; delete n[tabKey]; return n; });
     setEditableJournalFields(prev => { const n = { ...prev }; delete n[tabKey]; return n; });
     setTabSaving(prev => { const n = { ...prev }; delete n[tabKey]; return n; });
+    setTabPosting(prev => { const n = { ...prev }; delete n[tabKey]; return n; });
     setSelectedLinesByTab(prev => { const n = { ...prev }; delete n[tabKey]; return n; });
 
     // If closing active tab, switch to search or last tab
@@ -1114,8 +1134,13 @@ const ManageJournals: React.FC = () => {
     const headerFields = editableJournalFields[tabKey] || {
       batchDescription: journal.batchDescription || '',
       journalDescription: journal.journalDescription || '',
+      category: journal.category || '',
+      currencyCode: journal.currencyCode || '',
+      conversionRate: 1,
+      conversionRateType: 'User',
     };
     const isSaving = tabSaving[tabKey] || false;
+    const isPosting = tabPosting[tabKey] || false;
     const selectedLineIndices = selectedLinesByTab[tabKey] || [];
 
     // Get expanded state for this tab
@@ -1132,8 +1157,8 @@ const ManageJournals: React.FC = () => {
       setActiveDetailTabState(prev => ({ ...prev, [tabKey]: tab }));
     };
 
-    // Update a header field
-    const handleHeaderFieldChange = (field: 'batchDescription' | 'journalDescription', value: string) => {
+    // Update any header / batch field
+    const handleHeaderFieldChange = (field: string, value: any) => {
       setEditableJournalFields(prev => ({
         ...prev,
         [tabKey]: { ...prev[tabKey], [field]: value },
@@ -1207,11 +1232,16 @@ const ManageJournals: React.FC = () => {
 
       setTabSaving(prev => ({ ...prev, [tabKey]: true }));
       try {
+        const convRate = headerFields.conversionRate || 1;
         const payload = {
           jeHeaderId: journal.jeHeaderId,
           jeBatchId: journal.jeBatchId,
           batchDescription: headerFields.batchDescription,
           journalDescription: headerFields.journalDescription,
+          category: headerFields.category,
+          currencyCode: headerFields.currencyCode,
+          conversionRate: convRate,
+          conversionRateType: headerFields.conversionRateType,
           lines: lines.map(l => ({
             lineId: l.lineId,
             lineNum: l.lineNum,
@@ -1219,9 +1249,10 @@ const ManageJournals: React.FC = () => {
             description: l.description,
             enteredDr: l.enteredDr || 0,
             enteredCr: l.enteredCr || 0,
-            accountedDr: l.accountedDr || 0,
-            accountedCr: l.accountedCr || 0,
-            currency: l.currency || journal.currencyCode,
+            // accountedDr/Cr = entered × conversionRate
+            accountedDr: (l.enteredDr || 0) * convRate,
+            accountedCr: (l.enteredCr || 0) * convRate,
+            currency: l.currency || headerFields.currencyCode || journal.currencyCode,
           })),
         };
         const result = await updateJournal(journal.jeHeaderId, payload);
@@ -1237,34 +1268,139 @@ const ManageJournals: React.FC = () => {
       }
     };
 
-    // Post handler for this journal tab — calls PUT gl/journals/:jeBatchId/post
-    const handlePostJournal = async () => {
+    // Post handler — validates, confirms, posts, then stays on page in read-only mode
+    const handlePostJournal = () => {
       const totalDr = lines.reduce((s, l) => s + (l.enteredDr || 0), 0);
       const totalCr = lines.reduce((s, l) => s + (l.enteredCr || 0), 0);
-      if (Math.abs(totalDr - totalCr) > 0.01) {
-        message.error('Journal is out of balance. Debit must equal Credit before posting.');
-        return;
-      }
+
+      // ── Collect all validation errors ─────────────────────────────────────
+      const errors: string[] = [];
+
       if (lines.length === 0) {
-        message.error('Journal must have at least one line before posting.');
+        errors.push('Journal must have at least one line.');
+      }
+
+      if (Math.abs(totalDr - totalCr) > 0.01) {
+        errors.push(
+          `Journal is out of balance — Debit ${formatNumber(totalDr)} ≠ Credit ${formatNumber(totalCr)} ` +
+          `(difference: ${formatNumber(Math.abs(totalDr - totalCr))}).`
+        );
+      }
+
+      const blankAccounts = lines.filter(l => !l.account?.trim());
+      if (blankAccounts.length > 0) {
+        errors.push(`${blankAccounts.length} line(s) have no account code.`);
+      }
+
+      const zeroLines = lines.filter(l => (l.enteredDr || 0) === 0 && (l.enteredCr || 0) === 0);
+      if (zeroLines.length > 0) {
+        errors.push(`${zeroLines.length} line(s) have both Debit and Credit as zero.`);
+      }
+
+      const bothSides = lines.filter(l => (l.enteredDr || 0) > 0 && (l.enteredCr || 0) > 0);
+      if (bothSides.length > 0) {
+        errors.push(`${bothSides.length} line(s) have both Debit and Credit filled — each line should use only one side.`);
+      }
+
+      // Period open check — use periods already fetched for the search form
+      const journalPeriod = journal.periodName;
+      const periodRecord = periods.find(p => p.period_name_id === journalPeriod);
+      if (periodRecord && periodRecord.status !== 'Open') {
+        errors.push(`Accounting period "${journalPeriod}" is "${periodRecord.status}". Only Open periods can be posted.`);
+      }
+
+      if (!journal.jeBatchId) {
+        errors.push('No Batch ID found — cannot post.');
+      }
+
+      // ── Show errors and stop ───────────────────────────────────────────────
+      if (errors.length > 0) {
+        Modal.error({
+          title: 'Cannot Post Journal',
+          width: 540,
+          content: (
+            <ul style={{ paddingLeft: 20, margin: '8px 0 0', lineHeight: 1.8 }}>
+              {errors.map((e, i) => <li key={i}>{e}</li>)}
+            </ul>
+          ),
+        });
         return;
       }
-      const jeBatchId = journal.jeBatchId;
-      if (!jeBatchId) {
-        message.warning('No batch ID found for this journal');
-        return;
-      }
-      try {
-        const result = await postJournal(jeBatchId);
-        if (result.success) {
-          message.success('Journal posted successfully');
-          closeJournalTab(tabKey);
-        } else {
-          message.error(`Post failed: ${result.error || 'Unknown error'}`);
-        }
-      } catch (error) {
-        message.error('Failed to post journal');
-      }
+
+      // ── Confirmation dialog ────────────────────────────────────────────────
+      Modal.confirm({
+        title: 'Post Journal Batch',
+        width: 480,
+        okText: 'Post',
+        cancelText: 'Cancel',
+        okButtonProps: { style: { background: REDWOOD.warning, borderColor: REDWOOD.warning } },
+        content: (
+          <div style={{ fontSize: 13 }}>
+            <p style={{ margin: '8px 0' }}>Are you sure you want to post this journal batch?</p>
+            <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 8 }}>
+              <tbody>
+                {[
+                  ['Batch', journal.batchName],
+                  ['Journal', journal.journalName],
+                  ['Period', journal.periodName],
+                  ['Currency', headerFields.currencyCode || journal.currencyCode],
+                  ['Total Debit', formatNumber(totalDr)],
+                  ['Total Credit', formatNumber(totalCr)],
+                  ['Lines', String(lines.length)],
+                ].map(([label, val]) => (
+                  <tr key={label}>
+                    <td style={{ color: '#888', paddingBottom: 4, width: '40%' }}>{label}</td>
+                    <td style={{ fontWeight: 500, paddingBottom: 4 }}>{val}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p style={{ marginTop: 12, color: REDWOOD.warning, fontSize: 12 }}>
+              ⚠ Posted journals cannot be modified.
+            </p>
+          </div>
+        ),
+        onOk: async () => {
+          setTabPosting(prev => ({ ...prev, [tabKey]: true }));
+          try {
+            const result = await postJournal(journal.jeBatchId);
+            if (result.success) {
+              message.success('Journal posted successfully');
+              // Stay on page — flip tab journal to read-only Posted state
+              setOpenJournalTabs(prev =>
+                prev.map(tab =>
+                  tab.key === tabKey
+                    ? { ...tab, journal: { ...tab.journal, statusMeaning: 'Posted', status: 'P' } }
+                    : tab
+                )
+              );
+              // Clear editable state — panel becomes read-only
+              setEditableLines(prev => { const n = { ...prev }; delete n[tabKey]; return n; });
+              setEditableJournalFields(prev => { const n = { ...prev }; delete n[tabKey]; return n; });
+              setSelectedLinesByTab(prev => { const n = { ...prev }; delete n[tabKey]; return n; });
+            } else {
+              // Server returned validation errors or system error
+              const serverErrors: string[] = result.errors || [];
+              Modal.error({
+                title: 'Post Failed',
+                width: 540,
+                content: serverErrors.length > 0 ? (
+                  <div>
+                    <p style={{ marginBottom: 8 }}>{result.error}</p>
+                    <ul style={{ paddingLeft: 20, margin: 0, lineHeight: 1.8 }}>
+                      {serverErrors.map((e, i) => <li key={i}>{e}</li>)}
+                    </ul>
+                  </div>
+                ) : (result.error || 'An unexpected error occurred.'),
+              });
+            }
+          } catch {
+            Modal.error({ title: 'Post Failed', content: 'Could not connect to server.' });
+          } finally {
+            setTabPosting(prev => ({ ...prev, [tabKey]: false }));
+          }
+        },
+      });
     };
 
     // Render expanded tabs (full details)
@@ -1311,25 +1447,88 @@ const ManageJournals: React.FC = () => {
                       <Col span={14}><Text style={{ fontSize: 13 }}>{journal.effectiveDate}</Text></Col>
 
                       <Col span={10}><Text type="secondary" style={{ fontSize: 13 }}><span style={{ color: REDWOOD.primary }}>*</span> Category</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 13 }}>{journal.category}</Text></Col>
+                      <Col span={14}>
+                        {isEditable ? (
+                          <Select
+                            size="small"
+                            style={{ width: '100%', fontSize: 13 }}
+                            value={headerFields.category}
+                            onChange={v => handleHeaderFieldChange('category', v)}
+                            showSearch
+                            allowClear
+                            placeholder="Select category"
+                          >
+                            {journalCategories.map(c => <Option key={c} value={c}>{c}</Option>)}
+                          </Select>
+                        ) : (
+                          <Text style={{ fontSize: 13 }}>{journal.category}</Text>
+                        )}
+                      </Col>
                     </Row>
                   </Col>
                   <Col span={12}>
                     <Row gutter={[6, 8]}>
                       <Col span={10}><Text type="secondary" style={{ fontSize: 13 }}>Currency</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 13 }}>{journal.currencyCode} {getCurrencyName(journal.currencyCode)}</Text></Col>
+                      <Col span={14}>
+                        {isEditable ? (
+                          <Input
+                            size="small"
+                            style={{ fontSize: 13, textTransform: 'uppercase' }}
+                            value={headerFields.currencyCode}
+                            onChange={e => handleHeaderFieldChange('currencyCode', e.target.value.toUpperCase())}
+                            placeholder="e.g. AED"
+                            maxLength={15}
+                          />
+                        ) : (
+                          <Text style={{ fontSize: 13 }}>{journal.currencyCode} {getCurrencyName(journal.currencyCode)}</Text>
+                        )}
+                      </Col>
 
                       <Col span={10}><Text type="secondary" style={{ fontSize: 13 }}>Conversion Date</Text></Col>
                       <Col span={14}><Text style={{ fontSize: 13 }}>{journal.effectiveDate}</Text></Col>
 
                       <Col span={10}><Text type="secondary" style={{ fontSize: 13 }}>Conversion Rate Type</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 13 }}>User</Text></Col>
+                      <Col span={14}>
+                        {isEditable ? (
+                          <Select
+                            size="small"
+                            style={{ width: '100%', fontSize: 13 }}
+                            value={headerFields.conversionRateType}
+                            onChange={v => handleHeaderFieldChange('conversionRateType', v)}
+                          >
+                            {['User', 'Spot', 'Corporate', 'Fixed', 'Period Average'].map(t => (
+                              <Option key={t} value={t}>{t}</Option>
+                            ))}
+                          </Select>
+                        ) : (
+                          <Text style={{ fontSize: 13 }}>User</Text>
+                        )}
+                      </Col>
 
                       <Col span={10}><Text type="secondary" style={{ fontSize: 13 }}>Conversion Rate</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 13 }}>1</Text></Col>
+                      <Col span={14}>
+                        {isEditable ? (
+                          <InputNumber
+                            size="small"
+                            style={{ width: '100%', fontSize: 13 }}
+                            value={headerFields.conversionRate}
+                            min={0}
+                            precision={6}
+                            onChange={v => handleHeaderFieldChange('conversionRate', v || 1)}
+                          />
+                        ) : (
+                          <Text style={{ fontSize: 13 }}>1</Text>
+                        )}
+                      </Col>
 
                       <Col span={10}><Text type="secondary" style={{ fontSize: 13 }}>Inverse Rate</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 13 }}>1</Text></Col>
+                      <Col span={14}>
+                        <Text style={{ fontSize: 13 }}>
+                          {isEditable && headerFields.conversionRate > 0
+                            ? (1 / headerFields.conversionRate).toFixed(6)
+                            : '1'}
+                        </Text>
+                      </Col>
 
                       <Col span={10}><Text type="secondary" style={{ fontSize: 13 }}>Reference</Text></Col>
                       <Col span={14}><Text style={{ fontSize: 13 }}>{journal.externalReference || '-'}</Text></Col>
@@ -1483,25 +1682,88 @@ const ManageJournals: React.FC = () => {
                       <Col span={16}><Text style={{ fontSize: 13 }}>{journal.effectiveDate}</Text></Col>
 
                       <Col span={8}><Text type="secondary" style={{ fontSize: 13 }}><span style={{ color: REDWOOD.primary }}>*</span> Category</Text></Col>
-                      <Col span={16}><Text style={{ fontSize: 13 }}>{journal.category}</Text></Col>
+                      <Col span={16}>
+                        {isEditable ? (
+                          <Select
+                            size="small"
+                            style={{ width: '100%', fontSize: 13 }}
+                            value={headerFields.category}
+                            onChange={v => handleHeaderFieldChange('category', v)}
+                            showSearch
+                            allowClear
+                            placeholder="Select category"
+                          >
+                            {journalCategories.map(c => <Option key={c} value={c}>{c}</Option>)}
+                          </Select>
+                        ) : (
+                          <Text style={{ fontSize: 13 }}>{journal.category}</Text>
+                        )}
+                      </Col>
                     </Row>
                   </Col>
                   <Col span={12}>
                     <Row gutter={[6, 5]}>
                       <Col span={10}><Text type="secondary" style={{ fontSize: 13 }}>Currency</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 13 }}>{journal.currencyCode} {getCurrencyName(journal.currencyCode)}</Text></Col>
+                      <Col span={14}>
+                        {isEditable ? (
+                          <Input
+                            size="small"
+                            style={{ fontSize: 13, textTransform: 'uppercase' }}
+                            value={headerFields.currencyCode}
+                            onChange={e => handleHeaderFieldChange('currencyCode', e.target.value.toUpperCase())}
+                            placeholder="e.g. AED"
+                            maxLength={15}
+                          />
+                        ) : (
+                          <Text style={{ fontSize: 13 }}>{journal.currencyCode} {getCurrencyName(journal.currencyCode)}</Text>
+                        )}
+                      </Col>
 
                       <Col span={10}><Text type="secondary" style={{ fontSize: 13 }}>Conversion Date</Text></Col>
                       <Col span={14}><Text style={{ fontSize: 13 }}>{journal.effectiveDate}</Text></Col>
 
                       <Col span={10}><Text type="secondary" style={{ fontSize: 13 }}>Conversion Rate Type</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 13 }}>User</Text></Col>
+                      <Col span={14}>
+                        {isEditable ? (
+                          <Select
+                            size="small"
+                            style={{ width: '100%', fontSize: 13 }}
+                            value={headerFields.conversionRateType}
+                            onChange={v => handleHeaderFieldChange('conversionRateType', v)}
+                          >
+                            {['User', 'Spot', 'Corporate', 'Fixed', 'Period Average'].map(t => (
+                              <Option key={t} value={t}>{t}</Option>
+                            ))}
+                          </Select>
+                        ) : (
+                          <Text style={{ fontSize: 13 }}>User</Text>
+                        )}
+                      </Col>
 
                       <Col span={10}><Text type="secondary" style={{ fontSize: 13 }}>Conversion Rate</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 13 }}>1</Text></Col>
+                      <Col span={14}>
+                        {isEditable ? (
+                          <InputNumber
+                            size="small"
+                            style={{ width: '100%', fontSize: 13 }}
+                            value={headerFields.conversionRate}
+                            min={0}
+                            precision={6}
+                            onChange={v => handleHeaderFieldChange('conversionRate', v || 1)}
+                          />
+                        ) : (
+                          <Text style={{ fontSize: 13 }}>1</Text>
+                        )}
+                      </Col>
 
                       <Col span={10}><Text type="secondary" style={{ fontSize: 13 }}>Inverse Rate</Text></Col>
-                      <Col span={14}><Text style={{ fontSize: 13 }}>1</Text></Col>
+                      <Col span={14}>
+                        <Text style={{ fontSize: 13 }}>
+                          {isEditable && headerFields.conversionRate > 0
+                            ? (1 / headerFields.conversionRate).toFixed(6)
+                            : '1'}
+                        </Text>
+                      </Col>
                     </Row>
                   </Col>
                 </Row>
@@ -1668,6 +1930,7 @@ const ManageJournals: React.FC = () => {
                     size="small"
                     style={{ fontSize: 10, background: REDWOOD.warning, color: '#fff', borderColor: REDWOOD.warning }}
                     onClick={handlePostJournal}
+                    loading={isPosting}
                     icon={<CheckOutlined />}
                   >
                     Post
