@@ -28,6 +28,17 @@ const { Content } = Layout;
 const { Text, Title } = Typography;
 const { Option } = Select;
 
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const fmtDate = (v: string | null | undefined): string => {
+  if (!v) return '—';
+  // Already formatted (e.g. '2005-Sep-26') — return as-is
+  if (/^\d{4}-[A-Za-z]{3}-\d{2}$/.test(v)) return v;
+  // ISO timestamp — extract date part only
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return v;
+  return `${d.getUTCFullYear()}-${MONTHS[d.getUTCMonth()]}-${String(d.getUTCDate()).padStart(2, '0')}`;
+};
+
 // Oracle Redwood palette
 const REDWOOD = {
   primary:    '#C74634',
@@ -189,7 +200,8 @@ const ManageAssets: React.FC = () => {
       ellipsis: true,
     },
     {
-      title: 'Date in Service', dataIndex: 'datePlacedInService', key: 'datePlacedInService', width: 130,
+      title: 'Date in Service', dataIndex: 'datePlacedInService', key: 'datePlacedInService', width: 120,
+      render: (v: string) => fmtDate(v),
     },
     {
       title: 'Cost', dataIndex: 'cost', key: 'cost', width: 120, align: 'right' as const,
