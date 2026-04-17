@@ -79,15 +79,30 @@ const AssetTabContent: React.FC<{
 }> = ({ tab, onSubTabChange }) => {
   const { asset, detail, books, deprn, distributions, invoices, transactions, loading, activeSubTab } = tab;
 
+  // Depreciation filter state
+  const [deprnFY,     setDeprnFY]     = useState('');
+  const [deprnPeriod, setDeprnPeriod] = useState('');
+
+  // Derived unique option lists for filter dropdowns
+  const fyOptions     = Array.from(new Set(deprn.map(r => r.fiscalYear).filter(Boolean))).sort((a, b) => b.localeCompare(a));
+  const periodOptions = Array.from(new Set(deprn.map(r => r.periodName).filter(Boolean))).sort((a, b) => b.localeCompare(a));
+
+  const filteredDeprn = deprn.filter(r =>
+    (!deprnFY     || r.fiscalYear  === deprnFY) &&
+    (!deprnPeriod || r.periodName  === deprnPeriod)
+  );
+
   const deprnColumns: ColumnsType<DeprnRecord> = [
-    { title: 'Period',                    dataIndex: 'periodName',                 key: 'periodName',    width: 100 },
-    { title: 'Total Amount',              dataIndex: 'totalDeprnAmount',           key: 'totalAmt',      align: 'right' as const, render: (v) => formatCurrency(v) },
-    { title: 'Depreciation Amount',       dataIndex: 'deprnAmount',                key: 'deprnAmt',      align: 'right' as const, render: (v) => formatCurrency(v) },
-    { title: 'Deprn Adjustment',          dataIndex: 'deprnAdjustmentAmount',      key: 'deprnAdj',      align: 'right' as const, render: (v) => formatCurrency(v) },
-    { title: 'Bonus Deprn Amount',        dataIndex: 'bonusDeprnAmount',           key: 'bonusAmt',      align: 'right' as const, render: (v) => formatCurrency(v) },
-    { title: 'Bonus Deprn Adjustment',    dataIndex: 'bonusDeprnAdjustmentAmount', key: 'bonusAdj',      align: 'right' as const, render: (v) => formatCurrency(v) },
-    { title: 'YTD Deprn',                 dataIndex: 'ytdDeprn',                   key: 'ytdDeprn',      align: 'right' as const, render: (v) => formatCurrency(v) },
-    { title: 'Deprn Reserve',             dataIndex: 'deprnReserve',               key: 'deprnReserve',  align: 'right' as const, render: (v) => formatCurrency(v) },
+    { title: 'FY',          dataIndex: 'fiscalYear',               key: 'fiscalYear',  width: 60  },
+    { title: 'Period Num',  dataIndex: 'periodNum',                key: 'periodNum',   width: 80  },
+    { title: 'Period',      dataIndex: 'periodName',               key: 'periodName',  width: 110 },
+    { title: 'Total Amount',            dataIndex: 'totalDeprnAmount',           key: 'totalAmt',  align: 'right' as const, render: (v) => formatCurrency(v) },
+    { title: 'Depreciation Amount',     dataIndex: 'deprnAmount',                key: 'deprnAmt',  align: 'right' as const, render: (v) => formatCurrency(v) },
+    { title: 'Deprn Adjustment',        dataIndex: 'deprnAdjustmentAmount',      key: 'deprnAdj',  align: 'right' as const, render: (v) => formatCurrency(v) },
+    { title: 'Bonus Deprn Amount',      dataIndex: 'bonusDeprnAmount',           key: 'bonusAmt',  align: 'right' as const, render: (v) => formatCurrency(v) },
+    { title: 'Bonus Deprn Adjustment',  dataIndex: 'bonusDeprnAdjustmentAmount', key: 'bonusAdj',  align: 'right' as const, render: (v) => formatCurrency(v) },
+    { title: 'YTD Deprn',               dataIndex: 'ytdDeprn',                   key: 'ytdDeprn',  align: 'right' as const, render: (v) => formatCurrency(v) },
+    { title: 'Deprn Reserve',           dataIndex: 'deprnReserve',               key: 'reserve',   align: 'right' as const, render: (v) => formatCurrency(v) },
   ];
 
   const distColumns: ColumnsType<DistributionRecord> = [
@@ -218,13 +233,48 @@ const AssetTabContent: React.FC<{
       children: loading
         ? <Spin style={{ display: 'block', margin: '40px auto' }} />
         : (
-          <Table
-            dataSource={deprn} columns={deprnColumns}
-            rowKey={(r) => `${r.periodCounter}-${r.distributionId}`}
-            size="small" pagination={{ pageSize: 15, showSizeChanger: false }}
-            locale={{ emptyText: 'No depreciation records' }}
-            style={{ marginTop: 4 }}
-          />
+          <>
+            {/* Filter row */}
+            <div style={{
+              display: 'flex', gap: 10, alignItems: 'center',
+              padding: '8px 0 10px', flexWrap: 'wrap',
+            }}>
+              <Text type="secondary" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>Filter:</Text>
+              <Select
+                allowClear placeholder="Fiscal Year" size="small"
+                style={{ width: 120 }} value={deprnFY || undefined}
+                onChange={(v) => { setDeprnFY(v || ''); setDeprnPeriod(''); }}
+              >
+                {fyOptions.map(fy => <Option key={fy} value={fy}>{fy}</Option>)}
+              </Select>
+              <Select
+                allowClear placeholder="Period" size="small"
+                style={{ width: 140 }} value={deprnPeriod || undefined}
+                onChange={(v) => setDeprnPeriod(v || '')}
+              >
+                {(deprnFY
+                  ? Array.from(new Set(deprn.filter(r => r.fiscalYear === deprnFY).map(r => r.periodName).filter(Boolean))).sort((a,b) => b.localeCompare(a))
+                  : periodOptions
+                ).map(p => <Option key={p} value={p}>{p}</Option>)}
+              </Select>
+              {(deprnFY || deprnPeriod) && (
+                <Button size="small" onClick={() => { setDeprnFY(''); setDeprnPeriod(''); }}>
+                  Clear
+                </Button>
+              )}
+              <Text type="secondary" style={{ fontSize: 11, marginLeft: 'auto' }}>
+                {filteredDeprn.length} of {deprn.length} records
+              </Text>
+            </div>
+            <Table
+              dataSource={filteredDeprn} columns={deprnColumns}
+              rowKey={(r) => `${r.periodCounter}-${r.distributionId}`}
+              size="small"
+              scroll={{ x: 1000 }}
+              pagination={{ pageSize: 15, showSizeChanger: true, pageSizeOptions: ['15','25','50'] }}
+              locale={{ emptyText: 'No depreciation records' }}
+            />
+          </>
         ),
     },
     {
