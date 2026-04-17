@@ -25,8 +25,10 @@ END;
 -- ============================================================
 -- GET fa/assets
 -- Query params: assetNumber, description, category,
---               bookTypeCode, assetType, status,
+--               bookTypeCode, assetType, assetStatus,
 --               offset (default 0), limit (default 25)
+-- NOTE: use ?assetStatus=ACTIVE|RETIRED  (:status is reserved
+--       by ORDS for the HTTP response code)
 -- ============================================================
 BEGIN
     ORDS.DEFINE_HANDLER(
@@ -46,7 +48,7 @@ BEGIN
         p_category     => :category,
         p_book_type    => :bookTypeCode,
         p_asset_type   => :assetType,
-        p_status       => :status,
+        p_status       => :assetStatus,
         p_offset       => NVL(:offset, 0),
         p_limit        => NVL(:limit,  25),
         p_http_status  => v_status,
