@@ -3171,8 +3171,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         : computedTotal - invoicePayments
           .filter(p => p.status !== 'Voided')
           .reduce((sum, p) => sum + p.paidAmount, 0),
-      currency:      headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED',
-      paymentDate:   dayjs(),
+      currency:         headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED',
+      paymentDate:      dayjs(),
+      conversionRateType: form.getFieldValue('conversionRateType') || undefined,
+      conversionDate:     form.getFieldValue('conversionDate') || undefined,
+      conversionRate:     form.getFieldValue('conversionRate') || undefined,
     });
     setPayInFullOpen(true);
 
@@ -4559,6 +4562,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 return;
               }
               setHeaderValues(allValues);
+              if (changedValues.invoiceCurrency) {
+                form.validateFields(['conversionRateType', 'conversionDate', 'conversionRate']);
+              }
               // Copy invoice date to all lines' accounting date + derive multiperiod dates
               if (changedValues.invoiceDate) {
                 const formattedDate = changedValues.invoiceDate.format('DD-MMM-YYYY');
@@ -5055,6 +5061,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Conversion Rate Type</Text>}
                           name="conversionRateType"
                           style={{ marginBottom: 4 }}
+                          rules={[{ required: (headerValues.invoiceCurrency || 'AED') !== 'AED', message: 'Conversion rate type is required for foreign currency invoices' }]}
                         >
                           <Select placeholder="Select rate type" allowClear>
                             <Option value="User">User</Option>
@@ -5066,6 +5073,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Conversion Date</Text>}
                           name="conversionDate"
                           style={{ marginBottom: 4 }}
+                          rules={[{ required: (headerValues.invoiceCurrency || 'AED') !== 'AED', message: 'Conversion date is required for foreign currency invoices' }]}
                         >
                           <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
                         </Form.Item>
@@ -5073,6 +5081,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Conversion Rate</Text>}
                           name="conversionRate"
                           style={{ marginBottom: 4 }}
+                          rules={[{ required: (headerValues.invoiceCurrency || 'AED') !== 'AED', message: 'Conversion rate is required for foreign currency invoices' }]}
                         >
                           <InputNumber style={{ width: '100%' }} placeholder="0.000000" precision={6} min={0} />
                         </Form.Item>
@@ -7556,9 +7565,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 PaymentAmount: payBalance, PaymentBaseAmount: payBalance,
                 WithheldAmount: null, BankChargeAmount: null,
                 PaymentDate: payDate, AccountingDate: payDate,
-                MaturityDate: null, AnticipatedValueDate: null, StopDate: null,
+                MaturityDate: values.maturityDate ? values.maturityDate.format('YYYY-MM-DD') : null,
+                AnticipatedValueDate: null, StopDate: null,
                 VoidDate: null, VoidAccountingDate: null,
-                ConversionDate: payDate, ClearingDate: null,
+                ConversionDate: values.conversionDate ? values.conversionDate.format('YYYY-MM-DD') : payDate,
+                ClearingDate: null,
                 ClearingConversionDate: null, ClearingValueDate: null, MaturityConversionDate: null,
                 CreationDate: sysdate, LastUpdateDate: sysdate,
                 LocalCreatedDate: sysdate, LocalUpdatedDate: sysdate,
@@ -7566,8 +7577,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 PaymentStatus: 'Negotiable', PaymentType: 'Quick',
                 PaymentMode: null, PaymentFunction: 'Supplier Payments',
                 PaymentCurrency: currency, PaymentBaseCurrency: currency,
-                ConversionRate: headerValues.conversionRate || null,
-                ConversionRateType: headerValues.conversionRateType || null,
+                ConversionRate: values.conversionRate || headerValues.conversionRate || null,
+                ConversionRateType: values.conversionRateType || headerValues.conversionRateType || null,
                 CrossCurrencyRateType: 'Corporate',
                 ClearingAmount: null, ClearingLedgerAmount: null,
                 ClearingConversionRate: null, ClearingConversionRateType: null,
@@ -7831,6 +7842,46 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               ))}
             </Select>
           </Form.Item>
+
+          {/* Row 4: Conversion fields + Maturity Date (shown for all, required for foreign currency) */}
+          <Row gutter={12}>
+            <Col span={6}>
+              <Form.Item
+                label="Conversion Rate Type"
+                name="conversionRateType"
+                rules={[{ required: (headerValues.invoiceCurrency || 'AED') !== 'AED', message: 'Required for foreign currency' }]}
+              >
+                <Select placeholder="Select type" allowClear>
+                  <Select.Option value="User">User</Select.Option>
+                  <Select.Option value="Corporate">Corporate</Select.Option>
+                  <Select.Option value="Spot">Spot</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item
+                label="Conversion Date"
+                name="conversionDate"
+                rules={[{ required: (headerValues.invoiceCurrency || 'AED') !== 'AED', message: 'Required for foreign currency' }]}
+              >
+                <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item
+                label="Conversion Rate"
+                name="conversionRate"
+                rules={[{ required: (headerValues.invoiceCurrency || 'AED') !== 'AED', message: 'Required for foreign currency' }]}
+              >
+                <InputNumber style={{ width: '100%' }} placeholder="0.000000" precision={6} min={0} />
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item label="Maturity Date" name="maturityDate">
+                <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
+              </Form.Item>
+            </Col>
+          </Row>
 
           <Form.Item label="Description" name="description">
             <Input.TextArea rows={2} placeholder="Optional payment description" />
