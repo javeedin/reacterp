@@ -198,20 +198,69 @@ export interface CategoryBookRecord {
   bookTypeCode: string;
   bookTypeName: string;
   bookClass: string;
-  // CCIDs
+  // Standard CCIDs
   assetCostAccountCcid: string;
   assetClearingAccountCcid: string;
   deprnExpenseAccountCcid: string;
   reserveAccountCcid: string;
   bonusExpenseAccountCcid: string;
   bonusReserveAccountCcid: string;
-  // Resolved account strings (Co-Lob-Dept-Account-...)
+  // CIP CCIDs
+  cipCostAccountCcid?: string;
+  cipClearingAccountCcid?: string;
+  // Unplanned + impairment CCIDs
+  unplannedDeprnExpCcid?: string;
+  impairmentExpenseAcctCcid?: string;
+  impairmentReserveAcctCcid?: string;
+  // Revaluation CCIDs
+  revalReserveAcctCcid?: string;
+  revalAmortAcctCcid?: string;
+  revalLossExpAcctCcid?: string;
+  // Resolved account strings (standard)
   assetCostAccount: string;
   assetClearingAccount: string;
   deprnExpenseAccount: string;
   reserveAccount: string;
   bonusExpenseAccount: string;
   bonusReserveAccount: string;
+  // Resolved account strings (CIP)
+  cipCostAccount?: string;
+  cipClearingAccount?: string;
+  // Resolved account strings (unplanned + impairment)
+  unplannedDeprnExpAccount?: string;
+  impairmentExpenseAccount?: string;
+  impairmentReserveAccount?: string;
+  // Resolved account strings (revaluation)
+  revalReserveAccount?: string;
+  revalAmortAccount?: string;
+  revalLossExpAccount?: string;
+}
+
+export interface CategoryBookDefaultRecord {
+  defaultsId?: string;
+  bookTypeCode?: string;
+  fromDate?: string;
+  toDate?: string;
+  depreciateFlag?: string;
+  deprnMethodCode?: string;
+  lifeInMonths?: string;
+  prorateConventionCode?: string;
+  retirementTypeCode?: string;
+  percentSalvageValue?: string;
+  deprnLimitType?: string;
+  bonusRule?: string;
+  ceilingName?: string;
+  capitalGainsThreshYears?: string;
+  capitalGainsThreshMonths?: string;
+  priceIndexName?: string;
+  massPropertyFlag?: string;
+  subcompRuleType?: string;
+  minYearsLife?: string;
+  minMonthsLife?: string;
+  recognizeGainLoss?: string;
+  trackingMethod?: string;
+  terminalGainLoss?: string;
+  groupAssetNumber?: string;
 }
 
 export interface CategorySearchParams {
@@ -380,6 +429,11 @@ export const getCategoryDetail = async (categoryId: string): Promise<{ success: 
 
 export const getCategoryBooks = async (categoryId: string): Promise<{ success: boolean; items: CategoryBookRecord[]; error?: string }> => {
   try { return await fetchFromApex(`fa/categories/${categoryId}/books`); }
+  catch (e) { return { success: false, items: [], error: e instanceof Error ? e.message : 'Unknown error' }; }
+};
+
+export const getCategoryBookDefaults = async (categoryId: string): Promise<{ success: boolean; items: CategoryBookDefaultRecord[]; error?: string }> => {
+  try { return await fetchFromApex(`fa/categories/${categoryId}/book-defaults`); }
   catch (e) { return { success: false, items: [], error: e instanceof Error ? e.message : 'Unknown error' }; }
 };
 
