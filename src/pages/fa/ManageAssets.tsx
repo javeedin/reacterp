@@ -277,62 +277,57 @@ const AssetTabContent: React.FC<{
         size="small"
         style={{
           borderRadius: 10, marginBottom: 16,
-          border: `1px solid ${FA_COLOR}30`,
-          background: `linear-gradient(135deg, ${FA_COLOR}08 0%, #fff 100%)`,
+          border: `1px solid ${REDWOOD.neutral200}`,
+          background: REDWOOD.surface,
+          boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
         }}
-        bodyStyle={{ padding: '12px 16px' }}
+        bodyStyle={{ padding: '14px 20px' }}
       >
-        <Row gutter={[16, 8]} align="middle">
-          <Col xs={24} sm={12} md={8}>
-            <Space align="start">
-              <div style={{
-                width: 40, height: 40, borderRadius: 8,
-                background: `linear-gradient(135deg, ${FA_COLOR} 0%, #9E5C00 100%)`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-              }}>
-                <DatabaseOutlined style={{ fontSize: 20, color: '#fff' }} />
-              </div>
-              <div>
-                <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Asset</Text>
-                <Text strong style={{ fontSize: 13, color: REDWOOD.neutral900 }}>
-                  {asset.assetId}
-                </Text>
-                <div style={{ marginTop: 2 }}>{statusTag(asset.retiredFlag)}</div>
-              </div>
-            </Space>
-          </Col>
-          <Col xs={12} sm={6} md={4}>
+        {/* Top row: identity + status */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+          <div>
+            <Text type="secondary" style={{ fontSize: 11 }}>Asset</Text>
+            {' '}
+            <Text strong style={{ fontSize: 15, color: FA_COLOR }}>{asset.assetId}</Text>
+          </div>
+          <span style={{ color: REDWOOD.neutral300 }}>|</span>
+          <Text style={{ fontSize: 13, color: REDWOOD.neutral900 }}>{asset.description}</Text>
+          <div style={{ marginLeft: 'auto' }}>{statusTag(asset.retiredFlag)}</div>
+        </div>
+        {/* Bottom row: key metrics */}
+        <Row gutter={[12, 0]} align="middle">
+          <Col xs={12} sm={8} md={4}>
             <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Book</Text>
             <Text strong style={{ fontSize: 12 }}>{asset.bookTypeCode || '—'}</Text>
           </Col>
-          <Col xs={12} sm={6} md={4}>
+          <Col xs={12} sm={8} md={4}>
             <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Date in Service</Text>
             <Text strong style={{ fontSize: 12 }}>{fmtDate(asset.datePlacedInService)}</Text>
           </Col>
-          <Col xs={8} sm={8} md={4}>
+          <Col xs={8} sm={8} md={5}>
             <div style={{
-              textAlign: 'center', padding: '8px 6px', borderRadius: 8,
-              background: `${FA_COLOR}12`, border: `1px solid ${FA_COLOR}30`,
+              padding: '6px 12px', borderRadius: 6,
+              background: `${FA_COLOR}10`, border: `1px solid ${FA_COLOR}25`,
             }}>
               <Text type="secondary" style={{ fontSize: 10, display: 'block' }}>Cost</Text>
               <Text strong style={{ color: FA_COLOR, fontSize: 13 }}>{formatCurrency(asset.cost)}</Text>
             </div>
           </Col>
-          <Col xs={8} sm={8} md={4}>
+          <Col xs={8} sm={8} md={5}>
             <div style={{
-              textAlign: 'center', padding: '8px 6px', borderRadius: 8,
-              background: `${REDWOOD.info}12`, border: `1px solid ${REDWOOD.info}30`,
+              padding: '6px 12px', borderRadius: 6,
+              background: `${REDWOOD.info}10`, border: `1px solid ${REDWOOD.info}25`,
             }}>
               <Text type="secondary" style={{ fontSize: 10, display: 'block' }}>NBV</Text>
               <Text strong style={{ color: REDWOOD.info, fontSize: 13 }}>{formatCurrency(asset.nbv)}</Text>
             </div>
           </Col>
-          <Col xs={8} sm={8} md={4}>
+          <Col xs={8} sm={8} md={5}>
             <div style={{
-              textAlign: 'center', padding: '8px 6px', borderRadius: 8,
-              background: `${REDWOOD.warning}12`, border: `1px solid ${REDWOOD.warning}30`,
+              padding: '6px 12px', borderRadius: 6,
+              background: `${REDWOOD.warning}10`, border: `1px solid ${REDWOOD.warning}25`,
             }}>
-              <Text type="secondary" style={{ fontSize: 10, display: 'block' }}>Reserve</Text>
+              <Text type="secondary" style={{ fontSize: 10, display: 'block' }}>Deprn Reserve</Text>
               <Text strong style={{ color: REDWOOD.warning, fontSize: 13 }}>{formatCurrency(asset.deprnReserve)}</Text>
             </div>
           </Col>
