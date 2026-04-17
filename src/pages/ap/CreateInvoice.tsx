@@ -2826,8 +2826,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     return lines.reduce((sum, l) => sum + (l.amount || 0), 0);
   }, [lines]);
 
-  // Tax total based on dynamic tax rate
-  const taxTotal = useMemo(() => linesTotal * (taxRate / 100), [linesTotal, taxRate]);
+  // Tax total: sum per-line taxAmount (already computed in updateLine)
+  const taxTotal = useMemo(() => lines.reduce((sum, l) => sum + (l.taxAmount || 0), 0), [lines]);
 
   // Tally validation: header amount must equal lines total + tax
   const headerInvoiceAmount = headerValues.invoiceAmount || 0;
