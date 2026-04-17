@@ -279,6 +279,11 @@ const ManageJournals: React.FC = () => {
   const [openJournalTabs, setOpenJournalTabs] = useState<OpenJournalTab[]>([]);
   const [createJournalTabOpen, setCreateJournalTabOpen] = useState(false);
 
+  // API indicator — tracks the last URL called during search
+  const [lastSearchUrl, setLastSearchUrl] = useState<string | null>(null);
+  const [lastSearchStatus, setLastSearchStatus] = useState<number | null>(null);
+  const [apiUrlCopied, setApiUrlCopied] = useState(false);
+
   // Journal panel expanded/collapsed state per tab (for Show More/Show Less)
   const [journalExpandedState, setJournalExpandedState] = useState<Record<string, boolean>>({});
   const [activeDetailTabState, setActiveDetailTabState] = useState<Record<string, string>>({});
@@ -665,16 +670,35 @@ const ManageJournals: React.FC = () => {
 
         const url = `${API_BASE_URL}/headers?${params.toString()}`;
 
+        // Always expose the first-page URL in the API indicator
+        if (pageCount === 1) {
+          setLastSearchUrl(url);
+          setLastSearchStatus(null);
+        }
+
         addDebugLog('request', `Page ${pageCount} - GET Request`, { url, offset, limit: PAGE_SIZE });
 
         const response = await fetch(url);
         const responseText = await response.text();
+
+        setLastSearchStatus(response.status);
 
         addDebugLog('response', `Page ${pageCount} - Raw response`, {
           responseLength: responseText.length,
           first500Chars: responseText.substring(0, 500),
           last200Chars: responseText.substring(responseText.length - 200),
         });
+
+        // Guard: ORDS returns an HTML error page when the endpoint doesn't exist
+        if (!response.ok || responseText.trimStart().startsWith('<')) {
+          addDebugLog('error', `Page ${pageCount} - Non-JSON response (HTTP ${response.status})`, {
+            url,
+            first300: responseText.substring(0, 300),
+          });
+          message.error(`API error (HTTP ${response.status}): endpoint returned HTML instead of JSON. Check the ORDS route exists.`);
+          hasMore = false;
+          break;
+        }
 
         const data: ApiResponse = JSON.parse(responseText);
 
@@ -2727,6 +2751,50 @@ const ManageJournals: React.FC = () => {
                 <Button size="small" disabled={selectedRowKeys.length === 0} style={{ fontSize: 11 }}>
                   Reverse Batch
                 </Button>
+                {lastSearchUrl && (
+                  <Tooltip
+                    title={
+                      <div>
+                        <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 12 }}>
+                          Last API Request
+                          {lastSearchStatus && (
+                            <span style={{
+                              marginLeft: 8,
+                              color: lastSearchStatus >= 200 && lastSearchStatus < 300 ? '#52c41a' : '#ff4d4f',
+                              fontSize: 11,
+                            }}>
+                              HTTP {lastSearchStatus}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', maxWidth: 460 }}>
+                          {lastSearchUrl}
+                        </div>
+                        <div style={{ marginTop: 6, color: '#aaa', fontSize: 10 }}>Click to copy full URL</div>
+                      </div>
+                    }
+                    overlayStyle={{ maxWidth: 500 }}
+                    placement="bottomRight"
+                  >
+                    <Button
+                      size="small"
+                      icon={<ApiOutlined />}
+                      style={{
+                        fontSize: 11,
+                        borderColor: lastSearchStatus && lastSearchStatus >= 400 ? REDWOOD.error : REDWOOD.info,
+                        color: lastSearchStatus && lastSearchStatus >= 400 ? REDWOOD.error : REDWOOD.info,
+                      }}
+                      onClick={() => {
+                        navigator.clipboard.writeText(lastSearchUrl);
+                        setApiUrlCopied(true);
+                        message.success('API URL copied to clipboard');
+                        setTimeout(() => setApiUrlCopied(false), 2000);
+                      }}
+                    >
+                      {apiUrlCopied ? <><CheckOutlined /> Copied</> : 'API'}
+                    </Button>
+                  </Tooltip>
+                )}
               </Space>
             </div>
 
