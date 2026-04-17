@@ -322,8 +322,9 @@ export const fetchFromApex = async (
 
     const response = await fetch(url);
     const text = await response.text();
-    if (!response.ok || text.trimStart().startsWith('<')) {
-      const errMsg = `HTTP ${response.status}: endpoint returned non-JSON (HTML error page). Check the ORDS route exists.`;
+    // Only block HTML error pages (e.g. ORDS 404); valid JSON error responses pass through
+    if (text.trimStart().startsWith('<')) {
+      const errMsg = `HTTP ${response.status}: endpoint returned HTML (not JSON). Check the ORDS route exists.`;
       log?.('error', `GET Error: ${errMsg}`);
       throw new Error(errMsg);
     }

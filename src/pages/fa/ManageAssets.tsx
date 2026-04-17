@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Layout, Card, Form, Input, Button, Space, Typography, Table, Tag,
   Row, Col, Breadcrumb, Tooltip, Select, Drawer, Tabs, Descriptions,
-  Spin, Empty, Badge, Divider, message,
+  Spin, Empty, Badge, Divider, message, Modal,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -63,9 +63,11 @@ const ManageAssets: React.FC = () => {
   const [pageSize,   setPageSize]   = useState(25);
   const [searched,   setSearched]   = useState(false);
 
-  // API indicator
-  const [lastApiUrl,    setLastApiUrl]    = useState<string | null>(null);
-  const [apiUrlCopied,  setApiUrlCopied]  = useState(false);
+  // API indicator / modal
+  const [lastApiUrl,      setLastApiUrl]      = useState<string | null>(null);
+  const [apiResponse,     setApiResponse]     = useState<string>('');
+  const [apiModalVisible, setApiModalVisible] = useState(false);
+  const [apiUrlCopied,    setApiUrlCopied]    = useState(false);
 
   // Drawer / detail state
   const [drawerOpen,    setDrawerOpen]    = useState(false);
@@ -106,6 +108,7 @@ const ManageAssets: React.FC = () => {
         offset:       (pg - 1) * ps,
         limit:        ps,
       });
+      setApiResponse(JSON.stringify(res, null, 2));
       if (res.error) {
         message.error(res.error);
       } else {
@@ -467,33 +470,14 @@ const ManageAssets: React.FC = () => {
                 : <Text strong>Assets</Text>
             }
             extra={lastApiUrl ? (
-              <Tooltip
-                title={
-                  <div>
-                    <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 12 }}>GET Endpoint</div>
-                    <div style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', maxWidth: 420 }}>
-                      {lastApiUrl}
-                    </div>
-                    <div style={{ color: '#bbb', fontSize: 10, marginTop: 6 }}>Click to copy full URL</div>
-                  </div>
-                }
-                overlayStyle={{ maxWidth: 480 }}
-                placement="bottomRight"
+              <Button
+                size="small"
+                icon={<ApiOutlined />}
+                style={{ color: FA_COLOR, borderColor: FA_COLOR, fontSize: 11 }}
+                onClick={() => setApiModalVisible(true)}
               >
-                <Button
-                  size="small"
-                  icon={apiUrlCopied ? <CheckOutlined /> : <ApiOutlined />}
-                  style={{ color: FA_COLOR, borderColor: FA_COLOR, fontSize: 11 }}
-                  onClick={() => {
-                    navigator.clipboard.writeText(lastApiUrl);
-                    setApiUrlCopied(true);
-                    message.success('URL copied to clipboard');
-                    setTimeout(() => setApiUrlCopied(false), 2000);
-                  }}
-                >
-                  {apiUrlCopied ? 'Copied' : 'API'}
-                </Button>
-              </Tooltip>
+                API
+              </Button>
             ) : undefined}
           >
             <Table<AssetRecord>
@@ -579,6 +563,54 @@ const ManageAssets: React.FC = () => {
             </>
           )}
         </Drawer>
+      {/* API Response Modal */}
+      <Modal
+        open={apiModalVisible}
+        onCancel={() => setApiModalVisible(false)}
+        footer={[
+          <Button
+            key="copy"
+            size="small"
+            icon={apiUrlCopied ? <CheckOutlined /> : <ApiOutlined />}
+            onClick={() => {
+              navigator.clipboard.writeText(lastApiUrl || '');
+              setApiUrlCopied(true);
+              setTimeout(() => setApiUrlCopied(false), 2000);
+            }}
+          >
+            {apiUrlCopied ? 'Copied' : 'Copy URL'}
+          </Button>,
+          <Button key="close" size="small" type="primary" onClick={() => setApiModalVisible(false)}>
+            Close
+          </Button>,
+        ]}
+        width={720}
+        title={<Space><ApiOutlined style={{ color: FA_COLOR }} /><span>Last API Call — fa/assets</span></Space>}
+        styles={{ body: { padding: '12px 16px' } }}
+      >
+        <div style={{ marginBottom: 10 }}>
+          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Endpoint (GET)</Text>
+          <div style={{
+            fontFamily: 'monospace', fontSize: 11,
+            background: '#f5f5f5', border: '1px solid #e0e0e0',
+            borderRadius: 4, padding: '6px 10px',
+            wordBreak: 'break-all',
+          }}>
+            {lastApiUrl}
+          </div>
+        </div>
+        <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Response</Text>
+        <pre style={{
+          background: '#1a1a1a', color: '#e8e8e8',
+          padding: '10px 14px', borderRadius: 6,
+          fontSize: 11, fontFamily: 'monospace',
+          maxHeight: 460, overflow: 'auto',
+          margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+        }}>
+          {apiResponse}
+        </pre>
+      </Modal>
+
       </Content>
 
       <Autopilot />
