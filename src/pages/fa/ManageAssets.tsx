@@ -1,16 +1,17 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import * as XLSX from 'xlsx';
 import {
   Layout, Card, Form, Input, Button, Space, Typography, Table, Tag,
   Row, Col, Breadcrumb, Tooltip, Select, Tabs, Descriptions,
   Spin, Empty, Badge, message, Modal,
 } from 'antd';
-import type { ColumnsType } from 'antd/es/table';
+import type { ColumnsType, TableProps } from 'antd/es/table';
 import {
   HomeOutlined, SearchOutlined, ReloadOutlined, PlusOutlined,
   FileTextOutlined, LineChartOutlined,
   EnvironmentOutlined, DatabaseOutlined, InfoCircleOutlined,
   BookOutlined, HistoryOutlined, BarcodeOutlined, ApiOutlined, CheckOutlined,
-  FilterOutlined,
+  FilterOutlined, DownloadOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import Autopilot from '../../components/Autopilot';
@@ -91,6 +92,33 @@ const AssetTabContent: React.FC<{
     (!deprnFY     || r.fiscalYear  === deprnFY) &&
     (!deprnPeriod || r.periodName  === deprnPeriod)
   );
+
+  const exportDeprnToExcel = () => {
+    const data = filteredDeprn.map(r => ({
+      'FY':                         r.fiscalYear,
+      'Period Num':                 r.periodNum,
+      'Period':                     r.periodName,
+      'Total Amount':               parseFloat(r.totalDeprnAmount) || 0,
+      'Depreciation Amount':        parseFloat(r.deprnAmount) || 0,
+      'Deprn Adjustment':           parseFloat(r.deprnAdjustmentAmount) || 0,
+      'Bonus Deprn Amount':         parseFloat(r.bonusDeprnAmount) || 0,
+      'Bonus Deprn Adjustment':     parseFloat(r.bonusDeprnAdjustmentAmount) || 0,
+      'YTD Deprn':                  parseFloat(r.ytdDeprn) || 0,
+      'Deprn Reserve':              parseFloat(r.deprnReserve) || 0,
+      'Cost':                       parseFloat(r.cost) || 0,
+      'NBV':                        parseFloat(r.nbv) || 0,
+      'Reval Reserve':              parseFloat(r.revalReserve) || 0,
+      'Impairment Amount':          parseFloat(r.impairmentAmount) || 0,
+      'Backlog Deprn Reserve':      parseFloat(r.backlogDeprnReserve) || 0,
+      'Distribution ID':            r.distributionId,
+      'Source Code':                r.deprnSourceCode,
+      'Run Date':                   r.deprnRunDate,
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Depreciation');
+    XLSX.writeFile(wb, `deprn_asset${asset.assetId}_${new Date().toISOString().slice(0,10)}.xlsx`);
+  };
 
   const deprnColumns: ColumnsType<DeprnRecord> = [
     { title: 'FY',          dataIndex: 'fiscalYear',               key: 'fiscalYear',  width: 60  },
@@ -262,9 +290,18 @@ const AssetTabContent: React.FC<{
                   Clear
                 </Button>
               )}
-              <Text type="secondary" style={{ fontSize: 11, marginLeft: 'auto' }}>
-                {filteredDeprn.length} of {deprn.length} records
-              </Text>
+              <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                  {filteredDeprn.length} of {deprn.length} records
+                </Text>
+                {filteredDeprn.length > 0 && (
+                  <Tooltip title="Export to Excel">
+                    <Button size="small" icon={<DownloadOutlined />} onClick={exportDeprnToExcel}>
+                      Excel
+                    </Button>
+                  </Tooltip>
+                )}
+              </div>
             </div>
             <Table
               dataSource={filteredDeprn} columns={deprnColumns}
@@ -525,38 +562,90 @@ const ManageAssets: React.FC = () => {
     setRows([]);
     setTotalCount(0);
     setSearched(false);
+    setGridSearch('');
+  };
+
+  // Grid quick-search (client-side filter over current page)
+  const [gridSearch, setGridSearch] = useState('');
+  const displayedRows = gridSearch
+    ? rows.filter(r => {
+        const q = gridSearch.toLowerCase();
+        return (
+          (r.description   || '').toLowerCase().includes(q) ||
+          (r.assetNumber   || '').toLowerCase().includes(q) ||
+          (r.assetId       || '').toLowerCase().includes(q) ||
+          (r.bookTypeCode  || '').toLowerCase().includes(q) ||
+          (r.assetType     || '').toLowerCase().includes(q)
+        );
+      })
+    : rows;
+
+  // Export assets grid to Excel
+  const exportAssetsToExcel = () => {
+    const data = displayedRows.map(r => ({
+      'Asset Number':      r.assetNumber || r.assetId,
+      'Description':       r.description,
+      'Asset Type':        assetTypeLabel(r.assetType || ''),
+      'Book':              r.bookTypeCode,
+      'Date in Service':   fmtDate(r.datePlacedInService),
+      'Cost':              parseFloat(r.cost) || 0,
+      'Original Cost':     parseFloat(r.originalCost) || 0,
+      'Adjusted Cost':     parseFloat(r.adjustedCost) || 0,
+      'Salvage Value':     parseFloat(r.salvageValue) || 0,
+      'Deprn Reserve':     parseFloat(r.deprnReserve) || 0,
+      'NBV':               parseFloat(r.nbv) || 0,
+      'Depreciate':        r.depreciateFlag,
+      'Capitalize':        r.capitalizeFlag,
+      'Status':            assetStatusLabel(r.retiredFlag),
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Assets');
+    XLSX.writeFile(wb, `assets_${new Date().toISOString().slice(0,10)}.xlsx`);
   };
 
   // ── Table columns ─────────────────────────────────────────────────────────────
   const columns: ColumnsType<AssetRecord> = [
     {
       title: 'Asset Number', dataIndex: 'assetNumber', key: 'assetNumber', width: 130,
+      sorter: (a, b) => (a.assetNumber || a.assetId).localeCompare(b.assetNumber || b.assetId),
       render: (v, record) => (
         <Button type="link" style={{ padding: 0, fontWeight: 600 }} onClick={(e) => { e.stopPropagation(); openAssetTab(record); }}>
           {v || record.assetId}
         </Button>
       ),
     },
-    { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
+    {
+      title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true,
+      sorter: (a, b) => (a.description || '').localeCompare(b.description || ''),
+    },
     {
       title: 'Type', dataIndex: 'assetType', key: 'assetType', width: 110,
+      sorter: (a, b) => (a.assetType || '').localeCompare(b.assetType || ''),
       render: (v) => <Tag style={{ borderRadius: 4, fontSize: 11 }}>{assetTypeLabel(v)}</Tag>,
     },
-    { title: 'Book', dataIndex: 'bookTypeCode', key: 'bookTypeCode', width: 150, ellipsis: true },
     {
-      title: 'Date in Service', dataIndex: 'datePlacedInService', key: 'datePlacedInService', width: 120,
+      title: 'Book', dataIndex: 'bookTypeCode', key: 'bookTypeCode', width: 150, ellipsis: true,
+      sorter: (a, b) => (a.bookTypeCode || '').localeCompare(b.bookTypeCode || ''),
+    },
+    {
+      title: 'Date in Service', dataIndex: 'datePlacedInService', key: 'datePlacedInService', width: 130,
+      sorter: (a, b) => (a.datePlacedInService || '').localeCompare(b.datePlacedInService || ''),
       render: (v: string) => fmtDate(v),
     },
     {
-      title: 'Cost', dataIndex: 'cost', key: 'cost', width: 120, align: 'right' as const,
+      title: 'Cost', dataIndex: 'cost', key: 'cost', width: 130, align: 'right' as const,
+      sorter: (a, b) => (parseFloat(a.cost) || 0) - (parseFloat(b.cost) || 0),
       render: (v) => formatCurrency(v),
     },
     {
-      title: 'NBV', dataIndex: 'nbv', key: 'nbv', width: 120, align: 'right' as const,
+      title: 'NBV', dataIndex: 'nbv', key: 'nbv', width: 130, align: 'right' as const,
+      sorter: (a, b) => (parseFloat(a.nbv) || 0) - (parseFloat(b.nbv) || 0),
       render: (v) => formatCurrency(v),
     },
     {
       title: 'Status', dataIndex: 'retiredFlag', key: 'status', width: 90,
+      sorter: (a, b) => (a.retiredFlag || '').localeCompare(b.retiredFlag || ''),
       render: (v) => statusTag(v),
     },
     {
@@ -643,29 +732,47 @@ const ManageAssets: React.FC = () => {
             ? <Text strong>Results <Badge count={totalCount} style={{ backgroundColor: FA_COLOR }} /></Text>
             : <Text strong>Assets</Text>
         }
-        extra={lastApiUrl ? (
-          <Button
-            size="small" icon={<ApiOutlined />}
-            style={{ color: FA_COLOR, borderColor: FA_COLOR, fontSize: 11 }}
-            onClick={() => setApiModalVisible(true)}
-          >
-            API
-          </Button>
-        ) : undefined}
+        extra={
+          <Space size="small">
+            <Input
+              size="small" allowClear placeholder="Search in grid…"
+              prefix={<SearchOutlined style={{ color: REDWOOD.neutral300 }} />}
+              style={{ width: 180 }}
+              value={gridSearch}
+              onChange={(e) => setGridSearch(e.target.value)}
+            />
+            {rows.length > 0 && (
+              <Tooltip title="Export to Excel">
+                <Button size="small" icon={<DownloadOutlined />} onClick={exportAssetsToExcel}>
+                  Excel
+                </Button>
+              </Tooltip>
+            )}
+            {lastApiUrl && (
+              <Button
+                size="small" icon={<ApiOutlined />}
+                style={{ color: FA_COLOR, borderColor: FA_COLOR, fontSize: 11 }}
+                onClick={() => setApiModalVisible(true)}
+              >
+                API
+              </Button>
+            )}
+          </Space>
+        }
       >
         <Table<AssetRecord>
-          dataSource={rows}
+          dataSource={displayedRows}
           columns={columns}
           rowKey="assetId"
           loading={loading}
           size="small"
-          scroll={{ x: 1000 }}
+          scroll={{ x: 1100 }}
           locale={{ emptyText: searched ? 'No assets found' : 'Enter search criteria above' }}
           onRow={(record) => ({ onClick: () => openAssetTab(record), style: { cursor: 'pointer' } })}
           pagination={{
             current: page, pageSize, total: totalCount,
             showSizeChanger: true,
-            showTotal: (t) => `${t} assets`,
+            showTotal: (t) => `${t} total${gridSearch ? ` (${displayedRows.length} shown)` : ''}`,
             pageSizeOptions: ['25', '50', '100'],
             onChange: (p, ps) => { setPageSize(ps); runSearch(p, ps); },
           }}
