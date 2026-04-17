@@ -319,20 +319,28 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         p_result      OUT CLOB
     ) IS
         CURSOR c_deprn IS
-            SELECT ds.ASSET_ID, ds.BOOK_TYPE_CODE, ds.PERIOD_COUNTER,
+            SELECT dd.ASSET_ID, dd.BOOK_TYPE_CODE, dd.PERIOD_COUNTER,
                    dp.PERIOD_NAME, dp.FISCAL_YEAR, dp.PERIOD_NUM,
-                   ds.DEPRN_RUN_DATE, ds.DEPRN_AMOUNT, ds.YTD_DEPRN,
-                   ds.DEPRN_RESERVE, ds.ADJUSTED_COST,
-                   ds.BONUS_DEPRN_AMOUNT, ds.BONUS_YTD_DEPRN, ds.BONUS_DEPRN_RESERVE,
-                   ds.REVAL_RESERVE, ds.IMPAIRMENT_AMOUNT, ds.PRIOR_FY_EXPENSE,
-                   ds.DEPRN_SOURCE_CODE,
-                   NVL(ds.ADJUSTED_COST, 0) - NVL(ds.DEPRN_RESERVE, 0) AS NBV
-            FROM   RR_FA_DEPRN_SUMMARY ds
+                   dd.DISTRIBUTION_ID, dd.DEPRN_RUN_ID, dd.DEPRN_SOURCE_CODE,
+                   dd.DEPRN_RUN_DATE,
+                   dd.DEPRN_AMOUNT, dd.YTD_DEPRN, dd.DEPRN_RESERVE,
+                   dd.DEPRN_ADJUSTMENT_AMOUNT,
+                   dd.COST,
+                   NVL(dd.COST, 0) - NVL(dd.DEPRN_RESERVE, 0)   AS NBV,
+                   NVL(dd.DEPRN_AMOUNT, 0) + NVL(dd.DEPRN_ADJUSTMENT_AMOUNT, 0) AS TOTAL_DEPRN_AMOUNT,
+                   dd.BONUS_DEPRN_AMOUNT, dd.BONUS_YTD_DEPRN, dd.BONUS_DEPRN_RESERVE,
+                   dd.BONUS_DEPRN_ADJUSTMENT_AMOUNT,
+                   dd.REVAL_RESERVE, dd.REVAL_DEPRN_EXPENSE, dd.YTD_REVAL_DEPRN_EXPENSE,
+                   dd.REVAL_AMORTIZATION, dd.REVAL_AMORT_BALANCE,
+                   dd.IMPAIRMENT_AMOUNT, dd.IMPAIRMENT_RESERVE, dd.YTD_IMPAIRMENT,
+                   dd.CAPITAL_ADJUSTMENT, dd.GENERAL_FUND,
+                   dd.BACKLOG_DEPRN_RESERVE, dd.YTD_BACKLOG_DEPRN
+            FROM   RR_FA_DEPRN_DETAIL dd
             LEFT JOIN RR_FA_DEPRN_PERIODS dp
-                   ON dp.BOOK_TYPE_CODE  = ds.BOOK_TYPE_CODE
-                  AND dp.PERIOD_COUNTER  = ds.PERIOD_COUNTER
-            WHERE  ds.ASSET_ID = p_asset_id
-            ORDER BY ds.PERIOD_COUNTER DESC;
+                   ON dp.BOOK_TYPE_CODE = dd.BOOK_TYPE_CODE
+                  AND dp.PERIOD_COUNTER = dd.PERIOD_COUNTER
+            WHERE  dd.ASSET_ID = p_asset_id
+            ORDER BY TO_NUMBER(dd.PERIOD_COUNTER) DESC, dd.DISTRIBUTION_ID;
     BEGIN
         APEX_JSON.INITIALIZE_CLOB_OUTPUT;
         APEX_JSON.OPEN_OBJECT;
@@ -342,25 +350,39 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
 
         FOR r IN c_deprn LOOP
             APEX_JSON.OPEN_OBJECT;
-            APEX_JSON.WRITE('assetId',           r.ASSET_ID);
-            APEX_JSON.WRITE('bookTypeCode',      r.BOOK_TYPE_CODE);
-            APEX_JSON.WRITE('periodCounter',     r.PERIOD_COUNTER);
-            APEX_JSON.WRITE('periodName',        r.PERIOD_NAME);
-            APEX_JSON.WRITE('fiscalYear',        r.FISCAL_YEAR);
-            APEX_JSON.WRITE('periodNum',         r.PERIOD_NUM);
-            APEX_JSON.WRITE('deprnRunDate',      r.DEPRN_RUN_DATE);
-            APEX_JSON.WRITE('deprnAmount',       r.DEPRN_AMOUNT);
-            APEX_JSON.WRITE('ytdDeprn',          r.YTD_DEPRN);
-            APEX_JSON.WRITE('deprnReserve',      r.DEPRN_RESERVE);
-            APEX_JSON.WRITE('adjustedCost',      r.ADJUSTED_COST);
-            APEX_JSON.WRITE('bonusDeprnAmount',  r.BONUS_DEPRN_AMOUNT);
-            APEX_JSON.WRITE('bonusYtdDeprn',     r.BONUS_YTD_DEPRN);
-            APEX_JSON.WRITE('bonusDeprnReserve', r.BONUS_DEPRN_RESERVE);
-            APEX_JSON.WRITE('revalReserve',      r.REVAL_RESERVE);
-            APEX_JSON.WRITE('impairmentAmount',  r.IMPAIRMENT_AMOUNT);
-            APEX_JSON.WRITE('priorFyExpense',    r.PRIOR_FY_EXPENSE);
-            APEX_JSON.WRITE('deprnSourceCode',   r.DEPRN_SOURCE_CODE);
-            APEX_JSON.WRITE('nbv',               r.NBV);
+            APEX_JSON.WRITE('assetId',                     r.ASSET_ID);
+            APEX_JSON.WRITE('bookTypeCode',                r.BOOK_TYPE_CODE);
+            APEX_JSON.WRITE('periodCounter',               r.PERIOD_COUNTER);
+            APEX_JSON.WRITE('periodName',                  r.PERIOD_NAME);
+            APEX_JSON.WRITE('fiscalYear',                  r.FISCAL_YEAR);
+            APEX_JSON.WRITE('periodNum',                   r.PERIOD_NUM);
+            APEX_JSON.WRITE('distributionId',              r.DISTRIBUTION_ID);
+            APEX_JSON.WRITE('deprnRunId',                  r.DEPRN_RUN_ID);
+            APEX_JSON.WRITE('deprnSourceCode',             r.DEPRN_SOURCE_CODE);
+            APEX_JSON.WRITE('deprnRunDate',                r.DEPRN_RUN_DATE);
+            APEX_JSON.WRITE('deprnAmount',                 r.DEPRN_AMOUNT);
+            APEX_JSON.WRITE('ytdDeprn',                    r.YTD_DEPRN);
+            APEX_JSON.WRITE('deprnReserve',                r.DEPRN_RESERVE);
+            APEX_JSON.WRITE('deprnAdjustmentAmount',       r.DEPRN_ADJUSTMENT_AMOUNT);
+            APEX_JSON.WRITE('totalDeprnAmount',            r.TOTAL_DEPRN_AMOUNT);
+            APEX_JSON.WRITE('cost',                        r.COST);
+            APEX_JSON.WRITE('nbv',                         r.NBV);
+            APEX_JSON.WRITE('bonusDeprnAmount',            r.BONUS_DEPRN_AMOUNT);
+            APEX_JSON.WRITE('bonusYtdDeprn',               r.BONUS_YTD_DEPRN);
+            APEX_JSON.WRITE('bonusDeprnReserve',           r.BONUS_DEPRN_RESERVE);
+            APEX_JSON.WRITE('bonusDeprnAdjustmentAmount',  r.BONUS_DEPRN_ADJUSTMENT_AMOUNT);
+            APEX_JSON.WRITE('revalReserve',                r.REVAL_RESERVE);
+            APEX_JSON.WRITE('revalDeprnExpense',           r.REVAL_DEPRN_EXPENSE);
+            APEX_JSON.WRITE('ytdRevalDeprnExpense',        r.YTD_REVAL_DEPRN_EXPENSE);
+            APEX_JSON.WRITE('revalAmortization',           r.REVAL_AMORTIZATION);
+            APEX_JSON.WRITE('revalAmortBalance',           r.REVAL_AMORT_BALANCE);
+            APEX_JSON.WRITE('impairmentAmount',            r.IMPAIRMENT_AMOUNT);
+            APEX_JSON.WRITE('impairmentReserve',           r.IMPAIRMENT_RESERVE);
+            APEX_JSON.WRITE('ytdImpairment',               r.YTD_IMPAIRMENT);
+            APEX_JSON.WRITE('capitalAdjustment',           r.CAPITAL_ADJUSTMENT);
+            APEX_JSON.WRITE('generalFund',                 r.GENERAL_FUND);
+            APEX_JSON.WRITE('backlogDeprnReserve',         r.BACKLOG_DEPRN_RESERVE);
+            APEX_JSON.WRITE('ytdBacklogDeprn',             r.YTD_BACKLOG_DEPRN);
             APEX_JSON.CLOSE_OBJECT;
         END LOOP;
 

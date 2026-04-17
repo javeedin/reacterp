@@ -99,17 +99,33 @@ export interface DeprnRecord {
   periodName: string;
   fiscalYear: string;
   periodNum: string;
+  distributionId: string;
+  deprnRunId: string;
+  deprnSourceCode: string;
   deprnRunDate: string;
   deprnAmount: string;
   ytdDeprn: string;
   deprnReserve: string;
-  adjustedCost: string;
-  bonusDeprnAmount: string;
-  revalReserve: string;
-  impairmentAmount: string;
-  priorFyExpense: string;
-  deprnSourceCode: string;
+  deprnAdjustmentAmount: string;
+  totalDeprnAmount: string;
+  cost: string;
   nbv: string;
+  bonusDeprnAmount: string;
+  bonusYtdDeprn: string;
+  bonusDeprnReserve: string;
+  bonusDeprnAdjustmentAmount: string;
+  revalReserve: string;
+  revalDeprnExpense: string;
+  ytdRevalDeprnExpense: string;
+  revalAmortization: string;
+  revalAmortBalance: string;
+  impairmentAmount: string;
+  impairmentReserve: string;
+  ytdImpairment: string;
+  capitalAdjustment: string;
+  generalFund: string;
+  backlogDeprnReserve: string;
+  ytdBacklogDeprn: string;
 }
 
 export interface DistributionRecord {

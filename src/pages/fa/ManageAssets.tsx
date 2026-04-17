@@ -80,14 +80,14 @@ const AssetTabContent: React.FC<{
   const { asset, detail, books, deprn, distributions, invoices, transactions, loading, activeSubTab } = tab;
 
   const deprnColumns: ColumnsType<DeprnRecord> = [
-    { title: 'Period',    dataIndex: 'periodName',    key: 'periodName',   width: 110 },
-    { title: 'FY',        dataIndex: 'fiscalYear',    key: 'fiscalYear',   width: 60  },
-    { title: 'Book',      dataIndex: 'bookTypeCode',  key: 'bookTypeCode', ellipsis: true },
-    { title: 'Deprn Amt', dataIndex: 'deprnAmount',   key: 'deprnAmount',  align: 'right' as const, render: formatCurrency },
-    { title: 'YTD',       dataIndex: 'ytdDeprn',      key: 'ytdDeprn',     align: 'right' as const, render: formatCurrency },
-    { title: 'Reserve',   dataIndex: 'deprnReserve',  key: 'deprnReserve', align: 'right' as const, render: formatCurrency },
-    { title: 'NBV',       dataIndex: 'nbv',           key: 'nbv',          align: 'right' as const, render: formatCurrency },
-    { title: 'Run Date',  dataIndex: 'deprnRunDate',  key: 'deprnRunDate', width: 110, render: fmtDate },
+    { title: 'Period',                       dataIndex: 'periodName',               key: 'periodName',               width: 100 },
+    { title: 'Total Amount',                 dataIndex: 'totalDeprnAmount',         key: 'totalDeprnAmount',         align: 'right' as const, render: formatCurrency },
+    { title: 'Depreciation Amount',          dataIndex: 'deprnAmount',              key: 'deprnAmount',              align: 'right' as const, render: formatCurrency },
+    { title: 'Deprn Adjustment',             dataIndex: 'deprnAdjustmentAmount',    key: 'deprnAdjustmentAmount',    align: 'right' as const, render: formatCurrency },
+    { title: 'Bonus Deprn Amount',           dataIndex: 'bonusDeprnAmount',         key: 'bonusDeprnAmount',         align: 'right' as const, render: formatCurrency },
+    { title: 'Bonus Deprn Adjustment',       dataIndex: 'bonusDeprnAdjustmentAmount', key: 'bonusDeprnAdj',          align: 'right' as const, render: formatCurrency },
+    { title: 'YTD Deprn',                    dataIndex: 'ytdDeprn',                 key: 'ytdDeprn',                 align: 'right' as const, render: formatCurrency },
+    { title: 'Deprn Reserve',                dataIndex: 'deprnReserve',             key: 'deprnReserve',             align: 'right' as const, render: formatCurrency },
   ];
 
   const distColumns: ColumnsType<DistributionRecord> = [
@@ -219,7 +219,8 @@ const AssetTabContent: React.FC<{
         ? <Spin style={{ display: 'block', margin: '40px auto' }} />
         : (
           <Table
-            dataSource={deprn} columns={deprnColumns} rowKey="periodCounter"
+            dataSource={deprn} columns={deprnColumns}
+            rowKey={(r) => `${r.periodCounter}-${r.distributionId}`}
             size="small" pagination={{ pageSize: 15, showSizeChanger: false }}
             locale={{ emptyText: 'No depreciation records' }}
             style={{ marginTop: 4 }}
