@@ -262,15 +262,15 @@ DECLARE
     BEGIN
         IF p_ccid IS NULL THEN RETURN NULL; END IF;
         BEGIN
-            SELECT NVL(buimercFinGlbCoaCo,'')         || '-' ||
-                   NVL(buimercFinGlbCoaLob,'')         || '-' ||
-                   NVL(buimercFinGlbCoaDepartment,'')  || '-' ||
-                   NVL(buimercFinGlbCoaAccount,'')     || '-' ||
-                   NVL(buimercFinGlbCoaSubAcc,'')      || '-' ||
-                   NVL(buimercFinGlbCoaAlys,'')        || '-' ||
-                   NVL(buimercFinGlbCoaIc,'')          || '-' ||
-                   NVL(buimercFinGlbCoaFut1,'')        || '-' ||
-                   NVL(buimercFinGlbCoaFut2,'')
+            SELECT NVL("buimercFinGlbCoaCo",'')        || '-' ||
+                   NVL("buimercFinGlbCoaLob",'')        || '-' ||
+                   NVL("buimercFinGlbCoaDepartment",'') || '-' ||
+                   NVL("buimercFinGlbCoaAccount",'')    || '-' ||
+                   NVL("buimercFinGlbCoaSubAcc",'')     || '-' ||
+                   NVL("buimercFinGlbCoaAlys",'')       || '-' ||
+                   NVL("buimercFinGlbCoaIc",'')         || '-' ||
+                   NVL("buimercFinGlbCoaFut1",'')       || '-' ||
+                   NVL("buimercFinGlbCoaFut2",'')
             INTO   v_str
             FROM   REERP_GL_CODE_COMBINATIONS
             WHERE  "_CODE_COMBINATION_ID" = TO_NUMBER(p_ccid);
