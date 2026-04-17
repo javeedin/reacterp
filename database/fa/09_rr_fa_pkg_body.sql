@@ -34,7 +34,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         v_offset    NUMBER         := NVL(p_offset, 0);
         v_limit     NUMBER         := NVL(p_limit, 25);
         v_total     NUMBER         := 0;
-        v_where     VARCHAR2(2000) := ' WHERE 1=1 ';
+        v_where     VARCHAR2(2000) := ' WHERE a.LANGUAGE = ''US'' ';
         v_sql_count VARCHAR2(4000);
         v_sql_main  VARCHAR2(4000);
 
@@ -87,7 +87,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         END IF;
 
         v_sql_count :=
-            'SELECT COUNT(*) FROM RR_FA_ADDITIONS a '
+            'SELECT COUNT(*) FROM RR_FA_ADDITIONS_TL a '
          || 'LEFT JOIN (SELECT * FROM RR_FA_BOOKS WHERE DATE_INEFFECTIVE IS NULL) b'
          || '  ON a.ASSET_ID = b.ASSET_ID '
          || v_where;
@@ -104,7 +104,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
          || '       NVL(ds.DEPRN_RESERVE, 0) AS DEPRN_RESERVE,'
          || '       NVL(b.COST,0) - NVL(ds.DEPRN_RESERVE,0) AS NBV,'
          || '       a.CREATION_DATE, a.LAST_UPDATE_DATE'
-         || '  FROM RR_FA_ADDITIONS a'
+         || '  FROM RR_FA_ADDITIONS_TL a'
          || '  LEFT JOIN (SELECT * FROM RR_FA_BOOKS WHERE DATE_INEFFECTIVE IS NULL) b'
          || '         ON a.ASSET_ID = b.ASSET_ID'
          || '  LEFT JOIN ('
@@ -183,32 +183,31 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         p_http_status OUT NUMBER,
         p_result      OUT CLOB
     ) IS
-        v_asset_id         RR_FA_ADDITIONS.ASSET_ID%TYPE;
-        v_asset_number     RR_FA_ADDITIONS.ASSET_NUMBER%TYPE;
-        v_asset_type       RR_FA_ADDITIONS.ASSET_TYPE%TYPE;
-        v_tag_number       RR_FA_ADDITIONS.TAG_NUMBER%TYPE;
-        v_description      RR_FA_ADDITIONS.DESCRIPTION%TYPE;
-        v_category_id      RR_FA_ADDITIONS.ASSET_CATEGORY_ID%TYPE;
-        v_parent_asset_id  RR_FA_ADDITIONS.PARENT_ASSET_ID%TYPE;
-        v_manufacturer     RR_FA_ADDITIONS.MANUFACTURER_NAME%TYPE;
-        v_serial_number    RR_FA_ADDITIONS.SERIAL_NUMBER%TYPE;
-        v_model_number     RR_FA_ADDITIONS.MODEL_NUMBER%TYPE;
-        v_in_use_flag      RR_FA_ADDITIONS.IN_USE_FLAG%TYPE;
-        v_owned_leased     RR_FA_ADDITIONS.OWNED_LEASED%TYPE;
-        v_new_used         RR_FA_ADDITIONS.NEW_USED%TYPE;
-        v_units            RR_FA_ADDITIONS.UNITS%TYPE;
-        v_current_units    RR_FA_ADDITIONS.CURRENT_UNITS%TYPE;
-        v_inventorial      RR_FA_ADDITIONS.INVENTORIAL%TYPE;
-        v_capitalized_flag RR_FA_ADDITIONS.CAPITALIZED_FLAG%TYPE;
-        v_retired_flag     RR_FA_ADDITIONS.RETIRED_FLAG%TYPE;
-        v_pending_flag     RR_FA_ADDITIONS.PENDING_FLAG%TYPE;
-        v_property_type    RR_FA_ADDITIONS.PROPERTY_TYPE_CODE%TYPE;
-        v_feeder_system    RR_FA_ADDITIONS.FEEDER_SYSTEM_NAME%TYPE;
+        v_asset_id         RR_FA_ADDITIONS_TL.ASSET_ID%TYPE;
+        v_asset_number     RR_FA_ADDITIONS_TL.ASSET_NUMBER%TYPE;
+        v_asset_type       RR_FA_ADDITIONS_TL.ASSET_TYPE%TYPE;
+        v_tag_number       RR_FA_ADDITIONS_TL.TAG_NUMBER%TYPE;
+        v_description      RR_FA_ADDITIONS_TL.DESCRIPTION%TYPE;
+        v_category_id      RR_FA_ADDITIONS_TL.ASSET_CATEGORY_ID%TYPE;
+        v_parent_asset_id  RR_FA_ADDITIONS_TL.PARENT_ASSET_ID%TYPE;
+        v_manufacturer     RR_FA_ADDITIONS_TL.MANUFACTURER_NAME%TYPE;
+        v_serial_number    RR_FA_ADDITIONS_TL.SERIAL_NUMBER%TYPE;
+        v_model_number     RR_FA_ADDITIONS_TL.MODEL_NUMBER%TYPE;
+        v_in_use_flag      RR_FA_ADDITIONS_TL.IN_USE_FLAG%TYPE;
+        v_owned_leased     RR_FA_ADDITIONS_TL.OWNED_LEASED%TYPE;
+        v_new_used         RR_FA_ADDITIONS_TL.NEW_USED%TYPE;
+        v_units            RR_FA_ADDITIONS_TL.UNITS%TYPE;
+        v_current_units    RR_FA_ADDITIONS_TL.CURRENT_UNITS%TYPE;
+        v_inventorial      RR_FA_ADDITIONS_TL.INVENTORIAL%TYPE;
+        v_capitalized_flag RR_FA_ADDITIONS_TL.CAPITALIZED_FLAG%TYPE;
+        v_retired_flag     RR_FA_ADDITIONS_TL.RETIRED_FLAG%TYPE;
+        v_pending_flag     RR_FA_ADDITIONS_TL.PENDING_FLAG%TYPE;
+        v_property_type    RR_FA_ADDITIONS_TL.PROPERTY_TYPE_CODE%TYPE;
+        v_feeder_system    RR_FA_ADDITIONS_TL.FEEDER_SYSTEM_NAME%TYPE;
         v_creation_date    VARCHAR2(100);
-        v_created_by       RR_FA_ADDITIONS.CREATED_BY%TYPE;
+        v_created_by       RR_FA_ADDITIONS_TL.CREATED_BY%TYPE;
         v_last_update_date VARCHAR2(100);
-        v_last_updated_by  RR_FA_ADDITIONS.LAST_UPDATED_BY%TYPE;
-        v_tl_description   RR_FA_ADDITIONS_TL.DESCRIPTION%TYPE;
+        v_last_updated_by  RR_FA_ADDITIONS_TL.LAST_UPDATED_BY%TYPE;
     BEGIN
         SELECT a.ASSET_ID, a.ASSET_NUMBER, a.ASSET_TYPE, a.TAG_NUMBER, a.DESCRIPTION,
                a.ASSET_CATEGORY_ID, a.PARENT_ASSET_ID, a.MANUFACTURER_NAME, a.SERIAL_NUMBER,
@@ -216,19 +215,16 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
                a.UNITS, a.CURRENT_UNITS, a.INVENTORIAL, a.CAPITALIZED_FLAG,
                a.RETIRED_FLAG, a.PENDING_FLAG, a.PROPERTY_TYPE_CODE, a.FEEDER_SYSTEM_NAME,
                TO_CHAR(a.CREATION_DATE,   'YYYY-MM-DD'), a.CREATED_BY,
-               TO_CHAR(a.LAST_UPDATE_DATE,'YYYY-MM-DD'), a.LAST_UPDATED_BY,
-               NVL(tl.DESCRIPTION, a.DESCRIPTION)
+               TO_CHAR(a.LAST_UPDATE_DATE,'YYYY-MM-DD'), a.LAST_UPDATED_BY
         INTO   v_asset_id, v_asset_number, v_asset_type, v_tag_number, v_description,
                v_category_id, v_parent_asset_id, v_manufacturer, v_serial_number,
                v_model_number, v_in_use_flag, v_owned_leased, v_new_used,
                v_units, v_current_units, v_inventorial, v_capitalized_flag,
                v_retired_flag, v_pending_flag, v_property_type, v_feeder_system,
-               v_creation_date, v_created_by, v_last_update_date, v_last_updated_by,
-               v_tl_description
-        FROM   RR_FA_ADDITIONS a
-        LEFT JOIN RR_FA_ADDITIONS_TL tl
-               ON tl.ASSET_ID = a.ASSET_ID AND tl.LANGUAGE = 'US'
+               v_creation_date, v_created_by, v_last_update_date, v_last_updated_by
+        FROM   RR_FA_ADDITIONS_TL a
         WHERE  a.ASSET_ID = p_asset_id
+        AND    a.LANGUAGE = 'US'
         AND    ROWNUM = 1;
 
         APEX_JSON.INITIALIZE_CLOB_OUTPUT;
@@ -239,7 +235,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         APEX_JSON.WRITE('assetType',        v_asset_type);
         APEX_JSON.WRITE('tagNumber',        v_tag_number);
         APEX_JSON.WRITE('description',      v_description);
-        APEX_JSON.WRITE('tlDescription',    v_tl_description);
+        APEX_JSON.WRITE('tlDescription',    v_description);
         APEX_JSON.WRITE('categoryId',       v_category_id);
         APEX_JSON.WRITE('parentAssetId',    v_parent_asset_id);
         APEX_JSON.WRITE('manufacturerName', v_manufacturer);
