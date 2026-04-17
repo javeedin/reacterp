@@ -185,6 +185,51 @@ export interface CategoryRecord {
   enabledFlag: string;
 }
 
+export interface CategoryDetail extends CategoryRecord {
+  structureInstanceNumber: string;
+  creationDate: string;
+  createdBy: string;
+  lastUpdateDate: string;
+  lastUpdatedBy: string;
+}
+
+export interface CategoryBookRecord {
+  categoryBookId: string;
+  bookTypeCode: string;
+  bookTypeName: string;
+  bookClass: string;
+  // CCIDs
+  assetCostAccountCcid: string;
+  assetClearingAccountCcid: string;
+  deprnExpenseAccountCcid: string;
+  reserveAccountCcid: string;
+  bonusExpenseAccountCcid: string;
+  bonusReserveAccountCcid: string;
+  // Resolved account strings (Co-Lob-Dept-Account-...)
+  assetCostAccount: string;
+  assetClearingAccount: string;
+  deprnExpenseAccount: string;
+  reserveAccount: string;
+  bonusExpenseAccount: string;
+  bonusReserveAccount: string;
+}
+
+export interface CategorySearchParams {
+  description?: string;
+  categoryType?: string;
+  capitalizeFlag?: string;
+  ownedLeased?: string;
+  enabledFlag?: string;
+  offset?: number;
+  limit?: number;
+}
+
+export interface CategorySearchResponse {
+  totalCount: number;
+  items: CategoryRecord[];
+  error?: string;
+}
+
 export interface MethodRecord {
   methodId: string;
   methodCode: string;
@@ -311,6 +356,32 @@ export const getAssetTransactions = async (assetId: string): Promise<{ success: 
 };
 
 // ── Setup Lookups ─────────────────────────────────────────────────────────────
+
+export const searchCategories = async (
+  params: CategorySearchParams
+): Promise<CategorySearchResponse> => {
+  const q = new URLSearchParams();
+  if (params.description)   q.append('description',   params.description);
+  if (params.categoryType)  q.append('categoryType',  params.categoryType);
+  if (params.capitalizeFlag)q.append('capitalizeFlag',params.capitalizeFlag);
+  if (params.ownedLeased)   q.append('ownedLeased',   params.ownedLeased);
+  if (params.enabledFlag)   q.append('enabledFlag',   params.enabledFlag);
+  if (params.offset !== undefined) q.append('offset', String(params.offset));
+  if (params.limit  !== undefined) q.append('limit',  String(params.limit));
+  const qs = q.toString();
+  try { return await fetchFromApex(`fa/categories${qs ? '?' + qs : ''}`); }
+  catch (e) { return { totalCount: 0, items: [], error: e instanceof Error ? e.message : 'Unknown error' }; }
+};
+
+export const getCategoryDetail = async (categoryId: string): Promise<{ success: boolean; error?: string } & Partial<CategoryDetail>> => {
+  try { return await fetchFromApex(`fa/categories/${categoryId}`); }
+  catch (e) { return { success: false, error: e instanceof Error ? e.message : 'Unknown error' }; }
+};
+
+export const getCategoryBooks = async (categoryId: string): Promise<{ success: boolean; items: CategoryBookRecord[]; error?: string }> => {
+  try { return await fetchFromApex(`fa/categories/${categoryId}/books`); }
+  catch (e) { return { success: false, items: [], error: e instanceof Error ? e.message : 'Unknown error' }; }
+};
 
 export const getCategories = async (): Promise<CategoryRecord[]> => {
   try { const d = await fetchFromApex('fa/categories'); return d.items || []; }

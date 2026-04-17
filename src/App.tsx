@@ -17,7 +17,7 @@ const ManageAssets            = lazy(() => import('./pages/fa/ManageAssets'));
 const CreateAsset             = lazy(() => import('./pages/fa/CreateAsset'));
 const Depreciation            = lazy(() => import('./pages/fa/Depreciation'));
 const FARetirements           = lazy(() => import('./pages/fa/Retirements'));
-const FAAssetCategories       = lazy(() => import('./pages/fa/setup/AssetCategories'));
+const FAAssetCategories       = lazy(() => import('./pages/fa/setup/ManageCategories'));
 const FADeprnMethods          = lazy(() => import('./pages/fa/setup/DeprnMethods'));
 const FALocations             = lazy(() => import('./pages/fa/setup/Locations'));
 const FABookControls          = lazy(() => import('./pages/fa/setup/BookControls'));
