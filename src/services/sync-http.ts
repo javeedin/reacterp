@@ -313,7 +313,12 @@ export const fetchFromApex = async (
 ): Promise<any> => {
   try {
     const queryParams = new URLSearchParams(params);
-    const url = `${APEX_DB_CONFIG.baseUrl}/${endpoint}?${queryParams.toString()}`;
+    const qs = queryParams.toString();
+    // Avoid a trailing '?' when params is empty, and don't double up '?' if
+    // the endpoint already carries its own query string (e.g. 'fa/assets?offset=0')
+    const url = qs
+      ? `${APEX_DB_CONFIG.baseUrl}/${endpoint}${endpoint.includes('?') ? '&' : '?'}${qs}`
+      : `${APEX_DB_CONFIG.baseUrl}/${endpoint}`;
 
     if (verbose) {
       log?.('step', '──── [GET] APEX Database ────');
