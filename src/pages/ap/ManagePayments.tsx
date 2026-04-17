@@ -29,6 +29,7 @@ import {
   Drawer,
   Descriptions,
   Popover,
+  InputNumber,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -461,6 +462,7 @@ const ManagePayments: React.FC = () => {
   // Create Payment tab state
   const [createPaymentTabOpen, setCreatePaymentTabOpen] = useState(false);
   const [createPaymentActiveTab, setCreatePaymentActiveTab] = useState('paymentDetails');
+  const [createPaymentCurrency, setCreatePaymentCurrency] = useState<string>('AED');
 
   // Supplier lookup modal state
   const [supplierModalVisible, setSupplierModalVisible] = useState(false);
@@ -606,7 +608,8 @@ const ManagePayments: React.FC = () => {
       PaymentBaseAmount: totalAppliedAmount,
       WithheldAmount: null, BankChargeAmount: null,
       PaymentDate: payDate, AccountingDate: payDate,
-      MaturityDate: null, AnticipatedValueDate: null,
+      MaturityDate: v.maturityDate ? formDateStr(v.maturityDate) : null,
+      AnticipatedValueDate: null,
       StopDate: null, VoidDate: null, VoidAccountingDate: null,
       ConversionDate: v.conversionDate ? formDateStr(v.conversionDate) : payDate,
       ClearingDate: null, ClearingConversionDate: null,
@@ -821,10 +824,12 @@ const ManagePayments: React.FC = () => {
         createPaymentForm.resetFields();
         setInvoicesToPay([]);
         setSelectedBuLegalEntityName('');
+        setCreatePaymentCurrency('AED');
       } else {
         createPaymentForm.resetFields();
         setInvoicesToPay([]);
         setSelectedBuLegalEntityName('');
+        setCreatePaymentCurrency('AED');
         setCreatePaymentActiveTab('paymentDetails');
         message.info('Form cleared — ready to create another payment');
       }
@@ -2216,6 +2221,7 @@ const ManagePayments: React.FC = () => {
                         createPaymentForm.resetFields();
                         setInvoicesToPay([]);
                         setSelectedBuLegalEntityName('');
+                        setCreatePaymentCurrency('AED');
                       }}
                     >
                       Cancel
@@ -2389,7 +2395,16 @@ const ManagePayments: React.FC = () => {
                               initialValue="AED"
                               rules={[{ required: true, message: 'Required' }]}
                             >
-                              <Select showSearch optionFilterProp="label" placeholder="Select Currency" disabled={!selectedBuLegalEntityName}>
+                              <Select
+                                showSearch
+                                optionFilterProp="label"
+                                placeholder="Select Currency"
+                                disabled={!selectedBuLegalEntityName}
+                                onChange={(val) => {
+                                  setCreatePaymentCurrency(val || 'AED');
+                                  createPaymentForm.validateFields(['conversionRateType', 'conversionDate', 'conversionRate']);
+                                }}
+                              >
                                 <Option value="AED" label="AED - UAE Dirham">AED – UAE Dirham</Option>
                                 <Option value="USD" label="USD - US Dollar">USD – US Dollar</Option>
                                 <Option value="EUR" label="EUR - Euro">EUR – Euro</Option>
@@ -2411,6 +2426,34 @@ const ManagePayments: React.FC = () => {
                                 <Option value="HKD" label="HKD - Hong Kong Dollar">HKD – Hong Kong Dollar</Option>
                                 <Option value="TRY" label="TRY - Turkish Lira">TRY – Turkish Lira</Option>
                               </Select>
+                            </Form.Item>
+                            <Form.Item
+                              label={createPaymentCurrency !== 'AED' ? <><span style={{ color: REDWOOD.primary }}>*</span> Conversion Rate Type</> : 'Conversion Rate Type'}
+                              name="conversionRateType"
+                              rules={[{ required: createPaymentCurrency !== 'AED', message: 'Required for foreign currency' }]}
+                            >
+                              <Select placeholder="Select rate type" allowClear disabled={!selectedBuLegalEntityName}>
+                                <Option value="User">User</Option>
+                                <Option value="Corporate">Corporate</Option>
+                                <Option value="Spot">Spot</Option>
+                              </Select>
+                            </Form.Item>
+                            <Form.Item
+                              label={createPaymentCurrency !== 'AED' ? <><span style={{ color: REDWOOD.primary }}>*</span> Conversion Date</> : 'Conversion Date'}
+                              name="conversionDate"
+                              rules={[{ required: createPaymentCurrency !== 'AED', message: 'Required for foreign currency' }]}
+                            >
+                              <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" disabled={!selectedBuLegalEntityName} />
+                            </Form.Item>
+                            <Form.Item
+                              label={createPaymentCurrency !== 'AED' ? <><span style={{ color: REDWOOD.primary }}>*</span> Conversion Rate</> : 'Conversion Rate'}
+                              name="conversionRate"
+                              rules={[{ required: createPaymentCurrency !== 'AED', message: 'Required for foreign currency' }]}
+                            >
+                              <InputNumber style={{ width: '100%' }} placeholder="0.000000" precision={6} min={0} disabled={!selectedBuLegalEntityName} />
+                            </Form.Item>
+                            <Form.Item label="Maturity Date" name="maturityDate">
+                              <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" disabled={!selectedBuLegalEntityName} />
                             </Form.Item>
                             <Form.Item
                               label={<><span style={{ color: REDWOOD.primary }}>*</span> Payment Method</>}
