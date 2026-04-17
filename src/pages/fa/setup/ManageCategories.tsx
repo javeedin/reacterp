@@ -219,6 +219,23 @@ const CategoryTabContent: React.FC<{
     { title: 'Book Class',  dataIndex: 'bookClass',    key: 'bookClass',    width: 110 },
   ];
 
+  // Book selector shown at the top of Accounts and Default Rules tabs
+  const bookSelector = books.length > 1 ? (
+    <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+      <Text type="secondary" style={{ fontSize: 12 }}>Book:</Text>
+      <Select
+        size="small"
+        value={selectedBookIdx}
+        onChange={(v) => onBookRowSelect(tab.key, v)}
+        style={{ width: 220 }}
+      >
+        {books.map((b, i) => (
+          <Option key={b.categoryBookId} value={i}>{b.bookTypeCode} – {b.bookTypeName || b.bookClass}</Option>
+        ))}
+      </Select>
+    </div>
+  ) : null;
+
   const subTabs = [
     {
       key: 'general',
@@ -260,84 +277,69 @@ const CategoryTabContent: React.FC<{
         : books.length === 0
           ? <Empty description="No book assignments" style={{ marginTop: 32 }} />
           : (
+            <Table
+              dataSource={books}
+              columns={bookColumns}
+              rowKey="categoryBookId"
+              size="small"
+              pagination={false}
+              rowClassName={(_, i) => i === selectedBookIdx ? 'ant-table-row-selected' : ''}
+              onRow={(_, i) => ({ onClick: () => onBookRowSelect(tab.key, i ?? 0), style: { cursor: 'pointer' } })}
+              style={{ marginTop: 8 }}
+            />
+          ),
+    },
+    {
+      key: 'accounts',
+      label: <span><AccountBookOutlined style={{ marginRight: 4 }} />Accounts</span>,
+      children: loading
+        ? <Spin style={{ display: 'block', margin: '40px auto' }} />
+        : books.length === 0
+          ? <Empty description="No book assignments" style={{ marginTop: 32 }} />
+          : !selectedBook
+            ? <Empty description="Select a book" style={{ marginTop: 32 }} />
+            : (
+              <div style={{ marginTop: 8 }}>
+                {bookSelector}
+                <Row gutter={[20, 0]}>
+                  <Col xs={24} md={8}>
+                    <AccountField label="Asset Cost"                    value={selectedBook.assetCostAccount}            required />
+                    <AccountField label="Asset Clearing"                value={selectedBook.assetClearingAccount}        required />
+                    <AccountField label="Depreciation Expense"          value={selectedBook.deprnExpenseAccount}         required />
+                    <AccountField label="Depreciation Reserve"          value={selectedBook.reserveAccount}              required />
+                    <AccountField label="Bonus Depreciation Expense"    value={selectedBook.bonusExpenseAccount} />
+                    <AccountField label="Bonus Depreciation Reserve"    value={selectedBook.bonusReserveAccount} />
+                  </Col>
+                  <Col xs={24} md={8}>
+                    <AccountField label="CIP Cost"                      value={selectedBook.cipCostAccount} />
+                    <AccountField label="CIP Clearing"                  value={selectedBook.cipClearingAccount} />
+                    <AccountField label="Unplanned Depreciation Expense" value={selectedBook.unplannedDeprnExpAccount} />
+                    <AccountField label="Impairment Expense"            value={selectedBook.impairmentExpenseAccount} />
+                    <AccountField label="Impairment Reserve"            value={selectedBook.impairmentReserveAccount} />
+                    <AccountField label="Revaluation Reserve"           value={selectedBook.revalReserveAccount} />
+                  </Col>
+                  <Col xs={24} md={8}>
+                    <AccountField label="Revaluation Reserve Amortization" value={selectedBook.revalAmortAccount} />
+                    <AccountField label="Revaluation Loss Expense"         value={selectedBook.revalLossExpAccount} />
+                  </Col>
+                </Row>
+              </div>
+            ),
+    },
+    {
+      key: 'defaultRules',
+      label: <span><FilterOutlined style={{ marginRight: 4 }} />Default Rules</span>,
+      children: loading
+        ? <Spin style={{ display: 'block', margin: '40px auto' }} />
+        : books.length === 0
+          ? <Empty description="No book assignments" style={{ marginTop: 32 }} />
+          : (
             <div style={{ marginTop: 8 }}>
-              {/* Books table */}
-              <Table
-                dataSource={books}
-                columns={bookColumns}
-                rowKey="categoryBookId"
-                size="small"
-                pagination={false}
-                rowClassName={(_, i) => i === selectedBookIdx ? 'ant-table-row-selected' : ''}
-                onRow={(_, i) => ({ onClick: () => onBookRowSelect(tab.key, i ?? 0), style: { cursor: 'pointer' } })}
-                style={{ marginBottom: 16 }}
+              {bookSelector}
+              <DefaultRulesPanel
+                defaults={defaults}
+                bookTypeCode={selectedBook?.bookTypeCode}
               />
-
-              {/* Accounting Rules for selected book */}
-              {selectedBook && (
-                <Card
-                  size="small"
-                  title={
-                    <Space>
-                      <AccountBookOutlined style={{ color: FA_COLOR }} />
-                      <Text strong>{selectedBook.bookTypeCode}</Text>
-                      <Text type="secondary" style={{ fontSize: 12 }}>: Accounting Rules</Text>
-                    </Space>
-                  }
-                  style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
-                  styles={{ body: { padding: '12px 16px' } }}
-                >
-                  <Tabs
-                    activeKey={activeBooksTab}
-                    onChange={(k) => onBooksTabChange(tab.key, k)}
-                    size="small"
-                    tabBarStyle={{ borderBottom: `2px solid ${REDWOOD.info}30`, marginBottom: 16 }}
-                    items={[
-                      {
-                        key: 'accounts',
-                        label: 'Accounts',
-                        children: (
-                          <Row gutter={[20, 0]}>
-                            {/* Column 1 – Standard accounts */}
-                            <Col xs={24} md={8}>
-                              <AccountField label="Asset Cost"              value={selectedBook.assetCostAccount}         required />
-                              <AccountField label="Asset Clearing"          value={selectedBook.assetClearingAccount}     required />
-                              <AccountField label="Depreciation Expense"    value={selectedBook.deprnExpenseAccount}      required />
-                              <AccountField label="Depreciation Reserve"    value={selectedBook.reserveAccount}           required />
-                              <AccountField label="Bonus Depreciation Expense" value={selectedBook.bonusExpenseAccount} />
-                              <AccountField label="Bonus Depreciation Reserve" value={selectedBook.bonusReserveAccount} />
-                            </Col>
-                            {/* Column 2 – CIP + Impairment accounts */}
-                            <Col xs={24} md={8}>
-                              <AccountField label="CIP Cost"                    value={selectedBook.cipCostAccount} />
-                              <AccountField label="CIP Clearing"                value={selectedBook.cipClearingAccount} />
-                              <AccountField label="Unplanned Depreciation Expense" value={selectedBook.unplannedDeprnExpAccount} />
-                              <AccountField label="Impairment Expense"          value={selectedBook.impairmentExpenseAccount} />
-                              <AccountField label="Impairment Reserve"          value={selectedBook.impairmentReserveAccount} />
-                              <AccountField label="Revaluation Reserve"         value={selectedBook.revalReserveAccount} />
-                            </Col>
-                            {/* Column 3 – Revaluation accounts */}
-                            <Col xs={24} md={8}>
-                              <AccountField label="Revaluation Reserve Amortization" value={selectedBook.revalAmortAccount} />
-                              <AccountField label="Revaluation Loss Expense"         value={selectedBook.revalLossExpAccount} />
-                            </Col>
-                          </Row>
-                        ),
-                      },
-                      {
-                        key: 'defaultRules',
-                        label: 'Default Rules',
-                        children: (
-                          <DefaultRulesPanel
-                            defaults={defaults}
-                            bookTypeCode={selectedBook.bookTypeCode}
-                          />
-                        ),
-                      },
-                    ]}
-                  />
-                </Card>
-              )}
             </div>
           ),
     },
