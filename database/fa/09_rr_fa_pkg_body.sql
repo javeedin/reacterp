@@ -6,7 +6,7 @@
 
 CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
 
-    -- ── Private helper ────────────────────────────────────────────────────────
+    -- ── Private helpers ───────────────────────────────────────────────────────
     PROCEDURE write_error (
         p_http_status OUT NUMBER,
         p_result      OUT CLOB,
@@ -18,11 +18,18 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         p_result      := '{"success":false,"error":"' || REPLACE(p_msg, '"', '\"') || '"}';
     END write_error;
 
+    -- JSON string helper — wraps a value in quotes, escapes special chars, or null
+    FUNCTION jstr(p_val IN VARCHAR2) RETURN VARCHAR2 IS
+    BEGIN
+        IF p_val IS NULL THEN RETURN 'null'; END IF;
+        RETURN '"' || REPLACE(REPLACE(p_val, '\', '\\'), '"', '\"') || '"';
+    END jstr;
+
     -- ── GET_ASSETS ────────────────────────────────────────────────────────────
-    -- Available columns: RR_FA_ADDITIONS_TL (ASSET_ID, DESCRIPTION, CREATION_DATE,
-    --   CREATED_BY, LAST_UPDATE_DATE, LAST_UPDATED_BY) + RR_FA_BOOKS (financial).
-    -- Filters p_asset_number / p_category / p_asset_type / p_status are silently
-    -- ignored — those columns do not exist in the two source tables.
+    -- Sources: RR_FA_ADDITIONS_TL + RR_FA_BOOKS.
+    -- Supported filters: p_description, p_book_type.
+    -- Others (p_asset_number, p_category, p_asset_type, p_status) are ignored
+    -- because those columns do not exist in these two tables.
     PROCEDURE GET_ASSETS (
         p_asset_number  IN  VARCHAR2,
         p_description   IN  VARCHAR2,
@@ -35,119 +42,91 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         p_http_status   OUT NUMBER,
         p_result        OUT CLOB
     ) IS
-        v_offset    NUMBER         := NVL(p_offset, 0);
-        v_limit     NUMBER         := NVL(p_limit, 25);
-        v_total     NUMBER         := 0;
-        v_where     VARCHAR2(2000) := ' WHERE a.LANGUAGE = ''US'' ';
-        v_sql_count VARCHAR2(4000);
-        v_sql_main  VARCHAR2(4000);
-
-        TYPE t_cur IS REF CURSOR;
-        v_cur t_cur;
-
-        v_asset_id         VARCHAR2(400);
-        v_description      VARCHAR2(400);
-        v_creation_date    VARCHAR2(400);
-        v_created_by       VARCHAR2(400);
-        v_last_update_date VARCHAR2(400);
-        v_last_updated_by  VARCHAR2(400);
-        v_book_type_code   VARCHAR2(400);
-        v_date_placed      VARCHAR2(400);
-        v_cost             VARCHAR2(400);
-        v_original_cost    VARCHAR2(400);
-        v_adjusted_cost    VARCHAR2(400);
-        v_salvage_value    VARCHAR2(400);
-        v_capitalize_flag  VARCHAR2(400);
-        v_depreciate_flag  VARCHAR2(400);
-        v_date_ineffective VARCHAR2(400);
-        v_deprn_reserve    VARCHAR2(400);
-        v_nbv              VARCHAR2(400);
+        v_offset NUMBER  := NVL(p_offset, 0);
+        v_limit  NUMBER  := NVL(p_limit, 25);
+        v_total  NUMBER  := 0;
+        v_first  BOOLEAN := TRUE;
     BEGIN
-        -- Only description and book_type_code filters are supported
-        IF p_description IS NOT NULL THEN
-            v_where := v_where || ' AND UPPER(a.DESCRIPTION) LIKE UPPER(''%' || p_description || '%'')';
-        END IF;
-        IF p_book_type IS NOT NULL THEN
-            v_where := v_where || ' AND b.BOOK_TYPE_CODE = ''' || p_book_type || '''';
-        END IF;
+        -- Count
+        SELECT COUNT(*)
+        INTO   v_total
+        FROM   RR_FA_ADDITIONS_TL a
+        LEFT JOIN (SELECT * FROM RR_FA_BOOKS WHERE DATE_INEFFECTIVE IS NULL) b
+               ON a.ASSET_ID = b.ASSET_ID
+        WHERE  a.LANGUAGE = 'US'
+        AND    (p_description IS NULL OR UPPER(a.DESCRIPTION) LIKE UPPER('%' || p_description || '%'))
+        AND    (p_book_type   IS NULL OR b.BOOK_TYPE_CODE = p_book_type);
 
-        v_sql_count :=
-            'SELECT COUNT(*) FROM RR_FA_ADDITIONS_TL a '
-         || 'LEFT JOIN (SELECT * FROM RR_FA_BOOKS WHERE DATE_INEFFECTIVE IS NULL) b'
-         || '  ON a.ASSET_ID = b.ASSET_ID '
-         || v_where;
+        -- JSON header
+        p_result := '{"success":true'
+                 || ',"totalCount":' || v_total
+                 || ',"offset":'     || v_offset
+                 || ',"limit":'      || v_limit
+                 || ',"items":[';
 
-        EXECUTE IMMEDIATE v_sql_count INTO v_total;
+        -- Rows — same query confirmed working in step 2
+        FOR r IN (
+            SELECT a.ASSET_ID,
+                   a.DESCRIPTION,
+                   a.CREATION_DATE,
+                   a.CREATED_BY,
+                   a.LAST_UPDATE_DATE,
+                   a.LAST_UPDATED_BY,
+                   b.BOOK_TYPE_CODE,
+                   b.DATE_PLACED_IN_SERVICE,
+                   b.COST,
+                   b.ORIGINAL_COST,
+                   b.ADJUSTED_COST,
+                   b.SALVAGE_VALUE,
+                   b.CAPITALIZE_FLAG,
+                   b.DEPRECIATE_FLAG,
+                   b.DATE_INEFFECTIVE,
+                   NVL(ds.DEPRN_RESERVE, 0)                    AS DEPRN_RESERVE,
+                   NVL(b.COST, 0) - NVL(ds.DEPRN_RESERVE, 0)  AS NBV
+            FROM   RR_FA_ADDITIONS_TL a
+            LEFT JOIN (SELECT * FROM RR_FA_BOOKS WHERE DATE_INEFFECTIVE IS NULL) b
+                   ON a.ASSET_ID = b.ASSET_ID
+            LEFT JOIN (
+                SELECT ds1.ASSET_ID, ds1.BOOK_TYPE_CODE, ds1.DEPRN_RESERVE
+                FROM   RR_FA_DEPRN_SUMMARY ds1
+                WHERE  ds1.PERIOD_COUNTER = (
+                    SELECT MAX(ds2.PERIOD_COUNTER) FROM RR_FA_DEPRN_SUMMARY ds2
+                    WHERE  ds2.ASSET_ID      = ds1.ASSET_ID
+                    AND    ds2.BOOK_TYPE_CODE = ds1.BOOK_TYPE_CODE)
+            ) ds ON a.ASSET_ID = ds.ASSET_ID AND b.BOOK_TYPE_CODE = ds.BOOK_TYPE_CODE
+            WHERE  a.LANGUAGE = 'US'
+            AND    (p_description IS NULL OR UPPER(a.DESCRIPTION) LIKE UPPER('%' || p_description || '%'))
+            AND    (p_book_type   IS NULL OR b.BOOK_TYPE_CODE = p_book_type)
+            ORDER BY a.ASSET_ID
+            OFFSET v_offset ROWS FETCH NEXT v_limit ROWS ONLY
+        ) LOOP
+            IF NOT v_first THEN p_result := p_result || ','; END IF;
+            v_first := FALSE;
 
-        v_sql_main :=
-            'SELECT a.ASSET_ID, a.DESCRIPTION,'
-         || '       a.CREATION_DATE, a.CREATED_BY, a.LAST_UPDATE_DATE, a.LAST_UPDATED_BY,'
-         || '       b.BOOK_TYPE_CODE, b.DATE_PLACED_IN_SERVICE,'
-         || '       b.COST, b.ORIGINAL_COST, b.ADJUSTED_COST, b.SALVAGE_VALUE,'
-         || '       b.CAPITALIZE_FLAG, b.DEPRECIATE_FLAG, b.DATE_INEFFECTIVE,'
-         || '       NVL(ds.DEPRN_RESERVE, 0) AS DEPRN_RESERVE,'
-         || '       NVL(b.COST, 0) - NVL(ds.DEPRN_RESERVE, 0) AS NBV'
-         || '  FROM RR_FA_ADDITIONS_TL a'
-         || '  LEFT JOIN (SELECT * FROM RR_FA_BOOKS WHERE DATE_INEFFECTIVE IS NULL) b'
-         || '         ON a.ASSET_ID = b.ASSET_ID'
-         || '  LEFT JOIN ('
-         || '      SELECT ds1.ASSET_ID, ds1.BOOK_TYPE_CODE, ds1.DEPRN_RESERVE'
-         || '        FROM RR_FA_DEPRN_SUMMARY ds1'
-         || '       WHERE ds1.PERIOD_COUNTER = ('
-         || '           SELECT MAX(ds2.PERIOD_COUNTER) FROM RR_FA_DEPRN_SUMMARY ds2'
-         || '            WHERE ds2.ASSET_ID      = ds1.ASSET_ID'
-         || '              AND ds2.BOOK_TYPE_CODE = ds1.BOOK_TYPE_CODE)'
-         || '  ) ds ON a.ASSET_ID = ds.ASSET_ID AND b.BOOK_TYPE_CODE = ds.BOOK_TYPE_CODE'
-         || v_where
-         || ' ORDER BY a.ASSET_ID'
-         || ' OFFSET ' || v_offset || ' ROWS FETCH NEXT ' || v_limit || ' ROWS ONLY';
-
-        APEX_JSON.INITIALIZE_CLOB_OUTPUT;
-        APEX_JSON.OPEN_OBJECT;
-        APEX_JSON.WRITE('success',    TRUE);
-        APEX_JSON.WRITE('totalCount', v_total);
-        APEX_JSON.WRITE('offset',     v_offset);
-        APEX_JSON.WRITE('limit',      v_limit);
-        APEX_JSON.OPEN_ARRAY('items');
-
-        OPEN v_cur FOR v_sql_main;
-        LOOP
-            FETCH v_cur INTO
-                v_asset_id, v_description,
-                v_creation_date, v_created_by, v_last_update_date, v_last_updated_by,
-                v_book_type_code, v_date_placed,
-                v_cost, v_original_cost, v_adjusted_cost, v_salvage_value,
-                v_capitalize_flag, v_depreciate_flag, v_date_ineffective,
-                v_deprn_reserve, v_nbv;
-            EXIT WHEN v_cur%NOTFOUND;
-
-            APEX_JSON.OPEN_OBJECT;
-            APEX_JSON.WRITE('assetId',            v_asset_id);
-            APEX_JSON.WRITE('description',        v_description);
-            APEX_JSON.WRITE('creationDate',       v_creation_date);
-            APEX_JSON.WRITE('createdBy',          v_created_by);
-            APEX_JSON.WRITE('lastUpdateDate',     v_last_update_date);
-            APEX_JSON.WRITE('lastUpdatedBy',      v_last_updated_by);
-            APEX_JSON.WRITE('bookTypeCode',       v_book_type_code);
-            APEX_JSON.WRITE('datePlacedInService',v_date_placed);
-            APEX_JSON.WRITE('cost',               v_cost);
-            APEX_JSON.WRITE('originalCost',       v_original_cost);
-            APEX_JSON.WRITE('adjustedCost',       v_adjusted_cost);
-            APEX_JSON.WRITE('salvageValue',       v_salvage_value);
-            APEX_JSON.WRITE('capitalizeFlag',     v_capitalize_flag);
-            APEX_JSON.WRITE('depreciateFlag',     v_depreciate_flag);
-            APEX_JSON.WRITE('dateIneffective',    v_date_ineffective);
-            APEX_JSON.WRITE('deprnReserve',       v_deprn_reserve);
-            APEX_JSON.WRITE('nbv',                v_nbv);
-            APEX_JSON.CLOSE_OBJECT;
+            p_result := p_result
+                || '{'
+                || '"assetId":'             || jstr(r.ASSET_ID)
+                || ',"description":'        || jstr(r.DESCRIPTION)
+                || ',"creationDate":'       || jstr(r.CREATION_DATE)
+                || ',"createdBy":'          || jstr(r.CREATED_BY)
+                || ',"lastUpdateDate":'     || jstr(r.LAST_UPDATE_DATE)
+                || ',"lastUpdatedBy":'      || jstr(r.LAST_UPDATED_BY)
+                || ',"bookTypeCode":'       || jstr(r.BOOK_TYPE_CODE)
+                || ',"datePlacedInService":'|| jstr(r.DATE_PLACED_IN_SERVICE)
+                || ',"cost":'               || jstr(r.COST)
+                || ',"originalCost":'       || jstr(r.ORIGINAL_COST)
+                || ',"adjustedCost":'       || jstr(r.ADJUSTED_COST)
+                || ',"salvageValue":'       || jstr(r.SALVAGE_VALUE)
+                || ',"capitalizeFlag":'     || jstr(r.CAPITALIZE_FLAG)
+                || ',"depreciateFlag":'     || jstr(r.DEPRECIATE_FLAG)
+                || ',"dateIneffective":'    || jstr(r.DATE_INEFFECTIVE)
+                || ',"deprnReserve":'       || TO_CHAR(r.DEPRN_RESERVE)
+                || ',"nbv":'               || TO_CHAR(r.NBV)
+                || '}';
         END LOOP;
-        CLOSE v_cur;
 
-        APEX_JSON.CLOSE_ARRAY;
-        APEX_JSON.CLOSE_OBJECT;
+        p_result      := p_result || ']}';
         p_http_status := 200;
-        p_result      := APEX_JSON.GET_CLOB_OUTPUT;
-        APEX_JSON.FREE_OUTPUT;
     EXCEPTION
         WHEN OTHERS THEN
             write_error(p_http_status, p_result, 500, SQLERRM);
@@ -159,37 +138,35 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         p_http_status OUT NUMBER,
         p_result      OUT CLOB
     ) IS
-        -- TL columns
-        v_asset_id             RR_FA_ADDITIONS_TL.ASSET_ID%TYPE;
-        v_description          RR_FA_ADDITIONS_TL.DESCRIPTION%TYPE;
-        v_language             RR_FA_ADDITIONS_TL.LANGUAGE%TYPE;
-        v_source_lang          RR_FA_ADDITIONS_TL.SOURCE_LANG%TYPE;
-        v_tl_creation_date     RR_FA_ADDITIONS_TL.CREATION_DATE%TYPE;
-        v_tl_created_by        RR_FA_ADDITIONS_TL.CREATED_BY%TYPE;
-        v_tl_last_update_date  RR_FA_ADDITIONS_TL.LAST_UPDATE_DATE%TYPE;
-        v_tl_last_updated_by   RR_FA_ADDITIONS_TL.LAST_UPDATED_BY%TYPE;
-        -- BOOKS columns
-        v_book_type_code       RR_FA_BOOKS.BOOK_TYPE_CODE%TYPE;
-        v_date_placed          RR_FA_BOOKS.DATE_PLACED_IN_SERVICE%TYPE;
-        v_date_effective       RR_FA_BOOKS.DATE_EFFECTIVE%TYPE;
-        v_deprn_start_date     RR_FA_BOOKS.DEPRN_START_DATE%TYPE;
-        v_cost                 RR_FA_BOOKS.COST%TYPE;
-        v_original_cost        RR_FA_BOOKS.ORIGINAL_COST%TYPE;
-        v_adjusted_cost        RR_FA_BOOKS.ADJUSTED_COST%TYPE;
-        v_salvage_value        RR_FA_BOOKS.SALVAGE_VALUE%TYPE;
-        v_recoverable_cost     RR_FA_BOOKS.RECOVERABLE_COST%TYPE;
-        v_unrevalued_cost      RR_FA_BOOKS.UNREVALUED_COST%TYPE;
-        v_capitalize_flag      RR_FA_BOOKS.CAPITALIZE_FLAG%TYPE;
-        v_depreciate_flag      RR_FA_BOOKS.DEPRECIATE_FLAG%TYPE;
-        v_date_ineffective     RR_FA_BOOKS.DATE_INEFFECTIVE%TYPE;
-        v_prorate_date         RR_FA_BOOKS.PRORATE_DATE%TYPE;
-        v_rate_adj_factor      RR_FA_BOOKS.RATE_ADJUSTMENT_FACTOR%TYPE;
-        v_salvage_type         RR_FA_BOOKS.SALVAGE_TYPE%TYPE;
-        v_deprn_limit_type     RR_FA_BOOKS.DEPRN_LIMIT_TYPE%TYPE;
-        v_cip_cost             RR_FA_BOOKS.CIP_COST%TYPE;
-        v_method_id            RR_FA_BOOKS.METHOD_ID%TYPE;
-        v_convention_type_id   RR_FA_BOOKS.CONVENTION_TYPE_ID%TYPE;
-        v_retirement_id        RR_FA_BOOKS.RETIREMENT_ID%TYPE;
+        v_asset_id           VARCHAR2(400);
+        v_description        VARCHAR2(400);
+        v_language           VARCHAR2(400);
+        v_source_lang        VARCHAR2(400);
+        v_creation_date      VARCHAR2(400);
+        v_created_by         VARCHAR2(400);
+        v_last_update_date   VARCHAR2(400);
+        v_last_updated_by    VARCHAR2(400);
+        v_book_type_code     VARCHAR2(400);
+        v_date_placed        VARCHAR2(400);
+        v_date_effective     VARCHAR2(400);
+        v_deprn_start_date   VARCHAR2(400);
+        v_cost               VARCHAR2(400);
+        v_original_cost      VARCHAR2(400);
+        v_adjusted_cost      VARCHAR2(400);
+        v_salvage_value      VARCHAR2(400);
+        v_recoverable_cost   VARCHAR2(400);
+        v_unrevalued_cost    VARCHAR2(400);
+        v_capitalize_flag    VARCHAR2(400);
+        v_depreciate_flag    VARCHAR2(400);
+        v_date_ineffective   VARCHAR2(400);
+        v_prorate_date       VARCHAR2(400);
+        v_rate_adj_factor    VARCHAR2(400);
+        v_salvage_type       VARCHAR2(400);
+        v_deprn_limit_type   VARCHAR2(400);
+        v_cip_cost           VARCHAR2(400);
+        v_method_id          VARCHAR2(400);
+        v_convention_type_id VARCHAR2(400);
+        v_retirement_id      VARCHAR2(400);
     BEGIN
         SELECT tl.ASSET_ID, tl.DESCRIPTION, tl.LANGUAGE, tl.SOURCE_LANG,
                tl.CREATION_DATE, tl.CREATED_BY, tl.LAST_UPDATE_DATE, tl.LAST_UPDATED_BY,
@@ -201,7 +178,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
                b.SALVAGE_TYPE, b.DEPRN_LIMIT_TYPE, b.CIP_COST,
                b.METHOD_ID, b.CONVENTION_TYPE_ID, b.RETIREMENT_ID
         INTO   v_asset_id, v_description, v_language, v_source_lang,
-               v_tl_creation_date, v_tl_created_by, v_tl_last_update_date, v_tl_last_updated_by,
+               v_creation_date, v_created_by, v_last_update_date, v_last_updated_by,
                v_book_type_code, v_date_placed, v_date_effective,
                v_deprn_start_date, v_cost, v_original_cost, v_adjusted_cost,
                v_salvage_value, v_recoverable_cost, v_unrevalued_cost,
@@ -216,42 +193,38 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         AND    tl.LANGUAGE = 'US'
         AND    ROWNUM = 1;
 
-        APEX_JSON.INITIALIZE_CLOB_OUTPUT;
-        APEX_JSON.OPEN_OBJECT;
-        APEX_JSON.WRITE('success',             TRUE);
-        APEX_JSON.WRITE('assetId',             v_asset_id);
-        APEX_JSON.WRITE('description',         v_description);
-        APEX_JSON.WRITE('language',            v_language);
-        APEX_JSON.WRITE('sourceLang',          v_source_lang);
-        APEX_JSON.WRITE('creationDate',        v_tl_creation_date);
-        APEX_JSON.WRITE('createdBy',           v_tl_created_by);
-        APEX_JSON.WRITE('lastUpdateDate',      v_tl_last_update_date);
-        APEX_JSON.WRITE('lastUpdatedBy',       v_tl_last_updated_by);
-        APEX_JSON.WRITE('bookTypeCode',        v_book_type_code);
-        APEX_JSON.WRITE('datePlacedInService', v_date_placed);
-        APEX_JSON.WRITE('dateEffective',       v_date_effective);
-        APEX_JSON.WRITE('deprnStartDate',      v_deprn_start_date);
-        APEX_JSON.WRITE('cost',                v_cost);
-        APEX_JSON.WRITE('originalCost',        v_original_cost);
-        APEX_JSON.WRITE('adjustedCost',        v_adjusted_cost);
-        APEX_JSON.WRITE('salvageValue',        v_salvage_value);
-        APEX_JSON.WRITE('recoverableCost',     v_recoverable_cost);
-        APEX_JSON.WRITE('unrevaluedCost',      v_unrevalued_cost);
-        APEX_JSON.WRITE('capitalizeFlag',      v_capitalize_flag);
-        APEX_JSON.WRITE('depreciateFlag',      v_depreciate_flag);
-        APEX_JSON.WRITE('dateIneffective',     v_date_ineffective);
-        APEX_JSON.WRITE('prorateDate',         v_prorate_date);
-        APEX_JSON.WRITE('rateAdjustmentFactor',v_rate_adj_factor);
-        APEX_JSON.WRITE('salvageType',         v_salvage_type);
-        APEX_JSON.WRITE('deprnLimitType',      v_deprn_limit_type);
-        APEX_JSON.WRITE('cipCost',             v_cip_cost);
-        APEX_JSON.WRITE('methodId',            v_method_id);
-        APEX_JSON.WRITE('conventionTypeId',    v_convention_type_id);
-        APEX_JSON.WRITE('retirementId',        v_retirement_id);
-        APEX_JSON.CLOSE_OBJECT;
+        p_result := '{"success":true'
+            || ',"assetId":'             || jstr(v_asset_id)
+            || ',"description":'         || jstr(v_description)
+            || ',"language":'            || jstr(v_language)
+            || ',"sourceLang":'          || jstr(v_source_lang)
+            || ',"creationDate":'        || jstr(v_creation_date)
+            || ',"createdBy":'           || jstr(v_created_by)
+            || ',"lastUpdateDate":'      || jstr(v_last_update_date)
+            || ',"lastUpdatedBy":'       || jstr(v_last_updated_by)
+            || ',"bookTypeCode":'        || jstr(v_book_type_code)
+            || ',"datePlacedInService":' || jstr(v_date_placed)
+            || ',"dateEffective":'       || jstr(v_date_effective)
+            || ',"deprnStartDate":'      || jstr(v_deprn_start_date)
+            || ',"cost":'                || jstr(v_cost)
+            || ',"originalCost":'        || jstr(v_original_cost)
+            || ',"adjustedCost":'        || jstr(v_adjusted_cost)
+            || ',"salvageValue":'        || jstr(v_salvage_value)
+            || ',"recoverableCost":'     || jstr(v_recoverable_cost)
+            || ',"unrevaluedCost":'      || jstr(v_unrevalued_cost)
+            || ',"capitalizeFlag":'      || jstr(v_capitalize_flag)
+            || ',"depreciateFlag":'      || jstr(v_depreciate_flag)
+            || ',"dateIneffective":'     || jstr(v_date_ineffective)
+            || ',"prorateDate":'         || jstr(v_prorate_date)
+            || ',"rateAdjustmentFactor":'|| jstr(v_rate_adj_factor)
+            || ',"salvageType":'         || jstr(v_salvage_type)
+            || ',"deprnLimitType":'      || jstr(v_deprn_limit_type)
+            || ',"cipCost":'             || jstr(v_cip_cost)
+            || ',"methodId":'            || jstr(v_method_id)
+            || ',"conventionTypeId":'    || jstr(v_convention_type_id)
+            || ',"retirementId":'        || jstr(v_retirement_id)
+            || '}';
         p_http_status := 200;
-        p_result      := APEX_JSON.GET_CLOB_OUTPUT;
-        APEX_JSON.FREE_OUTPUT;
     EXCEPTION
         WHEN NO_DATA_FOUND THEN
             write_error(p_http_status, p_result, 404, 'Asset ' || p_asset_id || ' not found');
