@@ -231,27 +231,6 @@ BEGIN
         p_items_per_page => 0,
         p_source         => q'[
 DECLARE
-    FUNCTION acct_str(p_ccid VARCHAR2) RETURN VARCHAR2 IS
-        v_str VARCHAR2(200);
-    BEGIN
-        IF p_ccid IS NULL THEN RETURN NULL; END IF;
-        BEGIN
-            SELECT NVL(buimercFinGlbCoaCo,'')         || '-' ||
-                   NVL(buimercFinGlbCoaLob,'')         || '-' ||
-                   NVL(buimercFinGlbCoaDepartment,'')  || '-' ||
-                   NVL(buimercFinGlbCoaAccount,'')     || '-' ||
-                   NVL(buimercFinGlbCoaSubAcc,'')      || '-' ||
-                   NVL(buimercFinGlbCoaAlys,'')        || '-' ||
-                   NVL(buimercFinGlbCoaIc,'')          || '-' ||
-                   NVL(buimercFinGlbCoaFut1,'')        || '-' ||
-                   NVL(buimercFinGlbCoaFut2,'')
-            INTO   v_str
-            FROM   REERP_GL_CODE_COMBINATIONS
-            WHERE  "_CODE_COMBINATION_ID" = TO_NUMBER(p_ccid);
-        EXCEPTION WHEN OTHERS THEN v_str := p_ccid; END;
-        RETURN v_str;
-    END;
-
     -- RR_FA_CATEGORY_BOOKS actual columns (from DDL):
     -- BOOK_TYPE_CODE, CATEGORY_BOOK_ID, CATEGORY_ID,
     -- ASSET_COST_ACCOUNT_CCID, ASSET_CLEARING_ACCOUNT_CCID,
@@ -276,6 +255,28 @@ DECLARE
 
     v_clob CLOB;
     v_buf  VARCHAR2(32000);
+
+    -- Local function must come AFTER cursors/variables
+    FUNCTION acct_str(p_ccid VARCHAR2) RETURN VARCHAR2 IS
+        v_str VARCHAR2(200);
+    BEGIN
+        IF p_ccid IS NULL THEN RETURN NULL; END IF;
+        BEGIN
+            SELECT NVL(buimercFinGlbCoaCo,'')         || '-' ||
+                   NVL(buimercFinGlbCoaLob,'')         || '-' ||
+                   NVL(buimercFinGlbCoaDepartment,'')  || '-' ||
+                   NVL(buimercFinGlbCoaAccount,'')     || '-' ||
+                   NVL(buimercFinGlbCoaSubAcc,'')      || '-' ||
+                   NVL(buimercFinGlbCoaAlys,'')        || '-' ||
+                   NVL(buimercFinGlbCoaIc,'')          || '-' ||
+                   NVL(buimercFinGlbCoaFut1,'')        || '-' ||
+                   NVL(buimercFinGlbCoaFut2,'')
+            INTO   v_str
+            FROM   REERP_GL_CODE_COMBINATIONS
+            WHERE  "_CODE_COMBINATION_ID" = TO_NUMBER(p_ccid);
+        EXCEPTION WHEN OTHERS THEN v_str := p_ccid; END;
+        RETURN v_str;
+    END acct_str;
 BEGIN
     APEX_JSON.INITIALIZE_CLOB_OUTPUT;
     APEX_JSON.OPEN_OBJECT;
