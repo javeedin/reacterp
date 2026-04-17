@@ -486,7 +486,7 @@ const ManageAssets: React.FC = () => {
     {
       title: 'Asset Number', dataIndex: 'assetNumber', key: 'assetNumber', width: 130,
       render: (v, record) => (
-        <Button type="link" style={{ padding: 0, fontWeight: 600 }} onClick={() => openAssetTab(record)}>
+        <Button type="link" style={{ padding: 0, fontWeight: 600 }} onClick={(e) => { e.stopPropagation(); openAssetTab(record); }}>
           {v || record.assetId}
         </Button>
       ),
@@ -517,7 +517,7 @@ const ManageAssets: React.FC = () => {
       title: '', key: 'actions', width: 60, align: 'center' as const,
       render: (_: any, record: AssetRecord) => (
         <Tooltip title="Open asset">
-          <Button size="small" type="text" icon={<InfoCircleOutlined />} onClick={() => openAssetTab(record)} />
+          <Button size="small" type="text" icon={<InfoCircleOutlined />} onClick={(e) => { e.stopPropagation(); openAssetTab(record); }} />
         </Tooltip>
       ),
     },
@@ -674,6 +674,7 @@ const ManageAssets: React.FC = () => {
           onChange={setActiveTabKey}
           onEdit={onTabEdit}
           hideAdd
+          destroyInactiveTabPane
           style={{ background: REDWOOD.surface }}
           tabBarStyle={{
             margin: 0,
