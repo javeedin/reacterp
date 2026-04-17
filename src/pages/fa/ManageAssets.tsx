@@ -80,14 +80,14 @@ const AssetTabContent: React.FC<{
   const { asset, detail, books, deprn, distributions, invoices, transactions, loading, activeSubTab } = tab;
 
   const deprnColumns: ColumnsType<DeprnRecord> = [
-    { title: 'Period',                       dataIndex: 'periodName',               key: 'periodName',               width: 100 },
-    { title: 'Total Amount',                 dataIndex: 'totalDeprnAmount',         key: 'totalDeprnAmount',         align: 'right' as const, render: formatCurrency },
-    { title: 'Depreciation Amount',          dataIndex: 'deprnAmount',              key: 'deprnAmount',              align: 'right' as const, render: formatCurrency },
-    { title: 'Deprn Adjustment',             dataIndex: 'deprnAdjustmentAmount',    key: 'deprnAdjustmentAmount',    align: 'right' as const, render: formatCurrency },
-    { title: 'Bonus Deprn Amount',           dataIndex: 'bonusDeprnAmount',         key: 'bonusDeprnAmount',         align: 'right' as const, render: formatCurrency },
-    { title: 'Bonus Deprn Adjustment',       dataIndex: 'bonusDeprnAdjustmentAmount', key: 'bonusDeprnAdj',          align: 'right' as const, render: formatCurrency },
-    { title: 'YTD Deprn',                    dataIndex: 'ytdDeprn',                 key: 'ytdDeprn',                 align: 'right' as const, render: formatCurrency },
-    { title: 'Deprn Reserve',                dataIndex: 'deprnReserve',             key: 'deprnReserve',             align: 'right' as const, render: formatCurrency },
+    { title: 'Period',                    dataIndex: 'periodName',                 key: 'periodName',    width: 100 },
+    { title: 'Total Amount',              dataIndex: 'totalDeprnAmount',           key: 'totalAmt',      align: 'right' as const, render: (v) => formatCurrency(v) },
+    { title: 'Depreciation Amount',       dataIndex: 'deprnAmount',                key: 'deprnAmt',      align: 'right' as const, render: (v) => formatCurrency(v) },
+    { title: 'Deprn Adjustment',          dataIndex: 'deprnAdjustmentAmount',      key: 'deprnAdj',      align: 'right' as const, render: (v) => formatCurrency(v) },
+    { title: 'Bonus Deprn Amount',        dataIndex: 'bonusDeprnAmount',           key: 'bonusAmt',      align: 'right' as const, render: (v) => formatCurrency(v) },
+    { title: 'Bonus Deprn Adjustment',    dataIndex: 'bonusDeprnAdjustmentAmount', key: 'bonusAdj',      align: 'right' as const, render: (v) => formatCurrency(v) },
+    { title: 'YTD Deprn',                 dataIndex: 'ytdDeprn',                   key: 'ytdDeprn',      align: 'right' as const, render: (v) => formatCurrency(v) },
+    { title: 'Deprn Reserve',             dataIndex: 'deprnReserve',               key: 'deprnReserve',  align: 'right' as const, render: (v) => formatCurrency(v) },
   ];
 
   const distColumns: ColumnsType<DistributionRecord> = [
@@ -105,7 +105,7 @@ const AssetTabContent: React.FC<{
   const invoiceColumns: ColumnsType<InvoiceRecord> = [
     { title: 'Invoice ID',  dataIndex: 'assetInvoiceId',   key: 'assetInvoiceId',  width: 90  },
     { title: 'Book',        dataIndex: 'bookTypeCode',     key: 'bookTypeCode',    ellipsis: true },
-    { title: 'Cost',        dataIndex: 'fixedAssetsCost',  key: 'fixedAssetsCost', align: 'right' as const, render: formatCurrency },
+    { title: 'Cost',        dataIndex: 'fixedAssetsCost',  key: 'fixedAssetsCost', align: 'right' as const, render: (v) => formatCurrency(v) },
     { title: 'Description', dataIndex: 'description',      key: 'description',     ellipsis: true },
     { title: 'Feeder',      dataIndex: 'feederSystemName', key: 'feederSystemName',ellipsis: true },
     { title: 'Effective',   dataIndex: 'dateEffective',    key: 'dateEffective',   width: 110, render: fmtDate },
@@ -129,7 +129,7 @@ const AssetTabContent: React.FC<{
         ? <Spin style={{ display: 'block', margin: '40px auto' }} />
         : (
           <Descriptions column={2} size="small" bordered
-            labelStyle={{ fontWeight: 500, width: 160, background: REDWOOD.neutral100 }}
+            styles={{ label: { fontWeight: 500, width: 160, background: REDWOOD.neutral100 } }}
             style={{ marginTop: 4 }}
           >
             <Descriptions.Item label="Asset ID">{asset.assetId}</Descriptions.Item>
@@ -157,7 +157,7 @@ const AssetTabContent: React.FC<{
         ? <Spin style={{ display: 'block', margin: '40px auto' }} />
         : (
           <Descriptions column={2} size="small" bordered
-            labelStyle={{ fontWeight: 500, width: 160, background: REDWOOD.neutral100 }}
+            styles={{ label: { fontWeight: 500, width: 160, background: REDWOOD.neutral100 } }}
             style={{ marginTop: 4 }}
           >
             <Descriptions.Item label="Tag Number">{detail?.tagNumber || asset.tagNumber || '—'}</Descriptions.Item>
@@ -282,7 +282,7 @@ const AssetTabContent: React.FC<{
           background: REDWOOD.surface,
           boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
         }}
-        bodyStyle={{ padding: '14px 20px' }}
+        styles={{ body: { padding: '14px 20px' } }}
       >
         {/* Top row: identity + status */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
@@ -525,7 +525,7 @@ const ManageAssets: React.FC = () => {
       {/* Search card */}
       <Card
         style={{ borderRadius: 12, border: 'none', boxShadow: '0 2px 8px rgba(0,0,0,0.06)', marginBottom: 16 }}
-        bodyStyle={{ padding: '16px 20px' }}
+        styles={{ body: { padding: '16px 20px' } }}
         title={<Space><FilterOutlined style={{ color: FA_COLOR }} /><Text strong style={{ fontSize: 13 }}>Search Parameters</Text></Space>}
       >
         <Form form={form} layout="vertical" onFinish={() => runSearch(1, pageSize)}>
@@ -587,7 +587,7 @@ const ManageAssets: React.FC = () => {
       {/* Results table */}
       <Card
         style={{ borderRadius: 12, border: 'none', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
-        bodyStyle={{ padding: 0 }}
+        styles={{ body: { padding: 0 } }}
         title={
           searched
             ? <Text strong>Results <Badge count={totalCount} style={{ backgroundColor: FA_COLOR }} /></Text>
@@ -670,7 +670,7 @@ const ManageAssets: React.FC = () => {
           onChange={setActiveTabKey}
           onEdit={onTabEdit}
           hideAdd
-          destroyInactiveTabPane
+          destroyOnHidden
           style={{ background: REDWOOD.surface }}
           tabBarStyle={{
             margin: 0,
