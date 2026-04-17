@@ -19,29 +19,37 @@ export interface AssetSearchParams {
 }
 
 export interface AssetRecord {
+  // Fields returned by GET_ASSETS (RR_FA_ADDITIONS_TL + RR_FA_BOOKS)
   assetId: string;
-  assetNumber: string;
   description: string;
-  assetType: string;
-  categoryId: string;
-  tagNumber: string;
-  serialNumber: string;
-  manufacturer: string;
-  inUseFlag: string;
-  ownedLeased: string;
-  units: string;
-  currentUnits: string;
-  capitalizedFlag: string;
-  retiredFlag: string;
+  creationDate: string;
+  createdBy: string;
+  lastUpdateDate: string;
+  lastUpdatedBy: string;
   bookTypeCode: string;
   datePlacedInService: string;
   cost: string;
+  originalCost: string;
   adjustedCost: string;
   salvageValue: string;
+  capitalizeFlag: string;
+  depreciateFlag: string;
+  dateIneffective: string;
   deprnReserve: string;
   nbv: string;
-  creationDate: string;
-  lastUpdateDate: string;
+  retiredFlag: string;   // 'YES' if no active book entry, else 'NO'
+  // Legacy / not available from current tables — kept optional for UI compat
+  assetNumber?: string;
+  assetType?: string;
+  categoryId?: string;
+  tagNumber?: string;
+  serialNumber?: string;
+  manufacturer?: string;
+  inUseFlag?: string;
+  ownedLeased?: string;
+  units?: string;
+  currentUnits?: string;
+  capitalizedFlag?: string;
 }
 
 export interface AssetDetail extends AssetRecord {
@@ -245,7 +253,7 @@ export const searchAssets = async (
   if (params.category)     q.append('category',     params.category);
   if (params.bookTypeCode) q.append('bookTypeCode', params.bookTypeCode);
   if (params.assetType)    q.append('assetType',    params.assetType);
-  if (params.status)       q.append('status',       params.status);
+  if (params.status)       q.append('assetStatus',  params.status);
   if (params.offset !== undefined) q.append('offset', String(params.offset));
   if (params.limit  !== undefined) q.append('limit',  String(params.limit));
 

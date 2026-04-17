@@ -82,7 +82,8 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
                    b.DEPRECIATE_FLAG,
                    b.DATE_INEFFECTIVE,
                    NVL(ds.DEPRN_RESERVE, 0)                    AS DEPRN_RESERVE,
-                   NVL(b.COST, 0) - NVL(ds.DEPRN_RESERVE, 0)  AS NBV
+                   NVL(b.COST, 0) - NVL(ds.DEPRN_RESERVE, 0)  AS NBV,
+                   CASE WHEN b.ASSET_ID IS NULL THEN 'YES' ELSE 'NO' END AS RETIRED_FLAG
             FROM   RR_FA_ADDITIONS_TL a
             LEFT JOIN (SELECT * FROM RR_FA_BOOKS WHERE DATE_INEFFECTIVE IS NULL) b
                    ON a.ASSET_ID = b.ASSET_ID
@@ -122,6 +123,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
                 || ',"dateIneffective":'    || jstr(r.DATE_INEFFECTIVE)
                 || ',"deprnReserve":'       || TO_CHAR(r.DEPRN_RESERVE)
                 || ',"nbv":'               || TO_CHAR(r.NBV)
+                || ',"retiredFlag":'        || jstr(r.RETIRED_FLAG)
                 || '}';
         END LOOP;
 

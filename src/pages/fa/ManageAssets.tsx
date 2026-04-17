@@ -152,7 +152,7 @@ const ManageAssets: React.FC = () => {
       title: 'Asset Number', dataIndex: 'assetNumber', key: 'assetNumber', width: 130,
       render: (v, record) => (
         <Button type="link" style={{ padding: 0, fontWeight: 600 }} onClick={() => openAsset(record)}>
-          {v}
+          {v || record.assetId}
         </Button>
       ),
     },
@@ -482,7 +482,7 @@ const ManageAssets: React.FC = () => {
               ? (
                 <Space>
                   <DatabaseOutlined style={{ color: FA_COLOR }} />
-                  <span>{selectedAsset.assetNumber}</span>
+                  <span>{selectedAsset.assetNumber || selectedAsset.assetId}</span>
                   <Divider type="vertical" />
                   <Text type="secondary" style={{ fontSize: 13, fontWeight: 400 }}>{selectedAsset.description}</Text>
                   {statusTag(selectedAsset.retiredFlag)}
