@@ -47,9 +47,10 @@ interface OpenCategoryTab {
   detail: Partial<CategoryDetail> | null;
   books: CategoryBookRecord[];
   defaults: CategoryBookDefaultRecord[];
+  booksError: string | null;
   activeSubTab: string;
-  activeBooksTab: string;    // 'accounts' | 'defaultRules'
-  selectedBookIdx: number;   // which book row is selected
+  activeBooksTab: string;
+  selectedBookIdx: number;
 }
 
 // ── Account field row ──────────────────────────────────────────────────────────
@@ -202,7 +203,7 @@ const CategoryTabContent: React.FC<{
   onBooksTabChange: (key: string, booksTab: string) => void;
   onBookRowSelect: (key: string, idx: number) => void;
 }> = ({ tab, onSubTabChange, onBooksTabChange, onBookRowSelect }) => {
-  const { category, detail, books, defaults, loading, activeSubTab, activeBooksTab, selectedBookIdx } = tab;
+  const { category, detail, books, defaults, booksError, loading, activeSubTab, activeBooksTab, selectedBookIdx } = tab;
   const selectedBook = books[selectedBookIdx] ?? books[0];
 
   const bookColumns: ColumnsType<CategoryBookRecord> = [
@@ -294,6 +295,11 @@ const CategoryTabContent: React.FC<{
       label: <span><AccountBookOutlined style={{ marginRight: 4 }} />Accounts</span>,
       children: loading
         ? <Spin style={{ display: 'block', margin: '40px auto' }} />
+        : booksError
+          ? <div style={{ marginTop: 24, color: '#C74634', fontFamily: 'monospace', fontSize: 12 }}>
+              API Error: {booksError}<br/>
+              Make sure <b>database/fa/10_fa_categories.sql</b> has been run on the DB.
+            </div>
         : books.length === 0
           ? <Empty description="No book assignments" style={{ marginTop: 32 }} />
           : !selectedBook
@@ -486,7 +492,7 @@ const ManageCategories: React.FC = () => {
 
     setOpenCategoryTabs(prev => [...prev, {
       key: tabKey, category, loading: true,
-      detail: null, books: [], defaults: [],
+      detail: null, books: [], defaults: [], booksError: null,
       activeSubTab: 'general', activeBooksTab: 'accounts', selectedBookIdx: 0,
     }]);
     setActiveTabKey(tabKey);
@@ -499,9 +505,10 @@ const ManageCategories: React.FC = () => {
       ]);
       setOpenCategoryTabs(prev => prev.map(t => t.key === tabKey ? {
         ...t, loading: false,
-        detail:   det.success  !== false ? det  : null,
-        books:    bks.items  || [],
-        defaults: defs.items || [],
+        detail:     det.success  !== false ? det  : null,
+        books:      bks.items  || [],
+        defaults:   defs.items || [],
+        booksError: bks.error  || null,
       } : t));
     } catch {
       message.error('Failed to load category details');
