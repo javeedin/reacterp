@@ -9,10 +9,11 @@ import {
   HomeOutlined, SearchOutlined, ReloadOutlined, PlusOutlined,
   FileTextOutlined, DollarOutlined, LineChartOutlined, AuditOutlined,
   EnvironmentOutlined, DatabaseOutlined, InfoCircleOutlined,
-  BookOutlined, HistoryOutlined, BarcodeOutlined,
+  BookOutlined, HistoryOutlined, BarcodeOutlined, ApiOutlined, CheckOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import Autopilot from '../../components/Autopilot';
+import { APEX_DB_CONFIG } from '../../config/api.config';
 import {
   searchAssets, getAssetDetail, getAssetBooks, getAssetDeprn,
   getAssetDistributions, getAssetInvoices, getAssetTransactions,
@@ -62,6 +63,10 @@ const ManageAssets: React.FC = () => {
   const [pageSize,   setPageSize]   = useState(25);
   const [searched,   setSearched]   = useState(false);
 
+  // API indicator
+  const [lastApiUrl,    setLastApiUrl]    = useState<string | null>(null);
+  const [apiUrlCopied,  setApiUrlCopied]  = useState(false);
+
   // Drawer / detail state
   const [drawerOpen,    setDrawerOpen]    = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<AssetRecord | null>(null);
@@ -78,6 +83,18 @@ const ManageAssets: React.FC = () => {
   const runSearch = useCallback(async (pg = 1, ps = pageSize) => {
     const vals = form.getFieldsValue();
     setLoading(true);
+
+    // Build and expose the full API URL for the indicator
+    const q = new URLSearchParams();
+    if (vals.description)  q.append('description',  vals.description);
+    if (vals.category)     q.append('category',     vals.category);
+    if (vals.bookTypeCode) q.append('bookTypeCode', vals.bookTypeCode);
+    if (vals.assetType)    q.append('assetType',    vals.assetType);
+    if (vals.status)       q.append('assetStatus',  vals.status);
+    q.append('offset', String((pg - 1) * ps));
+    q.append('limit',  String(ps));
+    setLastApiUrl(`${APEX_DB_CONFIG.baseUrl}/fa/assets?${q.toString()}`);
+
     try {
       const res = await searchAssets({
         assetNumber:  vals.assetNumber  || undefined,
@@ -449,6 +466,35 @@ const ManageAssets: React.FC = () => {
                 ? <Text strong>Results <Badge count={totalCount} style={{ backgroundColor: FA_COLOR }} /></Text>
                 : <Text strong>Assets</Text>
             }
+            extra={lastApiUrl ? (
+              <Tooltip
+                title={
+                  <div>
+                    <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 12 }}>GET Endpoint</div>
+                    <div style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', maxWidth: 420 }}>
+                      {lastApiUrl}
+                    </div>
+                    <div style={{ color: '#bbb', fontSize: 10, marginTop: 6 }}>Click to copy full URL</div>
+                  </div>
+                }
+                overlayStyle={{ maxWidth: 480 }}
+                placement="bottomRight"
+              >
+                <Button
+                  size="small"
+                  icon={apiUrlCopied ? <CheckOutlined /> : <ApiOutlined />}
+                  style={{ color: FA_COLOR, borderColor: FA_COLOR, fontSize: 11 }}
+                  onClick={() => {
+                    navigator.clipboard.writeText(lastApiUrl);
+                    setApiUrlCopied(true);
+                    message.success('URL copied to clipboard');
+                    setTimeout(() => setApiUrlCopied(false), 2000);
+                  }}
+                >
+                  {apiUrlCopied ? 'Copied' : 'API'}
+                </Button>
+              </Tooltip>
+            ) : undefined}
           >
             <Table<AssetRecord>
               dataSource={rows}
