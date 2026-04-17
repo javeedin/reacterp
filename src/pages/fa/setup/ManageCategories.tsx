@@ -14,11 +14,11 @@ import {
 import { Link } from 'react-router-dom';
 import Autopilot from '../../../components/Autopilot';
 import {
-  searchCategories, getCategoryDetail, getCategoryBooks,
+  searchCategories, getCategoryDetail, getCategoryBooks, getCategoryBookDefaults,
 } from '../../../services/fa.service';
 import type {
   CategoryRecord, CategoryDetail, CategoryBookRecord,
-  CategorySearchParams,
+  CategoryBookDefaultRecord, CategorySearchParams,
 } from '../../../services/fa.service';
 
 const { Content } = Layout;
@@ -46,6 +46,7 @@ interface OpenCategoryTab {
   loading: boolean;
   detail: Partial<CategoryDetail> | null;
   books: CategoryBookRecord[];
+  defaults: CategoryBookDefaultRecord[];
   activeSubTab: string;
   activeBooksTab: string;    // 'accounts' | 'defaultRules'
   selectedBookIdx: number;   // which book row is selected
@@ -53,26 +54,146 @@ interface OpenCategoryTab {
 
 // ── Account field row ──────────────────────────────────────────────────────────
 const AccountField: React.FC<{ label: string; value: string | undefined; required?: boolean }> = ({ label, value, required }) => (
-  <Row gutter={[0, 4]} style={{ marginBottom: 8 }}>
-    <Col span={10}>
-      <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>
+  <Row gutter={[0, 4]} style={{ marginBottom: 6 }}>
+    <Col span={11}>
+      <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>
         {required && <span style={{ color: REDWOOD.primary, marginRight: 2 }}>*</span>}
         {label}
       </Text>
     </Col>
-    <Col span={14}>
+    <Col span={13}>
       <div style={{
         fontFamily: 'monospace', fontSize: 11,
-        padding: '4px 8px', borderRadius: 4,
+        padding: '3px 6px', borderRadius: 4,
         background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`,
         color: value ? REDWOOD.info : REDWOOD.neutral300,
-        minHeight: 26,
-      }}>
+        minHeight: 24, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }} title={value || '—'}>
         {value || '—'}
       </div>
     </Col>
   </Row>
 );
+
+// ── Read-only field (for Default Rules panel) ──────────────────────────────────
+const ReadField: React.FC<{ label: string; value?: string | null; span?: number }> = ({ label, value }) => (
+  <div style={{ marginBottom: 8 }}>
+    <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>{label}</Text>
+    <Text style={{ fontSize: 12 }}>{value || '—'}</Text>
+  </div>
+);
+
+// ── Default Rules panel (per-book master/detail) ───────────────────────────────
+const DefaultRulesPanel: React.FC<{
+  defaults: CategoryBookDefaultRecord[];
+  bookTypeCode: string | undefined;
+}> = ({ defaults, bookTypeCode }) => {
+  const [selIdx, setSelIdx] = useState(0);
+  const rows = defaults.filter(d => !bookTypeCode || d.bookTypeCode === bookTypeCode);
+  const sel  = rows[selIdx];
+
+  useEffect(() => { setSelIdx(0); }, [bookTypeCode]);
+
+  if (rows.length === 0) {
+    return <Empty description="No default rules defined for this book" style={{ marginTop: 24 }} />;
+  }
+
+  const lifeYears  = sel?.lifeInMonths ? Math.floor(parseInt(sel.lifeInMonths) / 12) : null;
+  const lifeMths   = sel?.lifeInMonths ? parseInt(sel.lifeInMonths) % 12 : null;
+
+  const defColumns: ColumnsType<CategoryBookDefaultRecord> = [
+    {
+      title: 'From Date Placed in Service', dataIndex: 'fromDate', key: 'fromDate', width: 220,
+      render: (v, _, i) => (
+        <Button type="link" style={{ padding: 0, fontWeight: selIdx === i ? 700 : 400 }}
+          onClick={() => setSelIdx(i)}>{v || '—'}</Button>
+      ),
+    },
+    { title: 'To Date Placed in Service', dataIndex: 'toDate', key: 'toDate', width: 200,
+      render: (v) => v || '(open)' },
+  ];
+
+  return (
+    <div>
+      <Table
+        dataSource={rows}
+        columns={defColumns}
+        rowKey={(r, i) => `${r.defaultsId || i}`}
+        size="small"
+        pagination={false}
+        rowClassName={(_, i) => i === selIdx ? 'ant-table-row-selected' : ''}
+        onRow={(_, i) => ({ onClick: () => setSelIdx(i ?? 0), style: { cursor: 'pointer' } })}
+        style={{ marginBottom: 16 }}
+      />
+
+      {sel && (
+        <Card
+          size="small"
+          title={<Text strong style={{ fontSize: 12 }}>{sel.fromDate}: Details</Text>}
+          style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
+          styles={{ body: { padding: '12px 16px' } }}
+        >
+          {/* Main depreciation fields */}
+          <Row gutter={[24, 0]}>
+            <Col xs={24} md={12}>
+              <div style={{ marginBottom: 8 }}>
+                <Checkbox checked={sel.depreciateFlag === 'YES' || sel.depreciateFlag === 'Y'} disabled>
+                  <Text style={{ fontSize: 12 }}>Depreciate</Text>
+                </Checkbox>
+              </div>
+              <ReadField label="Depreciation Method"   value={sel.deprnMethodCode} />
+              <ReadField label="Life in Years"         value={lifeYears !== null ? String(lifeYears) : undefined} />
+              <ReadField label="Life in Months"        value={lifeMths  !== null ? String(lifeMths)  : undefined} />
+              <ReadField label="Depreciation Limit Type" value={sel.deprnLimitType} />
+              <ReadField label="Bonus Rule"            value={sel.bonusRule} />
+            </Col>
+            <Col xs={24} md={12}>
+              <ReadField label="Prorate Convention"       value={sel.prorateConventionCode} />
+              <ReadField label="Retirement Convention"    value={sel.retirementTypeCode} />
+              <ReadField label="Default Salvage Percent"  value={sel.percentSalvageValue} />
+              <ReadField label="Depreciation Ceiling"     value={sel.ceilingName} />
+              <Row gutter={8}>
+                <Col span={12}><ReadField label="Capital Gains Threshold Years"  value={sel.capitalGainsThreshYears} /></Col>
+                <Col span={12}><ReadField label="Months" value={sel.capitalGainsThreshMonths} /></Col>
+              </Row>
+              <ReadField label="Price Index"            value={sel.priceIndexName} />
+              <div style={{ marginBottom: 8 }}>
+                <Checkbox checked={sel.massPropertyFlag === 'Y' || sel.massPropertyFlag === 'YES'} disabled>
+                  <Text style={{ fontSize: 12 }}>Mass property eligible</Text>
+                </Checkbox>
+              </div>
+            </Col>
+          </Row>
+
+          {/* Default Subcomponent Rules */}
+          <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${REDWOOD.neutral200}` }}>
+            <Text strong style={{ fontSize: 13, color: REDWOOD.neutral900, display: 'block', marginBottom: 8 }}>
+              Default Subcomponent Rules
+            </Text>
+            <Row gutter={[24, 0]}>
+              <Col xs={24} md={8}><ReadField label="Rule"            value={sel.subcompRuleType} /></Col>
+              <Col xs={12}  md={8}><ReadField label="Minimum Years"  value={sel.minYearsLife} /></Col>
+              <Col xs={12}  md={8}><ReadField label="Months"         value={sel.minMonthsLife} /></Col>
+            </Row>
+          </div>
+
+          {/* Group Asset Options */}
+          <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${REDWOOD.neutral200}` }}>
+            <Text strong style={{ fontSize: 13, color: REDWOOD.neutral900, display: 'block', marginBottom: 8 }}>
+              Group Asset Options
+            </Text>
+            <Row gutter={[24, 0]}>
+              <Col xs={24} md={12}><ReadField label="Recognize Gain or Loss" value={sel.recognizeGainLoss} /></Col>
+              <Col xs={24} md={12}><ReadField label="Tracking Method"        value={sel.trackingMethod} /></Col>
+              <Col xs={24} md={12}><ReadField label="Terminal Gain or Loss"  value={sel.terminalGainLoss} /></Col>
+              <Col xs={24} md={12}><ReadField label="Group Asset Number"     value={sel.groupAssetNumber} /></Col>
+            </Row>
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+};
 
 // ── Category tab content ───────────────────────────────────────────────────────
 const CategoryTabContent: React.FC<{
@@ -81,7 +202,7 @@ const CategoryTabContent: React.FC<{
   onBooksTabChange: (key: string, booksTab: string) => void;
   onBookRowSelect: (key: string, idx: number) => void;
 }> = ({ tab, onSubTabChange, onBooksTabChange, onBookRowSelect }) => {
-  const { category, detail, books, loading, activeSubTab, activeBooksTab, selectedBookIdx } = tab;
+  const { category, detail, books, defaults, loading, activeSubTab, activeBooksTab, selectedBookIdx } = tab;
   const selectedBook = books[selectedBookIdx] ?? books[0];
 
   const bookColumns: ColumnsType<CategoryBookRecord> = [
@@ -176,27 +297,29 @@ const CategoryTabContent: React.FC<{
                         key: 'accounts',
                         label: 'Accounts',
                         children: (
-                          <Row gutter={[32, 0]}>
+                          <Row gutter={[20, 0]}>
+                            {/* Column 1 – Standard accounts */}
                             <Col xs={24} md={8}>
-                              <AccountField label="Asset Cost"         value={selectedBook.assetCostAccount}       required />
-                              <AccountField label="Asset Clearing"     value={selectedBook.assetClearingAccount}   required />
-                              <AccountField label="Depreciation Expense" value={selectedBook.deprnExpenseAccount}  required />
-                              <AccountField label="Depreciation Reserve" value={selectedBook.reserveAccount}       required />
-                              <AccountField label="Bonus Deprn Expense" value={selectedBook.bonusExpenseAccount} />
-                              <AccountField label="Bonus Deprn Reserve" value={selectedBook.bonusReserveAccount} />
+                              <AccountField label="Asset Cost"              value={selectedBook.assetCostAccount}         required />
+                              <AccountField label="Asset Clearing"          value={selectedBook.assetClearingAccount}     required />
+                              <AccountField label="Depreciation Expense"    value={selectedBook.deprnExpenseAccount}      required />
+                              <AccountField label="Depreciation Reserve"    value={selectedBook.reserveAccount}           required />
+                              <AccountField label="Bonus Depreciation Expense" value={selectedBook.bonusExpenseAccount} />
+                              <AccountField label="Bonus Depreciation Reserve" value={selectedBook.bonusReserveAccount} />
                             </Col>
+                            {/* Column 2 – CIP + Impairment accounts */}
                             <Col xs={24} md={8}>
-                              <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 6 }}>CCID References</Text>
-                              <Descriptions column={1} size="small" bordered
-                                styles={{ label: { width: 160, background: REDWOOD.neutral100, fontSize: 11 } }}
-                              >
-                                <Descriptions.Item label="Asset Cost CCID">{selectedBook.assetCostAccountCcid || '—'}</Descriptions.Item>
-                                <Descriptions.Item label="Asset Clearing CCID">{selectedBook.assetClearingAccountCcid || '—'}</Descriptions.Item>
-                                <Descriptions.Item label="Deprn Expense CCID">{selectedBook.deprnExpenseAccountCcid || '—'}</Descriptions.Item>
-                                <Descriptions.Item label="Reserve CCID">{selectedBook.reserveAccountCcid || '—'}</Descriptions.Item>
-                                <Descriptions.Item label="Bonus Expense CCID">{selectedBook.bonusExpenseAccountCcid || '—'}</Descriptions.Item>
-                                <Descriptions.Item label="Bonus Reserve CCID">{selectedBook.bonusReserveAccountCcid || '—'}</Descriptions.Item>
-                              </Descriptions>
+                              <AccountField label="CIP Cost"                    value={selectedBook.cipCostAccount} />
+                              <AccountField label="CIP Clearing"                value={selectedBook.cipClearingAccount} />
+                              <AccountField label="Unplanned Depreciation Expense" value={selectedBook.unplannedDeprnExpAccount} />
+                              <AccountField label="Impairment Expense"          value={selectedBook.impairmentExpenseAccount} />
+                              <AccountField label="Impairment Reserve"          value={selectedBook.impairmentReserveAccount} />
+                              <AccountField label="Revaluation Reserve"         value={selectedBook.revalReserveAccount} />
+                            </Col>
+                            {/* Column 3 – Revaluation accounts */}
+                            <Col xs={24} md={8}>
+                              <AccountField label="Revaluation Reserve Amortization" value={selectedBook.revalAmortAccount} />
+                              <AccountField label="Revaluation Loss Expense"         value={selectedBook.revalLossExpAccount} />
                             </Col>
                           </Row>
                         ),
@@ -205,9 +328,9 @@ const CategoryTabContent: React.FC<{
                         key: 'defaultRules',
                         label: 'Default Rules',
                         children: (
-                          <Empty
-                            description="Default Rules data not yet available in this release"
-                            style={{ marginTop: 24 }}
+                          <DefaultRulesPanel
+                            defaults={defaults}
+                            bookTypeCode={selectedBook.bookTypeCode}
                           />
                         ),
                       },
@@ -361,20 +484,22 @@ const ManageCategories: React.FC = () => {
 
     setOpenCategoryTabs(prev => [...prev, {
       key: tabKey, category, loading: true,
-      detail: null, books: [],
+      detail: null, books: [], defaults: [],
       activeSubTab: 'general', activeBooksTab: 'accounts', selectedBookIdx: 0,
     }]);
     setActiveTabKey(tabKey);
 
     try {
-      const [det, bks] = await Promise.all([
+      const [det, bks, defs] = await Promise.all([
         getCategoryDetail(category.categoryId),
         getCategoryBooks(category.categoryId),
+        getCategoryBookDefaults(category.categoryId),
       ]);
       setOpenCategoryTabs(prev => prev.map(t => t.key === tabKey ? {
         ...t, loading: false,
-        detail: det.success !== false ? det : null,
-        books:  bks.items || [],
+        detail:   det.success  !== false ? det  : null,
+        books:    bks.items  || [],
+        defaults: defs.items || [],
       } : t));
     } catch {
       message.error('Failed to load category details');
