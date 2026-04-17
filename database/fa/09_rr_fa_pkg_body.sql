@@ -19,6 +19,10 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
     END write_error;
 
     -- ── GET_ASSETS ────────────────────────────────────────────────────────────
+    -- Available columns: RR_FA_ADDITIONS_TL (ASSET_ID, DESCRIPTION, CREATION_DATE,
+    --   CREATED_BY, LAST_UPDATE_DATE, LAST_UPDATED_BY) + RR_FA_BOOKS (financial).
+    -- Filters p_asset_number / p_category / p_asset_type / p_status are silently
+    -- ignored — those columns do not exist in the two source tables.
     PROCEDURE GET_ASSETS (
         p_asset_number  IN  VARCHAR2,
         p_description   IN  VARCHAR2,
@@ -41,49 +45,30 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         TYPE t_cur IS REF CURSOR;
         v_cur t_cur;
 
-        v_asset_id         VARCHAR2(100);
-        v_asset_number     VARCHAR2(200);
-        v_description      VARCHAR2(4000);
-        v_asset_type       VARCHAR2(100);
-        v_category_id      VARCHAR2(100);
-        v_tag_number       VARCHAR2(200);
-        v_serial_number    VARCHAR2(200);
-        v_manufacturer     VARCHAR2(200);
-        v_in_use_flag      VARCHAR2(10);
-        v_owned_leased     VARCHAR2(30);
-        v_units            VARCHAR2(50);
-        v_current_units    VARCHAR2(50);
-        v_capitalized_flag VARCHAR2(10);
-        v_retired_flag     VARCHAR2(10);
-        v_book_type_code   VARCHAR2(100);
-        v_date_placed      VARCHAR2(100);
-        v_cost             VARCHAR2(100);
-        v_adjusted_cost    VARCHAR2(100);
-        v_salvage_value    VARCHAR2(100);
-        v_deprn_reserve    VARCHAR2(100);
-        v_nbv              VARCHAR2(100);
-        v_creation_date    VARCHAR2(100);
-        v_last_update_date VARCHAR2(100);
+        v_asset_id         VARCHAR2(400);
+        v_description      VARCHAR2(400);
+        v_creation_date    VARCHAR2(400);
+        v_created_by       VARCHAR2(400);
+        v_last_update_date VARCHAR2(400);
+        v_last_updated_by  VARCHAR2(400);
+        v_book_type_code   VARCHAR2(400);
+        v_date_placed      VARCHAR2(400);
+        v_cost             VARCHAR2(400);
+        v_original_cost    VARCHAR2(400);
+        v_adjusted_cost    VARCHAR2(400);
+        v_salvage_value    VARCHAR2(400);
+        v_capitalize_flag  VARCHAR2(400);
+        v_depreciate_flag  VARCHAR2(400);
+        v_date_ineffective VARCHAR2(400);
+        v_deprn_reserve    VARCHAR2(400);
+        v_nbv              VARCHAR2(400);
     BEGIN
-        IF p_asset_number IS NOT NULL THEN
-            v_where := v_where || ' AND UPPER(a.ASSET_NUMBER) LIKE UPPER(''%' || p_asset_number || '%'')';
-        END IF;
+        -- Only description and book_type_code filters are supported
         IF p_description IS NOT NULL THEN
             v_where := v_where || ' AND UPPER(a.DESCRIPTION) LIKE UPPER(''%' || p_description || '%'')';
         END IF;
-        IF p_category IS NOT NULL THEN
-            v_where := v_where || ' AND a.ASSET_CATEGORY_ID = ''' || p_category || '''';
-        END IF;
         IF p_book_type IS NOT NULL THEN
             v_where := v_where || ' AND b.BOOK_TYPE_CODE = ''' || p_book_type || '''';
-        END IF;
-        IF p_asset_type IS NOT NULL THEN
-            v_where := v_where || ' AND a.ASSET_TYPE = ''' || p_asset_type || '''';
-        END IF;
-        IF p_status = 'RETIRED' THEN
-            v_where := v_where || ' AND a.RETIRED_FLAG = ''YES''';
-        ELSIF p_status = 'ACTIVE' THEN
-            v_where := v_where || ' AND NVL(a.RETIRED_FLAG,''NO'') <> ''YES''';
         END IF;
 
         v_sql_count :=
@@ -95,15 +80,13 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         EXECUTE IMMEDIATE v_sql_count INTO v_total;
 
         v_sql_main :=
-            'SELECT a.ASSET_ID, a.ASSET_NUMBER, a.DESCRIPTION, a.ASSET_TYPE,'
-         || '       a.ASSET_CATEGORY_ID, a.TAG_NUMBER, a.SERIAL_NUMBER, a.MANUFACTURER_NAME,'
-         || '       a.IN_USE_FLAG, a.OWNED_LEASED, a.UNITS, a.CURRENT_UNITS,'
-         || '       a.CAPITALIZED_FLAG, a.RETIRED_FLAG,'
-         || '       b.BOOK_TYPE_CODE, b.DATE_PLACED_IN_SERVICE, b.COST, b.ADJUSTED_COST,'
-         || '       b.SALVAGE_VALUE,'
+            'SELECT a.ASSET_ID, a.DESCRIPTION,'
+         || '       a.CREATION_DATE, a.CREATED_BY, a.LAST_UPDATE_DATE, a.LAST_UPDATED_BY,'
+         || '       b.BOOK_TYPE_CODE, b.DATE_PLACED_IN_SERVICE,'
+         || '       b.COST, b.ORIGINAL_COST, b.ADJUSTED_COST, b.SALVAGE_VALUE,'
+         || '       b.CAPITALIZE_FLAG, b.DEPRECIATE_FLAG, b.DATE_INEFFECTIVE,'
          || '       NVL(ds.DEPRN_RESERVE, 0) AS DEPRN_RESERVE,'
-         || '       NVL(b.COST,0) - NVL(ds.DEPRN_RESERVE,0) AS NBV,'
-         || '       a.CREATION_DATE, a.LAST_UPDATE_DATE'
+         || '       NVL(b.COST, 0) - NVL(ds.DEPRN_RESERVE, 0) AS NBV'
          || '  FROM RR_FA_ADDITIONS_TL a'
          || '  LEFT JOIN (SELECT * FROM RR_FA_BOOKS WHERE DATE_INEFFECTIVE IS NULL) b'
          || '         ON a.ASSET_ID = b.ASSET_ID'
@@ -112,11 +95,11 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
          || '        FROM RR_FA_DEPRN_SUMMARY ds1'
          || '       WHERE ds1.PERIOD_COUNTER = ('
          || '           SELECT MAX(ds2.PERIOD_COUNTER) FROM RR_FA_DEPRN_SUMMARY ds2'
-         || '            WHERE ds2.ASSET_ID = ds1.ASSET_ID'
+         || '            WHERE ds2.ASSET_ID      = ds1.ASSET_ID'
          || '              AND ds2.BOOK_TYPE_CODE = ds1.BOOK_TYPE_CODE)'
          || '  ) ds ON a.ASSET_ID = ds.ASSET_ID AND b.BOOK_TYPE_CODE = ds.BOOK_TYPE_CODE'
          || v_where
-         || ' ORDER BY a.ASSET_NUMBER'
+         || ' ORDER BY a.ASSET_ID'
          || ' OFFSET ' || v_offset || ' ROWS FETCH NEXT ' || v_limit || ' ROWS ONLY';
 
         APEX_JSON.INITIALIZE_CLOB_OUTPUT;
@@ -130,39 +113,32 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         OPEN v_cur FOR v_sql_main;
         LOOP
             FETCH v_cur INTO
-                v_asset_id, v_asset_number, v_description, v_asset_type,
-                v_category_id, v_tag_number, v_serial_number, v_manufacturer,
-                v_in_use_flag, v_owned_leased, v_units, v_current_units,
-                v_capitalized_flag, v_retired_flag,
-                v_book_type_code, v_date_placed, v_cost, v_adjusted_cost,
-                v_salvage_value, v_deprn_reserve, v_nbv,
-                v_creation_date, v_last_update_date;
+                v_asset_id, v_description,
+                v_creation_date, v_created_by, v_last_update_date, v_last_updated_by,
+                v_book_type_code, v_date_placed,
+                v_cost, v_original_cost, v_adjusted_cost, v_salvage_value,
+                v_capitalize_flag, v_depreciate_flag, v_date_ineffective,
+                v_deprn_reserve, v_nbv;
             EXIT WHEN v_cur%NOTFOUND;
 
             APEX_JSON.OPEN_OBJECT;
             APEX_JSON.WRITE('assetId',            v_asset_id);
-            APEX_JSON.WRITE('assetNumber',        v_asset_number);
             APEX_JSON.WRITE('description',        v_description);
-            APEX_JSON.WRITE('assetType',          v_asset_type);
-            APEX_JSON.WRITE('categoryId',         v_category_id);
-            APEX_JSON.WRITE('tagNumber',          v_tag_number);
-            APEX_JSON.WRITE('serialNumber',       v_serial_number);
-            APEX_JSON.WRITE('manufacturer',       v_manufacturer);
-            APEX_JSON.WRITE('inUseFlag',          v_in_use_flag);
-            APEX_JSON.WRITE('ownedLeased',        v_owned_leased);
-            APEX_JSON.WRITE('units',              v_units);
-            APEX_JSON.WRITE('currentUnits',       v_current_units);
-            APEX_JSON.WRITE('capitalizedFlag',    v_capitalized_flag);
-            APEX_JSON.WRITE('retiredFlag',        v_retired_flag);
+            APEX_JSON.WRITE('creationDate',       v_creation_date);
+            APEX_JSON.WRITE('createdBy',          v_created_by);
+            APEX_JSON.WRITE('lastUpdateDate',     v_last_update_date);
+            APEX_JSON.WRITE('lastUpdatedBy',      v_last_updated_by);
             APEX_JSON.WRITE('bookTypeCode',       v_book_type_code);
             APEX_JSON.WRITE('datePlacedInService',v_date_placed);
             APEX_JSON.WRITE('cost',               v_cost);
+            APEX_JSON.WRITE('originalCost',       v_original_cost);
             APEX_JSON.WRITE('adjustedCost',       v_adjusted_cost);
             APEX_JSON.WRITE('salvageValue',       v_salvage_value);
+            APEX_JSON.WRITE('capitalizeFlag',     v_capitalize_flag);
+            APEX_JSON.WRITE('depreciateFlag',     v_depreciate_flag);
+            APEX_JSON.WRITE('dateIneffective',    v_date_ineffective);
             APEX_JSON.WRITE('deprnReserve',       v_deprn_reserve);
             APEX_JSON.WRITE('nbv',                v_nbv);
-            APEX_JSON.WRITE('creationDate',       v_creation_date);
-            APEX_JSON.WRITE('lastUpdateDate',     v_last_update_date);
             APEX_JSON.CLOSE_OBJECT;
         END LOOP;
         CLOSE v_cur;
@@ -183,79 +159,95 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         p_http_status OUT NUMBER,
         p_result      OUT CLOB
     ) IS
-        v_asset_id         RR_FA_ADDITIONS_TL.ASSET_ID%TYPE;
-        v_asset_number     RR_FA_ADDITIONS_TL.ASSET_NUMBER%TYPE;
-        v_asset_type       RR_FA_ADDITIONS_TL.ASSET_TYPE%TYPE;
-        v_tag_number       RR_FA_ADDITIONS_TL.TAG_NUMBER%TYPE;
-        v_description      RR_FA_ADDITIONS_TL.DESCRIPTION%TYPE;
-        v_category_id      RR_FA_ADDITIONS_TL.ASSET_CATEGORY_ID%TYPE;
-        v_parent_asset_id  RR_FA_ADDITIONS_TL.PARENT_ASSET_ID%TYPE;
-        v_manufacturer     RR_FA_ADDITIONS_TL.MANUFACTURER_NAME%TYPE;
-        v_serial_number    RR_FA_ADDITIONS_TL.SERIAL_NUMBER%TYPE;
-        v_model_number     RR_FA_ADDITIONS_TL.MODEL_NUMBER%TYPE;
-        v_in_use_flag      RR_FA_ADDITIONS_TL.IN_USE_FLAG%TYPE;
-        v_owned_leased     RR_FA_ADDITIONS_TL.OWNED_LEASED%TYPE;
-        v_new_used         RR_FA_ADDITIONS_TL.NEW_USED%TYPE;
-        v_units            RR_FA_ADDITIONS_TL.UNITS%TYPE;
-        v_current_units    RR_FA_ADDITIONS_TL.CURRENT_UNITS%TYPE;
-        v_inventorial      RR_FA_ADDITIONS_TL.INVENTORIAL%TYPE;
-        v_capitalized_flag RR_FA_ADDITIONS_TL.CAPITALIZED_FLAG%TYPE;
-        v_retired_flag     RR_FA_ADDITIONS_TL.RETIRED_FLAG%TYPE;
-        v_pending_flag     RR_FA_ADDITIONS_TL.PENDING_FLAG%TYPE;
-        v_property_type    RR_FA_ADDITIONS_TL.PROPERTY_TYPE_CODE%TYPE;
-        v_feeder_system    RR_FA_ADDITIONS_TL.FEEDER_SYSTEM_NAME%TYPE;
-        v_creation_date    VARCHAR2(100);
-        v_created_by       RR_FA_ADDITIONS_TL.CREATED_BY%TYPE;
-        v_last_update_date VARCHAR2(100);
-        v_last_updated_by  RR_FA_ADDITIONS_TL.LAST_UPDATED_BY%TYPE;
+        -- TL columns
+        v_asset_id             RR_FA_ADDITIONS_TL.ASSET_ID%TYPE;
+        v_description          RR_FA_ADDITIONS_TL.DESCRIPTION%TYPE;
+        v_language             RR_FA_ADDITIONS_TL.LANGUAGE%TYPE;
+        v_source_lang          RR_FA_ADDITIONS_TL.SOURCE_LANG%TYPE;
+        v_tl_creation_date     RR_FA_ADDITIONS_TL.CREATION_DATE%TYPE;
+        v_tl_created_by        RR_FA_ADDITIONS_TL.CREATED_BY%TYPE;
+        v_tl_last_update_date  RR_FA_ADDITIONS_TL.LAST_UPDATE_DATE%TYPE;
+        v_tl_last_updated_by   RR_FA_ADDITIONS_TL.LAST_UPDATED_BY%TYPE;
+        -- BOOKS columns
+        v_book_type_code       RR_FA_BOOKS.BOOK_TYPE_CODE%TYPE;
+        v_date_placed          RR_FA_BOOKS.DATE_PLACED_IN_SERVICE%TYPE;
+        v_date_effective       RR_FA_BOOKS.DATE_EFFECTIVE%TYPE;
+        v_deprn_start_date     RR_FA_BOOKS.DEPRN_START_DATE%TYPE;
+        v_cost                 RR_FA_BOOKS.COST%TYPE;
+        v_original_cost        RR_FA_BOOKS.ORIGINAL_COST%TYPE;
+        v_adjusted_cost        RR_FA_BOOKS.ADJUSTED_COST%TYPE;
+        v_salvage_value        RR_FA_BOOKS.SALVAGE_VALUE%TYPE;
+        v_recoverable_cost     RR_FA_BOOKS.RECOVERABLE_COST%TYPE;
+        v_unrevalued_cost      RR_FA_BOOKS.UNREVALUED_COST%TYPE;
+        v_capitalize_flag      RR_FA_BOOKS.CAPITALIZE_FLAG%TYPE;
+        v_depreciate_flag      RR_FA_BOOKS.DEPRECIATE_FLAG%TYPE;
+        v_date_ineffective     RR_FA_BOOKS.DATE_INEFFECTIVE%TYPE;
+        v_prorate_date         RR_FA_BOOKS.PRORATE_DATE%TYPE;
+        v_rate_adj_factor      RR_FA_BOOKS.RATE_ADJUSTMENT_FACTOR%TYPE;
+        v_salvage_type         RR_FA_BOOKS.SALVAGE_TYPE%TYPE;
+        v_deprn_limit_type     RR_FA_BOOKS.DEPRN_LIMIT_TYPE%TYPE;
+        v_cip_cost             RR_FA_BOOKS.CIP_COST%TYPE;
+        v_method_id            RR_FA_BOOKS.METHOD_ID%TYPE;
+        v_convention_type_id   RR_FA_BOOKS.CONVENTION_TYPE_ID%TYPE;
+        v_retirement_id        RR_FA_BOOKS.RETIREMENT_ID%TYPE;
     BEGIN
-        SELECT a.ASSET_ID, a.ASSET_NUMBER, a.ASSET_TYPE, a.TAG_NUMBER, a.DESCRIPTION,
-               a.ASSET_CATEGORY_ID, a.PARENT_ASSET_ID, a.MANUFACTURER_NAME, a.SERIAL_NUMBER,
-               a.MODEL_NUMBER, a.IN_USE_FLAG, a.OWNED_LEASED, a.NEW_USED,
-               a.UNITS, a.CURRENT_UNITS, a.INVENTORIAL, a.CAPITALIZED_FLAG,
-               a.RETIRED_FLAG, a.PENDING_FLAG, a.PROPERTY_TYPE_CODE, a.FEEDER_SYSTEM_NAME,
-               TO_CHAR(a.CREATION_DATE,   'YYYY-MM-DD'), a.CREATED_BY,
-               TO_CHAR(a.LAST_UPDATE_DATE,'YYYY-MM-DD'), a.LAST_UPDATED_BY
-        INTO   v_asset_id, v_asset_number, v_asset_type, v_tag_number, v_description,
-               v_category_id, v_parent_asset_id, v_manufacturer, v_serial_number,
-               v_model_number, v_in_use_flag, v_owned_leased, v_new_used,
-               v_units, v_current_units, v_inventorial, v_capitalized_flag,
-               v_retired_flag, v_pending_flag, v_property_type, v_feeder_system,
-               v_creation_date, v_created_by, v_last_update_date, v_last_updated_by
-        FROM   RR_FA_ADDITIONS_TL a
-        WHERE  a.ASSET_ID = p_asset_id
-        AND    a.LANGUAGE = 'US'
+        SELECT tl.ASSET_ID, tl.DESCRIPTION, tl.LANGUAGE, tl.SOURCE_LANG,
+               tl.CREATION_DATE, tl.CREATED_BY, tl.LAST_UPDATE_DATE, tl.LAST_UPDATED_BY,
+               b.BOOK_TYPE_CODE, b.DATE_PLACED_IN_SERVICE, b.DATE_EFFECTIVE,
+               b.DEPRN_START_DATE, b.COST, b.ORIGINAL_COST, b.ADJUSTED_COST,
+               b.SALVAGE_VALUE, b.RECOVERABLE_COST, b.UNREVALUED_COST,
+               b.CAPITALIZE_FLAG, b.DEPRECIATE_FLAG, b.DATE_INEFFECTIVE,
+               b.PRORATE_DATE, b.RATE_ADJUSTMENT_FACTOR,
+               b.SALVAGE_TYPE, b.DEPRN_LIMIT_TYPE, b.CIP_COST,
+               b.METHOD_ID, b.CONVENTION_TYPE_ID, b.RETIREMENT_ID
+        INTO   v_asset_id, v_description, v_language, v_source_lang,
+               v_tl_creation_date, v_tl_created_by, v_tl_last_update_date, v_tl_last_updated_by,
+               v_book_type_code, v_date_placed, v_date_effective,
+               v_deprn_start_date, v_cost, v_original_cost, v_adjusted_cost,
+               v_salvage_value, v_recoverable_cost, v_unrevalued_cost,
+               v_capitalize_flag, v_depreciate_flag, v_date_ineffective,
+               v_prorate_date, v_rate_adj_factor,
+               v_salvage_type, v_deprn_limit_type, v_cip_cost,
+               v_method_id, v_convention_type_id, v_retirement_id
+        FROM   RR_FA_ADDITIONS_TL tl
+        LEFT JOIN RR_FA_BOOKS b
+               ON b.ASSET_ID = tl.ASSET_ID AND b.DATE_INEFFECTIVE IS NULL
+        WHERE  tl.ASSET_ID = p_asset_id
+        AND    tl.LANGUAGE = 'US'
         AND    ROWNUM = 1;
 
         APEX_JSON.INITIALIZE_CLOB_OUTPUT;
         APEX_JSON.OPEN_OBJECT;
-        APEX_JSON.WRITE('success',          TRUE);
-        APEX_JSON.WRITE('assetId',          v_asset_id);
-        APEX_JSON.WRITE('assetNumber',      v_asset_number);
-        APEX_JSON.WRITE('assetType',        v_asset_type);
-        APEX_JSON.WRITE('tagNumber',        v_tag_number);
-        APEX_JSON.WRITE('description',      v_description);
-        APEX_JSON.WRITE('tlDescription',    v_description);
-        APEX_JSON.WRITE('categoryId',       v_category_id);
-        APEX_JSON.WRITE('parentAssetId',    v_parent_asset_id);
-        APEX_JSON.WRITE('manufacturerName', v_manufacturer);
-        APEX_JSON.WRITE('serialNumber',     v_serial_number);
-        APEX_JSON.WRITE('modelNumber',      v_model_number);
-        APEX_JSON.WRITE('inUseFlag',        v_in_use_flag);
-        APEX_JSON.WRITE('ownedLeased',      v_owned_leased);
-        APEX_JSON.WRITE('newUsed',          v_new_used);
-        APEX_JSON.WRITE('units',            v_units);
-        APEX_JSON.WRITE('currentUnits',     v_current_units);
-        APEX_JSON.WRITE('inventorial',      v_inventorial);
-        APEX_JSON.WRITE('capitalizedFlag',  v_capitalized_flag);
-        APEX_JSON.WRITE('retiredFlag',      v_retired_flag);
-        APEX_JSON.WRITE('pendingFlag',      v_pending_flag);
-        APEX_JSON.WRITE('propertyTypeCode', v_property_type);
-        APEX_JSON.WRITE('feederSystemName', v_feeder_system);
-        APEX_JSON.WRITE('creationDate',     v_creation_date);
-        APEX_JSON.WRITE('createdBy',        v_created_by);
-        APEX_JSON.WRITE('lastUpdateDate',   v_last_update_date);
-        APEX_JSON.WRITE('lastUpdatedBy',    v_last_updated_by);
+        APEX_JSON.WRITE('success',             TRUE);
+        APEX_JSON.WRITE('assetId',             v_asset_id);
+        APEX_JSON.WRITE('description',         v_description);
+        APEX_JSON.WRITE('language',            v_language);
+        APEX_JSON.WRITE('sourceLang',          v_source_lang);
+        APEX_JSON.WRITE('creationDate',        v_tl_creation_date);
+        APEX_JSON.WRITE('createdBy',           v_tl_created_by);
+        APEX_JSON.WRITE('lastUpdateDate',      v_tl_last_update_date);
+        APEX_JSON.WRITE('lastUpdatedBy',       v_tl_last_updated_by);
+        APEX_JSON.WRITE('bookTypeCode',        v_book_type_code);
+        APEX_JSON.WRITE('datePlacedInService', v_date_placed);
+        APEX_JSON.WRITE('dateEffective',       v_date_effective);
+        APEX_JSON.WRITE('deprnStartDate',      v_deprn_start_date);
+        APEX_JSON.WRITE('cost',                v_cost);
+        APEX_JSON.WRITE('originalCost',        v_original_cost);
+        APEX_JSON.WRITE('adjustedCost',        v_adjusted_cost);
+        APEX_JSON.WRITE('salvageValue',        v_salvage_value);
+        APEX_JSON.WRITE('recoverableCost',     v_recoverable_cost);
+        APEX_JSON.WRITE('unrevaluedCost',      v_unrevalued_cost);
+        APEX_JSON.WRITE('capitalizeFlag',      v_capitalize_flag);
+        APEX_JSON.WRITE('depreciateFlag',      v_depreciate_flag);
+        APEX_JSON.WRITE('dateIneffective',     v_date_ineffective);
+        APEX_JSON.WRITE('prorateDate',         v_prorate_date);
+        APEX_JSON.WRITE('rateAdjustmentFactor',v_rate_adj_factor);
+        APEX_JSON.WRITE('salvageType',         v_salvage_type);
+        APEX_JSON.WRITE('deprnLimitType',      v_deprn_limit_type);
+        APEX_JSON.WRITE('cipCost',             v_cip_cost);
+        APEX_JSON.WRITE('methodId',            v_method_id);
+        APEX_JSON.WRITE('conventionTypeId',    v_convention_type_id);
+        APEX_JSON.WRITE('retirementId',        v_retirement_id);
         APEX_JSON.CLOSE_OBJECT;
         p_http_status := 200;
         p_result      := APEX_JSON.GET_CLOB_OUTPUT;
