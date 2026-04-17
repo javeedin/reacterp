@@ -57,11 +57,8 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         AND    (p_description IS NULL OR UPPER(a.DESCRIPTION) LIKE UPPER('%' || p_description || '%'))
         AND    (p_book_type   IS NULL OR b.BOOK_TYPE_CODE = p_book_type);
 
-        -- JSON header
-        p_result := '{"success":true'
-                 || ',"totalCount":' || v_total
-                 || ',"offset":'     || v_offset
-                 || ',"limit":'      || v_limit
+        -- JSON header — no envelope, just totalCount + items
+        p_result := '{"totalCount":' || v_total
                  || ',"items":[';
 
         -- Rows — same query confirmed working in step 2

@@ -106,12 +106,12 @@ const ManageAssets: React.FC = () => {
         offset:       (pg - 1) * ps,
         limit:        ps,
       });
-      if (res.success) {
-        setRows(res.items);
-        setTotalCount(res.totalCount);
-        setPage(pg);
+      if (res.error) {
+        message.error(res.error);
       } else {
-        message.error(res.error || 'Search failed');
+        setRows(res.items || []);
+        setTotalCount(res.totalCount || 0);
+        setPage(pg);
       }
     } finally {
       setLoading(false);

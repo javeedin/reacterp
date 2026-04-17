@@ -152,10 +152,7 @@ export interface TransactionRecord {
 }
 
 export interface AssetSearchResponse {
-  success: boolean;
   totalCount: number;
-  offset: number;
-  limit: number;
   items: AssetRecord[];
   error?: string;
 }
@@ -261,8 +258,7 @@ export const searchAssets = async (
   try {
     return await fetchFromApex(`fa/assets${qs ? '?' + qs : ''}`);
   } catch (e) {
-    return { success: false, totalCount: 0, offset: 0, limit: 25, items: [],
-             error: e instanceof Error ? e.message : 'Unknown error' };
+    return { totalCount: 0, items: [], error: e instanceof Error ? e.message : 'Unknown error' };
   }
 };
 
