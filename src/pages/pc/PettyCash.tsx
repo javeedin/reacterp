@@ -11,6 +11,7 @@ import {
   HomeOutlined, WalletOutlined, PlusOutlined, SearchOutlined,
   ReloadOutlined, EditOutlined, DeleteOutlined, CloseOutlined,
   DollarOutlined, MinusCircleOutlined, ArrowUpOutlined, ArrowDownOutlined,
+  ApiOutlined,
 } from '@ant-design/icons';
 import FloatingMenu from '../../components/FloatingMenu';
 import ApiDocsModal, { type ApiEndpoint } from '../../components/ApiDocsModal';
@@ -64,8 +65,9 @@ const PostingTag: React.FC<{ status: string }> = ({ status }) => {
 const RegisterDetail: React.FC<{
   tab: RegisterTab;
   onRefresh: () => void;
+  onRefreshWithLog: () => void;
   currentUser: string;
-}> = ({ tab, onRefresh, currentUser }) => {
+}> = ({ tab, onRefresh, onRefreshWithLog, currentUser }) => {
   const { register, transactions, txnLoading } = tab;
   const [addMoneyOpen, setAddMoneyOpen]     = useState(false);
   const [addExpenseOpen, setAddExpenseOpen] = useState(false);
@@ -256,7 +258,7 @@ const RegisterDetail: React.FC<{
           <Button
             size="small"
             icon={<ReloadOutlined />}
-            onClick={onRefresh}
+            onClick={onRefreshWithLog}
             loading={tab.txnLoading}
           >
             Refresh
@@ -503,6 +505,11 @@ const PettyCash: React.FC = () => {
   const [deleteLoading, setDeleteLoading]     = useState<number | null>(null);
   const [searched, setSearched]               = useState(false);
 
+  // ── API log modal (shown on manual Refresh) ────────────────
+  interface LogEntry { label: string; url: string; status: number | null; loading: boolean; response: string | null; }
+  const [refreshLogOpen, setRefreshLogOpen] = useState(false);
+  const [refreshLog, setRefreshLog]         = useState<LogEntry[]>([]);
+
   // ── Search ────────────────────────────────────────────────
   const handleSearch = useCallback(async () => {
     setSearchLoading(true);
@@ -565,6 +572,60 @@ const PettyCash: React.FC = () => {
     } catch {
       setOpenTabs(prev => prev.map(t => t.key === key ? { ...t, txnLoading: false } : t));
     }
+  }, [openTabs]);
+
+  // ── Refresh with live API log modal ───────────────────────
+  const refreshTabWithLog = useCallback(async (key: string) => {
+    const tab = openTabs.find(t => t.key === key);
+    if (!tab) return;
+    const id    = tab.register.registerId;
+    const regUrl = `${PC_BASE}/registers/${id}`;
+    const txnUrl = `${PC_BASE}/registers/${id}/transactions`;
+
+    setRefreshLog([
+      { label: 'GET Register Header', url: regUrl, status: null, loading: true, response: null },
+      { label: 'GET Transactions',    url: txnUrl, status: null, loading: true, response: null },
+    ]);
+    setRefreshLogOpen(true);
+    setOpenTabs(prev => prev.map(t => t.key === key ? { ...t, txnLoading: true } : t));
+
+    let reg = tab.register;
+    let txns = tab.transactions;
+
+    // ── Fetch register header
+    try {
+      const res  = await fetch(regUrl, { headers: { Accept: 'application/json' } });
+      const text = await res.text();
+      let pretty = text;
+      try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch { /* raw */ }
+      setRefreshLog(prev => prev.map((l, i) => i === 0
+        ? { ...l, status: res.status, loading: false, response: pretty }
+        : l));
+      if (res.ok) { const d = JSON.parse(text); if (d.registerId) reg = d; }
+    } catch (e: any) {
+      setRefreshLog(prev => prev.map((l, i) => i === 0
+        ? { ...l, status: 0, loading: false, response: `Network error: ${e?.message}` }
+        : l));
+    }
+
+    // ── Fetch transactions
+    try {
+      const res  = await fetch(txnUrl, { headers: { Accept: 'application/json' } });
+      const text = await res.text();
+      let pretty = text;
+      try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch { /* raw */ }
+      setRefreshLog(prev => prev.map((l, i) => i === 1
+        ? { ...l, status: res.status, loading: false, response: pretty }
+        : l));
+      if (res.ok) { const d = JSON.parse(text); if (d.items) txns = d.items; }
+    } catch (e: any) {
+      setRefreshLog(prev => prev.map((l, i) => i === 1
+        ? { ...l, status: 0, loading: false, response: `Network error: ${e?.message}` }
+        : l));
+    }
+
+    setOpenTabs(prev => prev.map(t => t.key === key ? { ...t, register: reg, transactions: txns, txnLoading: false } : t));
+    setRegisters(prev => prev.map(r => r.registerId === reg.registerId ? reg : r));
   }, [openTabs]);
 
   // ── Close tab ──────────────────────────────────────────────
@@ -843,7 +904,7 @@ const PettyCash: React.FC = () => {
             </div>
             <Space>
               <Button size="small" icon={<ReloadOutlined />}
-                onClick={() => refreshTab(tab.key)}>
+                onClick={() => refreshTabWithLog(tab.key)}>
                 Refresh
               </Button>
               <Button size="small" icon={<EditOutlined />} disabled>
@@ -854,6 +915,7 @@ const PettyCash: React.FC = () => {
           <RegisterDetail
             tab={tab}
             onRefresh={() => refreshTab(tab.key)}
+            onRefreshWithLog={() => refreshTabWithLog(tab.key)}
             currentUser={currentUser}
           />
         </div>
@@ -896,6 +958,53 @@ const PettyCash: React.FC = () => {
           />
         </Card>
       </Content>
+      {/* ── Refresh API Log Modal ──────────────────────────────── */}
+      <Modal
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} />Refresh — API Calls</Space>}
+        open={refreshLogOpen}
+        onCancel={() => setRefreshLogOpen(false)}
+        footer={<Button onClick={() => setRefreshLogOpen(false)}>Close</Button>}
+        width={760}
+        destroyOnClose
+      >
+        {refreshLog.map((entry, i) => (
+          <div key={i} style={{
+            border: `1px solid ${entry.loading ? REDWOOD.neutral200 : entry.status && entry.status >= 200 && entry.status < 300 ? '#b7eb8f' : entry.status === null ? REDWOOD.neutral200 : '#ffa39e'}`,
+            borderRadius: 8, marginBottom: 12, overflow: 'hidden',
+          }}>
+            {/* Header row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: '#fafafa', borderBottom: '1px solid #f0f0f0' }}>
+              <Tag color="blue" style={{ fontWeight: 700, fontSize: 11, margin: 0 }}>GET</Tag>
+              <Text style={{ fontFamily: 'monospace', fontSize: 12, flex: 1, wordBreak: 'break-all' }}>{entry.url}</Text>
+              {entry.loading
+                ? <Spin size="small" />
+                : entry.status !== null && (
+                  <Tag color={entry.status >= 200 && entry.status < 300 ? 'success' : 'error'}>
+                    HTTP {entry.status}
+                  </Tag>
+                )
+              }
+            </div>
+            {/* Label + response */}
+            <div style={{ padding: '6px 12px', background: '#fff' }}>
+              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, fontWeight: 600 }}>{entry.label}</Text>
+              {!entry.loading && entry.response !== null && (
+                <pre style={{
+                  marginTop: 6,
+                  background: entry.status && entry.status >= 200 && entry.status < 300 ? '#f6ffed' : '#fff2f0',
+                  border: `1px solid ${entry.status && entry.status >= 200 && entry.status < 300 ? '#b7eb8f' : '#ffa39e'}`,
+                  borderRadius: 4, padding: '6px 10px',
+                  fontSize: 11, maxHeight: 160, overflowY: 'auto',
+                  margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                }}>
+                  {entry.response}
+                </pre>
+              )}
+            </div>
+          </div>
+        ))}
+      </Modal>
+
       <FloatingMenu />
     </Layout>
   );
