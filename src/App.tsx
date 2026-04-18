@@ -49,6 +49,7 @@ const PrepaymentApplications  = lazy(() => import('./pages/ap/PrepaymentApplicat
 const ManageSuppliers         = lazy(() => import('./pages/suppliers/ManageSuppliers'));
 const SupplierBalance         = lazy(() => import('./pages/suppliers/SupplierBalance'));
 const SyncData                = lazy(() => import('./pages/sync/SyncData'));
+const PettyCash               = lazy(() => import('./pages/pc/PettyCash'));
 const APModule                = lazy(() => import('./pages/ap').then(m => ({ default: m.APModule })));
 const PMSModule               = lazy(() => import('./pages/pms').then(m => ({ default: m.PMSModule })));
 const FundManagement          = lazy(() => import('./pages/pms').then(m => ({ default: m.FundManagement })));
@@ -205,6 +206,8 @@ function App() {
               <Route path="reports/*" element={<ComingSoon moduleName="Reports & Analytics" />} />
               <Route path="admin" element={<AdminModule />} />
               <Route path="admin/users" element={<UserManagement />} />
+              {/* Petty Cash */}
+              <Route path="pc/registers" element={<PettyCash />} />
               {/* Cash Management */}
               <Route path="cash" element={<CashModule />} />
               <Route path="cash/bank-transfers" element={<ManageBankTransfers module="cash" />} />

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Typography, Tooltip, Space, Button, Form, Input, Select, DatePicker, Modal, InputNumber, message, Table, Tag, Checkbox } from 'antd';
 import {
+  WalletOutlined,
   CheckSquareOutlined,
   BarChartOutlined,
   SearchOutlined,
@@ -136,9 +137,14 @@ const setupItems: MenuItemType[] = [
   { key: 'invoice-holds', icon: <StopOutlined />, label: 'Manage Invoice Holds', description: 'View and manage invoice hold codes', color: REDWOOD.primary, path: '/ap/invoice-holds' },
 ];
 
+const pettyCashItems: MenuItemType[] = [
+  { key: 'petty-cash-registers', icon: <WalletOutlined />, label: 'Petty Cash Registers', description: 'Manage petty cash registers and transactions', color: REDWOOD.success, path: '/pc/registers' },
+];
+
 const taskSections = [
   { key: 'invoices', label: 'Invoices', items: invoiceTaskItems },
   { key: 'accounting', label: 'Accounting', items: accountingTaskItems },
+  { key: 'petty-cash', label: 'Petty Cash', items: pettyCashItems },
   { key: 'assets', label: 'Assets', items: assetsTaskItems },
   { key: 'periods', label: 'Payables Periods', items: periodsTaskItems },
   { key: 'payments', label: 'Payments', items: paymentTaskItems },
