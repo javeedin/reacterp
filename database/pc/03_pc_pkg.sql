@@ -133,20 +133,40 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         p_rows         OUT NUMBER,
         p_error        OUT VARCHAR2
     ) IS
+        l_name     VARCHAR2(200);
+        l_start    DATE;
+        l_end      DATE;
+        l_comments VARCHAR2(1000);
+        l_ccid     NUMBER;
+        l_acc_desc VARCHAR2(400);
+        l_currency VARCHAR2(10);
+        l_status   VARCHAR2(50);
+        l_by       VARCHAR2(150);
     BEGIN
         p_error := NULL;
         APEX_JSON.PARSE(p_json);
 
+        -- Parse all values into local variables before SQL
+        l_name     := APEX_JSON.GET_VARCHAR2(p_path => 'registerName');
+        l_start    := parse_date(APEX_JSON.GET_VARCHAR2(p_path => 'startDate'));
+        l_end      := parse_date(APEX_JSON.GET_VARCHAR2(p_path => 'endDate'));
+        l_comments := APEX_JSON.GET_VARCHAR2(p_path => 'comments');
+        l_ccid     := APEX_JSON.GET_NUMBER  (p_path => 'cashAccountCcid');
+        l_acc_desc := APEX_JSON.GET_VARCHAR2(p_path => 'cashAccountDesc');
+        l_currency := APEX_JSON.GET_VARCHAR2(p_path => 'currency');
+        l_status   := APEX_JSON.GET_VARCHAR2(p_path => 'status');
+        l_by       := APEX_JSON.GET_VARCHAR2(p_path => 'updatedBy');
+
         UPDATE RR_PC_REGISTERS SET
-            REGISTER_NAME     = NVL(APEX_JSON.GET_VARCHAR2(p_path => 'registerName'), REGISTER_NAME),
-            START_DATE        = NVL(parse_date(APEX_JSON.GET_VARCHAR2(p_path => 'startDate')), START_DATE),
-            END_DATE          = parse_date(APEX_JSON.GET_VARCHAR2(p_path => 'endDate')),
-            COMMENTS          = APEX_JSON.GET_VARCHAR2(p_path => 'comments'),
-            CASH_ACCOUNT_CCID = APEX_JSON.GET_NUMBER  (p_path => 'cashAccountCcid'),
-            CASH_ACCOUNT_DESC = APEX_JSON.GET_VARCHAR2(p_path => 'cashAccountDesc'),
-            CURRENCY          = NVL(APEX_JSON.GET_VARCHAR2(p_path => 'currency'),  CURRENCY),
-            STATUS            = NVL(APEX_JSON.GET_VARCHAR2(p_path => 'status'),    STATUS),
-            LAST_UPDATED_BY   = APEX_JSON.GET_VARCHAR2(p_path => 'updatedBy'),
+            REGISTER_NAME     = NVL(l_name,     REGISTER_NAME),
+            START_DATE        = NVL(l_start,    START_DATE),
+            END_DATE          = l_end,
+            COMMENTS          = l_comments,
+            CASH_ACCOUNT_CCID = l_ccid,
+            CASH_ACCOUNT_DESC = l_acc_desc,
+            CURRENCY          = NVL(l_currency, CURRENCY),
+            STATUS            = NVL(l_status,   STATUS),
+            LAST_UPDATED_BY   = l_by,
             LAST_UPDATE_DATE  = SYSTIMESTAMP
         WHERE REGISTER_ID = p_register_id;
 
@@ -198,9 +218,23 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         p_line   OUT NUMBER,
         p_error  OUT VARCHAR2
     ) IS
-        l_reg_id    NUMBER;
+        l_reg_id     NUMBER;
         l_reg_status VARCHAR2(50);
         l_next_line  NUMBER;
+        l_txn_date   DATE;
+        l_txn_type   VARCHAR2(100);
+        l_exp_type   VARCHAR2(200);
+        l_ca_ccid    NUMBER;
+        l_ca_desc    VARCHAR2(400);
+        l_acc_date   DATE;
+        l_post_stat  VARCHAR2(50);
+        l_currency   VARCHAR2(10);
+        l_debit      NUMBER;
+        l_credit     NUMBER;
+        l_comments   VARCHAR2(1000);
+        l_ref_no     VARCHAR2(200);
+        l_attach     VARCHAR2(1000);
+        l_by         VARCHAR2(150);
     BEGIN
         p_error := NULL;
         APEX_JSON.PARSE(p_json);
@@ -222,41 +256,45 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
             RETURN;
         END IF;
 
+        -- Parse all values into local variables before SQL
+        l_txn_date  := parse_date(APEX_JSON.GET_VARCHAR2(p_path => 'transactionDate'));
+        l_txn_type  := APEX_JSON.GET_VARCHAR2(p_path => 'transactionType');
+        l_exp_type  := APEX_JSON.GET_VARCHAR2(p_path => 'expenseType');
+        l_ca_ccid   := APEX_JSON.GET_NUMBER  (p_path => 'chargeAccountCcid');
+        l_ca_desc   := APEX_JSON.GET_VARCHAR2(p_path => 'chargeAccountDesc');
+        l_acc_date  := NVL(parse_date(APEX_JSON.GET_VARCHAR2(p_path => 'accountingDate')), l_txn_date);
+        l_post_stat := NVL(APEX_JSON.GET_VARCHAR2(p_path => 'postingStatus'), 'Unposted');
+        l_currency  := NVL(APEX_JSON.GET_VARCHAR2(p_path => 'currency'), 'AED');
+        l_debit     := NVL(APEX_JSON.GET_NUMBER  (p_path => 'debitAmount'),  0);
+        l_credit    := NVL(APEX_JSON.GET_NUMBER  (p_path => 'creditAmount'), 0);
+        l_comments  := APEX_JSON.GET_VARCHAR2(p_path => 'comments');
+        l_ref_no    := APEX_JSON.GET_VARCHAR2(p_path => 'referenceNo');
+        l_attach    := APEX_JSON.GET_VARCHAR2(p_path => 'attachment');
+        l_by        := APEX_JSON.GET_VARCHAR2(p_path => 'createdBy');
+
         -- Next line number within this register
         SELECT NVL(MAX(LINE_NUMBER), 0) + 1 INTO l_next_line
         FROM   RR_PC_TRANSACTIONS
         WHERE  REGISTER_ID = l_reg_id;
 
         INSERT INTO RR_PC_TRANSACTIONS (
-            REGISTER_ID,    LINE_NUMBER,
-            TRANSACTION_DATE,   TRANSACTION_TYPE,   EXPENSE_TYPE,
+            REGISTER_ID,         LINE_NUMBER,
+            TRANSACTION_DATE,    TRANSACTION_TYPE,    EXPENSE_TYPE,
             CHARGE_ACCOUNT_CCID, CHARGE_ACCOUNT_DESC,
-            ACCOUNTING_DATE,    POSTING_STATUS,
-            CURRENCY,       DEBIT_AMOUNT,       CREDIT_AMOUNT,
-            COMMENTS,       REFERENCE_NO,       ATTACHMENT,
-            CREATED_BY,     CREATION_DATE,
-            LAST_UPDATED_BY, LAST_UPDATE_DATE
+            ACCOUNTING_DATE,     POSTING_STATUS,
+            CURRENCY,            DEBIT_AMOUNT,        CREDIT_AMOUNT,
+            COMMENTS,            REFERENCE_NO,        ATTACHMENT,
+            CREATED_BY,          CREATION_DATE,
+            LAST_UPDATED_BY,     LAST_UPDATE_DATE
         ) VALUES (
-            l_reg_id,
-            l_next_line,
-            parse_date(APEX_JSON.GET_VARCHAR2(p_path => 'transactionDate')),
-            APEX_JSON.GET_VARCHAR2(p_path => 'transactionType'),
-            APEX_JSON.GET_VARCHAR2(p_path => 'expenseType'),
-            APEX_JSON.GET_NUMBER  (p_path => 'chargeAccountCcid'),
-            APEX_JSON.GET_VARCHAR2(p_path => 'chargeAccountDesc'),
-            NVL(parse_date(APEX_JSON.GET_VARCHAR2(p_path => 'accountingDate')),
-                parse_date(APEX_JSON.GET_VARCHAR2(p_path => 'transactionDate'))),
-            NVL(APEX_JSON.GET_VARCHAR2(p_path => 'postingStatus'), 'Unposted'),
-            NVL(APEX_JSON.GET_VARCHAR2(p_path => 'currency'), 'AED'),
-            NVL(APEX_JSON.GET_NUMBER  (p_path => 'debitAmount'),  0),
-            NVL(APEX_JSON.GET_NUMBER  (p_path => 'creditAmount'), 0),
-            APEX_JSON.GET_VARCHAR2(p_path => 'comments'),
-            APEX_JSON.GET_VARCHAR2(p_path => 'referenceNo'),
-            APEX_JSON.GET_VARCHAR2(p_path => 'attachment'),
-            APEX_JSON.GET_VARCHAR2(p_path => 'createdBy'),
-            SYSTIMESTAMP,
-            APEX_JSON.GET_VARCHAR2(p_path => 'createdBy'),
-            SYSTIMESTAMP
+            l_reg_id,    l_next_line,
+            l_txn_date,  l_txn_type,  l_exp_type,
+            l_ca_ccid,   l_ca_desc,
+            l_acc_date,  l_post_stat,
+            l_currency,  l_debit,     l_credit,
+            l_comments,  l_ref_no,    l_attach,
+            l_by,        SYSTIMESTAMP,
+            l_by,        SYSTIMESTAMP
         ) RETURNING TRANSACTION_ID INTO p_id;
 
         p_line := l_next_line;
@@ -276,29 +314,55 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         p_rows            OUT NUMBER,
         p_error           OUT VARCHAR2
     ) IS
+        l_txn_date  DATE;
+        l_txn_type  VARCHAR2(100);
+        l_exp_type  VARCHAR2(200);
+        l_ca_ccid   NUMBER;
+        l_ca_desc   VARCHAR2(400);
+        l_acc_date  DATE;
+        l_post_stat VARCHAR2(50);
+        l_currency  VARCHAR2(10);
+        l_debit     NUMBER;
+        l_credit    NUMBER;
+        l_comments  VARCHAR2(1000);
+        l_ref_no    VARCHAR2(200);
+        l_attach    VARCHAR2(1000);
+        l_by        VARCHAR2(150);
     BEGIN
         p_error := NULL;
         APEX_JSON.PARSE(p_json);
 
+        -- Parse all values into local variables before SQL
+        l_txn_date  := parse_date(APEX_JSON.GET_VARCHAR2(p_path => 'transactionDate'));
+        l_txn_type  := APEX_JSON.GET_VARCHAR2(p_path => 'transactionType');
+        l_exp_type  := APEX_JSON.GET_VARCHAR2(p_path => 'expenseType');
+        l_ca_ccid   := APEX_JSON.GET_NUMBER  (p_path => 'chargeAccountCcid');
+        l_ca_desc   := APEX_JSON.GET_VARCHAR2(p_path => 'chargeAccountDesc');
+        l_acc_date  := parse_date(APEX_JSON.GET_VARCHAR2(p_path => 'accountingDate'));
+        l_post_stat := APEX_JSON.GET_VARCHAR2(p_path => 'postingStatus');
+        l_currency  := APEX_JSON.GET_VARCHAR2(p_path => 'currency');
+        l_debit     := APEX_JSON.GET_NUMBER  (p_path => 'debitAmount');
+        l_credit    := APEX_JSON.GET_NUMBER  (p_path => 'creditAmount');
+        l_comments  := APEX_JSON.GET_VARCHAR2(p_path => 'comments');
+        l_ref_no    := APEX_JSON.GET_VARCHAR2(p_path => 'referenceNo');
+        l_attach    := APEX_JSON.GET_VARCHAR2(p_path => 'attachment');
+        l_by        := APEX_JSON.GET_VARCHAR2(p_path => 'updatedBy');
+
         UPDATE RR_PC_TRANSACTIONS SET
-            TRANSACTION_DATE    = NVL(parse_date(APEX_JSON.GET_VARCHAR2(p_path => 'transactionDate')),
-                                      TRANSACTION_DATE),
-            TRANSACTION_TYPE    = NVL(APEX_JSON.GET_VARCHAR2(p_path => 'transactionType'),
-                                      TRANSACTION_TYPE),
-            EXPENSE_TYPE        = APEX_JSON.GET_VARCHAR2(p_path => 'expenseType'),
-            CHARGE_ACCOUNT_CCID = APEX_JSON.GET_NUMBER  (p_path => 'chargeAccountCcid'),
-            CHARGE_ACCOUNT_DESC = APEX_JSON.GET_VARCHAR2(p_path => 'chargeAccountDesc'),
-            ACCOUNTING_DATE     = NVL(parse_date(APEX_JSON.GET_VARCHAR2(p_path => 'accountingDate')),
-                                      ACCOUNTING_DATE),
-            POSTING_STATUS      = NVL(APEX_JSON.GET_VARCHAR2(p_path => 'postingStatus'),
-                                      POSTING_STATUS),
-            CURRENCY            = NVL(APEX_JSON.GET_VARCHAR2(p_path => 'currency'), CURRENCY),
-            DEBIT_AMOUNT        = NVL(APEX_JSON.GET_NUMBER  (p_path => 'debitAmount'),  DEBIT_AMOUNT),
-            CREDIT_AMOUNT       = NVL(APEX_JSON.GET_NUMBER  (p_path => 'creditAmount'), CREDIT_AMOUNT),
-            COMMENTS            = APEX_JSON.GET_VARCHAR2(p_path => 'comments'),
-            REFERENCE_NO        = APEX_JSON.GET_VARCHAR2(p_path => 'referenceNo'),
-            ATTACHMENT          = APEX_JSON.GET_VARCHAR2(p_path => 'attachment'),
-            LAST_UPDATED_BY     = APEX_JSON.GET_VARCHAR2(p_path => 'updatedBy'),
+            TRANSACTION_DATE    = NVL(l_txn_date,  TRANSACTION_DATE),
+            TRANSACTION_TYPE    = NVL(l_txn_type,  TRANSACTION_TYPE),
+            EXPENSE_TYPE        = l_exp_type,
+            CHARGE_ACCOUNT_CCID = l_ca_ccid,
+            CHARGE_ACCOUNT_DESC = l_ca_desc,
+            ACCOUNTING_DATE     = NVL(l_acc_date,  ACCOUNTING_DATE),
+            POSTING_STATUS      = NVL(l_post_stat, POSTING_STATUS),
+            CURRENCY            = NVL(l_currency,  CURRENCY),
+            DEBIT_AMOUNT        = NVL(l_debit,     DEBIT_AMOUNT),
+            CREDIT_AMOUNT       = NVL(l_credit,    CREDIT_AMOUNT),
+            COMMENTS            = l_comments,
+            REFERENCE_NO        = l_ref_no,
+            ATTACHMENT          = l_attach,
+            LAST_UPDATED_BY     = l_by,
             LAST_UPDATE_DATE    = SYSTIMESTAMP
         WHERE TRANSACTION_ID = p_transaction_id;
 
