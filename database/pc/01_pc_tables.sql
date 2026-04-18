@@ -40,14 +40,16 @@ CREATE TABLE RR_PC_TRANSACTIONS (
     REGISTER_ID         NUMBER        NOT NULL,
     LINE_NUMBER         NUMBER,                        -- sequence within register
     TRANSACTION_DATE    DATE          NOT NULL,
-    TRANSACTION_TYPE    VARCHAR2(100) NOT NULL,        -- 'Balance Refill' | 'Expense' | 'Adjustment'
-    EXPENSE_TYPE        VARCHAR2(200),                 -- populated for Expense lines
-    CURRENCY            VARCHAR2(10)  DEFAULT 'AED',
-    DEBIT_AMOUNT        NUMBER(18,2)  DEFAULT 0,      -- money IN  (Add Money)
-    CREDIT_AMOUNT       NUMBER(18,2)  DEFAULT 0,      -- money OUT (Add Expense)
-    COMMENTS            VARCHAR2(1000),
-    REFERENCE_NO        VARCHAR2(200),
-    ATTACHMENT          VARCHAR2(1000),
+    TRANSACTION_TYPE      VARCHAR2(100) NOT NULL,        -- 'Balance Refill' | 'Expense' | 'Adjustment'
+    EXPENSE_TYPE          VARCHAR2(200),                 -- populated for Expense lines
+    CHARGE_ACCOUNT_CCID   NUMBER,                        -- GL code combination for charge account
+    CHARGE_ACCOUNT_DESC   VARCHAR2(400),                 -- denormalised segment string
+    CURRENCY              VARCHAR2(10)  DEFAULT 'AED',
+    DEBIT_AMOUNT          NUMBER(18,2)  DEFAULT 0,      -- money IN  (Add Money)
+    CREDIT_AMOUNT         NUMBER(18,2)  DEFAULT 0,      -- money OUT (Add Expense)
+    COMMENTS              VARCHAR2(1000),
+    REFERENCE_NO          VARCHAR2(200),
+    ATTACHMENT            VARCHAR2(1000),
     CREATED_BY          VARCHAR2(150),
     CREATION_DATE       TIMESTAMP     DEFAULT SYSTIMESTAMP,
     LAST_UPDATED_BY     VARCHAR2(150),
@@ -62,10 +64,12 @@ CREATE INDEX IDX_RR_PC_TXN_REG    ON RR_PC_TRANSACTIONS(REGISTER_ID);
 CREATE INDEX IDX_RR_PC_TXN_DATE   ON RR_PC_TRANSACTIONS(TRANSACTION_DATE);
 CREATE INDEX IDX_RR_PC_TXN_TYPE   ON RR_PC_TRANSACTIONS(TRANSACTION_TYPE);
 
-COMMENT ON TABLE  RR_PC_TRANSACTIONS                      IS 'Petty cash transaction lines — debits (money in) and credits (expenses out)';
-COMMENT ON COLUMN RR_PC_TRANSACTIONS.DEBIT_AMOUNT          IS 'Cash received into petty cash (Balance Refill / Adjustment)';
-COMMENT ON COLUMN RR_PC_TRANSACTIONS.CREDIT_AMOUNT         IS 'Cash paid out (Expense)';
-COMMENT ON COLUMN RR_PC_TRANSACTIONS.LINE_NUMBER            IS 'Auto-assigned sequential line number per register';
+COMMENT ON TABLE  RR_PC_TRANSACTIONS                          IS 'Petty cash transaction lines — debits (money in) and credits (expenses out)';
+COMMENT ON COLUMN RR_PC_TRANSACTIONS.DEBIT_AMOUNT              IS 'Cash received into petty cash (Balance Refill / Adjustment)';
+COMMENT ON COLUMN RR_PC_TRANSACTIONS.CREDIT_AMOUNT             IS 'Cash paid out (Expense)';
+COMMENT ON COLUMN RR_PC_TRANSACTIONS.LINE_NUMBER               IS 'Auto-assigned sequential line number per register';
+COMMENT ON COLUMN RR_PC_TRANSACTIONS.CHARGE_ACCOUNT_CCID       IS 'GL code combination ID for the expense charge account';
+COMMENT ON COLUMN RR_PC_TRANSACTIONS.CHARGE_ACCOUNT_DESC       IS 'Denormalised segment string for the charge account';
 
 -- ============================================================
 -- 3. Alter RR_EXTERNAL_CASH_TRANSACTIONS — add REGISTER_ID

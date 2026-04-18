@@ -334,6 +334,8 @@ DECLARE
                t.TRANSACTION_DATE,
                t.TRANSACTION_TYPE,
                t.EXPENSE_TYPE,
+               t.CHARGE_ACCOUNT_CCID,
+               t.CHARGE_ACCOUNT_DESC,
                t.CURRENCY,
                t.DEBIT_AMOUNT,
                t.CREDIT_AMOUNT,
@@ -362,9 +364,11 @@ BEGIN
         APEX_JSON.WRITE(''registerId'',      rec.REGISTER_ID);
         APEX_JSON.WRITE(''lineNumber'',      rec.LINE_NUMBER);
         APEX_JSON.WRITE(''transactionDate'', TO_CHAR(rec.TRANSACTION_DATE, ''DD-MON-YYYY''));
-        APEX_JSON.WRITE(''transactionType'', rec.TRANSACTION_TYPE);
-        APEX_JSON.WRITE(''expenseType'',     rec.EXPENSE_TYPE);
-        APEX_JSON.WRITE(''currency'',        NVL(rec.CURRENCY, ''AED''));
+        APEX_JSON.WRITE(''transactionType'',    rec.TRANSACTION_TYPE);
+        APEX_JSON.WRITE(''expenseType'',        rec.EXPENSE_TYPE);
+        APEX_JSON.WRITE(''chargeAccountCcid'',  rec.CHARGE_ACCOUNT_CCID);
+        APEX_JSON.WRITE(''chargeAccountDesc'',  rec.CHARGE_ACCOUNT_DESC);
+        APEX_JSON.WRITE(''currency'',           NVL(rec.CURRENCY, ''AED''));
         APEX_JSON.WRITE(''debitAmount'',     rec.DEBIT_AMOUNT);
         APEX_JSON.WRITE(''creditAmount'',    rec.CREDIT_AMOUNT);
         APEX_JSON.WRITE(''comments'',        rec.COMMENTS);
@@ -438,6 +442,7 @@ BEGIN
 
     INSERT INTO RR_PC_TRANSACTIONS (
         REGISTER_ID, LINE_NUMBER, TRANSACTION_DATE, TRANSACTION_TYPE, EXPENSE_TYPE,
+        CHARGE_ACCOUNT_CCID, CHARGE_ACCOUNT_DESC,
         CURRENCY, DEBIT_AMOUNT, CREDIT_AMOUNT, COMMENTS,
         REFERENCE_NO, ATTACHMENT, CREATED_BY, CREATION_DATE,
         LAST_UPDATED_BY, LAST_UPDATE_DATE
@@ -447,6 +452,8 @@ BEGIN
         TO_DATE(APEX_JSON.GET_VARCHAR2(p_path => ''transactionDate''), ''YYYY-MM-DD''),
         APEX_JSON.GET_VARCHAR2(p_path => ''transactionType''),
         APEX_JSON.GET_VARCHAR2(p_path => ''expenseType''),
+        APEX_JSON.GET_NUMBER  (p_path => ''chargeAccountCcid''),
+        APEX_JSON.GET_VARCHAR2(p_path => ''chargeAccountDesc''),
         NVL(APEX_JSON.GET_VARCHAR2(p_path => ''currency''), ''AED''),
         NVL(APEX_JSON.GET_NUMBER(p_path => ''debitAmount''),  0),
         NVL(APEX_JSON.GET_NUMBER(p_path => ''creditAmount''), 0),
@@ -499,9 +506,11 @@ BEGIN
     APEX_JSON.PARSE(l_json);
     UPDATE RR_PC_TRANSACTIONS SET
         TRANSACTION_DATE  = NVL(TO_DATE(APEX_JSON.GET_VARCHAR2(p_path => ''transactionDate''), ''YYYY-MM-DD''), TRANSACTION_DATE),
-        TRANSACTION_TYPE  = NVL(APEX_JSON.GET_VARCHAR2(p_path => ''transactionType''), TRANSACTION_TYPE),
-        EXPENSE_TYPE      = APEX_JSON.GET_VARCHAR2(p_path => ''expenseType''),
-        CURRENCY          = NVL(APEX_JSON.GET_VARCHAR2(p_path => ''currency''), CURRENCY),
+        TRANSACTION_TYPE    = NVL(APEX_JSON.GET_VARCHAR2(p_path => ''transactionType''), TRANSACTION_TYPE),
+        EXPENSE_TYPE        = APEX_JSON.GET_VARCHAR2(p_path => ''expenseType''),
+        CHARGE_ACCOUNT_CCID = APEX_JSON.GET_NUMBER  (p_path => ''chargeAccountCcid''),
+        CHARGE_ACCOUNT_DESC = APEX_JSON.GET_VARCHAR2(p_path => ''chargeAccountDesc''),
+        CURRENCY            = NVL(APEX_JSON.GET_VARCHAR2(p_path => ''currency''), CURRENCY),
         DEBIT_AMOUNT      = NVL(APEX_JSON.GET_NUMBER(p_path => ''debitAmount''),  DEBIT_AMOUNT),
         CREDIT_AMOUNT     = NVL(APEX_JSON.GET_NUMBER(p_path => ''creditAmount''), CREDIT_AMOUNT),
         COMMENTS          = APEX_JSON.GET_VARCHAR2(p_path => ''comments''),
