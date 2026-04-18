@@ -616,7 +616,7 @@ const ManagePayments: React.FC = () => {
       ClearingValueDate: null, MaturityConversionDate: null,
       CreationDate: sysdate, LastUpdateDate: sysdate,
       PaymentDescription: v.paymentDescription || null,
-      PaymentStatus: 'Negotiable',
+      PaymentStatus: v.maturityDate ? 'Issued' : 'Negotiable',
       PaymentType: v.paymentType || 'Quick',
       PaymentMode: null,
       PaymentFunction: 'Supplier Payments',
