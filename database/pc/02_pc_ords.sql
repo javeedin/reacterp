@@ -18,6 +18,14 @@
 --   DELETE /pc/transactions/:transactionId        — delete transaction
 -- ============================================================
 
+-- Drop existing module first so all templates/handlers are recreated cleanly
+BEGIN
+    ORDS.DELETE_MODULE(p_module_name => 'pc');
+EXCEPTION
+    WHEN OTHERS THEN NULL;  -- ignore ORA-20001 if module does not exist yet
+END;
+/
+
 BEGIN
     -- ── MODULE ─────────────────────────────────────────────────────────────
     ORDS.DEFINE_MODULE(
