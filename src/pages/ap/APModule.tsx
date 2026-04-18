@@ -38,6 +38,7 @@ import {
   CopyOutlined,
   CheckOutlined,
   TableOutlined,
+  WalletOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import Autopilot from '../../components/Autopilot';
@@ -84,6 +85,7 @@ const invoiceTaskItems: MenuItemType[] = [
   { key: 'create-invoice-spreadsheet', icon: <ImportOutlined />, label: 'Create Invoice from Spreadsheet', description: 'Import invoices from file', color: REDWOOD.info },
   { key: 'create-recurring', icon: <ScheduleOutlined />, label: 'Create Recurring Invoices', description: 'Set up recurring invoices', color: REDWOOD.success },
   { key: 'manage-invoices', icon: <FileTextOutlined />, label: 'Manage Invoices', description: 'Search and manage invoices', color: REDWOOD.primary, path: '/ap/manage-invoices' },
+  { key: 'petty-cash', icon: <WalletOutlined />, label: 'Petty Cash Registers', description: 'Manage petty cash registers and transactions', color: REDWOOD.success, path: '/pc/registers' },
   { key: 'prepayment-applications', icon: <SwapOutlined />, label: 'Prepayment Applications', description: 'Apply and manage prepayment applications', color: REDWOOD.success, path: '/ap/prepayment-applications' },
   { key: 'apply-conversion-rates', icon: <SwapOutlined />, label: 'Apply Missing Conversion Rates', description: 'Update currency rates', color: REDWOOD.warning },
   { key: 'validate-invoices', icon: <CheckCircleOutlined />, label: 'Validate Invoices', description: 'Validate invoice entries', color: REDWOOD.success },
@@ -437,8 +439,6 @@ const APModule: React.FC = () => {
     </div>
   );
 
-  // Quick task items for landing page
-  const quickInvoiceTasks = invoiceTaskItems.slice(0, 4);
   const quickPaymentTasks = paymentTaskItems.slice(0, 4);
 
   return (
@@ -572,7 +572,7 @@ const APModule: React.FC = () => {
           <div style={{ marginBottom: 32 }}>
             <SectionTitle icon={<FileTextOutlined />} title="Invoice Tasks" color={REDWOOD.taskBlue} />
             <Row gutter={[16, 16]}>
-              {quickInvoiceTasks.map((item) => (
+              {invoiceTaskItems.map((item) => (
                 <Col xs={24} sm={12} lg={8} xl={6} key={item.key}>
                   <MenuCard item={item} />
                 </Col>

@@ -868,8 +868,8 @@ const PettyCash: React.FC = () => {
           style={{ marginBottom: 12 }}
           items={[
             { title: <Link to="/home"><HomeOutlined /> Home</Link> },
-            { title: 'Petty Cash' },
-            { title: 'Registers' },
+            { title: <Link to="/ap">Payables</Link> },
+            { title: 'Petty Cash Registers' },
           ]}
         />
 
