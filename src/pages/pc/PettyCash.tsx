@@ -2,16 +2,18 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Layout, Card, Typography, Breadcrumb, Tabs, Form, Input, Select,
   DatePicker, Button, Table, Tag, Row, Col, Space, Divider,
-  Modal, InputNumber, message, Tooltip, Statistic, Collapse, Spin,
+  Modal, InputNumber, message, Tooltip, Statistic, Collapse,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { Link } from 'react-router-dom';
 import dayjs from 'dayjs';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 import {
   HomeOutlined, WalletOutlined, PlusOutlined, SearchOutlined,
   ReloadOutlined, EditOutlined, DeleteOutlined, CloseOutlined,
   DollarOutlined, MinusCircleOutlined, ArrowUpOutlined, ArrowDownOutlined,
-  ApiOutlined,
+  DownloadOutlined,
 } from '@ant-design/icons';
 import FloatingMenu from '../../components/FloatingMenu';
 import ApiDocsModal, { type ApiEndpoint } from '../../components/ApiDocsModal';
@@ -60,14 +62,184 @@ const PostingTag: React.FC<{ status: string }> = ({ status }) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Excel export
+// ─────────────────────────────────────────────────────────────────────────────
+const solid = (argb: string): ExcelJS.Fill => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
+const numFmt = '#,##0.00;[Red](#,##0.00)';
+
+async function exportRegisterToExcel(register: PCRegister, transactions: PCTransaction[]) {
+  const wb = new ExcelJS.Workbook();
+  wb.creator  = 'ReactERP';
+  wb.created  = new Date();
+  const ws = wb.addWorksheet('Petty Cash Register', { views: [{ showGridLines: false }] });
+
+  // ── column widths ──────────────────────────────────────────
+  ws.columns = [
+    { width: 6  }, // A  #
+    { width: 14 }, // B  Date
+    { width: 18 }, // C  Type
+    { width: 20 }, // D  Expense Type
+    { width: 10 }, // E  Currency
+    { width: 16 }, // F  Debit
+    { width: 16 }, // G  Credit
+    { width: 16 }, // H  Balance
+    { width: 26 }, // I  Charge Account
+    { width: 14 }, // J  Acct Date
+    { width: 12 }, // K  Posting
+    { width: 20 }, // L  Reference
+    { width: 30 }, // M  Comments
+    { width: 22 }, // N  Created By
+  ];
+
+  // ── Title row ──────────────────────────────────────────────
+  ws.mergeCells('A1:N1');
+  const titleCell = ws.getCell('A1');
+  titleCell.value = 'Petty Cash Register — Export';
+  titleCell.font  = { bold: true, size: 16, color: { argb: 'FFFFFFFF' } };
+  titleCell.fill  = solid('FFC74634');
+  titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
+  ws.getRow(1).height = 32;
+
+  // ── Register header section ─────────────────────────────────
+  const hdr: [string, string | number][] = [
+    ['Register Name',   register.registerName],
+    ['Register ID',     register.registerId],
+    ['Status',          register.status],
+    ['Currency',        register.currency],
+    ['Start Date',      register.startDate || '—'],
+    ['End Date',        register.endDate   || '—'],
+    ['Cash Account',    register.cashAccountDesc || '—'],
+    ['Balance',         register.balance],
+    ['Total In (Debit)',register.totalDebit],
+    ['Total Out (Credit)', register.totalCredit],
+    ['Export Date',     new Date().toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' })],
+  ];
+
+  let r = 2;
+  for (const [label, val] of hdr) {
+    ws.mergeCells(`C${r}:F${r}`);
+    ws.mergeCells(`G${r}:N${r}`);
+    const lbl = ws.getCell(`C${r}`);
+    lbl.value = label;
+    lbl.font  = { bold: true, size: 11, color: { argb: 'FF1A3C5E' } };
+    lbl.fill  = solid('FFF0F4FA');
+    lbl.alignment = { horizontal: 'right', vertical: 'middle' };
+    lbl.border = { bottom: { style: 'hair', color: { argb: 'FFE5E5E5' } } };
+
+    const val_cell = ws.getCell(`G${r}`);
+    val_cell.value = val;
+    val_cell.font  = { size: 11 };
+    val_cell.fill  = solid('FFFFFFFF');
+    val_cell.alignment = { horizontal: 'left', vertical: 'middle' };
+    val_cell.border = { bottom: { style: 'hair', color: { argb: 'FFE5E5E5' } } };
+    if (typeof val === 'number') val_cell.numFmt = numFmt;
+    ws.getRow(r).height = 18;
+    r++;
+  }
+
+  r++; // blank spacer
+
+  // ── Transactions header row ────────────────────────────────
+  const COLS = ['#','Date','Type','Expense Type','Currency','Debit','Credit','Balance',
+                'Charge Account','Acct Date','Posting','Reference','Comments','Created By'];
+  const hdrRow = ws.getRow(r);
+  COLS.forEach((h, i) => {
+    const cell = hdrRow.getCell(i + 1);
+    cell.value = h;
+    cell.font  = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+    cell.fill  = solid('FF1A3C5E');
+    cell.alignment = { horizontal: i >= 5 && i <= 7 ? 'right' : 'center', vertical: 'middle' };
+    cell.border = { bottom: { style: 'medium', color: { argb: 'FF2E6DA4' } } };
+  });
+  hdrRow.height = 22;
+  r++;
+
+  // ── Transaction rows ───────────────────────────────────────
+  const startDataRow = r;
+  for (const txn of transactions) {
+    const isRefill = txn.transactionType === 'Balance Refill';
+    const rowBg    = isRefill ? 'FFF0FFF4' : 'FFFFFFFF';
+    const rowData  = ws.getRow(r);
+
+    const vals: (string | number | null)[] = [
+      txn.lineNumber, txn.transactionDate, txn.transactionType,
+      txn.expenseType || '', txn.currency,
+      txn.debitAmount  || 0,
+      txn.creditAmount || 0,
+      txn.runningBalance,
+      txn.chargeAccountDesc || '', txn.accountingDate || '',
+      txn.postingStatus, txn.referenceNo || '',
+      txn.comments || '', txn.createdBy || '',
+    ];
+
+    vals.forEach((v, i) => {
+      const cell = rowData.getCell(i + 1);
+      cell.value = v;
+      cell.fill  = solid(rowBg);
+      cell.font  = { size: 10 };
+      cell.border = { bottom: { style: 'hair', color: { argb: 'FFE5E5E5' } } };
+      const isAmt = i >= 5 && i <= 7;
+      cell.alignment = { horizontal: isAmt ? 'right' : i === 0 ? 'center' : 'left', vertical: 'middle' };
+      if (isAmt) cell.numFmt = numFmt;
+    });
+    // colour debit green, credit red, balance bold
+    rowData.getCell(6).font  = { size: 10, color: { argb: 'FF1D7B4D' } };
+    rowData.getCell(7).font  = { size: 10, color: { argb: 'FFC74634' } };
+    rowData.getCell(8).font  = { size: 10, bold: true };
+    rowData.height = 16;
+    r++;
+  }
+
+  // ── Totals row ─────────────────────────────────────────────
+  const totRow = ws.getRow(r);
+  ws.mergeCells(`A${r}:E${r}`);
+  totRow.getCell(1).value = `TOTAL  (${transactions.length} transactions)`;
+  totRow.getCell(1).font  = { bold: true, size: 11 };
+  totRow.getCell(1).fill  = solid('FFE8F0FE');
+  totRow.getCell(1).alignment = { horizontal: 'right' };
+
+  const sumDebit  = transactions.reduce((s, t) => s + (t.debitAmount  || 0), 0);
+  const sumCredit = transactions.reduce((s, t) => s + (t.creditAmount || 0), 0);
+  [[6, sumDebit, 'FF1D7B4D'], [7, sumCredit, 'FFC74634'], [8, register.balance, 'FF1A1A1A']].forEach(([col, val, argb]) => {
+    const c = totRow.getCell(col as number);
+    c.value  = val as number;
+    c.numFmt = numFmt;
+    c.font   = { bold: true, size: 11, color: { argb: argb as string } };
+    c.fill   = solid('FFE8F0FE');
+    c.alignment = { horizontal: 'right' };
+    c.border = { top: { style: 'medium', color: { argb: 'FF2E6DA4' } } };
+  });
+  for (let col = 1; col <= 14; col++) {
+    const c = totRow.getCell(col);
+    if (!c.fill || (c.fill as ExcelJS.PatternFill).fgColor?.argb === 'FF000000') c.fill = solid('FFE8F0FE');
+  }
+  totRow.height = 22;
+
+  // ── Freeze panes & auto-filter ─────────────────────────────
+  ws.views = [{ state: 'frozen', xSplit: 0, ySplit: startDataRow - 1, showGridLines: false }];
+  ws.autoFilter = { from: { row: startDataRow - 1, column: 1 }, to: { row: r - 1, column: 14 } };
+
+  // ── Save ──────────────────────────────────────────────────
+  const buf = await wb.xlsx.writeBuffer();
+  const eAPI = (window as any).electronAPI;
+  const safeName = register.registerName.replace(/[^a-z0-9]/gi, '_');
+  const filename  = `PC_Register_${safeName}_${dayjs().format('YYYYMMDD')}.xlsx`;
+  if (eAPI?.saveFile) {
+    await eAPI.saveFile(buf, filename);
+  } else {
+    saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), filename);
+  }
+  message.success(`Exported: ${filename}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Register Detail Panel
 // ─────────────────────────────────────────────────────────────────────────────
 const RegisterDetail: React.FC<{
   tab: RegisterTab;
   onRefresh: () => void;
-  onRefreshWithLog: () => void;
   currentUser: string;
-}> = ({ tab, onRefresh, onRefreshWithLog, currentUser }) => {
+}> = ({ tab, onRefresh, currentUser }) => {
   const { register, transactions, txnLoading } = tab;
   const [addMoneyOpen, setAddMoneyOpen]     = useState(false);
   const [addExpenseOpen, setAddExpenseOpen] = useState(false);
@@ -258,10 +430,17 @@ const RegisterDetail: React.FC<{
           <Button
             size="small"
             icon={<ReloadOutlined />}
-            onClick={onRefreshWithLog}
+            onClick={onRefresh}
             loading={tab.txnLoading}
           >
             Refresh
+          </Button>
+          <Button
+            size="small"
+            icon={<DownloadOutlined />}
+            onClick={() => exportRegisterToExcel(register, transactions)}
+          >
+            Export Excel
           </Button>
           <Button
             icon={<DollarOutlined />}
@@ -505,10 +684,6 @@ const PettyCash: React.FC = () => {
   const [deleteLoading, setDeleteLoading]     = useState<number | null>(null);
   const [searched, setSearched]               = useState(false);
 
-  // ── API log modal (shown on manual Refresh) ────────────────
-  interface LogEntry { label: string; url: string; status: number | null; loading: boolean; response: string | null; }
-  const [refreshLogOpen, setRefreshLogOpen] = useState(false);
-  const [refreshLog, setRefreshLog]         = useState<LogEntry[]>([]);
 
   // ── Search ────────────────────────────────────────────────
   const handleSearch = useCallback(async () => {
@@ -572,60 +747,6 @@ const PettyCash: React.FC = () => {
     } catch {
       setOpenTabs(prev => prev.map(t => t.key === key ? { ...t, txnLoading: false } : t));
     }
-  }, [openTabs]);
-
-  // ── Refresh with live API log modal ───────────────────────
-  const refreshTabWithLog = useCallback(async (key: string) => {
-    const tab = openTabs.find(t => t.key === key);
-    if (!tab) return;
-    const id    = tab.register.registerId;
-    const regUrl = `${PC_BASE}/registers/${id}`;
-    const txnUrl = `${PC_BASE}/registers/${id}/transactions`;
-
-    setRefreshLog([
-      { label: 'GET Register Header', url: regUrl, status: null, loading: true, response: null },
-      { label: 'GET Transactions',    url: txnUrl, status: null, loading: true, response: null },
-    ]);
-    setRefreshLogOpen(true);
-    setOpenTabs(prev => prev.map(t => t.key === key ? { ...t, txnLoading: true } : t));
-
-    let reg = tab.register;
-    let txns = tab.transactions;
-
-    // ── Fetch register header
-    try {
-      const res  = await fetch(regUrl, { headers: { Accept: 'application/json' } });
-      const text = await res.text();
-      let pretty = text;
-      try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch { /* raw */ }
-      setRefreshLog(prev => prev.map((l, i) => i === 0
-        ? { ...l, status: res.status, loading: false, response: pretty }
-        : l));
-      if (res.ok) { const d = JSON.parse(text); if (d.registerId) reg = d; }
-    } catch (e: any) {
-      setRefreshLog(prev => prev.map((l, i) => i === 0
-        ? { ...l, status: 0, loading: false, response: `Network error: ${e?.message}` }
-        : l));
-    }
-
-    // ── Fetch transactions
-    try {
-      const res  = await fetch(txnUrl, { headers: { Accept: 'application/json' } });
-      const text = await res.text();
-      let pretty = text;
-      try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch { /* raw */ }
-      setRefreshLog(prev => prev.map((l, i) => i === 1
-        ? { ...l, status: res.status, loading: false, response: pretty }
-        : l));
-      if (res.ok) { const d = JSON.parse(text); if (d.items) txns = d.items; }
-    } catch (e: any) {
-      setRefreshLog(prev => prev.map((l, i) => i === 1
-        ? { ...l, status: 0, loading: false, response: `Network error: ${e?.message}` }
-        : l));
-    }
-
-    setOpenTabs(prev => prev.map(t => t.key === key ? { ...t, register: reg, transactions: txns, txnLoading: false } : t));
-    setRegisters(prev => prev.map(r => r.registerId === reg.registerId ? reg : r));
   }, [openTabs]);
 
   // ── Close tab ──────────────────────────────────────────────
@@ -904,7 +1025,7 @@ const PettyCash: React.FC = () => {
             </div>
             <Space>
               <Button size="small" icon={<ReloadOutlined />}
-                onClick={() => refreshTabWithLog(tab.key)}>
+                onClick={() => refreshTab(tab.key)}>
                 Refresh
               </Button>
               <Button size="small" icon={<EditOutlined />} disabled>
@@ -915,7 +1036,6 @@ const PettyCash: React.FC = () => {
           <RegisterDetail
             tab={tab}
             onRefresh={() => refreshTab(tab.key)}
-            onRefreshWithLog={() => refreshTabWithLog(tab.key)}
             currentUser={currentUser}
           />
         </div>
@@ -958,53 +1078,6 @@ const PettyCash: React.FC = () => {
           />
         </Card>
       </Content>
-      {/* ── Refresh API Log Modal ──────────────────────────────── */}
-      <Modal
-        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} />Refresh — API Calls</Space>}
-        open={refreshLogOpen}
-        onCancel={() => setRefreshLogOpen(false)}
-        footer={<Button onClick={() => setRefreshLogOpen(false)}>Close</Button>}
-        width={760}
-        destroyOnClose
-      >
-        {refreshLog.map((entry, i) => (
-          <div key={i} style={{
-            border: `1px solid ${entry.loading ? REDWOOD.neutral200 : entry.status && entry.status >= 200 && entry.status < 300 ? '#b7eb8f' : entry.status === null ? REDWOOD.neutral200 : '#ffa39e'}`,
-            borderRadius: 8, marginBottom: 12, overflow: 'hidden',
-          }}>
-            {/* Header row */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: '#fafafa', borderBottom: '1px solid #f0f0f0' }}>
-              <Tag color="blue" style={{ fontWeight: 700, fontSize: 11, margin: 0 }}>GET</Tag>
-              <Text style={{ fontFamily: 'monospace', fontSize: 12, flex: 1, wordBreak: 'break-all' }}>{entry.url}</Text>
-              {entry.loading
-                ? <Spin size="small" />
-                : entry.status !== null && (
-                  <Tag color={entry.status >= 200 && entry.status < 300 ? 'success' : 'error'}>
-                    HTTP {entry.status}
-                  </Tag>
-                )
-              }
-            </div>
-            {/* Label + response */}
-            <div style={{ padding: '6px 12px', background: '#fff' }}>
-              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, fontWeight: 600 }}>{entry.label}</Text>
-              {!entry.loading && entry.response !== null && (
-                <pre style={{
-                  marginTop: 6,
-                  background: entry.status && entry.status >= 200 && entry.status < 300 ? '#f6ffed' : '#fff2f0',
-                  border: `1px solid ${entry.status && entry.status >= 200 && entry.status < 300 ? '#b7eb8f' : '#ffa39e'}`,
-                  borderRadius: 4, padding: '6px 10px',
-                  fontSize: 11, maxHeight: 160, overflowY: 'auto',
-                  margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-                }}>
-                  {entry.response}
-                </pre>
-              )}
-            </div>
-          </div>
-        ))}
-      </Modal>
-
       <FloatingMenu />
     </Layout>
   );
