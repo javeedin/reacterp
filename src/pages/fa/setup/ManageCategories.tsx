@@ -13,8 +13,6 @@ import {
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import Autopilot from '../../../components/Autopilot';
-import ApiDocsModal, { type ApiEndpoint } from '../../../components/ApiDocsModal';
-import { APEX_DB_CONFIG } from '../../../config/api.config';
 import {
   searchCategories, getCategoryDetail, getCategoryBooks, getCategoryBookDefaults,
 } from '../../../services/fa.service';
@@ -40,14 +38,6 @@ const REDWOOD = {
   surface:    '#FFFFFF',
 };
 const FA_COLOR = '#CA7700';
-
-const FA_BASE = `${APEX_DB_CONFIG.baseUrl}/fa`;
-const FA_CAT_ENDPOINTS: ApiEndpoint[] = [
-  { method: 'GET',  url: `${FA_BASE}/categories`,                              description: 'Search asset categories', params: 'q, enabled, assetType' },
-  { method: 'GET',  url: `${FA_BASE}/categories/:categoryId`,                  description: 'Get single category detail' },
-  { method: 'GET',  url: `${FA_BASE}/categories/:categoryId/books`,            description: 'Get depreciation book accounts for a category' },
-  { method: 'GET',  url: `${FA_BASE}/categories/:categoryId/book-defaults`,    description: 'Get default rules for a category book' },
-];
 
 // ── Per-tab data ───────────────────────────────────────────────────────────────
 interface OpenCategoryTab {
@@ -719,15 +709,12 @@ const ManageCategories: React.FC = () => {
                 <Text type="secondary" style={{ fontSize: 11 }}>Search and view fixed asset category definitions</Text>
               </div>
             </Space>
-            <Space>
-              <ApiDocsModal title="FA Asset Categories" endpoints={FA_CAT_ENDPOINTS} />
-              <Button type="primary" icon={<PlusOutlined />}
-                style={{ background: FA_COLOR, borderColor: FA_COLOR }}
-                disabled
-              >
-                Create Category
-              </Button>
-            </Space>
+            <Button type="primary" icon={<PlusOutlined />}
+              style={{ background: FA_COLOR, borderColor: FA_COLOR }}
+              disabled
+            >
+              Create Category
+            </Button>
           </div>
         </div>
 

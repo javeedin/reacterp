@@ -415,15 +415,51 @@ const RegisterDetail: React.FC<{
 const PC_BASE = `${APEX_DB_CONFIG.baseUrl}/pc`;
 
 const PC_API_ENDPOINTS: ApiEndpoint[] = [
-  { method: 'GET',    url: `${PC_BASE}/registers`,                       description: 'Search registers', params: 'q, status, dateFrom, dateTo' },
-  { method: 'POST',   url: `${PC_BASE}/registers`,                       description: 'Create register',  body: 'registerName, startDate, endDate, comments, cashAccountDesc, currency, createdBy' },
-  { method: 'GET',    url: `${PC_BASE}/registers/:registerId`,           description: 'Get single register with live balance' },
-  { method: 'PUT',    url: `${PC_BASE}/registers/:registerId`,           description: 'Update register header', body: 'registerName, startDate, endDate, comments, cashAccountDesc, currency, status, updatedBy' },
-  { method: 'DELETE', url: `${PC_BASE}/registers/:registerId`,           description: 'Delete register (blocked if transactions exist)' },
-  { method: 'GET',    url: `${PC_BASE}/registers/:registerId/transactions`, description: 'Get all transactions for a register (with running balance)' },
-  { method: 'POST',   url: `${PC_BASE}/transactions`,                    description: 'Create transaction (Add Money or Add Expense)', body: 'registerId, transactionDate, transactionType, expenseType, chargeAccountCcid, chargeAccountDesc, accountingDate, postingStatus, currency, debitAmount, creditAmount, comments, referenceNo, attachment, createdBy' },
-  { method: 'PUT',    url: `${PC_BASE}/transactions/:transactionId`,     description: 'Update transaction', body: 'transactionDate, transactionType, expenseType, chargeAccountCcid, chargeAccountDesc, accountingDate, postingStatus, currency, debitAmount, creditAmount, comments, referenceNo, attachment, updatedBy' },
-  { method: 'DELETE', url: `${PC_BASE}/transactions/:transactionId`,     description: 'Delete transaction line' },
+  {
+    method: 'GET', url: `${PC_BASE}/registers`,
+    description: 'Search all petty cash registers',
+    params: 'q (name contains), status (ACTIVE|CLOSED), dateFrom (YYYY-MM-DD), dateTo (YYYY-MM-DD)',
+  },
+  {
+    method: 'POST', url: `${PC_BASE}/registers`,
+    description: 'Create a new petty cash register',
+    body: 'registerName*, startDate, endDate, comments, cashAccountDesc, currency, createdBy',
+    sampleBody: JSON.stringify({ registerName: 'Main Office Petty Cash', currency: 'AED', startDate: '2026-01-01', cashAccountDesc: '01-100-1010-000', createdBy: 'ADMIN' }, null, 2),
+  },
+  {
+    method: 'GET', url: `${PC_BASE}/registers/:registerId`,
+    description: 'Get single register with live balance, totalDebit, totalCredit',
+  },
+  {
+    method: 'PUT', url: `${PC_BASE}/registers/:registerId`,
+    description: 'Update register header fields',
+    body: 'registerName, startDate, endDate, comments, cashAccountDesc, currency, status, updatedBy',
+    sampleBody: JSON.stringify({ status: 'CLOSED', updatedBy: 'ADMIN' }, null, 2),
+  },
+  {
+    method: 'DELETE', url: `${PC_BASE}/registers/:registerId`,
+    description: 'Delete register — blocked if transactions exist',
+  },
+  {
+    method: 'GET', url: `${PC_BASE}/registers/:registerId/transactions`,
+    description: 'Get all transaction lines with running balance (analytic window)',
+  },
+  {
+    method: 'POST', url: `${PC_BASE}/transactions`,
+    description: 'Create a transaction — Balance Refill (debit) or Expense (credit)',
+    body: 'registerId*, transactionDate*, transactionType*, currency, debitAmount, creditAmount, expenseType, chargeAccountCcid, chargeAccountDesc, accountingDate, postingStatus, comments, referenceNo, attachment, createdBy',
+    sampleBody: JSON.stringify({ registerId: 1001, transactionDate: '2026-04-18', transactionType: 'Expense', expenseType: 'Meals & Entertainment', currency: 'AED', debitAmount: 0, creditAmount: 150, referenceNo: 'EXP-001', comments: 'Team lunch', createdBy: 'ADMIN' }, null, 2),
+  },
+  {
+    method: 'PUT', url: `${PC_BASE}/transactions/:transactionId`,
+    description: 'Update a transaction line',
+    body: 'transactionDate, transactionType, expenseType, chargeAccountCcid, chargeAccountDesc, accountingDate, postingStatus, currency, debitAmount, creditAmount, comments, referenceNo, attachment, updatedBy',
+    sampleBody: JSON.stringify({ postingStatus: 'Posted', updatedBy: 'ADMIN' }, null, 2),
+  },
+  {
+    method: 'DELETE', url: `${PC_BASE}/transactions/:transactionId`,
+    description: 'Delete a transaction line',
+  },
 ];
 
 const PettyCash: React.FC = () => {
