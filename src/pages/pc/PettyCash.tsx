@@ -103,6 +103,7 @@ async function exportRegisterToExcel(register: PCRegister, transactions: PCTrans
   // ── Register header section ─────────────────────────────────
   const hdr: [string, string | number][] = [
     ['Register Name',   register.registerName],
+    ['Business Unit',   register.businessUnit || '—'],
     ['Register ID',     register.registerId],
     ['Status',          register.status],
     ['Currency',        register.currency],
@@ -406,6 +407,7 @@ const RegisterDetail: React.FC<{
           <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
             <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 4 }}>Register Info</div>
             <div style={{ fontSize: 12 }}>
+              <b>BU:</b> {register.businessUnit || '—'}<br />
               <b>Currency:</b> {register.currency}<br />
               <b>Status:</b> <StatusTag status={register.status} /><br />
               {register.startDate && <><b>From:</b> {register.startDate}<br /></>}
@@ -627,8 +629,8 @@ const PC_API_ENDPOINTS: ApiEndpoint[] = [
   {
     method: 'POST', url: `${PC_BASE}/registers`,
     description: 'Create a new petty cash register',
-    body: 'registerName*, startDate, endDate, comments, cashAccountDesc, currency, createdBy',
-    sampleBody: JSON.stringify({ registerName: 'Main Office Petty Cash', currency: 'AED', startDate: '2026-01-01', cashAccountDesc: '01-100-1010-000', createdBy: 'ADMIN' }, null, 2),
+    body: 'registerName*, businessUnit*, startDate, endDate, comments, cashAccountDesc, currency, createdBy',
+    sampleBody: JSON.stringify({ registerName: 'Main Office Petty Cash', businessUnit: 'Business Unit Name', currency: 'AED', startDate: '2026-01-01', cashAccountDesc: '01-100-1010-000', createdBy: 'ADMIN' }, null, 2),
   },
   {
     method: 'GET', url: `${PC_BASE}/registers/:registerId`,
@@ -683,7 +685,19 @@ const PettyCash: React.FC = () => {
   const [saveLoading, setSaveLoading]         = useState(false);
   const [deleteLoading, setDeleteLoading]     = useState<number | null>(null);
   const [searched, setSearched]               = useState(false);
+  const [businessUnits, setBusinessUnits]     = useState<string[]>([]);
 
+  // ── Load Business Units on mount ───────────────────────────
+  useEffect(() => {
+    fetch(`${APEX_DB_CONFIG.baseUrl}/gl/businessunits`, { headers: { Accept: 'application/json' } })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return;
+        const items: any[] = Array.isArray(data) ? data : (data.items || []);
+        setBusinessUnits(items.map((i: any) => i.business_unit_name || '').filter(Boolean));
+      })
+      .catch(() => {});
+  }, []);
 
   // ── Search ────────────────────────────────────────────────
   const handleSearch = useCallback(async () => {
@@ -693,6 +707,7 @@ const PettyCash: React.FC = () => {
       const rows = await searchRegisters({
         q:        values.registerName || undefined,
         status:   values.status       || undefined,
+        bu:       values.businessUnit  || undefined,
         dateFrom: values.dateFrom ? values.dateFrom.format('YYYY-MM-DD') : undefined,
         dateTo:   values.dateTo   ? values.dateTo.format('YYYY-MM-DD')   : undefined,
       });
@@ -762,6 +777,7 @@ const PettyCash: React.FC = () => {
     try {
       const result = await createRegister({
         registerName:    values.registerName,
+        businessUnit:    values.businessUnit,
         startDate:       values.startDate ? values.startDate.format('YYYY-MM-DD') : undefined,
         endDate:         values.endDate   ? values.endDate.format('YYYY-MM-DD')   : undefined,
         comments:        values.comments,
@@ -815,6 +831,8 @@ const PettyCash: React.FC = () => {
           {v}
         </Button>
       )},
+    { title: 'Business Unit', dataIndex: 'businessUnit', width: 200, ellipsis: true,
+      render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Currency', dataIndex: 'currency', width: 80, align: 'center',
       render: (v) => <Text style={{ fontSize: 12 }}>{v}</Text> },
     { title: 'Status', dataIndex: 'status', width: 90,
@@ -866,12 +884,20 @@ const PettyCash: React.FC = () => {
               children: (
                 <Form form={searchForm} layout="vertical" size="small">
                   <Row gutter={16}>
-                    <Col span={6}>
+                    <Col span={5}>
                       <Form.Item label="Register Name" name="registerName">
                         <Input placeholder="Search by name" allowClear />
                       </Form.Item>
                     </Col>
-                    <Col span={4}>
+                    <Col span={5}>
+                      <Form.Item label="Business Unit" name="businessUnit">
+                        <Select placeholder="All BUs" allowClear showSearch
+                          filterOption={(v, o) => String(o?.value ?? '').toLowerCase().includes(v.toLowerCase())}>
+                          {businessUnits.map(bu => <Option key={bu} value={bu}>{bu}</Option>)}
+                        </Select>
+                      </Form.Item>
+                    </Col>
+                    <Col span={3}>
                       <Form.Item label="Status" name="status">
                         <Select placeholder="All" allowClear>
                           <Option value="ACTIVE">Active</Option>
@@ -879,17 +905,17 @@ const PettyCash: React.FC = () => {
                         </Select>
                       </Form.Item>
                     </Col>
-                    <Col span={5}>
+                    <Col span={4}>
                       <Form.Item label="Start Date From" name="dateFrom">
                         <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" />
                       </Form.Item>
                     </Col>
-                    <Col span={5}>
+                    <Col span={4}>
                       <Form.Item label="Start Date To" name="dateTo">
                         <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" />
                       </Form.Item>
                     </Col>
-                    <Col span={4} style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: 24 }}>
+                    <Col span={3} style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: 24 }}>
                       <Space>
                         <Button type="primary" icon={<SearchOutlined />}
                           style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
@@ -958,6 +984,17 @@ const PettyCash: React.FC = () => {
                   <Input placeholder="e.g. Main Office Petty Cash" />
                 </Form.Item>
               </Col>
+              <Col span={12}>
+                <Form.Item label={<><span style={{ color: REDWOOD.primary }}>*</span> Business Unit</>}
+                  name="businessUnit" rules={[{ required: true, message: 'Business Unit is required' }]}>
+                  <Select placeholder="Select Business Unit" showSearch allowClear
+                    filterOption={(v, o) => String(o?.value ?? '').toLowerCase().includes(v.toLowerCase())}>
+                    {businessUnits.map(bu => <Option key={bu} value={bu}>{bu}</Option>)}
+                  </Select>
+                </Form.Item>
+              </Col>
+            </Row>
+            <Row gutter={16}>
               <Col span={12}>
                 <Form.Item label="Currency" name="currency" initialValue="AED">
                   <Select>

@@ -58,6 +58,7 @@ DECLARE
     CURSOR c IS
         SELECT r.REGISTER_ID,
                r.REGISTER_NAME,
+               r.BUSINESS_UNIT,
                r.START_DATE,
                r.END_DATE,
                r.COMMENTS,
@@ -73,10 +74,11 @@ DECLARE
         FROM   RR_PC_REGISTERS r
         LEFT JOIN RR_PC_TRANSACTIONS t ON t.REGISTER_ID = r.REGISTER_ID
         WHERE  (:q        IS NULL OR UPPER(r.REGISTER_NAME) LIKE ''%''||UPPER(:q)||''%'')
-        AND    (:status   IS NULL OR r.STATUS    = :status)
+        AND    (:status   IS NULL OR r.STATUS       = :status)
+        AND    (:bu       IS NULL OR r.BUSINESS_UNIT = :bu)
         AND    (:dateFrom IS NULL OR r.START_DATE >= TO_DATE(:dateFrom,''YYYY-MM-DD''))
         AND    (:dateTo   IS NULL OR r.END_DATE   <= TO_DATE(:dateTo,  ''YYYY-MM-DD''))
-        GROUP BY r.REGISTER_ID, r.REGISTER_NAME, r.START_DATE, r.END_DATE,
+        GROUP BY r.REGISTER_ID, r.REGISTER_NAME, r.BUSINESS_UNIT, r.START_DATE, r.END_DATE,
                  r.COMMENTS, r.CASH_ACCOUNT_CCID, r.CASH_ACCOUNT_DESC,
                  r.CURRENCY, r.STATUS, r.CREATED_BY, r.CREATION_DATE
         ORDER BY r.REGISTER_ID DESC;
@@ -90,6 +92,7 @@ BEGIN
         APEX_JSON.OPEN_OBJECT;
         APEX_JSON.WRITE(''registerId'',      rec.REGISTER_ID);
         APEX_JSON.WRITE(''registerName'',    rec.REGISTER_NAME);
+        APEX_JSON.WRITE(''businessUnit'',    rec.BUSINESS_UNIT);
         APEX_JSON.WRITE(''startDate'',       TO_CHAR(rec.START_DATE, ''DD-MON-YYYY''));
         APEX_JSON.WRITE(''endDate'',         TO_CHAR(rec.END_DATE,   ''DD-MON-YYYY''));
         APEX_JSON.WRITE(''comments'',        rec.COMMENTS);
@@ -161,7 +164,8 @@ END;
         p_source      => '
 DECLARE
     CURSOR c IS
-        SELECT r.REGISTER_ID, r.REGISTER_NAME, r.START_DATE, r.END_DATE,
+        SELECT r.REGISTER_ID, r.REGISTER_NAME, r.BUSINESS_UNIT,
+               r.START_DATE, r.END_DATE,
                r.COMMENTS, r.CASH_ACCOUNT_CCID, r.CASH_ACCOUNT_DESC,
                r.CURRENCY, r.STATUS, r.CREATED_BY, r.CREATION_DATE,
                NVL(SUM(t.DEBIT_AMOUNT),0) - NVL(SUM(t.CREDIT_AMOUNT),0) AS BALANCE,
@@ -170,7 +174,8 @@ DECLARE
         FROM   RR_PC_REGISTERS r
         LEFT JOIN RR_PC_TRANSACTIONS t ON t.REGISTER_ID = r.REGISTER_ID
         WHERE  r.REGISTER_ID = :registerId
-        GROUP BY r.REGISTER_ID, r.REGISTER_NAME, r.START_DATE, r.END_DATE,
+        GROUP BY r.REGISTER_ID, r.REGISTER_NAME, r.BUSINESS_UNIT,
+                 r.START_DATE, r.END_DATE,
                  r.COMMENTS, r.CASH_ACCOUNT_CCID, r.CASH_ACCOUNT_DESC,
                  r.CURRENCY, r.STATUS, r.CREATED_BY, r.CREATION_DATE;
     rec c%ROWTYPE;
@@ -187,6 +192,7 @@ BEGIN
     APEX_JSON.WRITE(''success'',         TRUE);
     APEX_JSON.WRITE(''registerId'',      rec.REGISTER_ID);
     APEX_JSON.WRITE(''registerName'',    rec.REGISTER_NAME);
+    APEX_JSON.WRITE(''businessUnit'',    rec.BUSINESS_UNIT);
     APEX_JSON.WRITE(''startDate'',       TO_CHAR(rec.START_DATE, ''DD-MON-YYYY''));
     APEX_JSON.WRITE(''endDate'',         TO_CHAR(rec.END_DATE,   ''DD-MON-YYYY''));
     APEX_JSON.WRITE(''comments'',        rec.COMMENTS);

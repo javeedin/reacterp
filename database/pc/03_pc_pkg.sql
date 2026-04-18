@@ -77,6 +77,7 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         p_error    OUT VARCHAR2
     ) IS
         l_name     VARCHAR2(200);
+        l_bu       VARCHAR2(240);
         l_start    DATE;
         l_end      DATE;
         l_comments VARCHAR2(1000);
@@ -89,6 +90,7 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         APEX_JSON.PARSE(p_json);
 
         l_name     := APEX_JSON.GET_VARCHAR2(p_path => 'registerName');
+        l_bu       := APEX_JSON.GET_VARCHAR2(p_path => 'businessUnit');
         l_start    := parse_date(APEX_JSON.GET_VARCHAR2(p_path => 'startDate'));
         l_end      := parse_date(APEX_JSON.GET_VARCHAR2(p_path => 'endDate'));
         l_comments := APEX_JSON.GET_VARCHAR2(p_path => 'comments');
@@ -101,14 +103,18 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
             p_error := 'registerName is required';
             RETURN;
         END IF;
+        IF l_bu IS NULL THEN
+            p_error := 'businessUnit is required';
+            RETURN;
+        END IF;
 
         INSERT INTO RR_PC_REGISTERS (
-            REGISTER_NAME, START_DATE, END_DATE, COMMENTS,
+            REGISTER_NAME, BUSINESS_UNIT, START_DATE, END_DATE, COMMENTS,
             CASH_ACCOUNT_CCID, CASH_ACCOUNT_DESC, CURRENCY,
             STATUS, CREATED_BY, CREATION_DATE,
             LAST_UPDATED_BY, LAST_UPDATE_DATE
         ) VALUES (
-            l_name, l_start, l_end, l_comments,
+            l_name, l_bu, l_start, l_end, l_comments,
             l_ccid, l_acc_desc, l_currency,
             'ACTIVE', l_by, SYSTIMESTAMP,
             l_by, SYSTIMESTAMP
@@ -134,6 +140,7 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         p_error        OUT VARCHAR2
     ) IS
         l_name     VARCHAR2(200);
+        l_bu       VARCHAR2(240);
         l_start    DATE;
         l_end      DATE;
         l_comments VARCHAR2(1000);
@@ -148,6 +155,7 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
 
         -- Parse all values into local variables before SQL
         l_name     := APEX_JSON.GET_VARCHAR2(p_path => 'registerName');
+        l_bu       := APEX_JSON.GET_VARCHAR2(p_path => 'businessUnit');
         l_start    := parse_date(APEX_JSON.GET_VARCHAR2(p_path => 'startDate'));
         l_end      := parse_date(APEX_JSON.GET_VARCHAR2(p_path => 'endDate'));
         l_comments := APEX_JSON.GET_VARCHAR2(p_path => 'comments');
@@ -159,6 +167,7 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
 
         UPDATE RR_PC_REGISTERS SET
             REGISTER_NAME     = NVL(l_name,     REGISTER_NAME),
+            BUSINESS_UNIT     = NVL(l_bu,       BUSINESS_UNIT),
             START_DATE        = NVL(l_start,    START_DATE),
             END_DATE          = l_end,
             COMMENTS          = l_comments,

@@ -5,6 +5,7 @@ const BASE = `${APEX_DB_CONFIG.baseUrl}/pc`;
 export interface PCRegister {
   registerId: number;
   registerName: string;
+  businessUnit: string;
   startDate: string | null;
   endDate: string | null;
   comments: string | null;
@@ -44,6 +45,7 @@ export interface PCTransaction {
 export interface SearchRegistersParams {
   q?: string;
   status?: string;
+  bu?: string;
   dateFrom?: string;
   dateTo?: string;
 }
@@ -52,6 +54,7 @@ export async function searchRegisters(params: SearchRegistersParams = {}): Promi
   const qs = new URLSearchParams();
   if (params.q)        qs.set('q',        params.q);
   if (params.status)   qs.set('status',   params.status);
+  if (params.bu)       qs.set('bu',       params.bu);
   if (params.dateFrom) qs.set('dateFrom', params.dateFrom);
   if (params.dateTo)   qs.set('dateTo',   params.dateTo);
   const url = `${BASE}/registers${qs.toString() ? '?' + qs.toString() : ''}`;
