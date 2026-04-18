@@ -44,20 +44,23 @@ CREATE TABLE RR_PC_TRANSACTIONS (
     EXPENSE_TYPE          VARCHAR2(200),                 -- populated for Expense lines
     CHARGE_ACCOUNT_CCID   NUMBER,                        -- GL code combination for charge account
     CHARGE_ACCOUNT_DESC   VARCHAR2(400),                 -- denormalised segment string
+    ACCOUNTING_DATE       DATE,                          -- GL accounting date
+    POSTING_STATUS        VARCHAR2(50) DEFAULT 'Unposted', -- Unposted | Posted | Error
     CURRENCY              VARCHAR2(10)  DEFAULT 'AED',
-    DEBIT_AMOUNT          NUMBER(18,2)  DEFAULT 0,      -- money IN  (Add Money)
-    CREDIT_AMOUNT         NUMBER(18,2)  DEFAULT 0,      -- money OUT (Add Expense)
+    DEBIT_AMOUNT          NUMBER(18,2)  DEFAULT 0,       -- money IN  (Add Money)
+    CREDIT_AMOUNT         NUMBER(18,2)  DEFAULT 0,       -- money OUT (Add Expense)
     COMMENTS              VARCHAR2(1000),
     REFERENCE_NO          VARCHAR2(200),
     ATTACHMENT            VARCHAR2(1000),
-    CREATED_BY          VARCHAR2(150),
-    CREATION_DATE       TIMESTAMP     DEFAULT SYSTIMESTAMP,
-    LAST_UPDATED_BY     VARCHAR2(150),
-    LAST_UPDATE_DATE    TIMESTAMP     DEFAULT SYSTIMESTAMP,
-    CONSTRAINT RR_PC_TXN_REG_FK     FOREIGN KEY (REGISTER_ID) REFERENCES RR_PC_REGISTERS(REGISTER_ID),
-    CONSTRAINT RR_PC_TXN_TYPE_CK    CHECK (TRANSACTION_TYPE IN ('Balance Refill','Expense','Adjustment')),
-    CONSTRAINT RR_PC_TXN_DEBIT_CK   CHECK (DEBIT_AMOUNT  >= 0),
-    CONSTRAINT RR_PC_TXN_CREDIT_CK  CHECK (CREDIT_AMOUNT >= 0)
+    CREATED_BY            VARCHAR2(150),
+    CREATION_DATE         TIMESTAMP    DEFAULT SYSTIMESTAMP,
+    LAST_UPDATED_BY       VARCHAR2(150),
+    LAST_UPDATE_DATE      TIMESTAMP    DEFAULT SYSTIMESTAMP,
+    CONSTRAINT RR_PC_TXN_REG_FK      FOREIGN KEY (REGISTER_ID) REFERENCES RR_PC_REGISTERS(REGISTER_ID),
+    CONSTRAINT RR_PC_TXN_TYPE_CK     CHECK (TRANSACTION_TYPE IN ('Balance Refill','Expense','Adjustment')),
+    CONSTRAINT RR_PC_TXN_POSTING_CK  CHECK (POSTING_STATUS IN ('Unposted','Posted','Error')),
+    CONSTRAINT RR_PC_TXN_DEBIT_CK    CHECK (DEBIT_AMOUNT  >= 0),
+    CONSTRAINT RR_PC_TXN_CREDIT_CK   CHECK (CREDIT_AMOUNT >= 0)
 );
 
 CREATE INDEX IDX_RR_PC_TXN_REG    ON RR_PC_TRANSACTIONS(REGISTER_ID);
@@ -70,6 +73,8 @@ COMMENT ON COLUMN RR_PC_TRANSACTIONS.CREDIT_AMOUNT             IS 'Cash paid out
 COMMENT ON COLUMN RR_PC_TRANSACTIONS.LINE_NUMBER               IS 'Auto-assigned sequential line number per register';
 COMMENT ON COLUMN RR_PC_TRANSACTIONS.CHARGE_ACCOUNT_CCID       IS 'GL code combination ID for the expense charge account';
 COMMENT ON COLUMN RR_PC_TRANSACTIONS.CHARGE_ACCOUNT_DESC       IS 'Denormalised segment string for the charge account';
+COMMENT ON COLUMN RR_PC_TRANSACTIONS.ACCOUNTING_DATE           IS 'GL accounting date — may differ from transaction date';
+COMMENT ON COLUMN RR_PC_TRANSACTIONS.POSTING_STATUS            IS 'Unposted = not yet posted to GL; Posted = transferred; Error = posting failed';
 
 -- ============================================================
 -- 3. Alter RR_EXTERNAL_CASH_TRANSACTIONS — add REGISTER_ID
