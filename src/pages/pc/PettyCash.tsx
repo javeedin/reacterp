@@ -854,7 +854,7 @@ const PettyCash: React.FC = () => {
       render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Cash Account', dataIndex: 'cashAccountDesc', ellipsis: true,
       render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
-    { title: 'Created By', dataIndex: 'createdBy', width: 110,
+    { title: 'Created By', dataIndex: 'createdBy', ellipsis: true,
       render: (v) => <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{v || '—'}</Text> },
     { title: '', key: 'actions', width: 60, align: 'center',
       render: (_, rec) => (
