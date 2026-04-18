@@ -13,7 +13,9 @@ import {
   DollarOutlined, MinusCircleOutlined, ArrowUpOutlined, ArrowDownOutlined,
 } from '@ant-design/icons';
 import FloatingMenu from '../../components/FloatingMenu';
+import ApiDocsModal, { type ApiEndpoint } from '../../components/ApiDocsModal';
 import { useAuth } from '../../context/AuthContext';
+import { APEX_DB_CONFIG } from '../../config/api.config';
 import {
   searchRegisters, createRegister, updateRegister, deleteRegister,
   getTransactions, createTransaction,
@@ -410,6 +412,20 @@ const RegisterDetail: React.FC<{
 // ─────────────────────────────────────────────────────────────────────────────
 // Main Page
 // ─────────────────────────────────────────────────────────────────────────────
+const PC_BASE = `${APEX_DB_CONFIG.baseUrl}/pc`;
+
+const PC_API_ENDPOINTS: ApiEndpoint[] = [
+  { method: 'GET',    url: `${PC_BASE}/registers`,                       description: 'Search registers', params: 'q, status, dateFrom, dateTo' },
+  { method: 'POST',   url: `${PC_BASE}/registers`,                       description: 'Create register',  body: 'registerName, startDate, endDate, comments, cashAccountDesc, currency, createdBy' },
+  { method: 'GET',    url: `${PC_BASE}/registers/:registerId`,           description: 'Get single register with live balance' },
+  { method: 'PUT',    url: `${PC_BASE}/registers/:registerId`,           description: 'Update register header', body: 'registerName, startDate, endDate, comments, cashAccountDesc, currency, status, updatedBy' },
+  { method: 'DELETE', url: `${PC_BASE}/registers/:registerId`,           description: 'Delete register (blocked if transactions exist)' },
+  { method: 'GET',    url: `${PC_BASE}/registers/:registerId/transactions`, description: 'Get all transactions for a register (with running balance)' },
+  { method: 'POST',   url: `${PC_BASE}/transactions`,                    description: 'Create transaction (Add Money or Add Expense)', body: 'registerId, transactionDate, transactionType, expenseType, chargeAccountCcid, chargeAccountDesc, accountingDate, postingStatus, currency, debitAmount, creditAmount, comments, referenceNo, attachment, createdBy' },
+  { method: 'PUT',    url: `${PC_BASE}/transactions/:transactionId`,     description: 'Update transaction', body: 'transactionDate, transactionType, expenseType, chargeAccountCcid, chargeAccountDesc, accountingDate, postingStatus, currency, debitAmount, creditAmount, comments, referenceNo, attachment, updatedBy' },
+  { method: 'DELETE', url: `${PC_BASE}/transactions/:transactionId`,     description: 'Delete transaction line' },
+];
+
 const PettyCash: React.FC = () => {
   const { user } = useAuth();
   const currentUser = user?.username || 'SYSTEM';
@@ -801,11 +817,12 @@ const PettyCash: React.FC = () => {
             style={{ padding: '0 16px' }}
             tabBarStyle={{ marginBottom: 0 }}
             tabBarExtraContent={
-              <div style={{ padding: '8px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ padding: '8px 0', display: 'flex', alignItems: 'center', gap: 12 }}>
                 <WalletOutlined style={{ color: REDWOOD.success }} />
                 <Text style={{ fontWeight: 600, color: REDWOOD.neutral900, fontSize: 14 }}>
                   Petty Cash Registers
                 </Text>
+                <ApiDocsModal title="Petty Cash" endpoints={PC_API_ENDPOINTS} />
               </div>
             }
             items={tabItems}
