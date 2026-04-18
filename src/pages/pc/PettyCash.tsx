@@ -17,7 +17,7 @@ import ApiDocsModal, { type ApiEndpoint } from '../../components/ApiDocsModal';
 import { useAuth } from '../../context/AuthContext';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import {
-  searchRegisters, createRegister, updateRegister, deleteRegister,
+  searchRegisters, getRegister, createRegister, updateRegister, deleteRegister,
   getTransactions, createTransaction,
   type PCRegister, type PCTransaction,
 } from '../../services/pc.service';
@@ -72,8 +72,10 @@ const RegisterDetail: React.FC<{
   const [saving, setSaving]                 = useState(false);
   const [moneyForm]   = Form.useForm();
   const [expenseForm] = Form.useForm();
+  const needsRefresh = React.useRef(false);
 
-  const isClosed = register.status === 'CLOSED';
+  const isClosed   = register.status === 'CLOSED';
+  const noBalance  = register.balance <= 0;
 
   // ── Add Money ──────────────────────────────────────────────
   const handleAddMoney = async (values: any) => {
@@ -96,6 +98,7 @@ const RegisterDetail: React.FC<{
       });
       message.success('Money added to register');
       moneyForm.resetFields();
+      needsRefresh.current = false;
       setAddMoneyOpen(false);
       onRefresh();
     } catch (e: any) {
@@ -107,6 +110,10 @@ const RegisterDetail: React.FC<{
 
   // ── Add Expense ────────────────────────────────────────────
   const handleAddExpense = async (values: any) => {
+    if (values.amount > register.balance) {
+      message.error(`Expense amount (${fmt(values.amount)}) exceeds available balance (${fmt(register.balance)} ${register.currency})`);
+      return;
+    }
     setSaving(true);
     try {
       await createTransaction({
@@ -130,6 +137,7 @@ const RegisterDetail: React.FC<{
       });
       message.success('Expense recorded');
       expenseForm.resetFields();
+      needsRefresh.current = false;
       setAddExpenseOpen(false);
       onRefresh();
     } catch (e: any) {
@@ -242,23 +250,38 @@ const RegisterDetail: React.FC<{
       )}
 
       {/* Action buttons */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 12 }}>
-        <Button
-          icon={<DollarOutlined />}
-          style={{ background: REDWOOD.success, borderColor: REDWOOD.success, color: '#fff' }}
-          disabled={isClosed}
-          onClick={() => { moneyForm.resetFields(); setAddMoneyOpen(true); }}
-        >
-          Add Money
-        </Button>
-        <Button
-          icon={<MinusCircleOutlined />}
-          style={{ background: REDWOOD.warning, borderColor: REDWOOD.warning, color: '#fff' }}
-          disabled={isClosed}
-          onClick={() => { expenseForm.resetFields(); setAddExpenseOpen(true); }}
-        >
-          Add Expense
-        </Button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Transactions</Text>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Button
+            size="small"
+            icon={<ReloadOutlined />}
+            onClick={onRefresh}
+            loading={tab.txnLoading}
+          >
+            Refresh
+          </Button>
+          <Button
+            icon={<DollarOutlined />}
+            style={{ background: REDWOOD.success, borderColor: REDWOOD.success, color: '#fff' }}
+            disabled={isClosed}
+            onClick={() => { moneyForm.resetFields(); setAddMoneyOpen(true); }}
+          >
+            Add Money
+          </Button>
+          <Tooltip title={noBalance ? 'No available balance to record an expense' : undefined}>
+            <Button
+              icon={<MinusCircleOutlined />}
+              style={!isClosed && !noBalance
+                ? { background: REDWOOD.warning, borderColor: REDWOOD.warning, color: '#fff' }
+                : {}}
+              disabled={isClosed || noBalance}
+              onClick={() => { expenseForm.resetFields(); setAddExpenseOpen(true); }}
+            >
+              Add Expense
+            </Button>
+          </Tooltip>
+        </div>
       </div>
 
       {/* Transactions table */}
@@ -278,7 +301,7 @@ const RegisterDetail: React.FC<{
       <Modal
         title={<Space><DollarOutlined style={{ color: REDWOOD.success }} /> Add Money to Register</Space>}
         open={addMoneyOpen}
-        onCancel={() => setAddMoneyOpen(false)}
+        onCancel={() => { setAddMoneyOpen(false); if (needsRefresh.current) { needsRefresh.current = false; onRefresh(); } }}
         footer={null}
         width={520}
         destroyOnClose
@@ -334,7 +357,7 @@ const RegisterDetail: React.FC<{
       <Modal
         title={<Space><MinusCircleOutlined style={{ color: REDWOOD.warning }} /> Add Expense</Space>}
         open={addExpenseOpen}
-        onCancel={() => setAddExpenseOpen(false)}
+        onCancel={() => { setAddExpenseOpen(false); if (needsRefresh.current) { needsRefresh.current = false; onRefresh(); } }}
         footer={null}
         width={580}
         destroyOnClose
@@ -527,14 +550,14 @@ const PettyCash: React.FC = () => {
     }
   }, [openTabs]);
 
-  // ── Refresh a tab (after adding money/expense) ─────────────
+  // ── Refresh a tab (register header + transactions) ──────────
   const refreshTab = useCallback(async (key: string) => {
     const tab = openTabs.find(t => t.key === key);
     if (!tab) return;
     setOpenTabs(prev => prev.map(t => t.key === key ? { ...t, txnLoading: true } : t));
     try {
       const [reg, txns] = await Promise.all([
-        searchRegisters({ q: tab.register.registerName }).then(r => r.find(x => x.registerId === tab.register.registerId) || tab.register),
+        getRegister(tab.register.registerId),
         getTransactions(tab.register.registerId),
       ]);
       setOpenTabs(prev => prev.map(t => t.key === key ? { ...t, register: reg, transactions: txns, txnLoading: false } : t));
