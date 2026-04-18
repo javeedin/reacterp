@@ -472,6 +472,7 @@ const PettyCash: React.FC = () => {
   const [activeTab, setActiveTab]             = useState('search');
   const [openTabs, setOpenTabs]               = useState<RegisterTab[]>([]);
   const [createTabOpen, setCreateTabOpen]     = useState(false);
+  const openingKeys = React.useRef<Set<string>>(new Set());
 
   const [registers, setRegisters]             = useState<PCRegister[]>([]);
   const [searchLoading, setSearchLoading]     = useState(false);
@@ -504,11 +505,16 @@ const PettyCash: React.FC = () => {
   // ── Open register detail tab ───────────────────────────────
   const openRegisterTab = useCallback(async (reg: PCRegister) => {
     const key = `reg-${reg.registerId}`;
-    const existing = openTabs.find(t => t.key === key);
-    if (existing) { setActiveTab(key); return; }
+    // Guard: if already open or currently being opened, just switch to it
+    if (openingKeys.current.has(key)) { setActiveTab(key); return; }
+    if (openTabs.find(t => t.key === key)) { setActiveTab(key); return; }
 
+    openingKeys.current.add(key);
     const newTab: RegisterTab = { key, register: reg, transactions: [], txnLoading: true };
-    setOpenTabs(prev => [...prev, newTab]);
+    setOpenTabs(prev => {
+      if (prev.find(t => t.key === key)) return prev;  // double-check inside updater
+      return [...prev, newTab];
+    });
     setActiveTab(key);
 
     try {
@@ -516,6 +522,8 @@ const PettyCash: React.FC = () => {
       setOpenTabs(prev => prev.map(t => t.key === key ? { ...t, transactions: txns, txnLoading: false } : t));
     } catch {
       setOpenTabs(prev => prev.map(t => t.key === key ? { ...t, txnLoading: false } : t));
+    } finally {
+      openingKeys.current.delete(key);
     }
   }, [openTabs]);
 
@@ -598,7 +606,7 @@ const PettyCash: React.FC = () => {
     { title: 'Register Name', dataIndex: 'registerName',
       render: (v, rec) => (
         <Button type="link" style={{ padding: 0, fontSize: 13, fontWeight: 500 }}
-          onClick={() => openRegisterTab(rec)}>
+          onClick={(e) => { e.stopPropagation(); openRegisterTab(rec); }}>
           {v}
         </Button>
       )},
