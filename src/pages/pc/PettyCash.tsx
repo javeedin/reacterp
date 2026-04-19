@@ -21,7 +21,7 @@ import { useAuth } from '../../context/AuthContext';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import {
   searchRegisters, getRegister, createRegister, updateRegister, deleteRegister,
-  getTransactions, createTransaction, deleteTransaction,
+  getTransactions, createTransaction, updateTransaction, deleteTransaction,
   type PCRegister, type PCTransaction,
 } from '../../services/pc.service';
 import {
@@ -248,9 +248,12 @@ const RegisterDetail: React.FC<{
   const { register, transactions, txnLoading } = tab;
   const [addMoneyOpen, setAddMoneyOpen]     = useState(false);
   const [addExpenseOpen, setAddExpenseOpen] = useState(false);
+  const [editTxnOpen, setEditTxnOpen]       = useState(false);
+  const [editTxn, setEditTxn]               = useState<PCTransaction | null>(null);
   const [saving, setSaving]                 = useState(false);
   const [moneyForm]   = Form.useForm();
   const [expenseForm] = Form.useForm();
+  const [editTxnForm] = Form.useForm();
   const needsRefresh = React.useRef(false);
   const [distCombinations, setDistCombinations] = useState<DistCombination[]>([]);
   const [txnActionLoading, setTxnActionLoading] = useState<number | null>(null);
@@ -321,6 +324,58 @@ const RegisterDetail: React.FC<{
         }
       },
     });
+  };
+
+  // ── Open edit transaction modal ───────────────────────────
+  const openEditTransaction = (txn: PCTransaction) => {
+    setEditTxn(txn);
+    const isExpense = txn.transactionType === 'Expense';
+    editTxnForm.setFieldsValue({
+      transactionDate:   txn.transactionDate ? dayjs(txn.transactionDate, ['DD-MMM-YYYY','YYYY-MM-DD']) : null,
+      accountingDate:    txn.accountingDate  ? dayjs(txn.accountingDate,  ['DD-MMM-YYYY','YYYY-MM-DD']) : null,
+      currency:          txn.currency,
+      amount:            isExpense ? txn.creditAmount : txn.debitAmount,
+      expenseType:       txn.expenseType,
+      chargeAccountDesc: txn.chargeAccountDesc,
+      chargeAccountCcid: txn.chargeAccountCcid,
+      referenceNo:       txn.referenceNo,
+      comments:          txn.comments,
+      attachment:        txn.attachment,
+    });
+    setEditTxnOpen(true);
+  };
+
+  // ── Save edited transaction ───────────────────────────────
+  const handleSaveEditTransaction = async (values: any) => {
+    if (!editTxn) return;
+    setSaving(true);
+    try {
+      const isExpense = editTxn.transactionType === 'Expense';
+      await updateTransaction(editTxn.transactionId, {
+        transactionDate:   values.transactionDate.format('YYYY-MM-DD'),
+        accountingDate:    values.accountingDate
+          ? values.accountingDate.format('YYYY-MM-DD')
+          : values.transactionDate.format('YYYY-MM-DD'),
+        currency:          values.currency,
+        debitAmount:       isExpense ? 0 : values.amount,
+        creditAmount:      isExpense ? values.amount : 0,
+        expenseType:       values.expenseType   || null,
+        chargeAccountDesc: values.chargeAccountDesc || null,
+        chargeAccountCcid: values.chargeAccountCcid || null,
+        referenceNo:       values.referenceNo   || null,
+        comments:          values.comments      || null,
+        attachment:        values.attachment    || null,
+        updatedBy:         currentUser,
+      });
+      message.success(`Line #${editTxn.lineNumber} updated`);
+      setEditTxnOpen(false);
+      setEditTxn(null);
+      onRefresh();
+    } catch (e: any) {
+      message.error(e?.message ?? 'Update failed');
+    } finally {
+      setSaving(false);
+    }
   };
 
   // ── Add Money ──────────────────────────────────────────────
@@ -435,24 +490,32 @@ const RegisterDetail: React.FC<{
       render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Created By', dataIndex: 'createdBy', width: 130, ellipsis: true,
       render: (v) => <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{v || '—'}</Text> },
-    { title: '', key: 'actions', width: 70, align: 'center' as const, fixed: 'right' as const,
+    { title: '', key: 'actions', width: 80, align: 'center' as const, fixed: 'right' as const,
       render: (_: any, txn: PCTransaction) => {
-        const isPosted   = txn.postingStatus === 'Posted';
-        const canDelete  = !isPosted;                    // Unposted or Error
-        const isLoading  = txnActionLoading === txn.transactionId;
+        const isPosted  = txn.postingStatus === 'Posted';
+        const isLoading = txnActionLoading === txn.transactionId;
         return (
           <Space size={2}>
-            {canDelete ? (
-              <Tooltip title="Delete transaction">
-                <Button type="text" danger size="small"
-                  icon={<DeleteOutlined />}
-                  loading={isLoading}
-                  disabled={isClosed}
-                  onClick={() => handleDeleteTransaction(txn)}
-                />
-              </Tooltip>
+            {!isPosted ? (
+              <>
+                <Tooltip title="Edit transaction">
+                  <Button type="text" size="small"
+                    icon={<EditOutlined style={{ color: REDWOOD.info }} />}
+                    disabled={isClosed}
+                    onClick={() => openEditTransaction(txn)}
+                  />
+                </Tooltip>
+                <Tooltip title="Delete transaction">
+                  <Button type="text" danger size="small"
+                    icon={<DeleteOutlined />}
+                    loading={isLoading}
+                    disabled={isClosed}
+                    onClick={() => handleDeleteTransaction(txn)}
+                  />
+                </Tooltip>
+              </>
             ) : (
-              <Tooltip title="Create reversal (transaction is posted)">
+              <Tooltip title="Create reversal (posted — cannot edit)">
                 <Button type="text" size="small"
                   icon={<RollbackOutlined style={{ color: REDWOOD.warning }} />}
                   loading={isLoading}
@@ -733,6 +796,130 @@ const RegisterDetail: React.FC<{
             </Button>
           </div>
         </Form>
+      </Modal>
+
+      {/* ── Edit Transaction Modal ─────────────────────────── */}
+      <Modal
+        title={
+          <Space>
+            <EditOutlined style={{ color: REDWOOD.info }} />
+            {editTxn && (
+              <>
+                Edit Line #{editTxn.lineNumber}
+                <Tag color={editTxn.transactionType === 'Balance Refill' ? 'blue' : editTxn.transactionType === 'Expense' ? 'orange' : 'purple'} style={{ fontSize: 11 }}>
+                  {editTxn.transactionType}
+                </Tag>
+              </>
+            )}
+          </Space>
+        }
+        open={editTxnOpen}
+        onCancel={() => { setEditTxnOpen(false); setEditTxn(null); }}
+        footer={null}
+        width={580}
+        destroyOnClose
+      >
+        {editTxn && (
+          <Form form={editTxnForm} layout="vertical" size="small" onFinish={handleSaveEditTransaction}>
+            <Row gutter={12}>
+              <Col span={12}>
+                <Form.Item label="Transaction Date" name="transactionDate"
+                  rules={[{ required: true, message: 'Required' }]}>
+                  <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item label="Accounting Date" name="accountingDate">
+                  <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="Defaults to Txn Date" />
+                </Form.Item>
+              </Col>
+            </Row>
+
+            {editTxn.transactionType === 'Expense' && (
+              <Row gutter={12}>
+                <Col span={12}>
+                  <Form.Item label="Expense Type" name="expenseType"
+                    rules={[{ required: true, message: 'Required' }]}>
+                    <Select
+                      placeholder="Select expense type"
+                      showSearch
+                      filterOption={(input, option) =>
+                        String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                      }
+                      onChange={(val) => {
+                        const dist = distCombinations.find(d => d.combinationName === val);
+                        editTxnForm.setFieldsValue({
+                          chargeAccountDesc: dist?.glAccountDesc ?? editTxnForm.getFieldValue('chargeAccountDesc'),
+                          chargeAccountCcid: dist?.glAccountCcid ?? editTxnForm.getFieldValue('chargeAccountCcid'),
+                        });
+                      }}
+                      options={distCombinations.map(d => ({ value: d.combinationName, label: d.combinationName }))}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item label="Currency" name="currency">
+                    <Select>
+                      {['AED','USD','EUR','GBP','SAR','KWD','QAR','OMR','BHD','EGP','INR'].map(c =>
+                        <Option key={c} value={c}>{c}</Option>)}
+                    </Select>
+                  </Form.Item>
+                </Col>
+              </Row>
+            )}
+
+            <Row gutter={12}>
+              <Col span={12}>
+                <Form.Item
+                  label={editTxn.transactionType === 'Expense' ? 'Amount (Credit)' : 'Amount (Debit)'}
+                  name="amount"
+                  rules={[{ required: true, message: 'Required' }, { type: 'number', min: 0.01, message: 'Must be > 0' }]}>
+                  <InputNumber style={{ width: '100%' }} precision={2} min={0} placeholder="0.00" />
+                </Form.Item>
+              </Col>
+              {editTxn.transactionType !== 'Expense' && (
+                <Col span={12}>
+                  <Form.Item label="Currency" name="currency">
+                    <Select>
+                      {['AED','USD','EUR','GBP','SAR','KWD','QAR','OMR','BHD','EGP','INR'].map(c =>
+                        <Option key={c} value={c}>{c}</Option>)}
+                    </Select>
+                  </Form.Item>
+                </Col>
+              )}
+              <Col span={12}>
+                <Form.Item label="Reference No" name="referenceNo">
+                  <Input placeholder="Optional" />
+                </Form.Item>
+              </Col>
+            </Row>
+
+            {editTxn.transactionType === 'Expense' && (
+              <>
+                <Form.Item name="chargeAccountCcid" hidden><Input /></Form.Item>
+                <Form.Item label="Charge Account" name="chargeAccountDesc"
+                  extra={<span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Auto-filled from Expense Type — edit if needed</span>}>
+                  <Input placeholder="Auto-filled from Expense Type" />
+                </Form.Item>
+              </>
+            )}
+
+            <Form.Item label="Comments" name="comments">
+              <Input.TextArea rows={2} placeholder="Optional" />
+            </Form.Item>
+            <Form.Item label="Attachment" name="attachment">
+              <Input placeholder="File name or URL" />
+            </Form.Item>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+              <Button onClick={() => { setEditTxnOpen(false); setEditTxn(null); }}>Cancel</Button>
+              <Button type="primary" htmlType="submit" loading={saving}
+                style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}>
+                Save Changes
+              </Button>
+            </div>
+          </Form>
+        )}
       </Modal>
     </>
   );
