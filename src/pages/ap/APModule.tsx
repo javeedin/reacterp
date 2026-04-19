@@ -118,6 +118,7 @@ const periodsTaskItems: MenuItemType[] = [
 const setupItems: MenuItemType[] = [
   { key: 'banks', icon: <BankOutlined />, label: 'Banks', description: 'Manage banks, branches & accounts', color: REDWOOD.info, path: '/ap/banks' },
   { key: 'suppliers', icon: <FileTextOutlined />, label: 'Suppliers', description: 'Manage supplier master data', color: REDWOOD.success, path: '/ap/suppliers' },
+  { key: 'dist-combinations', icon: <TableOutlined />, label: 'Manage Distribution Combinations', description: 'Define expense type combinations with GL accounts', color: REDWOOD.searchPurple, path: '/ap/distribution-combinations' },
   { key: 'payment-terms', icon: <CalendarOutlined />, label: 'Payment Terms', description: 'Configure payment terms', color: REDWOOD.warning },
   { key: 'payment-methods', icon: <CreditCardOutlined />, label: 'Payment Methods', description: 'Setup payment methods', color: REDWOOD.primary },
   { key: 'invoice-holds', icon: <StopOutlined />, label: 'Manage Invoice Holds', description: 'View and manage invoice hold codes', color: REDWOOD.primaryDark, path: '/ap/invoice-holds' },
