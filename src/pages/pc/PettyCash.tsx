@@ -13,7 +13,7 @@ import {
   HomeOutlined, WalletOutlined, PlusOutlined, SearchOutlined,
   ReloadOutlined, EditOutlined, DeleteOutlined, CloseOutlined,
   DollarOutlined, MinusCircleOutlined, ArrowUpOutlined, ArrowDownOutlined,
-  DownloadOutlined,
+  DownloadOutlined, RollbackOutlined,
 } from '@ant-design/icons';
 import FloatingMenu from '../../components/FloatingMenu';
 import ApiDocsModal, { type ApiEndpoint } from '../../components/ApiDocsModal';
@@ -21,7 +21,7 @@ import { useAuth } from '../../context/AuthContext';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import {
   searchRegisters, getRegister, createRegister, updateRegister, deleteRegister,
-  getTransactions, createTransaction,
+  getTransactions, createTransaction, deleteTransaction,
   type PCRegister, type PCTransaction,
 } from '../../services/pc.service';
 import {
@@ -253,6 +253,7 @@ const RegisterDetail: React.FC<{
   const [expenseForm] = Form.useForm();
   const needsRefresh = React.useRef(false);
   const [distCombinations, setDistCombinations] = useState<DistCombination[]>([]);
+  const [txnActionLoading, setTxnActionLoading] = useState<number | null>(null);
 
   const isClosed   = register.status === 'CLOSED';
   const noBalance  = register.balance <= 0;
@@ -263,6 +264,64 @@ const RegisterDetail: React.FC<{
       .then(data => setDistCombinations(data.filter(d => d.module === 'PC' || d.module === 'ALL')))
       .catch(() => {});
   }, []);
+
+  // ── Delete transaction (Unposted / Error only) ────────────
+  const handleDeleteTransaction = (txn: PCTransaction) => {
+    Modal.confirm({
+      title: `Delete Line #${txn.lineNumber}?`,
+      content: `This will permanently remove this ${txn.transactionType} transaction of ${fmt(txn.debitAmount || txn.creditAmount)} ${txn.currency}. This cannot be undone.`,
+      okText: 'Delete', okButtonProps: { danger: true },
+      onOk: async () => {
+        setTxnActionLoading(txn.transactionId);
+        try {
+          await deleteTransaction(txn.transactionId);
+          message.success(`Line #${txn.lineNumber} deleted`);
+          onRefresh();
+        } catch (e: any) {
+          message.error(e?.message ?? 'Delete failed');
+        } finally {
+          setTxnActionLoading(null);
+        }
+      },
+    });
+  };
+
+  // ── Reverse transaction (Posted only) ────────────────────
+  const handleReverseTransaction = (txn: PCTransaction) => {
+    Modal.confirm({
+      title: `Reverse Line #${txn.lineNumber}?`,
+      content: `This creates an offsetting Adjustment transaction to cancel this posted ${txn.transactionType}. The original line is kept for the audit trail.`,
+      okText: 'Create Reversal',
+      okButtonProps: { style: { background: REDWOOD.warning, borderColor: REDWOOD.warning } },
+      onOk: async () => {
+        setTxnActionLoading(txn.transactionId);
+        try {
+          await createTransaction({
+            registerId:      txn.registerId,
+            transactionDate: dayjs().format('YYYY-MM-DD'),
+            accountingDate:  dayjs().format('YYYY-MM-DD'),
+            transactionType: 'Adjustment',
+            expenseType:     txn.expenseType || undefined,
+            currency:        txn.currency,
+            debitAmount:     txn.creditAmount,   // swap: credit→debit reverses an expense
+            creditAmount:    txn.debitAmount,    // swap: debit→credit reverses a refill
+            chargeAccountCcid: txn.chargeAccountCcid || undefined,
+            chargeAccountDesc: txn.chargeAccountDesc || undefined,
+            postingStatus:   'Unposted',
+            comments:        `Reversal of Line #${txn.lineNumber}${txn.comments ? ' — ' + txn.comments : ''}`,
+            referenceNo:     txn.referenceNo || undefined,
+            createdBy:       currentUser,
+          });
+          message.success(`Reversal created for Line #${txn.lineNumber}`);
+          onRefresh();
+        } catch (e: any) {
+          message.error(e?.message ?? 'Reversal failed');
+        } finally {
+          setTxnActionLoading(null);
+        }
+      },
+    });
+  };
 
   // ── Add Money ──────────────────────────────────────────────
   const handleAddMoney = async (values: any) => {
@@ -376,6 +435,35 @@ const RegisterDetail: React.FC<{
       render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Created By', dataIndex: 'createdBy', width: 130, ellipsis: true,
       render: (v) => <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{v || '—'}</Text> },
+    { title: '', key: 'actions', width: 70, align: 'center' as const, fixed: 'right' as const,
+      render: (_: any, txn: PCTransaction) => {
+        const isPosted   = txn.postingStatus === 'Posted';
+        const canDelete  = !isPosted;                    // Unposted or Error
+        const isLoading  = txnActionLoading === txn.transactionId;
+        return (
+          <Space size={2}>
+            {canDelete ? (
+              <Tooltip title="Delete transaction">
+                <Button type="text" danger size="small"
+                  icon={<DeleteOutlined />}
+                  loading={isLoading}
+                  disabled={isClosed}
+                  onClick={() => handleDeleteTransaction(txn)}
+                />
+              </Tooltip>
+            ) : (
+              <Tooltip title="Create reversal (transaction is posted)">
+                <Button type="text" size="small"
+                  icon={<RollbackOutlined style={{ color: REDWOOD.warning }} />}
+                  loading={isLoading}
+                  disabled={isClosed}
+                  onClick={() => handleReverseTransaction(txn)}
+                />
+              </Tooltip>
+            )}
+          </Space>
+        );
+      }},
   ];
 
   return (
