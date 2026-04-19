@@ -12,7 +12,9 @@ import {
 } from '@ant-design/icons';
 import FloatingMenu from '../../components/FloatingMenu';
 import AccountSelector from '../../components/AccountSelector';
+import ApiDocsModal, { type ApiEndpoint } from '../../components/ApiDocsModal';
 import { useAuth } from '../../context/AuthContext';
+import { APEX_DB_CONFIG } from '../../config/api.config';
 import {
   searchCombinations, createCombination, updateCombination, deleteCombination,
   MODULES,
@@ -22,6 +24,48 @@ import {
 const { Content } = Layout;
 const { Text } = Typography;
 const { Option } = Select;
+
+const DIST_BASE = `${APEX_DB_CONFIG.baseUrl}/distributions`;
+
+const DIST_API_ENDPOINTS: ApiEndpoint[] = [
+  {
+    method: 'GET',
+    url: `${DIST_BASE}/combinations`,
+    description: 'Search distribution combinations with optional filters',
+    params: 'q (name contains), module (AP|PC|GL|FA|AR|CASH|ALL), status (ACTIVE|INACTIVE), bu (business unit)',
+  },
+  {
+    method: 'POST',
+    url: `${DIST_BASE}/combinations`,
+    description: 'Create a new distribution combination',
+    body: 'combinationName* (required), businessUnit, glAccountCcid, glAccountDesc, module* (required), description, status (default ACTIVE), createdBy',
+    sampleBody: JSON.stringify({
+      combinationName: 'Office Supplies',
+      businessUnit: 'BCL DIFC Branch',
+      glAccountDesc: '01-100-6010-000',
+      glAccountCcid: null,
+      module: 'PC',
+      description: 'General office supplies expense',
+      status: 'ACTIVE',
+      createdBy: 'ADMIN',
+    }, null, 2),
+  },
+  {
+    method: 'PUT',
+    url: `${DIST_BASE}/combinations/:combinationId`,
+    description: 'Update an existing distribution combination',
+    body: 'combinationName, businessUnit, glAccountCcid, glAccountDesc, module, description, status, updatedBy',
+    sampleBody: JSON.stringify({
+      status: 'INACTIVE',
+      updatedBy: 'ADMIN',
+    }, null, 2),
+  },
+  {
+    method: 'DELETE',
+    url: `${DIST_BASE}/combinations/:combinationId`,
+    description: 'Delete a distribution combination permanently',
+  },
+];
 
 const REDWOOD = {
   primary:    '#C74634',
@@ -502,24 +546,30 @@ const ManageDistCombinations: React.FC = () => {
 
         {/* Page header */}
         <div style={{ padding: '16px 24px 0', background: REDWOOD.surface, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
-          <Space align="center" style={{ marginBottom: 12 }}>
-            <div style={{
-              width: 44, height: 44, borderRadius: 10,
-              background: `linear-gradient(135deg, ${REDWOOD.info} 0%, #0452a3 100%)`,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: `0 3px 8px ${REDWOOD.info}40`,
-            }}>
-              <SettingOutlined style={{ fontSize: 22, color: '#fff' }} />
-            </div>
-            <div>
-              <Text strong style={{ fontSize: 18, color: REDWOOD.neutral900, display: 'block' }}>
-                Manage Distribution Combinations
-              </Text>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                Define expense type combinations with GL accounts for use in transactions
-              </Text>
-            </div>
-          </Space>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <Space align="center">
+              <div style={{
+                width: 44, height: 44, borderRadius: 10,
+                background: `linear-gradient(135deg, ${REDWOOD.info} 0%, #0452a3 100%)`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                boxShadow: `0 3px 8px ${REDWOOD.info}40`,
+              }}>
+                <SettingOutlined style={{ fontSize: 22, color: '#fff' }} />
+              </div>
+              <div>
+                <Text strong style={{ fontSize: 18, color: REDWOOD.neutral900, display: 'block' }}>
+                  Manage Distribution Combinations
+                </Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  Define expense type combinations with GL accounts for use in transactions
+                </Text>
+              </div>
+            </Space>
+            <ApiDocsModal
+              title="Distribution Combinations"
+              endpoints={DIST_API_ENDPOINTS}
+            />
+          </div>
         </div>
 
         {/* Tabs */}
