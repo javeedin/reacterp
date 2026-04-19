@@ -12,7 +12,7 @@ export interface PCRegister {
   cashAccountCcid: number | null;
   cashAccountDesc: string | null;
   currency: string;
-  status: 'ACTIVE' | 'CLOSED';
+  status: 'DRAFT' | 'ACTIVE' | 'INACTIVE' | 'CLOSED';
   balance: number;
   totalDebit: number;
   totalCredit: number;

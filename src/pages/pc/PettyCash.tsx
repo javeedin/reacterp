@@ -55,8 +55,11 @@ interface RegisterTab {
 // ─────────────────────────────────────────────────────────────────────────────
 // Status tag helper
 // ─────────────────────────────────────────────────────────────────────────────
+const STATUS_COLOR: Record<string, string> = {
+  DRAFT: 'default', ACTIVE: 'green', INACTIVE: 'orange', CLOSED: 'red',
+};
 const StatusTag: React.FC<{ status: string }> = ({ status }) => (
-  <Tag color={status === 'ACTIVE' ? 'green' : 'default'} style={{ fontSize: 11 }}>
+  <Tag color={STATUS_COLOR[status] ?? 'default'} style={{ fontSize: 11 }}>
     {status}
   </Tag>
 );
@@ -261,7 +264,7 @@ const RegisterDetail: React.FC<{
   const [coaOpen, setCoaOpen]     = useState(false);
   const [coaTarget, setCoaTarget] = useState<'add' | 'edit'>('edit');
 
-  const isClosed   = register.status === 'CLOSED';
+  const isClosed   = register.status !== 'ACTIVE';   // DRAFT / INACTIVE / CLOSED all block transactions
   const noBalance  = register.balance <= 0;
 
   // ── Load distribution combinations (PC + ALL) on mount ────
@@ -1143,6 +1146,7 @@ const PettyCash: React.FC = () => {
         comments:        values.comments,
         cashAccountDesc: values.cashAccountDesc,
         currency:        values.currency || 'AED',
+        status:          values.status   || 'DRAFT',
         createdBy:       currentUser,
       });
       message.success(`Register #${result.registerId} created`);
@@ -1160,9 +1164,13 @@ const PettyCash: React.FC = () => {
   // ── Delete register ────────────────────────────────────────
   const handleDelete = async (reg: PCRegister, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (reg.status !== 'DRAFT') {
+      message.warning(`Only Draft registers can be deleted — "${reg.registerName}" is ${reg.status}`);
+      return;
+    }
     Modal.confirm({
       title: `Delete "${reg.registerName}"?`,
-      content: 'This cannot be undone. Registers with transactions cannot be deleted.',
+      content: 'This cannot be undone. Only Draft registers with no transactions can be deleted.',
       okText: 'Delete', okButtonProps: { danger: true },
       onOk: async () => {
         setDeleteLoading(reg.registerId);
@@ -1217,13 +1225,17 @@ const PettyCash: React.FC = () => {
     { title: 'Created By', dataIndex: 'createdBy', ellipsis: true,
       render: (v) => <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{v || '—'}</Text> },
     { title: '', key: 'actions', width: 60, align: 'center',
-      render: (_, rec) => (
-        <Tooltip title="Delete register">
-          <Button type="text" danger size="small" icon={<DeleteOutlined />}
-            loading={deleteLoading === rec.registerId}
-            onClick={(e) => handleDelete(rec, e)} />
-        </Tooltip>
-      )},
+      render: (_, rec) => {
+        const canDelete = rec.status === 'DRAFT';
+        return (
+          <Tooltip title={canDelete ? 'Delete register' : `${rec.status} registers cannot be deleted`}>
+            <Button type="text" danger size="small" icon={<DeleteOutlined />}
+              loading={deleteLoading === rec.registerId}
+              disabled={!canDelete}
+              onClick={(e) => handleDelete(rec, e)} />
+          </Tooltip>
+        );
+      }},
   ];
 
   // ── Tab items ──────────────────────────────────────────────
@@ -1260,7 +1272,9 @@ const PettyCash: React.FC = () => {
                     <Col span={3}>
                       <Form.Item label="Status" name="status">
                         <Select placeholder="All" allowClear>
+                          <Option value="DRAFT">Draft</Option>
                           <Option value="ACTIVE">Active</Option>
+                          <Option value="INACTIVE">Inactive</Option>
                           <Option value="CLOSED">Closed</Option>
                         </Select>
                       </Form.Item>
@@ -1360,6 +1374,14 @@ const PettyCash: React.FC = () => {
                   <Select>
                     {['AED','USD','EUR','GBP','SAR','KWD','QAR','OMR','BHD','EGP','INR'].map(c =>
                       <Option key={c} value={c}>{c}</Option>)}
+                  </Select>
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item label="Status" name="status" initialValue="DRAFT">
+                  <Select>
+                    <Option value="DRAFT"><Tag color="default" style={{ fontSize: 11 }}>DRAFT</Tag> — set up, not yet active</Option>
+                    <Option value="ACTIVE"><Tag color="green" style={{ fontSize: 11 }}>ACTIVE</Tag> — open for transactions</Option>
                   </Select>
                 </Form.Item>
               </Col>

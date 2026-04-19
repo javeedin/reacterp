@@ -84,6 +84,7 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         l_ccid     NUMBER;
         l_acc_desc VARCHAR2(400);
         l_currency VARCHAR2(10);
+        l_status   VARCHAR2(50);
         l_by       VARCHAR2(150);
     BEGIN
         p_error := NULL;
@@ -97,6 +98,7 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         l_ccid     := APEX_JSON.GET_NUMBER  (p_path => 'cashAccountCcid');
         l_acc_desc := APEX_JSON.GET_VARCHAR2(p_path => 'cashAccountDesc');
         l_currency := NVL(APEX_JSON.GET_VARCHAR2(p_path => 'currency'), 'AED');
+        l_status   := NVL(APEX_JSON.GET_VARCHAR2(p_path => 'status'), 'DRAFT');
         l_by       := APEX_JSON.GET_VARCHAR2(p_path => 'createdBy');
 
         IF l_name IS NULL THEN
@@ -105,6 +107,10 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         END IF;
         IF l_bu IS NULL THEN
             p_error := 'businessUnit is required';
+            RETURN;
+        END IF;
+        IF l_status NOT IN ('DRAFT','ACTIVE') THEN
+            p_error := 'status must be DRAFT or ACTIVE when creating a register';
             RETURN;
         END IF;
 
@@ -116,7 +122,7 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         ) VALUES (
             l_name, l_bu, l_start, l_end, l_comments,
             l_ccid, l_acc_desc, l_currency,
-            'ACTIVE', l_by, SYSTIMESTAMP,
+            l_status, l_by, SYSTIMESTAMP,
             l_by, SYSTIMESTAMP
         ) RETURNING REGISTER_ID INTO p_id;
 
@@ -149,6 +155,7 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         l_currency VARCHAR2(10);
         l_status   VARCHAR2(50);
         l_by       VARCHAR2(150);
+        l_balance  NUMBER;
     BEGIN
         p_error := NULL;
         APEX_JSON.PARSE(p_json);
@@ -164,6 +171,21 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         l_currency := APEX_JSON.GET_VARCHAR2(p_path => 'currency');
         l_status   := APEX_JSON.GET_VARCHAR2(p_path => 'status');
         l_by       := APEX_JSON.GET_VARCHAR2(p_path => 'updatedBy');
+
+        -- Validate INACTIVE transition: balance must be zero
+        IF l_status = 'INACTIVE' THEN
+            SELECT NVL(SUM(DEBIT_AMOUNT),0) - NVL(SUM(CREDIT_AMOUNT),0)
+            INTO   l_balance
+            FROM   RR_PC_TRANSACTIONS
+            WHERE  REGISTER_ID = p_register_id;
+
+            IF l_balance != 0 THEN
+                p_error := 'BLOCKED:Cannot set Inactive — register balance must be zero (current balance: '
+                           || TO_CHAR(ABS(l_balance),'FM999999990.00') || ')';
+                p_rows  := 0;
+                RETURN;
+            END IF;
+        END IF;
 
         UPDATE RR_PC_REGISTERS SET
             REGISTER_NAME     = NVL(l_name,     REGISTER_NAME),
@@ -196,8 +218,24 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         p_error        OUT VARCHAR2
     ) IS
         l_txn_count NUMBER;
+        l_status    VARCHAR2(50);
     BEGIN
         p_error := NULL;
+
+        -- Only DRAFT registers can be deleted
+        BEGIN
+            SELECT STATUS INTO l_status
+            FROM   RR_PC_REGISTERS
+            WHERE  REGISTER_ID = p_register_id;
+        EXCEPTION WHEN NO_DATA_FOUND THEN
+            p_rows := 0; RETURN;
+        END;
+
+        IF l_status != 'DRAFT' THEN
+            p_error := 'BLOCKED:Only Draft registers can be deleted — this register is ' || l_status;
+            p_rows  := 0;
+            RETURN;
+        END IF;
 
         SELECT COUNT(*) INTO l_txn_count
         FROM   RR_PC_TRANSACTIONS
@@ -260,8 +298,8 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
             RETURN;
         END;
 
-        IF l_reg_status = 'CLOSED' THEN
-            p_error := 'BLOCKED:Register is closed — no transactions allowed';
+        IF l_reg_status != 'ACTIVE' THEN
+            p_error := 'BLOCKED:Register is ' || l_reg_status || ' — only Active registers accept transactions';
             RETURN;
         END IF;
 

@@ -17,12 +17,12 @@ CREATE TABLE RR_PC_REGISTERS (
     CASH_ACCOUNT_CCID   NUMBER,                       -- FK → REERP_GL_CODE_COMBINATIONS
     CASH_ACCOUNT_DESC   VARCHAR2(400),                -- denormalised segment string
     CURRENCY            VARCHAR2(10)   DEFAULT 'AED',
-    STATUS              VARCHAR2(50)   DEFAULT 'ACTIVE',  -- ACTIVE | CLOSED
+    STATUS              VARCHAR2(50)   DEFAULT 'DRAFT',   -- DRAFT | ACTIVE | INACTIVE
     CREATED_BY          VARCHAR2(150),
     CREATION_DATE       TIMESTAMP      DEFAULT SYSTIMESTAMP,
     LAST_UPDATED_BY     VARCHAR2(150),
     LAST_UPDATE_DATE    TIMESTAMP      DEFAULT SYSTIMESTAMP,
-    CONSTRAINT RR_PC_REG_STATUS_CK  CHECK (STATUS IN ('ACTIVE','CLOSED')),
+    CONSTRAINT RR_PC_REG_STATUS_CK  CHECK (STATUS IN ('DRAFT','ACTIVE','INACTIVE','CLOSED')),
     CONSTRAINT RR_PC_REG_NAME_UK    UNIQUE (REGISTER_NAME)
 );
 
@@ -32,7 +32,21 @@ CREATE INDEX IDX_RR_PC_REG_DATES  ON RR_PC_REGISTERS(START_DATE, END_DATE);
 COMMENT ON TABLE  RR_PC_REGISTERS                     IS 'Petty cash register headers';
 COMMENT ON COLUMN RR_PC_REGISTERS.BUSINESS_UNIT        IS 'Oracle Fusion Business Unit that owns this petty cash register';
 COMMENT ON COLUMN RR_PC_REGISTERS.CASH_ACCOUNT_CCID   IS 'GL code combination ID for the petty cash GL account';
-COMMENT ON COLUMN RR_PC_REGISTERS.STATUS               IS 'ACTIVE = open for transactions; CLOSED = read-only';
+COMMENT ON COLUMN RR_PC_REGISTERS.STATUS               IS 'DRAFT = setup not complete; ACTIVE = open for transactions; INACTIVE = closed/no transactions; CLOSED = legacy';
+
+-- Safe ALTER for existing installations — update status constraint to include DRAFT/INACTIVE
+DECLARE
+    l_count NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO l_count FROM user_constraints
+    WHERE  table_name = 'RR_PC_REGISTERS' AND constraint_name = 'RR_PC_REG_STATUS_CK';
+    IF l_count > 0 THEN
+        EXECUTE IMMEDIATE 'ALTER TABLE RR_PC_REGISTERS DROP CONSTRAINT RR_PC_REG_STATUS_CK';
+    END IF;
+    EXECUTE IMMEDIATE 'ALTER TABLE RR_PC_REGISTERS ADD CONSTRAINT RR_PC_REG_STATUS_CK CHECK (STATUS IN (''DRAFT'',''ACTIVE'',''INACTIVE'',''CLOSED''))';
+EXCEPTION WHEN OTHERS THEN NULL;
+END;
+/
 
 -- Safe ALTER for existing installations (adds BUSINESS_UNIT if missing)
 DECLARE
