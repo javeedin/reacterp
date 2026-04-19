@@ -262,6 +262,7 @@ const RegisterDetail: React.FC<{
   const needsRefresh = React.useRef(false);
   const [distCombinations, setDistCombinations] = useState<DistCombination[]>([]);
   const [openPeriods, setOpenPeriods]           = useState<APPeriod[]>([]);
+  const [periodsLoaded, setPeriodsLoaded]       = useState(false);
   const [txnActionLoading, setTxnActionLoading] = useState<number | null>(null);
   const [coaOpen, setCoaOpen]     = useState(false);
   const [coaTarget, setCoaTarget] = useState<'add' | 'edit'>('edit');
@@ -275,8 +276,8 @@ const RegisterDetail: React.FC<{
       .then(data => setDistCombinations(data.filter(d => d.module === 'PC' || d.module === 'ALL')))
       .catch(() => {});
     getOpenAPPeriods()
-      .then(setOpenPeriods)
-      .catch(() => {});
+      .then(p => { setOpenPeriods(p); setPeriodsLoaded(true); })
+      .catch(() => { setPeriodsLoaded(true); });
   }, []);
 
   // ── Derive AP period for a given date ────────────────────
@@ -390,7 +391,7 @@ const RegisterDetail: React.FC<{
   const handleSaveEditTransaction = async (values: any) => {
     if (!editTxn) return;
     const accDate = values.accountingDate ?? values.transactionDate;
-    if (!findAPPeriod(accDate)) {
+    if (periodsLoaded && openPeriods.length > 0 && !findAPPeriod(accDate)) {
       message.error(`Accounting date ${accDate.format('DD-MMM-YYYY')} does not fall within an open AP period`);
       return;
     }
@@ -427,7 +428,7 @@ const RegisterDetail: React.FC<{
   // ── Add Money ──────────────────────────────────────────────
   const handleAddMoney = async (values: any) => {
     const accDate = values.accountingDate ?? values.transactionDate;
-    if (!findAPPeriod(accDate)) {
+    if (periodsLoaded && openPeriods.length > 0 && !findAPPeriod(accDate)) {
       message.error(`Accounting date ${accDate.format('DD-MMM-YYYY')} does not fall within an open AP period`);
       return;
     }
@@ -461,7 +462,7 @@ const RegisterDetail: React.FC<{
   // ── Add Expense ────────────────────────────────────────────
   const handleAddExpense = async (values: any) => {
     const accDate = values.accountingDate ?? values.transactionDate;
-    if (!findAPPeriod(accDate)) {
+    if (periodsLoaded && openPeriods.length > 0 && !findAPPeriod(accDate)) {
       message.error(`Accounting date ${accDate.format('DD-MMM-YYYY')} does not fall within an open AP period`);
       return;
     }
@@ -726,11 +727,11 @@ const RegisterDetail: React.FC<{
           <Form.Item noStyle shouldUpdate>
             {({ getFieldValue }) => {
               const d = getFieldValue('accountingDate') ?? getFieldValue('transactionDate');
+              if (!d || !periodsLoaded) return null;
               const p = findAPPeriod(d);
-              if (!d) return null;
-              return p
-                ? <div style={{ marginTop: -12, marginBottom: 8 }}><Tag color="green" style={{ fontSize: 11 }}>AP Period: {p.periodName}</Tag></div>
-                : <div style={{ marginTop: -12, marginBottom: 8 }}><Tag color="red" style={{ fontSize: 11 }}>⚠ No open AP period for this date</Tag></div>;
+              if (p) return <div style={{ marginTop: -12, marginBottom: 8 }}><Tag color="green" style={{ fontSize: 11 }}>AP Period: {p.periodName}</Tag></div>;
+              if (openPeriods.length === 0) return <div style={{ marginTop: -12, marginBottom: 8 }}><Tag color="orange" style={{ fontSize: 11 }}>⚠ AP period data not synced — server will validate</Tag></div>;
+              return <div style={{ marginTop: -12, marginBottom: 8 }}><Tag color="red" style={{ fontSize: 11 }}>⚠ No open AP period for this date</Tag></div>;
             }}
           </Form.Item>
           <Row gutter={12}>
@@ -792,11 +793,11 @@ const RegisterDetail: React.FC<{
           <Form.Item noStyle shouldUpdate>
             {({ getFieldValue }) => {
               const d = getFieldValue('accountingDate') ?? getFieldValue('transactionDate');
+              if (!d || !periodsLoaded) return null;
               const p = findAPPeriod(d);
-              if (!d) return null;
-              return p
-                ? <div style={{ marginTop: -12, marginBottom: 8 }}><Tag color="green" style={{ fontSize: 11 }}>AP Period: {p.periodName}</Tag></div>
-                : <div style={{ marginTop: -12, marginBottom: 8 }}><Tag color="red" style={{ fontSize: 11 }}>⚠ No open AP period for this date</Tag></div>;
+              if (p) return <div style={{ marginTop: -12, marginBottom: 8 }}><Tag color="green" style={{ fontSize: 11 }}>AP Period: {p.periodName}</Tag></div>;
+              if (openPeriods.length === 0) return <div style={{ marginTop: -12, marginBottom: 8 }}><Tag color="orange" style={{ fontSize: 11 }}>⚠ AP period data not synced — server will validate</Tag></div>;
+              return <div style={{ marginTop: -12, marginBottom: 8 }}><Tag color="red" style={{ fontSize: 11 }}>⚠ No open AP period for this date</Tag></div>;
             }}
           </Form.Item>
           <Row gutter={12}>
