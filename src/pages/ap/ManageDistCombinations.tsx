@@ -63,10 +63,23 @@ const ManageDistCombinations: React.FC = () => {
   const [searchLoading, setSearchLoading] = useState(false);
   const [saveLoading, setSaveLoading]     = useState(false);
   const [deleteLoading, setDeleteLoading] = useState<number | null>(null);
+  const [businessUnits, setBusinessUnits] = useState<string[]>([]);
 
   // COA selector state for create form
   const [coaCreateOpen, setCoaCreateOpen] = useState(false);
   const [coaEditOpen, setCoaEditOpen]     = useState(false);
+
+  // ── Load Business Units ───────────────────────────────────
+  useEffect(() => {
+    fetch(`https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/gl/businessunits`, { headers: { Accept: 'application/json' } })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return;
+        const items: any[] = Array.isArray(data) ? data : (data.items || []);
+        setBusinessUnits(items.map((i: any) => i.business_unit_name || '').filter(Boolean));
+      })
+      .catch(() => {});
+  }, []);
 
   // ── Search ────────────────────────────────────────────────
   const handleSearch = useCallback(async () => {
@@ -74,9 +87,10 @@ const ManageDistCombinations: React.FC = () => {
     try {
       const v = searchForm.getFieldsValue();
       const data = await searchCombinations({
-        q:      v.name   || undefined,
-        module: v.module || undefined,
-        status: v.status || undefined,
+        q:      v.name         || undefined,
+        module: v.module       || undefined,
+        status: v.status       || undefined,
+        bu:     v.businessUnit || undefined,
       });
       setRows(data);
     } catch (e: any) {
@@ -115,11 +129,12 @@ const ManageDistCombinations: React.FC = () => {
     try {
       const result = await createCombination({
         combinationName: values.combinationName,
-        glAccountCcid:   values.glAccountCcid || null,
+        businessUnit:    values.businessUnit   || null,
+        glAccountCcid:   values.glAccountCcid  || null,
         glAccountDesc:   values.glAccountDesc  || null,
         module:          values.module,
-        description:     values.description   || null,
-        status:          values.status        || 'ACTIVE',
+        description:     values.description    || null,
+        status:          values.status         || 'ACTIVE',
         createdBy:       currentUser,
       });
       message.success(`Combination #${result.combinationId} created`);
@@ -140,10 +155,11 @@ const ManageDistCombinations: React.FC = () => {
     try {
       await updateCombination(combinationId, {
         combinationName: values.combinationName,
-        glAccountCcid:   values.glAccountCcid || null,
+        businessUnit:    values.businessUnit   || null,
+        glAccountCcid:   values.glAccountCcid  || null,
         glAccountDesc:   values.glAccountDesc  || null,
         module:          values.module,
-        description:     values.description   || null,
+        description:     values.description    || null,
         status:          values.status,
         updatedBy:       currentUser,
       });
@@ -198,6 +214,10 @@ const ManageDistCombinations: React.FC = () => {
           {v}
         </Button>
       ),
+    },
+    {
+      title: 'Business Unit', dataIndex: 'businessUnit', width: 180, ellipsis: true,
+      render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text>,
     },
     {
       title: 'Module', dataIndex: 'module', width: 90, align: 'center',
@@ -272,6 +292,13 @@ const ManageDistCombinations: React.FC = () => {
         </Col>
       </Row>
 
+      <Form.Item label="Business Unit" name="businessUnit">
+        <Select placeholder="All Business Units (leave blank)" allowClear showSearch
+          filterOption={(v, o) => String(o?.value ?? '').toLowerCase().includes(v.toLowerCase())}>
+          {businessUnits.map(bu => <Option key={bu} value={bu}>{bu}</Option>)}
+        </Select>
+      </Form.Item>
+
       <Form.Item label="GL Account" style={{ marginBottom: 0 }}>
         <Row gutter={8} align="middle">
           <Col flex="1">
@@ -337,14 +364,22 @@ const ManageDistCombinations: React.FC = () => {
               children: (
                 <Form form={searchForm} layout="vertical" size="small">
                   <Row gutter={16}>
-                    <Col span={8}>
+                    <Col span={6}>
                       <Form.Item label="Name" name="name">
                         <Input placeholder="Search by name" allowClear />
                       </Form.Item>
                     </Col>
                     <Col span={6}>
+                      <Form.Item label="Business Unit" name="businessUnit">
+                        <Select placeholder="All BUs" allowClear showSearch
+                          filterOption={(v, o) => String(o?.value ?? '').toLowerCase().includes(v.toLowerCase())}>
+                          {businessUnits.map(bu => <Option key={bu} value={bu}>{bu}</Option>)}
+                        </Select>
+                      </Form.Item>
+                    </Col>
+                    <Col span={4}>
                       <Form.Item label="Module" name="module">
-                        <Select placeholder="All Modules" allowClear>
+                        <Select placeholder="All" allowClear>
                           {MODULES.map(m => (
                             <Option key={m} value={m}>
                               <Tag color={MODULE_COLORS[m]}>{m}</Tag>
@@ -353,9 +388,9 @@ const ManageDistCombinations: React.FC = () => {
                         </Select>
                       </Form.Item>
                     </Col>
-                    <Col span={6}>
+                    <Col span={4}>
                       <Form.Item label="Status" name="status">
-                        <Select placeholder="All Statuses" allowClear>
+                        <Select placeholder="All" allowClear>
                           <Option value="ACTIVE"><Tag color="green">ACTIVE</Tag></Option>
                           <Option value="INACTIVE"><Tag>INACTIVE</Tag></Option>
                         </Select>
@@ -439,6 +474,7 @@ const ManageDistCombinations: React.FC = () => {
               tab={tab}
               currentUser={currentUser}
               saveLoading={saveLoading}
+              businessUnits={businessUnits}
               onUpdate={handleUpdate}
               onClose={() => closeEditTab(tab.key)}
               onDelete={(rec, e) => handleDelete(rec, e)}
@@ -529,11 +565,12 @@ const EditCombinationForm: React.FC<{
   tab: EditTab;
   currentUser: string;
   saveLoading: boolean;
+  businessUnits: string[];
   onUpdate: (key: string, id: number, values: any) => void;
   onClose: () => void;
   onDelete: (rec: DistCombination, e: React.MouseEvent) => void;
   deleteLoading: number | null;
-}> = ({ tab, currentUser: _currentUser, saveLoading, onUpdate, onClose, onDelete, deleteLoading }) => {
+}> = ({ tab, currentUser: _currentUser, saveLoading, businessUnits: buList, onUpdate, onClose, onDelete, deleteLoading }) => {
   const [form] = Form.useForm();
   const [coaOpen, setCoaOpen] = useState(false);
   const { combination } = tab;
@@ -541,6 +578,7 @@ const EditCombinationForm: React.FC<{
   useEffect(() => {
     form.setFieldsValue({
       combinationName: combination.combinationName,
+      businessUnit:    combination.businessUnit,
       glAccountDesc:   combination.glAccountDesc,
       glAccountCcid:   combination.glAccountCcid,
       module:          combination.module,
@@ -572,6 +610,13 @@ const EditCombinationForm: React.FC<{
           </Form.Item>
         </Col>
       </Row>
+
+      <Form.Item label="Business Unit" name="businessUnit">
+        <Select placeholder="All Business Units (leave blank)" allowClear showSearch
+          filterOption={(v, o) => String(o?.value ?? '').toLowerCase().includes(v.toLowerCase())}>
+          {buList.map(bu => <Option key={bu} value={bu}>{bu}</Option>)}
+        </Select>
+      </Form.Item>
 
       <Form.Item label="GL Account" style={{ marginBottom: 0 }}>
         <Row gutter={8} align="middle">

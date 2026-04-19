@@ -31,7 +31,7 @@ BEGIN
         p_pattern        => 'combinations'
     );
 
-    -- GET /distributions/combinations?q=&module=&status=
+    -- GET /distributions/combinations?q=&module=&status=&bu=
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'distributions',
         p_pattern        => 'combinations',
@@ -42,6 +42,7 @@ BEGIN
             SELECT
                 c.COMBINATION_ID      AS "combinationId",
                 c.COMBINATION_NAME    AS "combinationName",
+                c.BUSINESS_UNIT       AS "businessUnit",
                 c.GL_ACCOUNT_CCID     AS "glAccountCcid",
                 c.GL_ACCOUNT_DESC     AS "glAccountDesc",
                 c.MODULE              AS "module",
@@ -56,6 +57,7 @@ BEGIN
               AND (:q      IS NULL OR UPPER(c.COMBINATION_NAME) LIKE '%' || UPPER(:q) || '%')
               AND (:module IS NULL OR c.MODULE = :module)
               AND (:status IS NULL OR c.STATUS = :status)
+              AND (:bu     IS NULL OR c.BUSINESS_UNIT = :bu)
             ORDER BY c.MODULE, c.COMBINATION_NAME
         ]'
     );

@@ -18,6 +18,7 @@ CREATE OR REPLACE PACKAGE BODY RR_DIST_PKG AS
     -- ────────────────────────────────────────────────────────
     PROCEDURE create_combination (p_body IN CLOB) IS
         l_name    VARCHAR2(300);
+        l_bu      VARCHAR2(240);
         l_ccid    NUMBER;
         l_desc    VARCHAR2(400);
         l_module  VARCHAR2(50);
@@ -29,6 +30,7 @@ CREATE OR REPLACE PACKAGE BODY RR_DIST_PKG AS
         APEX_JSON.PARSE(p_body);
 
         l_name   := APEX_JSON.GET_VARCHAR2(p_path => 'combinationName');
+        l_bu     := APEX_JSON.GET_VARCHAR2(p_path => 'businessUnit');
         l_ccid   := APEX_JSON.GET_NUMBER(p_path  => 'glAccountCcid');
         l_desc   := APEX_JSON.GET_VARCHAR2(p_path => 'glAccountDesc');
         l_module := APEX_JSON.GET_VARCHAR2(p_path => 'module');
@@ -47,11 +49,11 @@ CREATE OR REPLACE PACKAGE BODY RR_DIST_PKG AS
         END IF;
 
         INSERT INTO RR_DIST_COMBINATIONS (
-            COMBINATION_NAME, GL_ACCOUNT_CCID, GL_ACCOUNT_DESC,
+            COMBINATION_NAME, BUSINESS_UNIT, GL_ACCOUNT_CCID, GL_ACCOUNT_DESC,
             MODULE, DESCRIPTION, STATUS,
             CREATED_BY, CREATION_DATE, LAST_UPDATED_BY, LAST_UPDATE_DATE
         ) VALUES (
-            l_name, l_ccid, l_desc,
+            l_name, l_bu, l_ccid, l_desc,
             l_module, l_descr, l_status,
             l_user, SYSTIMESTAMP, l_user, SYSTIMESTAMP
         ) RETURNING COMBINATION_ID INTO l_new_id;
@@ -77,6 +79,7 @@ CREATE OR REPLACE PACKAGE BODY RR_DIST_PKG AS
     -- ────────────────────────────────────────────────────────
     PROCEDURE update_combination (p_id IN NUMBER, p_body IN CLOB) IS
         l_name    VARCHAR2(300);
+        l_bu      VARCHAR2(240);
         l_ccid    NUMBER;
         l_desc    VARCHAR2(400);
         l_module  VARCHAR2(50);
@@ -87,6 +90,7 @@ CREATE OR REPLACE PACKAGE BODY RR_DIST_PKG AS
         APEX_JSON.PARSE(p_body);
 
         l_name   := APEX_JSON.GET_VARCHAR2(p_path => 'combinationName');
+        l_bu     := APEX_JSON.GET_VARCHAR2(p_path => 'businessUnit');
         l_ccid   := APEX_JSON.GET_NUMBER(p_path  => 'glAccountCcid');
         l_desc   := APEX_JSON.GET_VARCHAR2(p_path => 'glAccountDesc');
         l_module := APEX_JSON.GET_VARCHAR2(p_path => 'module');
@@ -97,6 +101,7 @@ CREATE OR REPLACE PACKAGE BODY RR_DIST_PKG AS
         UPDATE RR_DIST_COMBINATIONS
         SET
             COMBINATION_NAME  = NVL(l_name,   COMBINATION_NAME),
+            BUSINESS_UNIT     = NVL(l_bu,     BUSINESS_UNIT),
             GL_ACCOUNT_CCID   = NVL(l_ccid,   GL_ACCOUNT_CCID),
             GL_ACCOUNT_DESC   = NVL(l_desc,   GL_ACCOUNT_DESC),
             MODULE            = NVL(l_module, MODULE),

@@ -5,6 +5,7 @@ const BASE = `${APEX_DB_CONFIG.baseUrl}/distributions`;
 export interface DistCombination {
   combinationId: number;
   combinationName: string;
+  businessUnit: string | null;
   glAccountCcid: number | null;
   glAccountDesc: string | null;
   module: string;
@@ -20,6 +21,7 @@ export interface SearchCombinationsParams {
   q?: string;
   module?: string;
   status?: string;
+  bu?: string;
 }
 
 export async function searchCombinations(params: SearchCombinationsParams = {}): Promise<DistCombination[]> {
@@ -27,6 +29,7 @@ export async function searchCombinations(params: SearchCombinationsParams = {}):
   if (params.q)      qs.set('q',      params.q);
   if (params.module) qs.set('module', params.module);
   if (params.status) qs.set('status', params.status);
+  if (params.bu)     qs.set('bu',     params.bu);
   const url = `${BASE}/combinations${qs.toString() ? '?' + qs.toString() : ''}`;
   const res  = await fetch(url, { headers: { Accept: 'application/json' } });
   const data = await res.json();
