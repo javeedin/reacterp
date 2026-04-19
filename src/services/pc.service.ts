@@ -30,6 +30,7 @@ export interface PCTransaction {
   chargeAccountCcid: number | null;
   chargeAccountDesc: string | null;
   accountingDate: string | null;
+  accountingPeriod: string | null;
   postingStatus: 'Unposted' | 'Posted' | 'Error';
   currency: string;
   debitAmount: number;
@@ -40,6 +41,15 @@ export interface PCTransaction {
   createdBy: string | null;
   creationDate: string | null;
   runningBalance: number;
+}
+
+export interface APPeriod {
+  periodName: string;
+  startDate: string;    // YYYY-MM-DD
+  endDate: string;      // YYYY-MM-DD
+  periodYear: number;
+  periodNumber: number;
+  status: string;
 }
 
 export interface SearchRegistersParams {
@@ -99,6 +109,13 @@ export async function deleteRegister(registerId: number): Promise<void> {
   });
   const data = await res.json();
   if (!res.ok || !data.success) throw new Error(data?.message || `HTTP ${res.status}`);
+}
+
+export async function getOpenAPPeriods(): Promise<APPeriod[]> {
+  const res = await fetch(`${BASE}/openperiods`, { headers: { Accept: 'application/json' } });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.message || `HTTP ${res.status}`);
+  return (data.items || []) as APPeriod[];
 }
 
 export async function getTransaction(transactionId: number): Promise<PCTransaction> {

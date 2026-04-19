@@ -23,7 +23,8 @@ import { APEX_DB_CONFIG } from '../../config/api.config';
 import {
   searchRegisters, getRegister, createRegister, updateRegister, deleteRegister,
   getTransactions, getTransaction, createTransaction, updateTransaction, deleteTransaction,
-  type PCRegister, type PCTransaction,
+  getOpenAPPeriods,
+  type PCRegister, type PCTransaction, type APPeriod,
 } from '../../services/pc.service';
 import {
   searchCombinations,
@@ -260,6 +261,7 @@ const RegisterDetail: React.FC<{
   const [editTxnForm] = Form.useForm();
   const needsRefresh = React.useRef(false);
   const [distCombinations, setDistCombinations] = useState<DistCombination[]>([]);
+  const [openPeriods, setOpenPeriods]           = useState<APPeriod[]>([]);
   const [txnActionLoading, setTxnActionLoading] = useState<number | null>(null);
   const [coaOpen, setCoaOpen]     = useState(false);
   const [coaTarget, setCoaTarget] = useState<'add' | 'edit'>('edit');
@@ -267,12 +269,23 @@ const RegisterDetail: React.FC<{
   const isClosed   = register.status !== 'ACTIVE';   // DRAFT / INACTIVE / CLOSED all block transactions
   const noBalance  = register.balance <= 0;
 
-  // ── Load distribution combinations (PC + ALL) on mount ────
+  // ── Load distribution combinations + open AP periods on mount ─
   useEffect(() => {
     searchCombinations({ status: 'ACTIVE' })
       .then(data => setDistCombinations(data.filter(d => d.module === 'PC' || d.module === 'ALL')))
       .catch(() => {});
+    getOpenAPPeriods()
+      .then(setOpenPeriods)
+      .catch(() => {});
   }, []);
+
+  // ── Derive AP period for a given date ────────────────────
+  const findAPPeriod = (date: dayjs.Dayjs | null): APPeriod | null => {
+    if (!date) return null;
+    return openPeriods.find(p =>
+      !date.isBefore(dayjs(p.startDate)) && !date.isAfter(dayjs(p.endDate))
+    ) ?? null;
+  };
 
   // ── Populate edit form once modal is open and editTxn is set ─
   useEffect(() => {
@@ -376,6 +389,11 @@ const RegisterDetail: React.FC<{
   // ── Save edited transaction ───────────────────────────────
   const handleSaveEditTransaction = async (values: any) => {
     if (!editTxn) return;
+    const accDate = values.accountingDate ?? values.transactionDate;
+    if (!findAPPeriod(accDate)) {
+      message.error(`Accounting date ${accDate.format('DD-MMM-YYYY')} does not fall within an open AP period`);
+      return;
+    }
     setSaving(true);
     try {
       const isExpense = editTxn.transactionType === 'Expense';
@@ -408,14 +426,17 @@ const RegisterDetail: React.FC<{
 
   // ── Add Money ──────────────────────────────────────────────
   const handleAddMoney = async (values: any) => {
+    const accDate = values.accountingDate ?? values.transactionDate;
+    if (!findAPPeriod(accDate)) {
+      message.error(`Accounting date ${accDate.format('DD-MMM-YYYY')} does not fall within an open AP period`);
+      return;
+    }
     setSaving(true);
     try {
       await createTransaction({
         registerId:      register.registerId,
         transactionDate: values.transactionDate.format('YYYY-MM-DD'),
-        accountingDate:  values.accountingDate
-          ? values.accountingDate.format('YYYY-MM-DD')
-          : values.transactionDate.format('YYYY-MM-DD'),
+        accountingDate:  accDate.format('YYYY-MM-DD'),
         transactionType: 'Balance Refill',
         currency:        values.currency || register.currency,
         debitAmount:     values.amount,
@@ -439,6 +460,11 @@ const RegisterDetail: React.FC<{
 
   // ── Add Expense ────────────────────────────────────────────
   const handleAddExpense = async (values: any) => {
+    const accDate = values.accountingDate ?? values.transactionDate;
+    if (!findAPPeriod(accDate)) {
+      message.error(`Accounting date ${accDate.format('DD-MMM-YYYY')} does not fall within an open AP period`);
+      return;
+    }
     if (values.amount > register.balance) {
       message.error(`Expense amount (${fmt(values.amount)}) exceeds available balance (${fmt(register.balance)} ${register.currency})`);
       return;
@@ -695,6 +721,16 @@ const RegisterDetail: React.FC<{
               </Form.Item>
             </Col>
           </Row>
+          <Form.Item noStyle shouldUpdate>
+            {({ getFieldValue }) => {
+              const d = getFieldValue('accountingDate') ?? getFieldValue('transactionDate');
+              const p = findAPPeriod(d);
+              if (!d) return null;
+              return p
+                ? <div style={{ marginTop: -12, marginBottom: 8 }}><Tag color="green" style={{ fontSize: 11 }}>AP Period: {p.periodName}</Tag></div>
+                : <div style={{ marginTop: -12, marginBottom: 8 }}><Tag color="red" style={{ fontSize: 11 }}>⚠ No open AP period for this date</Tag></div>;
+            }}
+          </Form.Item>
           <Row gutter={12}>
             <Col span={12}>
               <Form.Item label="Amount" name="amount"
@@ -751,6 +787,16 @@ const RegisterDetail: React.FC<{
               </Form.Item>
             </Col>
           </Row>
+          <Form.Item noStyle shouldUpdate>
+            {({ getFieldValue }) => {
+              const d = getFieldValue('accountingDate') ?? getFieldValue('transactionDate');
+              const p = findAPPeriod(d);
+              if (!d) return null;
+              return p
+                ? <div style={{ marginTop: -12, marginBottom: 8 }}><Tag color="green" style={{ fontSize: 11 }}>AP Period: {p.periodName}</Tag></div>
+                : <div style={{ marginTop: -12, marginBottom: 8 }}><Tag color="red" style={{ fontSize: 11 }}>⚠ No open AP period for this date</Tag></div>;
+            }}
+          </Form.Item>
           <Row gutter={12}>
             <Col span={12}>
               <Form.Item label="Expense Type" name="expenseType"
@@ -867,6 +913,16 @@ const RegisterDetail: React.FC<{
                 </Form.Item>
               </Col>
             </Row>
+            <Form.Item noStyle shouldUpdate>
+              {({ getFieldValue }) => {
+                const d = getFieldValue('accountingDate') ?? getFieldValue('transactionDate');
+                const p = findAPPeriod(d);
+                if (!d) return null;
+                return p
+                  ? <div style={{ marginTop: -12, marginBottom: 8 }}><Tag color="green" style={{ fontSize: 11 }}>AP Period: {p.periodName}</Tag></div>
+                  : <div style={{ marginTop: -12, marginBottom: 8 }}><Tag color="red" style={{ fontSize: 11 }}>⚠ No open AP period for this date</Tag></div>;
+              }}
+            </Form.Item>
 
             {editTxn.transactionType === 'Expense' && (
               <Row gutter={12}>

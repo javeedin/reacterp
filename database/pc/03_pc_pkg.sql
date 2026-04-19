@@ -282,13 +282,15 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         l_ref_no     VARCHAR2(200);
         l_attach     VARCHAR2(1000);
         l_by         VARCHAR2(150);
+        l_period_cnt NUMBER;
+        l_period     VARCHAR2(30);
     BEGIN
         p_error := NULL;
         APEX_JSON.PARSE(p_json);
 
         l_reg_id := APEX_JSON.GET_NUMBER(p_path => 'registerId');
 
-        -- Validate register exists and is open
+        -- Validate register exists and is active
         BEGIN
             SELECT STATUS INTO l_reg_status
             FROM   RR_PC_REGISTERS
@@ -319,6 +321,21 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         l_attach    := APEX_JSON.GET_VARCHAR2(p_path => 'attachment');
         l_by        := APEX_JSON.GET_VARCHAR2(p_path => 'createdBy');
 
+        -- Validate accounting date against open AP periods (application_id = 200)
+        SELECT COUNT(*), MAX(period_name_id)
+        INTO   l_period_cnt, l_period
+        FROM   rr_accounting_periods_status
+        WHERE  application_id         = 200
+        AND    closing_status         = 'O'
+        AND    NVL(adjustment_period_flag,'N') = 'N'
+        AND    l_acc_date BETWEEN start_date AND end_date;
+
+        IF l_period_cnt = 0 THEN
+            p_error := 'BLOCKED:Accounting date ' || TO_CHAR(l_acc_date,'DD-Mon-YYYY')
+                       || ' does not fall within an open AP period. Please check period status.';
+            RETURN;
+        END IF;
+
         -- Next line number within this register
         SELECT NVL(MAX(LINE_NUMBER), 0) + 1 INTO l_next_line
         FROM   RR_PC_TRANSACTIONS
@@ -328,7 +345,7 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
             REGISTER_ID,         LINE_NUMBER,
             TRANSACTION_DATE,    TRANSACTION_TYPE,    EXPENSE_TYPE,
             CHARGE_ACCOUNT_CCID, CHARGE_ACCOUNT_DESC,
-            ACCOUNTING_DATE,     POSTING_STATUS,
+            ACCOUNTING_DATE,     ACCOUNTING_PERIOD,   POSTING_STATUS,
             CURRENCY,            DEBIT_AMOUNT,        CREDIT_AMOUNT,
             COMMENTS,            REFERENCE_NO,        ATTACHMENT,
             CREATED_BY,          CREATION_DATE,
@@ -337,7 +354,7 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
             l_reg_id,    l_next_line,
             l_txn_date,  l_txn_type,  l_exp_type,
             l_ca_ccid,   l_ca_desc,
-            l_acc_date,  l_post_stat,
+            l_acc_date,  l_period,    l_post_stat,
             l_currency,  l_debit,     l_credit,
             l_comments,  l_ref_no,    l_attach,
             l_by,        SYSTIMESTAMP,
@@ -371,10 +388,12 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         l_currency  VARCHAR2(10);
         l_debit     NUMBER;
         l_credit    NUMBER;
-        l_comments  VARCHAR2(1000);
-        l_ref_no    VARCHAR2(200);
-        l_attach    VARCHAR2(1000);
-        l_by        VARCHAR2(150);
+        l_comments   VARCHAR2(1000);
+        l_ref_no     VARCHAR2(200);
+        l_attach     VARCHAR2(1000);
+        l_by         VARCHAR2(150);
+        l_period_cnt NUMBER;
+        l_period     VARCHAR2(30);
     BEGIN
         p_error := NULL;
         APEX_JSON.PARSE(p_json);
@@ -395,6 +414,24 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         l_attach    := APEX_JSON.GET_VARCHAR2(p_path => 'attachment');
         l_by        := APEX_JSON.GET_VARCHAR2(p_path => 'updatedBy');
 
+        -- Validate accounting date against open AP periods
+        IF l_acc_date IS NOT NULL THEN
+            SELECT COUNT(*), MAX(period_name_id)
+            INTO   l_period_cnt, l_period
+            FROM   rr_accounting_periods_status
+            WHERE  application_id                = 200
+            AND    closing_status                = 'O'
+            AND    NVL(adjustment_period_flag,'N') = 'N'
+            AND    l_acc_date BETWEEN start_date AND end_date;
+
+            IF l_period_cnt = 0 THEN
+                p_error := 'BLOCKED:Accounting date ' || TO_CHAR(l_acc_date,'DD-Mon-YYYY')
+                           || ' does not fall within an open AP period.';
+                p_rows  := 0;
+                RETURN;
+            END IF;
+        END IF;
+
         UPDATE RR_PC_TRANSACTIONS SET
             TRANSACTION_DATE    = NVL(l_txn_date,  TRANSACTION_DATE),
             TRANSACTION_TYPE    = NVL(l_txn_type,  TRANSACTION_TYPE),
@@ -402,6 +439,7 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
             CHARGE_ACCOUNT_CCID = l_ca_ccid,
             CHARGE_ACCOUNT_DESC = l_ca_desc,
             ACCOUNTING_DATE     = NVL(l_acc_date,  ACCOUNTING_DATE),
+            ACCOUNTING_PERIOD   = NVL(l_period,    ACCOUNTING_PERIOD),
             POSTING_STATUS      = NVL(l_post_stat, POSTING_STATUS),
             CURRENCY            = NVL(l_currency,  CURRENCY),
             DEBIT_AMOUNT        = NVL(l_debit,     DEBIT_AMOUNT),

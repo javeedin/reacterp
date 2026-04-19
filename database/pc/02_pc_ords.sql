@@ -310,6 +310,7 @@ DECLARE
                t.CHARGE_ACCOUNT_CCID,
                t.CHARGE_ACCOUNT_DESC,
                t.ACCOUNTING_DATE,
+               t.ACCOUNTING_PERIOD,
                t.POSTING_STATUS,
                t.CURRENCY,
                t.DEBIT_AMOUNT,
@@ -341,19 +342,20 @@ BEGIN
         APEX_JSON.WRITE(''transactionDate'',  TO_CHAR(rec.TRANSACTION_DATE, ''DD-MON-YYYY''));
         APEX_JSON.WRITE(''transactionType'',  rec.TRANSACTION_TYPE);
         APEX_JSON.WRITE(''expenseType'',      rec.EXPENSE_TYPE);
-        APEX_JSON.WRITE(''chargeAccountCcid'',rec.CHARGE_ACCOUNT_CCID);
-        APEX_JSON.WRITE(''chargeAccountDesc'',rec.CHARGE_ACCOUNT_DESC);
-        APEX_JSON.WRITE(''accountingDate'',   TO_CHAR(rec.ACCOUNTING_DATE, ''DD-MON-YYYY''));
-        APEX_JSON.WRITE(''postingStatus'',    rec.POSTING_STATUS);
-        APEX_JSON.WRITE(''currency'',         NVL(rec.CURRENCY,''AED''));
-        APEX_JSON.WRITE(''debitAmount'',      rec.DEBIT_AMOUNT);
-        APEX_JSON.WRITE(''creditAmount'',     rec.CREDIT_AMOUNT);
-        APEX_JSON.WRITE(''comments'',         rec.COMMENTS);
-        APEX_JSON.WRITE(''referenceNo'',      rec.REFERENCE_NO);
-        APEX_JSON.WRITE(''attachment'',       rec.ATTACHMENT);
-        APEX_JSON.WRITE(''createdBy'',        rec.CREATED_BY);
-        APEX_JSON.WRITE(''creationDate'',     TO_CHAR(rec.CREATION_DATE,''DD-MON-YYYY''));
-        APEX_JSON.WRITE(''runningBalance'',   rec.RUNNING_BALANCE);
+        APEX_JSON.WRITE(''chargeAccountCcid'',  rec.CHARGE_ACCOUNT_CCID);
+        APEX_JSON.WRITE(''chargeAccountDesc'',  rec.CHARGE_ACCOUNT_DESC);
+        APEX_JSON.WRITE(''accountingDate'',     TO_CHAR(rec.ACCOUNTING_DATE, ''DD-MON-YYYY''));
+        APEX_JSON.WRITE(''accountingPeriod'',   rec.ACCOUNTING_PERIOD);
+        APEX_JSON.WRITE(''postingStatus'',      rec.POSTING_STATUS);
+        APEX_JSON.WRITE(''currency'',           NVL(rec.CURRENCY,''AED''));
+        APEX_JSON.WRITE(''debitAmount'',        rec.DEBIT_AMOUNT);
+        APEX_JSON.WRITE(''creditAmount'',       rec.CREDIT_AMOUNT);
+        APEX_JSON.WRITE(''comments'',           rec.COMMENTS);
+        APEX_JSON.WRITE(''referenceNo'',        rec.REFERENCE_NO);
+        APEX_JSON.WRITE(''attachment'',         rec.ATTACHMENT);
+        APEX_JSON.WRITE(''createdBy'',          rec.CREATED_BY);
+        APEX_JSON.WRITE(''creationDate'',       TO_CHAR(rec.CREATION_DATE,''DD-MON-YYYY''));
+        APEX_JSON.WRITE(''runningBalance'',     rec.RUNNING_BALANCE);
         APEX_JSON.CLOSE_OBJECT;
     END LOOP;
     APEX_JSON.CLOSE_ARRAY;
@@ -438,7 +440,7 @@ DECLARE
         SELECT t.TRANSACTION_ID, t.REGISTER_ID, t.LINE_NUMBER,
                t.TRANSACTION_DATE, t.TRANSACTION_TYPE, t.EXPENSE_TYPE,
                t.CHARGE_ACCOUNT_CCID, t.CHARGE_ACCOUNT_DESC,
-               t.ACCOUNTING_DATE, t.POSTING_STATUS, t.CURRENCY,
+               t.ACCOUNTING_DATE, t.ACCOUNTING_PERIOD, t.POSTING_STATUS, t.CURRENCY,
                t.DEBIT_AMOUNT, t.CREDIT_AMOUNT,
                t.COMMENTS, t.REFERENCE_NO, t.ATTACHMENT,
                t.CREATED_BY, t.CREATION_DATE,
@@ -466,6 +468,7 @@ BEGIN
     APEX_JSON.WRITE(''chargeAccountCcid'', rec.CHARGE_ACCOUNT_CCID);
     APEX_JSON.WRITE(''chargeAccountDesc'', rec.CHARGE_ACCOUNT_DESC);
     APEX_JSON.WRITE(''accountingDate'',    TO_CHAR(rec.ACCOUNTING_DATE,   ''DD-MON-YYYY''));
+    APEX_JSON.WRITE(''accountingPeriod'',  rec.ACCOUNTING_PERIOD);
     APEX_JSON.WRITE(''postingStatus'',     rec.POSTING_STATUS);
     APEX_JSON.WRITE(''currency'',          NVL(rec.CURRENCY,''AED''));
     APEX_JSON.WRITE(''debitAmount'',       rec.DEBIT_AMOUNT);
@@ -545,6 +548,62 @@ BEGIN
         :status_code := 200;
         HTP.PRN(''{"success":true,"message":"Transaction deleted"}'');
     END IF;
+END;
+'
+    );
+
+    -- ══════════════════════════════════════════════════════════════════════
+    -- TEMPLATE 6: /pc/openperiods
+    -- ══════════════════════════════════════════════════════════════════════
+    ORDS.DEFINE_TEMPLATE(
+        p_module_name => 'pc',
+        p_pattern     => 'openperiods'
+    );
+
+    -- ──────────────────────────────────────────────────────────────────────
+    -- GET /pc/openperiods  — open AP periods (application_id = 200)
+    -- ──────────────────────────────────────────────────────────────────────
+    ORDS.DEFINE_HANDLER(
+        p_module_name => 'pc',
+        p_pattern     => 'openperiods',
+        p_method      => 'GET',
+        p_source_type => ORDS.source_type_plsql,
+        p_source      => '
+DECLARE
+    v_clob CLOB;
+    CURSOR c IS
+        SELECT period_name_id,
+               TO_CHAR(start_date, ''YYYY-MM-DD'') AS start_date,
+               TO_CHAR(end_date,   ''YYYY-MM-DD'') AS end_date,
+               period_year,
+               period_number,
+               closing_status
+        FROM   rr_accounting_periods_status
+        WHERE  application_id = 200
+        AND    closing_status = ''O''
+        AND    NVL(adjustment_period_flag, ''N'') = ''N''
+        ORDER BY period_year, period_number;
+BEGIN
+    :status_code := 200;
+    APEX_JSON.INITIALIZE_CLOB_OUTPUT;
+    APEX_JSON.OPEN_OBJECT;
+    APEX_JSON.WRITE(''success'', TRUE);
+    APEX_JSON.OPEN_ARRAY(''items'');
+    FOR rec IN c LOOP
+        APEX_JSON.OPEN_OBJECT;
+        APEX_JSON.WRITE(''periodName'',   rec.period_name_id);
+        APEX_JSON.WRITE(''startDate'',    rec.start_date);
+        APEX_JSON.WRITE(''endDate'',      rec.end_date);
+        APEX_JSON.WRITE(''periodYear'',   rec.period_year);
+        APEX_JSON.WRITE(''periodNumber'', rec.period_number);
+        APEX_JSON.WRITE(''status'',       rec.closing_status);
+        APEX_JSON.CLOSE_OBJECT;
+    END LOOP;
+    APEX_JSON.CLOSE_ARRAY;
+    APEX_JSON.CLOSE_OBJECT;
+    v_clob := APEX_JSON.GET_CLOB_OUTPUT;
+    APEX_JSON.FREE_OUTPUT;
+    HTP.PRN(v_clob);
 END;
 '
     );
