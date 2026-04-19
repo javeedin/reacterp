@@ -21,6 +21,8 @@ import {
   Popover,
   Divider,
   Input,
+  message,
+  Modal,
 } from 'antd';
 import {
   HomeOutlined,
@@ -186,6 +188,7 @@ const AccountingPeriods: React.FC = () => {
   const [tabDetailsMap, setTabDetailsMap] = useState<Record<string, PeriodStatusDetailItem[]>>({});
   const [tabLoadingMap, setTabLoadingMap] = useState<Record<string, boolean>>({});
   const [tabErrorMap, setTabErrorMap] = useState<Record<string, string>>({});
+  const [periodActionLoading, setPeriodActionLoading] = useState<string | null>(null);
 
   // Period Status tab state (legacy - keep for now)
   const [periodStatuses, setPeriodStatuses] = useState<PeriodStatus[]>([]);
@@ -624,6 +627,51 @@ const AccountingPeriods: React.FC = () => {
     }
   };
 
+  // Open or Close a period
+  const handlePeriodAction = async (
+    item: CurrentPeriodStatusItem,
+    period: PeriodStatusDetailItem,
+    action: 'OPEN' | 'CLOSE',
+  ) => {
+    const doAction = async () => {
+      const key = `${period.period_name_id}-${action}`;
+      setPeriodActionLoading(key);
+      try {
+        const res = await fetch(`${PROXY_CONFIG.baseUrl}/apex/gl/periodstatus`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            periodName: period.period_name_id,
+            ledgerName: item.ledger_name,
+            app: item.app,
+            action,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+        message.success(`${period.period_name_id} ${action === 'OPEN' ? 'opened' : 'closed'} successfully`);
+        fetchPeriodStatusDetails(item);
+        fetchCurrentPeriodStatuses();
+      } catch (e: any) {
+        message.error(e?.message ?? 'Action failed');
+      } finally {
+        setPeriodActionLoading(null);
+      }
+    };
+
+    if (action === 'CLOSE') {
+      Modal.confirm({
+        title: `Close Period ${period.period_name_id}?`,
+        content: `Closing this period will prevent new transactions from being posted to ${item.application_name} for ${period.period_name_id}. This can be re-opened later.`,
+        okText: 'Close Period',
+        okButtonProps: { danger: true },
+        onOk: doAction,
+      });
+    } else {
+      doAction();
+    }
+  };
+
   // Webservices used on this page
   const webservices = [
     { method: 'GET', url: '/api/apex/applications/getall', description: 'Fetch applications list' },
@@ -1043,8 +1091,8 @@ const AccountingPeriods: React.FC = () => {
     </div>
   );
 
-  // NEW: Detail columns for APEX periodsstatus/create data
-  const periodDetailColumns = [
+  // Detail columns — parameterised by tab item so Actions can call handlePeriodAction
+  const getPeriodDetailColumns = (item: CurrentPeriodStatusItem) => [
     {
       title: 'Period',
       dataIndex: 'period_name_id',
@@ -1056,37 +1104,36 @@ const AccountingPeriods: React.FC = () => {
       title: 'Year',
       dataIndex: 'period_year',
       key: 'period_year',
-      width: 80,
+      width: 70,
       render: (year: number) => <Text code style={{ fontSize: 11 }}>{year}</Text>,
     },
     {
       title: 'Period #',
       dataIndex: 'period_number',
       key: 'period_number',
-      width: 80,
+      width: 70,
       render: (num: number) => <Text style={{ fontSize: 11 }}>{num}</Text>,
     },
     {
       title: 'Start Date',
       dataIndex: 'start_date',
       key: 'start_date',
-      width: 120,
+      width: 110,
       render: (date: string) => <Text style={{ fontSize: 11 }}>{date ? dayjs(date).format('D-MMM-YYYY') : '-'}</Text>,
     },
     {
       title: 'End Date',
       dataIndex: 'end_date',
       key: 'end_date',
-      width: 120,
+      width: 110,
       render: (date: string) => <Text style={{ fontSize: 11 }}>{date ? dayjs(date).format('D-MMM-YYYY') : '-'}</Text>,
     },
     {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
-      width: 100,
+      width: 130,
       render: (status: string) => {
-        // Map status text to status code for icon
         const statusCode = status === 'Open' ? 'O' : status === 'Closed' ? 'C' : status === 'Future' ? 'F' : status === 'Never Opened' ? 'N' : status === 'Permanently Closed' ? 'P' : status;
         return (
           <Space>
@@ -1100,11 +1147,54 @@ const AccountingPeriods: React.FC = () => {
       title: 'Adj',
       dataIndex: 'adj_flag',
       key: 'adj_flag',
-      width: 60,
+      width: 50,
       align: 'center' as const,
       render: (flag: string) => (
         flag === 'Y' ? <Tag color="orange" style={{ fontSize: 9 }}>Y</Tag> : <Text style={{ fontSize: 10 }}>N</Text>
       ),
+    },
+    {
+      title: 'Actions',
+      key: 'actions',
+      width: 160,
+      align: 'center' as const,
+      render: (_: unknown, period: PeriodStatusDetailItem) => {
+        const actionKey = `${period.period_name_id}-action`;
+        const isLoading = periodActionLoading === actionKey;
+        const canOpen  = ['Closed', 'Future', 'Never Opened'].includes(period.status);
+        const canClose = period.status === 'Open';
+
+        return (
+          <Space size={4}>
+            {canOpen && (
+              <Button
+                size="small"
+                icon={<UnlockOutlined />}
+                loading={isLoading}
+                style={{ background: REDWOOD.success, borderColor: REDWOOD.success, color: '#fff', fontSize: 11 }}
+                onClick={() => handlePeriodAction(item, period, 'OPEN')}
+              >
+                Open Period
+              </Button>
+            )}
+            {canClose && (
+              <Button
+                size="small"
+                danger
+                icon={<LockOutlined />}
+                loading={isLoading}
+                style={{ fontSize: 11 }}
+                onClick={() => handlePeriodAction(item, period, 'CLOSE')}
+              >
+                Close Period
+              </Button>
+            )}
+            {!canOpen && !canClose && (
+              <Text style={{ fontSize: 10, color: REDWOOD.textSecondary }}>—</Text>
+            )}
+          </Space>
+        );
+      },
     },
   ];
 
@@ -1162,11 +1252,11 @@ const AccountingPeriods: React.FC = () => {
           <Spin spinning={isLoading}>
             <Table
               dataSource={details}
-              columns={periodDetailColumns}
+              columns={getPeriodDetailColumns(item)}
               rowKey="period_name_id"
               size="small"
               pagination={{ pageSize: 20, showSizeChanger: true, size: 'small' }}
-              scroll={{ y: 'calc(100vh - 380px)' }}
+              scroll={{ x: 900, y: 'calc(100vh - 380px)' }}
             />
           </Spin>
         </Card>
