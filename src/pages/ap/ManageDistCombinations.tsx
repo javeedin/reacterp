@@ -7,7 +7,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { Link } from 'react-router-dom';
 import {
   HomeOutlined, SettingOutlined, PlusOutlined, SearchOutlined,
-  ReloadOutlined, EditOutlined, DeleteOutlined, CloseOutlined,
+  ReloadOutlined, EditOutlined, DeleteOutlined,
   BankOutlined, CheckCircleOutlined,
 } from '@ant-design/icons';
 import FloatingMenu from '../../components/FloatingMenu';
@@ -399,6 +399,7 @@ const ManageDistCombinations: React.FC = () => {
     {
       key: 'search',
       label: <Space><SearchOutlined />Combinations</Space>,
+      closable: false,
       children: (
         <div style={{ padding: '12px 0' }}>
           <Collapse defaultActiveKey={['search']} style={{ marginBottom: 12, borderRadius: 8 }}
@@ -495,10 +496,6 @@ const ManageDistCombinations: React.FC = () => {
           <span style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block' }}>
             {tab.combination.combinationName}
           </span>
-          <CloseOutlined
-            style={{ fontSize: 10, color: REDWOOD.neutral600 }}
-            onClick={(e) => { e.stopPropagation(); closeEditTab(tab.key); }}
-          />
         </Space>
       ),
       children: (
@@ -579,6 +576,7 @@ const ManageDistCombinations: React.FC = () => {
             onChange={setActiveTab}
             type="editable-card"
             hideAdd
+            onEdit={(key, action) => { if (action === 'remove') closeEditTab(key as string); }}
             items={tabItems}
             style={{ background: REDWOOD.surface }}
           />
