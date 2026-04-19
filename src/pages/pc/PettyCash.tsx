@@ -711,29 +711,32 @@ const RegisterDetail: React.FC<{
       >
         <Form form={moneyForm} layout="vertical" size="small" onFinish={handleAddMoney}>
           <Row gutter={12}>
-            <Col span={12}>
+            <Col span={8}>
               <Form.Item label="Transaction Date" name="transactionDate"
                 rules={[{ required: true, message: 'Required' }]}
                 initialValue={dayjs()}>
                 <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" />
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col span={8}>
               <Form.Item label="Accounting Date" name="accountingDate">
                 <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="Defaults to Txn Date" />
               </Form.Item>
             </Col>
+            <Col span={8}>
+              <Form.Item label="AP Period" shouldUpdate>
+                {({ getFieldValue }) => {
+                  const d = getFieldValue('accountingDate') ?? getFieldValue('transactionDate');
+                  if (!d) return <Input disabled placeholder="Select date" />;
+                  if (!periodsLoaded) return <Input disabled placeholder="Loading…" />;
+                  const p = findAPPeriod(d);
+                  if (p) return <Input disabled value={p.periodName} style={{ color: REDWOOD.success, fontWeight: 600, background: '#f6ffed', borderColor: '#b7eb8f' }} />;
+                  if (openPeriods.length === 0) return <Input disabled placeholder="Not synced" style={{ color: REDWOOD.warning }} />;
+                  return <Input disabled placeholder="No open period" style={{ color: REDWOOD.error }} />;
+                }}
+              </Form.Item>
+            </Col>
           </Row>
-          <Form.Item noStyle shouldUpdate>
-            {({ getFieldValue }) => {
-              const d = getFieldValue('accountingDate') ?? getFieldValue('transactionDate');
-              if (!d || !periodsLoaded) return null;
-              const p = findAPPeriod(d);
-              if (p) return <div style={{ marginTop: -12, marginBottom: 8 }}><Tag color="green" style={{ fontSize: 11 }}>AP Period: {p.periodName}</Tag></div>;
-              if (openPeriods.length === 0) return <div style={{ marginTop: -12, marginBottom: 8 }}><Tag color="orange" style={{ fontSize: 11 }}>⚠ AP period data not synced — server will validate</Tag></div>;
-              return <div style={{ marginTop: -12, marginBottom: 8 }}><Tag color="red" style={{ fontSize: 11 }}>⚠ No open AP period for this date</Tag></div>;
-            }}
-          </Form.Item>
           <Row gutter={12}>
             <Col span={12}>
               <Form.Item label="Amount" name="amount"
@@ -777,29 +780,32 @@ const RegisterDetail: React.FC<{
       >
         <Form form={expenseForm} layout="vertical" size="small" onFinish={handleAddExpense}>
           <Row gutter={12}>
-            <Col span={12}>
+            <Col span={8}>
               <Form.Item label="Transaction Date" name="transactionDate"
                 rules={[{ required: true, message: 'Required' }]}
                 initialValue={dayjs()}>
                 <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" />
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col span={8}>
               <Form.Item label="Accounting Date" name="accountingDate">
                 <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="Defaults to Txn Date" />
               </Form.Item>
             </Col>
+            <Col span={8}>
+              <Form.Item label="AP Period" shouldUpdate>
+                {({ getFieldValue }) => {
+                  const d = getFieldValue('accountingDate') ?? getFieldValue('transactionDate');
+                  if (!d) return <Input disabled placeholder="Select date" />;
+                  if (!periodsLoaded) return <Input disabled placeholder="Loading…" />;
+                  const p = findAPPeriod(d);
+                  if (p) return <Input disabled value={p.periodName} style={{ color: REDWOOD.success, fontWeight: 600, background: '#f6ffed', borderColor: '#b7eb8f' }} />;
+                  if (openPeriods.length === 0) return <Input disabled placeholder="Not synced" style={{ color: REDWOOD.warning }} />;
+                  return <Input disabled placeholder="No open period" style={{ color: REDWOOD.error }} />;
+                }}
+              </Form.Item>
+            </Col>
           </Row>
-          <Form.Item noStyle shouldUpdate>
-            {({ getFieldValue }) => {
-              const d = getFieldValue('accountingDate') ?? getFieldValue('transactionDate');
-              if (!d || !periodsLoaded) return null;
-              const p = findAPPeriod(d);
-              if (p) return <div style={{ marginTop: -12, marginBottom: 8 }}><Tag color="green" style={{ fontSize: 11 }}>AP Period: {p.periodName}</Tag></div>;
-              if (openPeriods.length === 0) return <div style={{ marginTop: -12, marginBottom: 8 }}><Tag color="orange" style={{ fontSize: 11 }}>⚠ AP period data not synced — server will validate</Tag></div>;
-              return <div style={{ marginTop: -12, marginBottom: 8 }}><Tag color="red" style={{ fontSize: 11 }}>⚠ No open AP period for this date</Tag></div>;
-            }}
-          </Form.Item>
           <Row gutter={12}>
             <Col span={12}>
               <Form.Item label="Expense Type" name="expenseType"
@@ -904,28 +910,31 @@ const RegisterDetail: React.FC<{
         {editTxn && (
           <Form form={editTxnForm} layout="vertical" size="small" onFinish={handleSaveEditTransaction}>
             <Row gutter={12}>
-              <Col span={12}>
+              <Col span={8}>
                 <Form.Item label="Transaction Date" name="transactionDate"
                   rules={[{ required: true, message: 'Required' }]}>
                   <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" />
                 </Form.Item>
               </Col>
-              <Col span={12}>
+              <Col span={8}>
                 <Form.Item label="Accounting Date" name="accountingDate">
                   <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="Defaults to Txn Date" />
                 </Form.Item>
               </Col>
+              <Col span={8}>
+                <Form.Item label="AP Period" shouldUpdate>
+                  {({ getFieldValue }) => {
+                    const d = getFieldValue('accountingDate') ?? getFieldValue('transactionDate');
+                    if (!d) return <Input disabled placeholder="Select date" />;
+                    if (!periodsLoaded) return <Input disabled placeholder="Loading…" />;
+                    const p = findAPPeriod(d);
+                    if (p) return <Input disabled value={p.periodName} style={{ color: REDWOOD.success, fontWeight: 600, background: '#f6ffed', borderColor: '#b7eb8f' }} />;
+                    if (openPeriods.length === 0) return <Input disabled placeholder="Not synced" style={{ color: REDWOOD.warning }} />;
+                    return <Input disabled placeholder="No open period" style={{ color: REDWOOD.error }} />;
+                  }}
+                </Form.Item>
+              </Col>
             </Row>
-            <Form.Item noStyle shouldUpdate>
-              {({ getFieldValue }) => {
-                const d = getFieldValue('accountingDate') ?? getFieldValue('transactionDate');
-                const p = findAPPeriod(d);
-                if (!d) return null;
-                return p
-                  ? <div style={{ marginTop: -12, marginBottom: 8 }}><Tag color="green" style={{ fontSize: 11 }}>AP Period: {p.periodName}</Tag></div>
-                  : <div style={{ marginTop: -12, marginBottom: 8 }}><Tag color="red" style={{ fontSize: 11 }}>⚠ No open AP period for this date</Tag></div>;
-              }}
-            </Form.Item>
 
             {editTxn.transactionType === 'Expense' && (
               <Row gutter={12}>
