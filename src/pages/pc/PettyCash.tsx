@@ -271,10 +271,18 @@ const RegisterDetail: React.FC<{
   // ── Populate edit form once modal is open and editTxn is set ─
   useEffect(() => {
     if (!editTxnOpen || !editTxn) return;
+    const parseOracleDate = (s: string | null | undefined) => {
+      if (!s) return null;
+      // Oracle TO_CHAR 'DD-MON-YYYY' returns uppercase month e.g. '19-APR-2026'
+      // Normalize to title-case so dayjs 'DD-MMM-YYYY' token matches
+      const norm = s.replace(/-([A-Z]{3})-/g, (_, m) => `-${m[0]}${m.slice(1).toLowerCase()}-`);
+      const d = dayjs(norm, ['YYYY-MM-DD', 'DD-MMM-YYYY']);
+      return d.isValid() ? d : null;
+    };
     const isExpense = editTxn.transactionType === 'Expense';
     editTxnForm.setFieldsValue({
-      transactionDate:   editTxn.transactionDate ? dayjs(editTxn.transactionDate, ['DD-MMM-YYYY','YYYY-MM-DD','DD-MON-YYYY']) : null,
-      accountingDate:    editTxn.accountingDate  ? dayjs(editTxn.accountingDate,  ['DD-MMM-YYYY','YYYY-MM-DD','DD-MON-YYYY']) : null,
+      transactionDate:   parseOracleDate(editTxn.transactionDate),
+      accountingDate:    parseOracleDate(editTxn.accountingDate),
       currency:          editTxn.currency,
       amount:            isExpense ? editTxn.creditAmount : editTxn.debitAmount,
       expenseType:       editTxn.expenseType,
