@@ -66,15 +66,15 @@ BEGIN
     l_rows_fp := SQL%ROWCOUNT;
 
     -- ── 2. Update RR_ACCOUNTING_PERIODS_STATUS ───────────────────────
-    -- period_name_id format is '<prefix>_<PeriodName>' e.g. '16_Apr-26'
-    -- We match on the suffix using LIKE so we don't need to know the prefix.
+    -- period_name_id format is '<number>_<PeriodName>' e.g. '16_Apr-26'
+    -- ESCAPE '\' so the literal underscore in the pattern is not treated as wildcard.
     IF l_app_id IS NOT NULL THEN
         UPDATE rr_accounting_periods_status
         SET    closing_status    = l_new_ap_status,
                last_update_date  = SYSTIMESTAMP
         WHERE  application_id   = l_app_id
           AND  (period_name_id  = l_period_name
-             OR period_name_id LIKE '%_' || l_period_name);
+             OR period_name_id LIKE '%\_' || l_period_name ESCAPE '\');
         l_rows_aps := SQL%ROWCOUNT;
     END IF;
 
