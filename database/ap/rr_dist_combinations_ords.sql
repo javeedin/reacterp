@@ -54,10 +54,10 @@ BEGIN
                 TO_CHAR(c.LAST_UPDATE_DATE, 'YYYY-MM-DD"T"HH24:MI:SS') AS "lastUpdateDate"
             FROM RR_DIST_COMBINATIONS c
             WHERE 1=1
-              AND (:q      IS NULL OR UPPER(c.COMBINATION_NAME) LIKE '%' || UPPER(:q) || '%')
-              AND (:module IS NULL OR c.MODULE = :module)
-              AND (:status IS NULL OR c.STATUS = :status)
-              AND (:bu     IS NULL OR c.BUSINESS_UNIT = :bu)
+              AND ((:q      IS NULL OR :q      = '') OR UPPER(c.COMBINATION_NAME) LIKE '%' || UPPER(:q) || '%')
+              AND ((:module IS NULL OR :module = '') OR c.MODULE = :module)
+              AND ((:status IS NULL OR :status = '') OR c.STATUS = :status)
+              AND ((:bu     IS NULL OR :bu     = '') OR c.BUSINESS_UNIT = :bu)
             ORDER BY c.MODULE, c.COMBINATION_NAME
         ]'
     );
