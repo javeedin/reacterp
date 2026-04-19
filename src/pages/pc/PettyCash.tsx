@@ -13,10 +13,11 @@ import {
   HomeOutlined, WalletOutlined, PlusOutlined, SearchOutlined,
   ReloadOutlined, EditOutlined, DeleteOutlined, CloseOutlined,
   DollarOutlined, MinusCircleOutlined, ArrowUpOutlined, ArrowDownOutlined,
-  DownloadOutlined, RollbackOutlined,
+  DownloadOutlined, RollbackOutlined, BankOutlined,
 } from '@ant-design/icons';
 import FloatingMenu from '../../components/FloatingMenu';
 import ApiDocsModal, { type ApiEndpoint } from '../../components/ApiDocsModal';
+import AccountSelector from '../../components/AccountSelector';
 import { useAuth } from '../../context/AuthContext';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import {
@@ -257,6 +258,8 @@ const RegisterDetail: React.FC<{
   const needsRefresh = React.useRef(false);
   const [distCombinations, setDistCombinations] = useState<DistCombination[]>([]);
   const [txnActionLoading, setTxnActionLoading] = useState<number | null>(null);
+  const [coaOpen, setCoaOpen]     = useState(false);
+  const [coaTarget, setCoaTarget] = useState<'add' | 'edit'>('edit');
 
   const isClosed   = register.status === 'CLOSED';
   const noBalance  = register.balance <= 0;
@@ -799,10 +802,16 @@ const RegisterDetail: React.FC<{
           <Form.Item name="chargeAccountCcid" hidden><Input /></Form.Item>
           <Form.Item
             label="Charge Account"
-            name="chargeAccountDesc"
-            extra={<span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Auto-filled from Expense Type — edit if needed</span>}
+            extra={<span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Auto-filled from Expense Type — or Browse to select manually</span>}
           >
-            <Input placeholder="Auto-filled when Expense Type is selected" />
+            <Space.Compact style={{ width: '100%' }}>
+              <Form.Item name="chargeAccountDesc" noStyle>
+                <Input placeholder="Auto-filled when Expense Type is selected" />
+              </Form.Item>
+              <Button icon={<BankOutlined />} onClick={() => { setCoaTarget('add'); setCoaOpen(true); }}>
+                Browse
+              </Button>
+            </Space.Compact>
           </Form.Item>
           <Form.Item label="Comments" name="comments">
             <Input.TextArea rows={2} placeholder="Optional" />
@@ -918,9 +927,18 @@ const RegisterDetail: React.FC<{
             {editTxn.transactionType === 'Expense' && (
               <>
                 <Form.Item name="chargeAccountCcid" hidden><Input /></Form.Item>
-                <Form.Item label="Charge Account" name="chargeAccountDesc"
-                  extra={<span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Auto-filled from Expense Type — edit if needed</span>}>
-                  <Input placeholder="Auto-filled from Expense Type" />
+                <Form.Item
+                  label="Charge Account"
+                  extra={<span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Auto-filled from Expense Type — or Browse to select manually</span>}
+                >
+                  <Space.Compact style={{ width: '100%' }}>
+                    <Form.Item name="chargeAccountDesc" noStyle>
+                      <Input placeholder="Auto-filled from Expense Type" />
+                    </Form.Item>
+                    <Button icon={<BankOutlined />} onClick={() => { setCoaTarget('edit'); setCoaOpen(true); }}>
+                      Browse
+                    </Button>
+                  </Space.Compact>
                 </Form.Item>
               </>
             )}
@@ -942,6 +960,17 @@ const RegisterDetail: React.FC<{
           </Form>
         )}
       </Modal>
+
+      {/* ── Account (COA) Selector ────────────────────────── */}
+      <AccountSelector
+        visible={coaOpen}
+        onCancel={() => setCoaOpen(false)}
+        onSelect={(accountCode) => {
+          const form = coaTarget === 'add' ? expenseForm : editTxnForm;
+          form.setFieldsValue({ chargeAccountDesc: accountCode, chargeAccountCcid: null });
+          setCoaOpen(false);
+        }}
+      />
     </>
   );
 };
