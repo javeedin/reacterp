@@ -268,6 +268,24 @@ const RegisterDetail: React.FC<{
       .catch(() => {});
   }, []);
 
+  // ── Populate edit form once modal is open and editTxn is set ─
+  useEffect(() => {
+    if (!editTxnOpen || !editTxn) return;
+    const isExpense = editTxn.transactionType === 'Expense';
+    editTxnForm.setFieldsValue({
+      transactionDate:   editTxn.transactionDate ? dayjs(editTxn.transactionDate, ['DD-MMM-YYYY','YYYY-MM-DD','DD-MON-YYYY']) : null,
+      accountingDate:    editTxn.accountingDate  ? dayjs(editTxn.accountingDate,  ['DD-MMM-YYYY','YYYY-MM-DD','DD-MON-YYYY']) : null,
+      currency:          editTxn.currency,
+      amount:            isExpense ? editTxn.creditAmount : editTxn.debitAmount,
+      expenseType:       editTxn.expenseType,
+      chargeAccountDesc: editTxn.chargeAccountDesc,
+      chargeAccountCcid: editTxn.chargeAccountCcid,
+      referenceNo:       editTxn.referenceNo,
+      comments:          editTxn.comments,
+      attachment:        editTxn.attachment,
+    });
+  }, [editTxnOpen, editTxn]);
+
   // ── Delete transaction (Unposted / Error only) ────────────
   const handleDeleteTransaction = (txn: PCTransaction) => {
     Modal.confirm({
@@ -331,20 +349,8 @@ const RegisterDetail: React.FC<{
     setTxnActionLoading(txn.transactionId);
     try {
       const fresh = await getTransaction(txn.transactionId);
+      editTxnForm.resetFields();
       setEditTxn(fresh);
-      const isExpense = fresh.transactionType === 'Expense';
-      editTxnForm.setFieldsValue({
-        transactionDate:   fresh.transactionDate ? dayjs(fresh.transactionDate, ['DD-MMM-YYYY','YYYY-MM-DD']) : null,
-        accountingDate:    fresh.accountingDate  ? dayjs(fresh.accountingDate,  ['DD-MMM-YYYY','YYYY-MM-DD']) : null,
-        currency:          fresh.currency,
-        amount:            isExpense ? fresh.creditAmount : fresh.debitAmount,
-        expenseType:       fresh.expenseType,
-        chargeAccountDesc: fresh.chargeAccountDesc,
-        chargeAccountCcid: fresh.chargeAccountCcid,
-        referenceNo:       fresh.referenceNo,
-        comments:          fresh.comments,
-        attachment:        fresh.attachment,
-      });
       setEditTxnOpen(true);
     } catch (e: any) {
       message.error(e?.message ?? 'Failed to load transaction');
@@ -822,10 +828,9 @@ const RegisterDetail: React.FC<{
           </Space>
         }
         open={editTxnOpen}
-        onCancel={() => { setEditTxnOpen(false); setEditTxn(null); }}
+        onCancel={() => { setEditTxnOpen(false); setEditTxn(null); editTxnForm.resetFields(); }}
         footer={null}
         width={580}
-        destroyOnClose
       >
         {editTxn && (
           <Form form={editTxnForm} layout="vertical" size="small" onFinish={handleSaveEditTransaction}>
