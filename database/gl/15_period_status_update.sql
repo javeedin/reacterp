@@ -1,13 +1,22 @@
 -- ============================================================
 -- Period Status Update — Open / Close a period
--- Adds PUT /reerp/gl/periodstatus handler
+-- PUT /reerp/gl/periodstatus
 --
--- Updates:
---   1. RR_GL_FISCAL_PERIODS (used by the drill-down UI)
---   2. RR_ACCOUNTING_PERIODS_STATUS (used by PC module validation)
+-- Updates RR_ACCOUNTING_PERIODS_STATUS (local APEX table only).
+-- Does NOT call Oracle Fusion.
 --
--- Body: { "periodName": "Apr-26", "ledgerName": "...", "app": "AP", "action": "OPEN"|"CLOSE" }
+-- Table unique key: (PERIOD_NAME_ID, APPLICATION_ID, LEDGER_ID)
+--   PERIOD_NAME_ID  — e.g. '16_Apr-26'  (set_num_PeriodName)
+--   APPLICATION_ID  — 101=GL, 200=AP, 222=AR, 401=INV
+--   LEDGER_ID       — numeric (matched implicitly via APPLICATION_ID)
+--
+-- Request body:
+--   { "periodName": "Apr-26", "app": "AP", "action": "OPEN" | "CLOSE" }
+--
+-- Response:
+--   { "success": true, "message": "...", "rows": N }
 -- ============================================================
+
 BEGIN
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'reerp',
@@ -16,73 +25,81 @@ BEGIN
         p_source_type    => 'plsql/block',
         p_items_per_page => 0,
         p_mimes_allowed  => 'application/json',
-        p_comments       => 'Open or Close an accounting period for a module/ledger',
+        p_comments       => 'Open or Close an accounting period in RR_ACCOUNTING_PERIODS_STATUS',
         p_source         => q'[
 DECLARE
-    l_body        CLOB := :body_text;
-    l_period_name VARCHAR2(100);
-    l_ledger_name VARCHAR2(240);
-    l_app         VARCHAR2(20);
-    l_action      VARCHAR2(20);
-    l_new_fp_status  VARCHAR2(30);   -- RR_GL_FISCAL_PERIODS: 'Open' / 'Closed'
-    l_new_ap_status  VARCHAR2(1);    -- RR_ACCOUNTING_PERIODS_STATUS: 'O' / 'C'
+    l_body        CLOB    := :body_text;
+    l_period_name VARCHAR2(100);   -- e.g. 'Apr-26'
+    l_app         VARCHAR2(20);    -- e.g. 'AP'
+    l_action      VARCHAR2(20);    -- 'OPEN' or 'CLOSE'
+    l_new_status  VARCHAR2(1);     -- 'O' or 'C'
     l_app_id      NUMBER;
-    l_rows_fp     NUMBER := 0;
-    l_rows_aps    NUMBER := 0;
+    l_rows        NUMBER  := 0;
 BEGIN
+    -- Parse request body
     SELECT
         JSON_VALUE(l_body, '$.periodName'),
-        JSON_VALUE(l_body, '$.ledgerName'),
         UPPER(JSON_VALUE(l_body, '$.app')),
         UPPER(JSON_VALUE(l_body, '$.action'))
-    INTO l_period_name, l_ledger_name, l_app, l_action
+    INTO l_period_name, l_app, l_action
     FROM dual;
 
+    -- Validate action
     IF l_action NOT IN ('OPEN', 'CLOSE') THEN
         :status_code := 400;
         HTP.PRN('{"success":false,"message":"action must be OPEN or CLOSE"}');
         RETURN;
     END IF;
 
-    l_new_fp_status := CASE l_action WHEN 'OPEN' THEN 'Open' ELSE 'Closed' END;
-    l_new_ap_status := CASE l_action WHEN 'OPEN' THEN 'O'    ELSE 'C'      END;
+    -- Map CLOSING_STATUS single-char code
+    l_new_status := CASE l_action WHEN 'OPEN' THEN 'O' ELSE 'C' END;
 
-    -- Map app short name → numeric application_id
+    -- Map application short name to APPLICATION_ID
+    -- RR_ACCOUNTING_PERIODS_STATUS.APPLICATION_ID values:
+    --   101 = General Ledger (GL)
+    --   200 = Payables       (AP)
+    --   222 = Receivables    (AR)
+    --   401 = Inventory      (INV)
     l_app_id := CASE l_app
-        WHEN 'GL'  THEN 101
-        WHEN 'AP'  THEN 200
-        WHEN 'AR'  THEN 222
-        WHEN 'INV' THEN 401
-        ELSE NULL
-    END;
+                    WHEN 'GL'  THEN 101
+                    WHEN 'AP'  THEN 200
+                    WHEN 'AR'  THEN 222
+                    WHEN 'INV' THEN 401
+                    ELSE NULL
+                END;
 
-    -- ── 1. Update RR_GL_FISCAL_PERIODS ──────────────────────────────
-    UPDATE rr_gl_fiscal_periods
-    SET    status    = l_new_fp_status,
-           sync_date = SYSTIMESTAMP
-    WHERE  period_name = l_period_name
-      AND  ledger_name = l_ledger_name
-      AND  application = l_app;
-    l_rows_fp := SQL%ROWCOUNT;
+    IF l_app_id IS NULL THEN
+        :status_code := 400;
+        HTP.PRN('{"success":false,"message":"Unknown application code: ' || l_app || '"}');
+        RETURN;
+    END IF;
 
-    -- ── 2. Update RR_ACCOUNTING_PERIODS_STATUS ───────────────────────
-    -- period_name_id format is '<number>_<PeriodName>' e.g. '16_Apr-26'
-    -- ESCAPE '\' so the literal underscore in the pattern is not treated as wildcard.
-    IF l_app_id IS NOT NULL THEN
-        UPDATE rr_accounting_periods_status
-        SET    closing_status    = l_new_ap_status,
-               last_update_date  = SYSTIMESTAMP
-        WHERE  application_id   = l_app_id
-          AND  (period_name_id  = l_period_name
-             OR period_name_id LIKE '%\_' || l_period_name ESCAPE '\');
-        l_rows_aps := SQL%ROWCOUNT;
+    -- Update RR_ACCOUNTING_PERIODS_STATUS
+    -- PERIOD_NAME_ID stores the period as '<set_num>_<period_name>' e.g. '16_Apr-26'.
+    -- We match on APPLICATION_ID + PERIOD_NAME_ID suffix across all ledgers.
+    -- ESCAPE '\' ensures the underscore in the pattern is literal, not a wildcard.
+    UPDATE rr_accounting_periods_status
+    SET    closing_status   = l_new_status,
+           last_update_date = SYSTIMESTAMP
+    WHERE  application_id  = l_app_id
+      AND  (   period_name_id = l_period_name
+            OR period_name_id LIKE '%\_' || l_period_name ESCAPE '\');
+
+    l_rows := SQL%ROWCOUNT;
+
+    IF l_rows = 0 THEN
+        :status_code := 404;
+        HTP.PRN('{"success":false,"message":"No period found: ' || l_period_name || ' for app ' || l_app || '"}');
+        RETURN;
     END IF;
 
     COMMIT;
     :status_code := 200;
-    HTP.PRN('{"success":true,"message":"Period ' || l_period_name || ' ' || l_action || 'ED"'
-         || ',"rowsFiscal":' || l_rows_fp
-         || ',"rowsStatus":' || l_rows_aps || '}');
+    HTP.PRN('{"success":true'
+         || ',"message":"Period ' || l_period_name || ' ' || l_action || 'ED"'
+         || ',"rows":' || l_rows
+         || '}');
+
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;

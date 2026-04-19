@@ -642,7 +642,6 @@ const AccountingPeriods: React.FC = () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             periodName: period.period_name_id,
-            ledgerName: item.ledger_name,
             app: item.app,
             action,
           }),
