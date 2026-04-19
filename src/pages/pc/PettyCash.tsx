@@ -24,6 +24,10 @@ import {
   getTransactions, createTransaction,
   type PCRegister, type PCTransaction,
 } from '../../services/pc.service';
+import {
+  searchCombinations,
+  type DistCombination,
+} from '../../services/distCombinations.service';
 
 const { Content } = Layout;
 const { Text, Title } = Typography;
@@ -248,9 +252,17 @@ const RegisterDetail: React.FC<{
   const [moneyForm]   = Form.useForm();
   const [expenseForm] = Form.useForm();
   const needsRefresh = React.useRef(false);
+  const [distCombinations, setDistCombinations] = useState<DistCombination[]>([]);
 
   const isClosed   = register.status === 'CLOSED';
   const noBalance  = register.balance <= 0;
+
+  // ── Load distribution combinations (PC + ALL) on mount ────
+  useEffect(() => {
+    searchCombinations({ status: 'ACTIVE' })
+      .then(data => setDistCombinations(data.filter(d => d.module === 'PC' || d.module === 'ALL')))
+      .catch(() => {});
+  }, []);
 
   // ── Add Money ──────────────────────────────────────────────
   const handleAddMoney = async (values: any) => {
@@ -564,11 +576,29 @@ const RegisterDetail: React.FC<{
             <Col span={12}>
               <Form.Item label="Expense Type" name="expenseType"
                 rules={[{ required: true, message: 'Required' }]}>
-                <Select placeholder="Select expense type" showSearch>
-                  {['Meals & Entertainment','Travel','Office Supplies','Utilities','Maintenance',
-                    'Accommodation','Transport','Postage','Printing','Miscellaneous'].map(t =>
-                    <Option key={t} value={t}>{t}</Option>)}
-                </Select>
+                <Select
+                  placeholder="Select expense type"
+                  showSearch
+                  filterOption={(input, option) =>
+                    String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                  }
+                  onChange={(val) => {
+                    const dist = distCombinations.find(d => d.combinationName === val);
+                    expenseForm.setFieldsValue({
+                      chargeAccountDesc: dist?.glAccountDesc ?? '',
+                      chargeAccountCcid: dist?.glAccountCcid ?? null,
+                    });
+                  }}
+                  options={distCombinations.map(d => ({
+                    value: d.combinationName,
+                    label: d.combinationName,
+                  }))}
+                  notFoundContent={
+                    distCombinations.length === 0
+                      ? <span style={{ fontSize: 12, color: REDWOOD.neutral600 }}>No combinations found — add them in AP Setup &gt; Manage Distribution Combinations</span>
+                      : 'No match'
+                  }
+                />
               </Form.Item>
             </Col>
             <Col span={12}>
@@ -593,8 +623,13 @@ const RegisterDetail: React.FC<{
               </Form.Item>
             </Col>
           </Row>
-          <Form.Item label="Charge Account" name="chargeAccountDesc">
-            <Input placeholder="e.g. 01-100-6010-000" />
+          <Form.Item name="chargeAccountCcid" hidden><Input /></Form.Item>
+          <Form.Item
+            label="Charge Account"
+            name="chargeAccountDesc"
+            extra={<span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Auto-filled from Expense Type — edit if needed</span>}
+          >
+            <Input placeholder="Auto-filled when Expense Type is selected" />
           </Form.Item>
           <Form.Item label="Comments" name="comments">
             <Input.TextArea rows={2} placeholder="Optional" />
