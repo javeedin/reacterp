@@ -536,6 +536,8 @@ const RegisterDetail: React.FC<{
       render: (v) => <Text style={{ fontSize: 11 }}>{v || '—'}</Text> },
     { title: 'Acct Date', dataIndex: 'accountingDate', width: 100,
       render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+    { title: 'Period', dataIndex: 'accountingPeriod', width: 90,
+      render: (v) => v ? <Tag color="blue" style={{ fontSize: 11 }}>{v}</Tag> : <Text style={{ fontSize: 12, color: '#ccc' }}>—</Text> },
     { title: 'Posting', dataIndex: 'postingStatus', width: 90,
       render: (v) => <PostingTag status={v} /> },
     { title: 'Reference', dataIndex: 'referenceNo', width: 120,
