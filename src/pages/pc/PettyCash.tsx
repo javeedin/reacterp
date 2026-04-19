@@ -21,7 +21,7 @@ import { useAuth } from '../../context/AuthContext';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import {
   searchRegisters, getRegister, createRegister, updateRegister, deleteRegister,
-  getTransactions, createTransaction, updateTransaction, deleteTransaction,
+  getTransactions, getTransaction, createTransaction, updateTransaction, deleteTransaction,
   type PCRegister, type PCTransaction,
 } from '../../services/pc.service';
 import {
@@ -326,23 +326,31 @@ const RegisterDetail: React.FC<{
     });
   };
 
-  // ── Open edit transaction modal ───────────────────────────
-  const openEditTransaction = (txn: PCTransaction) => {
-    setEditTxn(txn);
-    const isExpense = txn.transactionType === 'Expense';
-    editTxnForm.setFieldsValue({
-      transactionDate:   txn.transactionDate ? dayjs(txn.transactionDate, ['DD-MMM-YYYY','YYYY-MM-DD']) : null,
-      accountingDate:    txn.accountingDate  ? dayjs(txn.accountingDate,  ['DD-MMM-YYYY','YYYY-MM-DD']) : null,
-      currency:          txn.currency,
-      amount:            isExpense ? txn.creditAmount : txn.debitAmount,
-      expenseType:       txn.expenseType,
-      chargeAccountDesc: txn.chargeAccountDesc,
-      chargeAccountCcid: txn.chargeAccountCcid,
-      referenceNo:       txn.referenceNo,
-      comments:          txn.comments,
-      attachment:        txn.attachment,
-    });
-    setEditTxnOpen(true);
+  // ── Open edit transaction modal (fetch-first) ────────────
+  const openEditTransaction = async (txn: PCTransaction) => {
+    setTxnActionLoading(txn.transactionId);
+    try {
+      const fresh = await getTransaction(txn.transactionId);
+      setEditTxn(fresh);
+      const isExpense = fresh.transactionType === 'Expense';
+      editTxnForm.setFieldsValue({
+        transactionDate:   fresh.transactionDate ? dayjs(fresh.transactionDate, ['DD-MMM-YYYY','YYYY-MM-DD']) : null,
+        accountingDate:    fresh.accountingDate  ? dayjs(fresh.accountingDate,  ['DD-MMM-YYYY','YYYY-MM-DD']) : null,
+        currency:          fresh.currency,
+        amount:            isExpense ? fresh.creditAmount : fresh.debitAmount,
+        expenseType:       fresh.expenseType,
+        chargeAccountDesc: fresh.chargeAccountDesc,
+        chargeAccountCcid: fresh.chargeAccountCcid,
+        referenceNo:       fresh.referenceNo,
+        comments:          fresh.comments,
+        attachment:        fresh.attachment,
+      });
+      setEditTxnOpen(true);
+    } catch (e: any) {
+      message.error(e?.message ?? 'Failed to load transaction');
+    } finally {
+      setTxnActionLoading(null);
+    }
   };
 
   // ── Save edited transaction ───────────────────────────────
@@ -500,7 +508,8 @@ const RegisterDetail: React.FC<{
               <>
                 <Tooltip title="Edit transaction">
                   <Button type="text" size="small"
-                    icon={<EditOutlined style={{ color: REDWOOD.info }} />}
+                    icon={<EditOutlined style={{ color: isLoading ? undefined : REDWOOD.info }} />}
+                    loading={isLoading}
                     disabled={isClosed}
                     onClick={() => openEditTransaction(txn)}
                   />
@@ -508,8 +517,7 @@ const RegisterDetail: React.FC<{
                 <Tooltip title="Delete transaction">
                   <Button type="text" danger size="small"
                     icon={<DeleteOutlined />}
-                    loading={isLoading}
-                    disabled={isClosed}
+                    disabled={isClosed || isLoading}
                     onClick={() => handleDeleteTransaction(txn)}
                   />
                 </Tooltip>

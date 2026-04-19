@@ -425,6 +425,66 @@ END;
     );
 
     -- ──────────────────────────────────────────────────────────────────────
+    -- GET /pc/transactions/:transactionId  — single transaction detail
+    -- ──────────────────────────────────────────────────────────────────────
+    ORDS.DEFINE_HANDLER(
+        p_module_name => 'pc',
+        p_pattern     => 'transactions/:transactionId',
+        p_method      => 'GET',
+        p_source_type => ORDS.source_type_plsql,
+        p_source      => '
+DECLARE
+    CURSOR c IS
+        SELECT t.TRANSACTION_ID, t.REGISTER_ID, t.LINE_NUMBER,
+               t.TRANSACTION_DATE, t.TRANSACTION_TYPE, t.EXPENSE_TYPE,
+               t.CHARGE_ACCOUNT_CCID, t.CHARGE_ACCOUNT_DESC,
+               t.ACCOUNTING_DATE, t.POSTING_STATUS, t.CURRENCY,
+               t.DEBIT_AMOUNT, t.CREDIT_AMOUNT,
+               t.COMMENTS, t.REFERENCE_NO, t.ATTACHMENT,
+               t.CREATED_BY, t.CREATION_DATE,
+               t.LAST_UPDATED_BY, t.LAST_UPDATE_DATE
+        FROM   RR_PC_TRANSACTIONS t
+        WHERE  t.TRANSACTION_ID = :transactionId;
+    rec c%ROWTYPE;
+BEGIN
+    OPEN c; FETCH c INTO rec; CLOSE c;
+    IF rec.TRANSACTION_ID IS NULL THEN
+        :status_code := 404;
+        HTP.PRN(''{"success":false,"message":"Transaction not found"}'');
+        RETURN;
+    END IF;
+    :status_code := 200;
+    APEX_JSON.INITIALIZE_CLOB_OUTPUT;
+    APEX_JSON.OPEN_OBJECT;
+    APEX_JSON.WRITE(''success'',           TRUE);
+    APEX_JSON.WRITE(''transactionId'',     rec.TRANSACTION_ID);
+    APEX_JSON.WRITE(''registerId'',        rec.REGISTER_ID);
+    APEX_JSON.WRITE(''lineNumber'',        rec.LINE_NUMBER);
+    APEX_JSON.WRITE(''transactionDate'',   TO_CHAR(rec.TRANSACTION_DATE,  ''DD-MON-YYYY''));
+    APEX_JSON.WRITE(''transactionType'',   rec.TRANSACTION_TYPE);
+    APEX_JSON.WRITE(''expenseType'',       rec.EXPENSE_TYPE);
+    APEX_JSON.WRITE(''chargeAccountCcid'', rec.CHARGE_ACCOUNT_CCID);
+    APEX_JSON.WRITE(''chargeAccountDesc'', rec.CHARGE_ACCOUNT_DESC);
+    APEX_JSON.WRITE(''accountingDate'',    TO_CHAR(rec.ACCOUNTING_DATE,   ''DD-MON-YYYY''));
+    APEX_JSON.WRITE(''postingStatus'',     rec.POSTING_STATUS);
+    APEX_JSON.WRITE(''currency'',          NVL(rec.CURRENCY,''AED''));
+    APEX_JSON.WRITE(''debitAmount'',       rec.DEBIT_AMOUNT);
+    APEX_JSON.WRITE(''creditAmount'',      rec.CREDIT_AMOUNT);
+    APEX_JSON.WRITE(''comments'',          rec.COMMENTS);
+    APEX_JSON.WRITE(''referenceNo'',       rec.REFERENCE_NO);
+    APEX_JSON.WRITE(''attachment'',        rec.ATTACHMENT);
+    APEX_JSON.WRITE(''createdBy'',         rec.CREATED_BY);
+    APEX_JSON.WRITE(''creationDate'',      TO_CHAR(rec.CREATION_DATE,     ''DD-MON-YYYY''));
+    APEX_JSON.WRITE(''lastUpdatedBy'',     rec.LAST_UPDATED_BY);
+    APEX_JSON.WRITE(''lastUpdateDate'',    TO_CHAR(rec.LAST_UPDATE_DATE,  ''DD-MON-YYYY''));
+    APEX_JSON.CLOSE_OBJECT;
+    HTP.PRN(APEX_JSON.GET_CLOB_OUTPUT);
+    APEX_JSON.FREE_OUTPUT;
+END;
+'
+    );
+
+    -- ──────────────────────────────────────────────────────────────────────
     -- PUT /pc/transactions/:transactionId  →  RR_PC_PKG.update_transaction
     -- ──────────────────────────────────────────────────────────────────────
     ORDS.DEFINE_HANDLER(

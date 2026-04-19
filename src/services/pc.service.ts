@@ -101,6 +101,13 @@ export async function deleteRegister(registerId: number): Promise<void> {
   if (!res.ok || !data.success) throw new Error(data?.message || `HTTP ${res.status}`);
 }
 
+export async function getTransaction(transactionId: number): Promise<PCTransaction> {
+  const res = await fetch(`${BASE}/transactions/${transactionId}`, { headers: { Accept: 'application/json' } });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.message || `HTTP ${res.status}`);
+  return data as PCTransaction;
+}
+
 export async function getTransactions(registerId: number): Promise<PCTransaction[]> {
   const res = await fetch(`${BASE}/registers/${registerId}/transactions`, { headers: { Accept: 'application/json' } });
   const data = await res.json();
