@@ -1532,7 +1532,7 @@ const PettyCash: React.FC = () => {
   const searchColumns: ColumnsType<PCRegister> = [
     { title: 'ID', dataIndex: 'registerId', width: 70, align: 'center',
       render: (v) => <Text style={{ fontSize: 12 }}>{v}</Text> },
-    { title: 'Register Name', dataIndex: 'registerName',
+    { title: 'Register Name', dataIndex: 'registerName', width: 220,
       render: (v, rec) => (
         <Button type="link" style={{ padding: 0, fontSize: 13, fontWeight: 500 }}
           onClick={(e) => { e.stopPropagation(); openRegisterTab(rec); }}>
