@@ -14,7 +14,7 @@ import {
   ReloadOutlined, EditOutlined, DeleteOutlined, CloseOutlined,
   DollarOutlined, MinusCircleOutlined, ArrowUpOutlined, ArrowDownOutlined,
   DownloadOutlined, RollbackOutlined, BankOutlined,
-  LockOutlined, UnlockOutlined, UserOutlined, FieldNumberOutlined,
+  LockOutlined, UnlockOutlined, UserOutlined, FieldNumberOutlined, ApiOutlined,
 } from '@ant-design/icons';
 import FloatingMenu from '../../components/FloatingMenu';
 import ApiDocsModal, { type ApiEndpoint } from '../../components/ApiDocsModal';
@@ -1701,13 +1701,29 @@ const PettyCash: React.FC = () => {
 
       {/* ── Edit Register Header Modal ─────────────────────── */}
       <Modal
-        title={<Space><EditOutlined style={{ color: REDWOOD.primary }} />Edit Register Header</Space>}
+        title={
+          <Space>
+            <EditOutlined style={{ color: REDWOOD.primary }} />
+            Edit Register Header
+            <Tooltip
+              overlayStyle={{ maxWidth: 480 }}
+              title={
+                <div style={{ fontFamily: 'monospace', fontSize: 11 }}>
+                  <div style={{ color: '#faad14', marginBottom: 4 }}>PUT</div>
+                  {`${APEX_DB_CONFIG.baseUrl}/pc/registers/${editRegTarget?.register.registerId ?? ':id'}`}
+                </div>
+              }
+            >
+              <ApiOutlined style={{ color: REDWOOD.neutral300, fontSize: 13, cursor: 'help' }} />
+            </Tooltip>
+          </Space>
+        }
         open={editRegOpen}
         onCancel={() => setEditRegOpen(false)}
         onOk={() => editRegForm.submit()}
         okText="Save"
         confirmLoading={editRegLoading}
-        width={480}
+        width={520}
         destroyOnClose
       >
         <Form form={editRegForm} layout="vertical" size="small" onFinish={handleEditRegister} style={{ marginTop: 16 }}>
@@ -1726,6 +1742,37 @@ const PettyCash: React.FC = () => {
                 <Button icon={<SearchOutlined />} onClick={() => setCoaRegOpen(true)} />
               </Tooltip>
             </Input.Group>
+          </Form.Item>
+
+          {/* Live JSON preview */}
+          <Form.Item shouldUpdate style={{ marginBottom: 0 }}>
+            {() => {
+              const v = editRegForm.getFieldsValue();
+              const body = {
+                cashAccountDesc: v.cashAccountDesc || null,
+                ownedBy:         v.ownedBy         || null,
+                limit:           v.limit           ?? null,
+                updatedBy:       currentUser,
+              };
+              return (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                    <ApiOutlined style={{ color: REDWOOD.info, fontSize: 12 }} />
+                    <span style={{ fontSize: 11, color: REDWOOD.neutral600, fontFamily: 'monospace' }}>
+                      PUT {`${APEX_DB_CONFIG.baseUrl}/pc/registers/${editRegTarget?.register.registerId ?? ':id'}`}
+                    </span>
+                  </div>
+                  <pre style={{
+                    background: '#1e1e1e', color: '#d4d4d4',
+                    borderRadius: 6, padding: '8px 12px',
+                    fontSize: 11, fontFamily: 'monospace',
+                    margin: 0, overflowX: 'auto', lineHeight: 1.5,
+                  }}>
+                    {JSON.stringify(body, null, 2)}
+                  </pre>
+                </div>
+              );
+            }}
           </Form.Item>
         </Form>
       </Modal>
