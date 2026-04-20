@@ -36,6 +36,8 @@ import {
   CloseCircleFilled,
   MinusCircleFilled,
   LoadingOutlined,
+  EyeInvisibleOutlined,
+  RightOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -240,6 +242,14 @@ const FloatingMenu: React.FC = () => {
   const navigate = useNavigate();
   const [activePanel, setActivePanel] = useState<'none' | 'tasks' | 'search' | 'reports' | 'match' | 'api'>('none');
   const [isClosing, setIsClosing] = useState(false);
+  const [menuHidden, setMenuHidden] = useState<boolean>(() => localStorage.getItem('floatingMenuHidden') === 'true');
+
+  const toggleMenuVisibility = () => {
+    const next = !menuHidden;
+    setMenuHidden(next);
+    localStorage.setItem('floatingMenuHidden', String(next));
+    if (next) closePanel();
+  };
   const [selectedTaskSection, setSelectedTaskSection] = useState<string>('invoices');
   const panelRef = useRef<HTMLDivElement>(null);
   const floatingIconsRef = useRef<HTMLDivElement>(null);
@@ -718,7 +728,39 @@ const FloatingMenu: React.FC = () => {
 
   return (
     <>
+      {/* Restore tab — shown only when menu is hidden */}
+      {menuHidden && (
+        <Tooltip title="Show floating menu" placement="left">
+          <div
+            onClick={toggleMenuVisibility}
+            style={{
+              position: 'fixed',
+              right: 0,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              zIndex: 1002,
+              width: 16,
+              height: 56,
+              background: REDWOOD.neutral300,
+              borderRadius: '6px 0 0 6px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              transition: 'background 0.2s',
+              color: REDWOOD.neutral600,
+              fontSize: 10,
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = REDWOOD.neutral600; (e.currentTarget as HTMLDivElement).style.color = '#fff'; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = REDWOOD.neutral300; (e.currentTarget as HTMLDivElement).style.color = REDWOOD.neutral600; }}
+          >
+            <RightOutlined style={{ fontSize: 8 }} />
+          </div>
+        </Tooltip>
+      )}
+
       {/* Floating Connected Icons */}
+      {!menuHidden && (
       <div
         ref={floatingIconsRef}
         style={{
@@ -774,10 +816,36 @@ const FloatingMenu: React.FC = () => {
           color="#1a1a2e"
           isActive={activePanel === 'api'}
           onClick={() => togglePanel('api')}
-          position="last"
+          position="middle"
           panelOpen={activePanel !== 'none' && !isClosing}
         />
+        <Tooltip title="Hide floating menu" placement="left">
+          <div
+            onClick={toggleMenuVisibility}
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: activePanel !== 'none' && !isClosing ? '0 0 0 8px' : '0 0 8px 8px',
+              background: REDWOOD.surface,
+              border: `2px solid ${REDWOOD.neutral300}`,
+              borderTop: 'none',
+              borderRight: activePanel !== 'none' && !isClosing ? 'none' : `2px solid ${REDWOOD.neutral300}`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              color: REDWOOD.neutral300,
+              fontSize: 14,
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = REDWOOD.neutral100; (e.currentTarget as HTMLDivElement).style.color = REDWOOD.neutral600; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = REDWOOD.surface; (e.currentTarget as HTMLDivElement).style.color = REDWOOD.neutral300; }}
+          >
+            <EyeInvisibleOutlined />
+          </div>
+        </Tooltip>
       </div>
+      )}
 
       {/* Backdrop Overlay */}
       {activePanel !== 'none' && (
