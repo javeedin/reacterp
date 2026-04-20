@@ -774,11 +774,14 @@ const RegisterDetail: React.FC<{
         <div style={{ marginBottom: 12, padding: '8px 12px', background: '#f0f9ff',
           borderRadius: 6, border: '1px solid #bae0ff', fontSize: 12 }}>
           <b>Cash Account:</b>{' '}
-          <Tooltip title={register.cashAccountDesc}>
-            <span style={{ color: '#1677ff', fontWeight: 500, cursor: 'default' }}>
-              {cashAccountName || register.cashAccountDesc}
-            </span>
-          </Tooltip>
+          <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>
+            {register.cashAccountDesc}
+          </span>
+          {cashAccountName && (
+            <div style={{ marginTop: 3, color: '#1677ff', paddingLeft: 2 }}>
+              {cashAccountName}
+            </div>
+          )}
         </div>
       )}
 
