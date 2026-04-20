@@ -595,11 +595,10 @@ const RegisterDetail: React.FC<{
         const hasLimit = register.limit != null && register.limit > 0;
         const canAdd   = hasLimit ? Math.max(0, register.limit! - register.balance) : null;
         const usedPct  = hasLimit ? Math.min(100, Math.round((register.balance / register.limit!) * 100)) : 0;
-        const colSpan  = hasLimit ? 4 : 6;
         return (
           <Row gutter={12} style={{ marginBottom: 16 }}>
             {/* Balance */}
-            <Col span={colSpan}>
+            <Col span={4}>
               <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
                 <Statistic
                   title={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Balance</Text>}
@@ -620,10 +619,10 @@ const RegisterDetail: React.FC<{
               </Card>
             </Col>
 
-            {/* Limit — only when set */}
-            {hasLimit && (
-              <Col span={4}>
-                <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
+            {/* Limit — always visible */}
+            <Col span={4}>
+              <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
+                {hasLimit ? (
                   <Statistic
                     title={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Limit</Text>}
                     value={register.limit!}
@@ -631,18 +630,23 @@ const RegisterDetail: React.FC<{
                     valueStyle={{ fontSize: 20, color: REDWOOD.neutral900 }}
                     suffix={<span style={{ fontSize: 12 }}>{register.currency}</span>}
                   />
-                </Card>
-              </Col>
-            )}
+                ) : (
+                  <>
+                    <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 4 }}>Limit</div>
+                    <div style={{ fontSize: 20, color: REDWOOD.neutral300 }}>—</div>
+                  </>
+                )}
+              </Card>
+            </Col>
 
-            {/* Can Add — only when limit is set */}
-            {hasLimit && (
-              <Col span={4}>
-                <Card size="small" style={{
-                  borderRadius: 8,
-                  border: `1px solid ${canAdd! > 0 ? '#b7eb8f' : REDWOOD.neutral200}`,
-                  background: canAdd! > 0 ? '#f6ffed' : undefined,
-                }}>
+            {/* Can Add — always visible */}
+            <Col span={4}>
+              <Card size="small" style={{
+                borderRadius: 8,
+                border: `1px solid ${hasLimit && canAdd! > 0 ? '#b7eb8f' : REDWOOD.neutral200}`,
+                background: hasLimit && canAdd! > 0 ? '#f6ffed' : undefined,
+              }}>
+                {hasLimit ? (
                   <Statistic
                     title={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Can Add</Text>}
                     value={canAdd!}
@@ -650,12 +654,17 @@ const RegisterDetail: React.FC<{
                     valueStyle={{ fontSize: 20, color: canAdd! > 0 ? REDWOOD.success : REDWOOD.neutral300 }}
                     suffix={<span style={{ fontSize: 12 }}>{register.currency}</span>}
                   />
-                </Card>
-              </Col>
-            )}
+                ) : (
+                  <>
+                    <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 4 }}>Can Add</div>
+                    <div style={{ fontSize: 20, color: REDWOOD.neutral300 }}>—</div>
+                  </>
+                )}
+              </Card>
+            </Col>
 
             {/* Total In */}
-            <Col span={colSpan}>
+            <Col span={4}>
               <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
                 <Statistic
                   title={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Total In (Debit)</Text>}
@@ -668,7 +677,7 @@ const RegisterDetail: React.FC<{
             </Col>
 
             {/* Total Out */}
-            <Col span={colSpan}>
+            <Col span={4}>
               <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
                 <Statistic
                   title={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Total Out (Credit)</Text>}
@@ -681,7 +690,7 @@ const RegisterDetail: React.FC<{
             </Col>
 
             {/* Register Info */}
-            <Col span={colSpan}>
+            <Col span={4}>
               <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
                 <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 4 }}>Register Info</div>
                 <div style={{ fontSize: 12 }}>
