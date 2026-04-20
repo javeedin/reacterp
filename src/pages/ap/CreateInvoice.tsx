@@ -3850,16 +3850,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           size="small"
           value={val}
           variant="borderless"
-          placeholder="Select…"
+          placeholder="Type or search…"
           disabled={isReadOnly}
-          readOnly
+          onChange={e => updateLine(record.key, 'distributionSet', e.target.value)}
           suffix={
             <SearchOutlined
               style={{ color: isReadOnly ? REDWOOD.neutral300 : REDWOOD.info, fontSize: 11, cursor: isReadOnly ? 'default' : 'pointer' }}
               onClick={() => {
                 if (isReadOnly) return;
                 setDistLovLineKey(record.key);
-                setDistLovSearch('');
+                setDistLovSearch(val || '');
                 setDistLovOpen(true);
               }}
             />
