@@ -19,7 +19,7 @@ import {
 } from '@ant-design/icons';
 import FloatingMenu from '../../components/FloatingMenu';
 import ApiDocsModal, { type ApiEndpoint } from '../../components/ApiDocsModal';
-import AccountSelector from '../../components/AccountSelector';
+import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
 import { useAuth } from '../../context/AuthContext';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import {
@@ -251,7 +251,8 @@ const RegisterDetail: React.FC<{
   tab: RegisterTab;
   onRefresh: () => void;
   currentUser: string;
-}> = ({ tab, onRefresh, currentUser }) => {
+  cashAccountName?: string;
+}> = ({ tab, onRefresh, currentUser, cashAccountName }) => {
   const { register, transactions, txnLoading } = tab;
   const [addMoneyOpen, setAddMoneyOpen]     = useState(false);
   const [addExpenseOpen, setAddExpenseOpen] = useState(false);
@@ -712,6 +713,11 @@ const RegisterDetail: React.FC<{
         <div style={{ marginBottom: 12, padding: '8px 12px', background: '#f0f9ff',
           borderRadius: 6, border: '1px solid #bae0ff', fontSize: 12 }}>
           <b>Cash Account:</b> {register.cashAccountDesc}
+          {cashAccountName && (
+            <span style={{ marginLeft: 12, color: '#1677ff', fontWeight: 500 }}>
+              — {cashAccountName}
+            </span>
+          )}
         </div>
       )}
 
@@ -1212,6 +1218,7 @@ const PettyCash: React.FC = () => {
 
   const [activeTab, setActiveTab]             = useState('search');
   const [openTabs, setOpenTabs]               = useState<RegisterTab[]>([]);
+  const [cashAccountNames, setCashAccountNames] = useState<Map<number, string>>(new Map());
   const [createTabOpen, setCreateTabOpen]     = useState(false);
   const openingKeys = React.useRef<Set<string>>(new Set());
 
@@ -1270,6 +1277,22 @@ const PettyCash: React.FC = () => {
     searchForm.setFieldsValue({ status: 'ACTIVE' });
     handleSearch();
   }, []);  // auto-search on mount with ACTIVE default
+
+  // ── Resolve cash account descriptions for open tabs ────────
+  useEffect(() => {
+    openTabs.forEach(tab => {
+      const reg = tab.register;
+      if (!reg.cashAccountDesc || cashAccountNames.has(reg.registerId)) return;
+      validateAccountCode(reg.cashAccountDesc).then(result => {
+        if (!result.segmentsLoaded || !Object.keys(result.segmentDetails).length) return;
+        const name = Object.values(result.segmentDetails)
+          .filter(d => d.description)
+          .map(d => d.description)
+          .join(' · ');
+        if (name) setCashAccountNames(prev => new Map(prev).set(reg.registerId, name));
+      });
+    });
+  }, [openTabs]);
 
   // ── Open register detail tab ───────────────────────────────
   const openRegisterTab = useCallback(async (reg: PCRegister) => {
@@ -1747,6 +1770,7 @@ const PettyCash: React.FC = () => {
             tab={tab}
             onRefresh={() => refreshTab(tab.key)}
             currentUser={currentUser}
+            cashAccountName={cashAccountNames.get(tab.register.registerId)}
           />
         </div>
       ),
@@ -1905,9 +1929,16 @@ const PettyCash: React.FC = () => {
       <AccountSelector
         visible={coaRegOpen}
         onCancel={() => setCoaRegOpen(false)}
-        onSelect={(accountCode) => {
+        onSelect={(accountCode, segmentDetails) => {
+          const name = Object.values(segmentDetails)
+            .filter(d => d.description)
+            .map(d => d.description)
+            .join(' · ');
           if (editRegOpen) {
             editRegForm.setFieldsValue({ cashAccountDesc: accountCode });
+            if (editRegTarget && name) {
+              setCashAccountNames(prev => new Map(prev).set(editRegTarget.register.registerId, name));
+            }
           } else {
             registerForm.setFieldsValue({ cashAccountDesc: accountCode });
           }
