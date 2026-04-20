@@ -15,6 +15,7 @@ import {
   DollarOutlined, MinusCircleOutlined, ArrowUpOutlined, ArrowDownOutlined,
   DownloadOutlined, RollbackOutlined, BankOutlined,
   LockOutlined, UnlockOutlined, UserOutlined, FieldNumberOutlined, ApiOutlined,
+  SwapOutlined,
 } from '@ant-design/icons';
 import FloatingMenu from '../../components/FloatingMenu';
 import ApiDocsModal, { type ApiEndpoint } from '../../components/ApiDocsModal';
@@ -1309,26 +1310,23 @@ const PettyCash: React.FC = () => {
     }
   };
 
-  // ── Close / Open register ─────────────────────────────────
+  // ── Change register status ────────────────────────────────
   const openRegAction = (tab: RegisterTab) => {
     setRegActionTarget(tab);
-    regActionForm.setFieldsValue({ closeDate: dayjs(), comments: '' });
+    regActionForm.setFieldsValue({ status: tab.register.status, comments: '' });
     setRegActionOpen(true);
   };
 
   const handleRegAction = async (values: any) => {
     if (!regActionTarget) return;
-    const isClosed = regActionTarget.register.status === 'CLOSED';
-    const newStatus = isClosed ? 'ACTIVE' : 'CLOSED';
     setRegActionLoading(true);
     try {
       await updateRegister(regActionTarget.register.registerId, {
-        status:    newStatus,
-        endDate:   isClosed ? undefined : (values.closeDate ? values.closeDate.format('YYYY-MM-DD') : undefined),
+        status:    values.status,
         comments:  values.comments || undefined,
         updatedBy: currentUser,
       });
-      message.success(`Register ${isClosed ? 'reopened' : 'closed'} successfully`);
+      message.success(`Status changed to ${values.status}`);
       setRegActionOpen(false);
       await refreshTab(regActionTarget.key);
       await handleSearch();
@@ -1631,25 +1629,20 @@ const PettyCash: React.FC = () => {
               >
                 Edit Header
               </Button>
-              {tab.register.status === 'CLOSED' ? (
-                <Button
-                  size="small"
-                  icon={<UnlockOutlined />}
-                  style={{ borderColor: REDWOOD.success, color: REDWOOD.success }}
-                  onClick={() => openRegAction(tab)}
-                >
-                  Open Register
-                </Button>
-              ) : (
-                <Button
-                  size="small"
-                  icon={<LockOutlined />}
-                  danger
-                  onClick={() => openRegAction(tab)}
-                >
-                  Close Register
-                </Button>
-              )}
+              <Button
+                size="small"
+                icon={<SwapOutlined />}
+                onClick={() => openRegAction(tab)}
+              >
+                Change Status
+              </Button>
+              <Button
+                size="small"
+                icon={<CloseOutlined />}
+                onClick={() => closeTab(tab.key)}
+              >
+                Close Tab
+              </Button>
             </Space>
           </div>
           <RegisterDetail
@@ -1777,38 +1770,35 @@ const PettyCash: React.FC = () => {
         </Form>
       </Modal>
 
-      {/* ── Close / Open Register Modal ────────────────────── */}
+      {/* ── Change Status Modal ────────────────────────────── */}
       <Modal
         title={
           <Space>
-            {regActionTarget?.register.status === 'CLOSED'
-              ? <UnlockOutlined style={{ color: REDWOOD.success }} />
-              : <LockOutlined style={{ color: REDWOOD.error }} />}
-            {regActionTarget?.register.status === 'CLOSED' ? 'Open Register' : 'Close Register'}
+            <SwapOutlined style={{ color: REDWOOD.primary }} />
+            Change Register Status
+            <Tag style={{ fontSize: 11 }}>{regActionTarget?.register.registerName}</Tag>
           </Space>
         }
         open={regActionOpen}
         onCancel={() => setRegActionOpen(false)}
         onOk={() => regActionForm.submit()}
-        okText={regActionTarget?.register.status === 'CLOSED' ? 'Open' : 'Close'}
-        okButtonProps={{
-          danger: regActionTarget?.register.status !== 'CLOSED',
-          style: regActionTarget?.register.status === 'CLOSED'
-            ? { background: REDWOOD.success, borderColor: REDWOOD.success }
-            : undefined,
-        }}
+        okText="Apply"
+        okButtonProps={{ style: { background: REDWOOD.primary, borderColor: REDWOOD.primary } }}
         confirmLoading={regActionLoading}
         width={420}
         destroyOnClose
       >
         <Form form={regActionForm} layout="vertical" size="small" onFinish={handleRegAction} style={{ marginTop: 16 }}>
-          {regActionTarget?.register.status !== 'CLOSED' && (
-            <Form.Item label="Close Date" name="closeDate">
-              <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" />
-            </Form.Item>
-          )}
+          <Form.Item label="New Status" name="status" rules={[{ required: true, message: 'Select a status' }]}>
+            <Select>
+              <Option value="DRAFT"><Tag color="default" style={{ fontSize: 11 }}>DRAFT</Tag> — set up, not yet active</Option>
+              <Option value="ACTIVE"><Tag color="green" style={{ fontSize: 11 }}>ACTIVE</Tag> — open for transactions</Option>
+              <Option value="INACTIVE"><Tag color="orange" style={{ fontSize: 11 }}>INACTIVE</Tag> — temporarily suspended</Option>
+              <Option value="CLOSED"><Tag color="red" style={{ fontSize: 11 }}>CLOSED</Tag> — permanently closed</Option>
+            </Select>
+          </Form.Item>
           <Form.Item label="Comments" name="comments">
-            <Input.TextArea rows={3} placeholder="Reason for closing / reopening…" />
+            <Input.TextArea rows={3} placeholder="Reason for status change…" />
           </Form.Item>
         </Form>
       </Modal>
