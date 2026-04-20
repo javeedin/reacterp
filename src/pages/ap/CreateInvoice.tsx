@@ -30,6 +30,7 @@ import {
   Upload,
   Badge,
   Popover,
+  AutoComplete,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -3846,25 +3847,55 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       key: 'distributionSet',
       width: 200,
       render: (val: string, record: InvoiceLine) => (
-        <Input
+        <AutoComplete
           size="small"
           value={val}
-          variant="borderless"
-          placeholder="Type or search…"
           disabled={isReadOnly}
-          onChange={e => updateLine(record.key, 'distributionSet', e.target.value)}
-          suffix={
-            <SearchOutlined
-              style={{ color: isReadOnly ? REDWOOD.neutral300 : REDWOOD.info, fontSize: 11, cursor: isReadOnly ? 'default' : 'pointer' }}
-              onClick={() => {
-                if (isReadOnly) return;
-                setDistLovLineKey(record.key);
-                setDistLovSearch(val || '');
-                setDistLovOpen(true);
-              }}
-            />
-          }
-        />
+          placeholder="Type or search…"
+          style={{ width: '100%' }}
+          options={distCombinations
+            .filter(d => {
+              if (!val) return true;
+              const q = val.toLowerCase();
+              return d.combinationName.toLowerCase().includes(q)
+                || (d.description || '').toLowerCase().includes(q)
+                || (d.glAccountDesc || '').toLowerCase().includes(q);
+            })
+            .map(d => ({
+              value: d.combinationName,
+              label: (
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600 }}>{d.combinationName}</span>
+                  <span style={{ fontSize: 11, color: REDWOOD.neutral300, fontFamily: 'monospace' }}>{d.glAccountDesc || ''}</span>
+                </div>
+              ),
+              combination: d,
+            }))}
+          onChange={v => updateLine(record.key, 'distributionSet', v)}
+          onSelect={(_v, opt) => {
+            const d = (opt as { combination: DistCombination }).combination;
+            updateLine(record.key, 'distributionSet', d.combinationName);
+            if (d.glAccountDesc) updateLine(record.key, 'distributionCombination', d.glAccountDesc);
+          }}
+          filterOption={false}
+          notFoundContent={val ? <span style={{ fontSize: 12, color: REDWOOD.neutral300 }}>No match</span> : null}
+        >
+          <Input
+            size="small"
+            variant="borderless"
+            suffix={
+              <SearchOutlined
+                style={{ color: isReadOnly ? REDWOOD.neutral300 : REDWOOD.info, fontSize: 11, cursor: isReadOnly ? 'default' : 'pointer' }}
+                onClick={() => {
+                  if (isReadOnly) return;
+                  setDistLovLineKey(record.key);
+                  setDistLovSearch(val || '');
+                  setDistLovOpen(true);
+                }}
+              />
+            }
+          />
+        </AutoComplete>
       ),
     },
     {
