@@ -309,16 +309,20 @@ const RegisterDetail: React.FC<{
   }, [transactions, distCombinations]);
 
   // ── Load bank accounts filtered by BU ────────────────────────
+  const BANK_ACCOUNTS_URL = `${APEX_DB_CONFIG.baseUrl}/banks/bankaccounts`;
+  const EXT_TXN_URL       = `${APEX_DB_CONFIG.baseUrl}/cash/externaltransactions`;
+
   const loadBankAccountsByBU = (bu: string) => {
     setBankAccounts([]);
-    const qs = bu ? `?businessUnitName=${encodeURIComponent(bu)}&row_limit=500` : '?row_limit=500';
-    fetch(`${APEX_DB_CONFIG.baseUrl}/cash/externaltransactions${qs}`, {
-      headers: { Accept: 'application/json' },
-    })
+    fetch(BANK_ACCOUNTS_URL, { headers: { Accept: 'application/json' } })
       .then(r => r.json())
       .then(data => {
+        const all = (data.items || []) as any[];
+        const filtered = bu
+          ? all.filter(i => (i.business_unit_name || i.businessUnitName || '').toLowerCase() === bu.toLowerCase())
+          : all;
         const names = [
-          ...new Set((data.items || []).map((t: any) => t.bankAccountName).filter(Boolean)),
+          ...new Set(filtered.map((i: any) => i.bank_account_name || i.bankAccountName || '').filter(Boolean)),
         ] as string[];
         setBankAccounts(names);
       })
@@ -583,7 +587,7 @@ const RegisterDetail: React.FC<{
       }],
     };
     try {
-      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/cash/externaltransactions`, {
+      const res = await fetch(EXT_TXN_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(payload),
@@ -595,7 +599,7 @@ const RegisterDetail: React.FC<{
         try {
           await new Promise(r => setTimeout(r, 400));
           const srch = await fetch(
-            `${APEX_DB_CONFIG.baseUrl}/cash/externaltransactions?source=ORA_MAN&reference=${encodeURIComponent(uniqueRef)}&row_limit=5`,
+            `${EXT_TXN_URL}?source=ORA_MAN&reference=${encodeURIComponent(uniqueRef)}&row_limit=5`,
             { headers: { Accept: 'application/json' } }
           );
           const srchData = await srch.json();
@@ -1091,7 +1095,19 @@ const RegisterDetail: React.FC<{
 
       {/* ── Create Bank Transaction Mini-Modal ────────────────── */}
       <Modal
-        title={<Space><BankOutlined style={{ color: REDWOOD.info }} /> Create Bank Transaction</Space>}
+        title={
+          <Space style={{ width: '100%', justifyContent: 'space-between', paddingRight: 32 }}>
+            <Space><BankOutlined style={{ color: REDWOOD.info }} /> Create Bank Transaction</Space>
+            <Space size={4}>
+              <Tooltip title={<><b>GET Bank Accounts</b><br />{BANK_ACCOUNTS_URL}</>} placement="bottomRight">
+                <Tag icon={<ApiOutlined />} color="blue" style={{ cursor: 'help', fontSize: 11 }}>Bank Accounts</Tag>
+              </Tooltip>
+              <Tooltip title={<><b>POST External Transaction</b><br />{EXT_TXN_URL}</>} placement="bottomRight">
+                <Tag icon={<ApiOutlined />} color="green" style={{ cursor: 'help', fontSize: 11 }}>Post Txn</Tag>
+              </Tooltip>
+            </Space>
+          </Space>
+        }
         open={bankTxnModalOpen}
         onCancel={() => setBankTxnModalOpen(false)}
         footer={null}
