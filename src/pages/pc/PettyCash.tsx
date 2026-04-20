@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Layout, Card, Typography, Breadcrumb, Tabs, Form, Input, Select,
   DatePicker, Button, Table, Tag, Row, Col, Space, Divider,
-  Modal, InputNumber, message, Tooltip, Statistic, Collapse, Progress,
+  Modal, InputNumber, message, Tooltip, Statistic, Collapse, Progress, Descriptions,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { Link } from 'react-router-dom';
@@ -278,6 +278,9 @@ const RegisterDetail: React.FC<{
   const [bankTxnSaving, setBankTxnSaving] = useState(false);
   const [bankAccounts, setBankAccounts]   = useState<{ name: string; cashAccount: string; currency: string }[]>([]);
   const [buLegalEntityMap, setBuLegalEntityMap] = useState<Map<string, string>>(new Map());
+  const [bankTxnDetailOpen, setBankTxnDetailOpen]     = useState(false);
+  const [bankTxnDetail, setBankTxnDetail]             = useState<any>(null);
+  const [bankTxnDetailLoading, setBankTxnDetailLoading] = useState(false);
   const [chargeAcctResolved, setChargeAcctResolved] =
     useState<Map<number, { code: string; desc: string }>>(new Map());
 
@@ -568,6 +571,7 @@ const RegisterDetail: React.FC<{
         chargeAccountCcid:  values.chargeAccountCcid || null,
         chargeAccountDesc:  values.chargeAccountDesc || null,
         referenceNo:        values.referenceNo,
+        bankTxnId:          linkedBankTxnRef ? (Number(linkedBankTxnRef) || null) : null,
         comments:           values.comments,
         postingStatus:      'Unposted',
         createdBy:          currentUser,
@@ -584,6 +588,20 @@ const RegisterDetail: React.FC<{
     } finally {
       setSaving(false);
     }
+  };
+
+  // ── Open bank transaction detail popup ────────────────────
+  const openBankTxnDetail = async (bankTxnId: number) => {
+    setBankTxnDetailLoading(true);
+    setBankTxnDetailOpen(true);
+    setBankTxnDetail(null);
+    try {
+      const res  = await fetch(`${EXT_TXN_URL}?transaction_number=${bankTxnId}&row_limit=1`, { headers: { Accept: 'application/json' } });
+      const data = await res.json();
+      const item = (data.items || [])[0] || null;
+      setBankTxnDetail(item);
+    } catch { setBankTxnDetail(null); }
+    finally { setBankTxnDetailLoading(false); }
   };
 
   // ── Create Bank Transaction (from Add Money) ──────────────
@@ -740,6 +758,10 @@ const RegisterDetail: React.FC<{
       render: (v) => <PostingTag status={v} /> },
     { title: 'Reference', dataIndex: 'referenceNo', width: 120,
       render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+    { title: 'Bank Txn ID', dataIndex: 'bankTxnId', width: 100,
+      render: (v: number | null) => v
+        ? <a style={{ fontSize: 12, fontFamily: 'monospace' }} onClick={() => openBankTxnDetail(v)}>{v}</a>
+        : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
     { title: 'Comments', dataIndex: 'comments', ellipsis: true,
       render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Created By', dataIndex: 'createdBy', width: 130, ellipsis: true,
@@ -1540,6 +1562,45 @@ const RegisterDetail: React.FC<{
           setCoaOpen(false);
         }}
       />
+
+      {/* ── Bank Transaction Detail Popup ─────────────────────── */}
+      <Modal
+        title={<Space><BankOutlined style={{ color: REDWOOD.info }} /> Bank Transaction {bankTxnDetail?.transactionId ?? ''}</Space>}
+        open={bankTxnDetailOpen}
+        onCancel={() => setBankTxnDetailOpen(false)}
+        footer={<Button onClick={() => setBankTxnDetailOpen(false)}>Close</Button>}
+        width={620}
+        zIndex={1050}
+      >
+        {bankTxnDetailLoading ? (
+          <div style={{ textAlign: 'center', padding: 32 }}><Text type="secondary">Loading…</Text></div>
+        ) : bankTxnDetail ? (
+          <Descriptions size="small" bordered column={2} labelStyle={{ fontWeight: 600, fontSize: 12 }} contentStyle={{ fontSize: 12 }}>
+            <Descriptions.Item label="Txn Number">{bankTxnDetail.transactionId ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Status">{bankTxnDetail.status ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Bank Account" span={2}>{bankTxnDetail.bankAccountName ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Business Unit" span={2}>{bankTxnDetail.businessUnitName ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Txn Date">{bankTxnDetail.transactionDate ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Value Date">{bankTxnDetail.valueDate ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Amount">{bankTxnDetail.amount ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Currency">{bankTxnDetail.currencyCode ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Txn Type">{bankTxnDetail.transactionType ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Source">{bankTxnDetail.source ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Reference" span={2}>{bankTxnDetail.referenceText ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Asset Account" span={2}>
+              <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{bankTxnDetail.assetAccountCombination ?? '—'}</Text>
+            </Descriptions.Item>
+            <Descriptions.Item label="Offset Account" span={2}>
+              <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{bankTxnDetail.offsetAccountCombination ?? '—'}</Text>
+            </Descriptions.Item>
+            <Descriptions.Item label="Description" span={2}>{bankTxnDetail.description ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Created By">{bankTxnDetail.createdBy ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Created On">{bankTxnDetail.creationDate ?? '—'}</Descriptions.Item>
+          </Descriptions>
+        ) : (
+          <div style={{ textAlign: 'center', padding: 32 }}><Text type="secondary">Bank transaction not found.</Text></div>
+        )}
+      </Modal>
     </>
   );
 };
