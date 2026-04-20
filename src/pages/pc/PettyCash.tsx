@@ -271,27 +271,36 @@ const RegisterDetail: React.FC<{
   const [coaTarget, setCoaTarget] = useState<'add' | 'edit'>('edit');
   const [addAcctDesc, setAddAcctDesc]     = useState<string>('');
   const [editAcctDesc, setEditAcctDesc]   = useState<string>('');
-  const [chargeAcctNames, setChargeAcctNames] = useState<Map<number, string>>(new Map());
+  const [chargeAcctResolved, setChargeAcctResolved] =
+    useState<Map<number, { code: string; desc: string }>>(new Map());
 
-  const isClosed   = register.status !== 'ACTIVE';   // DRAFT / INACTIVE / CLOSED all block transactions
+  const isClosed   = register.status !== 'ACTIVE';
   const noBalance  = register.balance <= 0;
 
-  // ── Resolve charge account segment-4 descriptions ─────────
+  // ── Resolve charge account combination + description for table ─
   useEffect(() => {
     const isCombCode = (v: string) => (v.match(/-/g) || []).length >= 5;
-    const unresolved = transactions.filter(t =>
-      t.chargeAccountDesc && isCombCode(t.chargeAccountDesc) && !chargeAcctNames.has(t.transactionId)
-    );
-    unresolved.forEach(t => {
-      validateAccountCode(t.chargeAccountDesc!).then(result => {
-        if (!result.segmentsLoaded) return;
-        const seg4 = Object.values(result.segmentDetails)[3]; // 0-indexed: seg4 = index 3
-        if (seg4?.description) {
-          setChargeAcctNames(prev => new Map(prev).set(t.transactionId, seg4.description));
-        }
-      });
+    transactions.forEach(t => {
+      if (!t.chargeAccountDesc || chargeAcctResolved.has(t.transactionId)) return;
+      if (isCombCode(t.chargeAccountDesc)) {
+        // Combination code stored → resolve segment-4 description async
+        validateAccountCode(t.chargeAccountDesc).then(result => {
+          const seg4 = Object.values(result.segmentDetails)[3];
+          setChargeAcctResolved(prev => new Map(prev).set(t.transactionId, {
+            code: t.chargeAccountDesc!,
+            desc: seg4?.description || '',
+          }));
+        });
+      } else {
+        // Description stored → reverse-lookup combination code from loaded combos
+        const match = distCombinations.find(d => d.glAccountDesc === t.chargeAccountDesc);
+        setChargeAcctResolved(prev => new Map(prev).set(t.transactionId, {
+          code: match?.combinationName || '',
+          desc: t.chargeAccountDesc!,
+        }));
+      }
     });
-  }, [transactions]);
+  }, [transactions, distCombinations]);
 
   // ── Load distribution combinations + open AP periods on mount ─
   useEffect(() => {
@@ -580,14 +589,17 @@ const RegisterDetail: React.FC<{
           {fmt(v)}
         </Text>
       )},
-    { title: 'Charge Account', dataIndex: 'chargeAccountDesc', width: 160,
-      render: (v, rec) => {
-        const name = chargeAcctNames.get(rec.transactionId) || v;
-        return (
-          <Tooltip title={v && v !== name ? v : undefined}>
-            <Text style={{ fontSize: 11 }}>{name || '—'}</Text>
-          </Tooltip>
-        );
+    { title: 'Charge Account', dataIndex: 'chargeAccountDesc', width: 180,
+      render: (_v, rec) => {
+        const r = chargeAcctResolved.get(rec.transactionId);
+        const code = r?.code || rec.chargeAccountDesc || '';
+        return <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{code || '—'}</Text>;
+      }},
+    { title: 'Acct Description', dataIndex: 'chargeAccountDesc', width: 160,
+      render: (_v, rec) => {
+        const r = chargeAcctResolved.get(rec.transactionId);
+        const desc = r?.desc || '';
+        return <Text style={{ fontSize: 11 }}>{desc || '—'}</Text>;
       }},
     { title: 'Acct Date', dataIndex: 'accountingDate', width: 100,
       render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
