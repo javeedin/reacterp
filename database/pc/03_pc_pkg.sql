@@ -85,6 +85,8 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         l_acc_desc VARCHAR2(400);
         l_currency VARCHAR2(10);
         l_status   VARCHAR2(50);
+        l_owned_by VARCHAR2(240);
+        l_limit    NUMBER;
         l_by       VARCHAR2(150);
     BEGIN
         p_error := NULL;
@@ -99,6 +101,8 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         l_acc_desc := APEX_JSON.GET_VARCHAR2(p_path => 'cashAccountDesc');
         l_currency := NVL(APEX_JSON.GET_VARCHAR2(p_path => 'currency'), 'AED');
         l_status   := NVL(APEX_JSON.GET_VARCHAR2(p_path => 'status'), 'DRAFT');
+        l_owned_by := APEX_JSON.GET_VARCHAR2(p_path => 'ownedBy');
+        l_limit    := APEX_JSON.GET_NUMBER  (p_path => 'limit');
         l_by       := APEX_JSON.GET_VARCHAR2(p_path => 'createdBy');
 
         IF l_name IS NULL THEN
@@ -117,12 +121,12 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         INSERT INTO RR_PC_REGISTERS (
             REGISTER_NAME, BUSINESS_UNIT, START_DATE, END_DATE, COMMENTS,
             CASH_ACCOUNT_CCID, CASH_ACCOUNT_DESC, CURRENCY,
-            STATUS, CREATED_BY, CREATION_DATE,
+            STATUS, OWNED_BY, CASH_LIMIT, CREATED_BY, CREATION_DATE,
             LAST_UPDATED_BY, LAST_UPDATE_DATE
         ) VALUES (
             l_name, l_bu, l_start, l_end, l_comments,
             l_ccid, l_acc_desc, l_currency,
-            l_status, l_by, SYSTIMESTAMP,
+            l_status, l_owned_by, l_limit, l_by, SYSTIMESTAMP,
             l_by, SYSTIMESTAMP
         ) RETURNING REGISTER_ID INTO p_id;
 
@@ -154,6 +158,8 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         l_acc_desc VARCHAR2(400);
         l_currency VARCHAR2(10);
         l_status   VARCHAR2(50);
+        l_owned_by VARCHAR2(240);
+        l_limit    NUMBER;
         l_by       VARCHAR2(150);
         l_balance  NUMBER;
     BEGIN
@@ -170,6 +176,8 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         l_acc_desc := APEX_JSON.GET_VARCHAR2(p_path => 'cashAccountDesc');
         l_currency := APEX_JSON.GET_VARCHAR2(p_path => 'currency');
         l_status   := APEX_JSON.GET_VARCHAR2(p_path => 'status');
+        l_owned_by := APEX_JSON.GET_VARCHAR2(p_path => 'ownedBy');
+        l_limit    := APEX_JSON.GET_NUMBER  (p_path => 'limit');
         l_by       := APEX_JSON.GET_VARCHAR2(p_path => 'updatedBy');
 
         -- Validate INACTIVE transition: balance must be zero
@@ -197,6 +205,8 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
             CASH_ACCOUNT_DESC = l_acc_desc,
             CURRENCY          = NVL(l_currency, CURRENCY),
             STATUS            = NVL(l_status,   STATUS),
+            OWNED_BY          = l_owned_by,
+            CASH_LIMIT        = l_limit,
             LAST_UPDATED_BY   = l_by,
             LAST_UPDATE_DATE  = SYSTIMESTAMP
         WHERE REGISTER_ID = p_register_id;

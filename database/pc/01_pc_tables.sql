@@ -70,6 +70,31 @@ BEGIN
 END;
 /
 
+-- Safe: add OWNED_BY if missing
+DECLARE l_count NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO l_count FROM user_tab_columns
+    WHERE  table_name = 'RR_PC_REGISTERS' AND column_name = 'OWNED_BY';
+    IF l_count = 0 THEN
+        EXECUTE IMMEDIATE 'ALTER TABLE RR_PC_REGISTERS ADD (OWNED_BY VARCHAR2(240))';
+    END IF;
+END;
+/
+
+-- Safe: add CASH_LIMIT if missing
+DECLARE l_count NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO l_count FROM user_tab_columns
+    WHERE  table_name = 'RR_PC_REGISTERS' AND column_name = 'CASH_LIMIT';
+    IF l_count = 0 THEN
+        EXECUTE IMMEDIATE 'ALTER TABLE RR_PC_REGISTERS ADD (CASH_LIMIT NUMBER(18,2))';
+    END IF;
+END;
+/
+
+COMMENT ON COLUMN RR_PC_REGISTERS.OWNED_BY   IS 'Person or department responsible for this petty cash register';
+COMMENT ON COLUMN RR_PC_REGISTERS.CASH_LIMIT IS 'Maximum allowed balance / spending limit for this register';
+
 -- Safe: update STATUS constraint to DRAFT | ACTIVE | INACTIVE | CLOSED
 DECLARE l_count NUMBER;
 BEGIN

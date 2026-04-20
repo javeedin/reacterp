@@ -66,6 +66,8 @@ DECLARE
                r.CASH_ACCOUNT_DESC,
                r.CURRENCY,
                r.STATUS,
+               r.OWNED_BY,
+               r.CASH_LIMIT,
                r.CREATED_BY,
                r.CREATION_DATE,
                NVL(SUM(t.DEBIT_AMOUNT),0) - NVL(SUM(t.CREDIT_AMOUNT),0) AS BALANCE,
@@ -80,7 +82,8 @@ DECLARE
         AND    (:dateTo   IS NULL OR r.END_DATE   <= TO_DATE(:dateTo,  ''YYYY-MM-DD''))
         GROUP BY r.REGISTER_ID, r.REGISTER_NAME, r.BUSINESS_UNIT, r.START_DATE, r.END_DATE,
                  r.COMMENTS, r.CASH_ACCOUNT_CCID, r.CASH_ACCOUNT_DESC,
-                 r.CURRENCY, r.STATUS, r.CREATED_BY, r.CREATION_DATE
+                 r.CURRENCY, r.STATUS, r.OWNED_BY, r.CASH_LIMIT,
+                 r.CREATED_BY, r.CREATION_DATE
         ORDER BY r.REGISTER_ID DESC;
 BEGIN
     :status_code := 200;
@@ -103,6 +106,8 @@ BEGIN
         APEX_JSON.WRITE(''balance'',         rec.BALANCE);
         APEX_JSON.WRITE(''totalDebit'',      rec.TOTAL_DEBIT);
         APEX_JSON.WRITE(''totalCredit'',     rec.TOTAL_CREDIT);
+        APEX_JSON.WRITE(''ownedBy'',         rec.OWNED_BY);
+        APEX_JSON.WRITE(''limit'',           rec.CASH_LIMIT);
         APEX_JSON.WRITE(''createdBy'',       rec.CREATED_BY);
         APEX_JSON.WRITE(''creationDate'',    TO_CHAR(rec.CREATION_DATE,''DD-MON-YYYY''));
         APEX_JSON.CLOSE_OBJECT;
@@ -167,7 +172,8 @@ DECLARE
         SELECT r.REGISTER_ID, r.REGISTER_NAME, r.BUSINESS_UNIT,
                r.START_DATE, r.END_DATE,
                r.COMMENTS, r.CASH_ACCOUNT_CCID, r.CASH_ACCOUNT_DESC,
-               r.CURRENCY, r.STATUS, r.CREATED_BY, r.CREATION_DATE,
+               r.CURRENCY, r.STATUS, r.OWNED_BY, r.CASH_LIMIT,
+               r.CREATED_BY, r.CREATION_DATE,
                NVL(SUM(t.DEBIT_AMOUNT),0) - NVL(SUM(t.CREDIT_AMOUNT),0) AS BALANCE,
                NVL(SUM(t.DEBIT_AMOUNT),0)  AS TOTAL_DEBIT,
                NVL(SUM(t.CREDIT_AMOUNT),0) AS TOTAL_CREDIT
@@ -177,7 +183,8 @@ DECLARE
         GROUP BY r.REGISTER_ID, r.REGISTER_NAME, r.BUSINESS_UNIT,
                  r.START_DATE, r.END_DATE,
                  r.COMMENTS, r.CASH_ACCOUNT_CCID, r.CASH_ACCOUNT_DESC,
-                 r.CURRENCY, r.STATUS, r.CREATED_BY, r.CREATION_DATE;
+                 r.CURRENCY, r.STATUS, r.OWNED_BY, r.CASH_LIMIT,
+                 r.CREATED_BY, r.CREATION_DATE;
     rec c%ROWTYPE;
 BEGIN
     OPEN c; FETCH c INTO rec; CLOSE c;
@@ -203,6 +210,8 @@ BEGIN
     APEX_JSON.WRITE(''balance'',         rec.BALANCE);
     APEX_JSON.WRITE(''totalDebit'',      rec.TOTAL_DEBIT);
     APEX_JSON.WRITE(''totalCredit'',     rec.TOTAL_CREDIT);
+    APEX_JSON.WRITE(''ownedBy'',         rec.OWNED_BY);
+    APEX_JSON.WRITE(''limit'',           rec.CASH_LIMIT);
     APEX_JSON.WRITE(''createdBy'',       rec.CREATED_BY);
     APEX_JSON.WRITE(''creationDate'',    TO_CHAR(rec.CREATION_DATE,''DD-MON-YYYY''));
     APEX_JSON.CLOSE_OBJECT;
