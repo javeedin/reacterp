@@ -269,9 +269,27 @@ const RegisterDetail: React.FC<{
   const [txnActionLoading, setTxnActionLoading] = useState<number | null>(null);
   const [coaOpen, setCoaOpen]     = useState(false);
   const [coaTarget, setCoaTarget] = useState<'add' | 'edit'>('edit');
+  const [chargeAcctNames, setChargeAcctNames] = useState<Map<number, string>>(new Map());
 
   const isClosed   = register.status !== 'ACTIVE';   // DRAFT / INACTIVE / CLOSED all block transactions
   const noBalance  = register.balance <= 0;
+
+  // ── Resolve charge account segment-4 descriptions ─────────
+  useEffect(() => {
+    const isCombCode = (v: string) => (v.match(/-/g) || []).length >= 5;
+    const unresolved = transactions.filter(t =>
+      t.chargeAccountDesc && isCombCode(t.chargeAccountDesc) && !chargeAcctNames.has(t.transactionId)
+    );
+    unresolved.forEach(t => {
+      validateAccountCode(t.chargeAccountDesc!).then(result => {
+        if (!result.segmentsLoaded) return;
+        const seg4 = Object.values(result.segmentDetails)[3]; // 0-indexed: seg4 = index 3
+        if (seg4?.description) {
+          setChargeAcctNames(prev => new Map(prev).set(t.transactionId, seg4.description));
+        }
+      });
+    });
+  }, [transactions]);
 
   // ── Load distribution combinations + open AP periods on mount ─
   useEffect(() => {
@@ -539,7 +557,14 @@ const RegisterDetail: React.FC<{
         </Text>
       )},
     { title: 'Charge Account', dataIndex: 'chargeAccountDesc', width: 160,
-      render: (v) => <Text style={{ fontSize: 11 }}>{v || '—'}</Text> },
+      render: (v, rec) => {
+        const name = chargeAcctNames.get(rec.transactionId) || v;
+        return (
+          <Tooltip title={v && v !== name ? v : undefined}>
+            <Text style={{ fontSize: 11 }}>{name || '—'}</Text>
+          </Tooltip>
+        );
+      }},
     { title: 'Acct Date', dataIndex: 'accountingDate', width: 100,
       render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Posting', dataIndex: 'postingStatus', width: 90,
@@ -712,12 +737,12 @@ const RegisterDetail: React.FC<{
       {register.cashAccountDesc && (
         <div style={{ marginBottom: 12, padding: '8px 12px', background: '#f0f9ff',
           borderRadius: 6, border: '1px solid #bae0ff', fontSize: 12 }}>
-          <b>Cash Account:</b> {register.cashAccountDesc}
-          {cashAccountName && (
-            <span style={{ marginLeft: 12, color: '#1677ff', fontWeight: 500 }}>
-              — {cashAccountName}
+          <b>Cash Account:</b>{' '}
+          <Tooltip title={register.cashAccountDesc}>
+            <span style={{ color: '#1677ff', fontWeight: 500, cursor: 'default' }}>
+              {cashAccountName || register.cashAccountDesc}
             </span>
-          )}
+          </Tooltip>
         </div>
       )}
 
@@ -1144,9 +1169,10 @@ const RegisterDetail: React.FC<{
       <AccountSelector
         visible={coaOpen}
         onCancel={() => setCoaOpen(false)}
-        onSelect={(accountCode) => {
+        onSelect={(accountCode, segmentDetails) => {
+          const seg4Desc = Object.values(segmentDetails)[3]?.description;
           const form = coaTarget === 'add' ? expenseForm : editTxnForm;
-          form.setFieldsValue({ chargeAccountDesc: accountCode, chargeAccountCcid: null });
+          form.setFieldsValue({ chargeAccountDesc: seg4Desc || accountCode, chargeAccountCcid: null });
           setCoaOpen(false);
         }}
       />
