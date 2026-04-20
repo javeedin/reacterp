@@ -670,7 +670,7 @@ const RegisterDetail: React.FC<{
           </Button>
           <Button
             icon={<DollarOutlined />}
-            style={{ background: REDWOOD.success, borderColor: REDWOOD.success, color: '#fff' }}
+            style={!isClosed ? { background: REDWOOD.success, borderColor: REDWOOD.success, color: '#fff' } : {}}
             disabled={isClosed}
             onClick={() => { moneyForm.resetFields(); setAddMoneyOpen(true); }}
           >
