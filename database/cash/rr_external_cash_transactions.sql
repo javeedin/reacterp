@@ -69,14 +69,16 @@ CREATE SEQUENCE RR_ECT_MANUAL_SEQ START WITH 1000000000 INCREMENT BY 1 NOCACHE;
 -- ============================================================
 
 CREATE OR REPLACE PROCEDURE RR_SYNC_EXTERNAL_CASH_TRANSACTIONS (
-    p_json  IN  CLOB,
-    p_count OUT NUMBER,
-    p_error OUT VARCHAR2
+    p_json   IN  CLOB,
+    p_count  OUT NUMBER,
+    p_error  OUT VARCHAR2,
+    p_ext_id OUT NUMBER    -- external_transaction_id of last upserted row
 ) AS
     l_ext_id  NUMBER;   -- resolved ExternalTransactionId (sequence fallback for manual)
 BEGIN
-    p_count := 0;
-    p_error := NULL;
+    p_count  := 0;
+    p_error  := NULL;
+    p_ext_id := NULL;
 
     FOR rec IN (
         SELECT *
@@ -247,7 +249,8 @@ BEGIN
                 src.last_update_date, src.last_update_login, SYSTIMESTAMP
             );
 
-        p_count := p_count + 1;
+        p_count  := p_count + 1;
+        p_ext_id := l_ext_id;   -- track last upserted ID
     END LOOP;
 
     COMMIT;
@@ -288,13 +291,15 @@ DECLARE
     l_json   CLOB;
     l_count  NUMBER;
     l_error  VARCHAR2(4000);
+    l_ext_id NUMBER;
 BEGIN
     l_json := :body_text;
 
     RR_SYNC_EXTERNAL_CASH_TRANSACTIONS(
-        p_json  => l_json,
-        p_count => l_count,
-        p_error => l_error
+        p_json   => l_json,
+        p_count  => l_count,
+        p_error  => l_error,
+        p_ext_id => l_ext_id
     );
 
     IF l_error IS NOT NULL THEN
@@ -302,7 +307,8 @@ BEGIN
         HTP.P('{"status":"error","message":"' || REPLACE(l_error, '"', '\"') || '"}');
     ELSE
         :status_code := 200;
-        HTP.P('{"status":"success","count":' || l_count || '}');
+        HTP.P('{"status":"success","count":' || l_count ||
+              ',"externalTransactionId":' || NVL(TO_CHAR(l_ext_id), 'null') || '}');
     END IF;
 END;
 ]'
@@ -319,6 +325,7 @@ END;
         p_comments       => 'Query external cash transactions with optional filters',
         p_source         => q'[
 DECLARE
+    l_ext_id      NUMBER         := TO_NUMBER(:external_transaction_id);
     l_txn_number  VARCHAR2(100)  := :transaction_number;
     l_bank_acct   VARCHAR2(360)  := :bank_account;
     l_currency    VARCHAR2(15)   := :currency_code;
@@ -365,7 +372,8 @@ DECLARE
                TO_CHAR(LAST_UPDATE_DATE,'YYYY-MM-DD"T"HH24:MI:SS') AS LAST_UPDATE_DATE,
                TO_CHAR(SYNC_DATE,       'YYYY-MM-DD"T"HH24:MI:SS') AS SYNC_DATE
           FROM RR_EXTERNAL_CASH_TRANSACTIONS
-         WHERE (l_txn_number IS NULL OR TO_CHAR(TRANSACTION_ID) LIKE '%' || l_txn_number || '%')
+         WHERE (l_ext_id     IS NULL OR EXTERNAL_TRANSACTION_ID    = l_ext_id)
+           AND (l_txn_number IS NULL OR TO_CHAR(TRANSACTION_ID) LIKE '%' || l_txn_number || '%')
            AND (l_bank_acct  IS NULL OR UPPER(BANK_ACCOUNT_NAME)   LIKE '%' || UPPER(l_bank_acct)  || '%')
            AND (l_currency   IS NULL OR CURRENCY_CODE              = l_currency)
            AND (l_bu         IS NULL OR BUSINESS_UNIT_NAME         = l_bu)

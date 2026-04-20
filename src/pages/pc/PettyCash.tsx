@@ -600,7 +600,7 @@ const RegisterDetail: React.FC<{
     setBankTxnDetailOpen(true);
     setBankTxnDetail(null);
     try {
-      const res  = await fetch(`${EXT_TXN_URL}?transaction_number=${bankTxnId}&row_limit=1`, { headers: { Accept: 'application/json' } });
+      const res  = await fetch(`${EXT_TXN_URL}?external_transaction_id=${bankTxnId}&row_limit=1`, { headers: { Accept: 'application/json' } });
       const data = await res.json();
       const item = (data.items || [])[0] || null;
       setBankTxnDetail(item);
@@ -643,21 +643,22 @@ const RegisterDetail: React.FC<{
       const data = await res.json();
       setBankTxnPostResponse(data);
       if (data.status === 'success') {
-        // Try to fetch the created transaction ID by reference
-        let txnRef = uniqueRef;
+        // externalTransactionId is now returned directly by the POST handler
+        const extId: number | null = data.externalTransactionId ?? null;
+        const txnRef = extId ? String(extId) : uniqueRef;
+        // Also do a lookup so we can show the full record in the debug panel
         let lookupResult: any = null;
-        try {
-          await new Promise(r => setTimeout(r, 400));
-          const srch = await fetch(
-            `${EXT_TXN_URL}?source=ORA_MAN&reference=${encodeURIComponent(uniqueRef)}&row_limit=5`,
-            { headers: { Accept: 'application/json' } }
-          );
-          lookupResult = await srch.json();
-          setBankTxnLookupResult(lookupResult);
-          const found = (lookupResult.items || []).find((t: any) => t.referenceText === uniqueRef);
-          if (found?.transactionId) txnRef = String(found.transactionId);
-        } catch {}
-        message.success('Bank transaction created');
+        if (extId) {
+          try {
+            const srch = await fetch(
+              `${EXT_TXN_URL}?external_transaction_id=${extId}&row_limit=1`,
+              { headers: { Accept: 'application/json' } }
+            );
+            lookupResult = await srch.json();
+          } catch {}
+        }
+        setBankTxnLookupResult(lookupResult);
+        message.success(`Bank transaction created — ID: ${txnRef}`);
         setLinkedBankTxnRef(txnRef);
         moneyForm.setFieldsValue({ referenceNo: txnRef });
         setBankTxnModalOpen(false);
