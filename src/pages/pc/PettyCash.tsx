@@ -283,6 +283,8 @@ const RegisterDetail: React.FC<{
   const [bankTxnDetailLoading, setBankTxnDetailLoading] = useState(false);
   const [bankTxnPostResponse, setBankTxnPostResponse]   = useState<any>(null);
   const [bankTxnLookupResult, setBankTxnLookupResult]   = useState<any>(null);
+  const [bankTxnPayload, setBankTxnPayload]             = useState<any>(null);
+  const [bankTxnRawError, setBankTxnRawError]           = useState<string>('');
   const [chargeAcctResolved, setChargeAcctResolved] =
     useState<Map<number, { code: string; desc: string }>>(new Map());
 
@@ -634,14 +636,20 @@ const RegisterDetail: React.FC<{
         OffsetAccountCombination: values.offsetAccountCombination ?? '',
       }],
     };
+    setBankTxnPayload(payload);
+    setBankTxnPostResponse(null);
+    setBankTxnRawError('');
     try {
       const res = await fetch(EXT_TXN_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
+      const rawText = await res.text();
+      let data: any = {};
+      try { data = JSON.parse(rawText); } catch { data = { status: 'error', message: rawText }; }
       setBankTxnPostResponse(data);
+      setBankTxnRawError(res.ok ? '' : `HTTP ${res.status} — ${rawText}`);
       if (data.status === 'success') {
         // externalTransactionId is now returned directly by the POST handler
         const extId: number | null = data.externalTransactionId ?? null;
@@ -663,9 +671,10 @@ const RegisterDetail: React.FC<{
         moneyForm.setFieldsValue({ referenceNo: txnRef });
         setBankTxnModalOpen(false);
       } else {
-        message.error(data.message || 'Failed to create bank transaction');
+        message.error(data.message || 'Failed — see API Response panel below');
       }
     } catch (e: any) {
+      setBankTxnRawError(String(e));
       message.error(e?.message ?? 'Network error');
     } finally {
       setBankTxnSaving(false);
@@ -977,6 +986,8 @@ const RegisterDetail: React.FC<{
               setLinkedBankTxnRef('');
               setBankTxnPostResponse(null);
               setBankTxnLookupResult(null);
+              setBankTxnPayload(null);
+              setBankTxnRawError('');
               if (register.limit != null && register.limit > 0) {
                 const canAdd = register.limit - register.balance;
                 if (canAdd <= 0) {
@@ -1283,6 +1294,50 @@ const RegisterDetail: React.FC<{
           <Form.Item label="Description" name="description">
             <Input.TextArea rows={2} placeholder="Optional" />
           </Form.Item>
+
+          {/* ── API Inspector ── */}
+          <Collapse size="small" style={{ marginBottom: 8 }}>
+            <Collapse.Panel
+              header={
+                <Space size={4}>
+                  <ApiOutlined style={{ color: REDWOOD.info }} />
+                  <Text style={{ fontSize: 11 }}>API Inspector</Text>
+                  <Text style={{ fontSize: 10, color: REDWOOD.neutral600 }}>
+                    POST {EXT_TXN_URL}
+                  </Text>
+                  {bankTxnRawError && <Tag color="error" style={{ fontSize: 10 }}>Error</Tag>}
+                  {bankTxnPostResponse?.status === 'success' && <Tag color="success" style={{ fontSize: 10 }}>Success</Tag>}
+                </Space>
+              }
+              key="api"
+            >
+              <Text style={{ fontSize: 10, color: REDWOOD.neutral600, display: 'block', marginBottom: 4 }}>
+                <b>Endpoint:</b> <Text code copyable style={{ fontSize: 10 }}>{EXT_TXN_URL}</Text>
+              </Text>
+              <Collapse size="small" ghost defaultActiveKey={['payload']}>
+                <Collapse.Panel header={<Text style={{ fontSize: 11 }}>Request Payload (JSON)</Text>} key="payload">
+                  <pre style={{ fontSize: 10, maxHeight: 200, overflow: 'auto', background: '#f0f5ff', padding: 8, borderRadius: 4, margin: 0, border: '1px solid #adc6ff' }}>
+                    {bankTxnPayload ? JSON.stringify(bankTxnPayload, null, 2) : '— submit form to see payload —'}
+                  </pre>
+                </Collapse.Panel>
+                {bankTxnPostResponse && (
+                  <Collapse.Panel header={<Text style={{ fontSize: 11 }}>Response</Text>} key="response">
+                    <pre style={{ fontSize: 10, maxHeight: 160, overflow: 'auto', background: bankTxnPostResponse?.status === 'success' ? '#f6ffed' : '#fff2f0', padding: 8, borderRadius: 4, margin: 0, border: `1px solid ${bankTxnPostResponse?.status === 'success' ? '#b7eb8f' : '#ffccc7'}` }}>
+                      {JSON.stringify(bankTxnPostResponse, null, 2)}
+                    </pre>
+                  </Collapse.Panel>
+                )}
+                {bankTxnRawError && (
+                  <Collapse.Panel header={<Text style={{ fontSize: 11, color: REDWOOD.error }}>Raw Error</Text>} key="rawerr">
+                    <pre style={{ fontSize: 10, maxHeight: 120, overflow: 'auto', background: '#fff2f0', padding: 8, borderRadius: 4, margin: 0, border: '1px solid #ffccc7', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                      {bankTxnRawError}
+                    </pre>
+                  </Collapse.Panel>
+                )}
+              </Collapse>
+            </Collapse.Panel>
+          </Collapse>
+
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
             <Button onClick={() => setBankTxnModalOpen(false)}>Cancel</Button>
             <Button type="primary" htmlType="submit" loading={bankTxnSaving}
