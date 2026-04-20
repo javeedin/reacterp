@@ -268,7 +268,7 @@ const RegisterDetail: React.FC<{
   const [periodsLoaded, setPeriodsLoaded]       = useState(false);
   const [txnActionLoading, setTxnActionLoading] = useState<number | null>(null);
   const [coaOpen, setCoaOpen]     = useState(false);
-  const [coaTarget, setCoaTarget] = useState<'add' | 'edit' | 'money' | 'bankOffset'>('edit');
+  const [coaTarget, setCoaTarget] = useState<'add' | 'edit' | 'money' | 'bankAsset' | 'bankOffset'>('edit');
   const [addAcctDesc, setAddAcctDesc]     = useState<string>('');
   const [editAcctDesc, setEditAcctDesc]   = useState<string>('');
   const [moneyAcctDesc, setMoneyAcctDesc] = useState<string>('');
@@ -1215,7 +1215,7 @@ const RegisterDetail: React.FC<{
                   <Form.Item name="assetAccountCombination" noStyle>
                     <Input readOnly placeholder="Select cash/bank account" style={{ fontFamily: 'monospace', fontSize: 11 }} />
                   </Form.Item>
-                  <Button icon={<SearchOutlined />} onClick={() => { setCoaTarget('bankOffset'); setCoaOpen(true); }} />
+                  <Button icon={<SearchOutlined />} onClick={() => { setCoaTarget('bankAsset'); setCoaOpen(true); }} />
                 </Space.Compact>
               </Form.Item>
             </Col>
@@ -1532,8 +1532,10 @@ const RegisterDetail: React.FC<{
             moneyForm.setFieldsValue({ chargeAccountDesc: accountCode, chargeAccountCcid: null });
             setMoneyAcctDesc(seg4Desc);
             bankTxnForm.setFieldsValue({ offsetAccountCombination: accountCode });
-          } else if (coaTarget === 'bankOffset') {
+          } else if (coaTarget === 'bankAsset') {
             bankTxnForm.setFieldsValue({ assetAccountCombination: accountCode });
+          } else if (coaTarget === 'bankOffset') {
+            bankTxnForm.setFieldsValue({ offsetAccountCombination: accountCode });
           }
           setCoaOpen(false);
         }}
