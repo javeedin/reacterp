@@ -16,6 +16,8 @@ export interface PCRegister {
   balance: number;
   totalDebit: number;
   totalCredit: number;
+  ownedBy: string | null;
+  limit: number | null;
   createdBy: string | null;
   creationDate: string | null;
 }

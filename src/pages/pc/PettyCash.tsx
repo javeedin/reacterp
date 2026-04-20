@@ -14,6 +14,7 @@ import {
   ReloadOutlined, EditOutlined, DeleteOutlined, CloseOutlined,
   DollarOutlined, MinusCircleOutlined, ArrowUpOutlined, ArrowDownOutlined,
   DownloadOutlined, RollbackOutlined, BankOutlined,
+  LockOutlined, UnlockOutlined, UserOutlined, FieldNumberOutlined,
 } from '@ant-design/icons';
 import FloatingMenu from '../../components/FloatingMenu';
 import ApiDocsModal, { type ApiEndpoint } from '../../components/ApiDocsModal';
@@ -630,6 +631,8 @@ const RegisterDetail: React.FC<{
               <b>BU:</b> {register.businessUnit || '—'}<br />
               <b>Currency:</b> {register.currency}<br />
               <b>Status:</b> <StatusTag status={register.status} /><br />
+              {register.ownedBy   && <><b>Owned By:</b> {register.ownedBy}<br /></>}
+              {register.limit != null && <><b>Limit:</b> {fmt(register.limit)} {register.currency}<br /></>}
               {register.startDate && <><b>From:</b> {register.startDate}<br /></>}
               {register.endDate   && <><b>To:</b> {register.endDate}</>}
             </div>
@@ -1103,8 +1106,10 @@ const PettyCash: React.FC = () => {
   const { user } = useAuth();
   const currentUser = user?.username || 'SYSTEM';
 
-  const [searchForm]  = Form.useForm();
-  const [registerForm] = Form.useForm();
+  const [searchForm]    = Form.useForm();
+  const [registerForm]  = Form.useForm();
+  const [editRegForm]   = Form.useForm();
+  const [regActionForm] = Form.useForm();
 
   const [activeTab, setActiveTab]             = useState('search');
   const [openTabs, setOpenTabs]               = useState<RegisterTab[]>([]);
@@ -1117,6 +1122,17 @@ const PettyCash: React.FC = () => {
   const [deleteLoading, setDeleteLoading]     = useState<number | null>(null);
   const [searched, setSearched]               = useState(false);
   const [businessUnits, setBusinessUnits]     = useState<string[]>([]);
+
+  // Edit register header
+  const [editRegOpen, setEditRegOpen]         = useState(false);
+  const [editRegTarget, setEditRegTarget]     = useState<RegisterTab | null>(null);
+  const [editRegLoading, setEditRegLoading]   = useState(false);
+  const [coaRegOpen, setCoaRegOpen]           = useState(false);
+
+  // Close / Open register action
+  const [regActionOpen, setRegActionOpen]     = useState(false);
+  const [regActionTarget, setRegActionTarget] = useState<RegisterTab | null>(null);
+  const [regActionLoading, setRegActionLoading] = useState(false);
 
   // ── Load Business Units on mount ───────────────────────────
   useEffect(() => {
@@ -1151,7 +1167,10 @@ const PettyCash: React.FC = () => {
     }
   }, [searchForm]);
 
-  useEffect(() => { handleSearch(); }, []);  // auto-search on mount
+  useEffect(() => {
+    searchForm.setFieldsValue({ status: 'ACTIVE' });
+    handleSearch();
+  }, []);  // auto-search on mount with ACTIVE default
 
   // ── Open register detail tab ───────────────────────────────
   const openRegisterTab = useCallback(async (reg: PCRegister) => {
@@ -1213,6 +1232,8 @@ const PettyCash: React.FC = () => {
         endDate:         values.endDate   ? values.endDate.format('YYYY-MM-DD')   : undefined,
         comments:        values.comments,
         cashAccountDesc: values.cashAccountDesc,
+        ownedBy:         values.ownedBy   || null,
+        limit:           values.limit     ?? null,
         currency:        values.currency || 'AED',
         status:          values.status   || 'DRAFT',
         createdBy:       currentUser,
@@ -1256,6 +1277,68 @@ const PettyCash: React.FC = () => {
     });
   };
 
+  // ── Edit register header ──────────────────────────────────
+  const openEditReg = (tab: RegisterTab) => {
+    setEditRegTarget(tab);
+    editRegForm.setFieldsValue({
+      cashAccountDesc: tab.register.cashAccountDesc,
+      ownedBy:         tab.register.ownedBy,
+      limit:           tab.register.limit,
+    });
+    setEditRegOpen(true);
+  };
+
+  const handleEditRegister = async (values: any) => {
+    if (!editRegTarget) return;
+    setEditRegLoading(true);
+    try {
+      await updateRegister(editRegTarget.register.registerId, {
+        cashAccountDesc: values.cashAccountDesc || null,
+        ownedBy:         values.ownedBy         || null,
+        limit:           values.limit           ?? null,
+        updatedBy:       currentUser,
+      });
+      message.success('Register updated');
+      setEditRegOpen(false);
+      await refreshTab(editRegTarget.key);
+      await handleSearch();
+    } catch (e: any) {
+      message.error(e?.message ?? 'Update failed');
+    } finally {
+      setEditRegLoading(false);
+    }
+  };
+
+  // ── Close / Open register ─────────────────────────────────
+  const openRegAction = (tab: RegisterTab) => {
+    setRegActionTarget(tab);
+    regActionForm.setFieldsValue({ closeDate: dayjs(), comments: '' });
+    setRegActionOpen(true);
+  };
+
+  const handleRegAction = async (values: any) => {
+    if (!regActionTarget) return;
+    const isClosed = regActionTarget.register.status === 'CLOSED';
+    const newStatus = isClosed ? 'ACTIVE' : 'CLOSED';
+    setRegActionLoading(true);
+    try {
+      await updateRegister(regActionTarget.register.registerId, {
+        status:    newStatus,
+        endDate:   isClosed ? undefined : (values.closeDate ? values.closeDate.format('YYYY-MM-DD') : undefined),
+        comments:  values.comments || undefined,
+        updatedBy: currentUser,
+      });
+      message.success(`Register ${isClosed ? 'reopened' : 'closed'} successfully`);
+      setRegActionOpen(false);
+      await refreshTab(regActionTarget.key);
+      await handleSearch();
+    } catch (e: any) {
+      message.error(e?.message ?? 'Action failed');
+    } finally {
+      setRegActionLoading(false);
+    }
+  };
+
   // ── Search results columns ─────────────────────────────────
   const searchColumns: ColumnsType<PCRegister> = [
     { title: 'ID', dataIndex: 'registerId', width: 70, align: 'center',
@@ -1288,6 +1371,12 @@ const PettyCash: React.FC = () => {
       render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'End Date', dataIndex: 'endDate', width: 100,
       render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+    { title: 'Owned By', dataIndex: 'ownedBy', width: 130, ellipsis: true,
+      render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+    { title: 'Limit', dataIndex: 'limit', width: 110, align: 'right',
+      render: (v, rec) => v != null
+        ? <Text style={{ fontSize: 12, fontWeight: 500 }}>{fmt(v)} <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{rec.currency}</span></Text>
+        : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
     { title: 'Cash Account', dataIndex: 'cashAccountDesc', ellipsis: true,
       render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Created By', dataIndex: 'createdBy', ellipsis: true,
@@ -1466,8 +1555,27 @@ const PettyCash: React.FC = () => {
                 </Form.Item>
               </Col>
             </Row>
+            <Row gutter={16}>
+              <Col span={12}>
+                <Form.Item label="Owned By" name="ownedBy">
+                  <Input placeholder="e.g. Finance Dept / John Doe" prefix={<UserOutlined style={{ color: REDWOOD.neutral300 }} />} />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item label="Cash Limit" name="limit">
+                  <InputNumber placeholder="0.00" style={{ width: '100%' }} min={0} precision={2} prefix={<FieldNumberOutlined style={{ color: REDWOOD.neutral300 }} />} />
+                </Form.Item>
+              </Col>
+            </Row>
             <Form.Item label="Cash Account" name="cashAccountDesc">
-              <Input placeholder="e.g. 01-100-1010-000 (GL account segments)" />
+              <Input.Group compact>
+                <Form.Item name="cashAccountDesc" noStyle>
+                  <Input style={{ width: 'calc(100% - 40px)' }} placeholder="Select from LOV or type account" readOnly />
+                </Form.Item>
+                <Tooltip title="Browse GL Accounts">
+                  <Button icon={<SearchOutlined />} onClick={() => setCoaRegOpen(true)} />
+                </Tooltip>
+              </Input.Group>
             </Form.Item>
             <Form.Item label="Comments" name="comments">
               <Input.TextArea rows={3} placeholder="Optional notes" />
@@ -1515,9 +1623,33 @@ const PettyCash: React.FC = () => {
                 onClick={() => refreshTab(tab.key)}>
                 Refresh
               </Button>
-              <Button size="small" icon={<EditOutlined />} disabled>
+              <Button
+                size="small"
+                icon={<EditOutlined />}
+                disabled={tab.register.status === 'CLOSED'}
+                onClick={() => openEditReg(tab)}
+              >
                 Edit Header
               </Button>
+              {tab.register.status === 'CLOSED' ? (
+                <Button
+                  size="small"
+                  icon={<UnlockOutlined />}
+                  style={{ borderColor: REDWOOD.success, color: REDWOOD.success }}
+                  onClick={() => openRegAction(tab)}
+                >
+                  Open Register
+                </Button>
+              ) : (
+                <Button
+                  size="small"
+                  icon={<LockOutlined />}
+                  danger
+                  onClick={() => openRegAction(tab)}
+                >
+                  Close Register
+                </Button>
+              )}
             </Space>
           </div>
           <RegisterDetail
@@ -1566,6 +1698,87 @@ const PettyCash: React.FC = () => {
         </Card>
       </Content>
       <FloatingMenu />
+
+      {/* ── Edit Register Header Modal ─────────────────────── */}
+      <Modal
+        title={<Space><EditOutlined style={{ color: REDWOOD.primary }} />Edit Register Header</Space>}
+        open={editRegOpen}
+        onCancel={() => setEditRegOpen(false)}
+        onOk={() => editRegForm.submit()}
+        okText="Save"
+        confirmLoading={editRegLoading}
+        width={480}
+        destroyOnClose
+      >
+        <Form form={editRegForm} layout="vertical" size="small" onFinish={handleEditRegister} style={{ marginTop: 16 }}>
+          <Form.Item label="Owned By" name="ownedBy">
+            <Input placeholder="e.g. Finance Dept / John Doe" prefix={<UserOutlined style={{ color: REDWOOD.neutral300 }} />} />
+          </Form.Item>
+          <Form.Item label="Cash Limit" name="limit">
+            <InputNumber placeholder="0.00" style={{ width: '100%' }} min={0} precision={2} />
+          </Form.Item>
+          <Form.Item label="Cash Account" name="cashAccountDesc">
+            <Input.Group compact>
+              <Form.Item name="cashAccountDesc" noStyle>
+                <Input style={{ width: 'calc(100% - 40px)' }} placeholder="Select from LOV or type account" readOnly />
+              </Form.Item>
+              <Tooltip title="Browse GL Accounts">
+                <Button icon={<SearchOutlined />} onClick={() => setCoaRegOpen(true)} />
+              </Tooltip>
+            </Input.Group>
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* ── Close / Open Register Modal ────────────────────── */}
+      <Modal
+        title={
+          <Space>
+            {regActionTarget?.register.status === 'CLOSED'
+              ? <UnlockOutlined style={{ color: REDWOOD.success }} />
+              : <LockOutlined style={{ color: REDWOOD.error }} />}
+            {regActionTarget?.register.status === 'CLOSED' ? 'Open Register' : 'Close Register'}
+          </Space>
+        }
+        open={regActionOpen}
+        onCancel={() => setRegActionOpen(false)}
+        onOk={() => regActionForm.submit()}
+        okText={regActionTarget?.register.status === 'CLOSED' ? 'Open' : 'Close'}
+        okButtonProps={{
+          danger: regActionTarget?.register.status !== 'CLOSED',
+          style: regActionTarget?.register.status === 'CLOSED'
+            ? { background: REDWOOD.success, borderColor: REDWOOD.success }
+            : undefined,
+        }}
+        confirmLoading={regActionLoading}
+        width={420}
+        destroyOnClose
+      >
+        <Form form={regActionForm} layout="vertical" size="small" onFinish={handleRegAction} style={{ marginTop: 16 }}>
+          {regActionTarget?.register.status !== 'CLOSED' && (
+            <Form.Item label="Close Date" name="closeDate">
+              <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" />
+            </Form.Item>
+          )}
+          <Form.Item label="Comments" name="comments">
+            <Input.TextArea rows={3} placeholder="Reason for closing / reopening…" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* ── GL Account LOV for Register form ──────────────── */}
+      <AccountSelector
+        visible={coaRegOpen}
+        onCancel={() => setCoaRegOpen(false)}
+        onSelect={(accountCode) => {
+          if (editRegOpen) {
+            editRegForm.setFieldsValue({ cashAccountDesc: accountCode });
+          } else {
+            registerForm.setFieldsValue({ cashAccountDesc: accountCode });
+          }
+          setCoaRegOpen(false);
+        }}
+      />
     </Layout>
   );
 };
