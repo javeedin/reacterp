@@ -276,7 +276,7 @@ const RegisterDetail: React.FC<{
   const [bankTxnModalOpen, setBankTxnModalOpen] = useState(false);
   const [bankTxnForm]     = Form.useForm();
   const [bankTxnSaving, setBankTxnSaving] = useState(false);
-  const [bankAccounts, setBankAccounts]   = useState<string[]>([]);
+  const [bankAccounts, setBankAccounts]   = useState<{ name: string; cashAccount: string; currency: string }[]>([]);
   const [buLegalEntityMap, setBuLegalEntityMap] = useState<Map<string, string>>(new Map());
   const [chargeAcctResolved, setChargeAcctResolved] =
     useState<Map<number, { code: string; desc: string }>>(new Map());
@@ -325,10 +325,15 @@ const RegisterDetail: React.FC<{
         const filtered = legalEntity
           ? all.filter(i => (i.legal_entity_name || '').toLowerCase() === legalEntity.toLowerCase())
           : all;
-        const names = [
-          ...new Set(filtered.map((i: any) => i.bank_account_name || i.bankAccountName || '').filter(Boolean)),
-        ] as string[];
-        setBankAccounts(names);
+        const seen = new Set<string>();
+        const accounts = filtered
+          .map((i: any) => ({
+            name:        i.bank_account_name || i.bankAccountName || '',
+            cashAccount: i.cash_account_combination || '',
+            currency:    i.currency_code || '',
+          }))
+          .filter(a => a.name && !seen.has(a.name) && seen.add(a.name));
+        setBankAccounts(accounts);
       })
       .catch(() => {});
   };
@@ -1156,8 +1161,14 @@ const RegisterDetail: React.FC<{
               <Form.Item label="Bank Account" name="bankAccountName" rules={[{ required: true, message: 'Required' }]}>
                 <Select
                   showSearch allowClear placeholder="Select bank account"
-                  options={bankAccounts.map(b => ({ value: b, label: b }))}
+                  options={bankAccounts.map(b => ({ value: b.name, label: b.name }))}
                   notFoundContent={<Text type="secondary" style={{ fontSize: 12 }}>No bank accounts found</Text>}
+                  onChange={val => {
+                    const acct = bankAccounts.find(b => b.name === val);
+                    if (acct) {
+                      bankTxnForm.setFieldsValue({ assetAccountCombination: acct.cashAccount });
+                    }
+                  }}
                 />
               </Form.Item>
             </Col>
