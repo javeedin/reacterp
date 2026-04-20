@@ -30,6 +30,7 @@ import {
   Upload,
   Badge,
   Popover,
+  AutoComplete,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -81,6 +82,7 @@ import * as XLSX from 'xlsx';
 import type { ColumnsType } from 'antd/es/table';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import { fetchLedgerByBusinessUnit, checkAccountingExists, getAccounting } from '../../services/sla.service';
+import { searchCombinations, type DistCombination } from '../../services/distCombinations.service';
 import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
 import { useAuth } from '../../context/AuthContext';
 
@@ -459,6 +461,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   // Unified invoice lines - shared across both tabs
   const [lines, setLines] = useState<InvoiceLine[]>([createBlankLine(1)]);
+
+  // Distribution combinations (AP + ALL modules)
+  const [distCombinations, setDistCombinations] = useState<DistCombination[]>([]);
 
   // Supplier modal
   const [supplierModalVisible, setSupplierModalVisible] = useState(false);
@@ -1858,6 +1863,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         setBusinessUnits(items.length > 0 ? items : FALLBACK_BUSINESS_UNITS);
       })
       .catch(() => setBusinessUnits(FALLBACK_BUSINESS_UNITS));
+
+    searchCombinations({ status: 'ACTIVE' })
+      .then(data => setDistCombinations(data.filter(d => d.module === 'AP' || d.module === 'ALL')))
+      .catch(() => {});
   }, []);
 
   // Pre-fill from initialData (Quick Create or Edit mode)
@@ -3833,18 +3842,48 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       title: 'Distribution Set',
       dataIndex: 'distributionSet',
       key: 'distributionSet',
-      width: 160,
-      render: (val: string, record: InvoiceLine) => (
-        <Input
-          size="small"
-          value={val}
-          onChange={(e) => updateLine(record.key, 'distributionSet', e.target.value)}
-          variant="borderless"
-          placeholder=""
-          disabled={isReadOnly}
-          suffix={<SearchOutlined style={{ color: REDWOOD.neutral300, fontSize: 11 }} />}
-        />
-      ),
+      width: 200,
+      render: (val: string, record: InvoiceLine) => {
+        const options = distCombinations
+          .filter(d =>
+            !val || d.combinationName.toLowerCase().includes(val.toLowerCase())
+          )
+          .map(d => ({
+            value: d.combinationName,
+            label: (
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 500 }}>{d.combinationName}</div>
+                {d.glAccountDesc && (
+                  <div style={{ fontSize: 11, color: REDWOOD.neutral300 }}>{d.glAccountDesc}</div>
+                )}
+              </div>
+            ),
+          }));
+
+        return (
+          <AutoComplete
+            size="small"
+            value={val}
+            options={options}
+            disabled={isReadOnly}
+            style={{ width: '100%' }}
+            placeholder="Type to search…"
+            filterOption={(input, option) =>
+              String(option?.value ?? '').toLowerCase().includes(input.toLowerCase())
+            }
+            onChange={(v) => updateLine(record.key, 'distributionSet', v)}
+            onSelect={(selected) => {
+              const dist = distCombinations.find(d => d.combinationName === selected);
+              if (dist) {
+                updateLine(record.key, 'distributionSet', selected);
+                if (dist.glAccountDesc) {
+                  updateLine(record.key, 'distributionCombination', dist.glAccountDesc);
+                }
+              }
+            }}
+          />
+        );
+      },
     },
     {
       title: 'Distribution Combination',
