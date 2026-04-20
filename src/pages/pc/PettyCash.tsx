@@ -268,9 +268,15 @@ const RegisterDetail: React.FC<{
   const [periodsLoaded, setPeriodsLoaded]       = useState(false);
   const [txnActionLoading, setTxnActionLoading] = useState<number | null>(null);
   const [coaOpen, setCoaOpen]     = useState(false);
-  const [coaTarget, setCoaTarget] = useState<'add' | 'edit'>('edit');
+  const [coaTarget, setCoaTarget] = useState<'add' | 'edit' | 'money' | 'bankOffset'>('edit');
   const [addAcctDesc, setAddAcctDesc]     = useState<string>('');
   const [editAcctDesc, setEditAcctDesc]   = useState<string>('');
+  const [moneyAcctDesc, setMoneyAcctDesc] = useState<string>('');
+  const [linkedBankTxnRef, setLinkedBankTxnRef] = useState<string>('');
+  const [bankTxnModalOpen, setBankTxnModalOpen] = useState(false);
+  const [bankTxnForm]     = Form.useForm();
+  const [bankTxnSaving, setBankTxnSaving] = useState(false);
+  const [bankAccounts, setBankAccounts]   = useState<string[]>([]);
   const [chargeAcctResolved, setChargeAcctResolved] =
     useState<Map<number, { code: string; desc: string }>>(new Map());
 
@@ -301,6 +307,33 @@ const RegisterDetail: React.FC<{
       }
     });
   }, [transactions, distCombinations]);
+
+  // ── Load bank account names when bank txn modal opens ─────────
+  useEffect(() => {
+    if (!bankTxnModalOpen) return;
+    // Pre-fill bank txn form from current Add Money values
+    const mv = moneyForm.getFieldsValue();
+    bankTxnForm.setFieldsValue({
+      amount:                   mv.amount,
+      transactionDate:          mv.transactionDate || dayjs(),
+      currencyCode:             mv.currency || register.currency,
+      offsetAccountCombination: mv.chargeAccountDesc || '',
+      businessUnitName:         register.businessUnit,
+      description:              `Petty Cash Refill — ${register.registerName}`,
+    });
+    if (bankAccounts.length > 0) return;
+    fetch(`${APEX_DB_CONFIG.baseUrl}/cash/externaltransactions?row_limit=500`, {
+      headers: { Accept: 'application/json' },
+    })
+      .then(r => r.json())
+      .then(data => {
+        const names = [
+          ...new Set((data.items || []).map((t: any) => t.bankAccountName).filter(Boolean)),
+        ] as string[];
+        setBankAccounts(names);
+      })
+      .catch(() => {});
+  }, [bankTxnModalOpen]);
 
   // ── Load distribution combinations + open AP periods on mount ─
   useEffect(() => {
@@ -489,20 +522,24 @@ const RegisterDetail: React.FC<{
     setSaving(true);
     try {
       await createTransaction({
-        registerId:      register.registerId,
-        transactionDate: values.transactionDate.format('YYYY-MM-DD'),
-        accountingDate:  accDate.format('YYYY-MM-DD'),
-        transactionType: 'Balance Refill',
-        currency:        values.currency || register.currency,
-        debitAmount:     values.amount,
-        creditAmount:    0,
-        referenceNo:     values.referenceNo,
-        comments:        values.comments,
-        postingStatus:   'Unposted',
-        createdBy:       currentUser,
+        registerId:         register.registerId,
+        transactionDate:    values.transactionDate.format('YYYY-MM-DD'),
+        accountingDate:     accDate.format('YYYY-MM-DD'),
+        transactionType:    'Balance Refill',
+        currency:           values.currency || register.currency,
+        debitAmount:        values.amount,
+        creditAmount:       0,
+        chargeAccountCcid:  values.chargeAccountCcid || null,
+        chargeAccountDesc:  values.chargeAccountDesc || null,
+        referenceNo:        values.referenceNo,
+        comments:           values.comments,
+        postingStatus:      'Unposted',
+        createdBy:          currentUser,
       });
       message.success('Money added to register');
       moneyForm.resetFields();
+      setMoneyAcctDesc('');
+      setLinkedBankTxnRef('');
       needsRefresh.current = false;
       setAddMoneyOpen(false);
       onRefresh();
@@ -510,6 +547,66 @@ const RegisterDetail: React.FC<{
       message.error(e?.message ?? 'Failed to add money');
     } finally {
       setSaving(false);
+    }
+  };
+
+  // ── Create Bank Transaction (from Add Money) ──────────────
+  const handleCreateBankTxn = async (values: any) => {
+    setBankTxnSaving(true);
+    const uniqueRef = values.referenceText?.trim() || `PC-REG${register.registerId}-${Date.now()}`;
+    const payload = {
+      items: [{
+        BankAccountName:          values.bankAccountName,
+        BusinessUnitName:         values.businessUnitName ?? register.businessUnit,
+        Amount:                   values.amount,
+        TransactionDate:          values.transactionDate?.format('YYYY-MM-DD'),
+        CurrencyCode:             values.currencyCode ?? register.currency,
+        ReferenceText:            uniqueRef,
+        TransactionType:          values.transactionType ?? 'MISC',
+        Description:              values.description ?? `Petty Cash Refill — ${register.registerName}`,
+        Source:                   'ORA_MAN',
+        Status:                   'UNR',
+        AccountingFlag:           false,
+        CreatedBy:                currentUser,
+        CreationDate:             new Date().toISOString(),
+        LastUpdatedBy:            currentUser,
+        LastUpdateDate:           new Date().toISOString(),
+        LastUpdateLogin:          '',
+        AssetAccountCombination:  values.assetAccountCombination ?? '',
+        OffsetAccountCombination: values.offsetAccountCombination ?? '',
+      }],
+    };
+    try {
+      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/cash/externaltransactions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data.status === 'success') {
+        // Try to fetch the created transaction ID by reference
+        let txnRef = uniqueRef;
+        try {
+          await new Promise(r => setTimeout(r, 400));
+          const srch = await fetch(
+            `${APEX_DB_CONFIG.baseUrl}/cash/externaltransactions?source=ORA_MAN&reference=${encodeURIComponent(uniqueRef)}&row_limit=5`,
+            { headers: { Accept: 'application/json' } }
+          );
+          const srchData = await srch.json();
+          const found = (srchData.items || []).find((t: any) => t.referenceText === uniqueRef);
+          if (found?.transactionId) txnRef = String(found.transactionId);
+        } catch {}
+        message.success('Bank transaction created');
+        setLinkedBankTxnRef(txnRef);
+        moneyForm.setFieldsValue({ referenceNo: txnRef });
+        setBankTxnModalOpen(false);
+      } else {
+        message.error(data.message || 'Failed to create bank transaction');
+      }
+    } catch (e: any) {
+      message.error(e?.message ?? 'Network error');
+    } finally {
+      setBankTxnSaving(false);
     }
   };
 
@@ -810,6 +907,8 @@ const RegisterDetail: React.FC<{
             disabled={isClosed}
             onClick={() => {
               moneyForm.resetFields();
+              setMoneyAcctDesc('');
+              setLinkedBankTxnRef('');
               if (register.limit != null && register.limit > 0) {
                 const canAdd = register.limit - register.balance;
                 if (canAdd <= 0) {
@@ -925,8 +1024,68 @@ const RegisterDetail: React.FC<{
               </Form.Item>
             </Col>
           </Row>
+
+          {/* ── Charge Account (same pattern as Add Expense) ── */}
+          <Form.Item label="Distribution Set">
+            <Select
+              showSearch allowClear placeholder="Select distribution to auto-fill account"
+              filterOption={(input, option) =>
+                String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+              }
+              onChange={(val) => {
+                const dist = distCombinations.find(d => d.combinationName === val);
+                moneyForm.setFieldsValue({
+                  chargeAccountDesc: dist?.combinationName ?? '',
+                  chargeAccountCcid: dist?.glAccountCcid ?? null,
+                });
+                setMoneyAcctDesc(dist?.glAccountDesc ?? '');
+              }}
+              options={distCombinations.map(d => ({ value: d.combinationName, label: d.combinationName }))}
+            />
+          </Form.Item>
+          <Form.Item name="chargeAccountCcid" hidden><Input /></Form.Item>
+          <Form.Item label="Charge Account">
+            <Space.Compact style={{ width: '100%' }}>
+              <Form.Item name="chargeAccountDesc" noStyle>
+                <Input placeholder="Auto-filled from Distribution Set or Browse" readOnly />
+              </Form.Item>
+              <Button icon={<BankOutlined />} onClick={() => { setCoaTarget('money'); setCoaOpen(true); }}>
+                Browse
+              </Button>
+            </Space.Compact>
+            {moneyAcctDesc && (
+              <div style={{ marginTop: 4, fontSize: 11, color: '#1677ff', paddingLeft: 2 }}>
+                {moneyAcctDesc}
+              </div>
+            )}
+          </Form.Item>
+
+          {/* ── Bank Transaction link ── */}
+          <Divider style={{ margin: '8px 0', fontSize: 12 }}>Bank Transaction</Divider>
+          {linkedBankTxnRef ? (
+            <div style={{ marginBottom: 12, padding: '6px 12px', background: '#f6ffed', borderRadius: 6, border: '1px solid #b7eb8f', fontSize: 12 }}>
+              <Space>
+                <BankOutlined style={{ color: REDWOOD.success }} />
+                <span><b>Linked:</b> Bank Transaction Ref <Text style={{ fontFamily: 'monospace', fontWeight: 600, color: REDWOOD.success }}>{linkedBankTxnRef}</Text></span>
+              </Space>
+            </div>
+          ) : (
+            <div style={{ marginBottom: 12 }}>
+              <Button
+                icon={<BankOutlined />}
+                onClick={() => setBankTxnModalOpen(true)}
+                style={{ width: '100%', borderStyle: 'dashed' }}
+              >
+                Create Bank Transaction
+              </Button>
+              <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 4, textAlign: 'center' }}>
+                Optional — creates a linked external bank transaction and auto-fills the reference
+              </div>
+            </div>
+          )}
+
           <Form.Item label="Reference No" name="referenceNo">
-            <Input placeholder="e.g. Payment001" />
+            <Input placeholder="Auto-filled after creating bank transaction, or enter manually" />
           </Form.Item>
           <Form.Item label="Comments" name="comments">
             <Input.TextArea rows={2} placeholder="Optional" />
@@ -936,6 +1095,107 @@ const RegisterDetail: React.FC<{
             <Button type="primary" htmlType="submit" loading={saving}
               style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>
               Add Money
+            </Button>
+          </div>
+        </Form>
+      </Modal>
+
+      {/* ── Create Bank Transaction Mini-Modal ────────────────── */}
+      <Modal
+        title={<Space><BankOutlined style={{ color: REDWOOD.info }} /> Create Bank Transaction</Space>}
+        open={bankTxnModalOpen}
+        onCancel={() => setBankTxnModalOpen(false)}
+        footer={null}
+        width={620}
+        destroyOnClose
+        zIndex={1100}
+      >
+        <Form form={bankTxnForm} layout="vertical" size="small" onFinish={handleCreateBankTxn}>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item label="Bank Account" name="bankAccountName" rules={[{ required: true, message: 'Required' }]}>
+                <Select
+                  showSearch allowClear placeholder="Select bank account"
+                  options={bankAccounts.map(b => ({ value: b, label: b }))}
+                  notFoundContent={<Text type="secondary" style={{ fontSize: 12 }}>No bank accounts found — type to enter manually</Text>}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Business Unit" name="businessUnitName">
+                <Input placeholder={register.businessUnit} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={8}>
+              <Form.Item label="Amount" name="amount" rules={[{ required: true, message: 'Required' }]}>
+                <InputNumber style={{ width: '100%' }} precision={2} placeholder="0.00" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item label="Transaction Date" name="transactionDate" rules={[{ required: true, message: 'Required' }]}>
+                <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item label="Currency" name="currencyCode">
+                <Select>
+                  {['AED','USD','EUR','GBP','SAR','KWD','QAR','OMR','BHD','EGP','INR'].map(c =>
+                    <Option key={c} value={c}>{c}</Option>)}
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item label="Transaction Type" name="transactionType">
+                <Select placeholder="Select type" allowClear>
+                  {['EFT','WIRE','CHECK','MISC'].map(t => <Option key={t} value={t}>{t}</Option>)}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Reference" name="referenceText">
+                <Input placeholder="e.g. BANK-TXN-001" />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Divider style={{ margin: '8px 0', fontSize: 11 }}>Account Coding</Divider>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item label="Cash Account (Asset)">
+                <Space.Compact style={{ width: '100%' }}>
+                  <Form.Item name="assetAccountCombination" noStyle>
+                    <Input readOnly placeholder="Select cash/bank account" style={{ fontFamily: 'monospace', fontSize: 11 }} />
+                  </Form.Item>
+                  <Button icon={<SearchOutlined />} onClick={() => { setCoaTarget('bankOffset'); setCoaOpen(true); }} />
+                </Space.Compact>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Offset Account">
+                <Space.Compact style={{ width: '100%' }}>
+                  <Form.Item name="offsetAccountCombination" noStyle>
+                    <Input readOnly placeholder="= Charge Account from Add Money" style={{ fontFamily: 'monospace', fontSize: 11 }} />
+                  </Form.Item>
+                  <Button icon={<SearchOutlined />} onClick={() => {
+                    setCoaTarget('bankOffset');
+                    setCoaOpen(true);
+                  }} />
+                </Space.Compact>
+                <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 2 }}>Pre-filled from Charge Account</div>
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item label="Description" name="description">
+            <Input.TextArea rows={2} placeholder="Optional" />
+          </Form.Item>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+            <Button onClick={() => setBankTxnModalOpen(false)}>Cancel</Button>
+            <Button type="primary" htmlType="submit" loading={bankTxnSaving}
+              style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}>
+              Create Bank Transaction
             </Button>
           </div>
         </Form>
@@ -1216,10 +1476,19 @@ const RegisterDetail: React.FC<{
         onCancel={() => setCoaOpen(false)}
         onSelect={(accountCode, segmentDetails) => {
           const seg4Desc = Object.values(segmentDetails)[3]?.description || '';
-          const form = coaTarget === 'add' ? expenseForm : editTxnForm;
-          form.setFieldsValue({ chargeAccountDesc: accountCode, chargeAccountCcid: null });
-          if (coaTarget === 'add') setAddAcctDesc(seg4Desc);
-          else setEditAcctDesc(seg4Desc);
+          if (coaTarget === 'add') {
+            expenseForm.setFieldsValue({ chargeAccountDesc: accountCode, chargeAccountCcid: null });
+            setAddAcctDesc(seg4Desc);
+          } else if (coaTarget === 'edit') {
+            editTxnForm.setFieldsValue({ chargeAccountDesc: accountCode, chargeAccountCcid: null });
+            setEditAcctDesc(seg4Desc);
+          } else if (coaTarget === 'money') {
+            moneyForm.setFieldsValue({ chargeAccountDesc: accountCode, chargeAccountCcid: null });
+            setMoneyAcctDesc(seg4Desc);
+            bankTxnForm.setFieldsValue({ offsetAccountCombination: accountCode });
+          } else if (coaTarget === 'bankOffset') {
+            bankTxnForm.setFieldsValue({ assetAccountCombination: accountCode });
+          }
           setCoaOpen(false);
         }}
       />

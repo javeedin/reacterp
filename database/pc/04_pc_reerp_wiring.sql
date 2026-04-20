@@ -270,6 +270,7 @@ DECLARE
                t.POSTING_STATUS, t.CURRENCY,
                t.DEBIT_AMOUNT, t.CREDIT_AMOUNT,
                t.COMMENTS, t.REFERENCE_NO, t.ATTACHMENT,
+               t.BANK_TXN_ID,
                t.CREATED_BY, t.CREATION_DATE,
                SUM(t.DEBIT_AMOUNT - t.CREDIT_AMOUNT) OVER (
                    PARTITION BY t.REGISTER_ID
@@ -304,6 +305,7 @@ BEGIN
         APEX_JSON.WRITE(''comments'',         rec.COMMENTS);
         APEX_JSON.WRITE(''referenceNo'',      rec.REFERENCE_NO);
         APEX_JSON.WRITE(''attachment'',       rec.ATTACHMENT);
+        APEX_JSON.WRITE(''bankTxnId'',        rec.BANK_TXN_ID);
         APEX_JSON.WRITE(''createdBy'',        rec.CREATED_BY);
         APEX_JSON.WRITE(''creationDate'',     TO_CHAR(rec.CREATION_DATE,''DD-MON-YYYY''));
         APEX_JSON.WRITE(''runningBalance'',   rec.RUNNING_BALANCE);
@@ -379,6 +381,7 @@ DECLARE
                t.ACCOUNTING_DATE, t.ACCOUNTING_PERIOD, t.POSTING_STATUS, t.CURRENCY,
                t.DEBIT_AMOUNT, t.CREDIT_AMOUNT,
                t.COMMENTS, t.REFERENCE_NO, t.ATTACHMENT,
+               t.BANK_TXN_ID,
                t.CREATED_BY, t.CREATION_DATE, t.LAST_UPDATED_BY, t.LAST_UPDATE_DATE
         FROM   RR_PC_TRANSACTIONS t
         WHERE  t.TRANSACTION_ID = :transactionId;
@@ -411,6 +414,7 @@ BEGIN
     APEX_JSON.WRITE(''comments'',          rec.COMMENTS);
     APEX_JSON.WRITE(''referenceNo'',       rec.REFERENCE_NO);
     APEX_JSON.WRITE(''attachment'',        rec.ATTACHMENT);
+    APEX_JSON.WRITE(''bankTxnId'',         rec.BANK_TXN_ID);
     APEX_JSON.WRITE(''createdBy'',         rec.CREATED_BY);
     APEX_JSON.WRITE(''creationDate'',      TO_CHAR(rec.CREATION_DATE,     ''DD-MON-YYYY''));
     APEX_JSON.WRITE(''lastUpdatedBy'',     rec.LAST_UPDATED_BY);

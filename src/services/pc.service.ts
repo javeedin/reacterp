@@ -40,6 +40,7 @@ export interface PCTransaction {
   comments: string | null;
   referenceNo: string | null;
   attachment: string | null;
+  bankTxnId: number | null;
   createdBy: string | null;
   creationDate: string | null;
   runningBalance: number;

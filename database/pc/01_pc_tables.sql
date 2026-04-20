@@ -220,3 +220,17 @@ BEGIN
 END;
 /
 
+
+-- ============================================================
+-- Add BANK_TXN_ID to RR_PC_TRANSACTIONS (idempotent)
+-- Links a Balance Refill to an external bank transaction
+-- ============================================================
+DECLARE l_count NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO l_count FROM user_tab_columns
+    WHERE  table_name = 'RR_PC_TRANSACTIONS' AND column_name = 'BANK_TXN_ID';
+    IF l_count = 0 THEN
+        EXECUTE IMMEDIATE 'ALTER TABLE RR_PC_TRANSACTIONS ADD (BANK_TXN_ID NUMBER)';
+    END IF;
+END;
+/
