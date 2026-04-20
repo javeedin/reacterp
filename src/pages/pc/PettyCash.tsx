@@ -323,29 +323,41 @@ const RegisterDetail: React.FC<{
       return d.isValid() ? d : null;
     };
     const isExpense = editTxn.transactionType === 'Expense';
+    const isCombCode = (v: string) => (v.match(/-/g) || []).length >= 5;
+    const raw = editTxn.chargeAccountDesc;
+
+    let combCode = raw;
+    let desc = '';
+
+    if (raw && !isCombCode(raw)) {
+      // Stored as description — reverse-lookup the combination code
+      const match = distCombinations.find(d => d.glAccountDesc === raw);
+      if (match) {
+        combCode = match.combinationName;
+        desc = raw;
+      }
+    } else if (raw && isCombCode(raw)) {
+      // Stored as combination code — resolve description async
+      validateAccountCode(raw).then(result => {
+        const seg4 = Object.values(result.segmentDetails)[3];
+        setEditAcctDesc(seg4?.description || '');
+      });
+    }
+
     editTxnForm.setFieldsValue({
       transactionDate:   parseOracleDate(editTxn.transactionDate),
       accountingDate:    parseOracleDate(editTxn.accountingDate),
       currency:          editTxn.currency,
       amount:            isExpense ? editTxn.creditAmount : editTxn.debitAmount,
       expenseType:       editTxn.expenseType,
-      chargeAccountDesc: editTxn.chargeAccountDesc,
+      chargeAccountDesc: combCode,
       chargeAccountCcid: editTxn.chargeAccountCcid,
       referenceNo:       editTxn.referenceNo,
       comments:          editTxn.comments,
       attachment:        editTxn.attachment,
     });
-    // Resolve description for display
-    const isCombCode = (v: string) => (v.match(/-/g) || []).length >= 5;
-    if (editTxn.chargeAccountDesc && isCombCode(editTxn.chargeAccountDesc)) {
-      validateAccountCode(editTxn.chargeAccountDesc).then(result => {
-        const seg4 = Object.values(result.segmentDetails)[3];
-        setEditAcctDesc(seg4?.description || '');
-      });
-    } else {
-      setEditAcctDesc('');
-    }
-  }, [editTxnOpen, editTxn]);
+    setEditAcctDesc(desc);
+  }, [editTxnOpen, editTxn, distCombinations]);
 
   // ── Delete transaction (Unposted / Error only) ────────────
   const handleDeleteTransaction = (txn: PCTransaction) => {
