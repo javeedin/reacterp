@@ -1866,8 +1866,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       })
       .catch(() => setBusinessUnits(FALLBACK_BUSINESS_UNITS));
 
-    searchCombinations({ status: 'ACTIVE' })
-      .then(data => setDistCombinations(data.filter(d => d.module === 'AP' || d.module === 'ALL')))
+    searchCombinations({})
+      .then(data => setDistCombinations(data))
       .catch(() => {});
   }, []);
 
@@ -6269,11 +6269,28 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
       {/* ========== DISTRIBUTION SET LOV ========== */}
       <Modal
-        title={<Space><SearchOutlined style={{ color: REDWOOD.info }} />Select Distribution Set</Space>}
+        title={
+          <Space>
+            <SearchOutlined style={{ color: REDWOOD.info }} />
+            Select Distribution Set
+            <Tooltip
+              title={
+                <div style={{ fontFamily: 'monospace', fontSize: 11 }}>
+                  <div style={{ marginBottom: 4, color: '#aaa' }}>GET</div>
+                  {`${APEX_DB_CONFIG.baseUrl}/distributions/combinations`}
+                  <div style={{ marginTop: 6, color: '#aaa' }}>No filters applied — all combinations returned</div>
+                </div>
+              }
+              overlayStyle={{ maxWidth: 520 }}
+            >
+              <ApiOutlined style={{ color: REDWOOD.neutral300, fontSize: 13, cursor: 'help' }} />
+            </Tooltip>
+          </Space>
+        }
         open={distLovOpen}
         onCancel={() => setDistLovOpen(false)}
         footer={null}
-        width={560}
+        width={600}
         destroyOnClose
       >
         <Input
@@ -6288,7 +6305,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         {distCombinations.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '24px 0', color: REDWOOD.neutral300, fontSize: 13 }}>
             No distribution combinations found.<br />
-            <span style={{ fontSize: 12 }}>Add them in AP Setup › Manage Distribution Combinations.</span>
+            <span style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.neutral300 }}>
+              {`${APEX_DB_CONFIG.baseUrl}/distributions/combinations`}
+            </span>
           </div>
         ) : (
           <Table
