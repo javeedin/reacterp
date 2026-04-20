@@ -281,6 +281,8 @@ const RegisterDetail: React.FC<{
   const [bankTxnDetailOpen, setBankTxnDetailOpen]     = useState(false);
   const [bankTxnDetail, setBankTxnDetail]             = useState<any>(null);
   const [bankTxnDetailLoading, setBankTxnDetailLoading] = useState(false);
+  const [bankTxnPostResponse, setBankTxnPostResponse]   = useState<any>(null);
+  const [bankTxnLookupResult, setBankTxnLookupResult]   = useState<any>(null);
   const [chargeAcctResolved, setChargeAcctResolved] =
     useState<Map<number, { code: string; desc: string }>>(new Map());
 
@@ -580,6 +582,8 @@ const RegisterDetail: React.FC<{
       moneyForm.resetFields();
       setMoneyAcctDesc('');
       setLinkedBankTxnRef('');
+      setBankTxnPostResponse(null);
+      setBankTxnLookupResult(null);
       needsRefresh.current = false;
       setAddMoneyOpen(false);
       onRefresh();
@@ -637,17 +641,20 @@ const RegisterDetail: React.FC<{
         body: JSON.stringify(payload),
       });
       const data = await res.json();
+      setBankTxnPostResponse(data);
       if (data.status === 'success') {
         // Try to fetch the created transaction ID by reference
         let txnRef = uniqueRef;
+        let lookupResult: any = null;
         try {
           await new Promise(r => setTimeout(r, 400));
           const srch = await fetch(
             `${EXT_TXN_URL}?source=ORA_MAN&reference=${encodeURIComponent(uniqueRef)}&row_limit=5`,
             { headers: { Accept: 'application/json' } }
           );
-          const srchData = await srch.json();
-          const found = (srchData.items || []).find((t: any) => t.referenceText === uniqueRef);
+          lookupResult = await srch.json();
+          setBankTxnLookupResult(lookupResult);
+          const found = (lookupResult.items || []).find((t: any) => t.referenceText === uniqueRef);
           if (found?.transactionId) txnRef = String(found.transactionId);
         } catch {}
         message.success('Bank transaction created');
@@ -967,6 +974,8 @@ const RegisterDetail: React.FC<{
               moneyForm.resetFields();
               setMoneyAcctDesc('');
               setLinkedBankTxnRef('');
+              setBankTxnPostResponse(null);
+              setBankTxnLookupResult(null);
               if (register.limit != null && register.limit > 0) {
                 const canAdd = register.limit - register.balance;
                 if (canAdd <= 0) {
@@ -1104,11 +1113,25 @@ const RegisterDetail: React.FC<{
           {/* ── Bank Transaction link ── */}
           <Divider style={{ margin: '8px 0', fontSize: 12 }}>Bank Transaction</Divider>
           {linkedBankTxnRef ? (
-            <div style={{ marginBottom: 12, padding: '6px 12px', background: '#f6ffed', borderRadius: 6, border: '1px solid #b7eb8f', fontSize: 12 }}>
-              <Space>
-                <BankOutlined style={{ color: REDWOOD.success }} />
-                <span><b>Linked:</b> Bank Transaction Ref <Text style={{ fontFamily: 'monospace', fontWeight: 600, color: REDWOOD.success }}>{linkedBankTxnRef}</Text></span>
-              </Space>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ padding: '8px 12px', background: '#f6ffed', borderRadius: 6, border: '1px solid #b7eb8f', fontSize: 12, marginBottom: 8 }}>
+                <Space>
+                  <BankOutlined style={{ color: REDWOOD.success }} />
+                  <span><b>Bank Txn ID:</b> <Text style={{ fontFamily: 'monospace', fontWeight: 700, color: REDWOOD.success, fontSize: 13 }}>{linkedBankTxnRef}</Text></span>
+                </Space>
+              </div>
+              <Collapse size="small" ghost>
+                <Collapse.Panel header={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>POST response</Text>} key="post">
+                  <pre style={{ fontSize: 10, maxHeight: 160, overflow: 'auto', background: '#f5f5f5', padding: 8, borderRadius: 4, margin: 0 }}>
+                    {JSON.stringify(bankTxnPostResponse, null, 2)}
+                  </pre>
+                </Collapse.Panel>
+                <Collapse.Panel header={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Lookup result (transaction_id source)</Text>} key="lookup">
+                  <pre style={{ fontSize: 10, maxHeight: 160, overflow: 'auto', background: '#f5f5f5', padding: 8, borderRadius: 4, margin: 0 }}>
+                    {JSON.stringify(bankTxnLookupResult, null, 2)}
+                  </pre>
+                </Collapse.Panel>
+              </Collapse>
             </div>
           ) : (
             <div style={{ marginBottom: 12 }}>
