@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Layout, Card, Typography, Breadcrumb, Tabs, Form, Input, Select,
   DatePicker, Button, Table, Tag, Row, Col, Space, Divider,
-  Modal, InputNumber, message, Tooltip, Statistic, Collapse,
+  Modal, InputNumber, message, Tooltip, Statistic, Collapse, Progress,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { Link } from 'react-router-dom';
@@ -590,56 +590,113 @@ const RegisterDetail: React.FC<{
 
   return (
     <>
-      {/* Header summary */}
-      <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={6}>
-          <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
-            <Statistic
-              title={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Balance</Text>}
-              value={register.balance}
-              precision={2}
-              valueStyle={{ fontSize: 22, color: register.balance >= 0 ? REDWOOD.success : REDWOOD.error }}
-              suffix={<span style={{ fontSize: 13 }}>{register.currency}</span>}
-            />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
-            <Statistic
-              title={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Total In (Debit)</Text>}
-              value={register.totalDebit}
-              precision={2}
-              valueStyle={{ fontSize: 18, color: REDWOOD.success }}
-              prefix={<ArrowDownOutlined />}
-            />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
-            <Statistic
-              title={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Total Out (Credit)</Text>}
-              value={register.totalCredit}
-              precision={2}
-              valueStyle={{ fontSize: 18, color: REDWOOD.error }}
-              prefix={<ArrowUpOutlined />}
-            />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
-            <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 4 }}>Register Info</div>
-            <div style={{ fontSize: 12 }}>
-              <b>BU:</b> {register.businessUnit || '—'}<br />
-              <b>Currency:</b> {register.currency}<br />
-              <b>Status:</b> <StatusTag status={register.status} /><br />
-              {register.ownedBy   && <><b>Owned By:</b> {register.ownedBy}<br /></>}
-              {register.limit != null && <><b>Limit:</b> {fmt(register.limit)} {register.currency}<br /></>}
-              {register.startDate && <><b>From:</b> {register.startDate}<br /></>}
-              {register.endDate   && <><b>To:</b> {register.endDate}</>}
-            </div>
-          </Card>
-        </Col>
-      </Row>
+      {/* Header KPIs */}
+      {(() => {
+        const hasLimit = register.limit != null && register.limit > 0;
+        const canAdd   = hasLimit ? Math.max(0, register.limit! - register.balance) : null;
+        const usedPct  = hasLimit ? Math.min(100, Math.round((register.balance / register.limit!) * 100)) : 0;
+        const colSpan  = hasLimit ? 4 : 6;
+        return (
+          <Row gutter={12} style={{ marginBottom: 16 }}>
+            {/* Balance */}
+            <Col span={colSpan}>
+              <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
+                <Statistic
+                  title={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Balance</Text>}
+                  value={register.balance}
+                  precision={2}
+                  valueStyle={{ fontSize: 20, color: register.balance >= 0 ? REDWOOD.success : REDWOOD.error }}
+                  suffix={<span style={{ fontSize: 12 }}>{register.currency}</span>}
+                />
+                {hasLimit && (
+                  <Progress
+                    percent={usedPct}
+                    size="small"
+                    strokeColor={usedPct >= 100 ? REDWOOD.success : REDWOOD.info}
+                    style={{ marginTop: 6, marginBottom: 0 }}
+                    format={p => <span style={{ fontSize: 10 }}>{p}%</span>}
+                  />
+                )}
+              </Card>
+            </Col>
+
+            {/* Limit — only when set */}
+            {hasLimit && (
+              <Col span={4}>
+                <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
+                  <Statistic
+                    title={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Limit</Text>}
+                    value={register.limit!}
+                    precision={2}
+                    valueStyle={{ fontSize: 20, color: REDWOOD.neutral900 }}
+                    suffix={<span style={{ fontSize: 12 }}>{register.currency}</span>}
+                  />
+                </Card>
+              </Col>
+            )}
+
+            {/* Can Add — only when limit is set */}
+            {hasLimit && (
+              <Col span={4}>
+                <Card size="small" style={{
+                  borderRadius: 8,
+                  border: `1px solid ${canAdd! > 0 ? '#b7eb8f' : REDWOOD.neutral200}`,
+                  background: canAdd! > 0 ? '#f6ffed' : undefined,
+                }}>
+                  <Statistic
+                    title={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Can Add</Text>}
+                    value={canAdd!}
+                    precision={2}
+                    valueStyle={{ fontSize: 20, color: canAdd! > 0 ? REDWOOD.success : REDWOOD.neutral300 }}
+                    suffix={<span style={{ fontSize: 12 }}>{register.currency}</span>}
+                  />
+                </Card>
+              </Col>
+            )}
+
+            {/* Total In */}
+            <Col span={colSpan}>
+              <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
+                <Statistic
+                  title={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Total In (Debit)</Text>}
+                  value={register.totalDebit}
+                  precision={2}
+                  valueStyle={{ fontSize: 18, color: REDWOOD.success }}
+                  prefix={<ArrowDownOutlined />}
+                />
+              </Card>
+            </Col>
+
+            {/* Total Out */}
+            <Col span={colSpan}>
+              <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
+                <Statistic
+                  title={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Total Out (Credit)</Text>}
+                  value={register.totalCredit}
+                  precision={2}
+                  valueStyle={{ fontSize: 18, color: REDWOOD.error }}
+                  prefix={<ArrowUpOutlined />}
+                />
+              </Card>
+            </Col>
+
+            {/* Register Info */}
+            <Col span={colSpan}>
+              <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
+                <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 4 }}>Register Info</div>
+                <div style={{ fontSize: 12 }}>
+                  <b>BU:</b> {register.businessUnit || '—'}<br />
+                  <b>Currency:</b> {register.currency}<br />
+                  <b>Status:</b> <StatusTag status={register.status} /><br />
+                  {register.ownedBy   && <><b>Owned By:</b> {register.ownedBy}<br /></>}
+                  {register.startDate && <><b>From:</b> {register.startDate}<br /></>}
+                  {register.endDate   && <><b>To:</b> {register.endDate}</>}
+                </div>
+              </Card>
+            </Col>
+          </Row>
+        );
+      })()}
 
       {/* Cash Account */}
       {register.cashAccountDesc && (
@@ -672,7 +729,18 @@ const RegisterDetail: React.FC<{
             icon={<DollarOutlined />}
             style={!isClosed ? { background: REDWOOD.success, borderColor: REDWOOD.success, color: '#fff' } : {}}
             disabled={isClosed}
-            onClick={() => { moneyForm.resetFields(); setAddMoneyOpen(true); }}
+            onClick={() => {
+              moneyForm.resetFields();
+              if (register.limit != null && register.limit > 0) {
+                const canAdd = register.limit - register.balance;
+                if (canAdd <= 0) {
+                  message.warning(`Register is already at its limit (${fmt(register.limit)} ${register.currency}). No more money can be added.`);
+                  return;
+                }
+                moneyForm.setFieldsValue({ amount: Math.round(canAdd * 100) / 100 });
+              }
+              setAddMoneyOpen(true);
+            }}
           >
             Add Money
           </Button>
@@ -741,11 +809,32 @@ const RegisterDetail: React.FC<{
               </Form.Item>
             </Col>
           </Row>
+          {register.limit != null && register.limit > 0 && (
+            <div style={{ marginBottom: 12, padding: '6px 10px', background: '#f6ffed', borderRadius: 6, border: '1px solid #b7eb8f', fontSize: 12 }}>
+              <Space size={16}>
+                <span><b>Limit:</b> {fmt(register.limit)} {register.currency}</span>
+                <span><b>Balance:</b> {fmt(register.balance)} {register.currency}</span>
+                <span style={{ color: REDWOOD.success, fontWeight: 600 }}>
+                  <b>Can Add:</b> {fmt(Math.max(0, register.limit - register.balance))} {register.currency}
+                </span>
+              </Space>
+            </div>
+          )}
           <Row gutter={12}>
             <Col span={12}>
               <Form.Item label="Amount" name="amount"
-                rules={[{ required: true, message: 'Required' }, { type: 'number', min: 0.01, message: 'Must be > 0' }]}>
-                <InputNumber style={{ width: '100%' }} precision={2} min={0} placeholder="0.00" />
+                rules={[
+                  { required: true, message: 'Required' },
+                  { type: 'number', min: 0.01, message: 'Must be > 0' },
+                  ...(register.limit != null && register.limit > 0 ? [{
+                    type: 'number' as const,
+                    max: Math.max(0, register.limit - register.balance),
+                    message: `Cannot exceed limit — max ${fmt(Math.max(0, register.limit - register.balance))} ${register.currency}`,
+                  }] : []),
+                ]}>
+                <InputNumber style={{ width: '100%' }} precision={2} min={0}
+                  max={register.limit != null ? Math.max(0, register.limit - register.balance) : undefined}
+                  placeholder="0.00" />
               </Form.Item>
             </Col>
             <Col span={12}>
