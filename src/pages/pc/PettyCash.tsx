@@ -1031,29 +1031,12 @@ const RegisterDetail: React.FC<{
             </Col>
           </Row>
 
-          {/* ── Charge Account (same pattern as Add Expense) ── */}
-          <Form.Item label="Distribution Set">
-            <Select
-              showSearch allowClear placeholder="Select distribution to auto-fill account"
-              filterOption={(input, option) =>
-                String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-              }
-              onChange={(val) => {
-                const dist = distCombinations.find(d => d.combinationName === val);
-                moneyForm.setFieldsValue({
-                  chargeAccountDesc: dist?.combinationName ?? '',
-                  chargeAccountCcid: dist?.glAccountCcid ?? null,
-                });
-                setMoneyAcctDesc(dist?.glAccountDesc ?? '');
-              }}
-              options={distCombinations.map(d => ({ value: d.combinationName, label: d.combinationName }))}
-            />
-          </Form.Item>
+          {/* ── Charge Account ── */}
           <Form.Item name="chargeAccountCcid" hidden><Input /></Form.Item>
           <Form.Item label="Charge Account">
             <Space.Compact style={{ width: '100%' }}>
               <Form.Item name="chargeAccountDesc" noStyle>
-                <Input placeholder="Auto-filled from Distribution Set or Browse" readOnly />
+                <Input placeholder="Browse to select account" readOnly />
               </Form.Item>
               <Button icon={<BankOutlined />} onClick={() => { setCoaTarget('money'); setCoaOpen(true); }}>
                 Browse
