@@ -308,21 +308,11 @@ const RegisterDetail: React.FC<{
     });
   }, [transactions, distCombinations]);
 
-  // ── Load bank account names when bank txn modal opens ─────────
-  useEffect(() => {
-    if (!bankTxnModalOpen) return;
-    // Pre-fill bank txn form from current Add Money values
-    const mv = moneyForm.getFieldsValue();
-    bankTxnForm.setFieldsValue({
-      amount:                   mv.amount,
-      transactionDate:          mv.transactionDate || dayjs(),
-      currencyCode:             mv.currency || register.currency,
-      offsetAccountCombination: mv.chargeAccountDesc || '',
-      businessUnitName:         register.businessUnit,
-      description:              `Petty Cash Refill — ${register.registerName}`,
-    });
-    if (bankAccounts.length > 0) return;
-    fetch(`${APEX_DB_CONFIG.baseUrl}/cash/externaltransactions?row_limit=500`, {
+  // ── Load bank accounts filtered by BU ────────────────────────
+  const loadBankAccountsByBU = (bu: string) => {
+    setBankAccounts([]);
+    const qs = bu ? `?businessUnitName=${encodeURIComponent(bu)}&row_limit=500` : '?row_limit=500';
+    fetch(`${APEX_DB_CONFIG.baseUrl}/cash/externaltransactions${qs}`, {
       headers: { Accept: 'application/json' },
     })
       .then(r => r.json())
@@ -333,6 +323,22 @@ const RegisterDetail: React.FC<{
         setBankAccounts(names);
       })
       .catch(() => {});
+  };
+
+  // ── Pre-fill bank txn modal on open ───────────────────────────
+  useEffect(() => {
+    if (!bankTxnModalOpen) return;
+    const mv = moneyForm.getFieldsValue();
+    const bu = register.businessUnit;
+    bankTxnForm.setFieldsValue({
+      businessUnitName:         bu,
+      amount:                   mv.amount,
+      transactionDate:          mv.transactionDate || dayjs(),
+      currencyCode:             mv.currency || register.currency,
+      offsetAccountCombination: mv.chargeAccountDesc || '',
+      description:              `Petty Cash Refill — ${register.registerName}`,
+    });
+    loadBankAccountsByBU(bu);
   }, [bankTxnModalOpen]);
 
   // ── Load distribution combinations + open AP periods on mount ─
@@ -1113,17 +1119,23 @@ const RegisterDetail: React.FC<{
         <Form form={bankTxnForm} layout="vertical" size="small" onFinish={handleCreateBankTxn}>
           <Row gutter={12}>
             <Col span={12}>
-              <Form.Item label="Bank Account" name="bankAccountName" rules={[{ required: true, message: 'Required' }]}>
-                <Select
-                  showSearch allowClear placeholder="Select bank account"
-                  options={bankAccounts.map(b => ({ value: b, label: b }))}
-                  notFoundContent={<Text type="secondary" style={{ fontSize: 12 }}>No bank accounts found — type to enter manually</Text>}
+              <Form.Item label="Business Unit" name="businessUnitName" rules={[{ required: true, message: 'Required' }]}>
+                <Input
+                  placeholder={register.businessUnit}
+                  onBlur={e => {
+                    const bu = e.target.value.trim();
+                    if (bu) loadBankAccountsByBU(bu);
+                  }}
                 />
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item label="Business Unit" name="businessUnitName">
-                <Input placeholder={register.businessUnit} />
+              <Form.Item label="Bank Account" name="bankAccountName" rules={[{ required: true, message: 'Required' }]}>
+                <Select
+                  showSearch allowClear placeholder="Select bank account"
+                  options={bankAccounts.map(b => ({ value: b, label: b }))}
+                  notFoundContent={<Text type="secondary" style={{ fontSize: 12 }}>No bank accounts found</Text>}
+                />
               </Form.Item>
             </Col>
           </Row>
