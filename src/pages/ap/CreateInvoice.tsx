@@ -30,7 +30,6 @@ import {
   Upload,
   Badge,
   Popover,
-  AutoComplete,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -464,6 +463,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   // Distribution combinations (AP + ALL modules)
   const [distCombinations, setDistCombinations] = useState<DistCombination[]>([]);
+  const [distLovOpen, setDistLovOpen]     = useState(false);
+  const [distLovLineKey, setDistLovLineKey] = useState<string | null>(null);
+  const [distLovSearch, setDistLovSearch] = useState('');
 
   // Supplier modal
   const [supplierModalVisible, setSupplierModalVisible] = useState(false);
@@ -3843,47 +3845,27 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       dataIndex: 'distributionSet',
       key: 'distributionSet',
       width: 200,
-      render: (val: string, record: InvoiceLine) => {
-        const options = distCombinations
-          .filter(d =>
-            !val || d.combinationName.toLowerCase().includes(val.toLowerCase())
-          )
-          .map(d => ({
-            value: d.combinationName,
-            label: (
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 500 }}>{d.combinationName}</div>
-                {d.glAccountDesc && (
-                  <div style={{ fontSize: 11, color: REDWOOD.neutral300 }}>{d.glAccountDesc}</div>
-                )}
-              </div>
-            ),
-          }));
-
-        return (
-          <AutoComplete
-            size="small"
-            value={val}
-            options={options}
-            disabled={isReadOnly}
-            style={{ width: '100%' }}
-            placeholder="Type to search…"
-            filterOption={(input, option) =>
-              String(option?.value ?? '').toLowerCase().includes(input.toLowerCase())
-            }
-            onChange={(v) => updateLine(record.key, 'distributionSet', v)}
-            onSelect={(selected) => {
-              const dist = distCombinations.find(d => d.combinationName === selected);
-              if (dist) {
-                updateLine(record.key, 'distributionSet', selected);
-                if (dist.glAccountDesc) {
-                  updateLine(record.key, 'distributionCombination', dist.glAccountDesc);
-                }
-              }
-            }}
-          />
-        );
-      },
+      render: (val: string, record: InvoiceLine) => (
+        <Input
+          size="small"
+          value={val}
+          variant="borderless"
+          placeholder="Select…"
+          disabled={isReadOnly}
+          readOnly
+          suffix={
+            <SearchOutlined
+              style={{ color: isReadOnly ? REDWOOD.neutral300 : REDWOOD.info, fontSize: 11, cursor: isReadOnly ? 'default' : 'pointer' }}
+              onClick={() => {
+                if (isReadOnly) return;
+                setDistLovLineKey(record.key);
+                setDistLovSearch('');
+                setDistLovOpen(true);
+              }}
+            />
+          }
+        />
+      ),
     },
     {
       title: 'Distribution Combination',
@@ -6284,6 +6266,79 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             : undefined
         }
       />
+
+      {/* ========== DISTRIBUTION SET LOV ========== */}
+      <Modal
+        title={<Space><SearchOutlined style={{ color: REDWOOD.info }} />Select Distribution Set</Space>}
+        open={distLovOpen}
+        onCancel={() => setDistLovOpen(false)}
+        footer={null}
+        width={560}
+        destroyOnClose
+      >
+        <Input
+          placeholder="Search by name or account…"
+          prefix={<SearchOutlined style={{ color: REDWOOD.neutral300 }} />}
+          value={distLovSearch}
+          onChange={e => setDistLovSearch(e.target.value)}
+          allowClear
+          autoFocus
+          style={{ marginBottom: 12 }}
+        />
+        {distCombinations.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '24px 0', color: REDWOOD.neutral300, fontSize: 13 }}>
+            No distribution combinations found.<br />
+            <span style={{ fontSize: 12 }}>Add them in AP Setup › Manage Distribution Combinations.</span>
+          </div>
+        ) : (
+          <Table
+            size="small"
+            dataSource={distCombinations.filter(d => {
+              const q = distLovSearch.toLowerCase();
+              return !q
+                || d.combinationName.toLowerCase().includes(q)
+                || (d.glAccountDesc || '').toLowerCase().includes(q)
+                || (d.description || '').toLowerCase().includes(q);
+            })}
+            rowKey="combinationId"
+            pagination={{ pageSize: 10, size: 'small', showTotal: t => `${t} combinations` }}
+            onRow={d => ({
+              style: { cursor: 'pointer' },
+              onClick: () => {
+                if (distLovLineKey) {
+                  updateLine(distLovLineKey, 'distributionSet', d.combinationName);
+                  if (d.glAccountDesc) updateLine(distLovLineKey, 'distributionCombination', d.glAccountDesc);
+                }
+                setDistLovOpen(false);
+              },
+            })}
+            columns={[
+              {
+                title: 'Distribution Set',
+                dataIndex: 'combinationName',
+                render: (v: string, d: DistCombination) => (
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 600 }}>{v}</div>
+                    {d.description && <div style={{ fontSize: 11, color: REDWOOD.neutral300 }}>{d.description}</div>}
+                  </div>
+                ),
+              },
+              {
+                title: 'GL Account',
+                dataIndex: 'glAccountDesc',
+                width: 200,
+                render: (v: string) => <span style={{ fontSize: 11, fontFamily: 'monospace' }}>{v || '—'}</span>,
+              },
+              {
+                title: 'BU',
+                dataIndex: 'businessUnit',
+                width: 100,
+                render: (v: string) => <span style={{ fontSize: 11 }}>{v || '—'}</span>,
+              },
+            ]}
+          />
+        )}
+      </Modal>
 
       {/* ========== VALIDATION CHECKLIST MODAL ========== */}
       <Modal
