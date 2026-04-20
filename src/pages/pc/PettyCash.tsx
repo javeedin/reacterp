@@ -277,6 +277,7 @@ const RegisterDetail: React.FC<{
   const [bankTxnForm]     = Form.useForm();
   const [bankTxnSaving, setBankTxnSaving] = useState(false);
   const [bankAccounts, setBankAccounts]   = useState<string[]>([]);
+  const [buLegalEntityMap, setBuLegalEntityMap] = useState<Map<string, string>>(new Map());
   const [chargeAcctResolved, setChargeAcctResolved] =
     useState<Map<number, { code: string; desc: string }>>(new Map());
 
@@ -308,18 +309,21 @@ const RegisterDetail: React.FC<{
     });
   }, [transactions, distCombinations]);
 
-  // ── Load bank accounts filtered by BU ────────────────────────
+  // ── Load bank accounts filtered by BU via legal entity ───────
   const BANK_ACCOUNTS_URL = `${APEX_DB_CONFIG.baseUrl}/banks/bankaccounts`;
   const EXT_TXN_URL       = `${APEX_DB_CONFIG.baseUrl}/cash/externaltransactions`;
+  const BU_LIST_URL       = `${APEX_DB_CONFIG.baseUrl}/gl/businessunits`;
 
-  const loadBankAccountsByBU = (bu: string) => {
+  const loadBankAccountsByBU = (bu: string, leMap?: Map<string, string>) => {
     setBankAccounts([]);
+    const map = leMap ?? buLegalEntityMap;
+    const legalEntity = map.get(bu) || '';
     fetch(BANK_ACCOUNTS_URL, { headers: { Accept: 'application/json' } })
       .then(r => r.json())
       .then(data => {
         const all = (data.items || []) as any[];
-        const filtered = bu
-          ? all.filter(i => (i.business_unit_name || i.businessUnitName || '').toLowerCase() === bu.toLowerCase())
+        const filtered = legalEntity
+          ? all.filter(i => (i.legal_entity_name || '').toLowerCase() === legalEntity.toLowerCase())
           : all;
         const names = [
           ...new Set(filtered.map((i: any) => i.bank_account_name || i.bankAccountName || '').filter(Boolean)),
@@ -342,7 +346,24 @@ const RegisterDetail: React.FC<{
       offsetAccountCombination: mv.chargeAccountDesc || '',
       description:              `Petty Cash Refill — ${register.registerName}`,
     });
-    loadBankAccountsByBU(bu);
+    // Fetch BU list to resolve legal entity, then load bank accounts
+    if (buLegalEntityMap.size > 0) {
+      loadBankAccountsByBU(bu);
+    } else {
+      fetch(BU_LIST_URL, { headers: { Accept: 'application/json' } })
+        .then(r => r.json())
+        .then(data => {
+          const leMap = new Map<string, string>(
+            (data.items || []).map((i: any) => [
+              i.business_unit_name || '',
+              i.legal_entity_name  || '',
+            ])
+          );
+          setBuLegalEntityMap(leMap);
+          loadBankAccountsByBU(bu, leMap);
+        })
+        .catch(() => loadBankAccountsByBU(bu));
+    }
   }, [bankTxnModalOpen]);
 
   // ── Load distribution combinations + open AP periods on mount ─
@@ -1085,10 +1106,13 @@ const RegisterDetail: React.FC<{
           </Form.Item>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
             <Button onClick={() => setAddMoneyOpen(false)}>Cancel</Button>
-            <Button type="primary" htmlType="submit" loading={saving}
-              style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>
-              Add Money
-            </Button>
+            <Tooltip title={!linkedBankTxnRef ? 'Create a bank transaction first' : undefined}>
+              <Button type="primary" htmlType="submit" loading={saving}
+                disabled={!linkedBankTxnRef}
+                style={{ background: linkedBankTxnRef ? REDWOOD.success : undefined, borderColor: linkedBankTxnRef ? REDWOOD.success : undefined }}>
+                Add Money
+              </Button>
+            </Tooltip>
           </div>
         </Form>
       </Modal>
