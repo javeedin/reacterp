@@ -381,11 +381,14 @@ const RegisterDetail: React.FC<{
   const [refGroupRef, setRefGroupRef]     = useState<string>('');
   const [refGroupSaving, setRefGroupSaving] = useState(false);
   const [refGroupForm] = Form.useForm();
-  const [reverseOpen, setReverseOpen]     = useState(false);
-  const [reverseTxn, setReverseTxn]       = useState<PCTransaction | null>(null);
-  const [reverseVoidBank, setReverseVoidBank] = useState(true);
-  const [reverseSaving, setReverseSaving] = useState(false);
-  const [reverseComments, setReverseComments] = useState('');
+  const [reverseOpen, setReverseOpen]         = useState(false);
+  const [reverseTxn, setReverseTxn]           = useState<PCTransaction | null>(null);
+  const [reverseVoidBank, setReverseVoidBank]  = useState(true);
+  const [reverseSaving, setReverseSaving]      = useState(false);
+  const [reverseComments, setReverseComments]  = useState('');
+  const [reverseBankData, setReverseBankData]           = useState<any | null>(null);
+  const [reverseBankLoading, setReverseBankLoading]     = useState(false);
+  const [reverseScenario, setReverseScenario]           = useState<'no_bank' | 'bank_void' | 'bank_unr' | 'bank_accounted'>('no_bank');
 
   const updateLine = (key: string, patch: Partial<ExpenseLine>) =>
     setExpenseLines(prev => prev.map(l => l.key === key ? { ...l, ...patch } : l));
@@ -590,20 +593,121 @@ const RegisterDetail: React.FC<{
     });
   };
 
-  // ── Open reverse modal ────────────────────────────────────
-  const openReverseModal = (txn: PCTransaction) => {
+  // ── Open reverse modal (fetches bank txn status to pick scenario) ────
+  const openReverseModal = async (txn: PCTransaction) => {
     setReverseTxn(txn);
     setReverseVoidBank(true);
     setReverseComments('');
+    setReverseBankData(null);
+    setReverseScenario('no_bank');
     setReverseOpen(true);
+    if (!txn.bankTxnId) return;
+    setReverseBankLoading(true);
+    try {
+      const res      = await fetch(`${EXT_TXN_URL}?external_transaction_id=${txn.bankTxnId}&row_limit=1`, { headers: { Accept: 'application/json' } });
+      const data     = await res.json();
+      const bankItem = (data.items || [])[0] ?? null;
+      setReverseBankData(bankItem);
+      if (!bankItem) {
+        setReverseScenario('no_bank');
+      } else if (bankItem.status === 'VOID') {
+        setReverseScenario('bank_void');
+      } else if (bankItem.accountingFlag === 'Y' || bankItem.status === 'REC') {
+        setReverseScenario('bank_accounted');
+      } else {
+        setReverseScenario('bank_unr');
+      }
+    } catch {
+      setReverseScenario('no_bank');
+    } finally {
+      setReverseBankLoading(false);
+    }
   };
 
-  // ── Confirm reversal (+optional bank void) ────────────────
+  // ── Confirm reversal — 3-branch decision tree ─────────────
   const handleConfirmReverse = async () => {
     if (!reverseTxn) return;
     setReverseSaving(true);
     try {
-      // 1. Create offsetting Adjustment in petty cash
+
+      // ── Scenario A: bank transaction is VOID (never accounted) ──────────
+      // Delete the PC entry; no GL entries needed.
+      if (reverseScenario === 'bank_void') {
+        await deleteTransaction(reverseTxn.transactionId);
+        message.success('Bank transaction was already void — Add Money entry removed');
+        setReverseOpen(false);
+        onRefresh();
+        return;
+      }
+
+      // ── Scenario C: bank transaction is reconciled or accounted ─────────
+      // Create a negative contra bank transaction, then link an Adjustment to it.
+      if (reverseScenario === 'bank_accounted') {
+        const bd     = reverseBankData;
+        const negRef = `REV-${bd?.referenceText ?? reverseTxn.bankTxnId ?? Date.now()}`;
+        const negPayload = {
+          items: [{
+            BankAccountName:          bd?.bankAccountName          ?? '',
+            BusinessUnitName:         bd?.businessUnitName         ?? register.businessUnit,
+            Amount:                   -(bd?.amount ?? reverseTxn.debitAmount),
+            TransactionDate:          dayjs().format('YYYY-MM-DD'),
+            CurrencyCode:             bd?.currencyCode             ?? reverseTxn.currency,
+            ReferenceText:            negRef,
+            TransactionType:          bd?.transactionType          ?? 'MISC',
+            Description:              reverseComments.trim() || `Reversal of bank txn #${reverseTxn.bankTxnId}`,
+            Source:                   'ORA_MAN',
+            Status:                   'UNR',
+            AccountingFlag:           false,
+            CreatedBy:                currentUser,
+            CreationDate:             new Date().toISOString(),
+            LastUpdatedBy:            currentUser,
+            LastUpdateDate:           new Date().toISOString(),
+            LastUpdateLogin:          '',
+            AssetAccountCombination:  bd?.assetAccountCombination  ?? '',
+            OffsetAccountCombination: bd?.offsetAccountCombination ?? '',
+          }],
+        };
+        const negRes  = await fetch(EXT_TXN_URL, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body:    JSON.stringify(negPayload),
+        });
+        const negData = await negRes.json().catch(() => ({})) as any;
+        if (!negRes.ok || negData.status !== 'success') {
+          throw new Error(negData.message ?? `Bank transaction POST failed (HTTP ${negRes.status})`);
+        }
+        const newBankTxnId: number | null = negData.externalTransactionId ?? null;
+
+        await createTransaction({
+          registerId:        reverseTxn.registerId,
+          transactionDate:   dayjs().format('YYYY-MM-DD'),
+          accountingDate:    dayjs().format('YYYY-MM-DD'),
+          transactionType:   'Adjustment',
+          expenseType:       reverseTxn.expenseType || undefined,
+          currency:          reverseTxn.currency,
+          debitAmount:       reverseTxn.creditAmount,
+          creditAmount:      reverseTxn.debitAmount,
+          chargeAccountCcid: reverseTxn.chargeAccountCcid || undefined,
+          chargeAccountDesc: reverseTxn.chargeAccountDesc || undefined,
+          postingStatus:     'Unposted',
+          referenceNo:       reverseTxn.referenceNo || undefined,
+          bankTxnId:         newBankTxnId ?? undefined,
+          comments:          reverseComments.trim()
+            ? reverseComments.trim()
+            : `Reversal of Line #${reverseTxn.lineNumber} (contra bank txn #${newBankTxnId ?? 'N/A'})`,
+          createdBy:         currentUser,
+        });
+
+        message.success(
+          `Reversal Adjustment created with offsetting bank transaction${newBankTxnId ? ` #${newBankTxnId}` : ''}`
+        );
+        setReverseOpen(false);
+        onRefresh();
+        return;
+      }
+
+      // ── Scenario B (default): bank is UNR + unaccounted, or no bank txn ─
+      // Create Adjustment, then optionally void the bank transaction.
       await createTransaction({
         registerId:        reverseTxn.registerId,
         transactionDate:   dayjs().format('YYYY-MM-DD'),
@@ -624,8 +728,7 @@ const RegisterDetail: React.FC<{
         createdBy:         currentUser,
       });
 
-      // 2. Optionally void the linked bank transaction
-      if (reverseVoidBank && reverseTxn.bankTxnId) {
+      if (reverseTxn.bankTxnId) {
         const voidUrl = `${EXT_TXN_URL}/${reverseTxn.bankTxnId}/void?updated_by=${encodeURIComponent(currentUser)}`;
         const res  = await fetch(voidUrl, { method: 'PUT', headers: { Accept: 'application/json' } });
         const data = await res.json().catch(() => ({})) as { success?: boolean; code?: string; message?: string };
@@ -2679,23 +2782,72 @@ const RegisterDetail: React.FC<{
               </Space>
             </div>
 
-            {/* What the reversal will do */}
-            <Alert
-              type="info"
-              showIcon
-              style={{ marginBottom: 14, fontSize: 12 }}
-              message={
-                <span>
-                  An <b>Adjustment</b> entry of{' '}
-                  <Text strong style={{ color: REDWOOD.error }}>−{fmt(reverseTxn.debitAmount)} {reverseTxn.currency}</Text>{' '}
-                  will be created, restoring the register balance to its prior state.
-                  The original line is kept for the audit trail.
-                </span>
-              }
-            />
+            {/* Bank status loading spinner */}
+            {reverseBankLoading && (
+              <div style={{ textAlign: 'center', padding: '16px 0', marginBottom: 14 }}>
+                <Spin size="small" tip="Checking bank transaction status…" />
+              </div>
+            )}
 
-            {/* Void bank transaction option */}
-            {reverseTxn.bankTxnId && (
+            {/* Scenario A: bank already VOID */}
+            {!reverseBankLoading && reverseScenario === 'bank_void' && (
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginBottom: 14, fontSize: 12 }}
+                message={
+                  <span>
+                    The linked bank transaction is already <b>VOID</b> and was never accounted.<br />
+                    The Add Money entry will be <b>deleted</b> from the register — no GL entries are needed.
+                    The bank transaction is already closed.
+                  </span>
+                }
+              />
+            )}
+
+            {/* Scenario C: bank reconciled or accounted */}
+            {!reverseBankLoading && reverseScenario === 'bank_accounted' && (
+              <Alert
+                type="error"
+                showIcon
+                style={{ marginBottom: 14, fontSize: 12 }}
+                message={
+                  <span>
+                    The linked bank transaction is{' '}
+                    <b>
+                      {reverseBankData?.status === 'REC' && reverseBankData?.accountingFlag === 'Y'
+                        ? 'reconciled and accounted'
+                        : reverseBankData?.status === 'REC'
+                        ? 'reconciled'
+                        : 'accounted'}
+                    </b>.
+                    <br />
+                    A <b>negative offsetting bank transaction</b> will be created and linked to a new Adjustment entry.
+                    The original bank transaction is preserved for reconciliation.
+                  </span>
+                }
+              />
+            )}
+
+            {/* Scenario B / no_bank: standard Adjustment */}
+            {!reverseBankLoading && (reverseScenario === 'bank_unr' || reverseScenario === 'no_bank') && (
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 14, fontSize: 12 }}
+                message={
+                  <span>
+                    An <b>Adjustment</b> entry of{' '}
+                    <Text strong style={{ color: REDWOOD.error }}>−{fmt(reverseTxn.debitAmount)} {reverseTxn.currency}</Text>{' '}
+                    will be created, restoring the register balance to its prior state.
+                    The original line is kept for the audit trail.
+                  </span>
+                }
+              />
+            )}
+
+            {/* Void bank checkbox — only shown for bank_unr */}
+            {!reverseBankLoading && reverseScenario === 'bank_unr' && reverseTxn.bankTxnId && (
               <div style={{ padding: '10px 14px', border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, marginBottom: 14 }}>
                 <Space>
                   <input
@@ -2717,16 +2869,18 @@ const RegisterDetail: React.FC<{
               </div>
             )}
 
-            {/* Reason */}
-            <div style={{ marginBottom: 16 }}>
-              <Text style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Reason / Comments</Text>
-              <Input.TextArea
-                rows={2}
-                placeholder="e.g. Wrong amount entered — reversing"
-                value={reverseComments}
-                onChange={e => setReverseComments(e.target.value)}
-              />
-            </div>
+            {/* Reason / Comments — not shown for bank_void (no entry created) */}
+            {!reverseBankLoading && reverseScenario !== 'bank_void' && (
+              <div style={{ marginBottom: 16 }}>
+                <Text style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Reason / Comments</Text>
+                <Input.TextArea
+                  rows={2}
+                  placeholder="e.g. Wrong amount entered — reversing"
+                  value={reverseComments}
+                  onChange={e => setReverseComments(e.target.value)}
+                />
+              </div>
+            )}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <Button onClick={() => setReverseOpen(false)}>Cancel</Button>
@@ -2734,10 +2888,11 @@ const RegisterDetail: React.FC<{
                 type="primary"
                 danger
                 loading={reverseSaving}
+                disabled={reverseBankLoading}
                 icon={<RollbackOutlined />}
                 onClick={handleConfirmReverse}
               >
-                Confirm Reversal
+                {reverseScenario === 'bank_void' ? 'Delete Entry' : 'Confirm Reversal'}
               </Button>
             </div>
           </>
