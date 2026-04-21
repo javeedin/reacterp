@@ -1732,41 +1732,15 @@ const RegisterDetail: React.FC<{
               </Tooltip>
             ) : null}
             {txn.transactionType === 'Balance Refill' ? (
-              /* Balance Refill — reverse + print */
-              <>
-                <Tooltip title="Reverse this Add Money entry">
-                  <Button type="text" size="small"
-                    icon={<RollbackOutlined style={{ color: REDWOOD.warning }} />}
-                    loading={isLoading}
-                    disabled={isClosed}
-                    onClick={() => openReverseModal(txn)}
-                  />
-                </Tooltip>
-                {(() => {
-                  const siblings = transactions.filter(t => txn.referenceNo && t.referenceNo === txn.referenceNo);
-                  const hasGroup = siblings.length > 1;
-                  const printItems = [
-                    { key: 'single', label: 'Print this transaction', icon: <PrinterOutlined /> },
-                    ...(hasGroup ? [{ key: 'group', label: `Print reference group (${siblings.length} lines)`, icon: <FilePdfOutlined /> }] : []),
-                  ];
-                  return (
-                    <Dropdown
-                      menu={{
-                        items: printItems,
-                        onClick: ({ key }) => {
-                          if (key === 'single') printPCTxnPDF(txn, register);
-                          else printRefGroupPDF(txn.referenceNo!, siblings, register);
-                        },
-                      }}
-                      trigger={['click']}
-                    >
-                      <Tooltip title="Print">
-                        <Button type="text" size="small" icon={<PrinterOutlined style={{ color: REDWOOD.neutral600 }} />} />
-                      </Tooltip>
-                    </Dropdown>
-                  );
-                })()}
-              </>
+              /* Balance Refill — always reverse via modal */
+              <Tooltip title="Reverse this Add Money entry">
+                <Button type="text" size="small"
+                  icon={<RollbackOutlined style={{ color: REDWOOD.warning }} />}
+                  loading={isLoading}
+                  disabled={isClosed}
+                  onClick={() => openReverseModal(txn)}
+                />
+              </Tooltip>
             ) : !isPosted ? (
               <>
                 <Tooltip title="Edit transaction">
@@ -1795,6 +1769,31 @@ const RegisterDetail: React.FC<{
                 />
               </Tooltip>
             )}
+            {/* Print — available on all transaction types */}
+            {(() => {
+              const siblings = transactions.filter(t => txn.referenceNo && t.referenceNo === txn.referenceNo);
+              const hasGroup = siblings.length > 1;
+              const printItems = [
+                { key: 'single', label: 'Print this transaction', icon: <PrinterOutlined /> },
+                ...(hasGroup ? [{ key: 'group', label: `Print reference group (${siblings.length} lines)`, icon: <FilePdfOutlined /> }] : []),
+              ];
+              return (
+                <Dropdown
+                  menu={{
+                    items: printItems,
+                    onClick: ({ key }) => {
+                      if (key === 'single') printPCTxnPDF(txn, register);
+                      else printRefGroupPDF(txn.referenceNo!, siblings, register);
+                    },
+                  }}
+                  trigger={['click']}
+                >
+                  <Tooltip title="Print / Download PDF">
+                    <Button type="text" size="small" icon={<PrinterOutlined style={{ color: REDWOOD.neutral600 }} />} />
+                  </Tooltip>
+                </Dropdown>
+              );
+            })()}
           </Space>
         );
       }},
