@@ -2049,10 +2049,10 @@ const RegisterDetail: React.FC<{
                       onChange={(val) => {
                         const dist = distCombinations.find(d => d.combinationName === val);
                         expenseForm.setFieldsValue({
-                          chargeAccountDesc: dist?.combinationName ?? '',
+                          chargeAccountDesc: dist?.glAccountDesc ?? '',
                           chargeAccountCcid: dist?.glAccountCcid ?? null,
                         });
-                        setAddAcctDesc(dist?.glAccountDesc ?? '');
+                        setAddAcctDesc(dist?.combinationName ?? '');
                       }}
                       options={distCombinations.map(d => ({
                         value: d.combinationName,
@@ -2190,9 +2190,9 @@ const RegisterDetail: React.FC<{
                         const dist = distCombinations.find(d => d.combinationName === val);
                         updateLine(line.key, {
                           expenseType:       val,
-                          chargeAccountDesc: dist?.combinationName ?? '',
+                          chargeAccountDesc: dist?.glAccountDesc ?? '',
                           chargeAccountCcid: dist?.glAccountCcid ?? null,
-                          acctDesc:          dist?.glAccountDesc ?? '',
+                          acctDesc:          dist?.combinationName ?? '',
                         });
                       }}
                       options={distCombinations.map(d => ({ value: d.combinationName, label: d.combinationName }))}
@@ -2345,10 +2345,10 @@ const RegisterDetail: React.FC<{
                       onChange={(val) => {
                         const dist = distCombinations.find(d => d.combinationName === val);
                         editTxnForm.setFieldsValue({
-                          chargeAccountDesc: dist?.combinationName ?? editTxnForm.getFieldValue('chargeAccountDesc'),
+                          chargeAccountDesc: dist?.glAccountDesc ?? editTxnForm.getFieldValue('chargeAccountDesc'),
                           chargeAccountCcid: dist?.glAccountCcid ?? editTxnForm.getFieldValue('chargeAccountCcid'),
                         });
-                        setEditAcctDesc(dist?.glAccountDesc ?? '');
+                        setEditAcctDesc(dist?.combinationName ?? '');
                       }}
                       options={distCombinations.map(d => ({ value: d.combinationName, label: d.combinationName }))}
                     />
