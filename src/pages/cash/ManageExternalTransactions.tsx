@@ -503,7 +503,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     try {
       const res = await fetch(`${APEX_BASE}/cash/externaltransactions?row_limit=1000`);
       const data = await parseApexJson(res);
-      if (data.status === 'success' && data.items) {
+      if (data.success && data.items) {
         const items: ExternalTxnRecord[] = data.items;
         const acctSet = new Set<string>();
         const buSet   = new Set<string>();
@@ -549,7 +549,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     try {
       const res  = await fetch(url);
       const data = await parseApexJson(res);
-      if (data.status === 'success') {
+      if (data.success) {
         setTransactions(data.items ?? []);
         if ((data.items ?? []).length === 0) message.info('No transactions found for the selected criteria.');
       } else {

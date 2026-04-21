@@ -346,22 +346,26 @@ END;
         p_comments       => 'Query external cash transactions with optional filters',
         p_source         => q'[
 DECLARE
-    l_ext_id      NUMBER         := TO_NUMBER(:external_transaction_id);
-    l_txn_number  VARCHAR2(100)  := :transaction_number;
-    l_bank_acct   VARCHAR2(360)  := :bank_account;
-    l_currency    VARCHAR2(15)   := :currency_code;
-    l_bu          VARCHAR2(360)  := :business_unit;
-    l_txn_type    VARCHAR2(60)   := :transaction_type;
-    l_source      VARCHAR2(60)   := :source;
-    l_status      VARCHAR2(30)   := :status;
-    l_reference   VARCHAR2(360)  := :reference;
-    l_date_from   VARCHAR2(30)   := :date_from;
-    l_date_to     VARCHAR2(30)   := :date_to;
-    l_amt_from    VARCHAR2(30)   := :amount_from;
-    l_amt_to      VARCHAR2(30)   := :amount_to;
-    l_limit       NUMBER         := NVL(TO_NUMBER(:row_limit),  500);
-    l_offset      NUMBER         := NVL(TO_NUMBER(:row_offset), 0);
-    v_total       NUMBER         := 0;
+    l_txn_number VARCHAR2(100) := :transaction_number;
+    l_bank_acct  VARCHAR2(360) := :bank_account;
+    l_currency   VARCHAR2(15)  := :currency_code;
+    l_bu         VARCHAR2(360) := :business_unit;
+    l_txn_type   VARCHAR2(60)  := :transaction_type;
+    l_source     VARCHAR2(60)  := :source;
+    l_status     VARCHAR2(30)  := :status;
+    l_reference  VARCHAR2(360) := :reference;
+    l_date_from  VARCHAR2(30)  := :date_from;
+    l_date_to    VARCHAR2(30)  := :date_to;
+    l_amt_from   VARCHAR2(30)  := :amount_from;
+    l_amt_to     VARCHAR2(30)  := :amount_to;
+    l_limit      NUMBER        := NVL(TO_NUMBER(:row_limit), 500);
+    l_offset     NUMBER        := NVL(TO_NUMBER(:row_offset), 0);
+
+    v_clob  CLOB;
+    v_first BOOLEAN := TRUE;
+    l_pos   INTEGER;
+    l_len   INTEGER;
+    l_chunk VARCHAR2(32767);
 
     CURSOR c_txns IS
         SELECT EXTERNAL_TRANSACTION_ID,
@@ -393,8 +397,7 @@ DECLARE
                TO_CHAR(LAST_UPDATE_DATE,'YYYY-MM-DD"T"HH24:MI:SS') AS LAST_UPDATE_DATE,
                TO_CHAR(SYNC_DATE,       'YYYY-MM-DD"T"HH24:MI:SS') AS SYNC_DATE
           FROM RR_EXTERNAL_CASH_TRANSACTIONS
-         WHERE (l_ext_id     IS NULL OR EXTERNAL_TRANSACTION_ID    = l_ext_id)
-           AND (l_txn_number IS NULL OR TO_CHAR(TRANSACTION_ID) LIKE '%' || l_txn_number || '%')
+         WHERE (l_txn_number IS NULL OR TO_CHAR(TRANSACTION_ID) LIKE '%' || l_txn_number || '%')
            AND (l_bank_acct  IS NULL OR UPPER(BANK_ACCOUNT_NAME)   LIKE '%' || UPPER(l_bank_acct)  || '%')
            AND (l_currency   IS NULL OR CURRENCY_CODE              = l_currency)
            AND (l_bu         IS NULL OR BUSINESS_UNIT_NAME         = l_bu)
@@ -410,72 +413,83 @@ DECLARE
          OFFSET l_offset ROWS FETCH NEXT l_limit ROWS ONLY;
 
     r c_txns%ROWTYPE;
-BEGIN
-    SELECT COUNT(*)
-      INTO v_total
-      FROM RR_EXTERNAL_CASH_TRANSACTIONS
-     WHERE (l_txn_number IS NULL OR TO_CHAR(TRANSACTION_ID) LIKE '%' || l_txn_number || '%')
-       AND (l_bank_acct  IS NULL OR UPPER(BANK_ACCOUNT_NAME)   LIKE '%' || UPPER(l_bank_acct)  || '%')
-       AND (l_currency   IS NULL OR CURRENCY_CODE              = l_currency)
-       AND (l_bu         IS NULL OR BUSINESS_UNIT_NAME         = l_bu)
-       AND (l_txn_type   IS NULL OR TRANSACTION_TYPE           = l_txn_type)
-       AND (l_source     IS NULL OR SOURCE                     = l_source)
-       AND (l_status     IS NULL OR STATUS                     = l_status)
-       AND (l_reference  IS NULL OR UPPER(REFERENCE_TEXT)      LIKE '%' || UPPER(l_reference)  || '%')
-       AND (l_date_from  IS NULL OR TRANSACTION_DATE >= TO_DATE(l_date_from, 'YYYY-MM-DD'))
-       AND (l_date_to    IS NULL OR TRANSACTION_DATE <= TO_DATE(l_date_to,   'YYYY-MM-DD'))
-       AND (l_amt_from   IS NULL OR AMOUNT >= TO_NUMBER(l_amt_from))
-       AND (l_amt_to     IS NULL OR AMOUNT <= TO_NUMBER(l_amt_to));
 
-    :status_code := 200;
-    APEX_JSON.OPEN_OBJECT;
-    APEX_JSON.WRITE('status', 'success');
-    APEX_JSON.WRITE('total',  v_total);
-    APEX_JSON.OPEN_ARRAY('items');
+    FUNCTION jstr(p IN VARCHAR2) RETURN VARCHAR2 IS
+        v VARCHAR2(32767) := p;
+    BEGIN
+        IF v IS NULL THEN RETURN 'null'; END IF;
+        v := REPLACE(v, '\',   '\\');
+        v := REPLACE(v, '"',   '\"');
+        v := REPLACE(v, CHR(9),  '\t');
+        v := REPLACE(v, CHR(10), '\n');
+        v := REPLACE(v, CHR(13), '\r');
+        v := REGEXP_REPLACE(v, '[[:cntrl:]]', '');
+        RETURN '"' || v || '"';
+    END jstr;
+
+BEGIN
+    DBMS_LOB.CREATETEMPORARY(v_clob, TRUE);
+    DBMS_LOB.APPEND(v_clob, TO_CLOB('{"success":true,"items":['));
 
     OPEN c_txns;
     LOOP
         FETCH c_txns INTO r;
         EXIT WHEN c_txns%NOTFOUND;
 
-        APEX_JSON.OPEN_OBJECT;
-        APEX_JSON.WRITE('externalTransactionId',    r.EXTERNAL_TRANSACTION_ID);
-        APEX_JSON.WRITE('transactionId',            r.TRANSACTION_ID);
-        APEX_JSON.WRITE('transactionDate',          r.TRANSACTION_DATE);
-        APEX_JSON.WRITE('valueDate',                r.VALUE_DATE);
-        APEX_JSON.WRITE('clearedDate',              r.CLEARED_DATE);
-        APEX_JSON.WRITE('amount',                   r.AMOUNT);
-        APEX_JSON.WRITE('currencyCode',             r.CURRENCY_CODE);
-        APEX_JSON.WRITE('description',              r.DESCRIPTION);
-        APEX_JSON.WRITE('referenceText',            r.REFERENCE_TEXT);
-        APEX_JSON.WRITE('source',                   r.SOURCE);
-        APEX_JSON.WRITE('status',                   r.STATUS);
-        APEX_JSON.WRITE('transactionType',          r.TRANSACTION_TYPE);
-        APEX_JSON.WRITE('accountingFlag',           r.ACCOUNTING_FLAG);
-        APEX_JSON.WRITE('bankAccountName',          r.BANK_ACCOUNT_NAME);
-        APEX_JSON.WRITE('businessUnitName',         r.BUSINESS_UNIT_NAME);
-        APEX_JSON.WRITE('legalEntityName',          r.LEGAL_ENTITY_NAME);
-        APEX_JSON.WRITE('assetAccountCombination',  r.ASSET_ACCOUNT_COMBINATION);
-        APEX_JSON.WRITE('offsetAccountCombination', r.OFFSET_ACCOUNT_COMBINATION);
-        APEX_JSON.WRITE('bankConversionRate',       r.BANK_CONVERSION_RATE);
-        APEX_JSON.WRITE('bankConversionRateType',   r.BANK_CONVERSION_RATE_TYPE);
-        APEX_JSON.WRITE('transferId',               r.TRANSFER_ID);
-        APEX_JSON.WRITE('checkNumber',              r.CHECK_NUMBER);
-        APEX_JSON.WRITE('reconReference',           r.RECON_REFERENCE);
-        APEX_JSON.WRITE('createdBy',                r.CREATED_BY);
-        APEX_JSON.WRITE('creationDate',             r.CREATION_DATE);
-        APEX_JSON.WRITE('lastUpdateDate',           r.LAST_UPDATE_DATE);
-        APEX_JSON.WRITE('syncDate',                 r.SYNC_DATE);
-        APEX_JSON.CLOSE_OBJECT;
+        IF NOT v_first THEN
+            DBMS_LOB.APPEND(v_clob, TO_CLOB(','));
+        END IF;
+        v_first := FALSE;
+
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(
+            '{"externalTransactionId":' || TO_CHAR(r.EXTERNAL_TRANSACTION_ID) || ','
+         || '"transactionId":'          || NVL(TO_CHAR(r.TRANSACTION_ID), 'null') || ','
+         || '"transactionDate":'        || jstr(r.TRANSACTION_DATE) || ','
+         || '"valueDate":'              || jstr(r.VALUE_DATE)       || ','
+         || '"clearedDate":'            || jstr(r.CLEARED_DATE)     || ','
+         || '"amount":'                 || NVL(TO_CHAR(r.AMOUNT), 'null') || ','
+         || '"currencyCode":'           || jstr(r.CURRENCY_CODE)    || ','
+         || '"description":'            || jstr(r.DESCRIPTION)      || ','
+         || '"referenceText":'          || jstr(r.REFERENCE_TEXT)   || ','
+         || '"source":'                 || jstr(r.SOURCE)           || ','
+         || '"status":'                 || jstr(r.STATUS)           || ','
+         || '"transactionType":'        || jstr(r.TRANSACTION_TYPE) || ','
+         || '"accountingFlag":'         || jstr(r.ACCOUNTING_FLAG)  || ','
+         || '"bankAccountName":'        || jstr(r.BANK_ACCOUNT_NAME)          || ','
+         || '"businessUnitName":'       || jstr(r.BUSINESS_UNIT_NAME)         || ','
+         || '"legalEntityName":'        || jstr(r.LEGAL_ENTITY_NAME)          || ','
+         || '"assetAccountCombination":' || jstr(r.ASSET_ACCOUNT_COMBINATION) || ','
+         || '"offsetAccountCombination":' || jstr(r.OFFSET_ACCOUNT_COMBINATION) || ','
+         || '"bankConversionRate":'     || NVL(TO_CHAR(r.BANK_CONVERSION_RATE), 'null') || ','
+         || '"bankConversionRateType":' || jstr(r.BANK_CONVERSION_RATE_TYPE)  || ','
+         || '"transferId":'             || NVL(TO_CHAR(r.TRANSFER_ID), 'null') || ','
+         || '"checkNumber":'            || jstr(r.CHECK_NUMBER)    || ','
+         || '"reconReference":'         || jstr(r.RECON_REFERENCE) || ','
+         || '"createdBy":'              || jstr(r.CREATED_BY)      || ','
+         || '"creationDate":'           || jstr(r.CREATION_DATE)   || ','
+         || '"lastUpdatedBy":'          || jstr(r.LAST_UPDATED_BY) || ','
+         || '"lastUpdateDate":'         || jstr(r.LAST_UPDATE_DATE) || ','
+         || '"syncDate":'               || jstr(r.SYNC_DATE) || '}'
+        ));
     END LOOP;
     CLOSE c_txns;
 
-    APEX_JSON.CLOSE_ARRAY;
-    APEX_JSON.CLOSE_OBJECT;
+    DBMS_LOB.APPEND(v_clob, TO_CLOB(']}'));
+
+    :status_code := 200;
+    l_len := DBMS_LOB.GETLENGTH(v_clob);
+    l_pos := 1;
+    WHILE l_pos <= l_len LOOP
+        l_chunk := DBMS_LOB.SUBSTR(v_clob, 32767, l_pos);
+        HTP.PRN(l_chunk);
+        l_pos := l_pos + 32767;
+    END LOOP;
+    DBMS_LOB.FREETEMPORARY(v_clob);
+
 EXCEPTION
     WHEN OTHERS THEN
         :status_code := 500;
-        HTP.P('{"status":"error","message":' || APEX_JSON.STRINGIFY(SQLERRM) || '}');
+        HTP.PRN('{"success":false,"message":' || APEX_JSON.STRINGIFY(SQLERRM) || '}');
 END;
 ]'
     );
