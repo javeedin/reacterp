@@ -574,6 +574,7 @@ const RegisterDetail: React.FC<{
         creditAmount:       0,
         chargeAccountCcid:  values.chargeAccountCcid || null,
         chargeAccountDesc:  values.chargeAccountDesc || null,
+        referenceNo:        values.referenceNo || null,
         bankTxnId:          linkedBankTxnRef ? (Number(linkedBankTxnRef) || null) : null,
         comments:           values.comments,
         postingStatus:      'Unposted',
@@ -667,6 +668,7 @@ const RegisterDetail: React.FC<{
         setBankTxnLookupResult(lookupResult);
         message.success(`Bank transaction created — ID: ${txnRef}`);
         setLinkedBankTxnRef(txnRef);
+        moneyForm.setFieldsValue({ referenceNo: uniqueRef });
         setBankTxnModalOpen(false);
       } else {
         message.error(data.message || 'Failed — see API Response panel below');
@@ -1159,6 +1161,9 @@ const RegisterDetail: React.FC<{
             </div>
           )}
 
+          <Form.Item label="Reference No" name="referenceNo">
+            <Input placeholder="Auto-filled from bank transaction reference" />
+          </Form.Item>
           <Form.Item label="Comments" name="comments">
             <Input.TextArea rows={2} placeholder="Optional" />
           </Form.Item>
