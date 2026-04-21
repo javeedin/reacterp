@@ -381,6 +381,11 @@ const RegisterDetail: React.FC<{
   const [refGroupRef, setRefGroupRef]     = useState<string>('');
   const [refGroupSaving, setRefGroupSaving] = useState(false);
   const [refGroupForm] = Form.useForm();
+  const [reverseOpen, setReverseOpen]     = useState(false);
+  const [reverseTxn, setReverseTxn]       = useState<PCTransaction | null>(null);
+  const [reverseVoidBank, setReverseVoidBank] = useState(true);
+  const [reverseSaving, setReverseSaving] = useState(false);
+  const [reverseComments, setReverseComments] = useState('');
 
   const updateLine = (key: string, patch: Partial<ExpenseLine>) =>
     setExpenseLines(prev => prev.map(l => l.key === key ? { ...l, ...patch } : l));
@@ -585,7 +590,63 @@ const RegisterDetail: React.FC<{
     });
   };
 
-  // ── Reverse transaction (Posted only) ────────────────────
+  // ── Open reverse modal ────────────────────────────────────
+  const openReverseModal = (txn: PCTransaction) => {
+    setReverseTxn(txn);
+    setReverseVoidBank(true);
+    setReverseComments('');
+    setReverseOpen(true);
+  };
+
+  // ── Confirm reversal (+optional bank void) ────────────────
+  const handleConfirmReverse = async () => {
+    if (!reverseTxn) return;
+    setReverseSaving(true);
+    try {
+      // 1. Create offsetting Adjustment in petty cash
+      await createTransaction({
+        registerId:        reverseTxn.registerId,
+        transactionDate:   dayjs().format('YYYY-MM-DD'),
+        accountingDate:    dayjs().format('YYYY-MM-DD'),
+        transactionType:   'Adjustment',
+        expenseType:       reverseTxn.expenseType || undefined,
+        currency:          reverseTxn.currency,
+        debitAmount:       reverseTxn.creditAmount,
+        creditAmount:      reverseTxn.debitAmount,
+        chargeAccountCcid: reverseTxn.chargeAccountCcid || undefined,
+        chargeAccountDesc: reverseTxn.chargeAccountDesc || undefined,
+        postingStatus:     'Unposted',
+        referenceNo:       reverseTxn.referenceNo || undefined,
+        comments:          reverseComments.trim()
+          ? reverseComments.trim()
+          : `Reversal of Line #${reverseTxn.lineNumber}`,
+        createdBy:         currentUser,
+      });
+
+      // 2. Optionally void the linked bank transaction
+      if (reverseVoidBank && reverseTxn.bankTxnId) {
+        const voidUrl = `${EXT_TXN_URL}/${reverseTxn.bankTxnId}/void?updated_by=${encodeURIComponent(currentUser)}`;
+        const res = await fetch(voidUrl, { method: 'PUT', headers: { Accept: 'application/json' } });
+        const data = await res.json().catch(() => ({})) as { success?: boolean; message?: string };
+        if (!res.ok || !data.success) {
+          message.warning(`Petty cash reversal saved, but bank transaction void failed: ${data.message || `HTTP ${res.status}`}`);
+        } else {
+          message.success(`Reversal created and bank transaction ${reverseTxn.bankTxnId} voided`);
+        }
+      } else {
+        message.success(`Reversal created for Line #${reverseTxn.lineNumber}`);
+      }
+
+      setReverseOpen(false);
+      onRefresh();
+    } catch (e: any) {
+      message.error(e?.message ?? 'Reversal failed');
+    } finally {
+      setReverseSaving(false);
+    }
+  };
+
+  // ── Reverse transaction (non-BalanceRefill posted rows) ───
   const handleReverseTransaction = (txn: PCTransaction) => {
     Modal.confirm({
       title: `Reverse Line #${txn.lineNumber}?`,
@@ -602,8 +663,8 @@ const RegisterDetail: React.FC<{
             transactionType: 'Adjustment',
             expenseType:     txn.expenseType || undefined,
             currency:        txn.currency,
-            debitAmount:     txn.creditAmount,   // swap: credit→debit reverses an expense
-            creditAmount:    txn.debitAmount,    // swap: debit→credit reverses a refill
+            debitAmount:     txn.creditAmount,
+            creditAmount:    txn.debitAmount,
             chargeAccountCcid: txn.chargeAccountCcid || undefined,
             chargeAccountDesc: txn.chargeAccountDesc || undefined,
             postingStatus:   'Unposted',
@@ -1408,7 +1469,17 @@ const RegisterDetail: React.FC<{
                 />
               </Tooltip>
             )}
-            {!isPosted ? (
+            {txn.transactionType === 'Balance Refill' ? (
+              /* Balance Refill — always reverse via modal (bank void option) */
+              <Tooltip title="Reverse this Add Money entry">
+                <Button type="text" size="small"
+                  icon={<RollbackOutlined style={{ color: REDWOOD.warning }} />}
+                  loading={isLoading}
+                  disabled={isClosed}
+                  onClick={() => openReverseModal(txn)}
+                />
+              </Tooltip>
+            ) : !isPosted ? (
               <>
                 <Tooltip title="Edit transaction">
                   <Button type="text" size="small"
@@ -2353,6 +2424,19 @@ const RegisterDetail: React.FC<{
       >
         {editTxn && (
           <Form form={editTxnForm} layout="vertical" size="small" onFinish={handleSaveEditTransaction}>
+            {editTxn.bankTxnId && (
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginBottom: 12, fontSize: 12 }}
+                message={
+                  <span>
+                    This transaction is linked to bank transaction <b>#{editTxn.bankTxnId}</b>.
+                    Editing fields here does <b>not</b> update the bank system — use <b>Reverse</b> if the amount needs to change.
+                  </span>
+                }
+              />
+            )}
             <Row gutter={12}>
               <Col span={8}>
                 <Form.Item label="Transaction Date" name="transactionDate"
@@ -2530,6 +2614,103 @@ const RegisterDetail: React.FC<{
               </Button>
             </div>
           </Form>
+        )}
+      </Modal>
+
+      {/* ── Reverse Add Money Modal ───────────────────────── */}
+      <Modal
+        title={<Space><RollbackOutlined style={{ color: REDWOOD.warning }} /> Reverse Add Money</Space>}
+        open={reverseOpen}
+        onCancel={() => setReverseOpen(false)}
+        footer={null}
+        width={520}
+        destroyOnClose
+      >
+        {reverseTxn && (
+          <>
+            {/* Original transaction summary */}
+            <div style={{ padding: '10px 14px', background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 6, marginBottom: 14 }}>
+              <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                <Text style={{ fontSize: 12 }}>
+                  <b>Line #{reverseTxn.lineNumber}</b> &nbsp;·&nbsp;
+                  {reverseTxn.transactionDate} &nbsp;·&nbsp;
+                  <Text strong style={{ color: REDWOOD.success }}>
+                    {fmt(reverseTxn.debitAmount)} {reverseTxn.currency}
+                  </Text>
+                </Text>
+                {reverseTxn.referenceNo && (
+                  <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Ref: {reverseTxn.referenceNo}</Text>
+                )}
+                {reverseTxn.bankTxnId && (
+                  <Text style={{ fontSize: 11, color: REDWOOD.info }}>
+                    <BankOutlined /> Linked Bank Txn ID: <b>{reverseTxn.bankTxnId}</b>
+                  </Text>
+                )}
+              </Space>
+            </div>
+
+            {/* What the reversal will do */}
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginBottom: 14, fontSize: 12 }}
+              message={
+                <span>
+                  An <b>Adjustment</b> entry of{' '}
+                  <Text strong style={{ color: REDWOOD.error }}>−{fmt(reverseTxn.debitAmount)} {reverseTxn.currency}</Text>{' '}
+                  will be created, restoring the register balance to its prior state.
+                  The original line is kept for the audit trail.
+                </span>
+              }
+            />
+
+            {/* Void bank transaction option */}
+            {reverseTxn.bankTxnId && (
+              <div style={{ padding: '10px 14px', border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, marginBottom: 14 }}>
+                <Space>
+                  <input
+                    type="checkbox"
+                    checked={reverseVoidBank}
+                    onChange={e => setReverseVoidBank(e.target.checked)}
+                    id="voidBankChk"
+                    style={{ cursor: 'pointer' }}
+                  />
+                  <label htmlFor="voidBankChk" style={{ cursor: 'pointer', fontSize: 13 }}>
+                    Also void linked bank transaction <b>#{reverseTxn.bankTxnId}</b>
+                  </label>
+                </Space>
+                {!reverseVoidBank && (
+                  <div style={{ marginTop: 6, fontSize: 11, color: REDWOOD.warning }}>
+                    The bank transaction will remain active — ensure the bank reconciliation team handles it separately.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Reason */}
+            <div style={{ marginBottom: 16 }}>
+              <Text style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Reason / Comments</Text>
+              <Input.TextArea
+                rows={2}
+                placeholder="e.g. Wrong amount entered — reversing"
+                value={reverseComments}
+                onChange={e => setReverseComments(e.target.value)}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <Button onClick={() => setReverseOpen(false)}>Cancel</Button>
+              <Button
+                type="primary"
+                danger
+                loading={reverseSaving}
+                icon={<RollbackOutlined />}
+                onClick={handleConfirmReverse}
+              >
+                Confirm Reversal
+              </Button>
+            </div>
+          </>
         )}
       </Modal>
 
