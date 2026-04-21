@@ -186,8 +186,8 @@ async function exportRegisterToExcel(register: PCRegister, transactions: PCTrans
     ['End Date',        register.endDate   || '—'],
     ['Cash Account',    register.cashAccountDesc || '—'],
     ['Balance',         register.balance],
-    ['Total In (Debit)',register.totalDebit],
-    ['Total Out (Credit)', register.totalCredit],
+    ['Total In (Debit)',  register.totalDebit],
+    ['Total Out (Credit)',register.totalCredit],
     ['Export Date',     new Date().toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' })],
   ];
 
@@ -525,7 +525,7 @@ const RegisterDetail: React.FC<{
       transactionDate:   parseOracleDate(editTxn.transactionDate),
       accountingDate:    parseOracleDate(editTxn.accountingDate),
       currency:          editTxn.currency,
-      amount:            isExpense ? editTxn.debitAmount : editTxn.creditAmount,
+      amount:            isExpense ? editTxn.creditAmount : editTxn.debitAmount,
       expenseType:       editTxn.expenseType,
       chargeAccountDesc: combCode,
       chargeAccountCcid: editTxn.chargeAccountCcid,
@@ -630,8 +630,8 @@ const RegisterDetail: React.FC<{
           ? values.accountingDate.format('YYYY-MM-DD')
           : values.transactionDate.format('YYYY-MM-DD'),
         currency:          values.currency,
-        debitAmount:       isExpense ? values.amount : 0,
-        creditAmount:      isExpense ? 0 : values.amount,
+        debitAmount:       isExpense ? 0 : values.amount,
+        creditAmount:      isExpense ? values.amount : 0,
         expenseType:       values.expenseType   || null,
         chargeAccountDesc: values.chargeAccountDesc || null,
         chargeAccountCcid: values.chargeAccountCcid || null,
@@ -671,8 +671,8 @@ const RegisterDetail: React.FC<{
         accountingDate:     accDate.format('YYYY-MM-DD'),
         transactionType:    'Balance Refill',
         currency:           values.currency || register.currency,
-        debitAmount:        0,
-        creditAmount:       values.amount,
+        debitAmount:        values.amount,
+        creditAmount:       0,
         chargeAccountCcid:  values.chargeAccountCcid || null,
         chargeAccountDesc:  values.chargeAccountDesc || null,
         referenceNo:        values.referenceNo || null,
@@ -813,8 +813,8 @@ const RegisterDetail: React.FC<{
         transactionType:   'Expense',
         expenseType:       values.expenseType,
         currency:          values.currency || register.currency,
-        debitAmount:       values.amount,
-        creditAmount:      0,
+        debitAmount:       0,
+        creditAmount:      values.amount,
         chargeAccountCcid: values.chargeAccountCcid || null,
         chargeAccountDesc: values.chargeAccountDesc || null,
         referenceNo:       values.referenceNo,
@@ -870,8 +870,8 @@ const RegisterDetail: React.FC<{
           transactionType:   'Expense',
           expenseType:       line.expenseType,
           currency:          vals.currency || register.currency,
-          debitAmount:       line.amount!,
-          creditAmount:      0,
+          debitAmount:       0,
+          creditAmount:      line.amount!,
           chargeAccountCcid: line.chargeAccountCcid || null,
           chargeAccountDesc: line.chargeAccountDesc || null,
           referenceNo:       vals.referenceNo || null,
@@ -965,8 +965,8 @@ const RegisterDetail: React.FC<{
       return;
     }
     const rows: AcctProgressRow[] = eligible.map(t => {
-      const isOut         = t.debitAmount > 0;
-      const amount        = isOut ? t.debitAmount : t.creditAmount;
+      const isOut         = t.creditAmount > 0;
+      const amount        = isOut ? t.creditAmount : t.debitAmount;
       const chargeCode    = t.chargeAccountDesc ?? '';
       const chargeDesc    = chargeAcctResolved.get(t.transactionId)?.desc ?? '';
       const cashCode      = register.cashAccountDesc ?? '';
@@ -1018,8 +1018,8 @@ const RegisterDetail: React.FC<{
       }
 
       try {
-        const isOut     = txn.debitAmount > 0;
-        const amount    = isOut ? txn.debitAmount : txn.creditAmount;
+        const isOut     = txn.creditAmount > 0;
+        const amount    = isOut ? txn.creditAmount : txn.debitAmount;
         const acctDate  = toIsoDate(txn.accountingDate || txn.transactionDate);
         const periodName = derivePeriodName(new Date(acctDate));
         const eventType = txn.transactionType === 'Expense'
@@ -1166,8 +1166,8 @@ const RegisterDetail: React.FC<{
         if (row.status === 'skipped') continue;
         const txn = transactions.find(t => t.transactionId === row.txnId);
         if (!txn) continue;
-        const isOut     = txn.debitAmount > 0;
-        const amount    = isOut ? txn.debitAmount : txn.creditAmount;
+        const isOut     = txn.creditAmount > 0;
+        const amount    = isOut ? txn.creditAmount : txn.debitAmount;
         const acctDate  = toIsoDate(txn.accountingDate || txn.transactionDate);
         const periodName = derivePeriodName(new Date(acctDate));
         const eventType = txn.transactionType === 'Expense'
@@ -1287,13 +1287,13 @@ const RegisterDetail: React.FC<{
       render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Currency', dataIndex: 'currency', width: 80, align: 'center',
       render: (v) => <Text style={{ fontSize: 12 }}>{v}</Text> },
-    { title: 'Debit', dataIndex: 'debitAmount', width: 110, align: 'right',
-      render: (v) => v > 0
-        ? <Text style={{ fontSize: 12, color: REDWOOD.error }}>{fmt(v)}</Text>
-        : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
-    { title: 'Credit', dataIndex: 'creditAmount', width: 110, align: 'right',
+    { title: 'Debit (Money In)', dataIndex: 'debitAmount', width: 130, align: 'right',
       render: (v) => v > 0
         ? <Text style={{ fontSize: 12, color: REDWOOD.success }}>{fmt(v)}</Text>
+        : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
+    { title: 'Credit (Money Out)', dataIndex: 'creditAmount', width: 130, align: 'right',
+      render: (v) => v > 0
+        ? <Text style={{ fontSize: 12, color: REDWOOD.error }}>{fmt(v)}</Text>
         : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
     { title: 'Balance', dataIndex: 'runningBalance', width: 120, align: 'right',
       render: (v) => (
@@ -1475,8 +1475,8 @@ const RegisterDetail: React.FC<{
             <Col span={4}>
               <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
                 <Statistic
-                  title={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Total In (Credit)</Text>}
-                  value={register.totalCredit}
+                  title={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Total In (Debit)</Text>}
+                  value={register.totalDebit}
                   precision={2}
                   valueStyle={{ fontSize: 18, color: REDWOOD.success }}
                   prefix={<ArrowDownOutlined />}
@@ -1488,8 +1488,8 @@ const RegisterDetail: React.FC<{
             <Col span={4}>
               <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
                 <Statistic
-                  title={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Total Out (Debit)</Text>}
-                  value={register.totalDebit}
+                  title={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Total Out (Credit)</Text>}
+                  value={register.totalCredit}
                   precision={2}
                   valueStyle={{ fontSize: 18, color: REDWOOD.error }}
                   prefix={<ArrowUpOutlined />}
@@ -2372,7 +2372,7 @@ const RegisterDetail: React.FC<{
             <Row gutter={12}>
               <Col span={12}>
                 <Form.Item
-                  label={editTxn.transactionType === 'Expense' ? 'Amount (Debit)' : 'Amount (Credit)'}
+                  label={editTxn.transactionType === 'Expense' ? 'Amount (Credit)' : 'Amount (Debit)'}
                   name="amount"
                   rules={[{ required: true, message: 'Required' }, { type: 'number', min: 0.01, message: 'Must be > 0' }]}>
                   <InputNumber style={{ width: '100%' }} precision={2} min={0} placeholder="0.00" />
