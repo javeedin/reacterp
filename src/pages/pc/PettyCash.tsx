@@ -3,13 +3,15 @@ import {
   Layout, Card, Typography, Breadcrumb, Tabs, Form, Input, Select,
   DatePicker, Button, Table, Tag, Row, Col, Space, Divider,
   Modal, InputNumber, message, Tooltip, Statistic, Collapse, Progress, Descriptions, Upload,
-  Spin, Alert, Switch,
+  Spin, Alert, Switch, Dropdown,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { Link } from 'react-router-dom';
 import dayjs from 'dayjs';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import {
   HomeOutlined, WalletOutlined, PlusOutlined, SearchOutlined,
   ReloadOutlined, EditOutlined, DeleteOutlined, CloseOutlined,
@@ -18,7 +20,7 @@ import {
   LockOutlined, UnlockOutlined, UserOutlined, FieldNumberOutlined, ApiOutlined,
   SwapOutlined, UploadOutlined, PaperClipOutlined, EyeOutlined,
   BookOutlined, CheckCircleOutlined, SyncOutlined, ExclamationCircleOutlined,
-  TagOutlined,
+  TagOutlined, PrinterOutlined, FilePdfOutlined,
 } from '@ant-design/icons';
 import FloatingMenu from '../../components/FloatingMenu';
 import ApiDocsModal, { type ApiEndpoint } from '../../components/ApiDocsModal';
@@ -307,6 +309,120 @@ async function exportRegisterToExcel(register: PCRegister, transactions: PCTrans
     saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), filename);
   }
   message.success(`Exported: ${filename}`);
+}
+
+// ── PDF helpers ───────────────────────────────────────────────────────────────
+const PDF_BLUE  = [0,  83, 156] as [number, number, number];
+const PDF_GREEN = [21, 128, 61] as [number, number, number];
+
+function pdfHeader(doc: jsPDF, title: string, subtitle: string, color: [number,number,number]) {
+  const W = doc.internal.pageSize.getWidth();
+  doc.setFillColor(...color);
+  doc.rect(0, 0, W, 28, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(15); doc.setFont('helvetica', 'bold');
+  doc.text(title, W / 2, 12, { align: 'center' });
+  doc.setFontSize(9);  doc.setFont('helvetica', 'normal');
+  doc.text(subtitle, W / 2, 21, { align: 'center' });
+  doc.setTextColor(0, 0, 0);
+}
+
+function pdfFooter(doc: jsPDF, lastY: number) {
+  const W = doc.internal.pageSize.getWidth();
+  doc.setFontSize(7); doc.setTextColor(150, 150, 150);
+  doc.text(`Printed: ${new Date().toLocaleString()}  ·  ReactERP Petty Cash`, W / 2, lastY + 6, { align: 'center' });
+}
+
+function printBankTxnPDF(bankData: any, registerName: string) {
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  pdfHeader(doc, 'BANK TRANSACTION RECEIPT', registerName, PDF_BLUE);
+  autoTable(doc, {
+    startY: 34,
+    body: [
+      ['Transaction ID',   String(bankData.transactionId  ?? '—')],
+      ['Status',           String(bankData.status         ?? '—')],
+      ['Accounting',       bankData.accountingFlag === 'Y' ? 'Accounted' : 'Not Accounted'],
+      ['Date',             String(bankData.transactionDate ?? '—')],
+      ['Value Date',       String(bankData.valueDate       ?? '—')],
+      ['Amount',           `${bankData.amount ?? '—'} ${bankData.currencyCode ?? ''}`],
+      ['Bank Account',     String(bankData.bankAccountName  ?? '—')],
+      ['Business Unit',    String(bankData.businessUnitName ?? '—')],
+      ['Txn Type',         String(bankData.transactionType  ?? '—')],
+      ['Reference',        String(bankData.referenceText    ?? '—')],
+      ['Description',      String(bankData.description      ?? '—')],
+      ['Asset Account',    String(bankData.assetAccountCombination  ?? '—')],
+      ['Offset Account',   String(bankData.offsetAccountCombination ?? '—')],
+      ['Created By',       String(bankData.createdBy    ?? '—')],
+      ['Created On',       String(bankData.creationDate ?? '—')],
+    ],
+    theme: 'striped',
+    columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50, fillColor: [245, 245, 250] } },
+    styles: { fontSize: 9.5 },
+  });
+  pdfFooter(doc, (doc as any).lastAutoTable.finalY);
+  doc.save(`bank-txn-${bankData.transactionId ?? 'receipt'}.pdf`);
+}
+
+function printPCTxnPDF(txn: PCTransaction, register: PCRegister) {
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const isIn = txn.debitAmount > 0;
+  pdfHeader(doc, 'PETTY CASH TRANSACTION', register.registerName, PDF_GREEN);
+  const rows: [string, string][] = [
+    ['Line #',            String(txn.lineNumber)],
+    ['Type',              txn.transactionType],
+    ['Transaction Date',  txn.transactionDate    ?? '—'],
+    ['Accounting Date',   txn.accountingDate     ?? '—'],
+    [isIn ? 'Money In' : 'Money Out', `${(isIn ? txn.debitAmount : txn.creditAmount).toLocaleString(undefined, { minimumFractionDigits: 2 })} ${txn.currency}`],
+  ];
+  if (txn.expenseType)       rows.push(['Expense Type',    txn.expenseType]);
+  if (txn.referenceNo)       rows.push(['Reference No',    txn.referenceNo]);
+  if (txn.bankTxnId)         rows.push(['Bank Txn ID',     String(txn.bankTxnId)]);
+  if (txn.chargeAccountDesc) rows.push(['Charge Account',  txn.chargeAccountDesc]);
+  if (txn.employeeName)      rows.push(['Employee',        txn.employeeName]);
+  rows.push(['Posting Status', txn.postingStatus ?? 'Unposted']);
+  if (txn.comments)          rows.push(['Comments',        txn.comments]);
+  rows.push(['Created By',   txn.createdBy ?? '—']);
+  autoTable(doc, {
+    startY: 34,
+    body: rows,
+    theme: 'striped',
+    columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50, fillColor: [245, 250, 245] } },
+    styles: { fontSize: 9.5 },
+  });
+  pdfFooter(doc, (doc as any).lastAutoTable.finalY);
+  doc.save(`pc-txn-line${txn.lineNumber}.pdf`);
+}
+
+function printRefGroupPDF(ref: string, txns: PCTransaction[], register: PCRegister) {
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  pdfHeader(doc, 'PETTY CASH TRANSACTION GROUP', `${register.registerName}  ·  Reference: ${ref}`, PDF_BLUE);
+  const totalIn  = txns.reduce((s, t) => s + (t.debitAmount  || 0), 0);
+  const totalOut = txns.reduce((s, t) => s + (t.creditAmount || 0), 0);
+  autoTable(doc, {
+    startY: 34,
+    head: [['#', 'Date', 'Type', 'Expense Type', 'Money In', 'Money Out', 'Status', 'Comments']],
+    body: txns.map(t => [
+      String(t.lineNumber),
+      t.transactionDate  ?? '—',
+      t.transactionType,
+      t.expenseType      ?? '—',
+      t.debitAmount  > 0 ? t.debitAmount.toLocaleString(undefined,  { minimumFractionDigits: 2 }) : '—',
+      t.creditAmount > 0 ? t.creditAmount.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '—',
+      t.postingStatus    ?? '—',
+      t.comments         ?? '—',
+    ]),
+    foot: [['', '', '', `Total (${txns.length} lines)`,
+      totalIn  > 0 ? totalIn.toLocaleString(undefined,  { minimumFractionDigits: 2 }) : '—',
+      totalOut > 0 ? totalOut.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '—',
+      '', '']],
+    theme: 'grid',
+    headStyles: { fillColor: PDF_BLUE, fontSize: 9, fontStyle: 'bold' },
+    footStyles: { fillColor: [235, 235, 235], fontStyle: 'bold', fontSize: 9 },
+    styles: { fontSize: 8.5 },
+    columnStyles: { 0: { cellWidth: 10 }, 4: { halign: 'right' }, 5: { halign: 'right' } },
+  });
+  pdfFooter(doc, (doc as any).lastAutoTable.finalY);
+  doc.save(`pc-ref-${ref}.pdf`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1612,15 +1728,41 @@ const RegisterDetail: React.FC<{
               </Tooltip>
             ) : null}
             {txn.transactionType === 'Balance Refill' ? (
-              /* Balance Refill — always reverse via modal (bank void option) */
-              <Tooltip title="Reverse this Add Money entry">
-                <Button type="text" size="small"
-                  icon={<RollbackOutlined style={{ color: REDWOOD.warning }} />}
-                  loading={isLoading}
-                  disabled={isClosed}
-                  onClick={() => openReverseModal(txn)}
-                />
-              </Tooltip>
+              /* Balance Refill — reverse + print */
+              <>
+                <Tooltip title="Reverse this Add Money entry">
+                  <Button type="text" size="small"
+                    icon={<RollbackOutlined style={{ color: REDWOOD.warning }} />}
+                    loading={isLoading}
+                    disabled={isClosed}
+                    onClick={() => openReverseModal(txn)}
+                  />
+                </Tooltip>
+                {(() => {
+                  const siblings = transactions.filter(t => txn.referenceNo && t.referenceNo === txn.referenceNo);
+                  const hasGroup = siblings.length > 1;
+                  const printItems = [
+                    { key: 'single', label: 'Print this transaction', icon: <PrinterOutlined /> },
+                    ...(hasGroup ? [{ key: 'group', label: `Print reference group (${siblings.length} lines)`, icon: <FilePdfOutlined /> }] : []),
+                  ];
+                  return (
+                    <Dropdown
+                      menu={{
+                        items: printItems,
+                        onClick: ({ key }) => {
+                          if (key === 'single') printPCTxnPDF(txn, register);
+                          else printRefGroupPDF(txn.referenceNo!, siblings, register);
+                        },
+                      }}
+                      trigger={['click']}
+                    >
+                      <Tooltip title="Print">
+                        <Button type="text" size="small" icon={<PrinterOutlined style={{ color: REDWOOD.neutral600 }} />} />
+                      </Tooltip>
+                    </Dropdown>
+                  );
+                })()}
+              </>
             ) : !isPosted ? (
               <>
                 <Tooltip title="Edit transaction">
@@ -2037,12 +2179,25 @@ const RegisterDetail: React.FC<{
           <Divider style={{ margin: '8px 0', fontSize: 12 }}>Bank Transaction</Divider>
           {linkedBankTxnRef ? (
             <div style={{ marginBottom: 12 }}>
-              <div style={{ padding: '8px 12px', background: '#f6ffed', borderRadius: 6, border: '1px solid #b7eb8f', fontSize: 12, marginBottom: 8 }}>
+              <div style={{ padding: '8px 12px', background: '#f6ffed', borderRadius: 6, border: '1px solid #b7eb8f', fontSize: 12, marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Space>
                   <BankOutlined style={{ color: REDWOOD.success }} />
                   <span><b>Bank Txn ID:</b> <Text style={{ fontFamily: 'monospace', fontWeight: 700, color: REDWOOD.success, fontSize: 13 }}>{linkedBankTxnRef}</Text></span>
                   <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>(saved to Bank Txn ID column)</Text>
                 </Space>
+                <Tooltip title="Download bank transaction receipt as PDF">
+                  <Button
+                    size="small"
+                    icon={<FilePdfOutlined />}
+                    onClick={() => {
+                      const bankData = (bankTxnLookupResult?.items || [])[0];
+                      if (bankData) printBankTxnPDF(bankData, register.registerName);
+                      else message.warning('Bank transaction data not available for printing');
+                    }}
+                  >
+                    Print Receipt
+                  </Button>
+                </Tooltip>
               </div>
               <Collapse size="small" ghost>
                 <Collapse.Panel header={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>POST response</Text>} key="post">
@@ -3007,6 +3162,17 @@ const RegisterDetail: React.FC<{
             );
           }}
         />
+
+        {/* Print */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+          <Button
+            size="small"
+            icon={<FilePdfOutlined />}
+            onClick={() => printRefGroupPDF(refGroupRef, transactions.filter(t => t.referenceNo === refGroupRef), register)}
+          >
+            Download PDF
+          </Button>
+        </div>
 
         {/* Rename reference */}
         {!isClosed && (
