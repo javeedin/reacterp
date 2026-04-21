@@ -361,6 +361,7 @@ const RegisterDetail: React.FC<{
   const [viewAttachName, setViewAttachName]   = useState<string>('');
   // ── Accounting state ──────────────────────────────────────────────────────
   const [selectedRowKeys, setSelectedRowKeys]   = useState<number[]>([]);
+  const [txnSearch, setTxnSearch]               = useState('');
   const [acctModalOpen, setAcctModalOpen]       = useState(false);
   const [acctProgress, setAcctProgress]         = useState<AcctProgressRow[]>([]);
   const [acctRunning, setAcctRunning]           = useState(false);
@@ -1789,8 +1790,41 @@ const RegisterDetail: React.FC<{
       )}
 
       {/* Action buttons */}
+      {(() => {
+        const q = txnSearch.trim().toLowerCase();
+        const filteredTxns = q
+          ? transactions.filter(t =>
+              (t.referenceNo     ?? '').toLowerCase().includes(q) ||
+              (t.transactionType ?? '').toLowerCase().includes(q) ||
+              (t.expenseType     ?? '').toLowerCase().includes(q) ||
+              (t.comments        ?? '').toLowerCase().includes(q) ||
+              (t.employeeName    ?? '').toLowerCase().includes(q) ||
+              (t.createdBy       ?? '').toLowerCase().includes(q) ||
+              (t.postingStatus   ?? '').toLowerCase().includes(q) ||
+              (t.transactionDate ?? '').includes(q) ||
+              String(t.lineNumber    ?? '').includes(q) ||
+              String(t.debitAmount   ?? '').includes(q) ||
+              String(t.creditAmount  ?? '').includes(q)
+            )
+          : transactions;
+      return (<>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Transactions</Text>
+        <Space size={8}>
+          <Text style={{ fontSize: 12, color: REDWOOD.neutral600, whiteSpace: 'nowrap' }}>Transactions</Text>
+          <Input.Search
+            size="small"
+            allowClear
+            placeholder="Search transactions…"
+            style={{ width: 220 }}
+            value={txnSearch}
+            onChange={e => setTxnSearch(e.target.value)}
+          />
+          {q && (
+            <Text style={{ fontSize: 11, color: REDWOOD.neutral600, whiteSpace: 'nowrap' }}>
+              {filteredTxns.length} / {transactions.length}
+            </Text>
+          )}
+        </Space>
         <div style={{ display: 'flex', gap: 8 }}>
           <Button
             size="small"
@@ -1884,14 +1918,14 @@ const RegisterDetail: React.FC<{
 
       {/* Transactions table */}
       <Table<PCTransaction>
-        dataSource={transactions}
+        dataSource={filteredTxns}
         columns={txnColumns}
         rowKey="transactionId"
         size="small"
         loading={txnLoading}
-        pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `${t} transactions` }}
+        pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `${t} transaction${t !== 1 ? 's' : ''}` }}
         scroll={{ x: 1600 }}
-        locale={{ emptyText: 'No transactions yet — use Add Money or Add Expense to begin.' }}
+        locale={{ emptyText: q ? 'No transactions match your search.' : 'No transactions yet — use Add Money or Add Expense to begin.' }}
         rowClassName={(r) => r.transactionType === 'Balance Refill' ? 'pc-row-refill' : ''}
         rowSelection={{
           type:            'checkbox',
@@ -1902,6 +1936,8 @@ const RegisterDetail: React.FC<{
           }),
         }}
       />
+      </>);
+      })()}
 
       {/* ── Add Money Modal ────────────────────────────────── */}
       <Modal
