@@ -90,7 +90,9 @@ interface AcctProgressRow {
   amount:          number;
   currency:        string;
   drAccount:       string;
+  drAccountDesc:   string;
   crAccount:       string;
+  crAccountDesc:   string;
   status:          'pending' | 'running' | 'success' | 'error' | 'skipped';
   message?:        string;
   headerId?:       number;
@@ -840,8 +842,12 @@ const RegisterDetail: React.FC<{
       return;
     }
     const rows: AcctProgressRow[] = eligible.map(t => {
-      const isOut  = t.creditAmount > 0;
-      const amount = isOut ? t.creditAmount : t.debitAmount;
+      const isOut         = t.creditAmount > 0;
+      const amount        = isOut ? t.creditAmount : t.debitAmount;
+      const chargeCode    = t.chargeAccountDesc ?? '';
+      const chargeDesc    = chargeAcctResolved.get(t.transactionId)?.desc ?? '';
+      const cashCode      = register.cashAccountDesc ?? '';
+      const cashDesc      = cashAccountName ?? '';
       return {
         txnId:           t.transactionId,
         lineNumber:      t.lineNumber,
@@ -849,8 +855,10 @@ const RegisterDetail: React.FC<{
         expenseType:     t.expenseType,
         amount,
         currency:        t.currency,
-        drAccount:       isOut ? (t.chargeAccountDesc ?? '') : (register.cashAccountDesc ?? ''),
-        crAccount:       isOut ? (register.cashAccountDesc ?? '') : (t.chargeAccountDesc ?? ''),
+        drAccount:       isOut ? chargeCode : cashCode,
+        drAccountDesc:   isOut ? chargeDesc : cashDesc,
+        crAccount:       isOut ? cashCode   : chargeCode,
+        crAccountDesc:   isOut ? cashDesc   : chargeDesc,
         status:          t.postingStatus === 'Posted' ? 'skipped' : 'pending',
         message:         t.postingStatus === 'Posted' ? 'Already posted — skipped' : undefined,
       };
@@ -2224,10 +2232,24 @@ const RegisterDetail: React.FC<{
               }},
             { title: 'Amount', dataIndex: 'amount', width: 110, align: 'right' as const,
               render: (v, r) => <Text style={{ fontSize: 12, fontWeight: 600 }}>{fmt(v)} {r.currency}</Text> },
-            { title: 'DR Account', dataIndex: 'drAccount', ellipsis: true,
-              render: (v) => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.error }}>{v || '—'}</Text> },
-            { title: 'CR Account', dataIndex: 'crAccount', ellipsis: true,
-              render: (v) => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.success }}>{v || '—'}</Text> },
+            { title: 'DR Account', dataIndex: 'drAccount',
+              render: (v, r) => (
+                <div>
+                  <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.error }}>{v || '—'}</Text>
+                  {r.drAccountDesc && (
+                    <div style={{ fontSize: 10, color: REDWOOD.neutral600, marginTop: 1 }}>{r.drAccountDesc}</div>
+                  )}
+                </div>
+              )},
+            { title: 'CR Account', dataIndex: 'crAccount',
+              render: (v, r) => (
+                <div>
+                  <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.success }}>{v || '—'}</Text>
+                  {r.crAccountDesc && (
+                    <div style={{ fontSize: 10, color: REDWOOD.neutral600, marginTop: 1 }}>{r.crAccountDesc}</div>
+                  )}
+                </div>
+              )},
             { title: 'Status', dataIndex: 'status', width: 130,
               render: (v, r) => {
                 if (v === 'pending')  return <Tag color="default" style={{ fontSize: 11 }}>Pending</Tag>;
