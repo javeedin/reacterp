@@ -358,6 +358,7 @@ const RegisterDetail: React.FC<{
   const [apiDebugOpen, setApiDebugOpen]         = useState(false);
   const [apiDebugItems, setApiDebugItems]       = useState<ApiDebugItem[]>([]);
   const [apiDebugLoading, setApiDebugLoading]   = useState(false);
+  const [viewAcctLineDescs, setViewAcctLineDescs] = useState<Map<string, string>>(new Map());
 
   const isClosed   = register.status !== 'ACTIVE';
   const noBalance  = register.balance <= 0;
@@ -850,11 +851,23 @@ const RegisterDetail: React.FC<{
   const openViewAccounting = async (txn: PCTransaction) => {
     setViewAcctTxn(txn);
     setViewAcctData(null);
+    setViewAcctLineDescs(new Map());
     setViewAcctLoading(true);
     setViewAcctOpen(true);
     try {
       const data = await getAccounting('PC_TRANSACTIONS', txn.transactionId);
       setViewAcctData(data);
+      // Resolve description for each unique account combination in the lines
+      const unique = [...new Set((data.lines || []).map(l => l.accountCombination).filter(Boolean))];
+      const resolved = new Map<string, string>();
+      await Promise.all(unique.map(async (combo) => {
+        try {
+          const result = await validateAccountCode(combo);
+          const seg4 = Object.values(result.segmentDetails)[3];
+          resolved.set(combo, seg4?.description || '');
+        } catch { resolved.set(combo, ''); }
+      }));
+      setViewAcctLineDescs(resolved);
     } catch { setViewAcctData(null); }
     finally { setViewAcctLoading(false); }
   };
@@ -2512,8 +2525,17 @@ const RegisterDetail: React.FC<{
                   render: (v) => <Tag color={v === 'DR' ? 'red' : 'green'} style={{ fontSize: 11 }}>{v}</Tag> },
                 { title: 'Class', dataIndex: 'accountingClass', width: 100,
                   render: (v) => <Text style={{ fontSize: 11 }}>{v}</Text> },
-                { title: 'Account', dataIndex: 'accountCombination', ellipsis: true,
-                  render: (v) => <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{v}</Text> },
+                { title: 'Account', dataIndex: 'accountCombination',
+                  render: (v, r) => {
+                    const desc = viewAcctLineDescs.get(v) || '';
+                    const color = r.lineType === 'DR' ? REDWOOD.error : REDWOOD.success;
+                    return (
+                      <div>
+                        <Text style={{ fontSize: 11, fontFamily: 'monospace', color }}>{v}</Text>
+                        {desc && <div style={{ fontSize: 10, color: REDWOOD.neutral600, marginTop: 1 }}>{desc}</div>}
+                      </div>
+                    );
+                  }},
                 { title: 'Debit', dataIndex: 'enteredDr', width: 110, align: 'right' as const,
                   render: (v) => v > 0
                     ? <Text style={{ fontSize: 12, color: REDWOOD.error }}>{fmt(v)}</Text>
