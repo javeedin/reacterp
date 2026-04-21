@@ -305,7 +305,11 @@ BEGIN
         APEX_JSON.WRITE(''comments'',         rec.COMMENTS);
         APEX_JSON.WRITE(''referenceNo'',      rec.REFERENCE_NO);
         APEX_JSON.WRITE(''attachment'',       rec.ATTACHMENT);
-        APEX_JSON.WRITE(''bankTxnId'',        rec.BANK_TXN_ID);
+        IF rec.BANK_TXN_ID IS NOT NULL THEN
+            APEX_JSON.WRITE(''bankTxnId'', rec.BANK_TXN_ID);
+        ELSE
+            APEX_JSON.WRITE(''bankTxnId'', TO_CHAR(NULL));
+        END IF;
         APEX_JSON.WRITE(''createdBy'',        rec.CREATED_BY);
         APEX_JSON.WRITE(''creationDate'',     TO_CHAR(rec.CREATION_DATE,''DD-MON-YYYY''));
         APEX_JSON.WRITE(''runningBalance'',   rec.RUNNING_BALANCE);
@@ -414,7 +418,11 @@ BEGIN
     APEX_JSON.WRITE(''comments'',          rec.COMMENTS);
     APEX_JSON.WRITE(''referenceNo'',       rec.REFERENCE_NO);
     APEX_JSON.WRITE(''attachment'',        rec.ATTACHMENT);
-    APEX_JSON.WRITE(''bankTxnId'',         rec.BANK_TXN_ID);
+    IF rec.BANK_TXN_ID IS NOT NULL THEN
+        APEX_JSON.WRITE(''bankTxnId'', rec.BANK_TXN_ID);
+    ELSE
+        APEX_JSON.WRITE(''bankTxnId'', TO_CHAR(NULL));
+    END IF;
     APEX_JSON.WRITE(''createdBy'',         rec.CREATED_BY);
     APEX_JSON.WRITE(''creationDate'',      TO_CHAR(rec.CREATION_DATE,     ''DD-MON-YYYY''));
     APEX_JSON.WRITE(''lastUpdatedBy'',     rec.LAST_UPDATED_BY);

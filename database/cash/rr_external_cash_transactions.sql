@@ -69,16 +69,14 @@ CREATE SEQUENCE RR_ECT_MANUAL_SEQ START WITH 1000000000 INCREMENT BY 1 NOCACHE;
 -- ============================================================
 
 CREATE OR REPLACE PROCEDURE RR_SYNC_EXTERNAL_CASH_TRANSACTIONS (
-    p_json   IN  CLOB,
-    p_count  OUT NUMBER,
-    p_error  OUT VARCHAR2,
-    p_ext_id OUT NUMBER    -- external_transaction_id of last upserted row
+    p_json  IN  CLOB,
+    p_count OUT NUMBER,
+    p_error OUT VARCHAR2
 ) AS
     l_ext_id  NUMBER;   -- resolved ExternalTransactionId (sequence fallback for manual)
 BEGIN
-    p_count  := 0;
-    p_error  := NULL;
-    p_ext_id := NULL;
+    p_count := 0;
+    p_error := NULL;
 
     FOR rec IN (
         SELECT *
@@ -249,8 +247,7 @@ BEGIN
                 src.last_update_date, src.last_update_login, SYSTIMESTAMP
             );
 
-        p_count  := p_count + 1;
-        p_ext_id := l_ext_id;   -- track last upserted ID
+        p_count := p_count + 1;
     END LOOP;
 
     COMMIT;
@@ -288,27 +285,51 @@ BEGIN
         p_comments       => 'Sync external cash transactions from Oracle Fusion',
         p_source         => q'[
 DECLARE
-    l_json   CLOB;
-    l_count  NUMBER;
-    l_error  VARCHAR2(4000);
-    l_ext_id NUMBER;
+    l_json      CLOB;
+    l_count     NUMBER;
+    l_error     VARCHAR2(4000);
+    l_ext_id    NUMBER;
+    l_reference VARCHAR2(360);
 BEGIN
     l_json := :body_text;
 
+    -- Extract reference text from first item so we can look up the created ID after insert
+    BEGIN
+        SELECT ref_text INTO l_reference
+        FROM JSON_TABLE(l_json, '$.items[0]'
+            COLUMNS (ref_text VARCHAR2(360) PATH '$.ReferenceText')) t;
+    EXCEPTION WHEN OTHERS THEN l_reference := NULL; END;
+
     RR_SYNC_EXTERNAL_CASH_TRANSACTIONS(
-        p_json   => l_json,
-        p_count  => l_count,
-        p_error  => l_error,
-        p_ext_id => l_ext_id
+        p_json  => l_json,
+        p_count => l_count,
+        p_error => l_error
     );
 
     IF l_error IS NOT NULL THEN
         :status_code := 500;
         HTP.P('{"status":"error","message":"' || REPLACE(l_error, '"', '\"') || '"}');
     ELSE
+        -- Look up the external_transaction_id of the record just inserted/updated
+        IF l_reference IS NOT NULL THEN
+            BEGIN
+                SELECT EXTERNAL_TRANSACTION_ID INTO l_ext_id
+                FROM (
+                    SELECT EXTERNAL_TRANSACTION_ID
+                      FROM RR_EXTERNAL_CASH_TRANSACTIONS
+                     WHERE REFERENCE_TEXT = l_reference
+                     ORDER BY EXTERNAL_TRANSACTION_ID DESC
+                )
+                WHERE ROWNUM = 1;
+            EXCEPTION WHEN OTHERS THEN l_ext_id := NULL; END;
+        END IF;
+
         :status_code := 200;
-        HTP.P('{"status":"success","count":' || l_count ||
-              ',"externalTransactionId":' || NVL(TO_CHAR(l_ext_id), 'null') || '}');
+        IF l_ext_id IS NOT NULL THEN
+            HTP.P('{"status":"success","count":' || l_count || ',"externalTransactionId":' || l_ext_id || '}');
+        ELSE
+            HTP.P('{"status":"success","count":' || l_count || '}');
+        END IF;
     END IF;
 END;
 ]'
