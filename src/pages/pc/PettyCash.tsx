@@ -574,7 +574,6 @@ const RegisterDetail: React.FC<{
         creditAmount:       0,
         chargeAccountCcid:  values.chargeAccountCcid || null,
         chargeAccountDesc:  values.chargeAccountDesc || null,
-        referenceNo:        values.referenceNo,
         bankTxnId:          linkedBankTxnRef ? (Number(linkedBankTxnRef) || null) : null,
         comments:           values.comments,
         postingStatus:      'Unposted',
@@ -668,7 +667,6 @@ const RegisterDetail: React.FC<{
         setBankTxnLookupResult(lookupResult);
         message.success(`Bank transaction created — ID: ${txnRef}`);
         setLinkedBankTxnRef(txnRef);
-        moneyForm.setFieldsValue({ referenceNo: txnRef });
         setBankTxnModalOpen(false);
       } else {
         message.error(data.message || 'Failed — see API Response panel below');
@@ -976,10 +974,11 @@ const RegisterDetail: React.FC<{
           >
             Export Excel
           </Button>
+          <Tooltip title={register.limit == null ? 'Set a limit on this register before adding money' : undefined}>
           <Button
             icon={<DollarOutlined />}
-            style={!isClosed ? { background: REDWOOD.success, borderColor: REDWOOD.success, color: '#fff' } : {}}
-            disabled={isClosed}
+            style={!isClosed && register.limit != null ? { background: REDWOOD.success, borderColor: REDWOOD.success, color: '#fff' } : {}}
+            disabled={isClosed || register.limit == null}
             onClick={() => {
               moneyForm.resetFields();
               setMoneyAcctDesc('');
@@ -1001,6 +1000,7 @@ const RegisterDetail: React.FC<{
           >
             Add Money
           </Button>
+          </Tooltip>
           <Tooltip title={noBalance ? 'No available balance to record an expense' : undefined}>
             <Button
               icon={<MinusCircleOutlined />}
@@ -1130,6 +1130,7 @@ const RegisterDetail: React.FC<{
                 <Space>
                   <BankOutlined style={{ color: REDWOOD.success }} />
                   <span><b>Bank Txn ID:</b> <Text style={{ fontFamily: 'monospace', fontWeight: 700, color: REDWOOD.success, fontSize: 13 }}>{linkedBankTxnRef}</Text></span>
+                  <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>(saved to Bank Txn ID column)</Text>
                 </Space>
               </div>
               <Collapse size="small" ghost>
@@ -1154,15 +1155,9 @@ const RegisterDetail: React.FC<{
               >
                 Create Bank Transaction
               </Button>
-              <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 4, textAlign: 'center' }}>
-                Optional — creates a linked external bank transaction and auto-fills the reference
-              </div>
             </div>
           )}
 
-          <Form.Item label="Reference No" name="referenceNo">
-            <Input placeholder="Auto-filled after creating bank transaction, or enter manually" />
-          </Form.Item>
           <Form.Item label="Comments" name="comments">
             <Input.TextArea rows={2} placeholder="Optional" />
           </Form.Item>
