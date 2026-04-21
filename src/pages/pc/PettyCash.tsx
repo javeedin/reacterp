@@ -1274,6 +1274,8 @@ const RegisterDetail: React.FC<{
   const txnColumns: ColumnsType<PCTransaction> = [
     { title: '#', dataIndex: 'lineNumber', width: 50, align: 'center',
       render: (v) => <Text style={{ fontSize: 12 }}>{v}</Text> },
+    { title: 'Reference', dataIndex: 'referenceNo', width: 120,
+      render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Date', dataIndex: 'transactionDate', width: 100,
       render: (v) => <Text style={{ fontSize: 12 }}>{v}</Text> },
     { title: 'Period', dataIndex: 'accountingPeriod', width: 100,
@@ -1318,8 +1320,6 @@ const RegisterDetail: React.FC<{
       render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Posting', dataIndex: 'postingStatus', width: 90,
       render: (v) => <PostingTag status={v} /> },
-    { title: 'Reference', dataIndex: 'referenceNo', width: 120,
-      render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Bank Txn ID', dataIndex: 'bankTxnId', width: 100,
       render: (v: number | null) => v
         ? <a style={{ fontSize: 12, fontFamily: 'monospace' }} onClick={() => openBankTxnDetail(v)}>{v}</a>
