@@ -1592,6 +1592,10 @@ const RegisterDetail: React.FC<{
               setBankTxnLookupResult(null);
               setBankTxnPayload(null);
               setBankTxnRawError('');
+              if (register.cashAccountDesc) {
+                moneyForm.setFieldsValue({ chargeAccountDesc: register.cashAccountDesc });
+                setMoneyAcctDesc(cashAccountName ?? '');
+              }
               if (register.limit != null && register.limit > 0) {
                 const canAdd = register.limit - register.balance;
                 if (canAdd <= 0) {
