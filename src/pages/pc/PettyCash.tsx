@@ -18,6 +18,7 @@ import {
   LockOutlined, UnlockOutlined, UserOutlined, FieldNumberOutlined, ApiOutlined,
   SwapOutlined, UploadOutlined, PaperClipOutlined, EyeOutlined,
   BookOutlined, CheckCircleOutlined, SyncOutlined, ExclamationCircleOutlined,
+  TagOutlined,
 } from '@ant-design/icons';
 import FloatingMenu from '../../components/FloatingMenu';
 import ApiDocsModal, { type ApiEndpoint } from '../../components/ApiDocsModal';
@@ -376,9 +377,32 @@ const RegisterDetail: React.FC<{
   const [viewAcctLineDescs, setViewAcctLineDescs] = useState<Map<string, string>>(new Map());
   const [expenseMode, setExpenseMode]   = useState<'single' | 'multi'>('single');
   const [expenseLines, setExpenseLines] = useState<ExpenseLine[]>([makeNewLine()]);
+  const [refGroupOpen, setRefGroupOpen]   = useState(false);
+  const [refGroupRef, setRefGroupRef]     = useState<string>('');
+  const [refGroupSaving, setRefGroupSaving] = useState(false);
+  const [refGroupForm] = Form.useForm();
 
   const updateLine = (key: string, patch: Partial<ExpenseLine>) =>
     setExpenseLines(prev => prev.map(l => l.key === key ? { ...l, ...patch } : l));
+
+  const handleSaveRefGroup = async (values: any) => {
+    const newRef = (values.referenceNo ?? '').trim() || null;
+    const lines  = transactions.filter(t => t.referenceNo === refGroupRef);
+    if (!lines.length) return;
+    setRefGroupSaving(true);
+    try {
+      await Promise.all(lines.map(t =>
+        updateTransaction(t.transactionId, { referenceNo: newRef, updatedBy: currentUser })
+      ));
+      message.success('Reference updated');
+      setRefGroupOpen(false);
+      onRefresh();
+    } catch (e: any) {
+      message.error(e?.message ?? 'Update failed');
+    } finally {
+      setRefGroupSaving(false);
+    }
+  };
 
   const isClosed   = register.status !== 'ACTIVE';
   const noBalance  = register.balance <= 0;
@@ -1274,8 +1298,29 @@ const RegisterDetail: React.FC<{
   const txnColumns: ColumnsType<PCTransaction> = [
     { title: '#', dataIndex: 'lineNumber', width: 50, align: 'center',
       render: (v) => <Text style={{ fontSize: 12 }}>{v}</Text> },
-    { title: 'Reference', dataIndex: 'referenceNo', width: 120,
-      render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+    { title: 'Reference', dataIndex: 'referenceNo', width: 140,
+      render: (v: string | null) => {
+        if (!v) return <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text>;
+        const siblings = transactions.filter(t => t.referenceNo === v);
+        const totalDr  = siblings.reduce((s, t) => s + (t.debitAmount  || 0), 0);
+        const totalCr  = siblings.reduce((s, t) => s + (t.creditAmount || 0), 0);
+        const multi    = siblings.length > 1;
+        return (
+          <div>
+            <a style={{ fontSize: 12, fontWeight: 600 }}
+              onClick={() => { setRefGroupRef(v); refGroupForm.setFieldsValue({ referenceNo: v }); setRefGroupOpen(true); }}>
+              {v}
+            </a>
+            {multi && (
+              <div style={{ fontSize: 10, color: REDWOOD.neutral600, marginTop: 1 }}>
+                {siblings.length} lines
+                {totalDr  > 0 && <span style={{ color: REDWOOD.success, marginLeft: 4 }}>↑{fmt(totalDr)}</span>}
+                {totalCr  > 0 && <span style={{ color: REDWOOD.error,   marginLeft: 4 }}>↓{fmt(totalCr)}</span>}
+              </div>
+            )}
+          </div>
+        );
+      }},
     { title: 'Date', dataIndex: 'transactionDate', width: 100,
       render: (v) => <Text style={{ fontSize: 12 }}>{v}</Text> },
     { title: 'Period', dataIndex: 'accountingPeriod', width: 100,
@@ -2485,6 +2530,90 @@ const RegisterDetail: React.FC<{
               </Button>
             </div>
           </Form>
+        )}
+      </Modal>
+
+      {/* ── Reference Group Modal ─────────────────────────── */}
+      <Modal
+        title={
+          <Space>
+            <TagOutlined style={{ color: REDWOOD.info }} />
+            Reference Group
+            <Tag color="blue" style={{ fontSize: 11 }}>{refGroupRef}</Tag>
+          </Space>
+        }
+        open={refGroupOpen}
+        onCancel={() => setRefGroupOpen(false)}
+        footer={null}
+        width={680}
+        destroyOnClose
+      >
+        {/* Lines in this reference group */}
+        <Table
+          size="small"
+          pagination={false}
+          rowKey="transactionId"
+          dataSource={transactions.filter(t => t.referenceNo === refGroupRef)}
+          style={{ marginBottom: 16 }}
+          columns={[
+            { title: '#',    dataIndex: 'lineNumber',    width: 50,  align: 'center' as const,
+              render: (v) => <Text style={{ fontSize: 12 }}>{v}</Text> },
+            { title: 'Date', dataIndex: 'transactionDate', width: 100,
+              render: (v) => <Text style={{ fontSize: 12 }}>{v}</Text> },
+            { title: 'Type', dataIndex: 'transactionType', width: 110,
+              render: (v) => {
+                const color = v === 'Balance Refill' ? 'blue' : v === 'Expense' ? 'orange' : 'purple';
+                return <Tag color={color} style={{ fontSize: 11 }}>{v}</Tag>;
+              }},
+            { title: 'Expense Type', dataIndex: 'expenseType', width: 130,
+              render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+            { title: 'Debit (In)', dataIndex: 'debitAmount', width: 100, align: 'right' as const,
+              render: (v) => v > 0
+                ? <Text style={{ fontSize: 12, color: REDWOOD.success }}>{fmt(v)}</Text>
+                : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
+            { title: 'Credit (Out)', dataIndex: 'creditAmount', width: 100, align: 'right' as const,
+              render: (v) => v > 0
+                ? <Text style={{ fontSize: 12, color: REDWOOD.error }}>{fmt(v)}</Text>
+                : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
+            { title: 'Comments', dataIndex: 'comments', ellipsis: true,
+              render: (v) => <Text style={{ fontSize: 11 }}>{v || '—'}</Text> },
+          ]}
+          summary={(rows) => {
+            const totalDr = rows.reduce((s, r) => s + (r.debitAmount  || 0), 0);
+            const totalCr = rows.reduce((s, r) => s + (r.creditAmount || 0), 0);
+            return (
+              <Table.Summary.Row style={{ background: '#fafafa' }}>
+                <Table.Summary.Cell index={0} colSpan={4}>
+                  <Text strong style={{ fontSize: 12 }}>Total ({rows.length} lines)</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={4} align="right">
+                  <Text strong style={{ fontSize: 12, color: REDWOOD.success }}>{totalDr > 0 ? fmt(totalDr) : '—'}</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={5} align="right">
+                  <Text strong style={{ fontSize: 12, color: REDWOOD.error }}>{totalCr > 0 ? fmt(totalCr) : '—'}</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={6} />
+              </Table.Summary.Row>
+            );
+          }}
+        />
+
+        {/* Rename reference */}
+        {!isClosed && (
+          <>
+            <Divider style={{ margin: '0 0 12px' }}>Rename Reference</Divider>
+            <Form form={refGroupForm} layout="inline" size="small" onFinish={handleSaveRefGroup}>
+              <Form.Item label="Reference No" name="referenceNo" style={{ flex: 1 }}>
+                <Input placeholder="New reference number (blank to clear)" allowClear />
+              </Form.Item>
+              <Form.Item>
+                <Button type="primary" htmlType="submit" loading={refGroupSaving}
+                  style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
+                  Apply to All Lines
+                </Button>
+              </Form.Item>
+            </Form>
+          </>
         )}
       </Modal>
 
