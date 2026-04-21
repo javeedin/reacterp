@@ -626,10 +626,26 @@ const RegisterDetail: React.FC<{
       // 2. Optionally void the linked bank transaction
       if (reverseVoidBank && reverseTxn.bankTxnId) {
         const voidUrl = `${EXT_TXN_URL}/${reverseTxn.bankTxnId}/void?updated_by=${encodeURIComponent(currentUser)}`;
-        const res = await fetch(voidUrl, { method: 'PUT', headers: { Accept: 'application/json' } });
-        const data = await res.json().catch(() => ({})) as { success?: boolean; message?: string };
+        const res  = await fetch(voidUrl, { method: 'PUT', headers: { Accept: 'application/json' } });
+        const data = await res.json().catch(() => ({})) as { success?: boolean; code?: string; message?: string };
         if (!res.ok || !data.success) {
-          message.warning(`Petty cash reversal saved, but bank transaction void failed: ${data.message || `HTTP ${res.status}`}`);
+          const hint =
+            data.code === 'IS_RECONCILED'
+              ? 'The bank transaction is reconciled — unreconcile it in Oracle Fusion Cash Management first, then void manually.'
+              : data.code === 'IS_ACCOUNTED'
+              ? 'The bank transaction has been posted to GL — reverse the accounting entries in Oracle Fusion first, then void manually.'
+              : data.code === 'ALREADY_VOID'
+              ? 'The bank transaction was already voided.'
+              : data.message || `HTTP ${res.status}`;
+          message.warning({
+            content: (
+              <span>
+                Petty cash reversal saved, but bank transaction <b>#{reverseTxn.bankTxnId}</b> could not be voided.
+                <br /><span style={{ fontSize: 11, color: '#666' }}>{hint}</span>
+              </span>
+            ),
+            duration: 8,
+          });
         } else {
           message.success(`Reversal created and bank transaction ${reverseTxn.bankTxnId} voided`);
         }

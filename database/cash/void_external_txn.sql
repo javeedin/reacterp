@@ -42,24 +42,54 @@ BEGIN
         p_comments       => 'Set STATUS = VOID on external transaction; no body needed',
         p_source         => q'[
 DECLARE
-    l_rows NUMBER;
+    l_status          VARCHAR2(30);
+    l_accounting_flag VARCHAR2(1);
 BEGIN
+    -- Read current state before touching anything
+    BEGIN
+        SELECT STATUS, NVL(ACCOUNTING_FLAG, 'N')
+        INTO   l_status, l_accounting_flag
+        FROM   RR_EXTERNAL_CASH_TRANSACTIONS
+        WHERE  EXTERNAL_TRANSACTION_ID = :externalTransactionId;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            :status_code := 404;
+            HTP.PRN('{"success":false,"message":"Transaction not found"}');
+            RETURN;
+    END;
+
+    -- Guard: already voided
+    IF l_status = 'VOID' THEN
+        :status_code := 422;
+        HTP.PRN('{"success":false,"code":"ALREADY_VOID","message":"Transaction is already voided."}');
+        RETURN;
+    END IF;
+
+    -- Guard: reconciled — must unreconcile in Oracle Fusion first
+    IF l_status = 'REC' THEN
+        :status_code := 422;
+        HTP.PRN('{"success":false,"code":"IS_RECONCILED","message":"Transaction is reconciled (REC). Unreconcile it in Oracle Fusion Cash Management before voiding."}');
+        RETURN;
+    END IF;
+
+    -- Guard: accounted — must reverse accounting entries first
+    IF l_accounting_flag = 'Y' THEN
+        :status_code := 422;
+        HTP.PRN('{"success":false,"code":"IS_ACCOUNTED","message":"Transaction has been accounted (posted to GL). Reverse the accounting entries before voiding."}');
+        RETURN;
+    END IF;
+
+    -- Safe to void
     UPDATE RR_EXTERNAL_CASH_TRANSACTIONS
     SET    STATUS           = 'VOID',
            LAST_UPDATED_BY  = NVL(:updated_by, 'SYSTEM'),
            LAST_UPDATE_DATE = SYSTIMESTAMP
     WHERE  EXTERNAL_TRANSACTION_ID = :externalTransactionId;
 
-    l_rows := SQL%ROWCOUNT;
     COMMIT;
+    :status_code := 200;
+    HTP.PRN('{"success":true,"message":"Transaction voided successfully."}');
 
-    IF l_rows = 0 THEN
-        :status_code := 404;
-        HTP.PRN('{"success":false,"message":"Transaction not found"}');
-    ELSE
-        :status_code := 200;
-        HTP.PRN('{"success":true,"rows":' || l_rows || '}');
-    END IF;
 EXCEPTION WHEN OTHERS THEN
     ROLLBACK;
     :status_code := 500;
