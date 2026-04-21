@@ -474,14 +474,23 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   const [transactions, setTransactions]   = useState<ExternalTxnRecord[]>([]);
   const [loading, setLoading]             = useState(false);
   const [hasSearched, setHasSearched]     = useState(false);
-  const [bankAccounts, setBankAccounts]   = useState<BankAccountOption[]>([]);
+  const [allBankAccounts, setAllBankAccounts] = useState<BankAccountOption[]>([]);
   const [businessUnits, setBusinessUnits] = useState<BUOption[]>([]);
   const [bankAccountMap, setBankAccountMap] = useState<Record<string, string>>({});
+  const [buLeMap, setBuLeMap]             = useState<Record<string, string>>({});   // bu → legalEntity
+  const [buBankMap, setBuBankMap]         = useState<Record<string, string[]>>({});  // bu → bankNames[]
+  const [selectedBU, setSelectedBU]       = useState<string>('');
+  const [derivedLE, setDerivedLE]         = useState<string>('');
   const [activeTabKey, setActiveTabKey]   = useState('search');
   const [tabs, setTabs]                   = useState<{ key: string; label: string; record?: ExternalTxnRecord }[]>([]);
   const [lastApiUrl, setLastApiUrl]       = useState('');
   const [showApiModal, setShowApiModal]   = useState(false);
   const [searchForm] = Form.useForm();
+
+  // Bank accounts filtered by selected BU (or all if no BU selected)
+  const filteredBankAccounts = selectedBU && buBankMap[selectedBU]
+    ? buBankMap[selectedBU].sort().map(n => ({ label: n, value: n }))
+    : allBankAccounts;
 
   // ── Accounting state ─────────────────────────────────────────────────────
   const [selectedRowKeys, setSelectedRowKeys]   = useState<number[]>([]);
@@ -528,24 +537,54 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   // ── Load LOVs ─────────────────────────────────────────────────────────────
   const loadLovs = useCallback(async () => {
     try {
-      const res = await fetch(`${APEX_BASE}/cash/externaltransactions?row_limit=1000`);
+      // Load BU → LE mapping from gl/businessunits
+      const buRes = await fetch(`${APEX_BASE}/gl/businessunits`, { headers: { Accept: 'application/json' } });
+      const buData = buRes.ok ? await buRes.json() : null;
+      const buLeMapping: Record<string, string> = {};
+      const buSet = new Set<string>();
+      if (buData?.items) {
+        (buData.items as any[]).forEach(i => {
+          const buName = i.business_unit_name || i.businessUnitName || '';
+          const leName = i.legal_entity_name  || i.legalEntityName  || '';
+          if (buName) { buSet.add(buName); buLeMapping[buName] = leName; }
+        });
+      }
+      setBuLeMap(buLeMapping);
+
+      // Load sample transactions to build bank account → BU mapping
+      const res = await fetch(`${APEX_BASE}/cash/externaltransactions?row_limit=2000`);
       const data = await parseApexJson(res);
       if (data.success && data.items) {
         const items: ExternalTxnRecord[] = data.items;
-        const acctSet = new Set<string>();
-        const buSet   = new Set<string>();
-        const acctMap: Record<string, string> = {};
+        const acctSet  = new Set<string>();
+        const acctMap: Record<string, string>    = {};
+        const buBanks: Record<string, Set<string>> = {};
+
         items.forEach(i => {
-          if (i.bankAccountName)   acctSet.add(i.bankAccountName);
-          if (i.businessUnitName)  buSet.add(i.businessUnitName);
-          if (i.bankAccountName && i.assetAccountCombination) {
-            acctMap[i.bankAccountName] = i.assetAccountCombination;
+          if (i.bankAccountName) {
+            acctSet.add(i.bankAccountName);
+            if (i.businessUnitName) {
+              if (!buBanks[i.businessUnitName]) buBanks[i.businessUnitName] = new Set();
+              buBanks[i.businessUnitName].add(i.bankAccountName);
+              buSet.add(i.businessUnitName);
+            }
           }
+          if (i.bankAccountName && i.assetAccountCombination)
+            acctMap[i.bankAccountName] = i.assetAccountCombination;
+          // Fill LE from transactions if not already from gl/businessunits
+          if (i.businessUnitName && i.legalEntityName && !buLeMapping[i.businessUnitName])
+            buLeMapping[i.businessUnitName] = i.legalEntityName;
         });
-        setBankAccounts([...acctSet].sort().map(n => ({ label: n, value: n })));
-        setBusinessUnits([...buSet].sort().map(n => ({ label: n, value: n })));
+
+        setAllBankAccounts([...acctSet].sort().map(n => ({ label: n, value: n })));
         setBankAccountMap(acctMap);
+        setBuLeMap({ ...buLeMapping });
+        setBuBankMap(Object.fromEntries(
+          Object.entries(buBanks).map(([bu, set]) => [bu, [...set]])
+        ));
       }
+
+      setBusinessUnits([...buSet].sort().map(n => ({ label: n, value: n })));
     } catch { /* silently skip */ }
   }, []);
 
@@ -587,7 +626,25 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     } finally { setLoading(false); }
   }, [searchForm]);
 
-  const handleReset = () => { searchForm.resetFields(); setTransactions([]); setHasSearched(false); setSelectedRowKeys([]); };
+  const handleBUChange = (bu: string) => {
+    setSelectedBU(bu || '');
+    setDerivedLE(bu ? (buLeMap[bu] || '') : '');
+    // Clear bank account if it doesn't belong to this BU
+    const banks = bu ? (buBankMap[bu] || []) : [];
+    const currentBank = searchForm.getFieldValue('bankAccount');
+    if (currentBank && banks.length > 0 && !banks.includes(currentBank)) {
+      searchForm.setFieldValue('bankAccount', undefined);
+    }
+  };
+
+  const handleReset = () => {
+    searchForm.resetFields();
+    setTransactions([]);
+    setHasSearched(false);
+    setSelectedRowKeys([]);
+    setSelectedBU('');
+    setDerivedLE('');
+  };
 
   // ── Create Accounting ─────────────────────────────────────────────────────
   const openCreateAccountingModal = () => {
@@ -854,9 +911,38 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
           children: (
         <Form form={searchForm} layout="horizontal" labelCol={{ span: 8 }} wrapperCol={{ span: 16 }}>
           <Row gutter={[24, 4]}>
+
+            {/* ── Row 1: BU → LE ── */}
             <Col xs={24} md={12}>
-              <Form.Item label="Transaction #" name="transactionNumber" style={{ marginBottom: 10 }}>
-                <Input placeholder="Transaction number" />
+              <Form.Item label="Business Unit" name="businessUnit" style={{ marginBottom: 10 }}>
+                <Select
+                  showSearch placeholder="Select Business Unit"
+                  optionFilterProp="label" options={businessUnits}
+                  allowClear style={{ width: '100%' }}
+                  onChange={handleBUChange}
+                  onClear={() => handleBUChange('')}
+                />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={12}>
+              <Form.Item label="Legal Entity" style={{ marginBottom: 10 }}>
+                <Input
+                  value={derivedLE || (selectedBU ? '—' : '')}
+                  readOnly
+                  placeholder="Auto-derived from BU"
+                  style={{ background: '#f5f5f5', color: derivedLE ? REDWOOD.info : REDWOOD.neutral600, cursor: 'default' }}
+                />
+              </Form.Item>
+            </Col>
+
+            {/* ── Row 2: Bank (filtered by BU) + Date From ── */}
+            <Col xs={24} md={12}>
+              <Form.Item label="Bank Account" name="bankAccount" style={{ marginBottom: 10 }}>
+                <Select
+                  showSearch placeholder={selectedBU ? `Banks for ${selectedBU}` : 'Select account'}
+                  optionFilterProp="label" options={filteredBankAccounts}
+                  allowClear style={{ width: '100%' }}
+                />
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
@@ -864,9 +950,16 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
                 <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
               </Form.Item>
             </Col>
+
+            {/* ── Row 3: Status + Date To ── */}
             <Col xs={24} md={12}>
-              <Form.Item label="Bank Account" name="bankAccount" style={{ marginBottom: 10 }}>
-                <Select showSearch placeholder="Select account" optionFilterProp="label" options={bankAccounts} allowClear style={{ width: '100%' }} />
+              <Form.Item label="Status" name="status" style={{ marginBottom: 10 }}>
+                <Select placeholder="Select status" allowClear>
+                  <Option value="REC">Reconciled</Option>
+                  <Option value="UNR">Unreconciled</Option>
+                  <Option value="CLR">Cleared</Option>
+                  <Option value="CAN">Cancelled</Option>
+                </Select>
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
@@ -874,28 +967,20 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
                 <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
               </Form.Item>
             </Col>
+
+            {/* ── Row 4: Txn # + Reference ── */}
             <Col xs={24} md={12}>
-              <Form.Item label="Currency" name="currencyCode" style={{ marginBottom: 10 }}>
-                <Select placeholder="Select currency" allowClear>
-                  {['AED','USD','EUR','GBP','SAR','QAR','KWD','BHD','OMR'].map(c => <Option key={c} value={c}>{c}</Option>)}
-                </Select>
+              <Form.Item label="Transaction #" name="transactionNumber" style={{ marginBottom: 10 }}>
+                <Input placeholder="Transaction number" />
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
-              <Form.Item label="Amount From" name="amountFrom" style={{ marginBottom: 10 }}>
-                <InputNumber style={{ width: '100%' }} placeholder="Min amount" precision={2} />
+              <Form.Item label="Reference" name="reference" style={{ marginBottom: 10 }}>
+                <Input placeholder="Reference text" />
               </Form.Item>
             </Col>
-            <Col xs={24} md={12}>
-              <Form.Item label="Business Unit" name="businessUnit" style={{ marginBottom: 10 }}>
-                <Select showSearch placeholder="Select BU" optionFilterProp="label" options={businessUnits} allowClear style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
-            <Col xs={24} md={12}>
-              <Form.Item label="Amount To" name="amountTo" style={{ marginBottom: 10 }}>
-                <InputNumber style={{ width: '100%' }} placeholder="Max amount" precision={2} />
-              </Form.Item>
-            </Col>
+
+            {/* ── Row 5: Type + Currency ── */}
             <Col xs={24} md={12}>
               <Form.Item label="Transaction Type" name="transactionType" style={{ marginBottom: 10 }}>
                 <Select placeholder="Select type" allowClear>
@@ -908,18 +993,22 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
-              <Form.Item label="Reference" name="reference" style={{ marginBottom: 10 }}>
-                <Input placeholder="Reference text" />
+              <Form.Item label="Currency" name="currencyCode" style={{ marginBottom: 10 }}>
+                <Select placeholder="Select currency" allowClear>
+                  {['AED','USD','EUR','GBP','SAR','QAR','KWD','BHD','OMR'].map(c => <Option key={c} value={c}>{c}</Option>)}
+                </Select>
+              </Form.Item>
+            </Col>
+
+            {/* ── Row 6: Amount range + Origin ── */}
+            <Col xs={24} md={12}>
+              <Form.Item label="Amount From" name="amountFrom" style={{ marginBottom: 10 }}>
+                <InputNumber style={{ width: '100%' }} placeholder="Min amount" precision={2} />
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
-              <Form.Item label="Status" name="status" style={{ marginBottom: 10 }}>
-                <Select placeholder="Select status" allowClear>
-                  <Option value="REC">Reconciled</Option>
-                  <Option value="UNR">Unreconciled</Option>
-                  <Option value="CLR">Cleared</Option>
-                  <Option value="CAN">Cancelled</Option>
-                </Select>
+              <Form.Item label="Amount To" name="amountTo" style={{ marginBottom: 10 }}>
+                <InputNumber style={{ width: '100%' }} placeholder="Max amount" precision={2} />
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
@@ -933,7 +1022,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
               </Form.Item>
             </Col>
           </Row>
-          <Text type="secondary" style={{ fontSize: 11 }}>** At least one filter recommended</Text>
+          <Text type="secondary" style={{ fontSize: 11 }}>Select a Business Unit to filter banks and legal entity</Text>
         </Form>
           ),
         }]}
