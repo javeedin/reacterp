@@ -270,6 +270,7 @@ DECLARE
                t.POSTING_STATUS, t.CURRENCY,
                t.DEBIT_AMOUNT, t.CREDIT_AMOUNT,
                t.COMMENTS, t.REFERENCE_NO, t.ATTACHMENT,
+               t.ATTACHMENT_DATA, t.EMPLOYEE_NAME, t.RECEIPT_STATUS,
                t.BANK_TXN_ID,
                t.CREATED_BY, t.CREATION_DATE,
                SUM(t.DEBIT_AMOUNT - t.CREDIT_AMOUNT) OVER (
@@ -305,6 +306,9 @@ BEGIN
         APEX_JSON.WRITE(''comments'',         rec.COMMENTS);
         APEX_JSON.WRITE(''referenceNo'',      rec.REFERENCE_NO);
         APEX_JSON.WRITE(''attachment'',       rec.ATTACHMENT);
+        APEX_JSON.WRITE(''attachmentData'',  rec.ATTACHMENT_DATA);
+        APEX_JSON.WRITE(''employeeName'',    rec.EMPLOYEE_NAME);
+        APEX_JSON.WRITE(''receiptStatus'',   rec.RECEIPT_STATUS);
         IF rec.BANK_TXN_ID IS NOT NULL THEN
             APEX_JSON.WRITE(''bankTxnId'', rec.BANK_TXN_ID);
         ELSE
@@ -385,6 +389,7 @@ DECLARE
                t.ACCOUNTING_DATE, t.ACCOUNTING_PERIOD, t.POSTING_STATUS, t.CURRENCY,
                t.DEBIT_AMOUNT, t.CREDIT_AMOUNT,
                t.COMMENTS, t.REFERENCE_NO, t.ATTACHMENT,
+               t.ATTACHMENT_DATA, t.EMPLOYEE_NAME, t.RECEIPT_STATUS,
                t.BANK_TXN_ID,
                t.CREATED_BY, t.CREATION_DATE, t.LAST_UPDATED_BY, t.LAST_UPDATE_DATE
         FROM   RR_PC_TRANSACTIONS t
@@ -418,6 +423,9 @@ BEGIN
     APEX_JSON.WRITE(''comments'',          rec.COMMENTS);
     APEX_JSON.WRITE(''referenceNo'',       rec.REFERENCE_NO);
     APEX_JSON.WRITE(''attachment'',        rec.ATTACHMENT);
+    APEX_JSON.WRITE(''attachmentData'',   rec.ATTACHMENT_DATA);
+    APEX_JSON.WRITE(''employeeName'',     rec.EMPLOYEE_NAME);
+    APEX_JSON.WRITE(''receiptStatus'',    rec.RECEIPT_STATUS);
     IF rec.BANK_TXN_ID IS NOT NULL THEN
         APEX_JSON.WRITE(''bankTxnId'', rec.BANK_TXN_ID);
     ELSE

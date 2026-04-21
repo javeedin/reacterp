@@ -234,3 +234,36 @@ BEGIN
     END IF;
 END;
 /
+
+-- ============================================================
+-- Add EMPLOYEE_NAME, RECEIPT_STATUS, ATTACHMENT_DATA (idempotent)
+-- ============================================================
+DECLARE l_count NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO l_count FROM user_tab_columns
+    WHERE  table_name = 'RR_PC_TRANSACTIONS' AND column_name = 'EMPLOYEE_NAME';
+    IF l_count = 0 THEN
+        EXECUTE IMMEDIATE 'ALTER TABLE RR_PC_TRANSACTIONS ADD (EMPLOYEE_NAME VARCHAR2(200))';
+    END IF;
+END;
+/
+
+DECLARE l_count NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO l_count FROM user_tab_columns
+    WHERE  table_name = 'RR_PC_TRANSACTIONS' AND column_name = 'RECEIPT_STATUS';
+    IF l_count = 0 THEN
+        EXECUTE IMMEDIATE 'ALTER TABLE RR_PC_TRANSACTIONS ADD (RECEIPT_STATUS VARCHAR2(3))';
+    END IF;
+END;
+/
+
+DECLARE l_count NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO l_count FROM user_tab_columns
+    WHERE  table_name = 'RR_PC_TRANSACTIONS' AND column_name = 'ATTACHMENT_DATA';
+    IF l_count = 0 THEN
+        EXECUTE IMMEDIATE 'ALTER TABLE RR_PC_TRANSACTIONS ADD (ATTACHMENT_DATA CLOB)';
+    END IF;
+END;
+/

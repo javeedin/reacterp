@@ -289,12 +289,15 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         l_currency   VARCHAR2(10);
         l_debit      NUMBER;
         l_credit     NUMBER;
-        l_comments   VARCHAR2(1000);
-        l_ref_no     VARCHAR2(200);
-        l_attach     VARCHAR2(1000);
-        l_by         VARCHAR2(150);
-        l_period_cnt NUMBER;
-        l_period     VARCHAR2(30);
+        l_comments      VARCHAR2(1000);
+        l_ref_no        VARCHAR2(200);
+        l_attach        VARCHAR2(1000);
+        l_attach_data   CLOB;
+        l_emp_name      VARCHAR2(200);
+        l_receipt_stat  VARCHAR2(3);
+        l_by            VARCHAR2(150);
+        l_period_cnt    NUMBER;
+        l_period        VARCHAR2(30);
     BEGIN
         p_error := NULL;
         APEX_JSON.PARSE(p_json);
@@ -327,11 +330,14 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         l_currency  := NVL(APEX_JSON.GET_VARCHAR2(p_path => 'currency'), 'AED');
         l_debit     := NVL(APEX_JSON.GET_NUMBER  (p_path => 'debitAmount'),  0);
         l_credit    := NVL(APEX_JSON.GET_NUMBER  (p_path => 'creditAmount'), 0);
-        l_comments    := APEX_JSON.GET_VARCHAR2(p_path => 'comments');
-        l_ref_no      := APEX_JSON.GET_VARCHAR2(p_path => 'referenceNo');
-        l_attach      := APEX_JSON.GET_VARCHAR2(p_path => 'attachment');
-        l_by          := APEX_JSON.GET_VARCHAR2(p_path => 'createdBy');
-        l_bank_txn_id := APEX_JSON.GET_NUMBER  (p_path => 'bankTxnId');
+        l_comments     := APEX_JSON.GET_VARCHAR2(p_path => 'comments');
+        l_ref_no       := APEX_JSON.GET_VARCHAR2(p_path => 'referenceNo');
+        l_attach       := APEX_JSON.GET_VARCHAR2(p_path => 'attachment');
+        l_attach_data  := APEX_JSON.GET_CLOB    (p_path => 'attachmentData');
+        l_emp_name     := APEX_JSON.GET_VARCHAR2(p_path => 'employeeName');
+        l_receipt_stat := APEX_JSON.GET_VARCHAR2(p_path => 'receiptStatus');
+        l_by           := APEX_JSON.GET_VARCHAR2(p_path => 'createdBy');
+        l_bank_txn_id  := APEX_JSON.GET_NUMBER  (p_path => 'bankTxnId');
 
         -- Validate accounting date against open AP periods (application_id = 200)
         SELECT COUNT(*), MAX(period_name_id)
@@ -360,6 +366,7 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
             ACCOUNTING_DATE,     ACCOUNTING_PERIOD,   POSTING_STATUS,
             CURRENCY,            DEBIT_AMOUNT,        CREDIT_AMOUNT,
             COMMENTS,            REFERENCE_NO,        ATTACHMENT,
+            ATTACHMENT_DATA,     EMPLOYEE_NAME,       RECEIPT_STATUS,
             BANK_TXN_ID,
             CREATED_BY,          CREATION_DATE,
             LAST_UPDATED_BY,     LAST_UPDATE_DATE
@@ -370,6 +377,7 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
             l_acc_date,  l_period,    l_post_stat,
             l_currency,  l_debit,     l_credit,
             l_comments,  l_ref_no,    l_attach,
+            l_attach_data, l_emp_name, l_receipt_stat,
             l_bank_txn_id,
             l_by,        SYSTIMESTAMP,
             l_by,        SYSTIMESTAMP
@@ -402,33 +410,39 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         l_currency    VARCHAR2(10);
         l_debit       NUMBER;
         l_credit      NUMBER;
-        l_comments    VARCHAR2(1000);
-        l_ref_no      VARCHAR2(200);
-        l_attach      VARCHAR2(1000);
-        l_by          VARCHAR2(150);
-        l_period_cnt  NUMBER;
-        l_period      VARCHAR2(30);
-        l_bank_txn_id NUMBER;
+        l_comments      VARCHAR2(1000);
+        l_ref_no        VARCHAR2(200);
+        l_attach        VARCHAR2(1000);
+        l_attach_data   CLOB;
+        l_emp_name      VARCHAR2(200);
+        l_receipt_stat  VARCHAR2(3);
+        l_by            VARCHAR2(150);
+        l_period_cnt    NUMBER;
+        l_period        VARCHAR2(30);
+        l_bank_txn_id   NUMBER;
     BEGIN
         p_error := NULL;
         APEX_JSON.PARSE(p_json);
 
         -- Parse all values into local variables before SQL
-        l_txn_date  := parse_date(APEX_JSON.GET_VARCHAR2(p_path => 'transactionDate'));
-        l_txn_type  := APEX_JSON.GET_VARCHAR2(p_path => 'transactionType');
-        l_exp_type  := APEX_JSON.GET_VARCHAR2(p_path => 'expenseType');
-        l_ca_ccid   := APEX_JSON.GET_NUMBER  (p_path => 'chargeAccountCcid');
-        l_ca_desc   := APEX_JSON.GET_VARCHAR2(p_path => 'chargeAccountDesc');
-        l_acc_date  := parse_date(APEX_JSON.GET_VARCHAR2(p_path => 'accountingDate'));
-        l_post_stat := APEX_JSON.GET_VARCHAR2(p_path => 'postingStatus');
-        l_currency  := APEX_JSON.GET_VARCHAR2(p_path => 'currency');
-        l_debit     := APEX_JSON.GET_NUMBER  (p_path => 'debitAmount');
-        l_credit    := APEX_JSON.GET_NUMBER  (p_path => 'creditAmount');
-        l_comments    := APEX_JSON.GET_VARCHAR2(p_path => 'comments');
-        l_ref_no      := APEX_JSON.GET_VARCHAR2(p_path => 'referenceNo');
-        l_attach      := APEX_JSON.GET_VARCHAR2(p_path => 'attachment');
-        l_by          := APEX_JSON.GET_VARCHAR2(p_path => 'updatedBy');
-        l_bank_txn_id := APEX_JSON.GET_NUMBER  (p_path => 'bankTxnId');
+        l_txn_date     := parse_date(APEX_JSON.GET_VARCHAR2(p_path => 'transactionDate'));
+        l_txn_type     := APEX_JSON.GET_VARCHAR2(p_path => 'transactionType');
+        l_exp_type     := APEX_JSON.GET_VARCHAR2(p_path => 'expenseType');
+        l_ca_ccid      := APEX_JSON.GET_NUMBER  (p_path => 'chargeAccountCcid');
+        l_ca_desc      := APEX_JSON.GET_VARCHAR2(p_path => 'chargeAccountDesc');
+        l_acc_date     := parse_date(APEX_JSON.GET_VARCHAR2(p_path => 'accountingDate'));
+        l_post_stat    := APEX_JSON.GET_VARCHAR2(p_path => 'postingStatus');
+        l_currency     := APEX_JSON.GET_VARCHAR2(p_path => 'currency');
+        l_debit        := APEX_JSON.GET_NUMBER  (p_path => 'debitAmount');
+        l_credit       := APEX_JSON.GET_NUMBER  (p_path => 'creditAmount');
+        l_comments     := APEX_JSON.GET_VARCHAR2(p_path => 'comments');
+        l_ref_no       := APEX_JSON.GET_VARCHAR2(p_path => 'referenceNo');
+        l_attach       := APEX_JSON.GET_VARCHAR2(p_path => 'attachment');
+        l_attach_data  := APEX_JSON.GET_CLOB    (p_path => 'attachmentData');
+        l_emp_name     := APEX_JSON.GET_VARCHAR2(p_path => 'employeeName');
+        l_receipt_stat := APEX_JSON.GET_VARCHAR2(p_path => 'receiptStatus');
+        l_by           := APEX_JSON.GET_VARCHAR2(p_path => 'updatedBy');
+        l_bank_txn_id  := APEX_JSON.GET_NUMBER  (p_path => 'bankTxnId');
 
         -- Validate accounting date against open AP periods
         IF l_acc_date IS NOT NULL THEN
@@ -463,6 +477,9 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
             COMMENTS            = l_comments,
             REFERENCE_NO        = l_ref_no,
             ATTACHMENT          = l_attach,
+            ATTACHMENT_DATA     = NVL(l_attach_data,  ATTACHMENT_DATA),
+            EMPLOYEE_NAME       = l_emp_name,
+            RECEIPT_STATUS      = l_receipt_stat,
             BANK_TXN_ID         = NVL(l_bank_txn_id, BANK_TXN_ID),
             LAST_UPDATED_BY     = l_by,
             LAST_UPDATE_DATE    = SYSTIMESTAMP

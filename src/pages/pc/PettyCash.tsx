@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Layout, Card, Typography, Breadcrumb, Tabs, Form, Input, Select,
   DatePicker, Button, Table, Tag, Row, Col, Space, Divider,
-  Modal, InputNumber, message, Tooltip, Statistic, Collapse, Progress, Descriptions,
+  Modal, InputNumber, message, Tooltip, Statistic, Collapse, Progress, Descriptions, Upload,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { Link } from 'react-router-dom';
@@ -15,7 +15,7 @@ import {
   DollarOutlined, MinusCircleOutlined, ArrowUpOutlined, ArrowDownOutlined,
   DownloadOutlined, RollbackOutlined, BankOutlined,
   LockOutlined, UnlockOutlined, UserOutlined, FieldNumberOutlined, ApiOutlined,
-  SwapOutlined,
+  SwapOutlined, UploadOutlined, PaperClipOutlined, EyeOutlined,
 } from '@ant-design/icons';
 import FloatingMenu from '../../components/FloatingMenu';
 import ApiDocsModal, { type ApiEndpoint } from '../../components/ApiDocsModal';
@@ -287,6 +287,13 @@ const RegisterDetail: React.FC<{
   const [bankTxnRawError, setBankTxnRawError]           = useState<string>('');
   const [chargeAcctResolved, setChargeAcctResolved] =
     useState<Map<number, { code: string; desc: string }>>(new Map());
+  const [addExpenseAttachName, setAddExpenseAttachName] = useState<string>('');
+  const [addExpenseAttachData, setAddExpenseAttachData] = useState<string>('');
+  const [editExpenseAttachName, setEditExpenseAttachName] = useState<string>('');
+  const [editExpenseAttachData, setEditExpenseAttachData] = useState<string>('');
+  const [viewAttachOpen, setViewAttachOpen]   = useState(false);
+  const [viewAttachData, setViewAttachData]   = useState<string>('');
+  const [viewAttachName, setViewAttachName]   = useState<string>('');
 
   const isClosed   = register.status !== 'ACTIVE';
   const noBalance  = register.balance <= 0;
@@ -440,8 +447,12 @@ const RegisterDetail: React.FC<{
       referenceNo:       editTxn.referenceNo,
       comments:          editTxn.comments,
       attachment:        editTxn.attachment,
+      employeeName:      editTxn.employeeName,
+      receiptStatus:     editTxn.receiptStatus,
     });
     setEditAcctDesc(desc);
+    setEditExpenseAttachName(editTxn.attachment || '');
+    setEditExpenseAttachData(editTxn.attachmentData || '');
   }, [editTxnOpen, editTxn, distCombinations]);
 
   // ── Delete transaction (Unposted / Error only) ────────────
@@ -541,12 +552,17 @@ const RegisterDetail: React.FC<{
         chargeAccountCcid: values.chargeAccountCcid || null,
         referenceNo:       values.referenceNo   || null,
         comments:          values.comments      || null,
-        attachment:        values.attachment    || null,
+        attachment:        editExpenseAttachName || values.attachment || null,
+        attachmentData:    editExpenseAttachData || null,
+        employeeName:      values.employeeName  || null,
+        receiptStatus:     values.receiptStatus || null,
         updatedBy:         currentUser,
       });
       message.success(`Line #${editTxn.lineNumber} updated`);
       setEditTxnOpen(false);
       setEditTxn(null);
+      setEditExpenseAttachName('');
+      setEditExpenseAttachData('');
       onRefresh();
     } catch (e: any) {
       message.error(e?.message ?? 'Update failed');
@@ -718,12 +734,17 @@ const RegisterDetail: React.FC<{
         chargeAccountDesc: values.chargeAccountDesc || null,
         referenceNo:       values.referenceNo,
         comments:          values.comments,
-        attachment:        values.attachment,
+        attachment:        addExpenseAttachName || null,
+        attachmentData:    addExpenseAttachData || null,
+        employeeName:      values.employeeName || null,
+        receiptStatus:     values.receiptStatus || null,
         postingStatus:     'Unposted',
         createdBy:         currentUser,
       });
       message.success('Expense recorded');
       expenseForm.resetFields();
+      setAddExpenseAttachName('');
+      setAddExpenseAttachData('');
       needsRefresh.current = false;
       setAddExpenseOpen(false);
       onRefresh();
@@ -788,6 +809,35 @@ const RegisterDetail: React.FC<{
       render: (v: number | null) => v
         ? <a style={{ fontSize: 12, fontFamily: 'monospace' }} onClick={() => openBankTxnDetail(v)}>{v}</a>
         : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
+    { title: 'Employee', dataIndex: 'employeeName', width: 130, ellipsis: true,
+      render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+    { title: 'Receipt', dataIndex: 'receiptStatus', width: 75, align: 'center' as const,
+      render: (v) => v === 'YES' ? <Tag color="green" style={{ fontSize: 11 }}>YES</Tag>
+        : v === 'NO' ? <Tag color="orange" style={{ fontSize: 11 }}>NO</Tag>
+        : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
+    { title: 'Attachment', dataIndex: 'attachment', width: 90, align: 'center' as const,
+      render: (_v: string | null, rec: PCTransaction) => rec.attachment ? (
+        <Tooltip title={rec.attachment}>
+          <Button type="text" size="small" icon={<PaperClipOutlined style={{ color: REDWOOD.info }} />}
+            onClick={() => {
+              if (rec.attachmentData) {
+                setViewAttachData(rec.attachmentData);
+                setViewAttachName(rec.attachment || 'attachment');
+                setViewAttachOpen(true);
+              } else {
+                getTransaction(rec.transactionId).then(fresh => {
+                  if (fresh.attachmentData) {
+                    setViewAttachData(fresh.attachmentData);
+                    setViewAttachName(fresh.attachment || 'attachment');
+                    setViewAttachOpen(true);
+                  } else {
+                    message.info('No attachment data stored');
+                  }
+                }).catch(() => message.error('Failed to load attachment'));
+              }
+            }} />
+        </Tooltip>
+      ) : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
     { title: 'Comments', dataIndex: 'comments', ellipsis: true,
       render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Created By', dataIndex: 'createdBy', width: 130, ellipsis: true,
@@ -1464,14 +1514,56 @@ const RegisterDetail: React.FC<{
               </div>
             )}
           </Form.Item>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item label="Employee Name" name="employeeName">
+                <Input prefix={<UserOutlined />} placeholder="Optional" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Receipt Status" name="receiptStatus">
+                <Select allowClear placeholder="Select">
+                  <Option value="YES">YES</Option>
+                  <Option value="NO">NO</Option>
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
           <Form.Item label="Comments" name="comments">
             <Input.TextArea rows={2} placeholder="Optional" />
           </Form.Item>
-          <Form.Item label="Attachment" name="attachment">
-            <Input placeholder="File name or URL" />
+          <Form.Item label="Attachment">
+            <Space direction="vertical" style={{ width: '100%' }} size={4}>
+              <Upload
+                beforeUpload={(file) => {
+                  const reader = new FileReader();
+                  reader.readAsDataURL(file);
+                  reader.onload = () => {
+                    setAddExpenseAttachData(reader.result as string);
+                    setAddExpenseAttachName(file.name);
+                  };
+                  return false;
+                }}
+                showUploadList={false}
+                accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+                maxCount={1}
+              >
+                <Button icon={<UploadOutlined />}>
+                  {addExpenseAttachName ? 'Replace file' : 'Upload file'}
+                </Button>
+              </Upload>
+              {addExpenseAttachName && (
+                <Space size={4}>
+                  <PaperClipOutlined style={{ color: REDWOOD.info }} />
+                  <Text style={{ fontSize: 12, color: REDWOOD.info }}>{addExpenseAttachName}</Text>
+                  <Button type="text" size="small" danger icon={<CloseOutlined />}
+                    onClick={() => { setAddExpenseAttachName(''); setAddExpenseAttachData(''); }} />
+                </Space>
+              )}
+            </Space>
           </Form.Item>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
-            <Button onClick={() => setAddExpenseOpen(false)}>Cancel</Button>
+            <Button onClick={() => { setAddExpenseOpen(false); setAddExpenseAttachName(''); setAddExpenseAttachData(''); }}>Cancel</Button>
             <Button type="primary" htmlType="submit" loading={saving}
               style={{ background: REDWOOD.warning, borderColor: REDWOOD.warning }}>
               Save Expense
@@ -1610,15 +1702,69 @@ const RegisterDetail: React.FC<{
               </>
             )}
 
+            {editTxn.transactionType === 'Expense' && (
+              <Row gutter={12}>
+                <Col span={12}>
+                  <Form.Item label="Employee Name" name="employeeName">
+                    <Input prefix={<UserOutlined />} placeholder="Optional" />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item label="Receipt Status" name="receiptStatus">
+                    <Select allowClear placeholder="Select">
+                      <Option value="YES">YES</Option>
+                      <Option value="NO">NO</Option>
+                    </Select>
+                  </Form.Item>
+                </Col>
+              </Row>
+            )}
             <Form.Item label="Comments" name="comments">
               <Input.TextArea rows={2} placeholder="Optional" />
             </Form.Item>
-            <Form.Item label="Attachment" name="attachment">
-              <Input placeholder="File name or URL" />
-            </Form.Item>
+            {editTxn.transactionType === 'Expense' && (
+              <Form.Item label="Attachment">
+                <Space direction="vertical" style={{ width: '100%' }} size={4}>
+                  <Space size={8}>
+                    <Upload
+                      beforeUpload={(file) => {
+                        const reader = new FileReader();
+                        reader.readAsDataURL(file);
+                        reader.onload = () => {
+                          setEditExpenseAttachData(reader.result as string);
+                          setEditExpenseAttachName(file.name);
+                        };
+                        return false;
+                      }}
+                      showUploadList={false}
+                      accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+                      maxCount={1}
+                    >
+                      <Button icon={<UploadOutlined />}>
+                        {editExpenseAttachName ? 'Replace file' : 'Upload file'}
+                      </Button>
+                    </Upload>
+                    {editExpenseAttachData && (
+                      <Button size="small" icon={<EyeOutlined />}
+                        onClick={() => { setViewAttachData(editExpenseAttachData); setViewAttachName(editExpenseAttachName); setViewAttachOpen(true); }}>
+                        View
+                      </Button>
+                    )}
+                  </Space>
+                  {editExpenseAttachName && (
+                    <Space size={4}>
+                      <PaperClipOutlined style={{ color: REDWOOD.info }} />
+                      <Text style={{ fontSize: 12, color: REDWOOD.info }}>{editExpenseAttachName}</Text>
+                      <Button type="text" size="small" danger icon={<CloseOutlined />}
+                        onClick={() => { setEditExpenseAttachName(''); setEditExpenseAttachData(''); }} />
+                    </Space>
+                  )}
+                </Space>
+              </Form.Item>
+            )}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
-              <Button onClick={() => { setEditTxnOpen(false); setEditTxn(null); }}>Cancel</Button>
+              <Button onClick={() => { setEditTxnOpen(false); setEditTxn(null); setEditExpenseAttachName(''); setEditExpenseAttachData(''); }}>Cancel</Button>
               <Button type="primary" htmlType="submit" loading={saving}
                 style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}>
                 Save Changes
@@ -1689,6 +1835,43 @@ const RegisterDetail: React.FC<{
           </Descriptions>
         ) : (
           <div style={{ textAlign: 'center', padding: 32 }}><Text type="secondary">Bank transaction not found.</Text></div>
+        )}
+      </Modal>
+
+      {/* ── Attachment Viewer ──────────────────────────────── */}
+      <Modal
+        title={<Space><PaperClipOutlined style={{ color: REDWOOD.info }} />{viewAttachName || 'Attachment'}</Space>}
+        open={viewAttachOpen}
+        onCancel={() => setViewAttachOpen(false)}
+        footer={[
+          <Button key="download" type="primary" icon={<DownloadOutlined />}
+            onClick={() => {
+              const a = document.createElement('a');
+              a.href = viewAttachData;
+              a.download = viewAttachName || 'attachment';
+              a.click();
+            }}>
+            Download
+          </Button>,
+          <Button key="close" onClick={() => setViewAttachOpen(false)}>Close</Button>,
+        ]}
+        width={700}
+        zIndex={1050}
+      >
+        {viewAttachData.startsWith('data:image') ? (
+          <img src={viewAttachData} alt={viewAttachName} style={{ width: '100%', maxHeight: 500, objectFit: 'contain' }} />
+        ) : viewAttachData.startsWith('data:application/pdf') ? (
+          <iframe src={viewAttachData} title={viewAttachName} style={{ width: '100%', height: 500, border: 'none' }} />
+        ) : (
+          <div style={{ textAlign: 'center', padding: 32 }}>
+            <PaperClipOutlined style={{ fontSize: 48, color: REDWOOD.neutral300 }} />
+            <div style={{ marginTop: 12 }}>
+              <Text type="secondary">Preview not available for this file type.</Text>
+            </div>
+            <div style={{ marginTop: 8 }}>
+              <Text style={{ fontSize: 12 }}>{viewAttachName}</Text>
+            </div>
+          </div>
         )}
       </Modal>
     </>
