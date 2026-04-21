@@ -182,7 +182,7 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
 
         -- Validate INACTIVE transition: balance must be zero
         IF l_status = 'INACTIVE' THEN
-            SELECT NVL(SUM(DEBIT_AMOUNT),0) - NVL(SUM(CREDIT_AMOUNT),0)
+            SELECT NVL(SUM(CREDIT_AMOUNT),0) - NVL(SUM(DEBIT_AMOUNT),0)
             INTO   l_balance
             FROM   RR_PC_TRANSACTIONS
             WHERE  REGISTER_ID = p_register_id;
