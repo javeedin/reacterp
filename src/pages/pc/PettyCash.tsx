@@ -368,6 +368,7 @@ function printPCTxnPDF(txn: PCTransaction, register: PCRegister) {
   const isIn = txn.debitAmount > 0;
   pdfHeader(doc, 'PETTY CASH TRANSACTION', register.registerName, PDF_GREEN);
   const rows: [string, string][] = [
+    ['Transaction ID',    String(txn.transactionId)],
     ['Line #',            String(txn.lineNumber)],
     ['Type',              txn.transactionType],
     ['Transaction Date',  txn.transactionDate    ?? '—'],
@@ -400,8 +401,9 @@ function printRefGroupPDF(ref: string, txns: PCTransaction[], register: PCRegist
   const totalOut = txns.reduce((s, t) => s + (t.creditAmount || 0), 0);
   autoTable(doc, {
     startY: 34,
-    head: [['#', 'Date', 'Type', 'Expense Type', 'Money In', 'Money Out', 'Status', 'Comments']],
+    head: [['Txn ID', '#', 'Date', 'Type', 'Expense Type', 'Money In', 'Money Out', 'Status', 'Comments']],
     body: txns.map(t => [
+      String(t.transactionId),
       String(t.lineNumber),
       t.transactionDate  ?? '—',
       t.transactionType,
@@ -411,7 +413,7 @@ function printRefGroupPDF(ref: string, txns: PCTransaction[], register: PCRegist
       t.postingStatus    ?? '—',
       t.comments         ?? '—',
     ]),
-    foot: [['', '', '', `Total (${txns.length} lines)`,
+    foot: [['', '', '', '', `Total (${txns.length} lines)`,
       totalIn  > 0 ? totalIn.toLocaleString(undefined,  { minimumFractionDigits: 2 }) : '—',
       totalOut > 0 ? totalOut.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '—',
       '', '']],
@@ -419,7 +421,7 @@ function printRefGroupPDF(ref: string, txns: PCTransaction[], register: PCRegist
     headStyles: { fillColor: PDF_BLUE, fontSize: 9, fontStyle: 'bold' },
     footStyles: { fillColor: [235, 235, 235], fontStyle: 'bold', fontSize: 9 },
     styles: { fontSize: 8.5 },
-    columnStyles: { 0: { cellWidth: 10 }, 4: { halign: 'right' }, 5: { halign: 'right' } },
+    columnStyles: { 0: { cellWidth: 18 }, 1: { cellWidth: 10 }, 5: { halign: 'right' }, 6: { halign: 'right' } },
   });
   pdfFooter(doc, (doc as any).lastAutoTable.finalY);
   doc.save(`pc-ref-${ref}.pdf`);
@@ -1609,6 +1611,8 @@ const RegisterDetail: React.FC<{
   const txnColumns: ColumnsType<PCTransaction> = [
     { title: '#', dataIndex: 'lineNumber', width: 50, align: 'center',
       render: (v) => <Text style={{ fontSize: 12 }}>{v}</Text> },
+    { title: 'Txn ID', dataIndex: 'transactionId', width: 76, align: 'center' as const,
+      render: (v) => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.neutral600 }}>{v}</Text> },
     { title: 'Reference', dataIndex: 'referenceNo', width: 140,
       render: (v: string | null) => {
         if (!v) return <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text>;
