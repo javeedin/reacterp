@@ -669,6 +669,15 @@ const RegisterDetail: React.FC<{
         message.success(`Bank transaction created — ID: ${txnRef}`);
         setLinkedBankTxnRef(txnRef);
         moneyForm.setFieldsValue({ referenceNo: uniqueRef });
+        // Copy offset account → charge account in Add Money
+        const offsetAcct = bankTxnForm.getFieldValue('offsetAccountCombination');
+        if (offsetAcct) {
+          moneyForm.setFieldsValue({ chargeAccountDesc: offsetAcct, chargeAccountCcid: null });
+          validateAccountCode(offsetAcct).then(result => {
+            const seg4 = Object.values(result.segmentDetails)[3];
+            setMoneyAcctDesc(seg4?.description || '');
+          }).catch(() => {});
+        }
         setBankTxnModalOpen(false);
       } else {
         message.error(data.message || 'Failed — see API Response panel below');
