@@ -89,6 +89,8 @@ interface AcctProgressRow {
   expenseType:     string | null;
   amount:          number;
   currency:        string;
+  accountingDate:  string;
+  periodName:      string;
   drAccount:       string;
   drAccountDesc:   string;
   crAccount:       string;
@@ -834,11 +836,21 @@ const RegisterDetail: React.FC<{
   };
 
   const openCreateAccountingModal = () => {
-    const eligible = transactions.filter(t =>
+    const selected = transactions.filter(t =>
       selectedRowKeys.includes(t.transactionId) && t.transactionType !== 'Balance Refill'
     );
-    if (eligible.length === 0) {
+    if (selected.length === 0) {
       message.warning('Select at least one Expense or Adjustment transaction. Balance Refills are accounted on the bank transaction side.');
+      return;
+    }
+    // Exclude transactions that have no charge account
+    const skipped = selected.filter(t => !t.chargeAccountDesc);
+    const eligible = selected.filter(t => !!t.chargeAccountDesc);
+    if (skipped.length > 0) {
+      message.warning(`${skipped.length} line(s) skipped — no charge account assigned.`);
+    }
+    if (eligible.length === 0) {
+      message.error('None of the selected transactions have a charge account. Cannot create accounting.');
       return;
     }
     const rows: AcctProgressRow[] = eligible.map(t => {
@@ -848,6 +860,7 @@ const RegisterDetail: React.FC<{
       const chargeDesc    = chargeAcctResolved.get(t.transactionId)?.desc ?? '';
       const cashCode      = register.cashAccountDesc ?? '';
       const cashDesc      = cashAccountName ?? '';
+      const acctDate      = t.accountingDate || t.transactionDate;
       return {
         txnId:           t.transactionId,
         lineNumber:      t.lineNumber,
@@ -855,6 +868,8 @@ const RegisterDetail: React.FC<{
         expenseType:     t.expenseType,
         amount,
         currency:        t.currency,
+        accountingDate:  acctDate,
+        periodName:      derivePeriodName(new Date(acctDate)),
         drAccount:       isOut ? chargeCode : cashCode,
         drAccountDesc:   isOut ? chargeDesc : cashDesc,
         crAccount:       isOut ? cashCode   : chargeCode,
@@ -2203,7 +2218,7 @@ const RegisterDetail: React.FC<{
                 </Button>,
               ]
         }
-        width={820}
+        width={900}
         destroyOnClose
       >
         {!register.cashAccountDesc && (
@@ -2216,20 +2231,33 @@ const RegisterDetail: React.FC<{
             style={{ marginBottom: 12 }}
           />
         )}
+        {acctProgress.length > 0 && (() => {
+          const periods = [...new Set(acctProgress.map(r => r.periodName))].filter(Boolean);
+          return (
+            <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Accounting Period{periods.length > 1 ? 's' : ''}:</Text>
+              {periods.map(p => (
+                <Tag key={p} color="blue" style={{ fontSize: 12, fontWeight: 600, margin: 0 }}>{p}</Tag>
+              ))}
+            </div>
+          );
+        })()}
         <Table<AcctProgressRow>
           dataSource={acctProgress}
           rowKey="txnId"
           size="small"
           pagination={false}
           columns={[
-            { title: 'Line #', dataIndex: 'lineNumber', width: 60, align: 'center' as const,
+            { title: 'Line #', dataIndex: 'lineNumber', width: 55, align: 'center' as const,
               render: (v) => <Text style={{ fontSize: 12 }}>{v}</Text> },
             { title: 'Type', dataIndex: 'transactionType', width: 100,
               render: (v, r) => {
                 const color = v === 'Expense' ? 'orange' : 'purple';
                 return <><Tag color={color} style={{ fontSize: 11 }}>{v}</Tag>
-                  {r.expenseType && <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}> {r.expenseType}</Text>}</>;
+                  {r.expenseType && <div style={{ fontSize: 10, color: REDWOOD.neutral600, marginTop: 1 }}>{r.expenseType}</div>}</>;
               }},
+            { title: 'Acct Date', dataIndex: 'accountingDate', width: 96,
+              render: (v) => <Text style={{ fontSize: 11 }}>{v ? v.slice(0, 10) : '—'}</Text> },
             { title: 'Amount', dataIndex: 'amount', width: 110, align: 'right' as const,
               render: (v, r) => <Text style={{ fontSize: 12, fontWeight: 600 }}>{fmt(v)} {r.currency}</Text> },
             { title: 'DR Account', dataIndex: 'drAccount',
