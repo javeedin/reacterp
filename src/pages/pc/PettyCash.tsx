@@ -100,6 +100,27 @@ interface AcctProgressRow {
   headerId?:       number;
 }
 
+// Convert Oracle DD-MON-YYYY or any ISO-ish string to YYYY-MM-DD
+const MON_MAP: Record<string, string> = {
+  JAN:'01',FEB:'02',MAR:'03',APR:'04',MAY:'05',JUN:'06',
+  JUL:'07',AUG:'08',SEP:'09',OCT:'10',NOV:'11',DEC:'12',
+};
+function toIsoDate(s: string | null | undefined): string {
+  if (!s) return '';
+  const ddMon = s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})/);
+  if (ddMon) return `${ddMon[3]}-${MON_MAP[ddMon[2].toUpperCase()] ?? '01'}-${ddMon[1].padStart(2,'0')}`;
+  return s.slice(0, 10); // already ISO or truncate
+}
+
+interface ApiDebugItem {
+  label:     string;
+  url:       string;
+  body:      unknown;
+  response?: unknown;
+  loading?:  boolean;
+  error?:    string;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Excel export
 // ─────────────────────────────────────────────────────────────────────────────
@@ -323,17 +344,20 @@ const RegisterDetail: React.FC<{
   const [viewAttachData, setViewAttachData]   = useState<string>('');
   const [viewAttachName, setViewAttachName]   = useState<string>('');
   // ── Accounting state ──────────────────────────────────────────────────────
-  const [selectedRowKeys, setSelectedRowKeys] = useState<number[]>([]);
-  const [acctModalOpen, setAcctModalOpen]     = useState(false);
-  const [acctProgress, setAcctProgress]       = useState<AcctProgressRow[]>([]);
-  const [acctRunning, setAcctRunning]         = useState(false);
-  const [acctDone, setAcctDone]               = useState(false);
-  const [viewAcctOpen, setViewAcctOpen]       = useState(false);
-  const [viewAcctTxn, setViewAcctTxn]         = useState<PCTransaction | null>(null);
-  const [viewAcctData, setViewAcctData]       = useState<SlaGetResult | null>(null);
-  const [viewAcctLoading, setViewAcctLoading] = useState(false);
-  const [ledgerInfo, setLedgerInfo]           = useState<{ ledgerId: number; ledgerName: string } | null>(null);
-  const [legalEntityName, setLegalEntityName] = useState<string>('');
+  const [selectedRowKeys, setSelectedRowKeys]   = useState<number[]>([]);
+  const [acctModalOpen, setAcctModalOpen]       = useState(false);
+  const [acctProgress, setAcctProgress]         = useState<AcctProgressRow[]>([]);
+  const [acctRunning, setAcctRunning]           = useState(false);
+  const [acctDone, setAcctDone]                 = useState(false);
+  const [viewAcctOpen, setViewAcctOpen]         = useState(false);
+  const [viewAcctTxn, setViewAcctTxn]           = useState<PCTransaction | null>(null);
+  const [viewAcctData, setViewAcctData]         = useState<SlaGetResult | null>(null);
+  const [viewAcctLoading, setViewAcctLoading]   = useState(false);
+  const [ledgerInfo, setLedgerInfo]             = useState<{ ledgerId: number; ledgerName: string } | null>(null);
+  const [legalEntityName, setLegalEntityName]   = useState<string>('');
+  const [apiDebugOpen, setApiDebugOpen]         = useState(false);
+  const [apiDebugItems, setApiDebugItems]       = useState<ApiDebugItem[]>([]);
+  const [apiDebugLoading, setApiDebugLoading]   = useState(false);
 
   const isClosed   = register.status !== 'ACTIVE';
   const noBalance  = register.balance <= 0;
@@ -860,7 +884,7 @@ const RegisterDetail: React.FC<{
       const chargeDesc    = chargeAcctResolved.get(t.transactionId)?.desc ?? '';
       const cashCode      = register.cashAccountDesc ?? '';
       const cashDesc      = cashAccountName ?? '';
-      const acctDate      = t.accountingDate || t.transactionDate;
+      const acctDate      = toIsoDate(t.accountingDate || t.transactionDate);
       return {
         txnId:           t.transactionId,
         lineNumber:      t.lineNumber,
@@ -909,7 +933,7 @@ const RegisterDetail: React.FC<{
       try {
         const isOut     = txn.creditAmount > 0;
         const amount    = isOut ? txn.creditAmount : txn.debitAmount;
-        const acctDate  = txn.accountingDate || txn.transactionDate;
+        const acctDate  = toIsoDate(txn.accountingDate || txn.transactionDate);
         const periodName = derivePeriodName(new Date(acctDate));
         const eventType = txn.transactionType === 'Expense'
           ? 'PC_EXPENSE_CREATED' as const
@@ -919,7 +943,7 @@ const RegisterDetail: React.FC<{
           transactionId:        txn.transactionId,
           sourceNumber:         `PC-${register.registerId}-L${txn.lineNumber}`,
           eventTypeCode:        eventType,
-          transactionDate:      txn.transactionDate,
+          transactionDate:      toIsoDate(txn.transactionDate),
           accountingDate:       acctDate,
           periodName,
           currency:             txn.currency,
@@ -1041,6 +1065,125 @@ const RegisterDetail: React.FC<{
     setAcctDone(true);
     setSelectedRowKeys([]);
     onRefresh();
+  };
+
+  // ── API Debug ─────────────────────────────────────────────
+  const openApiDebug = async () => {
+    setApiDebugLoading(true);
+    setApiDebugItems([]);
+    setApiDebugOpen(true);
+    try {
+      const ctx = await loadLedgerAndLE();
+      if (!ctx) { setApiDebugLoading(false); return; }
+      const APEX_BASE = APEX_DB_CONFIG.baseUrl;
+      const items: ApiDebugItem[] = [];
+
+      for (const row of acctProgress) {
+        if (row.status === 'skipped') continue;
+        const txn = transactions.find(t => t.transactionId === row.txnId);
+        if (!txn) continue;
+        const isOut     = txn.creditAmount > 0;
+        const amount    = isOut ? txn.creditAmount : txn.debitAmount;
+        const acctDate  = toIsoDate(txn.accountingDate || txn.transactionDate);
+        const periodName = derivePeriodName(new Date(acctDate));
+        const eventType = txn.transactionType === 'Expense'
+          ? 'PC_EXPENSE_CREATED' as const
+          : isOut ? 'PC_ADJUSTMENT' as const : 'PC_EXPENSE_REVERSAL' as const;
+        const batchName = `PC-${register.registerId}-L${txn.lineNumber}-<timestamp>`;
+
+        const slaPayload = buildPcTxnSlaPayload({
+          transactionId:        txn.transactionId,
+          sourceNumber:         `PC-${register.registerId}-L${txn.lineNumber}`,
+          eventTypeCode:        eventType,
+          transactionDate:      toIsoDate(txn.transactionDate),
+          accountingDate:       acctDate,
+          periodName,
+          currency:             txn.currency,
+          amount,
+          drAccountCombination: row.drAccount,
+          crAccountCombination: row.crAccount,
+          drAccountingClass:    isOut ? 'EXPENSE' : 'PETTY_CASH',
+          crAccountingClass:    isOut ? 'PETTY_CASH' : 'EXPENSE',
+          drDescription:        isOut ? (txn.expenseType || 'Expense') : 'Petty Cash Account',
+          crDescription:        isOut ? 'Petty Cash Account' : (txn.expenseType || 'Expense reversal'),
+          businessUnit:         register.businessUnit,
+          legalEntity:          ctx.legalEntity || undefined,
+          ledgerId:             ctx.ledgerId,
+          ledgerName:           ctx.ledgerName,
+          createdBy:            currentUser,
+        });
+
+        const glPayload = {
+          batch: {
+            batchName, batchDescription: `Petty Cash – ${register.registerName}`,
+            ledgerName: ctx.ledgerName, ledgerId: ctx.ledgerId, status: 'NEW',
+            accountingPeriod: periodName, controlTotal: amount,
+            runningTotalDr: amount, runningTotalCr: amount,
+            batchSource: 'Petty Cash', createdBy: currentUser,
+          },
+          header: {
+            ledgerId: ctx.ledgerId, ledgerName: ctx.ledgerName,
+            jeCategory: 'Petty Cash', jeSource: 'Petty Cash',
+            periodName, journalName: `PC-${txn.transactionType}-${txn.transactionId}`,
+            description: `${txn.expenseType || txn.transactionType} – ${register.registerName}`,
+            currencyCode: txn.currency, currencyConversionType: 'User',
+            currencyConversionDate: acctDate, currencyConversionRate: 1,
+            status: 'NEW', runningTotalDr: amount, runningTotalCr: amount, createdBy: currentUser,
+          },
+          lines: slaPayload.lines.map(l => ({
+            enteredDr: l.lineType === 'DR' ? l.enteredDr : null,
+            enteredCr: l.lineType === 'CR' ? l.enteredCr : null,
+            accountedDr: l.accountedDr || null, accountedCr: l.accountedCr || null,
+            statAmount: null, description: l.description,
+            currencyCode: l.currencyCode || txn.currency,
+            currencyConversionDate: acctDate, currencyConversionRate: 1,
+            userCurrencyConversionType: 'User', accountCombination: l.accountCombination,
+            chartOfAccountsName: 'Chart of Accounts',
+            reference1: String(txn.transactionId), reference2: register.registerName,
+            reference3: l.accountingClass || null, reference4: register.businessUnit || null,
+            reference5: null, createdBy: currentUser,
+          })),
+        };
+
+        const slaPostPayload = {
+          headerId: '<from SLA create response>',
+          glBatchId: '<from GL create response>',
+          glBatchName: batchName,
+          glHeaderId: '<from GL create response>',
+          postedBy: currentUser,
+        };
+
+        items.push(
+          { label: `[Line ${txn.lineNumber}] 1. POST sla/accounting/create`, url: `${APEX_BASE}/sla/accounting/create`, body: slaPayload },
+          { label: `[Line ${txn.lineNumber}] 2. POST journals/create`,        url: `${APEX_BASE}/journals/create`,       body: glPayload },
+          { label: `[Line ${txn.lineNumber}] 3. POST sla/accounting/post`,    url: `${APEX_BASE}/sla/accounting/post`,   body: slaPostPayload },
+        );
+      }
+      setApiDebugItems(items);
+    } catch (e: any) {
+      message.error(`Failed to build API preview: ${e?.message}`);
+    }
+    setApiDebugLoading(false);
+  };
+
+  const testApiItem = async (idx: number) => {
+    const item = apiDebugItems[idx];
+    if (!item || item.label.includes('sla/accounting/post')) {
+      message.warning('POST sla/accounting/post requires live headerId/glBatchId — run full accounting instead.');
+      return;
+    }
+    setApiDebugItems(prev => prev.map((it, i) => i === idx ? { ...it, loading: true, response: undefined, error: undefined } : it));
+    try {
+      const res = await fetch(item.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(item.body),
+      });
+      const data = await res.json();
+      setApiDebugItems(prev => prev.map((it, i) => i === idx ? { ...it, loading: false, response: data, error: res.ok ? undefined : (data?.message || `HTTP ${res.status}`) } : it));
+    } catch (e: any) {
+      setApiDebugItems(prev => prev.map((it, i) => i === idx ? { ...it, loading: false, error: e?.message } : it));
+    }
   };
 
   // ── Transaction columns ────────────────────────────────────
@@ -2209,6 +2352,11 @@ const RegisterDetail: React.FC<{
           acctDone
             ? <Button onClick={() => setAcctModalOpen(false)}>Close</Button>
             : [
+                <Button key="api" icon={<ApiOutlined />} onClick={openApiDebug}
+                  loading={apiDebugLoading} disabled={acctRunning}
+                  style={{ float: 'left' }}>
+                  Show API
+                </Button>,
                 <Button key="cancel" onClick={() => setAcctModalOpen(false)} disabled={acctRunning}>Cancel</Button>,
                 <Button key="run" type="primary" loading={acctRunning}
                   disabled={acctProgress.every(r => r.status === 'skipped')}
@@ -2378,6 +2526,63 @@ const RegisterDetail: React.FC<{
             />
           </>
         )}
+      </Modal>
+
+      {/* ── API Debug Modal ───────────────────────────────────── */}
+      <Modal
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} />API Inspector — Create Accounting</Space>}
+        open={apiDebugOpen}
+        onCancel={() => setApiDebugOpen(false)}
+        footer={<Button onClick={() => setApiDebugOpen(false)}>Close</Button>}
+        width={860}
+        destroyOnClose
+      >
+        {apiDebugLoading
+          ? <div style={{ textAlign: 'center', padding: 40 }}><Spin tip="Building payloads…" /></div>
+          : apiDebugItems.length === 0
+          ? <Text type="secondary">No payloads to show.</Text>
+          : apiDebugItems.map((item, idx) => (
+            <div key={idx} style={{ marginBottom: 16, border: '1px solid #e5e5e5', borderRadius: 6, overflow: 'hidden' }}>
+              {/* Header bar */}
+              <div style={{ background: '#f0f4fa', padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <Space size={6}>
+                  <Tag color="blue" style={{ margin: 0, fontFamily: 'monospace', fontSize: 11 }}>POST</Tag>
+                  <Text style={{ fontSize: 12, fontWeight: 600 }}>{item.label}</Text>
+                </Space>
+                <Button size="small" type="primary" loading={item.loading}
+                  disabled={item.label.includes('sla/accounting/post')}
+                  title={item.label.includes('sla/accounting/post') ? 'Needs live IDs from previous steps' : 'Send request'}
+                  onClick={() => testApiItem(idx)}>
+                  Test
+                </Button>
+              </div>
+              {/* URL */}
+              <div style={{ padding: '6px 12px', background: '#fafafa', borderBottom: '1px solid #e5e5e5', fontSize: 11, fontFamily: 'monospace', wordBreak: 'break-all', color: REDWOOD.neutral600 }}>
+                {item.url}
+              </div>
+              {/* Body */}
+              <div style={{ padding: '0 12px' }}>
+                <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Request Body:</Text>
+                <pre style={{ fontSize: 11, background: '#1e1e1e', color: '#d4d4d4', padding: '10px 12px', borderRadius: 4, overflowX: 'auto', marginTop: 4, maxHeight: 260 }}>
+                  {JSON.stringify(item.body, null, 2)}
+                </pre>
+              </div>
+              {/* Response */}
+              {(item.response !== undefined || item.error) && (
+                <div style={{ padding: '0 12px 10px' }}>
+                  <Text style={{ fontSize: 11, color: item.error ? REDWOOD.error : REDWOOD.success }}>
+                    {item.error ? `Error: ${item.error}` : 'Response:'}
+                  </Text>
+                  {item.response && (
+                    <pre style={{ fontSize: 11, background: item.error ? '#fff0f0' : '#f0fff4', color: '#333', padding: '8px 12px', borderRadius: 4, overflowX: 'auto', marginTop: 4 }}>
+                      {JSON.stringify(item.response, null, 2)}
+                    </pre>
+                  )}
+                </div>
+              )}
+            </div>
+          ))
+        }
       </Modal>
     </>
   );
