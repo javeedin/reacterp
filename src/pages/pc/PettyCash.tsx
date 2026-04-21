@@ -3,6 +3,7 @@ import {
   Layout, Card, Typography, Breadcrumb, Tabs, Form, Input, Select,
   DatePicker, Button, Table, Tag, Row, Col, Space, Divider,
   Modal, InputNumber, message, Tooltip, Statistic, Collapse, Progress, Descriptions, Upload,
+  Spin, Alert,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { Link } from 'react-router-dom';
@@ -16,6 +17,7 @@ import {
   DownloadOutlined, RollbackOutlined, BankOutlined,
   LockOutlined, UnlockOutlined, UserOutlined, FieldNumberOutlined, ApiOutlined,
   SwapOutlined, UploadOutlined, PaperClipOutlined, EyeOutlined,
+  BookOutlined, CheckCircleOutlined, SyncOutlined, ExclamationCircleOutlined,
 } from '@ant-design/icons';
 import FloatingMenu from '../../components/FloatingMenu';
 import ApiDocsModal, { type ApiEndpoint } from '../../components/ApiDocsModal';
@@ -32,6 +34,11 @@ import {
   searchCombinations,
   type DistCombination,
 } from '../../services/distCombinations.service';
+import {
+  getAccounting, createAccounting, fetchLedgerByBusinessUnit, derivePeriodName,
+  buildPcTxnSlaPayload,
+  type SlaGetResult,
+} from '../../services/sla.service';
 
 const { Content } = Layout;
 const { Text, Title } = Typography;
@@ -71,6 +78,23 @@ const PostingTag: React.FC<{ status: string }> = ({ status }) => {
   const color = status === 'Posted' ? 'green' : status === 'Error' ? 'red' : 'default';
   return <Tag color={color} style={{ fontSize: 11 }}>{status}</Tag>;
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Accounting progress row
+// ─────────────────────────────────────────────────────────────────────────────
+interface AcctProgressRow {
+  txnId:           number;
+  lineNumber:      number;
+  transactionType: string;
+  expenseType:     string | null;
+  amount:          number;
+  currency:        string;
+  drAccount:       string;
+  crAccount:       string;
+  status:          'pending' | 'running' | 'success' | 'error' | 'skipped';
+  message?:        string;
+  headerId?:       number;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Excel export
@@ -294,6 +318,18 @@ const RegisterDetail: React.FC<{
   const [viewAttachOpen, setViewAttachOpen]   = useState(false);
   const [viewAttachData, setViewAttachData]   = useState<string>('');
   const [viewAttachName, setViewAttachName]   = useState<string>('');
+  // ── Accounting state ──────────────────────────────────────────────────────
+  const [selectedRowKeys, setSelectedRowKeys] = useState<number[]>([]);
+  const [acctModalOpen, setAcctModalOpen]     = useState(false);
+  const [acctProgress, setAcctProgress]       = useState<AcctProgressRow[]>([]);
+  const [acctRunning, setAcctRunning]         = useState(false);
+  const [acctDone, setAcctDone]               = useState(false);
+  const [viewAcctOpen, setViewAcctOpen]       = useState(false);
+  const [viewAcctTxn, setViewAcctTxn]         = useState<PCTransaction | null>(null);
+  const [viewAcctData, setViewAcctData]       = useState<SlaGetResult | null>(null);
+  const [viewAcctLoading, setViewAcctLoading] = useState(false);
+  const [ledgerInfo, setLedgerInfo]           = useState<{ ledgerId: number; ledgerName: string } | null>(null);
+  const [legalEntityName, setLegalEntityName] = useState<string>('');
 
   const isClosed   = register.status !== 'ACTIVE';
   const noBalance  = register.balance <= 0;
@@ -755,6 +791,235 @@ const RegisterDetail: React.FC<{
     }
   };
 
+  // ── Accounting handlers ───────────────────────────────────
+
+  const loadLedgerAndLE = async (): Promise<{ ledgerId: number; ledgerName: string; legalEntity: string } | null> => {
+    let leInfo = legalEntityName;
+    let ldInfo = ledgerInfo;
+    if (!ldInfo) {
+      try {
+        const info = await fetchLedgerByBusinessUnit(register.businessUnit);
+        if (!info) { message.error('Could not resolve ledger for this Business Unit'); return null; }
+        setLedgerInfo(info);
+        ldInfo = info;
+      } catch { message.error('Failed to load ledger information'); return null; }
+    }
+    if (!leInfo) {
+      try {
+        const buRes = await fetch(`${BU_LIST_URL}`, { headers: { Accept: 'application/json' } });
+        const buData = await buRes.json();
+        const buItem = (buData.items || []).find((i: any) =>
+          (i.business_unit_name || '').toLowerCase() === register.businessUnit.toLowerCase()
+        );
+        const le = buItem?.legal_entity_name || '';
+        setLegalEntityName(le);
+        leInfo = le;
+      } catch { leInfo = ''; }
+    }
+    return { ...ldInfo, legalEntity: leInfo };
+  };
+
+  const openViewAccounting = async (txn: PCTransaction) => {
+    setViewAcctTxn(txn);
+    setViewAcctData(null);
+    setViewAcctLoading(true);
+    setViewAcctOpen(true);
+    try {
+      const data = await getAccounting('PC_TRANSACTIONS', txn.transactionId);
+      setViewAcctData(data);
+    } catch { setViewAcctData(null); }
+    finally { setViewAcctLoading(false); }
+  };
+
+  const openCreateAccountingModal = () => {
+    const eligible = transactions.filter(t =>
+      selectedRowKeys.includes(t.transactionId) && t.transactionType !== 'Balance Refill'
+    );
+    if (eligible.length === 0) {
+      message.warning('Select at least one Expense or Adjustment transaction. Balance Refills are accounted on the bank transaction side.');
+      return;
+    }
+    const rows: AcctProgressRow[] = eligible.map(t => {
+      const isOut  = t.creditAmount > 0;
+      const amount = isOut ? t.creditAmount : t.debitAmount;
+      return {
+        txnId:           t.transactionId,
+        lineNumber:      t.lineNumber,
+        transactionType: t.transactionType,
+        expenseType:     t.expenseType,
+        amount,
+        currency:        t.currency,
+        drAccount:       isOut ? (t.chargeAccountDesc ?? '') : (register.cashAccountDesc ?? ''),
+        crAccount:       isOut ? (register.cashAccountDesc ?? '') : (t.chargeAccountDesc ?? ''),
+        status:          t.postingStatus === 'Posted' ? 'skipped' : 'pending',
+        message:         t.postingStatus === 'Posted' ? 'Already posted — skipped' : undefined,
+      };
+    });
+    setAcctProgress(rows);
+    setAcctDone(false);
+    setAcctModalOpen(true);
+  };
+
+  const runCreateAccounting = async () => {
+    setAcctRunning(true);
+    const ctx = await loadLedgerAndLE();
+    if (!ctx) { setAcctRunning(false); return; }
+
+    const updateRow = (txnId: number, partial: Partial<AcctProgressRow>) =>
+      setAcctProgress(prev => prev.map(r => r.txnId === txnId ? { ...r, ...partial } : r));
+
+    const APEX_BASE = APEX_DB_CONFIG.baseUrl;
+
+    for (const row of acctProgress) {
+      if (row.status === 'skipped') continue;
+
+      updateRow(row.txnId, { status: 'running' });
+      const txn = transactions.find(t => t.transactionId === row.txnId);
+      if (!txn) { updateRow(row.txnId, { status: 'error', message: 'Transaction not found locally' }); continue; }
+      if (!register.cashAccountDesc) {
+        updateRow(row.txnId, { status: 'error', message: 'Register has no cash account configured' }); continue;
+      }
+      if (!txn.chargeAccountDesc) {
+        updateRow(row.txnId, { status: 'error', message: 'Transaction has no charge account' }); continue;
+      }
+
+      try {
+        const isOut     = txn.creditAmount > 0;
+        const amount    = isOut ? txn.creditAmount : txn.debitAmount;
+        const acctDate  = txn.accountingDate || txn.transactionDate;
+        const periodName = derivePeriodName(new Date(acctDate));
+        const eventType = txn.transactionType === 'Expense'
+          ? 'PC_EXPENSE_CREATED' as const
+          : isOut ? 'PC_ADJUSTMENT' as const : 'PC_EXPENSE_REVERSAL' as const;
+
+        const payload = buildPcTxnSlaPayload({
+          transactionId:        txn.transactionId,
+          sourceNumber:         `PC-${register.registerId}-L${txn.lineNumber}`,
+          eventTypeCode:        eventType,
+          transactionDate:      txn.transactionDate,
+          accountingDate:       acctDate,
+          periodName,
+          currency:             txn.currency,
+          amount,
+          drAccountCombination: row.drAccount,
+          crAccountCombination: row.crAccount,
+          drAccountingClass:    isOut ? 'EXPENSE' : 'PETTY_CASH',
+          crAccountingClass:    isOut ? 'PETTY_CASH' : 'EXPENSE',
+          drDescription:        isOut ? (txn.expenseType || 'Expense') : 'Petty Cash Account',
+          crDescription:        isOut ? 'Petty Cash Account' : (txn.expenseType || 'Expense reversal'),
+          businessUnit:         register.businessUnit,
+          legalEntity:          ctx.legalEntity || undefined,
+          ledgerId:             ctx.ledgerId,
+          ledgerName:           ctx.ledgerName,
+          createdBy:            currentUser,
+        });
+
+        // Step 1: Create SLA entry
+        const slaResult = await createAccounting(payload);
+
+        // Step 2: Create GL journal
+        const batchName = `PC-${register.registerId}-L${txn.lineNumber}-${Date.now()}`;
+        const glPayload = {
+          batch: {
+            batchName,
+            batchDescription: `Petty Cash – ${register.registerName}`,
+            ledgerName:       ctx.ledgerName,
+            ledgerId:         ctx.ledgerId,
+            status:           'NEW',
+            accountingPeriod: periodName,
+            controlTotal:     amount,
+            runningTotalDr:   amount,
+            runningTotalCr:   amount,
+            batchSource:      'Petty Cash',
+            createdBy:        currentUser,
+          },
+          header: {
+            ledgerId:               ctx.ledgerId,
+            ledgerName:             ctx.ledgerName,
+            jeCategory:             'Petty Cash',
+            jeSource:               'Petty Cash',
+            periodName,
+            journalName:            `PC-${txn.transactionType}-${txn.transactionId}`,
+            description:            `${txn.expenseType || txn.transactionType} – ${register.registerName}`,
+            currencyCode:           txn.currency,
+            currencyConversionType: 'User',
+            currencyConversionDate: acctDate,
+            currencyConversionRate: 1,
+            status:                 'NEW',
+            runningTotalDr:         amount,
+            runningTotalCr:         amount,
+            createdBy:              currentUser,
+          },
+          lines: payload.lines.map(l => ({
+            enteredDr:               l.lineType === 'DR' ? l.enteredDr : null,
+            enteredCr:               l.lineType === 'CR' ? l.enteredCr : null,
+            accountedDr:             l.accountedDr || null,
+            accountedCr:             l.accountedCr || null,
+            statAmount:              null,
+            description:             l.description,
+            currencyCode:            l.currencyCode || txn.currency,
+            currencyConversionDate:  acctDate,
+            currencyConversionRate:  1,
+            userCurrencyConversionType: 'User',
+            accountCombination:      l.accountCombination,
+            chartOfAccountsName:     'Chart of Accounts',
+            reference1:              String(txn.transactionId),
+            reference2:              register.registerName,
+            reference3:              l.accountingClass || null,
+            reference4:              register.businessUnit || null,
+            reference5:              null,
+            createdBy:               currentUser,
+          })),
+        };
+
+        const glRes = await fetch(`${APEX_BASE}/journals/create`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body:    JSON.stringify(glPayload),
+        });
+
+        let glMsg = '';
+        if (glRes.ok) {
+          const glData = await glRes.json();
+          // Step 3: Post SLA
+          await fetch(`${APEX_BASE}/sla/accounting/post`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body:    JSON.stringify({
+              headerId:    slaResult.headerId,
+              glBatchId:   glData.batchId   || 0,
+              glBatchName: batchName,
+              glHeaderId:  glData.headerId  || 0,
+              postedBy:    currentUser,
+            }),
+          });
+          glMsg = `GL Batch: ${batchName}`;
+        } else {
+          glMsg = 'GL journal failed — SLA is Draft';
+        }
+
+        // Step 4: Update PC transaction posting status
+        await updateTransaction(txn.transactionId, {
+          postingStatus: glRes.ok ? 'Posted' : 'Unposted',
+          updatedBy:     currentUser,
+        });
+
+        updateRow(row.txnId, {
+          status:   'success',
+          message:  `SLA ${slaResult.headerId} — ${glMsg}`,
+          headerId: slaResult.headerId,
+        });
+      } catch (e: any) {
+        updateRow(row.txnId, { status: 'error', message: e?.message || 'Unexpected error' });
+      }
+    }
+
+    setAcctRunning(false);
+    setAcctDone(true);
+    setSelectedRowKeys([]);
+    onRefresh();
+  };
+
   // ── Transaction columns ────────────────────────────────────
   const txnColumns: ColumnsType<PCTransaction> = [
     { title: '#', dataIndex: 'lineNumber', width: 50, align: 'center',
@@ -834,12 +1099,20 @@ const RegisterDetail: React.FC<{
       render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Created By', dataIndex: 'createdBy', width: 130, ellipsis: true,
       render: (v) => <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{v || '—'}</Text> },
-    { title: '', key: 'actions', width: 80, align: 'center' as const, fixed: 'right' as const,
+    { title: '', key: 'actions', width: 100, align: 'center' as const, fixed: 'right' as const,
       render: (_: any, txn: PCTransaction) => {
         const isPosted  = txn.postingStatus === 'Posted';
         const isLoading = txnActionLoading === txn.transactionId;
         return (
           <Space size={2}>
+            {isPosted && txn.transactionType !== 'Balance Refill' && (
+              <Tooltip title="View accounting entries">
+                <Button type="text" size="small"
+                  icon={<BookOutlined style={{ color: REDWOOD.success }} />}
+                  onClick={() => openViewAccounting(txn)}
+                />
+              </Tooltip>
+            )}
             {!isPosted ? (
               <>
                 <Tooltip title="Edit transaction">
@@ -1027,6 +1300,35 @@ const RegisterDetail: React.FC<{
           >
             Export Excel
           </Button>
+          <Tooltip title={selectedRowKeys.length !== 1 || transactions.find(t => t.transactionId === selectedRowKeys[0])?.postingStatus !== 'Posted'
+            ? 'Select one posted transaction to view its accounting entries' : undefined}>
+            <Button
+              icon={<BookOutlined />}
+              disabled={
+                selectedRowKeys.length !== 1 ||
+                transactions.find(t => t.transactionId === selectedRowKeys[0])?.postingStatus !== 'Posted' ||
+                transactions.find(t => t.transactionId === selectedRowKeys[0])?.transactionType === 'Balance Refill'
+              }
+              onClick={() => {
+                const txn = transactions.find(t => t.transactionId === selectedRowKeys[0]);
+                if (txn) openViewAccounting(txn);
+              }}
+            >
+              View Accounting
+            </Button>
+          </Tooltip>
+          <Tooltip title={selectedRowKeys.length === 0 ? 'Select expense transactions to account' : undefined}>
+            <Button
+              icon={<CheckCircleOutlined />}
+              disabled={isClosed || selectedRowKeys.length === 0}
+              style={!isClosed && selectedRowKeys.length > 0
+                ? { background: REDWOOD.info, borderColor: REDWOOD.info, color: '#fff' }
+                : {}}
+              onClick={openCreateAccountingModal}
+            >
+              Create Accounting{selectedRowKeys.length > 0 ? ` (${selectedRowKeys.length})` : ''}
+            </Button>
+          </Tooltip>
           <Tooltip title={register.limit == null ? 'Set a limit on this register before adding money' : undefined}>
           <Button
             icon={<DollarOutlined />}
@@ -1077,9 +1379,17 @@ const RegisterDetail: React.FC<{
         size="small"
         loading={txnLoading}
         pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `${t} transactions` }}
-        scroll={{ x: 1400 }}
+        scroll={{ x: 1600 }}
         locale={{ emptyText: 'No transactions yet — use Add Money or Add Expense to begin.' }}
         rowClassName={(r) => r.transactionType === 'Balance Refill' ? 'pc-row-refill' : ''}
+        rowSelection={{
+          type:            'checkbox',
+          selectedRowKeys,
+          onChange:        (keys) => setSelectedRowKeys(keys as number[]),
+          getCheckboxProps: (rec) => ({
+            disabled: rec.transactionType === 'Balance Refill',
+          }),
+        }}
       />
 
       {/* ── Add Money Modal ────────────────────────────────── */}
@@ -1864,6 +2174,159 @@ const RegisterDetail: React.FC<{
               <Text style={{ fontSize: 12 }}>{viewAttachName}</Text>
             </div>
           </div>
+        )}
+      </Modal>
+
+      {/* ── Create Accounting Modal ───────────────────────────── */}
+      <Modal
+        title={<Space><CheckCircleOutlined style={{ color: REDWOOD.info }} />Create Accounting</Space>}
+        open={acctModalOpen}
+        onCancel={() => { if (!acctRunning) { setAcctModalOpen(false); } }}
+        footer={
+          acctDone
+            ? <Button onClick={() => setAcctModalOpen(false)}>Close</Button>
+            : [
+                <Button key="cancel" onClick={() => setAcctModalOpen(false)} disabled={acctRunning}>Cancel</Button>,
+                <Button key="run" type="primary" loading={acctRunning}
+                  disabled={acctProgress.every(r => r.status === 'skipped')}
+                  style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+                  onClick={runCreateAccounting}>
+                  {acctRunning ? 'Processing…' : 'Run Create Accounting'}
+                </Button>,
+              ]
+        }
+        width={820}
+        destroyOnClose
+      >
+        {!register.cashAccountDesc && (
+          <Alert
+            type="warning"
+            showIcon
+            icon={<ExclamationCircleOutlined />}
+            message="Register has no cash account configured"
+            description="Set the GL Cash Account in the register settings before creating accounting entries."
+            style={{ marginBottom: 12 }}
+          />
+        )}
+        <Table<AcctProgressRow>
+          dataSource={acctProgress}
+          rowKey="txnId"
+          size="small"
+          pagination={false}
+          columns={[
+            { title: 'Line #', dataIndex: 'lineNumber', width: 60, align: 'center' as const,
+              render: (v) => <Text style={{ fontSize: 12 }}>{v}</Text> },
+            { title: 'Type', dataIndex: 'transactionType', width: 100,
+              render: (v, r) => {
+                const color = v === 'Expense' ? 'orange' : 'purple';
+                return <><Tag color={color} style={{ fontSize: 11 }}>{v}</Tag>
+                  {r.expenseType && <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}> {r.expenseType}</Text>}</>;
+              }},
+            { title: 'Amount', dataIndex: 'amount', width: 110, align: 'right' as const,
+              render: (v, r) => <Text style={{ fontSize: 12, fontWeight: 600 }}>{fmt(v)} {r.currency}</Text> },
+            { title: 'DR Account', dataIndex: 'drAccount', ellipsis: true,
+              render: (v) => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.error }}>{v || '—'}</Text> },
+            { title: 'CR Account', dataIndex: 'crAccount', ellipsis: true,
+              render: (v) => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.success }}>{v || '—'}</Text> },
+            { title: 'Status', dataIndex: 'status', width: 130,
+              render: (v, r) => {
+                if (v === 'pending')  return <Tag color="default" style={{ fontSize: 11 }}>Pending</Tag>;
+                if (v === 'running')  return <Tag icon={<SyncOutlined spin />} color="processing" style={{ fontSize: 11 }}>Running</Tag>;
+                if (v === 'success')  return <><Tag color="success" style={{ fontSize: 11 }}>Done</Tag>
+                  {r.message && <div style={{ fontSize: 10, color: REDWOOD.success, marginTop: 2 }}>{r.message}</div>}</>;
+                if (v === 'error')    return <><Tag color="error" style={{ fontSize: 11 }}>Error</Tag>
+                  {r.message && <div style={{ fontSize: 10, color: REDWOOD.error, marginTop: 2 }}>{r.message}</div>}</>;
+                if (v === 'skipped')  return <Tag color="warning" style={{ fontSize: 11 }}>Already Posted</Tag>;
+                return null;
+              }},
+          ]}
+        />
+        {acctDone && (
+          <Alert
+            type={acctProgress.some(r => r.status === 'error') ? 'warning' : 'success'}
+            showIcon
+            message={acctProgress.some(r => r.status === 'error')
+              ? 'Accounting completed with some errors — review the rows above'
+              : 'Accounting created and posted successfully'}
+            style={{ marginTop: 12 }}
+          />
+        )}
+      </Modal>
+
+      {/* ── View Accounting Modal ──────────────────────────────── */}
+      <Modal
+        title={
+          <Space>
+            <BookOutlined style={{ color: REDWOOD.success }} />
+            Accounting – Line #{viewAcctTxn?.lineNumber} ({viewAcctTxn?.transactionType})
+          </Space>
+        }
+        open={viewAcctOpen}
+        onCancel={() => setViewAcctOpen(false)}
+        footer={<Button onClick={() => setViewAcctOpen(false)}>Close</Button>}
+        width={680}
+        zIndex={1050}
+      >
+        {viewAcctLoading ? (
+          <div style={{ textAlign: 'center', padding: 32 }}><Spin /></div>
+        ) : !viewAcctData?.found ? (
+          <Alert
+            type="info"
+            showIcon
+            message="No accounting entries found for this transaction"
+            description="Use 'Create Accounting' to generate subledger entries."
+          />
+        ) : (
+          <>
+            <Descriptions size="small" bordered column={2}
+              labelStyle={{ fontWeight: 600, fontSize: 12 }} contentStyle={{ fontSize: 12 }}
+              style={{ marginBottom: 16 }}>
+              <Descriptions.Item label="Status">
+                <Tag color={viewAcctData.accountingStatus === 'POSTED' ? 'green' : viewAcctData.accountingStatus === 'DRAFT' ? 'orange' : 'red'}
+                  style={{ fontSize: 11 }}>
+                  {viewAcctData.accountingStatus}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="Posting">
+                <Tag color={viewAcctData.postingStatus === 'POSTED' ? 'green' : 'default'} style={{ fontSize: 11 }}>
+                  {viewAcctData.postingStatus}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="Accounting Date">{viewAcctData.accountingDate ?? '—'}</Descriptions.Item>
+              <Descriptions.Item label="Period">{viewAcctData.periodName ?? '—'}</Descriptions.Item>
+              <Descriptions.Item label="GL Batch" span={2}>
+                {viewAcctData.glBatchName
+                  ? <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{viewAcctData.glBatchName}</Text>
+                  : '—'}
+              </Descriptions.Item>
+              <Descriptions.Item label="Posted By">{viewAcctData.postedBy ?? '—'}</Descriptions.Item>
+              <Descriptions.Item label="Posted Date">{viewAcctData.postedDate ?? '—'}</Descriptions.Item>
+              <Descriptions.Item label="Description" span={2}>{viewAcctData.description ?? '—'}</Descriptions.Item>
+            </Descriptions>
+            <Table
+              dataSource={viewAcctData.lines}
+              rowKey="lineId"
+              size="small"
+              pagination={false}
+              columns={[
+                { title: '#', dataIndex: 'lineNumber', width: 40, align: 'center' as const },
+                { title: 'Dr/Cr', dataIndex: 'lineType', width: 50, align: 'center' as const,
+                  render: (v) => <Tag color={v === 'DR' ? 'red' : 'green'} style={{ fontSize: 11 }}>{v}</Tag> },
+                { title: 'Class', dataIndex: 'accountingClass', width: 100,
+                  render: (v) => <Text style={{ fontSize: 11 }}>{v}</Text> },
+                { title: 'Account', dataIndex: 'accountCombination', ellipsis: true,
+                  render: (v) => <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{v}</Text> },
+                { title: 'Debit', dataIndex: 'enteredDr', width: 110, align: 'right' as const,
+                  render: (v) => v > 0
+                    ? <Text style={{ fontSize: 12, color: REDWOOD.error }}>{fmt(v)}</Text>
+                    : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
+                { title: 'Credit', dataIndex: 'enteredCr', width: 110, align: 'right' as const,
+                  render: (v) => v > 0
+                    ? <Text style={{ fontSize: 12, color: REDWOOD.success }}>{fmt(v)}</Text>
+                    : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
+              ]}
+            />
+          </>
         )}
       </Modal>
     </>

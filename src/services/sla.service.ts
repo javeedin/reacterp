@@ -226,7 +226,166 @@ export async function fetchLedgerByBusinessUnit(businessUnitName: string): Promi
   }
 }
 
-// ── Payload builder for AP Invoices ───────────────────────────────────────
+// ── Payload builder for PC Transactions ──────────────────────────────────────
+
+export interface PcTxnSlaOptions {
+  transactionId:        number;
+  sourceNumber:         string;
+  eventTypeCode:        'PC_EXPENSE_CREATED' | 'PC_EXPENSE_REVERSAL' | 'PC_ADJUSTMENT';
+  transactionDate:      string;   // YYYY-MM-DD
+  accountingDate:       string;   // YYYY-MM-DD
+  periodName:           string;
+  currency:             string;
+  amount:               number;
+  drAccountCombination: string;
+  crAccountCombination: string;
+  drAccountingClass:    string;
+  crAccountingClass:    string;
+  drDescription?:       string;
+  crDescription?:       string;
+  businessUnit?:        string;
+  legalEntity?:         string;
+  ledgerId:             number;
+  ledgerName:           string;
+  ledgerCurrency?:      string;
+  exchangeRate?:        number;
+  createdBy?:           string;
+}
+
+export function buildPcTxnSlaPayload(opts: PcTxnSlaOptions): SlaCreatePayload {
+  const exRate   = opts.exchangeRate ?? 1;
+  const currency = opts.currency || 'AED';
+  return {
+    header: {
+      moduleName:       'PC',
+      sourceTable:      'PC_TRANSACTIONS',
+      sourceId:         opts.transactionId,
+      sourceNumber:     opts.sourceNumber,
+      sourceType:       'Petty Cash',
+      eventTypeCode:    opts.eventTypeCode,
+      eventDate:        opts.transactionDate,
+      accountingDate:   opts.accountingDate,
+      periodName:       opts.periodName,
+      ledgerId:         opts.ledgerId,
+      ledgerName:       opts.ledgerName,
+      currencyCode:     currency,
+      ledgerCurrency:   opts.ledgerCurrency ?? currency,
+      exchangeRate:     exRate,
+      exchangeRateType: 'Corporate',
+      businessUnit:     opts.businessUnit,
+      legalEntity:      opts.legalEntity,
+      description:      `${opts.eventTypeCode} – Transaction ${opts.transactionId}`,
+      createdBy:        opts.createdBy ?? 'SYSTEM',
+    },
+    lines: [
+      {
+        lineNumber:         1,
+        lineType:           'DR',
+        accountingClass:    opts.drAccountingClass,
+        accountCombination: opts.drAccountCombination,
+        enteredDr:          opts.amount,
+        enteredCr:          0,
+        accountedDr:        Math.round(opts.amount * exRate * 100) / 100,
+        accountedCr:        0,
+        currencyCode:       currency,
+        exchangeRate:       exRate,
+        description:        opts.drDescription ?? `Debit – Txn ${opts.transactionId}`,
+        sourceLineId:       opts.transactionId,
+      },
+      {
+        lineNumber:         2,
+        lineType:           'CR',
+        accountingClass:    opts.crAccountingClass,
+        accountCombination: opts.crAccountCombination,
+        enteredDr:          0,
+        enteredCr:          opts.amount,
+        accountedDr:        0,
+        accountedCr:        Math.round(opts.amount * exRate * 100) / 100,
+        currencyCode:       currency,
+        exchangeRate:       exRate,
+        description:        opts.crDescription ?? `Credit – Txn ${opts.transactionId}`,
+        sourceLineId:       opts.transactionId,
+      },
+    ],
+  };
+}
+
+// ── Payload builder for PC Bank Transactions ──────────────────────────────────
+
+export interface PcBankTxnSlaOptions {
+  externalTransactionId:    number;
+  referenceText?:           string;
+  transactionDate:          string;
+  accountingDate:           string;
+  periodName:               string;
+  currency:                 string;
+  amount:                   number;
+  assetAccountCombination:  string;   // bank account (CR)
+  offsetAccountCombination: string;   // petty cash account (DR)
+  businessUnit?:            string;
+  legalEntity?:             string;
+  ledgerId:                 number;
+  ledgerName:               string;
+  ledgerCurrency?:          string;
+  exchangeRate?:            number;
+  createdBy?:               string;
+}
+
+export function buildPcBankTxnSlaPayload(opts: PcBankTxnSlaOptions): SlaCreatePayload {
+  const exRate   = opts.exchangeRate ?? 1;
+  const currency = opts.currency || 'AED';
+  return {
+    header: {
+      moduleName:       'PC',
+      sourceTable:      'EXTERNAL_CASH_TRANSACTIONS',
+      sourceId:         opts.externalTransactionId,
+      sourceNumber:     opts.referenceText ?? String(opts.externalTransactionId),
+      sourceType:       'Bank Transfer',
+      eventTypeCode:    'PC_BALANCE_REFILL',
+      eventDate:        opts.transactionDate,
+      accountingDate:   opts.accountingDate,
+      periodName:       opts.periodName,
+      ledgerId:         opts.ledgerId,
+      ledgerName:       opts.ledgerName,
+      currencyCode:     currency,
+      ledgerCurrency:   opts.ledgerCurrency ?? currency,
+      exchangeRate:     exRate,
+      exchangeRateType: 'Corporate',
+      businessUnit:     opts.businessUnit,
+      legalEntity:      opts.legalEntity,
+      description:      `PC Balance Refill – Ext Txn ${opts.externalTransactionId}`,
+      createdBy:        opts.createdBy ?? 'SYSTEM',
+    },
+    lines: [
+      {
+        lineNumber:         1,
+        lineType:           'DR',
+        accountingClass:    'PETTY_CASH',
+        accountCombination: opts.offsetAccountCombination,
+        enteredDr:          opts.amount,
+        enteredCr:          0,
+        accountedDr:        Math.round(opts.amount * exRate * 100) / 100,
+        accountedCr:        0,
+        currencyCode:       currency,
+        exchangeRate:       exRate,
+        description:        `Petty Cash DR – Refill ${opts.externalTransactionId}`,
+      },
+      {
+        lineNumber:         2,
+        lineType:           'CR',
+        accountingClass:    'BANK_ASSET',
+        accountCombination: opts.assetAccountCombination,
+        enteredDr:          0,
+        enteredCr:          opts.amount,
+        accountedDr:        0,
+        accountedCr:        Math.round(opts.amount * exRate * 100) / 100,
+        currencyCode:       currency,
+        exchangeRate:       exRate,
+        description:        `Bank Asset CR – Refill ${opts.externalTransactionId}`,
+      },
+    ],
+  };
+}
 
 /**
  * Derive GL period name from a date: "Mon-YY" format (e.g. "Mar-26").
