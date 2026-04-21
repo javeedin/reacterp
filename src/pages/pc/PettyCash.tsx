@@ -3,7 +3,7 @@ import {
   Layout, Card, Typography, Breadcrumb, Tabs, Form, Input, Select,
   DatePicker, Button, Table, Tag, Row, Col, Space, Divider,
   Modal, InputNumber, message, Tooltip, Statistic, Collapse, Progress, Descriptions, Upload,
-  Spin, Alert,
+  Spin, Alert, Switch,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { Link } from 'react-router-dom';
@@ -120,6 +120,21 @@ interface ApiDebugItem {
   loading?:  boolean;
   error?:    string;
 }
+
+interface ExpenseLine {
+  key:              string;
+  expenseType:      string;
+  amount:           number | null;
+  description:      string;
+  chargeAccountDesc: string;
+  chargeAccountCcid: number | null;
+  acctDesc:         string;
+}
+let _lineSeq = 0;
+const makeNewLine = (): ExpenseLine => ({
+  key: String(++_lineSeq), expenseType: '', amount: null,
+  description: '', chargeAccountDesc: '', chargeAccountCcid: null, acctDesc: '',
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Excel export
@@ -359,6 +374,11 @@ const RegisterDetail: React.FC<{
   const [apiDebugItems, setApiDebugItems]       = useState<ApiDebugItem[]>([]);
   const [apiDebugLoading, setApiDebugLoading]   = useState(false);
   const [viewAcctLineDescs, setViewAcctLineDescs] = useState<Map<string, string>>(new Map());
+  const [expenseMode, setExpenseMode]   = useState<'single' | 'multi'>('single');
+  const [expenseLines, setExpenseLines] = useState<ExpenseLine[]>([makeNewLine()]);
+
+  const updateLine = (key: string, patch: Partial<ExpenseLine>) =>
+    setExpenseLines(prev => prev.map(l => l.key === key ? { ...l, ...patch } : l));
 
   const isClosed   = register.status !== 'ACTIVE';
   const noBalance  = register.balance <= 0;
@@ -815,6 +835,60 @@ const RegisterDetail: React.FC<{
       onRefresh();
     } catch (e: any) {
       message.error(e?.message ?? 'Failed to record expense');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Add Multiple Expenses ──────────────────────────────────
+  const handleAddMultiExpense = async () => {
+    const vals = expenseForm.getFieldsValue(['transactionDate', 'accountingDate', 'currency', 'referenceNo']);
+    if (!vals.transactionDate) { message.error('Transaction Date is required'); return; }
+    const accDate = vals.accountingDate ?? vals.transactionDate;
+    if (periodsLoaded && openPeriods.length > 0 && !findAPPeriod(accDate)) {
+      message.error(`Accounting date ${accDate.format('DD-MMM-YYYY')} does not fall within an open AP period`);
+      return;
+    }
+    const validLines = expenseLines.filter(l => l.expenseType && (l.amount ?? 0) > 0);
+    if (validLines.length === 0) {
+      message.error('Add at least one line with Expense Type and Amount > 0');
+      return;
+    }
+    const totalAmt = validLines.reduce((s, l) => s + (l.amount ?? 0), 0);
+    if (totalAmt > register.balance) {
+      message.error(`Total (${fmt(totalAmt)}) exceeds available balance (${fmt(register.balance)} ${register.currency})`);
+      return;
+    }
+    setSaving(true);
+    let created = 0;
+    try {
+      for (const line of validLines) {
+        await createTransaction({
+          registerId:        register.registerId,
+          transactionDate:   vals.transactionDate.format('YYYY-MM-DD'),
+          accountingDate:    accDate.format('YYYY-MM-DD'),
+          transactionType:   'Expense',
+          expenseType:       line.expenseType,
+          currency:          vals.currency || register.currency,
+          debitAmount:       line.amount!,
+          creditAmount:      0,
+          chargeAccountCcid: line.chargeAccountCcid || null,
+          chargeAccountDesc: line.chargeAccountDesc || null,
+          referenceNo:       vals.referenceNo || null,
+          comments:          line.description || null,
+          postingStatus:     'Unposted',
+          createdBy:         currentUser,
+        });
+        created++;
+      }
+      message.success(`${created} expense line${created > 1 ? 's' : ''} recorded`);
+      expenseForm.resetFields();
+      setExpenseLines([makeNewLine()]);
+      setExpenseMode('single');
+      setAddExpenseOpen(false);
+      onRefresh();
+    } catch (e: any) {
+      message.error(e?.message ?? 'Failed to record expenses');
     } finally {
       setSaving(false);
     }
@@ -1888,16 +1962,37 @@ const RegisterDetail: React.FC<{
 
       {/* ── Add Expense Modal ──────────────────────────────── */}
       <Modal
-        title={<Space><MinusCircleOutlined style={{ color: REDWOOD.warning }} /> Add Expense</Space>}
+        title={
+          <Space>
+            <MinusCircleOutlined style={{ color: REDWOOD.warning }} />
+            Add Expense
+            <Switch
+              size="small"
+              checkedChildren="Multiple Lines"
+              unCheckedChildren="Single Line"
+              checked={expenseMode === 'multi'}
+              onChange={v => {
+                setExpenseMode(v ? 'multi' : 'single');
+                setExpenseLines([makeNewLine()]);
+              }}
+            />
+          </Space>
+        }
         open={addExpenseOpen}
-        onCancel={() => { setAddExpenseOpen(false); if (needsRefresh.current) { needsRefresh.current = false; onRefresh(); } }}
+        onCancel={() => {
+          setAddExpenseOpen(false);
+          setExpenseMode('single');
+          setExpenseLines([makeNewLine()]);
+          if (needsRefresh.current) { needsRefresh.current = false; onRefresh(); }
+        }}
         footer={null}
-        width={580}
+        width={expenseMode === 'multi' ? 960 : 580}
         destroyOnClose
       >
+        {/* ── Shared header form (used by both modes) ── */}
         <Form form={expenseForm} layout="vertical" size="small" onFinish={handleAddExpense}>
           <Row gutter={12}>
-            <Col span={8}>
+            <Col span={expenseMode === 'multi' ? 5 : 8}>
               <Form.Item label="Transaction Date" name="transactionDate"
                 rules={[{ required: true, message: 'Required' }]}
                 initialValue={dayjs()}>
@@ -1905,12 +2000,12 @@ const RegisterDetail: React.FC<{
                   onChange={v => { if (v) expenseForm.setFieldsValue({ accountingDate: v }); }} />
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col span={expenseMode === 'multi' ? 5 : 8}>
               <Form.Item label="Accounting Date" name="accountingDate" initialValue={dayjs()}>
                 <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" />
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col span={expenseMode === 'multi' ? 4 : 8}>
               <Form.Item label="AP Period" shouldUpdate>
                 {({ getFieldValue }) => {
                   const d = getFieldValue('accountingDate') ?? getFieldValue('transactionDate');
@@ -1923,38 +2018,7 @@ const RegisterDetail: React.FC<{
                 }}
               </Form.Item>
             </Col>
-          </Row>
-          <Row gutter={12}>
-            <Col span={12}>
-              <Form.Item label="Expense Type" name="expenseType"
-                rules={[{ required: true, message: 'Required' }]}>
-                <Select
-                  placeholder="Select expense type"
-                  showSearch
-                  filterOption={(input, option) =>
-                    String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-                  }
-                  onChange={(val) => {
-                    const dist = distCombinations.find(d => d.combinationName === val);
-                    expenseForm.setFieldsValue({
-                      chargeAccountDesc: dist?.combinationName ?? '',
-                      chargeAccountCcid: dist?.glAccountCcid ?? null,
-                    });
-                    setAddAcctDesc(dist?.glAccountDesc ?? '');
-                  }}
-                  options={distCombinations.map(d => ({
-                    value: d.combinationName,
-                    label: d.combinationName,
-                  }))}
-                  notFoundContent={
-                    distCombinations.length === 0
-                      ? <span style={{ fontSize: 12, color: REDWOOD.neutral600 }}>No combinations found — add them in AP Setup &gt; Manage Distribution Combinations</span>
-                      : 'No match'
-                  }
-                />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
+            <Col span={expenseMode === 'multi' ? 5 : 12}>
               <Form.Item label="Currency" name="currency" initialValue={register.currency}>
                 <Select>
                   {['AED','USD','EUR','GBP','SAR','KWD','QAR','OMR','BHD','EGP','INR'].map(c =>
@@ -1962,91 +2026,259 @@ const RegisterDetail: React.FC<{
                 </Select>
               </Form.Item>
             </Col>
-          </Row>
-          <Row gutter={12}>
-            <Col span={12}>
-              <Form.Item label="Amount" name="amount"
-                rules={[{ required: true, message: 'Required' }, { type: 'number', min: 0.01, message: 'Must be > 0' }]}>
-                <InputNumber style={{ width: '100%' }} precision={2} min={0} placeholder="0.00" />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
+            <Col span={expenseMode === 'multi' ? 5 : 12}>
               <Form.Item label="Reference No" name="referenceNo">
                 <Input placeholder="Optional" />
               </Form.Item>
             </Col>
           </Row>
-          <Form.Item name="chargeAccountCcid" hidden><Input /></Form.Item>
-          <Form.Item label="Charge Account">
-            <Space.Compact style={{ width: '100%' }}>
-              <Form.Item name="chargeAccountDesc" noStyle>
-                <Input placeholder="Auto-filled when Expense Type is selected" />
+
+          {/* ── SINGLE LINE MODE ── */}
+          {expenseMode === 'single' && (
+            <>
+              <Row gutter={12}>
+                <Col span={12}>
+                  <Form.Item label="Expense Type" name="expenseType"
+                    rules={[{ required: true, message: 'Required' }]}>
+                    <Select
+                      placeholder="Select expense type"
+                      showSearch
+                      filterOption={(input, option) =>
+                        String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                      }
+                      onChange={(val) => {
+                        const dist = distCombinations.find(d => d.combinationName === val);
+                        expenseForm.setFieldsValue({
+                          chargeAccountDesc: dist?.combinationName ?? '',
+                          chargeAccountCcid: dist?.glAccountCcid ?? null,
+                        });
+                        setAddAcctDesc(dist?.glAccountDesc ?? '');
+                      }}
+                      options={distCombinations.map(d => ({
+                        value: d.combinationName,
+                        label: d.combinationName,
+                      }))}
+                      notFoundContent={
+                        distCombinations.length === 0
+                          ? <span style={{ fontSize: 12, color: REDWOOD.neutral600 }}>No combinations found — add them in AP Setup &gt; Manage Distribution Combinations</span>
+                          : 'No match'
+                      }
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item label="Amount" name="amount"
+                    rules={[{ required: true, message: 'Required' }, { type: 'number', min: 0.01, message: 'Must be > 0' }]}>
+                    <InputNumber style={{ width: '100%' }} precision={2} min={0} placeholder="0.00" />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Form.Item name="chargeAccountCcid" hidden><Input /></Form.Item>
+              <Form.Item label="Charge Account">
+                <Space.Compact style={{ width: '100%' }}>
+                  <Form.Item name="chargeAccountDesc" noStyle>
+                    <Input placeholder="Auto-filled when Expense Type is selected" />
+                  </Form.Item>
+                  <Button icon={<BankOutlined />} onClick={() => { setCoaTarget('add'); setCoaOpen(true); }}>
+                    Browse
+                  </Button>
+                </Space.Compact>
+                {addAcctDesc && (
+                  <div style={{ marginTop: 4, fontSize: 11, color: '#1677ff', paddingLeft: 2 }}>
+                    {addAcctDesc}
+                  </div>
+                )}
               </Form.Item>
-              <Button icon={<BankOutlined />} onClick={() => { setCoaTarget('add'); setCoaOpen(true); }}>
-                Browse
-              </Button>
-            </Space.Compact>
-            {addAcctDesc && (
-              <div style={{ marginTop: 4, fontSize: 11, color: '#1677ff', paddingLeft: 2 }}>
-                {addAcctDesc}
-              </div>
-            )}
-          </Form.Item>
-          <Row gutter={12}>
-            <Col span={12}>
-              <Form.Item label="Employee Name" name="employeeName">
-                <Input prefix={<UserOutlined />} placeholder="Optional" />
+              <Row gutter={12}>
+                <Col span={12}>
+                  <Form.Item label="Employee Name" name="employeeName">
+                    <Input prefix={<UserOutlined />} placeholder="Optional" />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item label="Receipt Status" name="receiptStatus">
+                    <Select allowClear placeholder="Select">
+                      <Option value="YES">YES</Option>
+                      <Option value="NO">NO</Option>
+                    </Select>
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Form.Item label="Comments" name="comments">
+                <Input.TextArea rows={2} placeholder="Optional" />
               </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item label="Receipt Status" name="receiptStatus">
-                <Select allowClear placeholder="Select">
-                  <Option value="YES">YES</Option>
-                  <Option value="NO">NO</Option>
-                </Select>
-              </Form.Item>
-            </Col>
-          </Row>
-          <Form.Item label="Comments" name="comments">
-            <Input.TextArea rows={2} placeholder="Optional" />
-          </Form.Item>
-          <Form.Item label="Attachment">
-            <Space direction="vertical" style={{ width: '100%' }} size={4}>
-              <Upload
-                beforeUpload={(file) => {
-                  const reader = new FileReader();
-                  reader.readAsDataURL(file);
-                  reader.onload = () => {
-                    setAddExpenseAttachData(reader.result as string);
-                    setAddExpenseAttachName(file.name);
-                  };
-                  return false;
-                }}
-                showUploadList={false}
-                accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
-                maxCount={1}
-              >
-                <Button icon={<UploadOutlined />}>
-                  {addExpenseAttachName ? 'Replace file' : 'Upload file'}
-                </Button>
-              </Upload>
-              {addExpenseAttachName && (
-                <Space size={4}>
-                  <PaperClipOutlined style={{ color: REDWOOD.info }} />
-                  <Text style={{ fontSize: 12, color: REDWOOD.info }}>{addExpenseAttachName}</Text>
-                  <Button type="text" size="small" danger icon={<CloseOutlined />}
-                    onClick={() => { setAddExpenseAttachName(''); setAddExpenseAttachData(''); }} />
+              <Form.Item label="Attachment">
+                <Space direction="vertical" style={{ width: '100%' }} size={4}>
+                  <Upload
+                    beforeUpload={(file) => {
+                      const reader = new FileReader();
+                      reader.readAsDataURL(file);
+                      reader.onload = () => {
+                        setAddExpenseAttachData(reader.result as string);
+                        setAddExpenseAttachName(file.name);
+                      };
+                      return false;
+                    }}
+                    showUploadList={false}
+                    accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+                    maxCount={1}
+                  >
+                    <Button icon={<UploadOutlined />}>
+                      {addExpenseAttachName ? 'Replace file' : 'Upload file'}
+                    </Button>
+                  </Upload>
+                  {addExpenseAttachName && (
+                    <Space size={4}>
+                      <PaperClipOutlined style={{ color: REDWOOD.info }} />
+                      <Text style={{ fontSize: 12, color: REDWOOD.info }}>{addExpenseAttachName}</Text>
+                      <Button type="text" size="small" danger icon={<CloseOutlined />}
+                        onClick={() => { setAddExpenseAttachName(''); setAddExpenseAttachData(''); }} />
+                    </Space>
+                  )}
                 </Space>
-              )}
-            </Space>
-          </Form.Item>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
-            <Button onClick={() => { setAddExpenseOpen(false); setAddExpenseAttachName(''); setAddExpenseAttachData(''); }}>Cancel</Button>
-            <Button type="primary" htmlType="submit" loading={saving}
-              style={{ background: REDWOOD.warning, borderColor: REDWOOD.warning }}>
-              Save Expense
-            </Button>
-          </div>
+              </Form.Item>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+                <Button onClick={() => { setAddExpenseOpen(false); setAddExpenseAttachName(''); setAddExpenseAttachData(''); }}>Cancel</Button>
+                <Button type="primary" htmlType="submit" loading={saving}
+                  style={{ background: REDWOOD.warning, borderColor: REDWOOD.warning }}>
+                  Save Expense
+                </Button>
+              </div>
+            </>
+          )}
+
+          {/* ── MULTIPLE LINES MODE ── */}
+          {expenseMode === 'multi' && (
+            <>
+              {/* Column headers */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: '40px 1fr 110px 1fr 1fr 36px',
+                gap: 6,
+                padding: '4px 0',
+                borderBottom: `1px solid ${REDWOOD.neutral200}`,
+                marginBottom: 4,
+              }}>
+                {['S.No', 'Expense Type', 'Amount', 'Description', 'Account', ''].map((h, i) => (
+                  <div key={i} style={{ fontSize: 11, fontWeight: 600, color: REDWOOD.neutral600, textAlign: i === 0 ? 'center' : 'left' }}>{h}</div>
+                ))}
+              </div>
+
+              {/* Lines */}
+              <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+                {expenseLines.map((line, idx) => (
+                  <div key={line.key} style={{
+                    display: 'grid',
+                    gridTemplateColumns: '40px 1fr 110px 1fr 1fr 36px',
+                    gap: 6,
+                    marginBottom: 6,
+                    alignItems: 'start',
+                  }}>
+                    {/* S.No */}
+                    <div style={{ textAlign: 'center', paddingTop: 6, fontSize: 12, color: REDWOOD.neutral600 }}>{idx + 1}</div>
+
+                    {/* Expense Type */}
+                    <Select
+                      size="small"
+                      placeholder="Expense type"
+                      showSearch
+                      value={line.expenseType || undefined}
+                      filterOption={(input, option) =>
+                        String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                      }
+                      onChange={(val) => {
+                        const dist = distCombinations.find(d => d.combinationName === val);
+                        updateLine(line.key, {
+                          expenseType:       val,
+                          chargeAccountDesc: dist?.combinationName ?? '',
+                          chargeAccountCcid: dist?.glAccountCcid ?? null,
+                          acctDesc:          dist?.glAccountDesc ?? '',
+                        });
+                      }}
+                      options={distCombinations.map(d => ({ value: d.combinationName, label: d.combinationName }))}
+                      style={{ width: '100%' }}
+                    />
+
+                    {/* Amount */}
+                    <InputNumber
+                      size="small"
+                      style={{ width: '100%' }}
+                      precision={2}
+                      min={0}
+                      placeholder="0.00"
+                      value={line.amount ?? undefined}
+                      onChange={v => updateLine(line.key, { amount: v as number | null })}
+                    />
+
+                    {/* Description */}
+                    <Input
+                      size="small"
+                      placeholder="Description"
+                      value={line.description}
+                      onChange={e => updateLine(line.key, { description: e.target.value })}
+                    />
+
+                    {/* Account (code + desc stacked) */}
+                    <div>
+                      <Input
+                        size="small"
+                        placeholder="Auto-filled"
+                        value={line.chargeAccountDesc}
+                        onChange={e => updateLine(line.key, { chargeAccountDesc: e.target.value })}
+                      />
+                      {line.acctDesc && (
+                        <div style={{ fontSize: 10, color: '#1677ff', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {line.acctDesc}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Delete */}
+                    <Button
+                      size="small"
+                      type="text"
+                      danger
+                      icon={<CloseOutlined />}
+                      disabled={expenseLines.length === 1}
+                      onClick={() => setExpenseLines(prev => prev.filter(l => l.key !== line.key))}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              {/* Add Line + Total */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+                <Button size="small" icon={<PlusOutlined />} onClick={() => setExpenseLines(prev => [...prev, makeNewLine()])}>
+                  Add Line
+                </Button>
+                <Space>
+                  <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>
+                    Total:
+                  </Text>
+                  <Text strong style={{ fontSize: 13, color: REDWOOD.error }}>
+                    {fmt(expenseLines.reduce((s, l) => s + (l.amount ?? 0), 0))} {register.currency}
+                  </Text>
+                  <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>
+                    / Balance: {fmt(register.balance)}
+                  </Text>
+                </Space>
+              </div>
+
+              <Divider style={{ margin: '10px 0' }} />
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <Button onClick={() => { setAddExpenseOpen(false); setExpenseMode('single'); setExpenseLines([makeNewLine()]); }}>Cancel</Button>
+                <Button
+                  type="primary"
+                  loading={saving}
+                  style={{ background: REDWOOD.warning, borderColor: REDWOOD.warning }}
+                  onClick={handleAddMultiExpense}
+                >
+                  Add Expense ({expenseLines.filter(l => l.expenseType && (l.amount ?? 0) > 0).length})
+                </Button>
+              </div>
+            </>
+          )}
         </Form>
       </Modal>
 
