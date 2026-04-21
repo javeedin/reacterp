@@ -187,8 +187,8 @@ async function exportRegisterToExcel(register: PCRegister, transactions: PCTrans
     ['End Date',        register.endDate   || '—'],
     ['Cash Account',    register.cashAccountDesc || '—'],
     ['Balance',         register.balance],
-    ['Total In (Debit)',  register.totalDebit],
-    ['Total Out (Credit)',register.totalCredit],
+    ['Total Money In',  register.totalDebit],
+    ['Total Money Out',register.totalCredit],
     ['Export Date',     new Date().toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' })],
   ];
 
@@ -1411,11 +1411,11 @@ const RegisterDetail: React.FC<{
       render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Currency', dataIndex: 'currency', width: 80, align: 'center',
       render: (v) => <Text style={{ fontSize: 12 }}>{v}</Text> },
-    { title: 'Debit (Money In)', dataIndex: 'debitAmount', width: 130, align: 'right',
+    { title: 'Money In', dataIndex: 'debitAmount', width: 130, align: 'right',
       render: (v) => v > 0
         ? <Text style={{ fontSize: 12, color: REDWOOD.success }}>{fmt(v)}</Text>
         : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
-    { title: 'Credit (Money Out)', dataIndex: 'creditAmount', width: 130, align: 'right',
+    { title: 'Money Out', dataIndex: 'creditAmount', width: 130, align: 'right',
       render: (v) => v > 0
         ? <Text style={{ fontSize: 12, color: REDWOOD.error }}>{fmt(v)}</Text>
         : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
@@ -1607,7 +1607,7 @@ const RegisterDetail: React.FC<{
             <Col span={4}>
               <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
                 <Statistic
-                  title={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Total In (Debit)</Text>}
+                  title={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Total Money In</Text>}
                   value={register.totalDebit}
                   precision={2}
                   valueStyle={{ fontSize: 18, color: REDWOOD.success }}
@@ -1620,7 +1620,7 @@ const RegisterDetail: React.FC<{
             <Col span={4}>
               <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
                 <Statistic
-                  title={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Total Out (Credit)</Text>}
+                  title={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Total Money Out</Text>}
                   value={register.totalCredit}
                   precision={2}
                   valueStyle={{ fontSize: 18, color: REDWOOD.error }}
@@ -2764,11 +2764,11 @@ const RegisterDetail: React.FC<{
               }},
             { title: 'Expense Type', dataIndex: 'expenseType', width: 130,
               render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
-            { title: 'Debit (In)', dataIndex: 'debitAmount', width: 100, align: 'right' as const,
+            { title: 'Money In', dataIndex: 'debitAmount', width: 100, align: 'right' as const,
               render: (v) => v > 0
                 ? <Text style={{ fontSize: 12, color: REDWOOD.success }}>{fmt(v)}</Text>
                 : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
-            { title: 'Credit (Out)', dataIndex: 'creditAmount', width: 100, align: 'right' as const,
+            { title: 'Money Out', dataIndex: 'creditAmount', width: 100, align: 'right' as const,
               render: (v) => v > 0
                 ? <Text style={{ fontSize: 12, color: REDWOOD.error }}>{fmt(v)}</Text>
                 : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
