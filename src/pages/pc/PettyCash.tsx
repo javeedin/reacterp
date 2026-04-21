@@ -3130,15 +3130,28 @@ const PettyCash: React.FC = () => {
   const handleRegAction = async (values: any) => {
     if (!regActionTarget) return;
     setRegActionLoading(true);
+    const targetKey = regActionTarget.key;
+    const targetId  = regActionTarget.register.registerId;
     try {
-      await updateRegister(regActionTarget.register.registerId, {
+      await updateRegister(targetId, {
         status:    values.status,
         comments:  values.comments || undefined,
         updatedBy: currentUser,
       });
       message.success(`Status changed to ${values.status}`);
       setRegActionOpen(false);
-      await refreshTab(regActionTarget.key);
+      // Immediately reflect new status so buttons re-enable without waiting for server round-trip
+      setOpenTabs(prev => prev.map(t =>
+        t.key === targetKey
+          ? { ...t, register: { ...t.register, status: values.status } }
+          : t
+      ));
+      // Then refresh to sync full server state
+      const [reg, txns] = await Promise.all([getRegister(targetId), getTransactions(targetId)]);
+      setOpenTabs(prev => prev.map(t =>
+        t.key === targetKey ? { ...t, register: reg, transactions: txns } : t
+      ));
+      setRegisters(prev => prev.map(r => r.registerId === targetId ? reg : r));
       await handleSearch();
     } catch (e: any) {
       message.error(e?.message ?? 'Action failed');
