@@ -1044,12 +1044,13 @@ const RegisterDetail: React.FC<{
               <Form.Item label="Transaction Date" name="transactionDate"
                 rules={[{ required: true, message: 'Required' }]}
                 initialValue={dayjs()}>
-                <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" />
+                <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY"
+                  onChange={v => { if (v) moneyForm.setFieldsValue({ accountingDate: v }); }} />
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item label="Accounting Date" name="accountingDate">
-                <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="Defaults to Txn Date" />
+              <Form.Item label="Accounting Date" name="accountingDate" initialValue={dayjs()}>
+                <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" />
               </Form.Item>
             </Col>
             <Col span={8}>
@@ -1358,12 +1359,13 @@ const RegisterDetail: React.FC<{
               <Form.Item label="Transaction Date" name="transactionDate"
                 rules={[{ required: true, message: 'Required' }]}
                 initialValue={dayjs()}>
-                <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" />
+                <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY"
+                  onChange={v => { if (v) expenseForm.setFieldsValue({ accountingDate: v }); }} />
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item label="Accounting Date" name="accountingDate">
-                <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="Defaults to Txn Date" />
+              <Form.Item label="Accounting Date" name="accountingDate" initialValue={dayjs()}>
+                <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" />
               </Form.Item>
             </Col>
             <Col span={8}>
