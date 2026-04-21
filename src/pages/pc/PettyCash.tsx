@@ -25,7 +25,7 @@ import { APEX_DB_CONFIG } from '../../config/api.config';
 import {
   searchRegisters, getRegister, createRegister, updateRegister, deleteRegister,
   getTransactions, getTransaction, createTransaction, updateTransaction, deleteTransaction,
-  getOpenAPPeriods,
+  getTransactionAttachment, getOpenAPPeriods,
   type PCRegister, type PCTransaction, type APPeriod,
 } from '../../services/pc.service';
 import {
@@ -452,7 +452,7 @@ const RegisterDetail: React.FC<{
     });
     setEditAcctDesc(desc);
     setEditExpenseAttachName(editTxn.attachment || '');
-    setEditExpenseAttachData(editTxn.attachmentData || '');
+    setEditExpenseAttachData('');
   }, [editTxnOpen, editTxn, distCombinations]);
 
   // ── Delete transaction (Unposted / Error only) ────────────
@@ -553,7 +553,7 @@ const RegisterDetail: React.FC<{
         referenceNo:       values.referenceNo   || null,
         comments:          values.comments      || null,
         attachment:        editExpenseAttachName || values.attachment || null,
-        attachmentData:    editExpenseAttachData || null,
+        attachmentData:    editExpenseAttachData || undefined,
         employeeName:      values.employeeName  || null,
         receiptStatus:     values.receiptStatus || null,
         updatedBy:         currentUser,
@@ -815,26 +815,18 @@ const RegisterDetail: React.FC<{
       render: (v) => v === 'YES' ? <Tag color="green" style={{ fontSize: 11 }}>YES</Tag>
         : v === 'NO' ? <Tag color="orange" style={{ fontSize: 11 }}>NO</Tag>
         : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
-    { title: 'Attachment', dataIndex: 'attachment', width: 90, align: 'center' as const,
-      render: (_v: string | null, rec: PCTransaction) => rec.attachment ? (
-        <Tooltip title={rec.attachment}>
+    { title: 'Attachment', dataIndex: 'hasAttachment', width: 90, align: 'center' as const,
+      render: (_v: string | null, rec: PCTransaction) => rec.hasAttachment === 'Y' ? (
+        <Tooltip title={rec.attachment || 'View attachment'}>
           <Button type="text" size="small" icon={<PaperClipOutlined style={{ color: REDWOOD.info }} />}
             onClick={() => {
-              if (rec.attachmentData) {
-                setViewAttachData(rec.attachmentData);
-                setViewAttachName(rec.attachment || 'attachment');
-                setViewAttachOpen(true);
-              } else {
-                getTransaction(rec.transactionId).then(fresh => {
-                  if (fresh.attachmentData) {
-                    setViewAttachData(fresh.attachmentData);
-                    setViewAttachName(fresh.attachment || 'attachment');
-                    setViewAttachOpen(true);
-                  } else {
-                    message.info('No attachment data stored');
-                  }
-                }).catch(() => message.error('Failed to load attachment'));
-              }
+              getTransactionAttachment(rec.transactionId)
+                .then(res => {
+                  setViewAttachData(res.attachmentData);
+                  setViewAttachName(res.fileName || rec.attachment || 'attachment');
+                  setViewAttachOpen(true);
+                })
+                .catch(() => message.error('Failed to load attachment'));
             }} />
         </Tooltip>
       ) : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },

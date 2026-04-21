@@ -40,7 +40,7 @@ export interface PCTransaction {
   comments: string | null;
   referenceNo: string | null;
   attachment: string | null;
-  attachmentData: string | null;
+  hasAttachment: 'Y' | 'N' | null;
   employeeName: string | null;
   receiptStatus: 'YES' | 'NO' | null;
   bankTxnId: number | null;
@@ -157,6 +157,13 @@ export async function updateTransaction(transactionId: number, payload: Partial<
   });
   const data = await res.json();
   if (!res.ok || !data.success) throw new Error(data?.message || `HTTP ${res.status}`);
+}
+
+export async function getTransactionAttachment(transactionId: number): Promise<{ fileName: string; attachmentData: string }> {
+  const res = await fetch(`${BASE}/transactions/${transactionId}/attachment`, { headers: { Accept: 'application/json' } });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data?.message || `HTTP ${res.status}`);
+  return data;
 }
 
 export async function deleteTransaction(transactionId: number): Promise<void> {

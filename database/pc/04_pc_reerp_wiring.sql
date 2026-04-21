@@ -270,7 +270,7 @@ DECLARE
                t.POSTING_STATUS, t.CURRENCY,
                t.DEBIT_AMOUNT, t.CREDIT_AMOUNT,
                t.COMMENTS, t.REFERENCE_NO, t.ATTACHMENT,
-               t.ATTACHMENT_DATA, t.EMPLOYEE_NAME, t.RECEIPT_STATUS,
+               t.EMPLOYEE_NAME, t.RECEIPT_STATUS,
                t.BANK_TXN_ID,
                t.CREATED_BY, t.CREATION_DATE,
                SUM(t.DEBIT_AMOUNT - t.CREDIT_AMOUNT) OVER (
@@ -306,7 +306,7 @@ BEGIN
         APEX_JSON.WRITE(''comments'',         rec.COMMENTS);
         APEX_JSON.WRITE(''referenceNo'',      rec.REFERENCE_NO);
         APEX_JSON.WRITE(''attachment'',       rec.ATTACHMENT);
-        APEX_JSON.WRITE(''attachmentData'',  rec.ATTACHMENT_DATA);
+        APEX_JSON.WRITE(''hasAttachment'',   CASE WHEN rec.ATTACHMENT IS NOT NULL THEN ''Y'' ELSE ''N'' END);
         APEX_JSON.WRITE(''employeeName'',    rec.EMPLOYEE_NAME);
         APEX_JSON.WRITE(''receiptStatus'',   rec.RECEIPT_STATUS);
         IF rec.BANK_TXN_ID IS NOT NULL THEN
@@ -389,7 +389,7 @@ DECLARE
                t.ACCOUNTING_DATE, t.ACCOUNTING_PERIOD, t.POSTING_STATUS, t.CURRENCY,
                t.DEBIT_AMOUNT, t.CREDIT_AMOUNT,
                t.COMMENTS, t.REFERENCE_NO, t.ATTACHMENT,
-               t.ATTACHMENT_DATA, t.EMPLOYEE_NAME, t.RECEIPT_STATUS,
+               t.EMPLOYEE_NAME, t.RECEIPT_STATUS,
                t.BANK_TXN_ID,
                t.CREATED_BY, t.CREATION_DATE, t.LAST_UPDATED_BY, t.LAST_UPDATE_DATE
         FROM   RR_PC_TRANSACTIONS t
@@ -423,7 +423,7 @@ BEGIN
     APEX_JSON.WRITE(''comments'',          rec.COMMENTS);
     APEX_JSON.WRITE(''referenceNo'',       rec.REFERENCE_NO);
     APEX_JSON.WRITE(''attachment'',        rec.ATTACHMENT);
-    APEX_JSON.WRITE(''attachmentData'',   rec.ATTACHMENT_DATA);
+    APEX_JSON.WRITE(''hasAttachment'',    CASE WHEN rec.ATTACHMENT IS NOT NULL THEN ''Y'' ELSE ''N'' END);
     APEX_JSON.WRITE(''employeeName'',     rec.EMPLOYEE_NAME);
     APEX_JSON.WRITE(''receiptStatus'',    rec.RECEIPT_STATUS);
     IF rec.BANK_TXN_ID IS NOT NULL THEN
@@ -495,7 +495,58 @@ END;
     );
 
     -- ══════════════════════════════════════════════════════════
-    -- TEMPLATE 6: pc/openperiods  (GET open AP periods)
+    -- TEMPLATE 6: pc/transactions/:transactionId/attachment (GET)
+    -- Returns the CLOB attachment data in chunks via HTP.PRN
+    -- ══════════════════════════════════════════════════════════
+    BEGIN
+        ORDS.DEFINE_TEMPLATE(p_module_name => 'reerp', p_pattern => 'pc/transactions/:transactionId/attachment');
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+
+    ORDS.DEFINE_HANDLER(
+        p_module_name    => 'reerp',
+        p_pattern        => 'pc/transactions/:transactionId/attachment',
+        p_method         => 'GET',
+        p_source_type    => ORDS.source_type_plsql,
+        p_items_per_page => 0,
+        p_source => '
+DECLARE
+    l_data     CLOB;
+    l_fname    VARCHAR2(1000);
+    l_offset   INTEGER := 1;
+    l_amount   INTEGER := 4000;
+    l_len      INTEGER;
+BEGIN
+    BEGIN
+        SELECT ATTACHMENT_DATA, ATTACHMENT
+        INTO   l_data, l_fname
+        FROM   RR_PC_TRANSACTIONS
+        WHERE  TRANSACTION_ID = :transactionId;
+    EXCEPTION WHEN NO_DATA_FOUND THEN
+        :status_code := 404;
+        HTP.PRN(''{"success":false,"message":"Transaction not found"}'');
+        RETURN;
+    END;
+    IF l_data IS NULL THEN
+        :status_code := 404;
+        HTP.PRN(''{"success":false,"message":"No attachment stored"}'');
+        RETURN;
+    END IF;
+    :status_code := 200;
+    l_len := DBMS_LOB.GETLENGTH(l_data);
+    HTP.PRN(''{"success":true,"fileName":'' || APEX_JSON.STRINGIFY(l_fname) || '','' ||
+             ''"attachmentData":"'');
+    WHILE l_offset <= l_len LOOP
+        HTP.PRN(DBMS_LOB.SUBSTR(l_data, l_amount, l_offset));
+        l_offset := l_offset + l_amount;
+    END LOOP;
+    HTP.PRN(''"}'');
+END;
+'
+    );
+
+    -- ══════════════════════════════════════════════════════════
+    -- TEMPLATE 7: pc/openperiods  (GET open AP periods)
     -- ══════════════════════════════════════════════════════════
     BEGIN
         ORDS.DEFINE_TEMPLATE(p_module_name => 'reerp', p_pattern => 'pc/openperiods');
