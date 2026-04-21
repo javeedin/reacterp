@@ -617,6 +617,7 @@ const RegisterDetail: React.FC<{
         chargeAccountDesc: reverseTxn.chargeAccountDesc || undefined,
         postingStatus:     'Unposted',
         referenceNo:       reverseTxn.referenceNo || undefined,
+        bankTxnId:         reverseTxn.bankTxnId   || undefined,
         comments:          reverseComments.trim()
           ? reverseComments.trim()
           : `Reversal of Line #${reverseTxn.lineNumber}`,
@@ -1048,11 +1049,9 @@ const RegisterDetail: React.FC<{
   };
 
   const openCreateAccountingModal = () => {
-    const selected = transactions.filter(t =>
-      selectedRowKeys.includes(t.transactionId) && t.transactionType !== 'Balance Refill'
-    );
+    const selected = transactions.filter(t => selectedRowKeys.includes(t.transactionId));
     if (selected.length === 0) {
-      message.warning('Select at least one Expense or Adjustment transaction. Balance Refills are accounted on the bank transaction side.');
+      message.warning('Select at least one transaction.');
       return;
     }
     // Exclude transactions that have no charge account
@@ -1125,6 +1124,8 @@ const RegisterDetail: React.FC<{
         const periodName = derivePeriodName(new Date(acctDate));
         const eventType = txn.transactionType === 'Expense'
           ? 'PC_EXPENSE_CREATED' as const
+          : txn.transactionType === 'Balance Refill'
+          ? 'PC_BALANCE_REFILL' as const
           : isOut ? 'PC_ADJUSTMENT' as const : 'PC_EXPENSE_REVERSAL' as const;
 
         const payload = buildPcTxnSlaPayload({
@@ -1233,12 +1234,23 @@ const RegisterDetail: React.FC<{
           glMsg = 'GL journal failed — SLA is Draft';
         }
 
-        // Step 4: Update PC transaction posting status (dedicated endpoint — no other columns touched)
+        // Step 4: Update PC transaction posting status
         await updateTransactionStatus(txn.transactionId, glRes.ok ? 'Posted' : 'Unposted', currentUser);
+
+        // Step 5: For Balance Refill — stamp accounting flag on linked bank transaction
+        let bankMsg = '';
+        if (glRes.ok && txn.transactionType === 'Balance Refill' && txn.bankTxnId) {
+          try {
+            const flagUrl = `${APEX_BASE}/cash/externaltransactions/${txn.bankTxnId}/acctflag?updated_by=${encodeURIComponent(currentUser)}`;
+            const flagRes = await fetch(flagUrl, { method: 'PUT', headers: { Accept: 'application/json' } });
+            const flagData = await flagRes.json().catch(() => ({})) as { success?: boolean };
+            bankMsg = flagData.success ? ` | Bank Txn #${txn.bankTxnId} accounted` : ` | Bank acctflag failed`;
+          } catch { bankMsg = ` | Bank acctflag error`; }
+        }
 
         updateRow(row.txnId, {
           status:   'success',
-          message:  `SLA ${slaResult.headerId} — ${glMsg}`,
+          message:  `SLA ${slaResult.headerId} — ${glMsg}${bankMsg}`,
           headerId: slaResult.headerId,
         });
       } catch (e: any) {
@@ -1273,6 +1285,8 @@ const RegisterDetail: React.FC<{
         const periodName = derivePeriodName(new Date(acctDate));
         const eventType = txn.transactionType === 'Expense'
           ? 'PC_EXPENSE_CREATED' as const
+          : txn.transactionType === 'Balance Refill'
+          ? 'PC_BALANCE_REFILL' as const
           : isOut ? 'PC_ADJUSTMENT' as const : 'PC_EXPENSE_REVERSAL' as const;
         const batchName = `PC-${register.registerId}-L${txn.lineNumber}-<timestamp>`;
 
@@ -1477,7 +1491,7 @@ const RegisterDetail: React.FC<{
         const isLoading = txnActionLoading === txn.transactionId;
         return (
           <Space size={2}>
-            {isPosted && txn.transactionType !== 'Balance Refill' && (
+            {isPosted && (
               <Tooltip title="View accounting entries">
                 <Button type="text" size="small"
                   icon={<BookOutlined style={{ color: REDWOOD.success }} />}
