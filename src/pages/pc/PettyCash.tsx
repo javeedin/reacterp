@@ -26,7 +26,7 @@ import { useAuth } from '../../context/AuthContext';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import {
   searchRegisters, getRegister, createRegister, updateRegister, deleteRegister,
-  getTransactions, getTransaction, createTransaction, updateTransaction, deleteTransaction,
+  getTransactions, getTransaction, createTransaction, updateTransaction, updateTransactionStatus, deleteTransaction,
   getTransactionAttachment, getOpenAPPeriods,
   type PCRegister, type PCTransaction, type APPeriod,
 } from '../../services/pc.service';
@@ -1058,11 +1058,8 @@ const RegisterDetail: React.FC<{
           glMsg = 'GL journal failed — SLA is Draft';
         }
 
-        // Step 4: Update PC transaction posting status
-        await updateTransaction(txn.transactionId, {
-          postingStatus: glRes.ok ? 'Posted' : 'Unposted',
-          updatedBy:     currentUser,
-        });
+        // Step 4: Update PC transaction posting status (dedicated endpoint — no other columns touched)
+        await updateTransactionStatus(txn.transactionId, glRes.ok ? 'Posted' : 'Unposted', currentUser);
 
         updateRow(row.txnId, {
           status:   'success',

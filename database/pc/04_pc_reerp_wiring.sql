@@ -602,6 +602,79 @@ END;
 /
 
 -- ============================================================
+-- PATCH: pc/transactions/:transactionId/status
+-- Updates ONLY POSTING_STATUS — does not touch any other column
+-- Body: { "postingStatus": "Posted"|"Unposted"|"Error", "updatedBy": "..." }
+-- ============================================================
+BEGIN
+    BEGIN
+        ORDS.DELETE_HANDLER(
+            p_module_name => 'reerp',
+            p_pattern     => 'pc/transactions/:transactionId/status',
+            p_method      => 'PUT'
+        );
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+
+    BEGIN
+        ORDS.DEFINE_TEMPLATE(
+            p_module_name => 'reerp',
+            p_pattern     => 'pc/transactions/:transactionId/status'
+        );
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+
+    ORDS.DEFINE_HANDLER(
+        p_module_name    => 'reerp',
+        p_pattern        => 'pc/transactions/:transactionId/status',
+        p_method         => 'PUT',
+        p_source_type    => ORDS.source_type_plsql,
+        p_mimes_allowed  => 'application/json',
+        p_source         => '
+DECLARE
+    l_status   VARCHAR2(20);
+    l_by       VARCHAR2(150);
+    l_rows     NUMBER;
+BEGIN
+    APEX_JSON.PARSE(:body_text);
+    l_status := APEX_JSON.GET_VARCHAR2(p_path => ''postingStatus'');
+    l_by     := NVL(APEX_JSON.GET_VARCHAR2(p_path => ''updatedBy''), ''SYSTEM'');
+
+    IF l_status IS NULL THEN
+        :status_code := 400;
+        HTP.PRN(''{"success":false,"message":"postingStatus is required"}'');
+        RETURN;
+    END IF;
+
+    UPDATE RR_PC_TRANSACTIONS
+    SET    POSTING_STATUS   = l_status,
+           LAST_UPDATED_BY  = l_by,
+           LAST_UPDATE_DATE = SYSTIMESTAMP
+    WHERE  TRANSACTION_ID   = :transactionId;
+
+    l_rows := SQL%ROWCOUNT;
+    COMMIT;
+
+    IF l_rows = 0 THEN
+        :status_code := 404;
+        HTP.PRN(''{"success":false,"message":"Transaction not found"}'');
+    ELSE
+        :status_code := 200;
+        HTP.PRN(''{"success":true,"message":"Posting status updated"}'');
+    END IF;
+EXCEPTION WHEN OTHERS THEN
+    ROLLBACK;
+    :status_code := 500;
+    HTP.PRN(''{"success":false,"message":'' || APEX_JSON.STRINGIFY(SQLERRM) || ''}'');
+END;
+'
+    );
+
+    COMMIT;
+END;
+/
+
+-- ============================================================
 -- Verify after running:
 --   SELECT pattern, method FROM user_ords_handlers
 --   WHERE module_name = 'reerp' AND pattern LIKE 'pc/%'

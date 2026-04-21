@@ -174,3 +174,17 @@ export async function deleteTransaction(transactionId: number): Promise<void> {
   const data = await res.json();
   if (!res.ok || !data.success) throw new Error(data?.message || `HTTP ${res.status}`);
 }
+
+export async function updateTransactionStatus(
+  transactionId: number,
+  postingStatus: 'Unposted' | 'Posted' | 'Error',
+  updatedBy?: string,
+): Promise<void> {
+  const res = await fetch(`${BASE}/transactions/${transactionId}/status`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ postingStatus, updatedBy: updatedBy ?? 'SYSTEM' }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data?.message || `HTTP ${res.status}`);
+}
