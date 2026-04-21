@@ -779,13 +779,14 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
               postedBy: currentUser,
             }),
           });
-          // 4. Stamp accounting flag
-          await fetch(`${APEX_BASE}/cash/externaltransactions/${txn.externalTransactionId}/accountingflag`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify({ accountingFlag: 'Y', updatedBy: currentUser }),
-          });
-          // Update local state
+          // 4. Stamp accounting flag via dedicated endpoint (no body parsing — URL params only)
+          const flagUrl = `${APEX_BASE}/cash/externaltransactions/${txn.externalTransactionId}/acctflag?updated_by=${encodeURIComponent(currentUser)}`;
+          const flagRes = await fetch(flagUrl, { method: 'PUT', headers: { Accept: 'application/json' } });
+          const flagData = await flagRes.json().catch(() => ({})) as { success?: boolean; message?: string };
+          if (!flagRes.ok || !flagData.success) {
+            throw new Error(flagData.message || `Accounting flag update failed (HTTP ${flagRes.status})`);
+          }
+          // Update local state so the table reflects the change immediately
           setTransactions(prev => prev.map(t =>
             t.externalTransactionId === txn.externalTransactionId ? { ...t, accountingFlag: 'Y' } : t
           ));
