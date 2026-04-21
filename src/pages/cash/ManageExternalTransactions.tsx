@@ -3,18 +3,22 @@ import dayjs, { type Dayjs } from 'dayjs';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input, Select,
   DatePicker, InputNumber, Row, Col, Space, Tag, Tooltip, Tabs, Collapse,
-  message, Empty, Divider, Badge, Modal,
+  message, Empty, Divider, Badge, Modal, Alert, Spin,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, BankOutlined, PlusOutlined, SearchOutlined, ReloadOutlined,
   EditOutlined, CloseOutlined, DollarOutlined, ApiOutlined, FileTextOutlined,
-  SwapOutlined, DownloadOutlined,
+  SwapOutlined, DownloadOutlined, CheckCircleOutlined, SyncOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 import AccountSelector from '../../components/AccountSelector';
+import { useAuth } from '../../context/AuthContext';
+import {
+  buildPcBankTxnSlaPayload, fetchLedgerByBusinessUnit, derivePeriodName, createAccounting,
+} from '../../services/sla.service';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -97,6 +101,19 @@ const statusLabel = (s: string) => {
   };
   return m[s] ?? s;
 };
+
+interface BankAcctProgressRow {
+  extTxnId:    number;
+  txnDate:     string;
+  periodName:  string;
+  amount:      number;
+  currency:    string;
+  drAccount:   string;
+  crAccount:   string;
+  bu:          string;
+  status:      'pending' | 'running' | 'success' | 'error' | 'skipped';
+  message?:    string;
+}
 
 const SOURCE_LABELS: Record<string, string> = {
   ORA_BAT: 'Bank', ORA_MAN: 'Manual', ORA_STA: 'Statement',
@@ -451,6 +468,9 @@ const ExternalTxnForm: React.FC<{
 // Main Page
 // ────────────────────────────────────────────────────────────────────────────
 const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'cash' }) => {
+  const { user } = useAuth();
+  const currentUser = user?.profile?.email ?? user?.profile?.sub ?? 'SYSTEM';
+
   const [transactions, setTransactions]   = useState<ExternalTxnRecord[]>([]);
   const [loading, setLoading]             = useState(false);
   const [hasSearched, setHasSearched]     = useState(false);
@@ -462,6 +482,13 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   const [lastApiUrl, setLastApiUrl]       = useState('');
   const [showApiModal, setShowApiModal]   = useState(false);
   const [searchForm] = Form.useForm();
+
+  // ── Accounting state ─────────────────────────────────────────────────────
+  const [selectedRowKeys, setSelectedRowKeys]   = useState<number[]>([]);
+  const [acctModalOpen, setAcctModalOpen]       = useState(false);
+  const [acctProgress, setAcctProgress]         = useState<BankAcctProgressRow[]>([]);
+  const [acctRunning, setAcctRunning]           = useState(false);
+  const [acctDone, setAcctDone]                 = useState(false);
 
   const modulePrefix = module === 'ap' ? '/ap' : '/cash';
 
@@ -560,7 +587,166 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     } finally { setLoading(false); }
   }, [searchForm]);
 
-  const handleReset = () => { searchForm.resetFields(); setTransactions([]); setHasSearched(false); };
+  const handleReset = () => { searchForm.resetFields(); setTransactions([]); setHasSearched(false); setSelectedRowKeys([]); };
+
+  // ── Create Accounting ─────────────────────────────────────────────────────
+  const openCreateAccountingModal = () => {
+    const selected = transactions.filter(t => selectedRowKeys.includes(t.externalTransactionId));
+    const noAccounts = selected.filter(t => !t.assetAccountCombination || !t.offsetAccountCombination);
+    if (noAccounts.length > 0) {
+      message.warning(`${noAccounts.length} row(s) have missing cash/offset account — they will be skipped.`);
+    }
+    const rows: BankAcctProgressRow[] = selected.map(t => {
+      const missingAccounts = !t.assetAccountCombination || !t.offsetAccountCombination;
+      const alreadyAccounted = t.accountingFlag === 'Y';
+      const date = t.transactionDate || t.valueDate || dayjs().format('YYYY-MM-DD');
+      const absAmount = Math.abs(t.amount ?? 0);
+      const isReceipt = (t.amount ?? 0) >= 0;
+      return {
+        extTxnId:   t.externalTransactionId,
+        txnDate:    date,
+        periodName: derivePeriodName(new Date(date)),
+        amount:     absAmount,
+        currency:   t.currencyCode || 'AED',
+        drAccount:  isReceipt ? t.offsetAccountCombination : t.assetAccountCombination,
+        crAccount:  isReceipt ? t.assetAccountCombination  : t.offsetAccountCombination,
+        bu:         t.businessUnitName || '',
+        status:     alreadyAccounted ? 'skipped' : missingAccounts ? 'error' : 'pending',
+        message:    alreadyAccounted ? 'Already accounted — skipped' : missingAccounts ? 'Missing asset/offset account' : undefined,
+      };
+    });
+    setAcctProgress(rows);
+    setAcctDone(false);
+    setAcctModalOpen(true);
+  };
+
+  const runCreateAccounting = async () => {
+    setAcctRunning(true);
+
+    const updateRow = (extTxnId: number, partial: Partial<BankAcctProgressRow>) =>
+      setAcctProgress(prev => prev.map(r => r.extTxnId === extTxnId ? { ...r, ...partial } : r));
+
+    for (const row of acctProgress) {
+      if (row.status === 'skipped' || row.status === 'error') continue;
+
+      updateRow(row.extTxnId, { status: 'running' });
+      const txn = transactions.find(t => t.externalTransactionId === row.extTxnId);
+      if (!txn) { updateRow(row.extTxnId, { status: 'error', message: 'Transaction not found' }); continue; }
+
+      try {
+        // 1. Resolve ledger dynamically
+        const ledger = await fetchLedgerByBusinessUnit(txn.businessUnitName);
+        if (!ledger) { updateRow(row.extTxnId, { status: 'error', message: 'Could not resolve ledger for BU' }); continue; }
+
+        const isReceipt = (txn.amount ?? 0) >= 0;
+        const absAmount = Math.abs(txn.amount ?? 0);
+
+        const slaPayload = buildPcBankTxnSlaPayload({
+          externalTransactionId:   txn.externalTransactionId,
+          referenceText:           txn.referenceText || String(txn.externalTransactionId),
+          transactionDate:         row.txnDate,
+          accountingDate:          row.txnDate,
+          periodName:              row.periodName,
+          currency:                txn.currencyCode || 'AED',
+          amount:                  absAmount,
+          assetAccountCombination: isReceipt ? txn.assetAccountCombination  : txn.offsetAccountCombination,
+          offsetAccountCombination:isReceipt ? txn.offsetAccountCombination : txn.assetAccountCombination,
+          businessUnit:            txn.businessUnitName || undefined,
+          legalEntity:             txn.legalEntityName  || undefined,
+          ledgerId:                ledger.ledgerId,
+          ledgerName:              ledger.ledgerName,
+          createdBy:               currentUser,
+        });
+
+        // 2. Create SLA entry
+        const slaResult = await createAccounting(slaPayload);
+
+        // 3. Create GL journal
+        const batchName = `BANK-${txn.externalTransactionId}-${Date.now()}`;
+        const glPayload = {
+          batch: {
+            batchName, batchDescription: `Bank External Txn ${txn.externalTransactionId}`,
+            ledgerName: ledger.ledgerName, ledgerId: ledger.ledgerId, status: 'NEW',
+            accountingPeriod: row.periodName, controlTotal: absAmount,
+            runningTotalDr: absAmount, runningTotalCr: absAmount,
+            batchSource: 'Cash Management', createdBy: currentUser,
+          },
+          header: {
+            ledgerId: ledger.ledgerId, ledgerName: ledger.ledgerName,
+            jeCategory: 'Cash Management', jeSource: 'Cash Management',
+            periodName: row.periodName,
+            journalName: `BANK-EXT-${txn.externalTransactionId}`,
+            description: `${txn.transactionType || 'Bank Txn'} – ${txn.referenceText || txn.externalTransactionId}`,
+            currencyCode: txn.currencyCode || 'AED',
+            currencyConversionType: 'User', currencyConversionDate: row.txnDate,
+            currencyConversionRate: txn.bankConversionRate || 1,
+            status: 'NEW', runningTotalDr: absAmount, runningTotalCr: absAmount,
+            createdBy: currentUser,
+          },
+          lines: slaPayload.lines.map(l => ({
+            enteredDr: l.lineType === 'DR' ? l.enteredDr : null,
+            enteredCr: l.lineType === 'CR' ? l.enteredCr : null,
+            accountedDr: l.accountedDr || null, accountedCr: l.accountedCr || null,
+            statAmount: null, description: l.description,
+            currencyCode: l.currencyCode || txn.currencyCode || 'AED',
+            currencyConversionDate: row.txnDate,
+            currencyConversionRate: txn.bankConversionRate || 1,
+            userCurrencyConversionType: 'User',
+            accountCombination: l.accountCombination,
+            chartOfAccountsName: 'Chart of Accounts',
+            reference1: String(txn.externalTransactionId),
+            reference2: txn.referenceText || '',
+            reference3: l.accountingClass || null,
+            reference4: txn.businessUnitName || null,
+            reference5: null, createdBy: currentUser,
+          })),
+        };
+
+        const glRes = await fetch(`${APEX_BASE}/journals/create`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify(glPayload),
+        });
+
+        let glMsg = '';
+        if (glRes.ok) {
+          const glData = await glRes.json();
+          await fetch(`${APEX_BASE}/sla/accounting/post`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({
+              headerId: slaResult.headerId,
+              glBatchId: glData.batchId || 0,
+              glBatchName: batchName,
+              glHeaderId: glData.headerId || 0,
+              postedBy: currentUser,
+            }),
+          });
+          // 4. Stamp accounting flag
+          await fetch(`${APEX_BASE}/cash/externaltransactions/${txn.externalTransactionId}/accountingflag`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ accountingFlag: 'Y', updatedBy: currentUser }),
+          });
+          // Update local state
+          setTransactions(prev => prev.map(t =>
+            t.externalTransactionId === txn.externalTransactionId ? { ...t, accountingFlag: 'Y' } : t
+          ));
+          glMsg = `GL: ${batchName}`;
+        } else {
+          glMsg = 'GL journal failed — SLA is Draft';
+        }
+
+        updateRow(row.extTxnId, { status: 'success', message: `SLA ${slaResult.headerId} — ${glMsg}` });
+      } catch (e: any) {
+        updateRow(row.extTxnId, { status: 'error', message: e?.message || 'Unexpected error' });
+      }
+    }
+
+    setAcctRunning(false);
+    setAcctDone(true);
+    setSelectedRowKeys([]);
+  };
 
   // ── Tab management ────────────────────────────────────────────────────────
   const openCreateTab = () => {
@@ -626,6 +812,12 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     {
       title: 'Origin', dataIndex: 'source', width: 90,
       render: v => <Text style={{ fontSize: 12 }}>{(SOURCE_LABELS[v] ?? v) || '—'}</Text>,
+    },
+    {
+      title: 'Accounted', dataIndex: 'accountingFlag', width: 80, align: 'center',
+      render: (v) => v === 'Y'
+        ? <Tag color="green" style={{ fontSize: 11, margin: 0 }}>Posted</Tag>
+        : <Tag color="default" style={{ fontSize: 11, margin: 0 }}>No</Tag>,
     },
     {
       title: 'Actions', key: 'actions', width: 70, align: 'center',
@@ -763,10 +955,20 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
             styles={{ body: { padding: 0 } }}
             title={
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                <Text strong>
-                  Search Results{' '}
-                  <Tag color="blue">{filtered.length}{q && filtered.length !== transactions.length ? ` / ${transactions.length}` : ''}</Tag>
-                </Text>
+                <Space>
+                  <Text strong>
+                    Search Results{' '}
+                    <Tag color="blue">{filtered.length}{q && filtered.length !== transactions.length ? ` / ${transactions.length}` : ''}</Tag>
+                  </Text>
+                  {selectedRowKeys.length > 0 && (
+                    <Button
+                      size="small" type="primary" icon={<CheckCircleOutlined />}
+                      style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+                      onClick={openCreateAccountingModal}>
+                      Create Accounting ({selectedRowKeys.length})
+                    </Button>
+                  )}
+                </Space>
                 <Input
                   prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
                   placeholder="Filter results…"
@@ -783,7 +985,13 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
               dataSource={filtered} columns={columns} rowKey="externalTransactionId"
               loading={loading} size="small" pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `${t} transactions` }}
               locale={{ emptyText: <Empty description="No transactions found" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
-              scroll={{ x: 1500 }}
+              scroll={{ x: 1600 }}
+              rowSelection={{
+                type: 'checkbox',
+                selectedRowKeys,
+                onChange: (keys) => setSelectedRowKeys(keys as number[]),
+                getCheckboxProps: (r) => ({ disabled: r.accountingFlag === 'Y' }),
+              }}
             />
           </Card>
         );
@@ -850,6 +1058,77 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
             style={{ marginTop: 8 }}
           />
         </div>
+
+        {/* ── Create Accounting Modal ──────────────────────────── */}
+        <Modal
+          title={<Space><CheckCircleOutlined style={{ color: REDWOOD.info }} />Create Accounting — Bank Transactions</Space>}
+          open={acctModalOpen}
+          onCancel={() => { if (!acctRunning) setAcctModalOpen(false); }}
+          footer={
+            acctDone
+              ? <Button onClick={() => setAcctModalOpen(false)}>Close</Button>
+              : [
+                  <Button key="cancel" onClick={() => setAcctModalOpen(false)} disabled={acctRunning}>Cancel</Button>,
+                  <Button key="run" type="primary" loading={acctRunning}
+                    disabled={acctProgress.every(r => r.status === 'skipped' || r.status === 'error')}
+                    style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+                    onClick={runCreateAccounting}>
+                    {acctRunning ? 'Processing…' : 'Run Create Accounting'}
+                  </Button>,
+                ]
+          }
+          width={900}
+          destroyOnClose
+        >
+          {acctProgress.length > 0 && (() => {
+            const periods = [...new Set(acctProgress.map(r => r.periodName))].filter(Boolean);
+            return (
+              <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Accounting Period{periods.length > 1 ? 's' : ''}:</Text>
+                {periods.map(p => <Tag key={p} color="blue" style={{ fontSize: 12, fontWeight: 600, margin: 0 }}>{p}</Tag>)}
+              </div>
+            );
+          })()}
+          <Table<BankAcctProgressRow>
+            dataSource={acctProgress}
+            rowKey="extTxnId"
+            size="small"
+            pagination={false}
+            columns={[
+              { title: 'Ext Txn ID', dataIndex: 'extTxnId', width: 90,
+                render: v => <Text style={{ fontSize: 12 }}>{v}</Text> },
+              { title: 'Date', dataIndex: 'txnDate', width: 95,
+                render: v => <Text style={{ fontSize: 11 }}>{v}</Text> },
+              { title: 'Amount', dataIndex: 'amount', width: 110, align: 'right' as const,
+                render: (v, r) => <Text style={{ fontSize: 12, fontWeight: 600 }}>{fmtAmount(v, r.currency)}</Text> },
+              { title: 'DR Account', dataIndex: 'drAccount',
+                render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: '#c74634' }}>{v || '—'}</Text> },
+              { title: 'CR Account', dataIndex: 'crAccount',
+                render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: '#1d7b4d' }}>{v || '—'}</Text> },
+              { title: 'Status', dataIndex: 'status', width: 140,
+                render: (v, r) => {
+                  if (v === 'pending') return <Tag color="default" style={{ fontSize: 11 }}>Pending</Tag>;
+                  if (v === 'running') return <Tag icon={<SyncOutlined spin />} color="processing" style={{ fontSize: 11 }}>Running</Tag>;
+                  if (v === 'success') return <><Tag color="success" style={{ fontSize: 11 }}>Done</Tag>
+                    {r.message && <div style={{ fontSize: 10, color: '#1d7b4d', marginTop: 2 }}>{r.message}</div>}</>;
+                  if (v === 'error')   return <><Tag color="error" style={{ fontSize: 11 }}>Error</Tag>
+                    {r.message && <div style={{ fontSize: 10, color: '#c74634', marginTop: 2 }}>{r.message}</div>}</>;
+                  if (v === 'skipped') return <Tag color="warning" style={{ fontSize: 11 }}>Already Posted</Tag>;
+                  return null;
+                }},
+            ]}
+          />
+          {acctDone && (
+            <Alert
+              type={acctProgress.some(r => r.status === 'error') ? 'warning' : 'success'}
+              showIcon
+              message={acctProgress.some(r => r.status === 'error')
+                ? 'Accounting completed with some errors'
+                : 'Accounting created and posted successfully'}
+              style={{ marginTop: 12 }}
+            />
+          )}
+        </Modal>
 
         {/* API Info Modal */}
         <Modal title={<Space><ApiOutlined /><span>API Endpoint Info</span></Space>}

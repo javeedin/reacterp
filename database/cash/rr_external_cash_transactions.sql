@@ -497,3 +497,69 @@ END;
     COMMIT;
 END;
 /
+
+-- ============================================================
+-- PUT cash/externaltransactions/:externalTransactionId/accountingflag
+-- Stamps ACCOUNTING_FLAG = 'Y' after SLA accounting is created
+-- ============================================================
+BEGIN
+    BEGIN
+        ORDS.DELETE_HANDLER(
+            p_module_name => 'reerp',
+            p_pattern     => 'cash/externaltransactions/:externalTransactionId/accountingflag',
+            p_method      => 'PUT'
+        );
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+
+    BEGIN
+        ORDS.DEFINE_TEMPLATE(
+            p_module_name => 'reerp',
+            p_pattern     => 'cash/externaltransactions/:externalTransactionId/accountingflag'
+        );
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+
+    ORDS.DEFINE_HANDLER(
+        p_module_name    => 'reerp',
+        p_pattern        => 'cash/externaltransactions/:externalTransactionId/accountingflag',
+        p_method         => 'PUT',
+        p_source_type    => ORDS.source_type_plsql,
+        p_mimes_allowed  => 'application/json',
+        p_source         => '
+DECLARE
+    l_flag VARCHAR2(1) := ''Y'';
+    l_by   VARCHAR2(150);
+    l_rows NUMBER;
+BEGIN
+    APEX_JSON.PARSE(:body_text);
+    l_flag := NVL(APEX_JSON.GET_VARCHAR2(p_path => ''accountingFlag''), ''Y'');
+    l_by   := NVL(APEX_JSON.GET_VARCHAR2(p_path => ''updatedBy''), ''SYSTEM'');
+
+    UPDATE RR_EXTERNAL_CASH_TRANSACTIONS
+    SET    ACCOUNTING_FLAG  = l_flag,
+           LAST_UPDATED_BY  = l_by,
+           LAST_UPDATE_DATE = SYSTIMESTAMP
+    WHERE  EXTERNAL_TRANSACTION_ID = :externalTransactionId;
+
+    l_rows := SQL%ROWCOUNT;
+    COMMIT;
+
+    IF l_rows = 0 THEN
+        :status_code := 404;
+        HTP.PRN(''{"success":false,"message":"Transaction not found"}'');
+    ELSE
+        :status_code := 200;
+        HTP.PRN(''{"success":true,"message":"Accounting flag updated"}'');
+    END IF;
+EXCEPTION WHEN OTHERS THEN
+    ROLLBACK;
+    :status_code := 500;
+    HTP.PRN(''{"success":false,"message":'' || APEX_JSON.STRINGIFY(SQLERRM) || ''}'');
+END;
+'
+    );
+
+    COMMIT;
+END;
+/
