@@ -1594,14 +1594,22 @@ const RegisterDetail: React.FC<{
         const isLoading = txnActionLoading === txn.transactionId;
         return (
           <Space size={2}>
-            {isPosted && (
+            {txn.transactionType === 'Balance Refill' ? (
+              /* Balance Refill — always show View Accounting regardless of PC posting status */
+              <Tooltip title="View accounting entries">
+                <Button type="text" size="small"
+                  icon={<BookOutlined style={{ color: isPosted ? REDWOOD.success : REDWOOD.neutral300 }} />}
+                  onClick={() => openViewAccounting(txn)}
+                />
+              </Tooltip>
+            ) : isPosted ? (
               <Tooltip title="View accounting entries">
                 <Button type="text" size="small"
                   icon={<BookOutlined style={{ color: REDWOOD.success }} />}
                   onClick={() => openViewAccounting(txn)}
                 />
               </Tooltip>
-            )}
+            ) : null}
             {txn.transactionType === 'Balance Refill' ? (
               /* Balance Refill — always reverse via modal (bank void option) */
               <Tooltip title="Reverse this Add Money entry">
@@ -3022,7 +3030,17 @@ const RegisterDetail: React.FC<{
         ) : bankTxnDetail ? (
           <Descriptions size="small" bordered column={2} labelStyle={{ fontWeight: 600, fontSize: 12 }} contentStyle={{ fontSize: 12 }}>
             <Descriptions.Item label="Txn Number">{bankTxnDetail.transactionId ?? '—'}</Descriptions.Item>
-            <Descriptions.Item label="Status">{bankTxnDetail.status ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Status">
+              {bankTxnDetail.status
+                ? <Tag color={bankTxnDetail.status === 'VOID' ? 'red' : bankTxnDetail.status === 'REC' ? 'blue' : 'default'} style={{ fontSize: 11 }}>{bankTxnDetail.status}</Tag>
+                : '—'}
+            </Descriptions.Item>
+            <Descriptions.Item label="Accounting Status">
+              {bankTxnDetail.accountingFlag === 'Y'
+                ? <Tag color="green" icon={<CheckCircleOutlined />} style={{ fontSize: 11 }}>Accounted</Tag>
+                : <Tag color="default" style={{ fontSize: 11 }}>Not Accounted</Tag>}
+            </Descriptions.Item>
+            <Descriptions.Item label="Acct Flag">{bankTxnDetail.accountingFlag ?? 'N'}</Descriptions.Item>
             <Descriptions.Item label="Bank Account" span={2}>{bankTxnDetail.bankAccountName ?? '—'}</Descriptions.Item>
             <Descriptions.Item label="Business Unit" span={2}>{bankTxnDetail.businessUnitName ?? '—'}</Descriptions.Item>
             <Descriptions.Item label="Txn Date">{bankTxnDetail.transactionDate ?? '—'}</Descriptions.Item>
