@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Drawer, Tabs, Table, Tag, Badge, Button, Space, Typography, Tooltip,
-  Collapse, Select, DatePicker, Empty, Spin, message as antMessage,
+  Collapse, Select, DatePicker, Empty, Alert,
 } from 'antd';
 import {
   WarningOutlined, CheckCircleOutlined, CloseCircleOutlined,
@@ -174,6 +174,7 @@ const GlValidationErrorsDrawer: React.FC = () => {
 
   const [dbRows,     setDbRows]     = useState<GlValidationLogEntry[]>([]);
   const [dbLoading,  setDbLoading]  = useState(false);
+  const [dbError,    setDbError]    = useState<string | null>(null);
   const [activeTab,  setActiveTab]  = useState<string>('session');
   const [filterMod,  setFilterMod]  = useState<string | undefined>();
   const [filterRes,  setFilterRes]  = useState<'FAILED' | 'PASSED' | undefined>();
@@ -181,6 +182,7 @@ const GlValidationErrorsDrawer: React.FC = () => {
 
   const loadDbLogs = useCallback(async () => {
     setDbLoading(true);
+    setDbError(null);
     try {
       const rows = await getValidationLogs({
         module:   filterMod,
@@ -191,7 +193,7 @@ const GlValidationErrorsDrawer: React.FC = () => {
       });
       setDbRows(rows);
     } catch (e: any) {
-      antMessage.error(`Failed to load validation log: ${e?.message}`);
+      setDbError(e?.message ?? 'Failed to load validation log');
     }
     setDbLoading(false);
   }, [filterMod, filterRes, dateRange]);
@@ -266,6 +268,15 @@ const GlValidationErrorsDrawer: React.FC = () => {
               Refresh
             </Button>
           </div>
+          {dbError && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 8 }}
+              message="Could not load history from database"
+              description={dbError}
+            />
+          )}
           <LogTable rows={dbRows} loading={dbLoading} />
         </div>
       ),

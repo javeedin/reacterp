@@ -218,15 +218,22 @@ END RR_GL_VAL_PKG;
 
 
 -- ---------------------------------------------------------------------------
--- 5a.  ORDS handler: POST gl/validation-log  (insert)
+-- 5.  ORDS handlers: GET + POST gl/validation-log
+--
+--  Drop the entire template first (removes all method handlers in one shot)
+--  so we can safely recreate both GET and POST without residual state.
 -- ---------------------------------------------------------------------------
 BEGIN
-  ORDS.DELETE_HANDLER(p_module_name => 'reerp', p_pattern => 'gl/validation-log', p_method => 'POST');
+  ORDS.DELETE_TEMPLATE(p_module_name => 'reerp', p_pattern => 'gl/validation-log');
   COMMIT;
 EXCEPTION WHEN OTHERS THEN NULL;
 END;
 /
 
+
+-- ---------------------------------------------------------------------------
+-- 5a.  ORDS handler: POST gl/validation-log  (insert)
+-- ---------------------------------------------------------------------------
 BEGIN
   ORDS.DEFINE_HANDLER(
     p_module_name   => 'reerp',
@@ -314,13 +321,6 @@ END;
 -- ---------------------------------------------------------------------------
 -- 5b.  ORDS handler: GET gl/validation-log  (list)
 -- ---------------------------------------------------------------------------
-BEGIN
-  ORDS.DELETE_HANDLER(p_module_name => 'reerp', p_pattern => 'gl/validation-log', p_method => 'GET');
-  COMMIT;
-EXCEPTION WHEN OTHERS THEN NULL;
-END;
-/
-
 BEGIN
   ORDS.DEFINE_HANDLER(
     p_module_name   => 'reerp',
