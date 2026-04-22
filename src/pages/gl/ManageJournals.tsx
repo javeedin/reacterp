@@ -67,6 +67,7 @@ import {
   WarningOutlined,
   LoadingOutlined,
   StopOutlined,
+  LockOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
