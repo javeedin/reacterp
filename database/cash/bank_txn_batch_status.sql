@@ -37,18 +37,40 @@ BEGIN
         p_module_name    => 'reerp',
         p_pattern        => 'cash/externaltransactions/batchstatus',
         p_method         => 'GET',
-        p_source_type    => ORDS.source_type_collection_query,
-        p_items_per_page => 1000,
+        p_source_type    => ORDS.source_type_plsql,
+        p_items_per_page => 0,
         p_mimes_allowed  => '',
         p_comments       => 'ids = comma-separated EXTERNAL_TRANSACTION_ID values',
         p_source         => q'[
-SELECT t.EXTERNAL_TRANSACTION_ID AS "externalTransactionId",
-       t.STATUS                   AS "status",
-       NVL(t.ACCOUNTING_FLAG,'N') AS "accountingFlag"
-FROM   RR_EXTERNAL_CASH_TRANSACTIONS t
-WHERE  INSTR(',' || :ids || ',',
-             ',' || TO_CHAR(t.EXTERNAL_TRANSACTION_ID) || ',') > 0
-ORDER  BY t.EXTERNAL_TRANSACTION_ID
+DECLARE
+    l_json  VARCHAR2(32767) := '[';
+    l_first BOOLEAN         := TRUE;
+BEGIN
+    FOR r IN (
+        SELECT t.EXTERNAL_TRANSACTION_ID,
+               t.STATUS,
+               NVL(t.ACCOUNTING_FLAG, 'N') AS ACCOUNTING_FLAG
+        FROM   RR_EXTERNAL_CASH_TRANSACTIONS t
+        WHERE  INSTR(',' || :ids || ',',
+                     ',' || TO_CHAR(t.EXTERNAL_TRANSACTION_ID) || ',') > 0
+        ORDER  BY t.EXTERNAL_TRANSACTION_ID
+    ) LOOP
+        IF NOT l_first THEN l_json := l_json || ','; END IF;
+        l_json := l_json
+            || '{"externalTransactionId":' || r.EXTERNAL_TRANSACTION_ID
+            || ',"status":"'        || REPLACE(r.STATUS,           '"', '\"') || '"'
+            || ',"accountingFlag":"'|| REPLACE(r.ACCOUNTING_FLAG,  '"', '\"') || '"'
+            || '}';
+        l_first := FALSE;
+    END LOOP;
+
+    l_json := l_json || ']';
+    :status_code := 200;
+    HTP.PRN('{"items":' || l_json || '}');
+EXCEPTION WHEN OTHERS THEN
+    :status_code := 500;
+    HTP.PRN('{"items":[],"error":"' || REPLACE(SQLERRM, '"', '\"') || '"}');
+END;
 ]'
     );
 
