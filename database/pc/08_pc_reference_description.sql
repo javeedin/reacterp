@@ -76,7 +76,7 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         INSERT INTO RR_PC_REGISTERS (
             REGISTER_NAME, BUSINESS_UNIT, START_DATE, END_DATE,
             COMMENTS, CASH_ACCOUNT_CCID, CASH_ACCOUNT_DESC,
-            CURRENCY, STATUS, OWNED_BY, LIMIT_AMOUNT,
+            CURRENCY, STATUS, OWNED_BY, CASH_LIMIT,
             CREATED_BY, CREATION_DATE, LAST_UPDATED_BY, LAST_UPDATE_DATE
         ) VALUES (
             l_name, l_bu, l_start, l_end,
@@ -138,7 +138,7 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
             CURRENCY            = NVL(l_currency, CURRENCY),
             STATUS              = NVL(l_status,   STATUS),
             OWNED_BY            = NVL(l_owned_by, OWNED_BY),
-            LIMIT_AMOUNT        = NVL(l_limit,    LIMIT_AMOUNT),
+            CASH_LIMIT          = NVL(l_limit,    CASH_LIMIT),
             LAST_UPDATED_BY     = l_by,
             LAST_UPDATE_DATE    = SYSTIMESTAMP
         WHERE REGISTER_ID = p_register_id;
