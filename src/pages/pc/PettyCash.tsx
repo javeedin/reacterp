@@ -86,22 +86,35 @@ const PostingTag: React.FC<{ status: string }> = ({ status }) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // Accounting progress row
 // ─────────────────────────────────────────────────────────────────────────────
+interface AcctDrLine {
+  txnId:         number;
+  chargeAccount: string;
+  chargeDesc:    string;
+  amount:        number;
+  expenseType:   string | null;
+}
+
 interface AcctProgressRow {
+  // primary key — first txnId in group
   txnId:           number;
   lineNumber:      number;
   transactionType: string;
-  expenseType:     string | null;
-  amount:          number;
+  expenseType:     string | null;  // joined for display
+  amount:          number;          // total amount for the group
   currency:        string;
   accountingDate:  string;
   periodName:      string;
-  drAccount:       string;
+  drAccount:       string;          // first DR account (display fallback)
   drAccountDesc:   string;
   crAccount:       string;
   crAccountDesc:   string;
   status:          'pending' | 'running' | 'success' | 'error' | 'skipped';
   message?:        string;
   headerId?:       number;
+  // reference-group fields
+  refNo:           string;          // reference number or unique key for no-ref rows
+  txnIds:          number[];        // all txnIds in this group
+  drLines:         AcctDrLine[];    // one per transaction in the group
 }
 
 // Convert Oracle DD-MON-YYYY or any ISO-ish string to YYYY-MM-DD
@@ -1639,45 +1652,63 @@ const RegisterDetail: React.FC<{
 
   const openCreateAccountingModal = () => {
     const selected = transactions.filter(t => selectedRowKeys.includes(t.transactionId));
-    if (selected.length === 0) {
-      message.warning('Select at least one transaction.');
-      return;
-    }
-    // Exclude transactions that have no charge account
-    const skipped = selected.filter(t => !t.chargeAccountDesc);
+    if (selected.length === 0) { message.warning('Select at least one transaction.'); return; }
+
+    const noAcct = selected.filter(t => !t.chargeAccountDesc);
     const eligible = selected.filter(t => !!t.chargeAccountDesc);
-    if (skipped.length > 0) {
-      message.warning(`${skipped.length} line(s) skipped — no charge account assigned.`);
+    if (noAcct.length > 0) message.warning(`${noAcct.length} line(s) skipped — no charge account assigned.`);
+    if (eligible.length === 0) { message.error('None of the selected transactions have a charge account.'); return; }
+
+    const cashCode = register.cashAccountDesc ?? '';
+    const cashDesc = cashAccountName ?? '';
+
+    // Group by referenceNo; transactions without a reference stay as individual groups
+    const byRef = new Map<string, PCTransaction[]>();
+    for (const t of eligible) {
+      const key = t.referenceNo ? t.referenceNo : `__NOREF_${t.transactionId}`;
+      if (!byRef.has(key)) byRef.set(key, []);
+      byRef.get(key)!.push(t);
     }
-    if (eligible.length === 0) {
-      message.error('None of the selected transactions have a charge account. Cannot create accounting.');
-      return;
-    }
-    const rows: AcctProgressRow[] = eligible.map(t => {
-      const isOut         = t.creditAmount > 0;
-      const amount        = isOut ? t.creditAmount : t.debitAmount;
-      const chargeCode    = t.chargeAccountDesc ?? '';
-      const chargeDesc    = chargeAcctResolved.get(t.transactionId)?.desc ?? '';
-      const cashCode      = register.cashAccountDesc ?? '';
-      const cashDesc      = cashAccountName ?? '';
-      const acctDate      = toIsoDate(t.accountingDate || t.transactionDate);
-      return {
-        txnId:           t.transactionId,
-        lineNumber:      t.lineNumber,
-        transactionType: t.transactionType,
-        expenseType:     t.expenseType,
-        amount,
-        currency:        t.currency,
+
+    const rows: AcctProgressRow[] = [];
+    for (const [groupKey, txns] of byRef) {
+      const refNo    = txns[0].referenceNo || '—';
+      const first    = txns[0];
+      const acctDate = toIsoDate(first.accountingDate || first.transactionDate);
+
+      const drLines: AcctDrLine[] = txns.map(t => ({
+        txnId:         t.transactionId,
+        chargeAccount: t.chargeAccountDesc ?? '',
+        chargeDesc:    chargeAcctResolved.get(t.transactionId)?.desc ?? '',
+        amount:        t.creditAmount > 0 ? t.creditAmount : t.debitAmount,
+        expenseType:   t.expenseType,
+      }));
+
+      const totalAmount   = drLines.reduce((s, l) => s + l.amount, 0);
+      const allPosted     = txns.every(t => t.postingStatus === 'Posted');
+      const joinedExpType = [...new Set(drLines.map(l => l.expenseType).filter(Boolean))].join(', ') || null;
+
+      rows.push({
+        txnId:           first.transactionId,
+        lineNumber:      first.lineNumber,
+        transactionType: first.transactionType,
+        expenseType:     joinedExpType,
+        amount:          totalAmount,
+        currency:        first.currency,
         accountingDate:  acctDate,
         periodName:      derivePeriodName(new Date(acctDate)),
-        drAccount:       isOut ? chargeCode : cashCode,
-        drAccountDesc:   isOut ? chargeDesc : cashDesc,
-        crAccount:       isOut ? cashCode   : chargeCode,
-        crAccountDesc:   isOut ? cashDesc   : chargeDesc,
-        status:          t.postingStatus === 'Posted' ? 'skipped' : 'pending',
-        message:         t.postingStatus === 'Posted' ? 'Already posted — skipped' : undefined,
-      };
-    });
+        drAccount:       drLines[0]?.chargeAccount || '',
+        drAccountDesc:   drLines[0]?.chargeDesc    || '',
+        crAccount:       cashCode,
+        crAccountDesc:   cashDesc,
+        status:          allPosted ? 'skipped' : 'pending',
+        message:         allPosted ? 'Already posted — skipped' : undefined,
+        refNo,
+        txnIds:          txns.map(t => t.transactionId),
+        drLines,
+      });
+    }
+
     setAcctProgress(rows);
     setAcctDone(false);
     setAcctModalOpen(true);
@@ -1695,55 +1726,109 @@ const RegisterDetail: React.FC<{
 
     for (const row of acctProgress) {
       if (row.status === 'skipped') continue;
-
       updateRow(row.txnId, { status: 'running' });
-      const txn = transactions.find(t => t.transactionId === row.txnId);
-      if (!txn) { updateRow(row.txnId, { status: 'error', message: 'Transaction not found locally' }); continue; }
+
       if (!register.cashAccountDesc) {
         updateRow(row.txnId, { status: 'error', message: 'Register has no cash account configured' }); continue;
       }
-      if (!txn.chargeAccountDesc) {
-        updateRow(row.txnId, { status: 'error', message: 'Transaction has no charge account' }); continue;
+
+      const txns = row.txnIds
+        .map(id => transactions.find(t => t.transactionId === id))
+        .filter(Boolean) as PCTransaction[];
+      if (txns.length === 0) {
+        updateRow(row.txnId, { status: 'error', message: 'Transactions not found locally' }); continue;
       }
 
       try {
-        const isOut     = txn.creditAmount > 0;
-        const amount    = isOut ? txn.creditAmount : txn.debitAmount;
-        const acctDate  = toIsoDate(txn.accountingDate || txn.transactionDate);
-        const periodName = derivePeriodName(new Date(acctDate));
-        const eventType = txn.transactionType === 'Expense'
-          ? 'PC_EXPENSE_CREATED' as const
-          : txn.transactionType === 'Balance Refill'
-          ? 'PC_BALANCE_REFILL' as const
-          : isOut ? 'PC_ADJUSTMENT' as const : 'PC_EXPENSE_REVERSAL' as const;
+        const acctDate   = row.accountingDate;
+        const periodName = row.periodName;
+        const currency   = row.currency;
+        const totalAmt   = row.amount;
+        const safRef     = row.refNo.replace(/[^a-z0-9]/gi, '_');
+        const batchName  = `PC-${register.registerId}-REF-${safRef}-${Date.now()}`;
 
-        const payload = buildPcTxnSlaPayload({
-          transactionId:        txn.transactionId,
-          sourceNumber:         `PC-${register.registerId}-L${txn.lineNumber}`,
-          eventTypeCode:        eventType,
-          transactionDate:      toIsoDate(txn.transactionDate),
-          accountingDate:       acctDate,
-          periodName,
-          currency:             txn.currency,
-          amount,
-          drAccountCombination: row.drAccount,
-          crAccountCombination: row.crAccount,
-          drAccountingClass:    isOut ? 'EXPENSE' : 'PETTY_CASH',
-          crAccountingClass:    isOut ? 'PETTY_CASH' : 'EXPENSE',
-          drDescription:        isOut ? (txn.expenseType || 'Expense') : 'Petty Cash Account',
-          crDescription:        isOut ? 'Petty Cash Account' : (txn.expenseType || 'Expense reversal'),
-          businessUnit:         register.businessUnit,
-          legalEntity:          ctx.legalEntity || undefined,
-          ledgerId:             ctx.ledgerId,
-          ledgerName:           ctx.ledgerName,
-          createdBy:            currentUser,
-        });
+        // ── Step 1: Create one SLA entry per transaction ──────
+        const slaResults: { headerId: number }[] = [];
+        for (const txn of txns) {
+          const isOut     = txn.creditAmount > 0;
+          const amount    = isOut ? txn.creditAmount : txn.debitAmount;
+          const chargeCode = txn.chargeAccountDesc ?? '';
+          const eventType  = txn.transactionType === 'Expense'
+            ? 'PC_EXPENSE_CREATED' as const
+            : txn.transactionType === 'Balance Refill'
+            ? 'PC_BALANCE_REFILL' as const
+            : isOut ? 'PC_ADJUSTMENT' as const : 'PC_EXPENSE_REVERSAL' as const;
 
-        // Step 1: Create SLA entry
-        const slaResult = await createAccounting(payload);
+          const slaPayload = buildPcTxnSlaPayload({
+            transactionId:        txn.transactionId,
+            sourceNumber:         `PC-${register.registerId}-L${txn.lineNumber}`,
+            eventTypeCode:        eventType,
+            transactionDate:      toIsoDate(txn.transactionDate),
+            accountingDate:       acctDate,
+            periodName,
+            currency,
+            amount,
+            drAccountCombination: isOut ? chargeCode : row.crAccount,
+            crAccountCombination: isOut ? row.crAccount : chargeCode,
+            drAccountingClass:    isOut ? 'EXPENSE'    : 'PETTY_CASH',
+            crAccountingClass:    isOut ? 'PETTY_CASH' : 'EXPENSE',
+            drDescription:        isOut ? (txn.expenseType || 'Expense') : 'Petty Cash Account',
+            crDescription:        isOut ? 'Petty Cash Account' : (txn.expenseType || 'Expense reversal'),
+            businessUnit:         register.businessUnit,
+            legalEntity:          ctx.legalEntity || undefined,
+            ledgerId:             ctx.ledgerId,
+            ledgerName:           ctx.ledgerName,
+            createdBy:            currentUser,
+          });
+          const slaResult = await createAccounting(slaPayload);
+          slaResults.push(slaResult);
+        }
 
-        // Step 2: Create GL journal
-        const batchName = `PC-${register.registerId}-L${txn.lineNumber}-${Date.now()}`;
+        // ── Step 2: Create ONE GL journal for the reference group ──
+        // N debit lines (one per expense) + 1 credit line (cash total)
+        const glLines = [
+          ...row.drLines.map(dl => ({
+            enteredDr:                  dl.amount,
+            enteredCr:                  null,
+            accountedDr:                dl.amount,
+            accountedCr:                null,
+            statAmount:                 null,
+            description:                dl.expenseType || 'Petty Cash Expense',
+            currencyCode:               currency,
+            currencyConversionDate:     acctDate,
+            currencyConversionRate:     1,
+            userCurrencyConversionType: 'User',
+            accountCombination:         dl.chargeAccount,
+            chartOfAccountsName:        'Chart of Accounts',
+            reference1:                 String(dl.txnId),
+            reference2:                 register.registerName,
+            reference3:                 'EXPENSE',
+            reference4:                 register.businessUnit || null,
+            reference5:                 row.refNo !== '—' ? row.refNo : null,
+            createdBy:                  currentUser,
+          })),
+          {
+            enteredDr:                  null,
+            enteredCr:                  totalAmt,
+            accountedDr:                null,
+            accountedCr:                totalAmt,
+            statAmount:                 null,
+            description:                'Petty Cash Account',
+            currencyCode:               currency,
+            currencyConversionDate:     acctDate,
+            currencyConversionRate:     1,
+            userCurrencyConversionType: 'User',
+            accountCombination:         row.crAccount,
+            chartOfAccountsName:        'Chart of Accounts',
+            reference1:                 row.refNo !== '—' ? row.refNo : String(txns[0].transactionId),
+            reference2:                 register.registerName,
+            reference3:                 'PETTY_CASH',
+            reference4:                 register.businessUnit || null,
+            reference5:                 null,
+            createdBy:                  currentUser,
+          },
+        ];
+
         const glPayload = {
           batch: {
             batchName,
@@ -1752,9 +1837,9 @@ const RegisterDetail: React.FC<{
             ledgerId:         ctx.ledgerId,
             status:           'NEW',
             accountingPeriod: periodName,
-            controlTotal:     amount,
-            runningTotalDr:   amount,
-            runningTotalCr:   amount,
+            controlTotal:     totalAmt,
+            runningTotalDr:   totalAmt,
+            runningTotalCr:   totalAmt,
             batchSource:      'Petty Cash',
             createdBy:        currentUser,
           },
@@ -1764,83 +1849,65 @@ const RegisterDetail: React.FC<{
             jeCategory:             'Petty Cash',
             jeSource:               'Petty Cash',
             periodName,
-            journalName:            `PC-${txn.transactionType}-${txn.transactionId}`,
-            description:            `${txn.expenseType || txn.transactionType} – ${register.registerName}`,
-            currencyCode:           txn.currency,
+            journalName:            `PC-${row.refNo !== '—' ? row.refNo : `TXN-${txns[0].transactionId}`}`,
+            description:            `${row.refNo !== '—' ? row.refNo : 'Petty Cash'} – ${register.registerName}`,
+            currencyCode:           currency,
             currencyConversionType: 'User',
             currencyConversionDate: acctDate,
             currencyConversionRate: 1,
             status:                 'NEW',
-            runningTotalDr:         amount,
-            runningTotalCr:         amount,
+            runningTotalDr:         totalAmt,
+            runningTotalCr:         totalAmt,
             createdBy:              currentUser,
           },
-          lines: payload.lines.map(l => ({
-            enteredDr:               l.lineType === 'DR' ? l.enteredDr : null,
-            enteredCr:               l.lineType === 'CR' ? l.enteredCr : null,
-            accountedDr:             l.accountedDr || null,
-            accountedCr:             l.accountedCr || null,
-            statAmount:              null,
-            description:             l.description,
-            currencyCode:            l.currencyCode || txn.currency,
-            currencyConversionDate:  acctDate,
-            currencyConversionRate:  1,
-            userCurrencyConversionType: 'User',
-            accountCombination:      l.accountCombination,
-            chartOfAccountsName:     'Chart of Accounts',
-            reference1:              String(txn.transactionId),
-            reference2:              register.registerName,
-            reference3:              l.accountingClass || null,
-            reference4:              register.businessUnit || null,
-            reference5:              null,
-            createdBy:               currentUser,
-          })),
+          lines: glLines,
         };
 
-        const glRes = await fetch(`${APEX_BASE}/journals/create`, {
-          method:  'POST',
+        const glRes  = await fetch(`${APEX_BASE}/journals/create`, {
+          method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body:    JSON.stringify(glPayload),
+          body:   JSON.stringify(glPayload),
         });
+        const glData = glRes.ok ? await glRes.json() : null;
 
-        let glMsg = '';
-        if (glRes.ok) {
-          const glData = await glRes.json();
-          // Step 3: Post SLA
-          await fetch(`${APEX_BASE}/sla/accounting/post`, {
-            method:  'POST',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body:    JSON.stringify({
-              headerId:    slaResult.headerId,
-              glBatchId:   glData.batchId   || 0,
-              glBatchName: batchName,
-              glHeaderId:  glData.headerId  || 0,
-              postedBy:    currentUser,
-            }),
-          });
-          glMsg = `GL Batch: ${batchName}`;
-        } else {
-          glMsg = 'GL journal failed — SLA is Draft';
+        // ── Step 3: Post each SLA entry to the shared GL batch ─
+        if (glRes.ok && glData) {
+          for (const slaResult of slaResults) {
+            await fetch(`${APEX_BASE}/sla/accounting/post`, {
+              method:  'POST',
+              headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+              body:    JSON.stringify({
+                headerId:    slaResult.headerId,
+                glBatchId:   glData.batchId  || 0,
+                glBatchName: batchName,
+                glHeaderId:  glData.headerId || 0,
+                postedBy:    currentUser,
+              }),
+            });
+          }
         }
 
-        // Step 4: Update PC transaction posting status
-        await updateTransactionStatus(txn.transactionId, glRes.ok ? 'Posted' : 'Unposted', currentUser);
-
-        // Step 5: For Balance Refill — stamp accounting flag on linked bank transaction
+        // ── Step 4: Update status of every transaction in group ─
         let bankMsg = '';
-        if (glRes.ok && txn.transactionType === 'Balance Refill' && txn.bankTxnId) {
-          try {
-            const flagUrl = `${APEX_BASE}/cash/externaltransactions/${txn.bankTxnId}/acctflag?updated_by=${encodeURIComponent(currentUser)}`;
-            const flagRes = await fetch(flagUrl, { method: 'PUT', headers: { Accept: 'application/json' } });
-            const flagData = await flagRes.json().catch(() => ({})) as { success?: boolean };
-            bankMsg = flagData.success ? ` | Bank Txn #${txn.bankTxnId} accounted` : ` | Bank acctflag failed`;
-          } catch { bankMsg = ` | Bank acctflag error`; }
+        for (const txn of txns) {
+          await updateTransactionStatus(txn.transactionId, glRes.ok ? 'Posted' : 'Unposted', currentUser);
+
+          if (glRes.ok && txn.transactionType === 'Balance Refill' && txn.bankTxnId) {
+            try {
+              const flagUrl = `${APEX_BASE}/cash/externaltransactions/${txn.bankTxnId}/acctflag?updated_by=${encodeURIComponent(currentUser)}`;
+              const flagRes = await fetch(flagUrl, { method: 'PUT', headers: { Accept: 'application/json' } });
+              const flagData = await flagRes.json().catch(() => ({})) as { success?: boolean };
+              bankMsg += flagData.success ? ` | Bank#${txn.bankTxnId} accounted` : ` | Bank#${txn.bankTxnId} flag failed`;
+            } catch { bankMsg += ` | Bank acctflag error`; }
+          }
         }
 
         updateRow(row.txnId, {
-          status:   'success',
-          message:  `SLA ${slaResult.headerId} — ${glMsg}${bankMsg}`,
-          headerId: slaResult.headerId,
+          status:  glRes.ok ? 'success' : 'error',
+          message: glRes.ok
+            ? `GL Batch: ${batchName} (${row.drLines.length} DR + 1 CR)${bankMsg}`
+            : `GL journal failed — SLA entries are Draft`,
+          headerId: slaResults[0]?.headerId,
         });
       } catch (e: any) {
         updateRow(row.txnId, { status: 'error', message: e?.message || 'Unexpected error' });
@@ -1866,86 +1933,84 @@ const RegisterDetail: React.FC<{
 
       for (const row of acctProgress) {
         if (row.status === 'skipped') continue;
-        const txn = transactions.find(t => t.transactionId === row.txnId);
-        if (!txn) continue;
-        const isOut     = txn.creditAmount > 0;
-        const amount    = isOut ? txn.creditAmount : txn.debitAmount;
-        const acctDate  = toIsoDate(txn.accountingDate || txn.transactionDate);
-        const periodName = derivePeriodName(new Date(acctDate));
-        const eventType = txn.transactionType === 'Expense'
-          ? 'PC_EXPENSE_CREATED' as const
-          : txn.transactionType === 'Balance Refill'
-          ? 'PC_BALANCE_REFILL' as const
-          : isOut ? 'PC_ADJUSTMENT' as const : 'PC_EXPENSE_REVERSAL' as const;
-        const batchName = `PC-${register.registerId}-L${txn.lineNumber}-<timestamp>`;
+        const txns = row.txnIds.map(id => transactions.find(t => t.transactionId === id)).filter(Boolean) as PCTransaction[];
+        if (txns.length === 0) continue;
 
-        const slaPayload = buildPcTxnSlaPayload({
-          transactionId:        txn.transactionId,
-          sourceNumber:         `PC-${register.registerId}-L${txn.lineNumber}`,
-          eventTypeCode:        eventType,
-          transactionDate:      toIsoDate(txn.transactionDate),
-          accountingDate:       acctDate,
-          periodName,
-          currency:             txn.currency,
-          amount,
-          drAccountCombination: row.drAccount,
-          crAccountCombination: row.crAccount,
-          drAccountingClass:    isOut ? 'EXPENSE' : 'PETTY_CASH',
-          crAccountingClass:    isOut ? 'PETTY_CASH' : 'EXPENSE',
-          drDescription:        isOut ? (txn.expenseType || 'Expense') : 'Petty Cash Account',
-          crDescription:        isOut ? 'Petty Cash Account' : (txn.expenseType || 'Expense reversal'),
-          businessUnit:         register.businessUnit,
-          legalEntity:          ctx.legalEntity || undefined,
-          ledgerId:             ctx.ledgerId,
-          ledgerName:           ctx.ledgerName,
-          createdBy:            currentUser,
-        });
+        const acctDate   = row.accountingDate;
+        const periodName = row.periodName;
+        const safRef     = row.refNo.replace(/[^a-z0-9]/gi, '_');
+        const batchName  = `PC-${register.registerId}-REF-${safRef}-<timestamp>`;
 
+        // One SLA payload per transaction
+        for (const txn of txns) {
+          const isOut    = txn.creditAmount > 0;
+          const amount   = isOut ? txn.creditAmount : txn.debitAmount;
+          const chargeCode = txn.chargeAccountDesc ?? '';
+          const eventType  = txn.transactionType === 'Expense'
+            ? 'PC_EXPENSE_CREATED' as const
+            : txn.transactionType === 'Balance Refill'
+            ? 'PC_BALANCE_REFILL' as const
+            : isOut ? 'PC_ADJUSTMENT' as const : 'PC_EXPENSE_REVERSAL' as const;
+          const slaPayload = buildPcTxnSlaPayload({
+            transactionId: txn.transactionId, sourceNumber: `PC-${register.registerId}-L${txn.lineNumber}`,
+            eventTypeCode: eventType, transactionDate: toIsoDate(txn.transactionDate),
+            accountingDate: acctDate, periodName, currency: row.currency, amount,
+            drAccountCombination: isOut ? chargeCode : row.crAccount,
+            crAccountCombination: isOut ? row.crAccount : chargeCode,
+            drAccountingClass: isOut ? 'EXPENSE' : 'PETTY_CASH',
+            crAccountingClass: isOut ? 'PETTY_CASH' : 'EXPENSE',
+            drDescription: isOut ? (txn.expenseType || 'Expense') : 'Petty Cash Account',
+            crDescription: isOut ? 'Petty Cash Account' : (txn.expenseType || 'Expense reversal'),
+            businessUnit: register.businessUnit, legalEntity: ctx.legalEntity || undefined,
+            ledgerId: ctx.ledgerId, ledgerName: ctx.ledgerName, createdBy: currentUser,
+          });
+          items.push({ label: `[${row.refNo}] L${txn.lineNumber} — 1. POST sla/accounting/create`, url: `${APEX_BASE}/sla/accounting/create`, body: slaPayload });
+        }
+
+        // ONE grouped GL journal per reference
+        const glLines = [
+          ...row.drLines.map(dl => ({
+            enteredDr: dl.amount, enteredCr: null, accountedDr: dl.amount, accountedCr: null,
+            statAmount: null, description: dl.expenseType || 'Petty Cash Expense',
+            currencyCode: row.currency, currencyConversionDate: acctDate, currencyConversionRate: 1,
+            userCurrencyConversionType: 'User', accountCombination: dl.chargeAccount,
+            chartOfAccountsName: 'Chart of Accounts',
+            reference1: String(dl.txnId), reference2: register.registerName,
+            reference3: 'EXPENSE', reference4: register.businessUnit || null,
+            reference5: row.refNo !== '—' ? row.refNo : null, createdBy: currentUser,
+          })),
+          {
+            enteredDr: null, enteredCr: row.amount, accountedDr: null, accountedCr: row.amount,
+            statAmount: null, description: 'Petty Cash Account',
+            currencyCode: row.currency, currencyConversionDate: acctDate, currencyConversionRate: 1,
+            userCurrencyConversionType: 'User', accountCombination: row.crAccount,
+            chartOfAccountsName: 'Chart of Accounts',
+            reference1: row.refNo !== '—' ? row.refNo : String(txns[0].transactionId),
+            reference2: register.registerName, reference3: 'PETTY_CASH',
+            reference4: register.businessUnit || null, reference5: null, createdBy: currentUser,
+          },
+        ];
         const glPayload = {
           batch: {
             batchName, batchDescription: `Petty Cash – ${register.registerName}`,
             ledgerName: ctx.ledgerName, ledgerId: ctx.ledgerId, status: 'NEW',
-            accountingPeriod: periodName, controlTotal: amount,
-            runningTotalDr: amount, runningTotalCr: amount,
+            accountingPeriod: periodName, controlTotal: row.amount,
+            runningTotalDr: row.amount, runningTotalCr: row.amount,
             batchSource: 'Petty Cash', createdBy: currentUser,
           },
           header: {
             ledgerId: ctx.ledgerId, ledgerName: ctx.ledgerName,
-            jeCategory: 'Petty Cash', jeSource: 'Petty Cash',
-            periodName, journalName: `PC-${txn.transactionType}-${txn.transactionId}`,
-            description: `${txn.expenseType || txn.transactionType} – ${register.registerName}`,
-            currencyCode: txn.currency, currencyConversionType: 'User',
+            jeCategory: 'Petty Cash', jeSource: 'Petty Cash', periodName,
+            journalName: `PC-${row.refNo !== '—' ? row.refNo : `TXN-${txns[0].transactionId}`}`,
+            description: `${row.refNo !== '—' ? row.refNo : 'Petty Cash'} – ${register.registerName}`,
+            currencyCode: row.currency, currencyConversionType: 'User',
             currencyConversionDate: acctDate, currencyConversionRate: 1,
-            status: 'NEW', runningTotalDr: amount, runningTotalCr: amount, createdBy: currentUser,
+            status: 'NEW', runningTotalDr: row.amount, runningTotalCr: row.amount, createdBy: currentUser,
           },
-          lines: slaPayload.lines.map(l => ({
-            enteredDr: l.lineType === 'DR' ? l.enteredDr : null,
-            enteredCr: l.lineType === 'CR' ? l.enteredCr : null,
-            accountedDr: l.accountedDr || null, accountedCr: l.accountedCr || null,
-            statAmount: null, description: l.description,
-            currencyCode: l.currencyCode || txn.currency,
-            currencyConversionDate: acctDate, currencyConversionRate: 1,
-            userCurrencyConversionType: 'User', accountCombination: l.accountCombination,
-            chartOfAccountsName: 'Chart of Accounts',
-            reference1: String(txn.transactionId), reference2: register.registerName,
-            reference3: l.accountingClass || null, reference4: register.businessUnit || null,
-            reference5: null, createdBy: currentUser,
-          })),
+          lines: glLines,
         };
-
-        const slaPostPayload = {
-          headerId: '<from SLA create response>',
-          glBatchId: '<from GL create response>',
-          glBatchName: batchName,
-          glHeaderId: '<from GL create response>',
-          postedBy: currentUser,
-        };
-
-        items.push(
-          { label: `[Line ${txn.lineNumber}] 1. POST sla/accounting/create`, url: `${APEX_BASE}/sla/accounting/create`, body: slaPayload },
-          { label: `[Line ${txn.lineNumber}] 2. POST journals/create`,        url: `${APEX_BASE}/journals/create`,       body: glPayload },
-          { label: `[Line ${txn.lineNumber}] 3. POST sla/accounting/post`,    url: `${APEX_BASE}/sla/accounting/post`,   body: slaPostPayload },
-        );
+        items.push({ label: `[${row.refNo}] 2. POST journals/create  (${row.drLines.length} DR + 1 CR)`, url: `${APEX_BASE}/journals/create`, body: glPayload });
+        items.push({ label: `[${row.refNo}] 3. POST sla/accounting/post  (per SLA entry)`, url: `${APEX_BASE}/sla/accounting/post`, body: { headerId: '<from SLA create>', glBatchId: '<from GL>', glBatchName: batchName, glHeaderId: '<from GL>', postedBy: currentUser } });
       }
       setApiDebugItems(items);
     } catch (e: any) {
@@ -4166,45 +4231,76 @@ const RegisterDetail: React.FC<{
           rowKey="txnId"
           size="small"
           pagination={false}
+          expandable={{
+            expandedRowRender: (row) => (
+              <div style={{ paddingLeft: 24, paddingBottom: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: REDWOOD.neutral600, marginBottom: 4 }}>
+                  Journal lines — {row.refNo}
+                </div>
+                {row.drLines.map((dl, i) => (
+                  <div key={dl.txnId} style={{ display: 'flex', gap: 12, fontSize: 11, padding: '2px 0', borderBottom: i < row.drLines.length - 1 ? `1px solid ${REDWOOD.neutral200}` : 'none' }}>
+                    <span style={{ color: REDWOOD.error, fontFamily: 'monospace', minWidth: 180 }}>Dr  {dl.chargeAccount}</span>
+                    <span style={{ color: REDWOOD.neutral600, minWidth: 120 }}>{dl.expenseType || '—'}</span>
+                    <span style={{ fontWeight: 600, marginLeft: 'auto' }}>{fmt(dl.amount)} {row.currency}</span>
+                  </div>
+                ))}
+                <div style={{ display: 'flex', gap: 12, fontSize: 11, padding: '4px 0', borderTop: `2px solid ${REDWOOD.neutral200}`, marginTop: 2 }}>
+                  <span style={{ color: REDWOOD.success, fontFamily: 'monospace', minWidth: 180 }}>Cr  {row.crAccount}</span>
+                  <span style={{ color: REDWOOD.neutral600, minWidth: 120 }}>Petty Cash Account</span>
+                  <span style={{ fontWeight: 600, marginLeft: 'auto' }}>{fmt(row.amount)} {row.currency}</span>
+                </div>
+              </div>
+            ),
+            rowExpandable: () => true,
+          }}
           columns={[
-            { title: 'Line #', dataIndex: 'lineNumber', width: 55, align: 'center' as const,
-              render: (v) => <Text style={{ fontSize: 12 }}>{v}</Text> },
-            { title: 'Type', dataIndex: 'transactionType', width: 100,
-              render: (v, r) => {
-                const color = v === 'Expense' ? 'orange' : 'purple';
-                return <><Tag color={color} style={{ fontSize: 11 }}>{v}</Tag>
-                  {r.expenseType && <div style={{ fontSize: 10, color: REDWOOD.neutral600, marginTop: 1 }}>{r.expenseType}</div>}</>;
-              }},
-            { title: 'Acct Date', dataIndex: 'accountingDate', width: 96,
-              render: (v) => <Text style={{ fontSize: 11 }}>{v ? v.slice(0, 10) : '—'}</Text> },
-            { title: 'Amount', dataIndex: 'amount', width: 110, align: 'right' as const,
-              render: (v, r) => <Text style={{ fontSize: 12, fontWeight: 600 }}>{fmt(v)} {r.currency}</Text> },
-            { title: 'DR Account', dataIndex: 'drAccount',
+            { title: 'Reference', dataIndex: 'refNo', width: 130,
               render: (v, r) => (
                 <div>
-                  <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.error }}>{v || '—'}</Text>
-                  {r.drAccountDesc && (
-                    <div style={{ fontSize: 10, color: REDWOOD.neutral600, marginTop: 1 }}>{r.drAccountDesc}</div>
-                  )}
+                  <Text style={{ fontSize: 12, fontWeight: 600, fontFamily: 'monospace', color: v === '—' ? REDWOOD.neutral300 : REDWOOD.info }}>{v}</Text>
+                  <div style={{ fontSize: 10, color: REDWOOD.neutral600 }}>{r.txnIds.length} line{r.txnIds.length !== 1 ? 's' : ''}</div>
                 </div>
               )},
-            { title: 'CR Account', dataIndex: 'crAccount',
+            { title: 'Journal Lines', key: 'journal', width: 220,
+              render: (_, r) => (
+                <div style={{ fontSize: 10, lineHeight: 1.6 }}>
+                  {r.drLines.map(dl => (
+                    <div key={dl.txnId} style={{ color: REDWOOD.error }}>
+                      Dr {dl.expenseType || '—'} <span style={{ float: 'right', fontWeight: 600 }}>{fmt(dl.amount)}</span>
+                    </div>
+                  ))}
+                  <div style={{ color: REDWOOD.success, borderTop: `1px solid ${REDWOOD.neutral200}` }}>
+                    Cr Cash <span style={{ float: 'right', fontWeight: 600 }}>{fmt(r.amount)}</span>
+                  </div>
+                </div>
+              )},
+            { title: 'Total', dataIndex: 'amount', width: 110, align: 'right' as const,
+              render: (v, r) => <Text style={{ fontSize: 13, fontWeight: 700 }}>{fmt(v)} <span style={{ fontSize: 11, fontWeight: 400 }}>{r.currency}</span></Text> },
+            { title: 'Period', dataIndex: 'periodName', width: 90,
+              render: (v) => <Tag color="blue" style={{ fontSize: 11 }}>{v || '—'}</Tag> },
+            { title: 'CR Cash Account', dataIndex: 'crAccount',
               render: (v, r) => (
                 <div>
                   <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.success }}>{v || '—'}</Text>
-                  {r.crAccountDesc && (
-                    <div style={{ fontSize: 10, color: REDWOOD.neutral600, marginTop: 1 }}>{r.crAccountDesc}</div>
-                  )}
+                  {r.crAccountDesc && <div style={{ fontSize: 10, color: REDWOOD.neutral600 }}>{r.crAccountDesc}</div>}
                 </div>
               )},
-            { title: 'Status', dataIndex: 'status', width: 130,
+            { title: 'Status', dataIndex: 'status', width: 150,
               render: (v, r) => {
                 if (v === 'pending')  return <Tag color="default" style={{ fontSize: 11 }}>Pending</Tag>;
-                if (v === 'running')  return <Tag icon={<SyncOutlined spin />} color="processing" style={{ fontSize: 11 }}>Running</Tag>;
-                if (v === 'success')  return <><Tag color="success" style={{ fontSize: 11 }}>Done</Tag>
-                  {r.message && <div style={{ fontSize: 10, color: REDWOOD.success, marginTop: 2 }}>{r.message}</div>}</>;
-                if (v === 'error')    return <><Tag color="error" style={{ fontSize: 11 }}>Error</Tag>
-                  {r.message && <div style={{ fontSize: 10, color: REDWOOD.error, marginTop: 2 }}>{r.message}</div>}</>;
+                if (v === 'running')  return <Tag icon={<SyncOutlined spin />} color="processing" style={{ fontSize: 11 }}>Running…</Tag>;
+                if (v === 'success')  return (
+                  <div>
+                    <Tag color="success" style={{ fontSize: 11 }}>Done</Tag>
+                    {r.message && <div style={{ fontSize: 10, color: REDWOOD.success, marginTop: 2 }}>{r.message}</div>}
+                  </div>
+                );
+                if (v === 'error')    return (
+                  <div>
+                    <Tag color="error" style={{ fontSize: 11 }}>Error</Tag>
+                    {r.message && <div style={{ fontSize: 10, color: REDWOOD.error, marginTop: 2 }}>{r.message}</div>}
+                  </div>
+                );
                 if (v === 'skipped')  return <Tag color="warning" style={{ fontSize: 11 }}>Already Posted</Tag>;
                 return null;
               }},
