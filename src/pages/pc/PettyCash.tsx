@@ -506,6 +506,8 @@ const RegisterDetail: React.FC<{
   const [attachListData, setAttachListData]          = useState<PCAttachment[]>([]);
   const [attachListLoading, setAttachListLoading]   = useState(false);
   const [attachListDeleting, setAttachListDeleting] = useState<number | null>(null);
+  const [attachListUrl, setAttachListUrl]           = useState<string>('');
+  const [attachListError, setAttachListError]       = useState<string>('');
   // File preview modal
   const [filePreviewOpen, setFilePreviewOpen]       = useState(false);
   const [filePreviewItem, setFilePreviewItem]       = useState<{ name: string; data: string; mimeType: string | null } | null>(null);
@@ -592,15 +594,18 @@ const RegisterDetail: React.FC<{
 
   // ── Open attachment list modal ────────────────────────────
   const openAttachList = async (txn: PCTransaction) => {
+    const url = `${APEX_DB_CONFIG.baseUrl}/pc/attachments?transactionId=${txn.transactionId}`;
     setAttachListTxn(txn);
     setAttachListData([]);
+    setAttachListError('');
+    setAttachListUrl(url);
     setAttachListLoading(true);
     setAttachListOpen(true);
     try {
       const list = await getAttachments(txn.registerId, txn.transactionId);
       setAttachListData(list);
-    } catch {
-      message.error('Failed to load attachments');
+    } catch (e: any) {
+      setAttachListError(e?.message ?? 'Failed to load attachments');
     } finally {
       setAttachListLoading(false);
     }
@@ -3616,15 +3621,38 @@ const RegisterDetail: React.FC<{
         open={attachListOpen}
         onCancel={() => setAttachListOpen(false)}
         footer={null}
-        width={560}
+        width={580}
         destroyOnClose
         zIndex={1050}
       >
+        {/* API URL bar — always visible for debugging */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '6px 10px', marginBottom: 12,
+          background: '#f0f5ff', borderRadius: 6,
+          border: '1px solid #adc6ff',
+        }}>
+          <ApiOutlined style={{ color: REDWOOD.info, flexShrink: 0 }} />
+          <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.info, flex: 1, wordBreak: 'break-all' }}>
+            GET {attachListUrl}
+          </Text>
+          <Tooltip title="Copy URL">
+            <Button type="text" size="small" icon={<DownloadOutlined style={{ fontSize: 11 }} />}
+              style={{ flexShrink: 0, padding: '0 4px' }}
+              onClick={() => { navigator.clipboard?.writeText(attachListUrl); message.success('URL copied'); }}
+            />
+          </Tooltip>
+        </div>
+
+        {attachListError && (
+          <Alert type="error" showIcon message={attachListError} style={{ marginBottom: 12, fontSize: 12 }} />
+        )}
+
         {attachListLoading ? (
           <div style={{ textAlign: 'center', padding: '32px 0' }}>
             <Spin size="small" tip="Loading…" />
           </div>
-        ) : attachListData.length === 0 ? (
+        ) : !attachListError && attachListData.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '32px 0', color: REDWOOD.neutral300 }}>
             <PaperClipOutlined style={{ fontSize: 32, display: 'block', marginBottom: 8 }} />
             No attachments found
