@@ -3,7 +3,7 @@ import {
   Layout, Card, Typography, Breadcrumb, Tabs, Form, Input, Select,
   DatePicker, Button, Table, Tag, Row, Col, Space, Divider,
   Modal, InputNumber, message, Tooltip, Statistic, Collapse, Progress, Descriptions, Upload,
-  Spin, Alert, Switch, Dropdown, Popover,
+  Spin, Alert, Switch, Dropdown, Popover, Badge,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { Link } from 'react-router-dom';
@@ -31,7 +31,8 @@ import {
   searchRegisters, getRegister, createRegister, updateRegister, deleteRegister,
   getTransactions, getTransaction, createTransaction, updateTransaction, updateTransactionStatus, deleteTransaction,
   getTransactionAttachment, getOpenAPPeriods, getNextVoucherNo,
-  type PCRegister, type PCTransaction, type APPeriod,
+  addAttachment, getAttachments, getAttachmentData, deleteAttachment,
+  type PCRegister, type PCTransaction, type APPeriod, type PCAttachment,
 } from '../../services/pc.service';
 import {
   searchCombinations,
@@ -427,6 +428,28 @@ function printRefGroupPDF(ref: string, txns: PCTransaction[], register: PCRegist
   doc.save(`pc-ref-${ref}.pdf`);
 }
 
+interface FileEntry {
+  uid: string;
+  name: string;
+  data: string;   // base64 without data: header
+  mimeType: string;
+}
+
+function readFileAsEntry(file: File): Promise<FileEntry> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const comma   = dataUrl.indexOf(',');
+      const base64  = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+      const mime    = dataUrl.slice(0, comma >= 0 ? comma : 0).match(/data:([^;]+)/)?.[1] || file.type;
+      resolve({ uid: file.uid ?? String(Date.now()), name: file.name, data: base64, mimeType: mime });
+    };
+    reader.onerror = reject;
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Register Detail Panel
 // ─────────────────────────────────────────────────────────────────────────────
@@ -470,13 +493,23 @@ const RegisterDetail: React.FC<{
   const [bankTxnRawError, setBankTxnRawError]           = useState<string>('');
   const [chargeAcctResolved, setChargeAcctResolved] =
     useState<Map<number, { code: string; desc: string }>>(new Map());
-  const [addExpenseAttachName, setAddExpenseAttachName] = useState<string>('');
-  const [addExpenseAttachData, setAddExpenseAttachData] = useState<string>('');
-  const [editExpenseAttachName, setEditExpenseAttachName] = useState<string>('');
-  const [editExpenseAttachData, setEditExpenseAttachData] = useState<string>('');
+  // Multi-file upload state (new RR_PC_ATTACHMENTS system)
+  const [addExpenseFiles, setAddExpenseFiles] = useState<FileEntry[]>([]);
+  const [editExpenseFiles, setEditExpenseFiles] = useState<FileEntry[]>([]);
+  // Old single-attachment viewer (backward compat for hasAttachment=Y rows)
   const [viewAttachOpen, setViewAttachOpen]   = useState(false);
   const [viewAttachData, setViewAttachData]   = useState<string>('');
   const [viewAttachName, setViewAttachName]   = useState<string>('');
+  // Attachment list modal (new system)
+  const [attachListOpen, setAttachListOpen]         = useState(false);
+  const [attachListTxn, setAttachListTxn]           = useState<PCTransaction | null>(null);
+  const [attachListData, setAttachListData]          = useState<PCAttachment[]>([]);
+  const [attachListLoading, setAttachListLoading]   = useState(false);
+  const [attachListDeleting, setAttachListDeleting] = useState<number | null>(null);
+  // File preview modal
+  const [filePreviewOpen, setFilePreviewOpen]       = useState(false);
+  const [filePreviewItem, setFilePreviewItem]       = useState<{ name: string; data: string; mimeType: string | null } | null>(null);
+  const [filePreviewLoading, setFilePreviewLoading] = useState(false);
   // ── Accounting state ──────────────────────────────────────────────────────
   const [selectedRowKeys, setSelectedRowKeys]   = useState<number[]>([]);
   const [txnSearch, setTxnSearch]               = useState('');
@@ -534,6 +567,71 @@ const RegisterDetail: React.FC<{
       message.error(e?.message ?? 'Update failed');
     } finally {
       setRefGroupSaving(false);
+    }
+  };
+
+  // ── Upload helper: post files to new attachment table ────────
+  const uploadFiles = async (
+    transactionId: number,
+    registerId: number,
+    referenceNo: string | null,
+    files: FileEntry[],
+  ) => {
+    for (const f of files) {
+      await addAttachment({
+        registerId,
+        transactionId,
+        referenceNo:  referenceNo ?? undefined,
+        fileName:     f.name,
+        fileData:     f.data,
+        mimeType:     f.mimeType,
+        createdBy:    currentUser,
+      });
+    }
+  };
+
+  // ── Open attachment list modal ────────────────────────────
+  const openAttachList = async (txn: PCTransaction) => {
+    setAttachListTxn(txn);
+    setAttachListData([]);
+    setAttachListLoading(true);
+    setAttachListOpen(true);
+    try {
+      const list = await getAttachments(txn.registerId, txn.transactionId);
+      setAttachListData(list);
+    } catch {
+      message.error('Failed to load attachments');
+    } finally {
+      setAttachListLoading(false);
+    }
+  };
+
+  const handleDeleteAttachment = async (attachmentId: number) => {
+    setAttachListDeleting(attachmentId);
+    try {
+      await deleteAttachment(attachmentId);
+      setAttachListData(prev => prev.filter(a => a.attachmentId !== attachmentId));
+      message.success('Attachment deleted');
+      onRefresh();
+    } catch (e: any) {
+      message.error(e?.message ?? 'Delete failed');
+    } finally {
+      setAttachListDeleting(null);
+    }
+  };
+
+  const openFilePreview = async (att: PCAttachment) => {
+    setFilePreviewItem(null);
+    setFilePreviewLoading(true);
+    setFilePreviewOpen(true);
+    try {
+      const data = await getAttachmentData(att.attachmentId);
+      setFilePreviewItem(data);
+    } catch {
+      message.error('Failed to load file');
+      setFilePreviewOpen(false);
+    } finally {
+      setFilePreviewLoading(false);
     }
   };
 
@@ -760,13 +858,11 @@ const RegisterDetail: React.FC<{
       chargeAccountCcid: editTxn.chargeAccountCcid,
       referenceNo:       editTxn.referenceNo,
       comments:          editTxn.comments,
-      attachment:        editTxn.attachment,
       employeeName:      editTxn.employeeName,
       receiptStatus:     editTxn.receiptStatus,
     });
     setEditAcctDesc(desc);
-    setEditExpenseAttachName(editTxn.attachment || '');
-    setEditExpenseAttachData('');
+    setEditExpenseFiles([]);
   }, [editTxnOpen, editTxn, distCombinations]);
 
   // ── Delete transaction (Unposted / Error only) ────────────
@@ -1045,17 +1141,17 @@ const RegisterDetail: React.FC<{
         chargeAccountCcid: values.chargeAccountCcid || null,
         referenceNo:       values.referenceNo   || null,
         comments:          values.comments      || null,
-        attachment:        editExpenseAttachName || values.attachment || null,
-        attachmentData:    editExpenseAttachData || undefined,
         employeeName:      values.employeeName  || null,
         receiptStatus:     values.receiptStatus || null,
         updatedBy:         currentUser,
       });
+      if (editExpenseFiles.length > 0) {
+        await uploadFiles(editTxn.transactionId, editTxn.registerId, editTxn.referenceNo, editExpenseFiles);
+      }
       message.success(`Line #${editTxn.lineNumber} updated`);
       setEditTxnOpen(false);
       setEditTxn(null);
-      setEditExpenseAttachName('');
-      setEditExpenseAttachData('');
+      setEditExpenseFiles([]);
       onRefresh();
     } catch (e: any) {
       message.error(e?.message ?? 'Update failed');
@@ -1214,7 +1310,7 @@ const RegisterDetail: React.FC<{
     }
     setSaving(true);
     try {
-      await createTransaction({
+      const result = await createTransaction({
         registerId:        register.registerId,
         transactionDate:   values.transactionDate.format('YYYY-MM-DD'),
         accountingDate:    values.accountingDate
@@ -1229,21 +1325,21 @@ const RegisterDetail: React.FC<{
         chargeAccountDesc: values.chargeAccountDesc || null,
         referenceNo:       addExpenseVoucherNo || null,
         comments:          values.comments,
-        attachment:        addExpenseAttachName || null,
-        attachmentData:    addExpenseAttachData || null,
         employeeName:      values.employeeName || null,
         receiptStatus:     values.receiptStatus || null,
         postingStatus:     'Unposted',
         createdBy:         currentUser,
       });
+      if (addExpenseFiles.length > 0) {
+        await uploadFiles(result.transactionId, register.registerId, addExpenseVoucherNo || null, addExpenseFiles);
+      }
       // Bump voucher immediately so next open shows correct incremented number
       const seqM = addExpenseVoucherNo.match(/(\d+)$/);
       const nextSeq = seqM ? parseInt(seqM[1], 10) + 1 : 1;
       setAddExpenseVoucherNo(`R${register.registerId}-${String(nextSeq).padStart(2, '0')}`);
       message.success('Expense recorded');
       expenseForm.resetFields();
-      setAddExpenseAttachName('');
-      setAddExpenseAttachData('');
+      setAddExpenseFiles([]);
       needsRefresh.current = false;
       setAddExpenseOpen(false);
       onRefresh();
@@ -1275,9 +1371,10 @@ const RegisterDetail: React.FC<{
     }
     setSaving(true);
     let created = 0;
+    let firstTxnId: number | null = null;
     try {
       for (const line of validLines) {
-        await createTransaction({
+        const result = await createTransaction({
           registerId:        register.registerId,
           transactionDate:   vals.transactionDate.format('YYYY-MM-DD'),
           accountingDate:    accDate.format('YYYY-MM-DD'),
@@ -1293,7 +1390,11 @@ const RegisterDetail: React.FC<{
           postingStatus:     'Unposted',
           createdBy:         currentUser,
         });
+        if (firstTxnId === null) firstTxnId = result.transactionId;
         created++;
+      }
+      if (firstTxnId !== null && addExpenseFiles.length > 0) {
+        await uploadFiles(firstTxnId, register.registerId, addExpenseVoucherNo || null, addExpenseFiles);
       }
       // Bump voucher so next open shows the next number in sequence
       const seqMm = addExpenseVoucherNo.match(/(\d+)$/);
@@ -1303,6 +1404,7 @@ const RegisterDetail: React.FC<{
       expenseForm.resetFields();
       setExpenseLines([makeNewLine()]);
       setExpenseMode('single');
+      setAddExpenseFiles([]);
       setAddExpenseOpen(false);
       onRefresh();
     } catch (e: any) {
@@ -1812,21 +1914,39 @@ const RegisterDetail: React.FC<{
       render: (v) => v === 'YES' ? <Tag color="green" style={{ fontSize: 11 }}>YES</Tag>
         : v === 'NO' ? <Tag color="orange" style={{ fontSize: 11 }}>NO</Tag>
         : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
-    { title: 'Attachment', dataIndex: 'hasAttachment', width: 90, align: 'center' as const,
-      render: (_v: string | null, rec: PCTransaction) => rec.hasAttachment === 'Y' ? (
-        <Tooltip title={rec.attachment || 'View attachment'}>
-          <Button type="text" size="small" icon={<PaperClipOutlined style={{ color: REDWOOD.info }} />}
-            onClick={() => {
-              getTransactionAttachment(rec.transactionId)
-                .then(res => {
-                  setViewAttachData(res.attachmentData);
-                  setViewAttachName(res.fileName || rec.attachment || 'attachment');
-                  setViewAttachOpen(true);
-                })
-                .catch(() => message.error('Failed to load attachment'));
-            }} />
-        </Tooltip>
-      ) : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
+    { title: 'Attachment', dataIndex: 'hasAttachment', width: 100, align: 'center' as const,
+      render: (_v: string | null, rec: PCTransaction) => {
+        const count = rec.attachmentCount ?? 0;
+        if (count > 0) {
+          return (
+            <Badge count={count} size="small" offset={[4, 0]}>
+              <Button type="text" size="small"
+                icon={<PaperClipOutlined style={{ color: REDWOOD.info }} />}
+                onClick={() => openAttachList(rec)}
+              />
+            </Badge>
+          );
+        }
+        if (rec.hasAttachment === 'Y') {
+          return (
+            <Tooltip title={rec.attachment || 'View attachment (legacy)'}>
+              <Button type="text" size="small"
+                icon={<PaperClipOutlined style={{ color: REDWOOD.neutral600 }} />}
+                onClick={() => {
+                  getTransactionAttachment(rec.transactionId)
+                    .then(res => {
+                      setViewAttachData(res.attachmentData);
+                      setViewAttachName(res.fileName || rec.attachment || 'attachment');
+                      setViewAttachOpen(true);
+                    })
+                    .catch(() => message.error('Failed to load attachment'));
+                }}
+              />
+            </Tooltip>
+          );
+        }
+        return <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text>;
+      }},
     { title: 'Created By', dataIndex: 'createdBy', width: 130, ellipsis: true,
       render: (v) => <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{v || '—'}</Text> },
     { title: '', key: 'actions', width: 100, align: 'center' as const, fixed: 'right' as const,
@@ -2710,38 +2830,34 @@ const RegisterDetail: React.FC<{
               <Form.Item label="Comments" name="comments">
                 <Input.TextArea rows={2} placeholder="Optional" />
               </Form.Item>
-              <Form.Item label="Attachment">
+              <Form.Item label="Attachments">
                 <Space direction="vertical" style={{ width: '100%' }} size={4}>
                   <Upload
-                    beforeUpload={(file) => {
-                      const reader = new FileReader();
-                      reader.readAsDataURL(file);
-                      reader.onload = () => {
-                        setAddExpenseAttachData(reader.result as string);
-                        setAddExpenseAttachName(file.name);
-                      };
+                    multiple
+                    beforeUpload={async (file) => {
+                      try {
+                        const entry = await readFileAsEntry(file);
+                        setAddExpenseFiles(prev => [...prev, entry]);
+                      } catch { message.error(`Failed to read ${file.name}`); }
                       return false;
                     }}
                     showUploadList={false}
                     accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
-                    maxCount={1}
                   >
-                    <Button icon={<UploadOutlined />}>
-                      {addExpenseAttachName ? 'Replace file' : 'Upload file'}
-                    </Button>
+                    <Button icon={<UploadOutlined />}>Upload Files</Button>
                   </Upload>
-                  {addExpenseAttachName && (
-                    <Space size={4}>
+                  {addExpenseFiles.map(f => (
+                    <Space key={f.uid} size={4} style={{ display: 'flex' }}>
                       <PaperClipOutlined style={{ color: REDWOOD.info }} />
-                      <Text style={{ fontSize: 12, color: REDWOOD.info }}>{addExpenseAttachName}</Text>
+                      <Text style={{ fontSize: 12, color: REDWOOD.info }}>{f.name}</Text>
                       <Button type="text" size="small" danger icon={<CloseOutlined />}
-                        onClick={() => { setAddExpenseAttachName(''); setAddExpenseAttachData(''); }} />
+                        onClick={() => setAddExpenseFiles(prev => prev.filter(x => x.uid !== f.uid))} />
                     </Space>
-                  )}
+                  ))}
                 </Space>
               </Form.Item>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
-                <Button onClick={() => { setAddExpenseOpen(false); setAddExpenseAttachName(''); setAddExpenseAttachData(''); }}>Cancel</Button>
+                <Button onClick={() => { setAddExpenseOpen(false); setAddExpenseFiles([]); }}>Cancel</Button>
                 <Button type="primary" htmlType="submit" loading={saving}
                   style={{ background: REDWOOD.warning, borderColor: REDWOOD.warning }}>
                   Save Expense
@@ -2869,8 +2985,37 @@ const RegisterDetail: React.FC<{
 
               <Divider style={{ margin: '10px 0' }} />
 
+              {/* Shared attachments for multi-line voucher */}
+              <div style={{ marginBottom: 10 }}>
+                <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Attachments (shared for this voucher):</Text>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6, alignItems: 'center' }}>
+                  <Upload
+                    multiple
+                    beforeUpload={async (file) => {
+                      try {
+                        const entry = await readFileAsEntry(file);
+                        setAddExpenseFiles(prev => [...prev, entry]);
+                      } catch { message.error(`Failed to read ${file.name}`); }
+                      return false;
+                    }}
+                    showUploadList={false}
+                    accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+                  >
+                    <Button size="small" icon={<UploadOutlined />}>Upload Files</Button>
+                  </Upload>
+                  {addExpenseFiles.map(f => (
+                    <Space key={f.uid} size={4}>
+                      <PaperClipOutlined style={{ color: REDWOOD.info, fontSize: 12 }} />
+                      <Text style={{ fontSize: 12, color: REDWOOD.info }}>{f.name}</Text>
+                      <Button type="text" size="small" danger icon={<CloseOutlined />}
+                        onClick={() => setAddExpenseFiles(prev => prev.filter(x => x.uid !== f.uid))} />
+                    </Space>
+                  ))}
+                </div>
+              </div>
+
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                <Button onClick={() => { setAddExpenseOpen(false); setExpenseMode('single'); setExpenseLines([makeNewLine()]); }}>Cancel</Button>
+                <Button onClick={() => { setAddExpenseOpen(false); setExpenseMode('single'); setExpenseLines([makeNewLine()]); setAddExpenseFiles([]); }}>Cancel</Button>
                 <Button
                   type="primary"
                   loading={saving}
@@ -3053,48 +3198,44 @@ const RegisterDetail: React.FC<{
               <Input.TextArea rows={2} placeholder="Optional" />
             </Form.Item>
             {editTxn.transactionType === 'Expense' && (
-              <Form.Item label="Attachment">
+              <Form.Item label="Add Attachments">
                 <Space direction="vertical" style={{ width: '100%' }} size={4}>
-                  <Space size={8}>
+                  <Space size={8} wrap>
                     <Upload
-                      beforeUpload={(file) => {
-                        const reader = new FileReader();
-                        reader.readAsDataURL(file);
-                        reader.onload = () => {
-                          setEditExpenseAttachData(reader.result as string);
-                          setEditExpenseAttachName(file.name);
-                        };
+                      multiple
+                      beforeUpload={async (file) => {
+                        try {
+                          const entry = await readFileAsEntry(file);
+                          setEditExpenseFiles(prev => [...prev, entry]);
+                        } catch { message.error(`Failed to read ${file.name}`); }
                         return false;
                       }}
                       showUploadList={false}
                       accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
-                      maxCount={1}
                     >
-                      <Button icon={<UploadOutlined />}>
-                        {editExpenseAttachName ? 'Replace file' : 'Upload file'}
-                      </Button>
+                      <Button icon={<UploadOutlined />}>Upload New Files</Button>
                     </Upload>
-                    {editExpenseAttachData && (
-                      <Button size="small" icon={<EyeOutlined />}
-                        onClick={() => { setViewAttachData(editExpenseAttachData); setViewAttachName(editExpenseAttachName); setViewAttachOpen(true); }}>
-                        View
+                    {(editTxn.attachmentCount ?? 0) > 0 && (
+                      <Button size="small" icon={<PaperClipOutlined />}
+                        onClick={() => openAttachList(editTxn)}>
+                        View Existing ({editTxn.attachmentCount})
                       </Button>
                     )}
                   </Space>
-                  {editExpenseAttachName && (
-                    <Space size={4}>
+                  {editExpenseFiles.map(f => (
+                    <Space key={f.uid} size={4} style={{ display: 'flex' }}>
                       <PaperClipOutlined style={{ color: REDWOOD.info }} />
-                      <Text style={{ fontSize: 12, color: REDWOOD.info }}>{editExpenseAttachName}</Text>
+                      <Text style={{ fontSize: 12, color: REDWOOD.info }}>{f.name}</Text>
                       <Button type="text" size="small" danger icon={<CloseOutlined />}
-                        onClick={() => { setEditExpenseAttachName(''); setEditExpenseAttachData(''); }} />
+                        onClick={() => setEditExpenseFiles(prev => prev.filter(x => x.uid !== f.uid))} />
                     </Space>
-                  )}
+                  ))}
                 </Space>
               </Form.Item>
             )}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
-              <Button onClick={() => { setEditTxnOpen(false); setEditTxn(null); setEditExpenseAttachName(''); setEditExpenseAttachData(''); }}>Cancel</Button>
+              <Button onClick={() => { setEditTxnOpen(false); setEditTxn(null); setEditExpenseFiles([]); }}>Cancel</Button>
               <Button type="primary" htmlType="submit" loading={saving}
                 style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}>
                 Save Changes
@@ -3420,6 +3561,179 @@ const RegisterDetail: React.FC<{
         ) : (
           <div style={{ textAlign: 'center', padding: 32 }}><Text type="secondary">Bank transaction not found.</Text></div>
         )}
+      </Modal>
+
+      {/* ── Attachment List Modal (new RR_PC_ATTACHMENTS system) ── */}
+      <Modal
+        title={
+          <Space>
+            <PaperClipOutlined style={{ color: REDWOOD.info }} />
+            Attachments
+            {attachListTxn && (
+              <Tag color="blue" style={{ fontSize: 11 }}>
+                Line #{attachListTxn.lineNumber}
+                {attachListTxn.referenceNo && ` · ${attachListTxn.referenceNo}`}
+              </Tag>
+            )}
+          </Space>
+        }
+        open={attachListOpen}
+        onCancel={() => setAttachListOpen(false)}
+        footer={null}
+        width={560}
+        destroyOnClose
+        zIndex={1050}
+      >
+        {attachListLoading ? (
+          <div style={{ textAlign: 'center', padding: '32px 0' }}>
+            <Spin size="small" tip="Loading…" />
+          </div>
+        ) : attachListData.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '32px 0', color: REDWOOD.neutral300 }}>
+            <PaperClipOutlined style={{ fontSize: 32, display: 'block', marginBottom: 8 }} />
+            No attachments found
+          </div>
+        ) : (
+          <div style={{ marginBottom: 12 }}>
+            {attachListData.map((att, idx) => (
+              <div key={att.attachmentId} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '8px 12px',
+                background: idx % 2 === 0 ? '#fafafa' : '#fff',
+                borderRadius: 4, marginBottom: 4,
+                border: `1px solid ${REDWOOD.neutral200}`,
+              }}>
+                <Space size={8}>
+                  <PaperClipOutlined style={{ color: REDWOOD.info }} />
+                  <div>
+                    <Text style={{ fontSize: 13, fontWeight: 500 }}>{att.fileName}</Text>
+                    <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>
+                      {att.createdBy} · {att.creationDate}
+                      {att.mimeType && <span style={{ marginLeft: 6, color: REDWOOD.neutral300 }}>{att.mimeType}</span>}
+                    </div>
+                  </div>
+                </Space>
+                <Space size={4}>
+                  <Tooltip title="View / Download">
+                    <Button size="small" icon={<EyeOutlined />}
+                      onClick={() => openFilePreview(att)} />
+                  </Tooltip>
+                  <Tooltip title="Delete attachment">
+                    <Button size="small" danger icon={<DeleteOutlined />}
+                      loading={attachListDeleting === att.attachmentId}
+                      onClick={() => {
+                        Modal.confirm({
+                          title: 'Delete attachment?',
+                          content: `"${att.fileName}" will be permanently removed.`,
+                          okText: 'Delete', okButtonProps: { danger: true },
+                          onOk: () => handleDeleteAttachment(att.attachmentId),
+                          zIndex: 1100,
+                        });
+                      }} />
+                  </Tooltip>
+                </Space>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Upload more files to this transaction */}
+        {attachListTxn && (
+          <div style={{ borderTop: `1px solid ${REDWOOD.neutral200}`, paddingTop: 12 }}>
+            <Upload
+              multiple
+              beforeUpload={async (file) => {
+                try {
+                  const entry = await readFileAsEntry(file);
+                  await addAttachment({
+                    registerId:    attachListTxn.registerId,
+                    transactionId: attachListTxn.transactionId,
+                    referenceNo:   attachListTxn.referenceNo ?? undefined,
+                    fileName:      entry.name,
+                    fileData:      entry.data,
+                    mimeType:      entry.mimeType,
+                    createdBy:     currentUser,
+                  });
+                  message.success(`${file.name} uploaded`);
+                  const list = await getAttachments(attachListTxn.registerId, attachListTxn.transactionId);
+                  setAttachListData(list);
+                  onRefresh();
+                } catch (e: any) {
+                  message.error(e?.message ?? 'Upload failed');
+                }
+                return false;
+              }}
+              showUploadList={false}
+              accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+            >
+              <Button icon={<UploadOutlined />} style={{ borderStyle: 'dashed', width: '100%' }}>
+                Add More Files
+              </Button>
+            </Upload>
+          </div>
+        )}
+      </Modal>
+
+      {/* ── File Preview Modal ────────────────────────────────── */}
+      <Modal
+        title={
+          <Space>
+            <EyeOutlined style={{ color: REDWOOD.info }} />
+            {filePreviewItem?.name ?? 'File Preview'}
+          </Space>
+        }
+        open={filePreviewOpen}
+        onCancel={() => setFilePreviewOpen(false)}
+        footer={[
+          filePreviewItem && (
+            <Button key="download" icon={<DownloadOutlined />}
+              onClick={() => {
+                const link = document.createElement('a');
+                link.href = `data:${filePreviewItem.mimeType || 'application/octet-stream'};base64,${filePreviewItem.data}`;
+                link.download = filePreviewItem.name;
+                link.click();
+              }}>
+              Download
+            </Button>
+          ),
+          <Button key="close" onClick={() => setFilePreviewOpen(false)}>Close</Button>,
+        ]}
+        width={720}
+        destroyOnClose
+        zIndex={1100}
+      >
+        {filePreviewLoading ? (
+          <div style={{ textAlign: 'center', padding: '48px 0' }}>
+            <Spin size="large" tip="Loading file…" />
+          </div>
+        ) : filePreviewItem ? (
+          (() => {
+            const mt = filePreviewItem.mimeType || '';
+            const src = `data:${mt || 'application/octet-stream'};base64,${filePreviewItem.data}`;
+            if (mt.startsWith('image/')) {
+              return (
+                <img src={src} alt={filePreviewItem.name}
+                  style={{ maxWidth: '100%', maxHeight: '60vh', objectFit: 'contain', display: 'block', margin: '0 auto' }}
+                />
+              );
+            }
+            if (mt === 'application/pdf') {
+              return (
+                <iframe src={src} title={filePreviewItem.name}
+                  style={{ width: '100%', height: '60vh', border: 'none' }} />
+              );
+            }
+            return (
+              <div style={{ textAlign: 'center', padding: '32px 0' }}>
+                <PaperClipOutlined style={{ fontSize: 48, color: REDWOOD.neutral300, display: 'block', marginBottom: 12 }} />
+                <Text style={{ fontSize: 14 }}>{filePreviewItem.name}</Text>
+                <div style={{ marginTop: 8, fontSize: 12, color: REDWOOD.neutral600 }}>
+                  This file type cannot be previewed — use Download.
+                </div>
+              </div>
+            );
+          })()
+        ) : null}
       </Modal>
 
       {/* ── Attachment Viewer ──────────────────────────────── */}

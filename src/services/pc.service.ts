@@ -47,6 +47,19 @@ export interface PCTransaction {
   createdBy: string | null;
   creationDate: string | null;
   runningBalance: number;
+  attachmentCount?: number;
+}
+
+export interface PCAttachment {
+  attachmentId: number;
+  registerId: number;
+  transactionId: number | null;
+  referenceNo: string | null;
+  fileName: string;
+  mimeType: string | null;
+  createdBy: string | null;
+  creationDate: string | null;
+  fileData?: string; // only present in single-get response
 }
 
 export interface APPeriod {
@@ -194,4 +207,56 @@ export async function getNextVoucherNo(registerId: number): Promise<string> {
   const data = await res.json();
   if (!res.ok) throw new Error(data?.message || `HTTP ${res.status}`);
   return data.voucherNo as string;
+}
+
+export async function addAttachment(payload: {
+  registerId: number;
+  transactionId?: number;
+  referenceNo?: string;
+  fileName: string;
+  fileData: string;
+  mimeType?: string;
+  createdBy?: string;
+}): Promise<{ attachmentId: number }> {
+  const res = await fetch(`${BASE}/attachments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data?.message || `HTTP ${res.status}`);
+  return data;
+}
+
+export async function getAttachments(
+  registerId: number,
+  transactionId?: number,
+  referenceNo?: string,
+): Promise<PCAttachment[]> {
+  const qs = new URLSearchParams();
+  if (transactionId != null) qs.set('transactionId', String(transactionId));
+  else {
+    qs.set('registerId', String(registerId));
+    if (referenceNo) qs.set('referenceNo', referenceNo);
+  }
+  const res = await fetch(`${BASE}/attachments?${qs.toString()}`, { headers: { Accept: 'application/json' } });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.message || `HTTP ${res.status}`);
+  return (data.items || []) as PCAttachment[];
+}
+
+export async function getAttachmentData(attachmentId: number): Promise<{ fileName: string; fileData: string; mimeType: string | null }> {
+  const res = await fetch(`${BASE}/attachments/${attachmentId}`, { headers: { Accept: 'application/json' } });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data?.message || `HTTP ${res.status}`);
+  return { fileName: data.fileName, fileData: data.fileData, mimeType: data.mimeType ?? null };
+}
+
+export async function deleteAttachment(attachmentId: number): Promise<void> {
+  const res = await fetch(`${BASE}/attachments/${attachmentId}`, {
+    method: 'DELETE',
+    headers: { Accept: 'application/json' },
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data?.message || `HTTP ${res.status}`);
 }
