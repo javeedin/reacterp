@@ -30,7 +30,7 @@ import { APEX_DB_CONFIG } from '../../config/api.config';
 import {
   searchRegisters, getRegister, createRegister, updateRegister, deleteRegister,
   getTransactions, getTransaction, createTransaction, updateTransaction, updateTransactionStatus, deleteTransaction,
-  getTransactionAttachment, getOpenAPPeriods,
+  getTransactionAttachment, getOpenAPPeriods, getNextVoucherNo,
   type PCRegister, type PCTransaction, type APPeriod,
 } from '../../services/pc.service';
 import {
@@ -511,6 +511,9 @@ const RegisterDetail: React.FC<{
   const [reverseBankData, setReverseBankData]           = useState<any | null>(null);
   const [reverseBankLoading, setReverseBankLoading]     = useState(false);
   const [reverseScenario, setReverseScenario]           = useState<'no_bank' | 'bank_void' | 'bank_unr' | 'bank_accounted'>('no_bank');
+  const [addExpenseVoucherNo, setAddExpenseVoucherNo] = useState('');
+  const [addMoneyVoucherNo,   setAddMoneyVoucherNo]   = useState('');
+  const [voucherNoLoading,    setVoucherNoLoading]    = useState(false);
 
   const updateLine = (key: string, patch: Partial<ExpenseLine>) =>
     setExpenseLines(prev => prev.map(l => l.key === key ? { ...l, ...patch } : l));
@@ -669,6 +672,25 @@ const RegisterDetail: React.FC<{
       .then(p => { setOpenPeriods(p); setPeriodsLoaded(true); })
       .catch(() => { setPeriodsLoaded(true); });
   }, []);
+
+  // Auto-generate voucher number when Add Expense or Add Money modal opens
+  useEffect(() => {
+    if (!addExpenseOpen) return;
+    setVoucherNoLoading(true);
+    getNextVoucherNo(register.registerId)
+      .then(v => setAddExpenseVoucherNo(v))
+      .catch(() => setAddExpenseVoucherNo(`R${register.registerId}-01`))
+      .finally(() => setVoucherNoLoading(false));
+  }, [addExpenseOpen]);
+
+  useEffect(() => {
+    if (!addMoneyOpen) return;
+    setVoucherNoLoading(true);
+    getNextVoucherNo(register.registerId)
+      .then(v => setAddMoneyVoucherNo(v))
+      .catch(() => setAddMoneyVoucherNo(`R${register.registerId}-01`))
+      .finally(() => setVoucherNoLoading(false));
+  }, [addMoneyOpen]);
 
   // ── Derive AP period for a given date ────────────────────
   const findAPPeriod = (date: dayjs.Dayjs | null): APPeriod | null => {
@@ -835,6 +857,8 @@ const RegisterDetail: React.FC<{
           throw new Error(negData.message ?? `Bank transaction POST failed (HTTP ${negRes.status})`);
         }
         const newBankTxnId: number | null = negData.externalTransactionId ?? null;
+        let revVoucherNoC: string | undefined;
+        try { revVoucherNoC = await getNextVoucherNo(reverseTxn.registerId); } catch { revVoucherNoC = undefined; }
 
         await createTransaction({
           registerId:        reverseTxn.registerId,
@@ -848,7 +872,7 @@ const RegisterDetail: React.FC<{
           chargeAccountCcid: reverseTxn.chargeAccountCcid || undefined,
           chargeAccountDesc: reverseTxn.chargeAccountDesc || undefined,
           postingStatus:     'Unposted',
-          referenceNo:       reverseTxn.referenceNo || undefined,
+          referenceNo:       revVoucherNoC,
           bankTxnId:         newBankTxnId ?? undefined,
           comments:          reverseComments.trim()
             ? reverseComments.trim()
@@ -866,6 +890,8 @@ const RegisterDetail: React.FC<{
 
       // ── Scenario B (default): bank is UNR + unaccounted, or no bank txn ─
       // Create Adjustment, then optionally void the bank transaction.
+      let revVoucherNoB: string | undefined;
+      try { revVoucherNoB = await getNextVoucherNo(reverseTxn.registerId); } catch { revVoucherNoB = undefined; }
       await createTransaction({
         registerId:        reverseTxn.registerId,
         transactionDate:   dayjs().format('YYYY-MM-DD'),
@@ -878,7 +904,7 @@ const RegisterDetail: React.FC<{
         chargeAccountCcid: reverseTxn.chargeAccountCcid || undefined,
         chargeAccountDesc: reverseTxn.chargeAccountDesc || undefined,
         postingStatus:     'Unposted',
-        referenceNo:       reverseTxn.referenceNo || undefined,
+        referenceNo:       revVoucherNoB,
         bankTxnId:         reverseTxn.bankTxnId   || undefined,
         comments:          reverseComments.trim()
           ? reverseComments.trim()
@@ -934,6 +960,8 @@ const RegisterDetail: React.FC<{
       onOk: async () => {
         setTxnActionLoading(txn.transactionId);
         try {
+          let quickRevVoucherNo: string | undefined;
+          try { quickRevVoucherNo = await getNextVoucherNo(txn.registerId); } catch { quickRevVoucherNo = undefined; }
           await createTransaction({
             registerId:      txn.registerId,
             transactionDate: dayjs().format('YYYY-MM-DD'),
@@ -947,7 +975,7 @@ const RegisterDetail: React.FC<{
             chargeAccountDesc: txn.chargeAccountDesc || undefined,
             postingStatus:   'Unposted',
             comments:        `Reversal of Line #${txn.lineNumber}${txn.comments ? ' — ' + txn.comments : ''}`,
-            referenceNo:     txn.referenceNo || undefined,
+            referenceNo:     quickRevVoucherNo,
             createdBy:       currentUser,
           });
           message.success(`Reversal created for Line #${txn.lineNumber}`);
@@ -1038,7 +1066,7 @@ const RegisterDetail: React.FC<{
         creditAmount:       0,
         chargeAccountCcid:  values.chargeAccountCcid || null,
         chargeAccountDesc:  values.chargeAccountDesc || null,
-        referenceNo:        values.referenceNo || null,
+        referenceNo:        addMoneyVoucherNo || null,
         bankTxnId:          linkedBankTxnRef ? (Number(linkedBankTxnRef) || null) : null,
         comments:           values.comments,
         postingStatus:      'Unposted',
@@ -1132,7 +1160,6 @@ const RegisterDetail: React.FC<{
         setBankTxnLookupResult(lookupResult);
         message.success(`Bank transaction created — ID: ${txnRef}`);
         setLinkedBankTxnRef(txnRef);
-        moneyForm.setFieldsValue({ referenceNo: uniqueRef });
         // Copy offset account → charge account in Add Money
         const offsetAcct = bankTxnForm.getFieldValue('offsetAccountCombination');
         if (offsetAcct) {
@@ -1180,7 +1207,7 @@ const RegisterDetail: React.FC<{
         creditAmount:      values.amount,
         chargeAccountCcid: values.chargeAccountCcid || null,
         chargeAccountDesc: values.chargeAccountDesc || null,
-        referenceNo:       values.referenceNo,
+        referenceNo:       addExpenseVoucherNo || null,
         comments:          values.comments,
         attachment:        addExpenseAttachName || null,
         attachmentData:    addExpenseAttachData || null,
@@ -1205,7 +1232,7 @@ const RegisterDetail: React.FC<{
 
   // ── Add Multiple Expenses ──────────────────────────────────
   const handleAddMultiExpense = async () => {
-    const vals = expenseForm.getFieldsValue(['transactionDate', 'accountingDate', 'currency', 'referenceNo']);
+    const vals = expenseForm.getFieldsValue(['transactionDate', 'accountingDate', 'currency']);
     if (!vals.transactionDate) { message.error('Transaction Date is required'); return; }
     const accDate = vals.accountingDate ?? vals.transactionDate;
     if (periodsLoaded && openPeriods.length > 0 && !findAPPeriod(accDate)) {
@@ -1237,7 +1264,7 @@ const RegisterDetail: React.FC<{
           creditAmount:      line.amount!,
           chargeAccountCcid: line.chargeAccountCcid || null,
           chargeAccountDesc: line.chargeAccountDesc || null,
-          referenceNo:       vals.referenceNo || null,
+          referenceNo:       addExpenseVoucherNo || null,
           comments:          line.description || null,
           postingStatus:     'Unposted',
           createdBy:         currentUser,
@@ -2293,8 +2320,14 @@ const RegisterDetail: React.FC<{
             </div>
           )}
 
-          <Form.Item label="Reference No" name="referenceNo">
-            <Input placeholder="Auto-filled from bank transaction reference" />
+          <Form.Item label="Voucher No">
+            <Input
+              value={addMoneyVoucherNo}
+              readOnly
+              prefix={<TagOutlined />}
+              suffix={voucherNoLoading ? <SyncOutlined spin style={{ fontSize: 11 }} /> : null}
+              style={{ fontFamily: 'monospace', color: '#1677ff', fontWeight: 600, background: '#f0f5ff', cursor: 'not-allowed' }}
+            />
           </Form.Item>
           <Form.Item label="Comments" name="comments">
             <Input.TextArea rows={2} placeholder="Optional" />
@@ -2548,9 +2581,14 @@ const RegisterDetail: React.FC<{
               </Form.Item>
             </Col>
             <Col span={expenseMode === 'multi' ? 5 : 12}>
-              <Form.Item label="Reference No" name="referenceNo"
-                rules={[{ required: true, message: 'Reference No is required' }]}>
-                <Input placeholder="e.g. EXP-001" />
+              <Form.Item label="Voucher No">
+                <Input
+                  value={addExpenseVoucherNo}
+                  readOnly
+                  prefix={<TagOutlined />}
+                  suffix={voucherNoLoading ? <SyncOutlined spin style={{ fontSize: 11 }} /> : null}
+                  style={{ fontFamily: 'monospace', color: '#1677ff', fontWeight: 600, background: '#f0f5ff', cursor: 'not-allowed' }}
+                />
               </Form.Item>
             </Col>
           </Row>
@@ -2920,8 +2958,12 @@ const RegisterDetail: React.FC<{
                 </Col>
               )}
               <Col span={12}>
-                <Form.Item label="Reference No" name="referenceNo">
-                  <Input placeholder="Optional" />
+                <Form.Item label="Voucher No" name="referenceNo">
+                  <Input
+                    readOnly
+                    prefix={<TagOutlined />}
+                    style={{ fontFamily: 'monospace', color: '#1677ff', fontWeight: 600, background: '#f0f5ff', cursor: 'not-allowed' }}
+                  />
                 </Form.Item>
               </Col>
             </Row>

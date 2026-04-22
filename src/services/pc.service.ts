@@ -188,3 +188,10 @@ export async function updateTransactionStatus(
   const data = await res.json();
   if (!res.ok || !data.success) throw new Error(data?.message || `HTTP ${res.status}`);
 }
+
+export async function getNextVoucherNo(registerId: number): Promise<string> {
+  const res = await fetch(`${BASE}/registers/${registerId}/nextvoucherno`, { headers: { Accept: 'application/json' } });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.message || `HTTP ${res.status}`);
+  return data.voucherNo as string;
+}
