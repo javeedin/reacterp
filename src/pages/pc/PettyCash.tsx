@@ -635,8 +635,15 @@ const RegisterDetail: React.FC<{
     setFilePreviewLoading(true);
     setFilePreviewOpen(true);
     try {
-      const data = await getAttachmentData(att.attachmentId);
-      setFilePreviewItem(data);
+      const raw = await getAttachmentData(att.attachmentId);
+      // derive mime type from extension when the server returns null
+      const ext = raw.fileName.split('.').pop()?.toLowerCase() ?? '';
+      const extMime: Record<string, string> = {
+        png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+        webp: 'image/webp', svg: 'image/svg+xml', pdf: 'application/pdf',
+      };
+      const mimeType = raw.mimeType || extMime[ext] || 'application/octet-stream';
+      setFilePreviewItem({ name: raw.fileName, data: raw.fileData, mimeType });
     } catch (e: any) {
       setFilePreviewError(e?.message ?? 'Failed to load file');
     } finally {
@@ -3799,32 +3806,36 @@ const RegisterDetail: React.FC<{
           </div>
         ) : filePreviewItem ? (
           (() => {
-            const mt = filePreviewItem.mimeType || '';
-            const src = `data:${mt || 'application/octet-stream'};base64,${filePreviewItem.data}`;
+            const mt   = filePreviewItem.mimeType || 'application/octet-stream';
+            const src  = `data:${mt};base64,${filePreviewItem.data}`;
             if (mt.startsWith('image/')) {
               return (
                 <img src={src} alt={filePreviewItem.name}
                   style={{ maxWidth: '100%', maxHeight: '60vh', objectFit: 'contain', display: 'block', margin: '0 auto' }}
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                 />
               );
             }
             if (mt === 'application/pdf') {
               return (
-                <iframe src={src} title={filePreviewItem.name}
-                  style={{ width: '100%', height: '60vh', border: 'none' }} />
+                <object data={src} type="application/pdf"
+                  style={{ width: '100%', height: '60vh', border: 'none' }}>
+                  <iframe src={src} title={filePreviewItem.name}
+                    style={{ width: '100%', height: '60vh', border: 'none' }} />
+                </object>
               );
             }
             return (
               <div style={{ textAlign: 'center', padding: '32px 0' }}>
                 <PaperClipOutlined style={{ fontSize: 48, color: REDWOOD.neutral300, display: 'block', marginBottom: 12 }} />
-                <Text style={{ fontSize: 14 }}>{filePreviewItem.name}</Text>
-                <div style={{ marginTop: 8, fontSize: 12, color: REDWOOD.neutral600 }}>
-                  This file type cannot be previewed — use Download.
-                </div>
+                <Text style={{ fontSize: 14, display: 'block' }}>{filePreviewItem.name}</Text>
+                <Text style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginTop: 8 }}>
+                  This file type cannot be previewed — use the Download button.
+                </Text>
               </div>
             );
           })()
-        ) : null}
+        ) : !filePreviewError ? null : null}
       </Modal>
 
       {/* ── Attachment Viewer ──────────────────────────────── */}
