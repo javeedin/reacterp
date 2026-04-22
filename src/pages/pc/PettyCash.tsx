@@ -623,6 +623,8 @@ const RegisterDetail: React.FC<{
   }, [bankTxnModalOpen]);
 
   // ── Batch-fetch bank txn status whenever transactions change ──
+  // If a bank txn comes back as accountingFlag='Y' but the linked PC
+  // transaction is still Unposted, auto-promote it to Posted.
   useEffect(() => {
     const ids = [...new Set(
       transactions
@@ -633,10 +635,25 @@ const RegisterDetail: React.FC<{
     const url = `${APEX_DB_CONFIG.baseUrl}/cash/externaltransactions/batchstatus/${ids.join(',')}`;
     fetch(url, { headers: { Accept: 'application/json' } })
       .then(r => r.json())
-      .then((data: { items?: { externalTransactionId: number; status: string; accountingFlag: string }[] }) => {
+      .then(async (data: { items?: { externalTransactionId: number; status: string; accountingFlag: string }[] }) => {
         const map = new Map<number, { status: string; accountingFlag: string }>();
-        (data.items || []).forEach(item => map.set(item.externalTransactionId, { status: item.status, accountingFlag: item.accountingFlag }));
+        (data.items || []).forEach(item =>
+          map.set(item.externalTransactionId, { status: item.status, accountingFlag: item.accountingFlag })
+        );
         setBankTxnStatusMap(map);
+
+        // Sync: bank is accounted (Y) but PC row is still Unposted → promote to Posted
+        const toSync = transactions.filter(t =>
+          t.bankTxnId != null &&
+          t.postingStatus !== 'Posted' &&
+          map.get(t.bankTxnId!)?.accountingFlag === 'Y'
+        );
+        if (toSync.length > 0) {
+          await Promise.all(
+            toSync.map(t => updateTransactionStatus(t.transactionId, 'Posted').catch(() => {}))
+          );
+          onRefresh();
+        }
       })
       .catch(() => {});
   }, [transactions]);
