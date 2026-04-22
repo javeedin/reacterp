@@ -166,9 +166,6 @@ const MainLayout: React.FC = () => {
           </Text>
         </Link>
 
-        {/* Global Menu Search */}
-        <GlobalMenuSearch />
-
         {/* Right side - Icons */}
         <Space size={4}>
           {/* Install App Button - shows on iOS, Android, and Desktop when installable */}
@@ -186,6 +183,8 @@ const MainLayout: React.FC = () => {
               />
             </Tooltip>
           )}
+          {/* Global Menu Search */}
+          <GlobalMenuSearch />
           <Tooltip title="Home">
             <Button
               type="text"
