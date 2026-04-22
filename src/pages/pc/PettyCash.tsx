@@ -3566,14 +3566,50 @@ const RegisterDetail: React.FC<{
       {/* ── Attachment List Modal (new RR_PC_ATTACHMENTS system) ── */}
       <Modal
         title={
-          <Space>
-            <PaperClipOutlined style={{ color: REDWOOD.info }} />
-            Attachments
+          <Space style={{ width: '100%', justifyContent: 'space-between', paddingRight: 32 }}>
+            <Space>
+              <PaperClipOutlined style={{ color: REDWOOD.info }} />
+              Attachments
+              {attachListTxn && (
+                <Tag color="blue" style={{ fontSize: 11 }}>
+                  Line #{attachListTxn.lineNumber}
+                  {attachListTxn.referenceNo && ` · ${attachListTxn.referenceNo}`}
+                </Tag>
+              )}
+            </Space>
             {attachListTxn && (
-              <Tag color="blue" style={{ fontSize: 11 }}>
-                Line #{attachListTxn.lineNumber}
-                {attachListTxn.referenceNo && ` · ${attachListTxn.referenceNo}`}
-              </Tag>
+              <Tooltip
+                title={
+                  <div style={{ fontSize: 11, fontFamily: 'monospace' }}>
+                    <div style={{ marginBottom: 4, color: '#adc6ff', fontWeight: 600 }}>GET (list)</div>
+                    <div style={{ wordBreak: 'break-all' }}>
+                      {`${APEX_DB_CONFIG.baseUrl}/pc/attachments?transactionId=${attachListTxn.transactionId}`}
+                    </div>
+                    <div style={{ marginTop: 8, marginBottom: 4, color: '#adc6ff', fontWeight: 600 }}>GET (single + fileData)</div>
+                    <div style={{ wordBreak: 'break-all' }}>
+                      {`${APEX_DB_CONFIG.baseUrl}/pc/attachments/:attachmentId`}
+                    </div>
+                    <div style={{ marginTop: 8, marginBottom: 4, color: '#adc6ff', fontWeight: 600 }}>POST (upload)</div>
+                    <div style={{ wordBreak: 'break-all' }}>
+                      {`${APEX_DB_CONFIG.baseUrl}/pc/attachments`}
+                    </div>
+                    <div style={{ marginTop: 8, marginBottom: 4, color: '#adc6ff', fontWeight: 600 }}>DELETE</div>
+                    <div style={{ wordBreak: 'break-all' }}>
+                      {`${APEX_DB_CONFIG.baseUrl}/pc/attachments/:attachmentId`}
+                    </div>
+                  </div>
+                }
+                placement="bottomRight"
+                overlayStyle={{ maxWidth: 460 }}
+              >
+                <Tag
+                  icon={<ApiOutlined />}
+                  color="blue"
+                  style={{ cursor: 'help', fontSize: 11, marginRight: 0 }}
+                >
+                  API
+                </Tag>
+              </Tooltip>
             )}
           </Space>
         }
