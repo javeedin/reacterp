@@ -1282,8 +1282,12 @@ const ManageJournals: React.FC = () => {
       return num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     };
 
-    // Editable mode flag
-    const isEditable = journal.statusMeaning !== 'Posted';
+    // Editable mode flag:
+    //   - Only Manual-category journals can be edited
+    //   - Only before posting — posted journals are always read-only
+    const isManual   = (journal.category || '').toLowerCase() === 'manual';
+    const isPosted   = journal.statusMeaning === 'Posted';
+    const isEditable = isManual && !isPosted;
 
     // Per-tab editable state helpers
     const lines = isEditable ? (editableLines[tabKey] || []) : (journal.lines || []);
@@ -2061,27 +2065,32 @@ const ManageJournals: React.FC = () => {
               </Tag>
             </Space>
             <Space size="small">
-              {journal.statusMeaning !== 'Posted' ? (
+              {/* Save — only for Manual unposted journals */}
+              {isEditable && (
+                <Space.Compact size="small">
+                  <Button size="small" icon={<SaveOutlined />} loading={isSaving} onClick={handleSave}>Save</Button>
+                  <Dropdown
+                    menu={{
+                      items: [
+                        { key: 'save', label: 'Save', onClick: handleSave },
+                        {
+                          key: 'saveClose', label: 'Save and Close', onClick: async () => {
+                            await handleSave();
+                            closeJournalTab(tabKey);
+                          }
+                        },
+                      ]
+                    }}
+                    placement="bottomRight"
+                  >
+                    <Button size="small" icon={<DownOutlined />} disabled={isSaving} />
+                  </Dropdown>
+                </Space.Compact>
+              )}
+
+              {/* Post — available for any unposted journal */}
+              {!isPosted && (
                 <>
-                  <Space.Compact size="small">
-                    <Button size="small" icon={<SaveOutlined />} loading={isSaving} onClick={handleSave}>Save</Button>
-                    <Dropdown
-                      menu={{
-                        items: [
-                          { key: 'save', label: 'Save', onClick: handleSave },
-                          {
-                            key: 'saveClose', label: 'Save and Close', onClick: async () => {
-                              await handleSave();
-                              closeJournalTab(tabKey);
-                            }
-                          },
-                        ]
-                      }}
-                      placement="bottomRight"
-                    >
-                      <Button size="small" icon={<DownOutlined />} disabled={isSaving} />
-                    </Dropdown>
-                  </Space.Compact>
                   <Button
                     size="small"
                     style={{ fontSize: 10, background: REDWOOD.warning, color: '#fff', borderColor: REDWOOD.warning }}
@@ -2094,17 +2103,28 @@ const ManageJournals: React.FC = () => {
                   <Tooltip title={`PUT ${APEX_DB_CONFIG.baseUrl}/gl/journals/${journal.jeBatchId}/post`} placement="bottom">
                     <ApiOutlined style={{ color: REDWOOD.info, fontSize: 13, cursor: 'pointer' }} />
                   </Tooltip>
-                  <Tooltip title={`PUT ${APEX_DB_CONFIG.baseUrl}/gl/journals/${journal.jeHeaderId}`} placement="bottom">
-                    <ApiOutlined style={{ color: REDWOOD.success, fontSize: 13, cursor: 'pointer' }} />
-                  </Tooltip>
+                  {isEditable && (
+                    <Tooltip title={`PUT ${APEX_DB_CONFIG.baseUrl}/gl/journals/${journal.jeHeaderId}`} placement="bottom">
+                      <ApiOutlined style={{ color: REDWOOD.success, fontSize: 13, cursor: 'pointer' }} />
+                    </Tooltip>
+                  )}
                 </>
-              ) : (
-                <Tooltip title="Posted journals are read-only">
-                  <Tag color={REDWOOD.success} style={{ fontSize: 10 }}>
-                    <CheckCircleOutlined style={{ marginRight: 4 }} />Read Only
+              )}
+
+              {/* Read-only badge */}
+              {isPosted ? (
+                <Tooltip title="Posted journals cannot be edited">
+                  <Tag color="green" style={{ fontSize: 10 }}>
+                    <CheckCircleOutlined style={{ marginRight: 4 }} />Posted — Read Only
                   </Tag>
                 </Tooltip>
-              )}
+              ) : !isManual ? (
+                <Tooltip title="Subledger journals are read-only — make changes in the source module (e.g. Petty Cash, AP)">
+                  <Tag color="orange" style={{ fontSize: 10 }}>
+                    <LockOutlined style={{ marginRight: 4 }} />Subledger — Read Only
+                  </Tag>
+                </Tooltip>
+              ) : null}
               <Button
                 size="small"
                 icon={<CloseOutlined />}
