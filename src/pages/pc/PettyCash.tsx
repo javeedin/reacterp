@@ -3943,11 +3943,17 @@ const PettyCash: React.FC = () => {
     setRegActionLoading(true);
     const targetKey = regActionTarget.key;
     const targetId  = regActionTarget.register.registerId;
+    const prevReg   = regActionTarget.register;
     try {
       await updateRegister(targetId, {
-        status:    values.status,
-        comments:  values.comments || undefined,
-        updatedBy: currentUser,
+        status:          values.status,
+        comments:        values.comments || undefined,
+        // Preserve fields the SQL would NULL if not sent (no NVL in update_register)
+        limit:           prevReg.limit,
+        cashAccountCcid: prevReg.cashAccountCcid,
+        cashAccountDesc: prevReg.cashAccountDesc,
+        ownedBy:         prevReg.ownedBy,
+        updatedBy:       currentUser,
       });
       message.success(`Status changed to ${values.status}`);
       setRegActionOpen(false);
