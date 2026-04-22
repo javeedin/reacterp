@@ -297,24 +297,32 @@ END;
         p_source_type => ORDS.source_type_plsql,
         p_source      => '
 DECLARE
-    v_clob CLOB;
-    CURSOR c IS
-        SELECT ATTACHMENT_ID, REGISTER_ID, TRANSACTION_ID, REFERENCE_NO,
-               FILE_NAME, MIME_TYPE, CREATED_BY,
-               TO_CHAR(CREATION_DATE, ''DD-MON-YYYY'') AS CREATION_DATE
-        FROM   RR_PC_ATTACHMENTS
-        WHERE  (:transactionId IS NOT NULL AND TRANSACTION_ID = :transactionId)
-           OR  (:transactionId IS NULL
-                AND (:registerId  IS NULL OR REGISTER_ID   = :registerId)
-                AND (:referenceNo IS NULL OR REFERENCE_NO  = :referenceNo))
-        ORDER BY CREATION_DATE, ATTACHMENT_ID;
+    v_clob  CLOB;
+    v_count PLS_INTEGER := 0;
 BEGIN
+    IF :transactionId IS NULL AND :registerId IS NULL AND :referenceNo IS NULL THEN
+        :status_code := 400;
+        HTP.PRN(''{"success":false,"message":"At least one filter parameter required"}'');
+        RETURN;
+    END IF;
+
     :status_code := 200;
     APEX_JSON.INITIALIZE_CLOB_OUTPUT;
     APEX_JSON.OPEN_OBJECT;
     APEX_JSON.WRITE(''success'', TRUE);
     APEX_JSON.OPEN_ARRAY(''items'');
-    FOR rec IN c LOOP
+
+    FOR rec IN (
+        SELECT ATTACHMENT_ID, REGISTER_ID, TRANSACTION_ID, REFERENCE_NO,
+               FILE_NAME, MIME_TYPE, CREATED_BY,
+               TO_CHAR(CREATION_DATE, ''YYYY-MM-DD"T"HH24:MI:SS'') AS CREATION_DATE
+        FROM   RR_PC_ATTACHMENTS
+        WHERE  (:transactionId IS NOT NULL AND TRANSACTION_ID = :transactionId)
+           OR  (:transactionId IS NULL
+                AND (:registerId  IS NULL OR REGISTER_ID  = :registerId)
+                AND (:referenceNo IS NULL OR REFERENCE_NO = :referenceNo))
+        ORDER BY CREATION_DATE, ATTACHMENT_ID
+    ) LOOP
         APEX_JSON.OPEN_OBJECT;
         APEX_JSON.WRITE(''attachmentId'',  rec.ATTACHMENT_ID);
         APEX_JSON.WRITE(''registerId'',    rec.REGISTER_ID);
@@ -325,12 +333,24 @@ BEGIN
         APEX_JSON.WRITE(''createdBy'',     rec.CREATED_BY);
         APEX_JSON.WRITE(''creationDate'',  rec.CREATION_DATE);
         APEX_JSON.CLOSE_OBJECT;
+        v_count := v_count + 1;
     END LOOP;
+
     APEX_JSON.CLOSE_ARRAY;
+    APEX_JSON.WRITE(''count'', v_count);
     APEX_JSON.CLOSE_OBJECT;
+
     v_clob := APEX_JSON.GET_CLOB_OUTPUT;
     APEX_JSON.FREE_OUTPUT;
     HTP.PRN(v_clob);
+
+EXCEPTION
+    WHEN OTHERS THEN
+        BEGIN APEX_JSON.FREE_OUTPUT; EXCEPTION WHEN OTHERS THEN NULL; END;
+        :status_code := 500;
+        HTP.PRN(''{"success":false,"message":''
+             || APEX_JSON.STRINGIFY(''Error: '' || SQLERRM)
+             || ''}'');
 END;
 '
     );
