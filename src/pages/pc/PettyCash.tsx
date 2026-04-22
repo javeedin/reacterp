@@ -512,6 +512,8 @@ const RegisterDetail: React.FC<{
   const [filePreviewOpen, setFilePreviewOpen]       = useState(false);
   const [filePreviewItem, setFilePreviewItem]       = useState<{ name: string; data: string; mimeType: string | null } | null>(null);
   const [filePreviewLoading, setFilePreviewLoading] = useState(false);
+  const [filePreviewUrl, setFilePreviewUrl]         = useState<string>('');
+  const [filePreviewError, setFilePreviewError]     = useState<string>('');
   // ── Accounting state ──────────────────────────────────────────────────────
   const [selectedRowKeys, setSelectedRowKeys]   = useState<number[]>([]);
   const [txnSearch, setTxnSearch]               = useState('');
@@ -626,15 +628,17 @@ const RegisterDetail: React.FC<{
   };
 
   const openFilePreview = async (att: PCAttachment) => {
+    const url = `${APEX_DB_CONFIG.baseUrl}/pc/attachments/${att.attachmentId}`;
     setFilePreviewItem(null);
+    setFilePreviewError('');
+    setFilePreviewUrl(url);
     setFilePreviewLoading(true);
     setFilePreviewOpen(true);
     try {
       const data = await getAttachmentData(att.attachmentId);
       setFilePreviewItem(data);
-    } catch {
-      message.error('Failed to load file');
-      setFilePreviewOpen(false);
+    } catch (e: any) {
+      setFilePreviewError(e?.message ?? 'Failed to load file');
     } finally {
       setFilePreviewLoading(false);
     }
@@ -3747,7 +3751,7 @@ const RegisterDetail: React.FC<{
           </Space>
         }
         open={filePreviewOpen}
-        onCancel={() => setFilePreviewOpen(false)}
+        onCancel={() => { setFilePreviewOpen(false); setFilePreviewError(''); }}
         footer={[
           filePreviewItem && (
             <Button key="download" icon={<DownloadOutlined />}
@@ -3766,6 +3770,29 @@ const RegisterDetail: React.FC<{
         destroyOnClose
         zIndex={1100}
       >
+        {/* API URL bar — always visible for debugging */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '6px 10px', marginBottom: 12,
+          background: '#f0f5ff', borderRadius: 6,
+          border: '1px solid #adc6ff',
+        }}>
+          <ApiOutlined style={{ color: REDWOOD.info, flexShrink: 0 }} />
+          <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.info, flex: 1, wordBreak: 'break-all' }}>
+            GET {filePreviewUrl}
+          </Text>
+          <Tooltip title="Copy URL">
+            <Button type="text" size="small" icon={<DownloadOutlined style={{ fontSize: 11 }} />}
+              style={{ flexShrink: 0, padding: '0 4px' }}
+              onClick={() => { navigator.clipboard?.writeText(filePreviewUrl); message.success('URL copied'); }}
+            />
+          </Tooltip>
+        </div>
+
+        {filePreviewError && (
+          <Alert type="error" showIcon message={filePreviewError} style={{ marginBottom: 12, fontSize: 12 }} />
+        )}
+
         {filePreviewLoading ? (
           <div style={{ textAlign: 'center', padding: '48px 0' }}>
             <Spin size="large" tip="Loading file…" />
