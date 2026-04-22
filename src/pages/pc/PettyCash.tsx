@@ -39,8 +39,7 @@ import {
   type DistCombination,
 } from '../../services/distCombinations.service';
 import {
-  getAccounting, createAccounting, fetchLedgerByBusinessUnit, derivePeriodName,
-  buildPcTxnSlaPayload,
+  getAccounting, fetchLedgerByBusinessUnit, derivePeriodName,
   type SlaGetResult,
 } from '../../services/sla.service';
 
@@ -1754,44 +1753,7 @@ const RegisterDetail: React.FC<{
         const safRef     = row.refNo.replace(/[^a-z0-9]/gi, '_');
         const batchName  = `PC-${register.registerId}-REF-${safRef}-${Date.now()}`;
 
-        // ── Step 1: Create one SLA entry per transaction ──────
-        const slaResults: { headerId: number }[] = [];
-        for (const txn of txns) {
-          const isOut     = txn.creditAmount > 0;
-          const amount    = isOut ? txn.creditAmount : txn.debitAmount;
-          const chargeCode = txn.chargeAccountDesc ?? '';
-          const eventType  = txn.transactionType === 'Expense'
-            ? 'PC_EXPENSE_CREATED' as const
-            : txn.transactionType === 'Balance Refill'
-            ? 'PC_BALANCE_REFILL' as const
-            : isOut ? 'PC_ADJUSTMENT' as const : 'PC_EXPENSE_REVERSAL' as const;
-
-          const slaPayload = buildPcTxnSlaPayload({
-            transactionId:        txn.transactionId,
-            sourceNumber:         `PC-${register.registerId}-L${txn.lineNumber}`,
-            eventTypeCode:        eventType,
-            transactionDate:      toIsoDate(txn.transactionDate),
-            accountingDate:       acctDate,
-            periodName,
-            currency,
-            amount,
-            drAccountCombination: isOut ? chargeCode : row.crAccount,
-            crAccountCombination: isOut ? row.crAccount : chargeCode,
-            drAccountingClass:    isOut ? 'EXPENSE'    : 'PETTY_CASH',
-            crAccountingClass:    isOut ? 'PETTY_CASH' : 'EXPENSE',
-            drDescription:        isOut ? (txn.expenseType || 'Expense') : 'Petty Cash Account',
-            crDescription:        isOut ? 'Petty Cash Account' : (txn.expenseType || 'Expense reversal'),
-            businessUnit:         register.businessUnit,
-            legalEntity:          ctx.legalEntity || undefined,
-            ledgerId:             ctx.ledgerId,
-            ledgerName:           ctx.ledgerName,
-            createdBy:            currentUser,
-          });
-          const slaResult = await createAccounting(slaPayload);
-          slaResults.push(slaResult);
-        }
-
-        // ── Step 2: Create ONE GL journal for the reference group ──
+        // ── Step 1: Create ONE GL journal for the reference group ──
         // N debit lines (one per expense) + 1 credit line (cash total)
         const glLines = [
           ...row.drLines.map(dl => ({
@@ -1877,24 +1839,7 @@ const RegisterDetail: React.FC<{
         });
         const glData = glRes.ok ? await glRes.json() : null;
 
-        // ── Step 3: Post each SLA entry to the shared GL batch ─
-        if (glRes.ok && glData) {
-          for (const slaResult of slaResults) {
-            await fetch(`${APEX_BASE}/sla/accounting/post`, {
-              method:  'POST',
-              headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-              body:    JSON.stringify({
-                headerId:    slaResult.headerId,
-                glBatchId:   glData.batchId  || 0,
-                glBatchName: batchName,
-                glHeaderId:  glData.headerId || 0,
-                postedBy:    currentUser,
-              }),
-            });
-          }
-        }
-
-        // ── Step 4: Update status of every transaction in group ─
+        // ── Step 2: Update status of every transaction in group ─
         let bankMsg = '';
         for (const txn of txns) {
           await updateTransactionStatus(txn.transactionId, glRes.ok ? 'Posted' : 'Unposted', currentUser);
@@ -1913,8 +1858,7 @@ const RegisterDetail: React.FC<{
           status:  glRes.ok ? 'success' : 'error',
           message: glRes.ok
             ? `GL Batch: ${batchName} (${row.drLines.length} DR + 1 CR)${bankMsg}`
-            : `GL journal failed — SLA entries are Draft`,
-          headerId: slaResults[0]?.headerId,
+            : `GL journal failed`,
         });
       } catch (e: any) {
         updateRow(row.txnId, { status: 'error', message: e?.message || 'Unexpected error' });
@@ -1947,32 +1891,6 @@ const RegisterDetail: React.FC<{
         const periodName = row.periodName;
         const safRef     = row.refNo.replace(/[^a-z0-9]/gi, '_');
         const batchName  = `PC-${register.registerId}-REF-${safRef}-<timestamp>`;
-
-        // One SLA payload per transaction
-        for (const txn of txns) {
-          const isOut    = txn.creditAmount > 0;
-          const amount   = isOut ? txn.creditAmount : txn.debitAmount;
-          const chargeCode = txn.chargeAccountDesc ?? '';
-          const eventType  = txn.transactionType === 'Expense'
-            ? 'PC_EXPENSE_CREATED' as const
-            : txn.transactionType === 'Balance Refill'
-            ? 'PC_BALANCE_REFILL' as const
-            : isOut ? 'PC_ADJUSTMENT' as const : 'PC_EXPENSE_REVERSAL' as const;
-          const slaPayload = buildPcTxnSlaPayload({
-            transactionId: txn.transactionId, sourceNumber: `PC-${register.registerId}-L${txn.lineNumber}`,
-            eventTypeCode: eventType, transactionDate: toIsoDate(txn.transactionDate),
-            accountingDate: acctDate, periodName, currency: row.currency, amount,
-            drAccountCombination: isOut ? chargeCode : row.crAccount,
-            crAccountCombination: isOut ? row.crAccount : chargeCode,
-            drAccountingClass: isOut ? 'EXPENSE' : 'PETTY_CASH',
-            crAccountingClass: isOut ? 'PETTY_CASH' : 'EXPENSE',
-            drDescription: isOut ? (txn.expenseType || 'Expense') : 'Petty Cash Account',
-            crDescription: isOut ? 'Petty Cash Account' : (txn.expenseType || 'Expense reversal'),
-            businessUnit: register.businessUnit, legalEntity: ctx.legalEntity || undefined,
-            ledgerId: ctx.ledgerId, ledgerName: ctx.ledgerName, createdBy: currentUser,
-          });
-          items.push({ label: `[${row.refNo}] L${txn.lineNumber} — 1. POST sla/accounting/create`, url: `${APEX_BASE}/sla/accounting/create`, body: slaPayload });
-        }
 
         // ONE grouped GL journal per reference
         const glLines = [
@@ -2016,8 +1934,7 @@ const RegisterDetail: React.FC<{
           },
           lines: glLines,
         };
-        items.push({ label: `[${row.refNo}] 2. POST journals/create  (${row.drLines.length} DR + 1 CR)`, url: `${APEX_BASE}/journals/create`, body: glPayload });
-        items.push({ label: `[${row.refNo}] 3. POST sla/accounting/post  (per SLA entry)`, url: `${APEX_BASE}/sla/accounting/post`, body: { headerId: '<from SLA create>', glBatchId: '<from GL>', glBatchName: batchName, glHeaderId: '<from GL>', postedBy: currentUser } });
+        items.push({ label: `[${row.refNo}] POST journals/create  (${row.drLines.length} DR + 1 CR)`, url: `${APEX_BASE}/journals/create`, body: glPayload });
       }
       setApiDebugItems(items);
     } catch (e: any) {
@@ -2028,10 +1945,7 @@ const RegisterDetail: React.FC<{
 
   const testApiItem = async (idx: number) => {
     const item = apiDebugItems[idx];
-    if (!item || item.label.includes('sla/accounting/post')) {
-      message.warning('POST sla/accounting/post requires live headerId/glBatchId — run full accounting instead.');
-      return;
-    }
+    if (!item) return;
     setApiDebugItems(prev => prev.map((it, i) => i === idx ? { ...it, loading: true, response: undefined, error: undefined } : it));
     try {
       const res = await fetch(item.url, {
@@ -4476,8 +4390,7 @@ const RegisterDetail: React.FC<{
                   <Text style={{ fontSize: 12, fontWeight: 600 }}>{item.label}</Text>
                 </Space>
                 <Button size="small" type="primary" loading={item.loading}
-                  disabled={item.label.includes('sla/accounting/post')}
-                  title={item.label.includes('sla/accounting/post') ? 'Needs live IDs from previous steps' : 'Send request'}
+                  title="Send request"
                   onClick={() => testApiItem(idx)}>
                   Test
                 </Button>
