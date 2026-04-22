@@ -299,6 +299,154 @@ async function exportRegisterToExcel(register: PCRegister, transactions: PCTrans
   ws.views = [{ state: 'frozen', xSplit: 0, ySplit: startDataRow - 1, showGridLines: false }];
   ws.autoFilter = { from: { row: startDataRow - 1, column: 1 }, to: { row: r - 1, column: 14 } };
 
+  // ── Summary sheet (by Reference No) ───────────────────────
+  const ws2 = wb.addWorksheet('Summary by Reference', { views: [{ showGridLines: false }] });
+  ws2.columns = [
+    { width: 5  }, // A  #
+    { width: 18 }, // B  Reference No
+    { width: 14 }, // C  Date
+    { width: 20 }, // D  Type
+    { width: 22 }, // E  Expense Type(s)
+    { width: 7  }, // F  Lines
+    { width: 10 }, // G  Currency
+    { width: 16 }, // H  Money In
+    { width: 16 }, // I  Money Out
+    { width: 16 }, // J  Net
+    { width: 32 }, // K  Comments
+  ];
+
+  // Title
+  ws2.mergeCells('A1:K1');
+  const t2 = ws2.getCell('A1');
+  t2.value = `Summary by Reference — ${register.registerName}`;
+  t2.font  = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
+  t2.fill  = solid('FF1A3C5E');
+  t2.alignment = { vertical: 'middle', horizontal: 'center' };
+  ws2.getRow(1).height = 28;
+
+  // Sub-header: register stats
+  const statsRows: [string, string | number][] = [
+    ['Register',  register.registerName],
+    ['Currency',  register.currency],
+    ['Balance',   register.balance],
+    ['Total In',  register.totalDebit],
+    ['Total Out', register.totalCredit],
+    ['Export',    new Date().toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' })],
+  ];
+  let r2 = 2;
+  for (const [lbl, val] of statsRows) {
+    ws2.mergeCells(`A${r2}:B${r2}`);
+    ws2.mergeCells(`C${r2}:E${r2}`);
+    const lc = ws2.getCell(`A${r2}`);
+    lc.value = lbl; lc.font = { bold: true, size: 10, color: { argb: 'FF1A3C5E' } };
+    lc.fill  = solid('FFF0F4FA'); lc.alignment = { horizontal: 'right' };
+    const vc = ws2.getCell(`C${r2}`);
+    vc.value = val; vc.font = { size: 10 };
+    vc.fill  = solid('FFFFFFFF'); vc.alignment = { horizontal: 'left' };
+    if (typeof val === 'number') vc.numFmt = numFmt;
+    ws2.getRow(r2).height = 16;
+    r2++;
+  }
+  r2++;
+
+  // Column header
+  const S_COLS = ['#', 'Reference No', 'Date', 'Type', 'Expense Type(s)', 'Lines', 'Currency', 'Money In', 'Money Out', 'Net', 'Comments'];
+  const sHdr = ws2.getRow(r2);
+  S_COLS.forEach((h, i) => {
+    const c = sHdr.getCell(i + 1);
+    c.value = h;
+    c.font  = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+    c.fill  = solid('FF1A3C5E');
+    c.alignment = { horizontal: i >= 7 && i <= 9 ? 'right' : 'center', vertical: 'middle' };
+    c.border = { bottom: { style: 'medium', color: { argb: 'FF2E6DA4' } } };
+  });
+  sHdr.height = 20;
+  const sDataStart = r2;
+  r2++;
+
+  // Aggregate by reference number
+  type SumRow = { ref: string; date: string; types: Set<string>; expTypes: Set<string>; lines: number; currency: string; debit: number; credit: number; comments: string[] };
+  const refMap = new Map<string, SumRow>();
+  for (const txn of transactions) {
+    const key = txn.referenceNo || '—';
+    if (!refMap.has(key)) {
+      refMap.set(key, { ref: key, date: txn.transactionDate, types: new Set(), expTypes: new Set(), lines: 0, currency: txn.currency || register.currency, debit: 0, credit: 0, comments: [] });
+    }
+    const row = refMap.get(key)!;
+    row.types.add(txn.transactionType);
+    if (txn.expenseType) row.expTypes.add(txn.expenseType);
+    row.lines++;
+    row.debit  += txn.debitAmount  || 0;
+    row.credit += txn.creditAmount || 0;
+    if (txn.comments) row.comments.push(txn.comments);
+  }
+
+  // Sort: '—' last, rest alphabetically
+  const sorted = [...refMap.values()].sort((a, b) => {
+    if (a.ref === '—') return 1;
+    if (b.ref === '—') return -1;
+    return a.ref.localeCompare(b.ref);
+  });
+
+  let sIdx = 1;
+  let sumTotalIn = 0, sumTotalOut = 0;
+  for (const row of sorted) {
+    const isRefill = [...row.types].some(t => t === 'Balance Refill' || t === 'Balance Brought Fwd');
+    const bg = isRefill ? 'FFF0FFF4' : sIdx % 2 === 0 ? 'FFF7F9FC' : 'FFFFFFFF';
+    const sRow = ws2.getRow(r2);
+    const typesStr   = [...row.types].join(', ');
+    const expTypesStr = [...row.expTypes].join(', ') || '—';
+    const commentsStr = [...new Set(row.comments)].slice(0, 3).join(' · ');
+    const net = row.debit - row.credit;
+
+    const vals: (string | number)[] = [
+      sIdx, row.ref, row.date, typesStr, expTypesStr,
+      row.lines, row.currency, row.debit, row.credit, net, commentsStr,
+    ];
+    vals.forEach((v, i) => {
+      const c = sRow.getCell(i + 1);
+      c.value = v;
+      c.fill  = solid(bg);
+      c.font  = { size: 10 };
+      c.border = { bottom: { style: 'hair', color: { argb: 'FFE5E5E5' } } };
+      const isAmt = i >= 7 && i <= 9;
+      c.alignment = { horizontal: isAmt ? 'right' : i === 0 || i === 5 ? 'center' : 'left', vertical: 'middle' };
+      if (isAmt) c.numFmt = numFmt;
+    });
+    sRow.getCell(8).font  = { size: 10, color: { argb: 'FF1D7B4D' } };
+    sRow.getCell(9).font  = { size: 10, color: { argb: 'FFC74634' } };
+    sRow.getCell(10).font = { size: 10, bold: true, color: { argb: net >= 0 ? 'FF1D7B4D' : 'FFC74634' } };
+    sRow.height = 16;
+    sumTotalIn  += row.debit;
+    sumTotalOut += row.credit;
+    sIdx++; r2++;
+  }
+
+  // Summary totals row
+  const sTot = ws2.getRow(r2);
+  ws2.mergeCells(`A${r2}:G${r2}`);
+  sTot.getCell(1).value = `TOTAL  (${sorted.length} references, ${transactions.length} lines)`;
+  sTot.getCell(1).font  = { bold: true, size: 11 };
+  sTot.getCell(1).fill  = solid('FFE8F0FE');
+  sTot.getCell(1).alignment = { horizontal: 'right' };
+  [[8, sumTotalIn, 'FF1D7B4D'], [9, sumTotalOut, 'FFC74634'], [10, sumTotalIn - sumTotalOut, 'FF1A1A1A']].forEach(([col, val, argb]) => {
+    const c = sTot.getCell(col as number);
+    c.value  = val as number;
+    c.numFmt = numFmt;
+    c.font   = { bold: true, size: 11, color: { argb: argb as string } };
+    c.fill   = solid('FFE8F0FE');
+    c.alignment = { horizontal: 'right' };
+    c.border = { top: { style: 'medium', color: { argb: 'FF2E6DA4' } } };
+  });
+  for (let col = 1; col <= 11; col++) {
+    const c = sTot.getCell(col);
+    if (!c.fill || (c.fill as ExcelJS.PatternFill).fgColor?.argb === 'FF000000') c.fill = solid('FFE8F0FE');
+  }
+  sTot.height = 22;
+
+  ws2.views = [{ state: 'frozen', xSplit: 0, ySplit: sDataStart, showGridLines: false }];
+  ws2.autoFilter = { from: { row: sDataStart, column: 1 }, to: { row: r2 - 1, column: 11 } };
+
   // ── Save ──────────────────────────────────────────────────
   const buf = await wb.xlsx.writeBuffer();
   const eAPI = (window as any).electronAPI;
