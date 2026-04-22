@@ -38,6 +38,7 @@ export interface PCTransaction {
   debitAmount: number;
   creditAmount: number;
   comments: string | null;
+  referenceDescription: string | null;
   referenceNo: string | null;
   attachment: string | null;
   hasAttachment: 'Y' | 'N' | null;

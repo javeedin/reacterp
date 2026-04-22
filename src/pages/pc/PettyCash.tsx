@@ -92,6 +92,7 @@ interface AcctDrLine {
   chargeDesc:    string;
   amount:        number;
   expenseType:   string | null;
+  description:   string | null;
 }
 
 interface AcctProgressRow {
@@ -112,7 +113,8 @@ interface AcctProgressRow {
   message?:        string;
   headerId?:       number;
   // reference-group fields
-  refNo:           string;          // reference number or unique key for no-ref rows
+  refNo:               string;       // reference number or unique key for no-ref rows
+  referenceDescription?: string | null; // used as Cr line description in GL journal
   txnIds:          number[];        // all txnIds in this group
   drLines:         AcctDrLine[];    // one per transaction in the group
 }
@@ -1488,24 +1490,25 @@ const RegisterDetail: React.FC<{
     setSaving(true);
     try {
       const result = await createTransaction({
-        registerId:        register.registerId,
-        transactionDate:   values.transactionDate.format('YYYY-MM-DD'),
-        accountingDate:    values.accountingDate
+        registerId:           register.registerId,
+        transactionDate:      values.transactionDate.format('YYYY-MM-DD'),
+        accountingDate:       values.accountingDate
           ? values.accountingDate.format('YYYY-MM-DD')
           : values.transactionDate.format('YYYY-MM-DD'),
-        transactionType:   'Expense',
-        expenseType:       values.expenseType,
-        currency:          values.currency || register.currency,
-        debitAmount:       0,
-        creditAmount:      values.amount,
-        chargeAccountCcid: values.chargeAccountCcid || null,
-        chargeAccountDesc: values.chargeAccountDesc || null,
-        referenceNo:       addExpenseVoucherNo || null,
-        comments:          values.comments,
-        employeeName:      values.employeeName || null,
-        receiptStatus:     values.receiptStatus || null,
-        postingStatus:     'Unposted',
-        createdBy:         currentUser,
+        transactionType:      'Expense',
+        expenseType:          values.expenseType,
+        currency:             values.currency || register.currency,
+        debitAmount:          0,
+        creditAmount:         values.amount,
+        chargeAccountCcid:    values.chargeAccountCcid || null,
+        chargeAccountDesc:    values.chargeAccountDesc || null,
+        referenceNo:          addExpenseVoucherNo || null,
+        comments:             values.comments,
+        referenceDescription: values.referenceDescription || null,
+        employeeName:         values.employeeName || null,
+        receiptStatus:        values.receiptStatus || null,
+        postingStatus:        'Unposted',
+        createdBy:            currentUser,
       });
       if (addExpenseFiles.length > 0) {
         await uploadFiles(result.transactionId, register.registerId, addExpenseVoucherNo || null, addExpenseFiles);
@@ -1529,7 +1532,7 @@ const RegisterDetail: React.FC<{
 
   // ── Add Multiple Expenses ──────────────────────────────────
   const handleAddMultiExpense = async () => {
-    const vals = expenseForm.getFieldsValue(['transactionDate', 'accountingDate', 'currency']);
+    const vals = expenseForm.getFieldsValue(['transactionDate', 'accountingDate', 'currency', 'referenceDescription']);
     if (!vals.transactionDate) { message.error('Transaction Date is required'); return; }
     const accDate = vals.accountingDate ?? vals.transactionDate;
     if (periodsLoaded && openPeriods.length > 0 && !findAPPeriod(accDate)) {
@@ -1552,20 +1555,21 @@ const RegisterDetail: React.FC<{
     try {
       for (const line of validLines) {
         const result = await createTransaction({
-          registerId:        register.registerId,
-          transactionDate:   vals.transactionDate.format('YYYY-MM-DD'),
-          accountingDate:    accDate.format('YYYY-MM-DD'),
-          transactionType:   'Expense',
-          expenseType:       line.expenseType,
-          currency:          vals.currency || register.currency,
-          debitAmount:       0,
-          creditAmount:      line.amount!,
-          chargeAccountCcid: line.chargeAccountCcid || null,
-          chargeAccountDesc: line.chargeAccountDesc || null,
-          referenceNo:       addExpenseVoucherNo || null,
-          comments:          line.description || null,
-          postingStatus:     'Unposted',
-          createdBy:         currentUser,
+          registerId:           register.registerId,
+          transactionDate:      vals.transactionDate.format('YYYY-MM-DD'),
+          accountingDate:       accDate.format('YYYY-MM-DD'),
+          transactionType:      'Expense',
+          expenseType:          line.expenseType,
+          currency:             vals.currency || register.currency,
+          debitAmount:          0,
+          creditAmount:         line.amount!,
+          chargeAccountCcid:    line.chargeAccountCcid || null,
+          chargeAccountDesc:    line.chargeAccountDesc || null,
+          referenceNo:          addExpenseVoucherNo || null,
+          comments:             line.description || null,
+          referenceDescription: vals.referenceDescription || null,
+          postingStatus:        'Unposted',
+          createdBy:            currentUser,
         });
         if (firstTxnId === null) firstTxnId = result.transactionId;
         created++;
@@ -1682,29 +1686,32 @@ const RegisterDetail: React.FC<{
         chargeDesc:    chargeAcctResolved.get(t.transactionId)?.desc ?? '',
         amount:        t.creditAmount > 0 ? t.creditAmount : t.debitAmount,
         expenseType:   t.expenseType,
+        description:   t.comments || null,
       }));
 
       const totalAmount   = drLines.reduce((s, l) => s + l.amount, 0);
       const allPosted     = txns.every(t => t.postingStatus === 'Posted');
       const joinedExpType = [...new Set(drLines.map(l => l.expenseType).filter(Boolean))].join(', ') || null;
+      const refDesc       = txns.find(t => t.referenceDescription)?.referenceDescription || null;
 
       rows.push({
-        txnId:           first.transactionId,
-        lineNumber:      first.lineNumber,
-        transactionType: first.transactionType,
-        expenseType:     joinedExpType,
-        amount:          totalAmount,
-        currency:        first.currency,
-        accountingDate:  acctDate,
-        periodName:      derivePeriodName(new Date(acctDate)),
-        drAccount:       drLines[0]?.chargeAccount || '',
-        drAccountDesc:   drLines[0]?.chargeDesc    || '',
-        crAccount:       cashCode,
-        crAccountDesc:   cashDesc,
-        status:          allPosted ? 'skipped' : 'pending',
-        message:         allPosted ? 'Already posted — skipped' : undefined,
+        txnId:                first.transactionId,
+        lineNumber:           first.lineNumber,
+        transactionType:      first.transactionType,
+        expenseType:          joinedExpType,
+        amount:               totalAmount,
+        currency:             first.currency,
+        accountingDate:       acctDate,
+        periodName:           derivePeriodName(new Date(acctDate)),
+        drAccount:            drLines[0]?.chargeAccount || '',
+        drAccountDesc:        drLines[0]?.chargeDesc    || '',
+        crAccount:            cashCode,
+        crAccountDesc:        cashDesc,
+        status:               allPosted ? 'skipped' : 'pending',
+        message:              allPosted ? 'Already posted — skipped' : undefined,
         refNo,
-        txnIds:          txns.map(t => t.transactionId),
+        referenceDescription: refDesc,
+        txnIds:               txns.map(t => t.transactionId),
         drLines,
       });
     }
@@ -1793,7 +1800,7 @@ const RegisterDetail: React.FC<{
             accountedDr:                dl.amount,
             accountedCr:                null,
             statAmount:                 null,
-            description:                dl.expenseType || 'Petty Cash Expense',
+            description:                dl.description || dl.expenseType || 'Petty Cash Expense',
             currencyCode:               currency,
             currencyConversionDate:     acctDate,
             currencyConversionRate:     1,
@@ -1813,7 +1820,7 @@ const RegisterDetail: React.FC<{
             accountedDr:                null,
             accountedCr:                totalAmt,
             statAmount:                 null,
-            description:                'Petty Cash Account',
+            description:                row.referenceDescription || 'Petty Cash Account',
             currencyCode:               currency,
             currencyConversionDate:     acctDate,
             currencyConversionRate:     1,
@@ -1971,7 +1978,7 @@ const RegisterDetail: React.FC<{
         const glLines = [
           ...row.drLines.map(dl => ({
             enteredDr: dl.amount, enteredCr: null, accountedDr: dl.amount, accountedCr: null,
-            statAmount: null, description: dl.expenseType || 'Petty Cash Expense',
+            statAmount: null, description: dl.description || dl.expenseType || 'Petty Cash Expense',
             currencyCode: row.currency, currencyConversionDate: acctDate, currencyConversionRate: 1,
             userCurrencyConversionType: 'User', accountCombination: dl.chargeAccount,
             chartOfAccountsName: 'Chart of Accounts',
@@ -1981,7 +1988,7 @@ const RegisterDetail: React.FC<{
           })),
           {
             enteredDr: null, enteredCr: row.amount, accountedDr: null, accountedCr: row.amount,
-            statAmount: null, description: 'Petty Cash Account',
+            statAmount: null, description: row.referenceDescription || 'Petty Cash Account',
             currencyCode: row.currency, currencyConversionDate: acctDate, currencyConversionRate: 1,
             userCurrencyConversionType: 'User', accountCombination: row.crAccount,
             chartOfAccountsName: 'Chart of Accounts',
@@ -3150,6 +3157,10 @@ const RegisterDetail: React.FC<{
               <Form.Item label="Comments" name="comments">
                 <Input.TextArea rows={2} placeholder="Optional" />
               </Form.Item>
+              <Form.Item label="Reference Description" name="referenceDescription"
+                help={<span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Used as GL Cr line description when posting</span>}>
+                <Input.TextArea rows={2} placeholder="Purpose or summary of this expense reference (optional)" />
+              </Form.Item>
               <Form.Item label="Attachments">
                 <Space direction="vertical" style={{ width: '100%' }} size={4}>
                   <Upload
@@ -3304,6 +3315,13 @@ const RegisterDetail: React.FC<{
               </div>
 
               <Divider style={{ margin: '10px 0' }} />
+
+              {/* Reference Description — shared for all lines in this voucher */}
+              <Form.Item label="Reference Description" name="referenceDescription"
+                style={{ marginBottom: 10 }}
+                help={<span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Used as GL Cr line description when posting (applies to all lines in this voucher)</span>}>
+                <Input placeholder="Purpose or summary of this reference (optional)" />
+              </Form.Item>
 
               {/* Shared attachments for multi-line voucher */}
               <div style={{ marginBottom: 10 }}>
