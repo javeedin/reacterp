@@ -4205,6 +4205,7 @@ const PettyCash: React.FC = () => {
                           <Option value="ACTIVE">Active</Option>
                           <Option value="INACTIVE">Inactive</Option>
                           <Option value="CLOSED">Closed</Option>
+                          <Option value="Transferred">Transferred</Option>
                         </Select>
                       </Form.Item>
                     </Col>
