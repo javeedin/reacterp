@@ -3,7 +3,7 @@ import {
   Layout, Card, Typography, Breadcrumb, Tabs, Form, Input, Select,
   DatePicker, Button, Table, Tag, Row, Col, Space, Divider,
   Modal, InputNumber, message, Tooltip, Statistic, Collapse, Progress, Descriptions, Upload,
-  Spin, Alert, Switch, Dropdown,
+  Spin, Alert, Switch, Dropdown, Popover,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { Link } from 'react-router-dom';
@@ -2038,20 +2038,34 @@ const RegisterDetail: React.FC<{
         );
       })()}
 
-      {/* Cash Account */}
+      {/* Cash Account — icon button opens a popover */}
       {register.cashAccountDesc && (
-        <div style={{ marginBottom: 12, padding: '8px 12px', background: '#f0f9ff',
-          borderRadius: 6, border: '1px solid #bae0ff', fontSize: 12 }}>
-          <b>Cash Account:</b>{' '}
-          <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>
-            {register.cashAccountDesc}
-          </span>
-          {cashAccountName && (
-            <div style={{ marginTop: 3, color: '#1677ff', paddingLeft: 2 }}>
-              {cashAccountName}
-            </div>
-          )}
-        </div>
+        <Tooltip title="Show Cash Account">
+          <Popover
+            title={<Space size={4}><BankOutlined style={{ color: REDWOOD.info }} /><span>Cash Account</span></Space>}
+            content={
+              <div style={{ maxWidth: 360 }}>
+                <div style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: 13, marginBottom: 4 }}>
+                  {register.cashAccountDesc}
+                </div>
+                {cashAccountName && (
+                  <div style={{ fontSize: 12, color: '#1677ff' }}>{cashAccountName}</div>
+                )}
+              </div>
+            }
+            trigger="click"
+            placement="bottomLeft"
+          >
+            <Button
+              size="small"
+              type="text"
+              icon={<BankOutlined style={{ color: REDWOOD.info }} />}
+              style={{ marginBottom: 8, fontSize: 12, color: REDWOOD.info }}
+            >
+              Cash Account
+            </Button>
+          </Popover>
+        </Tooltip>
       )}
 
       {/* Action buttons */}
