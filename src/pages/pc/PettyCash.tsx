@@ -489,6 +489,8 @@ const RegisterDetail: React.FC<{
   const [viewAcctTxn, setViewAcctTxn]           = useState<PCTransaction | null>(null);
   const [viewAcctData, setViewAcctData]         = useState<SlaGetResult | null>(null);
   const [viewAcctLoading, setViewAcctLoading]   = useState(false);
+  const [viewAcctQueue, setViewAcctQueue]       = useState<PCTransaction[]>([]);
+  const [viewAcctQueueIdx, setViewAcctQueueIdx] = useState(0);
   const [ledgerInfo, setLedgerInfo]             = useState<{ ledgerId: number; ledgerName: string } | null>(null);
   const [legalEntityName, setLegalEntityName]   = useState<string>('');
   const [apiDebugOpen, setApiDebugOpen]         = useState(false);
@@ -1283,16 +1285,14 @@ const RegisterDetail: React.FC<{
     return { ...ldInfo, legalEntity: leInfo };
   };
 
-  const openViewAccounting = async (txn: PCTransaction) => {
+  const loadViewAcctTxn = async (txn: PCTransaction) => {
     setViewAcctTxn(txn);
     setViewAcctData(null);
     setViewAcctLineDescs(new Map());
     setViewAcctLoading(true);
-    setViewAcctOpen(true);
     try {
       const data = await getAccounting('PC_TRANSACTIONS', txn.transactionId);
       setViewAcctData(data);
-      // Resolve description for each unique account combination in the lines
       const unique = [...new Set((data.lines || []).map(l => l.accountCombination).filter(Boolean))];
       const resolved = new Map<string, string>();
       await Promise.all(unique.map(async (combo) => {
@@ -1305,6 +1305,15 @@ const RegisterDetail: React.FC<{
       setViewAcctLineDescs(resolved);
     } catch { setViewAcctData(null); }
     finally { setViewAcctLoading(false); }
+  };
+
+  const openViewAccounting = (txn: PCTransaction, queue?: PCTransaction[]) => {
+    const q = queue ?? [txn];
+    const idx = q.findIndex(t => t.transactionId === txn.transactionId);
+    setViewAcctQueue(q);
+    setViewAcctQueueIdx(idx >= 0 ? idx : 0);
+    setViewAcctOpen(true);
+    loadViewAcctTxn(txn);
   };
 
   const openCreateAccountingModal = () => {
@@ -2041,23 +2050,25 @@ const RegisterDetail: React.FC<{
           >
             Export Excel
           </Button>
-          <Tooltip title={selectedRowKeys.length !== 1 || transactions.find(t => t.transactionId === selectedRowKeys[0])?.postingStatus !== 'Posted'
-            ? 'Select one posted transaction to view its accounting entries' : undefined}>
-            <Button
-              icon={<BookOutlined />}
-              disabled={
-                selectedRowKeys.length !== 1 ||
-                transactions.find(t => t.transactionId === selectedRowKeys[0])?.postingStatus !== 'Posted' ||
-                transactions.find(t => t.transactionId === selectedRowKeys[0])?.transactionType === 'Balance Refill'
-              }
-              onClick={() => {
-                const txn = transactions.find(t => t.transactionId === selectedRowKeys[0]);
-                if (txn) openViewAccounting(txn);
-              }}
-            >
-              View Accounting
-            </Button>
-          </Tooltip>
+          {(() => {
+            const postedSelected = transactions.filter(t =>
+              selectedRowKeys.includes(t.transactionId) && t.postingStatus === 'Posted'
+            );
+            const disabled = postedSelected.length === 0;
+            return (
+              <Tooltip title={disabled ? 'Select one or more posted transactions to view accounting' : undefined}>
+                <Button
+                  icon={<BookOutlined />}
+                  disabled={disabled}
+                  onClick={() => {
+                    openViewAccounting(postedSelected[0], postedSelected);
+                  }}
+                >
+                  View Accounting{postedSelected.length > 1 ? ` (${postedSelected.length})` : ''}
+                </Button>
+              </Tooltip>
+            );
+          })()}
           <Tooltip title={selectedRowKeys.length === 0 ? 'Select expense transactions to account' : undefined}>
             <Button
               icon={<CheckCircleOutlined />}
@@ -3475,15 +3486,41 @@ const RegisterDetail: React.FC<{
         title={
           <Space>
             <BookOutlined style={{ color: REDWOOD.success }} />
-            Accounting – Line #{viewAcctTxn?.lineNumber} ({viewAcctTxn?.transactionType})
+            {viewAcctQueue.length > 1
+              ? `Accounting — ${viewAcctQueue.length} transactions`
+              : `Accounting – Line #${viewAcctTxn?.lineNumber} (${viewAcctTxn?.transactionType})`}
           </Space>
         }
         open={viewAcctOpen}
         onCancel={() => setViewAcctOpen(false)}
         footer={<Button onClick={() => setViewAcctOpen(false)}>Close</Button>}
-        width={680}
+        width={720}
         zIndex={1050}
       >
+        {/* Transaction tabs when multiple are queued */}
+        {viewAcctQueue.length > 1 && (
+          <Tabs
+            size="small"
+            activeKey={String(viewAcctQueueIdx)}
+            onChange={key => {
+              const idx = Number(key);
+              setViewAcctQueueIdx(idx);
+              loadViewAcctTxn(viewAcctQueue[idx]);
+            }}
+            style={{ marginBottom: 12 }}
+            items={viewAcctQueue.map((t, i) => ({
+              key: String(i),
+              label: (
+                <span style={{ fontSize: 12 }}>
+                  Line #{t.lineNumber}
+                  <span style={{ fontSize: 11, color: REDWOOD.neutral600, marginLeft: 4 }}>
+                    {t.transactionType}
+                  </span>
+                </span>
+              ),
+            }))}
+          />
+        )}
         {viewAcctLoading ? (
           <div style={{ textAlign: 'center', padding: 32 }}><Spin /></div>
         ) : !viewAcctData?.found ? (
