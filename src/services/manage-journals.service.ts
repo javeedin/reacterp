@@ -4,6 +4,8 @@
  */
 
 import { fetchFromApex, putToApex } from './sync-http';
+import { APEX_DB_CONFIG } from '../config/api.config';
+import type { SlaGetResult } from './sla.service';
 
 // Endpoint constant for posting a journal batch (used in API icon tooltips)
 export const POST_JOURNAL_ENDPOINT = 'gl/journals/{jeBatchId}/post';
@@ -261,3 +263,30 @@ export const updateJournal = async (
     };
   }
 };
+
+/**
+ * Look up a GL journal by PC transaction ID.
+ * Queries RR_GL_LINES_ALL (and RR_GL_JE_LINES_ALL as fallback) via REFERENCE1.
+ * Returns a SlaGetResult-compatible shape so the view-accounting modal works unchanged.
+ */
+export async function getGlJournalByTxnId(txnId: number): Promise<SlaGetResult> {
+  const url = `${APEX_DB_CONFIG.baseUrl}/gl/journals/by-txn?txn_id=${txnId}`;
+  try {
+    const res  = await fetch(url, { headers: { Accept: 'application/json' } });
+    const data = await res.json();
+    if (!res.ok || !data.found) {
+      return { found: false, headerId: null, moduleName: null, eventTypeCode: null,
+               accountingStatus: null, postingStatus: null, accountingDate: null,
+               periodName: null, description: null, creationDate: null,
+               postedDate: null, postedBy: null, glBatchId: null, glBatchName: null,
+               glHeaderId: null, lines: [] };
+    }
+    return data as SlaGetResult;
+  } catch {
+    return { found: false, headerId: null, moduleName: null, eventTypeCode: null,
+             accountingStatus: null, postingStatus: null, accountingDate: null,
+             periodName: null, description: null, creationDate: null,
+             postedDate: null, postedBy: null, glBatchId: null, glBatchName: null,
+             glHeaderId: null, lines: [] };
+  }
+}

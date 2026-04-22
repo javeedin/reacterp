@@ -49,6 +49,7 @@ import {
   getAccounting, fetchLedgerByBusinessUnit, derivePeriodName,
   type SlaGetResult,
 } from '../../services/sla.service';
+import { getGlJournalByTxnId } from '../../services/manage-journals.service';
 
 const { Content } = Layout;
 const { Text, Title } = Typography;
@@ -1635,7 +1636,12 @@ const RegisterDetail: React.FC<{
     setViewAcctLineDescs(new Map());
     setViewAcctLoading(true);
     try {
-      const data = await getAccounting('PC_TRANSACTIONS', txn.transactionId);
+      // Try GL tables first (journals created without SLA steps)
+      let data = await getGlJournalByTxnId(txn.transactionId);
+      // Fall back to SLA sub-ledger for journals posted before the GL-direct flow
+      if (!data.found) {
+        data = await getAccounting('PC_TRANSACTIONS', txn.transactionId);
+      }
       setViewAcctData(data);
       const unique = [...new Set((data.lines || []).map(l => l.accountCombination).filter(Boolean))];
       const resolved = new Map<string, string>();
@@ -4356,8 +4362,8 @@ const RegisterDetail: React.FC<{
           <Alert
             type="info"
             showIcon
-            message="No accounting entries found for this transaction"
-            description="Use 'Create Accounting' to generate subledger entries."
+            message="No GL journal found for this transaction"
+            description="Use 'Create Accounting' to post this transaction to the General Ledger."
           />
         ) : (
           <>
