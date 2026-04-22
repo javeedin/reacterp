@@ -27,6 +27,7 @@ import ProfileModal from '../components/ProfileModal';
 import SupportTicketButton from '../components/SupportTicketButton';
 import ScreenRecorder from '../components/ScreenRecorder';
 import GlValidationErrorsDrawer from '../components/GlValidationErrorsDrawer';
+import GlobalMenuSearch from '../components/GlobalMenuSearch';
 import type { MenuProps } from 'antd';
 
 // Type for BeforeInstallPromptEvent
@@ -164,6 +165,9 @@ const MainLayout: React.FC = () => {
             ReactERP
           </Text>
         </Link>
+
+        {/* Global Menu Search */}
+        <GlobalMenuSearch />
 
         {/* Right side - Icons */}
         <Space size={4}>
