@@ -2548,8 +2548,9 @@ const RegisterDetail: React.FC<{
               </Form.Item>
             </Col>
             <Col span={expenseMode === 'multi' ? 5 : 12}>
-              <Form.Item label="Reference No" name="referenceNo">
-                <Input placeholder="Optional" />
+              <Form.Item label="Reference No" name="referenceNo"
+                rules={[{ required: true, message: 'Reference No is required' }]}>
+                <Input placeholder="e.g. EXP-001" />
               </Form.Item>
             </Col>
           </Row>
