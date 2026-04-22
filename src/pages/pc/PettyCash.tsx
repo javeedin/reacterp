@@ -480,6 +480,7 @@ const RegisterDetail: React.FC<{
   // ── Accounting state ──────────────────────────────────────────────────────
   const [selectedRowKeys, setSelectedRowKeys]   = useState<number[]>([]);
   const [txnSearch, setTxnSearch]               = useState('');
+  const [bankTxnStatusMap, setBankTxnStatusMap] = useState<Map<number, { status: string; accountingFlag: string }>>(new Map());
   const [acctModalOpen, setAcctModalOpen]       = useState(false);
   const [acctProgress, setAcctProgress]         = useState<AcctProgressRow[]>([]);
   const [acctRunning, setAcctRunning]           = useState(false);
@@ -620,6 +621,25 @@ const RegisterDetail: React.FC<{
         .catch(() => loadBankAccountsByBU(bu));
     }
   }, [bankTxnModalOpen]);
+
+  // ── Batch-fetch bank txn status whenever transactions change ──
+  useEffect(() => {
+    const ids = [...new Set(
+      transactions
+        .filter(t => t.bankTxnId != null)
+        .map(t => t.bankTxnId!)
+    )];
+    if (!ids.length) { setBankTxnStatusMap(new Map()); return; }
+    const url = `${APEX_DB_CONFIG.baseUrl}/cash/externaltransactions/batchstatus?ids=${ids.join(',')}`;
+    fetch(url, { headers: { Accept: 'application/json' } })
+      .then(r => r.json())
+      .then((data: { items?: { externalTransactionId: number; status: string; accountingFlag: string }[] }) => {
+        const map = new Map<number, { status: string; accountingFlag: string }>();
+        (data.items || []).forEach(item => map.set(item.externalTransactionId, { status: item.status, accountingFlag: item.accountingFlag }));
+        setBankTxnStatusMap(map);
+      })
+      .catch(() => {});
+  }, [transactions]);
 
   // ── Load distribution combinations + open AP periods on mount ─
   useEffect(() => {
@@ -801,7 +821,7 @@ const RegisterDetail: React.FC<{
           registerId:        reverseTxn.registerId,
           transactionDate:   dayjs().format('YYYY-MM-DD'),
           accountingDate:    dayjs().format('YYYY-MM-DD'),
-          transactionType:   'Adjustment',
+          transactionType:   'Balance Return',
           expenseType:       reverseTxn.expenseType || undefined,
           currency:          reverseTxn.currency,
           debitAmount:       reverseTxn.creditAmount,
@@ -831,7 +851,7 @@ const RegisterDetail: React.FC<{
         registerId:        reverseTxn.registerId,
         transactionDate:   dayjs().format('YYYY-MM-DD'),
         accountingDate:    dayjs().format('YYYY-MM-DD'),
-        transactionType:   'Adjustment',
+        transactionType:   'Balance Return',
         expenseType:       reverseTxn.expenseType || undefined,
         currency:          reverseTxn.currency,
         debitAmount:       reverseTxn.creditAmount,
@@ -1640,9 +1660,12 @@ const RegisterDetail: React.FC<{
       render: (v) => <Text style={{ fontSize: 12 }}>{v}</Text> },
     { title: 'Period', dataIndex: 'accountingPeriod', width: 100,
       render: (v) => v ? <Tag color="blue" style={{ fontSize: 11 }}>{v}</Tag> : <Text style={{ fontSize: 12, color: '#ccc' }}>—</Text> },
-    { title: 'Type', dataIndex: 'transactionType', width: 120,
+    { title: 'Type', dataIndex: 'transactionType', width: 130,
       render: (v) => {
-        const color = v === 'Balance Refill' ? 'blue' : v === 'Expense' ? 'orange' : 'purple';
+        const color = v === 'Balance Refill' ? 'blue'
+          : v === 'Balance Return' ? 'cyan'
+          : v === 'Expense'        ? 'orange'
+          : 'purple';
         return <Tag color={color} style={{ fontSize: 11 }}>{v}</Tag>;
       }},
     { title: 'Expense Type', dataIndex: 'expenseType', width: 120,
@@ -1680,10 +1703,25 @@ const RegisterDetail: React.FC<{
       render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Posting', dataIndex: 'postingStatus', width: 90,
       render: (v) => <PostingTag status={v} /> },
-    { title: 'Bank Txn ID', dataIndex: 'bankTxnId', width: 100,
-      render: (v: number | null) => v
-        ? <a style={{ fontSize: 12, fontFamily: 'monospace' }} onClick={() => openBankTxnDetail(v)}>{v}</a>
-        : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
+    { title: 'Bank Txn ID', dataIndex: 'bankTxnId', width: 118,
+      render: (v: number | null) => {
+        if (!v) return <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text>;
+        const bankSt = bankTxnStatusMap.get(v);
+        const stColor = bankSt?.status === 'VOID' ? 'red' : bankSt?.status === 'REC' ? 'blue' : 'default';
+        return (
+          <div>
+            <a style={{ fontSize: 12, fontFamily: 'monospace' }} onClick={() => openBankTxnDetail(v)}>{v}</a>
+            {bankSt && (
+              <div style={{ marginTop: 2, display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+                <Tag color={stColor} style={{ fontSize: 10, padding: '0 4px', lineHeight: '16px', margin: 0 }}>{bankSt.status}</Tag>
+                {bankSt.accountingFlag === 'Y'
+                  ? <Tag color="green" style={{ fontSize: 10, padding: '0 4px', lineHeight: '16px', margin: 0 }}>Acctd</Tag>
+                  : <Tag color="default" style={{ fontSize: 10, padding: '0 4px', lineHeight: '16px', margin: 0 }}>Unacctd</Tag>}
+              </div>
+            )}
+          </div>
+        );
+      }},
     { title: 'Employee', dataIndex: 'employeeName', width: 130, ellipsis: true,
       render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Receipt', dataIndex: 'receiptStatus', width: 75, align: 'center' as const,
