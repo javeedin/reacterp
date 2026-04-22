@@ -340,18 +340,22 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         l_bank_txn_id  := APEX_JSON.GET_NUMBER  (p_path => 'bankTxnId');
 
         -- Validate accounting date against open AP periods (application_id = 200)
-        SELECT COUNT(*), MAX(period_name_id)
-        INTO   l_period_cnt, l_period
-        FROM   rr_accounting_periods_status
-        WHERE  application_id         = 200
-        AND    closing_status         = 'O'
-        AND    NVL(adjustment_period_flag,'N') = 'N'
-        AND    l_acc_date BETWEEN start_date AND end_date;
+        -- Balance Brought Fwd is a carry-forward marker (postingStatus=Posted),
+        -- not a GL entry, so it bypasses the period gate.
+        IF l_txn_type != 'Balance Brought Fwd' THEN
+            SELECT COUNT(*), MAX(period_name_id)
+            INTO   l_period_cnt, l_period
+            FROM   rr_accounting_periods_status
+            WHERE  application_id         = 200
+            AND    closing_status         = 'O'
+            AND    NVL(adjustment_period_flag,'N') = 'N'
+            AND    l_acc_date BETWEEN start_date AND end_date;
 
-        IF l_period_cnt = 0 THEN
-            p_error := 'BLOCKED:Accounting date ' || TO_CHAR(l_acc_date,'DD-Mon-YYYY')
-                       || ' does not fall within an open AP period. Please check period status.';
-            RETURN;
+            IF l_period_cnt = 0 THEN
+                p_error := 'BLOCKED:Accounting date ' || TO_CHAR(l_acc_date,'DD-Mon-YYYY')
+                           || ' does not fall within an open AP period. Please check period status.';
+                RETURN;
+            END IF;
         END IF;
 
         -- Next line number within this register

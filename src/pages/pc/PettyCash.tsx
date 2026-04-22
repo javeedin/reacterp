@@ -20,7 +20,7 @@ import {
   LockOutlined, UnlockOutlined, UserOutlined, FieldNumberOutlined, ApiOutlined,
   SwapOutlined, UploadOutlined, PaperClipOutlined, EyeOutlined,
   BookOutlined, CheckCircleOutlined, SyncOutlined, ExclamationCircleOutlined,
-  TagOutlined, PrinterOutlined, FilePdfOutlined,
+  TagOutlined, PrinterOutlined, FilePdfOutlined, BranchesOutlined,
 } from '@ant-design/icons';
 import FloatingMenu from '../../components/FloatingMenu';
 import ApiDocsModal, { type ApiEndpoint } from '../../components/ApiDocsModal';
@@ -69,7 +69,7 @@ interface RegisterTab {
 // Status tag helper
 // ─────────────────────────────────────────────────────────────────────────────
 const STATUS_COLOR: Record<string, string> = {
-  DRAFT: 'default', ACTIVE: 'green', INACTIVE: 'orange', CLOSED: 'red',
+  DRAFT: 'default', ACTIVE: 'green', INACTIVE: 'orange', CLOSED: 'red', Transferred: 'purple',
 };
 const StatusTag: React.FC<{ status: string }> = ({ status }) => (
   <Tag color={STATUS_COLOR[status] ?? 'default'} style={{ fontSize: 11 }}>
@@ -1715,9 +1715,10 @@ const RegisterDetail: React.FC<{
       render: (v) => v ? <Tag color="blue" style={{ fontSize: 11 }}>{v}</Tag> : <Text style={{ fontSize: 12, color: '#ccc' }}>—</Text> },
     { title: 'Type', dataIndex: 'transactionType', width: 130,
       render: (v) => {
-        const color = v === 'Balance Refill' ? 'blue'
-          : v === 'Balance Return' ? 'cyan'
-          : v === 'Expense'        ? 'orange'
+        const color = v === 'Balance Refill'      ? 'blue'
+          : v === 'Balance Return'      ? 'cyan'
+          : v === 'Balance Brought Fwd' ? 'geekblue'
+          : v === 'Expense'             ? 'orange'
           : 'purple';
         return <Tag color={color} style={{ fontSize: 11 }}>{v}</Tag>;
       }},
@@ -3757,6 +3758,7 @@ const PettyCash: React.FC = () => {
   const [registerForm]  = Form.useForm();
   const [editRegForm]   = Form.useForm();
   const [regActionForm] = Form.useForm();
+  const [transferForm]  = Form.useForm();
 
   const [activeTab, setActiveTab]             = useState('search');
   const [openTabs, setOpenTabs]               = useState<RegisterTab[]>([]);
@@ -3781,6 +3783,11 @@ const PettyCash: React.FC = () => {
   const [regActionOpen, setRegActionOpen]     = useState(false);
   const [regActionTarget, setRegActionTarget] = useState<RegisterTab | null>(null);
   const [regActionLoading, setRegActionLoading] = useState(false);
+
+  // Transfer to New Register
+  const [transferOpen, setTransferOpen]       = useState(false);
+  const [transferTarget, setTransferTarget]   = useState<RegisterTab | null>(null);
+  const [transferSaving, setTransferSaving]   = useState(false);
 
   // ── Load Business Units on mount ───────────────────────────
   useEffect(() => {
@@ -4016,6 +4023,91 @@ const PettyCash: React.FC = () => {
       message.error(e?.message ?? 'Action failed');
     } finally {
       setRegActionLoading(false);
+    }
+  };
+
+  // ── Transfer to New Register ──────────────────────────────
+  const openTransfer = (tab: RegisterTab) => {
+    const unposted = tab.transactions.filter(t => t.postingStatus !== 'Posted');
+    if (unposted.length > 0) {
+      message.error(
+        `${unposted.length} transaction(s) are not yet Posted. Account all lines before transferring.`
+      );
+      return;
+    }
+    setTransferTarget(tab);
+    transferForm.setFieldsValue({
+      registerName: `${tab.register.registerName} (2)`,
+      limit:        tab.register.limit,
+      ownedBy:      tab.register.ownedBy,
+      startDate:    dayjs(),
+    });
+    setTransferOpen(true);
+  };
+
+  const handleTransfer = async (values: any) => {
+    if (!transferTarget) return;
+    setTransferSaving(true);
+    try {
+      // 1. Create new register (inherits BU, currency, cash account from old)
+      const newRegResult = await createRegister({
+        registerName:    values.registerName,
+        businessUnit:    transferTarget.register.businessUnit,
+        startDate:       values.startDate ? values.startDate.format('YYYY-MM-DD') : undefined,
+        currency:        transferTarget.register.currency,
+        limit:           values.limit           ?? null,
+        ownedBy:         values.ownedBy          || null,
+        cashAccountDesc: transferTarget.register.cashAccountDesc,
+        cashAccountCcid: transferTarget.register.cashAccountCcid,
+        status:          'ACTIVE',
+        createdBy:       currentUser,
+      });
+
+      // 2. Get voucher no for the new register's first line
+      let bfVoucherNo: string | undefined;
+      try { bfVoucherNo = await getNextVoucherNo(newRegResult.registerId); } catch { bfVoucherNo = undefined; }
+
+      // 3. Create 'Balance Brought Fwd' transaction on new register (immediately Posted)
+      const txnDate = values.startDate ? values.startDate.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD');
+      await createTransaction({
+        registerId:      newRegResult.registerId,
+        transactionDate: txnDate,
+        transactionType: 'Balance Brought Fwd',
+        currency:        transferTarget.register.currency,
+        debitAmount:     transferTarget.register.balance,
+        creditAmount:    0,
+        postingStatus:   'Posted',
+        comments:        `Balance b/fwd from Register #${transferTarget.register.registerId} — ${transferTarget.register.registerName}`,
+        referenceNo:     bfVoucherNo,
+        createdBy:       currentUser,
+      });
+
+      // 4. Mark old register as Transferred (preserve fields to avoid NVL nullification)
+      await updateRegister(transferTarget.register.registerId, {
+        status:          'Transferred',
+        comments:        `Transferred to Register #${newRegResult.registerId} — ${values.registerName}`,
+        limit:           transferTarget.register.limit,
+        cashAccountCcid: transferTarget.register.cashAccountCcid,
+        cashAccountDesc: transferTarget.register.cashAccountDesc,
+        ownedBy:         transferTarget.register.ownedBy,
+        updatedBy:       currentUser,
+      });
+
+      setTransferOpen(false);
+      message.success(`Transfer complete. New register #${newRegResult.registerId} is now open.`);
+
+      // 5. Refresh old tab (now Transferred — all actions disabled)
+      await refreshTab(transferTarget.key);
+
+      // 6. Open the new register tab
+      const fullNewReg = await getRegister(newRegResult.registerId);
+      await openRegisterTab(fullNewReg);
+
+      await handleSearch();
+    } catch (e: any) {
+      message.error(e?.message ?? 'Transfer failed');
+    } finally {
+      setTransferSaving(false);
     }
   };
 
@@ -4306,7 +4398,7 @@ const PettyCash: React.FC = () => {
               <Button
                 size="small"
                 icon={<EditOutlined />}
-                disabled={tab.register.status === 'CLOSED'}
+                disabled={tab.register.status !== 'ACTIVE'}
                 onClick={() => openEditReg(tab)}
               >
                 Edit Header
@@ -4318,6 +4410,16 @@ const PettyCash: React.FC = () => {
               >
                 Change Status
               </Button>
+              {tab.register.status === 'ACTIVE' && (
+                <Button
+                  size="small"
+                  icon={<BranchesOutlined />}
+                  onClick={() => openTransfer(tab)}
+                  style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
+                >
+                  Transfer to New Register
+                </Button>
+              )}
               <Button
                 size="small"
                 icon={<CloseOutlined />}
@@ -4484,6 +4586,102 @@ const PettyCash: React.FC = () => {
             <Input.TextArea rows={3} placeholder="Reason for status change…" />
           </Form.Item>
         </Form>
+      </Modal>
+
+      {/* ── Transfer to New Register Modal ───────────────── */}
+      <Modal
+        title={
+          <Space>
+            <BranchesOutlined style={{ color: REDWOOD.info }} />
+            Transfer to New Register
+            <Tag style={{ fontSize: 11 }}>{transferTarget?.register.registerName}</Tag>
+          </Space>
+        }
+        open={transferOpen}
+        onCancel={() => setTransferOpen(false)}
+        onOk={() => transferForm.submit()}
+        okText="Transfer"
+        okButtonProps={{ style: { background: REDWOOD.info, borderColor: REDWOOD.info } }}
+        confirmLoading={transferSaving}
+        width={620}
+        destroyOnClose
+      >
+        {transferTarget && (
+          <>
+            <Alert
+              type="info"
+              showIcon
+              icon={<WalletOutlined />}
+              message={
+                <span>
+                  Balance to carry forward:{' '}
+                  <strong>
+                    {fmt(transferTarget.register.balance)} {transferTarget.register.currency}
+                  </strong>
+                </span>
+              }
+              style={{ marginBottom: 16 }}
+            />
+            <Form
+              form={transferForm}
+              layout="vertical"
+              size="small"
+              onFinish={handleTransfer}
+              style={{ marginTop: 8 }}
+            >
+              <Form.Item
+                label="New Register Name"
+                name="registerName"
+                rules={[{ required: true, message: 'Register name is required' }]}
+              >
+                <Input prefix={<WalletOutlined style={{ color: REDWOOD.neutral300 }} />} />
+              </Form.Item>
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item label="Business Unit">
+                    <Input
+                      value={transferTarget.register.businessUnit}
+                      readOnly
+                      style={{ background: '#f5f5f5', cursor: 'not-allowed' }}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item label="Currency">
+                    <Input
+                      value={transferTarget.register.currency}
+                      readOnly
+                      style={{ background: '#f5f5f5', cursor: 'not-allowed' }}
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item label="Start Date" name="startDate">
+                    <DatePicker style={{ width: '100%' }} format="YYYY-MM-DD" />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item label="Cash Limit" name="limit">
+                    <InputNumber
+                      placeholder="0.00"
+                      style={{ width: '100%' }}
+                      min={0}
+                      precision={2}
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Form.Item label="Owned By" name="ownedBy">
+                <Input
+                  placeholder="e.g. Finance Dept / John Doe"
+                  prefix={<UserOutlined style={{ color: REDWOOD.neutral300 }} />}
+                />
+              </Form.Item>
+            </Form>
+          </>
+        )}
       </Modal>
 
       {/* ── GL Account LOV for Register form ──────────────── */}

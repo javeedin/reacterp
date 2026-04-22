@@ -12,7 +12,7 @@ export interface PCRegister {
   cashAccountCcid: number | null;
   cashAccountDesc: string | null;
   currency: string;
-  status: 'DRAFT' | 'ACTIVE' | 'INACTIVE' | 'CLOSED';
+  status: 'DRAFT' | 'ACTIVE' | 'INACTIVE' | 'CLOSED' | 'Transferred';
   balance: number;
   totalDebit: number;
   totalCredit: number;
@@ -27,7 +27,7 @@ export interface PCTransaction {
   registerId: number;
   lineNumber: number;
   transactionDate: string;
-  transactionType: 'Balance Refill' | 'Expense' | 'Adjustment';
+  transactionType: 'Balance Refill' | 'Expense' | 'Adjustment' | 'Balance Return' | 'Balance Brought Fwd';
   expenseType: string | null;
   chargeAccountCcid: number | null;
   chargeAccountDesc: string | null;
