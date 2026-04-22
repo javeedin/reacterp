@@ -1678,12 +1678,21 @@ const RegisterDetail: React.FC<{
     const cashCode = register.cashAccountDesc ?? '';
     const cashDesc = cashAccountName ?? '';
 
-    // Group by referenceNo; transactions without a reference stay as individual groups
+    // Group by referenceNo, always expanding to the FULL reference group from
+    // the transactions list — never process a partial reference.
     const byRef = new Map<string, PCTransaction[]>();
     for (const t of eligible) {
       const key = t.referenceNo ? t.referenceNo : `__NOREF_${t.transactionId}`;
-      if (!byRef.has(key)) byRef.set(key, []);
-      byRef.get(key)!.push(t);
+      if (byRef.has(key)) continue; // already added via group expansion below
+      if (t.referenceNo) {
+        // Pull every eligible line that shares this reference
+        const group = transactions.filter(
+          s => s.referenceNo === t.referenceNo && !!s.chargeAccountDesc
+        );
+        byRef.set(key, group);
+      } else {
+        byRef.set(key, [t]);
+      }
     }
 
     const rows: AcctProgressRow[] = [];
@@ -2632,7 +2641,30 @@ const RegisterDetail: React.FC<{
         rowSelection={{
           type:            'checkbox',
           selectedRowKeys,
-          onChange:        (keys) => setSelectedRowKeys(keys as number[]),
+          onChange: (keys) => {
+            const newKeys  = keys as number[];
+            const added    = newKeys.filter(k => !selectedRowKeys.includes(k));
+            const removed  = selectedRowKeys.filter(k => !newKeys.includes(k));
+            const expanded = new Set(newKeys);
+
+            // Selecting any line of a reference → select all lines of that reference
+            added.forEach(key => {
+              const ref = transactions.find(t => t.transactionId === key)?.referenceNo;
+              if (ref) transactions
+                .filter(t => t.referenceNo === ref && t.transactionType !== 'Balance Refill')
+                .forEach(t => expanded.add(t.transactionId));
+            });
+
+            // Deselecting any line of a reference → deselect all lines of that reference
+            removed.forEach(key => {
+              const ref = transactions.find(t => t.transactionId === key)?.referenceNo;
+              if (ref) transactions
+                .filter(t => t.referenceNo === ref)
+                .forEach(t => expanded.delete(t.transactionId));
+            });
+
+            setSelectedRowKeys([...expanded]);
+          },
           getCheckboxProps: (rec) => ({
             disabled: rec.transactionType === 'Balance Refill',
           }),
