@@ -2072,31 +2072,32 @@ const RegisterDetail: React.FC<{
         ) => (
           <div style={{
             background: bg || '#fff',
-            borderRadius: 10,
+            borderRadius: 8,
             border: `1px solid ${REDWOOD.neutral200}`,
             borderTop: `3px solid ${accent}`,
-            padding: '12px 14px 10px',
+            padding: '7px 12px 6px',
             position: 'relative',
             overflow: 'hidden',
             height: '100%',
-            boxShadow: '0 1px 4px rgba(0,0,0,0.05)',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
           }}>
             {icon && (
-              <div style={{ position: 'absolute', top: 8, right: 10, fontSize: 28, color: accent, opacity: 0.12, lineHeight: 1 }}>
+              <div style={{ position: 'absolute', top: 6, right: 8, fontSize: 22, color: accent, opacity: 0.10, lineHeight: 1 }}>
                 {icon}
               </div>
             )}
-            <div style={{ fontSize: 10, fontWeight: 600, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 3 }}>
               {label}
             </div>
-            <div style={{ fontSize: 20, fontWeight: 700, color: REDWOOD.neutral900, lineHeight: 1.15 }}>
+            <div style={{ fontSize: 17, fontWeight: 700, color: REDWOOD.neutral900, lineHeight: 1.2 }}>
               {value}
             </div>
-            {sub && <div style={{ marginTop: 6 }}>{sub}</div>}
+            {sub && <div style={{ marginTop: 3 }}>{sub}</div>}
           </div>
         );
         return (
-          <Row gutter={10} style={{ marginBottom: 14 }} align="stretch">
+          <>
+          <Row gutter={10} style={{ marginBottom: 8 }} align="stretch">
             {/* Balance */}
             <Col span={5}>
               {kpiCard(
@@ -2113,13 +2114,13 @@ const RegisterDetail: React.FC<{
                   <div>
                     <Progress
                       percent={usedPct}
-                      size="small"
+                      size={[undefined, 4] as any}
                       strokeColor={usedPct >= 90 ? REDWOOD.warning : REDWOOD.info}
                       trailColor={REDWOOD.neutral200}
-                      style={{ marginBottom: 0 }}
+                      style={{ marginBottom: 0, lineHeight: 1 }}
                       format={p => <span style={{ fontSize: 10, color: REDWOOD.neutral600 }}>{p}%</span>}
                     />
-                    <div style={{ fontSize: 10, color: REDWOOD.neutral600, marginTop: 2 }}>
+                    <div style={{ fontSize: 10, color: REDWOOD.neutral600, marginTop: 1 }}>
                       {usedPct}% of {fmt(register.limit!)} limit
                     </div>
                   </div>
@@ -2206,55 +2207,75 @@ const RegisterDetail: React.FC<{
             <Col span={4}>
               <div style={{
                 background: '#fff',
-                borderRadius: 10,
+                borderRadius: 8,
                 border: `1px solid ${REDWOOD.neutral200}`,
                 borderTop: `3px solid #722ed1`,
-                padding: '12px 14px 10px',
+                padding: '7px 12px 6px',
                 height: '100%',
-                boxShadow: '0 1px 4px rgba(0,0,0,0.05)',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
                 fontSize: 12,
               }}>
-                <div style={{ fontSize: 10, fontWeight: 600, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 5 }}>
                   Register Info
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                  <div style={{ display: 'flex', gap: 4 }}>
-                    <span style={{ color: REDWOOD.neutral600, flexShrink: 0 }}>Currency</span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 12 }}>
+                  <div style={{ display: 'flex' }}>
+                    <span style={{ color: REDWOOD.neutral600 }}>Currency</span>
                     <span style={{ fontWeight: 600, marginLeft: 'auto' }}>{register.currency}</span>
                   </div>
                   {register.ownedBy && (
-                    <div style={{ display: 'flex', gap: 4 }}>
-                      <span style={{ color: REDWOOD.neutral600, flexShrink: 0 }}>Owner</span>
-                      <span style={{ fontWeight: 500, marginLeft: 'auto', textAlign: 'right', maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{register.ownedBy}</span>
+                    <div style={{ display: 'flex' }}>
+                      <span style={{ color: REDWOOD.neutral600 }}>Owner</span>
+                      <span style={{ marginLeft: 'auto', maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{register.ownedBy}</span>
                     </div>
                   )}
                   {register.startDate && (
-                    <div style={{ display: 'flex', gap: 4 }}>
-                      <span style={{ color: REDWOOD.neutral600, flexShrink: 0 }}>From</span>
+                    <div style={{ display: 'flex' }}>
+                      <span style={{ color: REDWOOD.neutral600 }}>From</span>
                       <span style={{ marginLeft: 'auto' }}>{register.startDate}</span>
                     </div>
                   )}
                   {register.endDate && (
-                    <div style={{ display: 'flex', gap: 4 }}>
-                      <span style={{ color: REDWOOD.neutral600, flexShrink: 0 }}>To</span>
+                    <div style={{ display: 'flex' }}>
+                      <span style={{ color: REDWOOD.neutral600 }}>To</span>
                       <span style={{ marginLeft: 'auto' }}>{register.endDate}</span>
-                    </div>
-                  )}
-                  {register.cashAccountDesc && (
-                    <div style={{ marginTop: 4, paddingTop: 4, borderTop: `1px solid ${REDWOOD.neutral200}` }}>
-                      <div style={{ fontSize: 10, color: REDWOOD.neutral600 }}>Cash Account</div>
-                      <div style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info, fontWeight: 600 }}>
-                        {register.cashAccountDesc}
-                      </div>
-                      {cashAccountName && (
-                        <div style={{ fontSize: 10, color: REDWOOD.neutral600 }}>{cashAccountName}</div>
-                      )}
                     </div>
                   )}
                 </div>
               </div>
             </Col>
           </Row>
+
+        {/* Cash Account popover button */}
+        {register.cashAccountDesc && (
+          <div style={{ marginBottom: 8, marginTop: 2 }}>
+            <Popover
+              title={<Space size={4}><BankOutlined style={{ color: REDWOOD.info }} /><span>Cash Account</span></Space>}
+              content={
+                <div style={{ maxWidth: 360 }}>
+                  <div style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: 13, marginBottom: 4 }}>
+                    {register.cashAccountDesc}
+                  </div>
+                  {cashAccountName && (
+                    <div style={{ fontSize: 12, color: REDWOOD.info }}>{cashAccountName}</div>
+                  )}
+                </div>
+              }
+              trigger="click"
+              placement="bottomLeft"
+            >
+              <Button
+                size="small"
+                type="text"
+                icon={<BankOutlined style={{ color: REDWOOD.info }} />}
+                style={{ fontSize: 12, color: REDWOOD.info, padding: '0 6px' }}
+              >
+                Cash Account
+              </Button>
+            </Popover>
+          </div>
+        )}
+          </>
         );
       })()}
 
