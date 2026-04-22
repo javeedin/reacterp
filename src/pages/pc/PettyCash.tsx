@@ -26,7 +26,14 @@ import FloatingMenu from '../../components/FloatingMenu';
 import ApiDocsModal, { type ApiEndpoint } from '../../components/ApiDocsModal';
 import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
 import { useAuth } from '../../context/AuthContext';
+import { useGlValidation } from '../../context/GlValidationContext';
 import { APEX_DB_CONFIG } from '../../config/api.config';
+import {
+  validateGlPayload,
+  persistValidationLog,
+  type GlJournalPayload,
+  type GlValidationLogEntry,
+} from '../../services/glValidation.service';
 import {
   searchRegisters, getRegister, createRegister, updateRegister, deleteRegister,
   getTransactions, getTransaction, createTransaction, updateTransaction, updateTransactionStatus, deleteTransaction,
@@ -1831,6 +1838,53 @@ const RegisterDetail: React.FC<{
           },
           lines: glLines,
         };
+
+        // ── Pre-flight validation ─────────────────────────────
+        const txnStatuses = Object.fromEntries(txns.map(t => [t.transactionId, t.postingStatus]));
+        const validation  = validateGlPayload(glPayload as GlJournalPayload, {
+          module:             'PC',
+          referenceNo:        row.refNo,
+          expectedDrCount:    row.drLines.length,
+          sourceTxnIds:       row.txnIds,
+          sourceTxnStatuses:  txnStatuses,
+        });
+
+        // Always persist the validation result for the audit trail
+        const logId = await persistValidationLog(
+          'PC', row.refNo, batchName,
+          validation.valid ? 'PASSED' : 'FAILED',
+          validation.errors, glPayload as GlJournalPayload, currentUser,
+        );
+
+        const logEntry: GlValidationLogEntry = {
+          logId:           logId ?? Date.now(),
+          module:          'PC',
+          referenceNo:     row.refNo,
+          batchName,
+          result:          validation.valid ? 'PASSED' : 'FAILED',
+          errorCount:      validation.errors.filter(e => e.severity === 'ERROR').length,
+          warningCount:    validation.errors.filter(e => e.severity === 'WARNING').length,
+          errorCategories: [...new Set(validation.errors.map(e => e.category))].join(',') || null,
+          errorSummary:    validation.errors.filter(e => e.severity === 'ERROR').map(e => `[${e.category}] ${e.message}`).join(' | ') || null,
+          errorDetail:     validation.errors,
+          createdBy:       currentUser,
+          creationDate:    new Date().toISOString(),
+        };
+        addSessionEntry(logEntry);
+
+        if (!validation.valid) {
+          const errorLines = validation.errors.filter(e => e.severity === 'ERROR');
+          const logMsg = [
+            `GL VALIDATION FAILED — ref: ${row.refNo} | batch: ${batchName}`,
+            ...errorLines.map(e => `  [${e.category}] ${e.message}`),
+          ].join('\n');
+          console.error(logMsg);
+          updateRow(row.txnId, {
+            status:  'error',
+            message: `Validation failed (${errorLines.length} error${errorLines.length !== 1 ? 's' : ''}) — see Errors log: ${errorLines.map(e => e.category).join(', ')}`,
+          });
+          continue;
+        }
 
         const glRes  = await fetch(`${APEX_BASE}/journals/create`, {
           method: 'POST',
@@ -4483,6 +4537,7 @@ const PC_API_ENDPOINTS: ApiEndpoint[] = [
 const PettyCash: React.FC = () => {
   const { user } = useAuth();
   const currentUser = user?.username || 'SYSTEM';
+  const { addSessionEntry } = useGlValidation();
 
   const [searchForm]    = Form.useForm();
   const [registerForm]  = Form.useForm();

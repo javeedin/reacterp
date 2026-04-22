@@ -17,13 +17,16 @@ import {
   PlaySquareOutlined,
   GlobalOutlined,
   BookOutlined,
+  WarningOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, Link } from 'react-router-dom';
 import { ShowAndTellPanel } from '../features/showAndTell';
 import { useAuth } from '../context/AuthContext';
+import { useGlValidation } from '../context/GlValidationContext';
 import ProfileModal from '../components/ProfileModal';
 import SupportTicketButton from '../components/SupportTicketButton';
 import ScreenRecorder from '../components/ScreenRecorder';
+import GlValidationErrorsDrawer from '../components/GlValidationErrorsDrawer';
 import type { MenuProps } from 'antd';
 
 // Type for BeforeInstallPromptEvent
@@ -53,6 +56,8 @@ const REDWOOD_PRIMARY = '#C74634';
 const MainLayout: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const { sessionErrors, openDrawer: openValidationDrawer } = useGlValidation();
+  const failedCount = sessionErrors.filter(e => e.result === 'FAILED').length;
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
   const [showIOSModal, setShowIOSModal] = useState(false);
@@ -248,6 +253,28 @@ const MainLayout: React.FC = () => {
               onClick={() => navigate('/oracle-fusion')}
             />
           </Tooltip>
+          <Tooltip title={failedCount > 0 ? `${failedCount} GL journal validation failure(s) this session` : 'GL Validation Log'} placement="bottom">
+            <Badge count={failedCount} size="small" offset={[-4, 4]}>
+              <Button
+                type="text"
+                onClick={openValidationDrawer}
+                style={{
+                  color: '#fff',
+                  background: failedCount > 0 ? 'rgba(255,77,79,0.25)' : undefined,
+                  borderRadius: 4,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  paddingInline: 8,
+                }}
+              >
+                <WarningOutlined style={{ fontSize: 15, color: failedCount > 0 ? '#ffccc7' : '#fff' }} />
+                <span style={{ fontSize: 12, color: failedCount > 0 ? '#ffccc7' : 'rgba(255,255,255,0.85)' }}>
+                  Errors
+                </span>
+              </Button>
+            </Badge>
+          </Tooltip>
           <SupportTicketButton />
           <Tooltip title={user?.name || 'User Profile'}>
             <Dropdown menu={{ items: userMenuItems }} placement="bottomRight" trigger={['click']}>
@@ -350,6 +377,7 @@ const MainLayout: React.FC = () => {
 
       <ProfileModal open={showProfile} onClose={() => setShowProfile(false)} />
       <ShowAndTellPanel open={showAndTellOpen} onClose={() => setShowAndTellOpen(false)} />
+      <GlValidationErrorsDrawer />
     </Layout>
   );
 };

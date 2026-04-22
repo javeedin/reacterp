@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ConfigProvider, Spin } from 'antd';
 import { AuthProvider } from './context/AuthContext';
+import { GlValidationProvider } from './context/GlValidationContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import MainLayout from './layouts/MainLayout';
 import { ShowAndTellProvider, ShowAndTellOverlay } from './features/showAndTell';
@@ -109,6 +110,7 @@ function App() {
       }}
     >
       <AuthProvider>
+        <GlValidationProvider>
         <HashRouter>
           <ShowAndTellProvider>
           <ShowAndTellOverlay />
@@ -239,6 +241,7 @@ function App() {
           </Suspense>
           </ShowAndTellProvider>
         </HashRouter>
+        </GlValidationProvider>
       </AuthProvider>
     </ConfigProvider>
   );
