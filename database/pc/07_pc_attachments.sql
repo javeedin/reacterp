@@ -161,8 +161,8 @@ END RR_PC_ATTACH_PKG;
 /
 
 -- ── 4. Redefine GET /pc/registers/:registerId/transactions ───
---    Adds attachmentCount, and includes all fields
---    (hasAttachment, employeeName, receiptStatus, bankTxnId)
+--    Adds attachmentCount. HAS_ATTACHMENT computed (not a real column).
+--    EMPLOYEE_NAME, RECEIPT_STATUS, BANK_TXN_ID included if they exist.
 BEGIN
     ORDS.DEFINE_HANDLER(
         p_module_name => 'pc',
@@ -190,7 +190,7 @@ DECLARE
                t.COMMENTS,
                t.REFERENCE_NO,
                t.ATTACHMENT,
-               t.HAS_ATTACHMENT,
+               CASE WHEN t.ATTACHMENT IS NOT NULL THEN ''Y'' ELSE ''N'' END AS HAS_ATTACHMENT,
                t.EMPLOYEE_NAME,
                t.RECEIPT_STATUS,
                t.BANK_TXN_ID,
