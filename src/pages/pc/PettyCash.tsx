@@ -679,7 +679,16 @@ const RegisterDetail: React.FC<{
     setVoucherNoLoading(true);
     getNextVoucherNo(register.registerId)
       .then(v => setAddExpenseVoucherNo(v))
-      .catch(() => setAddExpenseVoucherNo(`R${register.registerId}-01`))
+      .catch(() => {
+        // Fallback: compute from transactions already in state
+        const pat = new RegExp(`^R${register.registerId}-(\\d+)$`);
+        const maxSeq = transactions.reduce((mx, t) => {
+          if (!t.referenceNo) return mx;
+          const m = t.referenceNo.match(pat);
+          return m ? Math.max(mx, parseInt(m[1], 10)) : mx;
+        }, 0);
+        setAddExpenseVoucherNo(`R${register.registerId}-${String(maxSeq + 1).padStart(2, '0')}`);
+      })
       .finally(() => setVoucherNoLoading(false));
   }, [addExpenseOpen]);
 
@@ -688,7 +697,15 @@ const RegisterDetail: React.FC<{
     setVoucherNoLoading(true);
     getNextVoucherNo(register.registerId)
       .then(v => setAddMoneyVoucherNo(v))
-      .catch(() => setAddMoneyVoucherNo(`R${register.registerId}-01`))
+      .catch(() => {
+        const pat = new RegExp(`^R${register.registerId}-(\\d+)$`);
+        const maxSeq = transactions.reduce((mx, t) => {
+          if (!t.referenceNo) return mx;
+          const m = t.referenceNo.match(pat);
+          return m ? Math.max(mx, parseInt(m[1], 10)) : mx;
+        }, 0);
+        setAddMoneyVoucherNo(`R${register.registerId}-${String(maxSeq + 1).padStart(2, '0')}`);
+      })
       .finally(() => setVoucherNoLoading(false));
   }, [addMoneyOpen]);
 
@@ -1072,6 +1089,9 @@ const RegisterDetail: React.FC<{
         postingStatus:      'Unposted',
         createdBy:          currentUser,
       });
+      const seqMn = addMoneyVoucherNo.match(/(\d+)$/);
+      const nextSeqN = seqMn ? parseInt(seqMn[1], 10) + 1 : 1;
+      setAddMoneyVoucherNo(`R${register.registerId}-${String(nextSeqN).padStart(2, '0')}`);
       message.success('Money added to register');
       moneyForm.resetFields();
       setMoneyAcctDesc('');
@@ -1216,6 +1236,10 @@ const RegisterDetail: React.FC<{
         postingStatus:     'Unposted',
         createdBy:         currentUser,
       });
+      // Bump voucher immediately so next open shows correct incremented number
+      const seqM = addExpenseVoucherNo.match(/(\d+)$/);
+      const nextSeq = seqM ? parseInt(seqM[1], 10) + 1 : 1;
+      setAddExpenseVoucherNo(`R${register.registerId}-${String(nextSeq).padStart(2, '0')}`);
       message.success('Expense recorded');
       expenseForm.resetFields();
       setAddExpenseAttachName('');
@@ -1271,6 +1295,10 @@ const RegisterDetail: React.FC<{
         });
         created++;
       }
+      // Bump voucher so next open shows the next number in sequence
+      const seqMm = addExpenseVoucherNo.match(/(\d+)$/);
+      const nextSeqM = seqMm ? parseInt(seqMm[1], 10) + 1 : 1;
+      setAddExpenseVoucherNo(`R${register.registerId}-${String(nextSeqM).padStart(2, '0')}`);
       message.success(`${created} expense line${created > 1 ? 's' : ''} recorded`);
       expenseForm.resetFields();
       setExpenseLines([makeNewLine()]);
@@ -1724,6 +1752,8 @@ const RegisterDetail: React.FC<{
       }},
     { title: 'Expense Type', dataIndex: 'expenseType', width: 120,
       render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+    { title: 'Comments', dataIndex: 'comments', width: 160, ellipsis: true,
+      render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Currency', dataIndex: 'currency', width: 80, align: 'center',
       render: (v) => <Text style={{ fontSize: 12 }}>{v}</Text> },
     { title: 'Money In', dataIndex: 'debitAmount', width: 130, align: 'right',
@@ -1797,8 +1827,6 @@ const RegisterDetail: React.FC<{
             }} />
         </Tooltip>
       ) : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
-    { title: 'Comments', dataIndex: 'comments', ellipsis: true,
-      render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Created By', dataIndex: 'createdBy', width: 130, ellipsis: true,
       render: (v) => <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{v || '—'}</Text> },
     { title: '', key: 'actions', width: 100, align: 'center' as const, fixed: 'right' as const,
