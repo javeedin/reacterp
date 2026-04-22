@@ -2057,152 +2057,207 @@ const RegisterDetail: React.FC<{
 
   return (
     <>
-      {/* Header KPIs */}
+      {/* ── Header KPIs ── */}
       {(() => {
         const hasLimit = register.limit != null && register.limit > 0;
         const canAdd   = hasLimit ? Math.max(0, register.limit! - register.balance) : null;
         const usedPct  = hasLimit ? Math.min(100, Math.round((register.balance / register.limit!) * 100)) : 0;
+        const kpiCard = (
+          accent: string,
+          label: string,
+          value: React.ReactNode,
+          sub?: React.ReactNode,
+          bg?: string,
+          icon?: React.ReactNode,
+        ) => (
+          <div style={{
+            background: bg || '#fff',
+            borderRadius: 10,
+            border: `1px solid ${REDWOOD.neutral200}`,
+            borderTop: `3px solid ${accent}`,
+            padding: '12px 14px 10px',
+            position: 'relative',
+            overflow: 'hidden',
+            height: '100%',
+            boxShadow: '0 1px 4px rgba(0,0,0,0.05)',
+          }}>
+            {icon && (
+              <div style={{ position: 'absolute', top: 8, right: 10, fontSize: 28, color: accent, opacity: 0.12, lineHeight: 1 }}>
+                {icon}
+              </div>
+            )}
+            <div style={{ fontSize: 10, fontWeight: 600, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+              {label}
+            </div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: REDWOOD.neutral900, lineHeight: 1.15 }}>
+              {value}
+            </div>
+            {sub && <div style={{ marginTop: 6 }}>{sub}</div>}
+          </div>
+        );
         return (
-          <Row gutter={12} style={{ marginBottom: 16 }}>
+          <Row gutter={10} style={{ marginBottom: 14 }} align="stretch">
             {/* Balance */}
-            <Col span={4}>
-              <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
-                <Statistic
-                  title={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Balance</Text>}
-                  value={register.balance}
-                  precision={2}
-                  valueStyle={{ fontSize: 20, color: register.balance >= 0 ? REDWOOD.success : REDWOOD.error }}
-                  suffix={<span style={{ fontSize: 12 }}>{register.currency}</span>}
-                />
-                {hasLimit && (
-                  <Progress
-                    percent={usedPct}
-                    size="small"
-                    strokeColor={usedPct >= 100 ? REDWOOD.success : REDWOOD.info}
-                    style={{ marginTop: 6, marginBottom: 0 }}
-                    format={p => <span style={{ fontSize: 10 }}>{p}%</span>}
-                  />
-                )}
-              </Card>
+            <Col span={5}>
+              {kpiCard(
+                REDWOOD.info,
+                'Balance',
+                <span>
+                  <span style={{ color: register.balance >= 0 ? REDWOOD.success : REDWOOD.error }}>
+                    {fmt(register.balance)}
+                  </span>
+                  {' '}
+                  <span style={{ fontSize: 12, fontWeight: 400, color: REDWOOD.neutral600 }}>{register.currency}</span>
+                </span>,
+                hasLimit ? (
+                  <div>
+                    <Progress
+                      percent={usedPct}
+                      size="small"
+                      strokeColor={usedPct >= 90 ? REDWOOD.warning : REDWOOD.info}
+                      trailColor={REDWOOD.neutral200}
+                      style={{ marginBottom: 0 }}
+                      format={p => <span style={{ fontSize: 10, color: REDWOOD.neutral600 }}>{p}%</span>}
+                    />
+                    <div style={{ fontSize: 10, color: REDWOOD.neutral600, marginTop: 2 }}>
+                      {usedPct}% of {fmt(register.limit!)} limit
+                    </div>
+                  </div>
+                ) : undefined,
+                undefined,
+                <WalletOutlined />,
+              )}
             </Col>
 
-            {/* Limit — always visible */}
+            {/* Can Add */}
             <Col span={4}>
-              <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
-                {hasLimit ? (
-                  <Statistic
-                    title={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Limit</Text>}
-                    value={register.limit!}
-                    precision={2}
-                    valueStyle={{ fontSize: 20, color: REDWOOD.neutral900 }}
-                    suffix={<span style={{ fontSize: 12 }}>{register.currency}</span>}
-                  />
-                ) : (
-                  <>
-                    <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 4 }}>Limit</div>
-                    <div style={{ fontSize: 20, color: REDWOOD.neutral300 }}>—</div>
-                  </>
-                )}
-              </Card>
+              {hasLimit ? kpiCard(
+                canAdd! > 0 ? REDWOOD.success : REDWOOD.neutral300,
+                'Available to Add',
+                <span>
+                  <span style={{ color: canAdd! > 0 ? REDWOOD.success : REDWOOD.neutral300 }}>
+                    {fmt(canAdd!)}
+                  </span>
+                  {' '}
+                  <span style={{ fontSize: 12, fontWeight: 400, color: REDWOOD.neutral600 }}>{register.currency}</span>
+                </span>,
+                <div style={{ fontSize: 10, color: REDWOOD.neutral600 }}>
+                  {canAdd! > 0
+                    ? `${Math.round((canAdd! / register.limit!) * 100)}% free`
+                    : 'At limit'}
+                </div>,
+                canAdd! > 0 ? '#f6ffed' : undefined,
+                <DollarOutlined />,
+              ) : kpiCard(
+                REDWOOD.neutral300, 'Available to Add',
+                <span style={{ color: REDWOOD.neutral300, fontSize: 18 }}>No Limit</span>,
+                undefined, undefined, <DollarOutlined />,
+              )}
             </Col>
 
-            {/* Can Add — always visible */}
-            <Col span={4}>
-              <Card size="small" style={{
-                borderRadius: 8,
-                border: `1px solid ${hasLimit && canAdd! > 0 ? '#b7eb8f' : REDWOOD.neutral200}`,
-                background: hasLimit && canAdd! > 0 ? '#f6ffed' : undefined,
-              }}>
-                {hasLimit ? (
-                  <Statistic
-                    title={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Can Add</Text>}
-                    value={canAdd!}
-                    precision={2}
-                    valueStyle={{ fontSize: 20, color: canAdd! > 0 ? REDWOOD.success : REDWOOD.neutral300 }}
-                    suffix={<span style={{ fontSize: 12 }}>{register.currency}</span>}
-                  />
-                ) : (
-                  <>
-                    <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 4 }}>Can Add</div>
-                    <div style={{ fontSize: 20, color: REDWOOD.neutral300 }}>—</div>
-                  </>
-                )}
-              </Card>
+            {/* Limit */}
+            <Col span={3}>
+              {kpiCard(
+                REDWOOD.neutral600,
+                'Limit',
+                hasLimit
+                  ? <span>
+                      <span style={{ color: REDWOOD.neutral900 }}>{fmt(register.limit!)}</span>
+                      {' '}<span style={{ fontSize: 12, fontWeight: 400, color: REDWOOD.neutral600 }}>{register.currency}</span>
+                    </span>
+                  : <span style={{ color: REDWOOD.neutral300, fontSize: 16 }}>—</span>,
+                undefined, undefined, <FieldNumberOutlined />,
+              )}
             </Col>
 
             {/* Total In */}
             <Col span={4}>
-              <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
-                <Statistic
-                  title={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Total Money In</Text>}
-                  value={register.totalDebit}
-                  precision={2}
-                  valueStyle={{ fontSize: 18, color: REDWOOD.success }}
-                  prefix={<ArrowDownOutlined />}
-                />
-              </Card>
+              {kpiCard(
+                REDWOOD.success,
+                'Total Money In',
+                <span style={{ color: REDWOOD.success }}>
+                  {fmt(register.totalDebit)}
+                  {' '}<span style={{ fontSize: 12, fontWeight: 400, color: REDWOOD.neutral600 }}>{register.currency}</span>
+                </span>,
+                <div style={{ fontSize: 10, color: REDWOOD.success }}>
+                  <ArrowDownOutlined style={{ marginRight: 3 }} />Inflows
+                </div>,
+                undefined, <ArrowDownOutlined />,
+              )}
             </Col>
 
             {/* Total Out */}
             <Col span={4}>
-              <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
-                <Statistic
-                  title={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Total Money Out</Text>}
-                  value={register.totalCredit}
-                  precision={2}
-                  valueStyle={{ fontSize: 18, color: REDWOOD.error }}
-                  prefix={<ArrowUpOutlined />}
-                />
-              </Card>
+              {kpiCard(
+                REDWOOD.error,
+                'Total Money Out',
+                <span style={{ color: REDWOOD.error }}>
+                  {fmt(register.totalCredit)}
+                  {' '}<span style={{ fontSize: 12, fontWeight: 400, color: REDWOOD.neutral600 }}>{register.currency}</span>
+                </span>,
+                <div style={{ fontSize: 10, color: REDWOOD.error }}>
+                  <ArrowUpOutlined style={{ marginRight: 3 }} />Outflows
+                </div>,
+                undefined, <ArrowUpOutlined />,
+              )}
             </Col>
 
             {/* Register Info */}
             <Col span={4}>
-              <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
-                <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 4 }}>Register Info</div>
-                <div style={{ fontSize: 12 }}>
-                  <b>BU:</b> {register.businessUnit || '—'}<br />
-                  <b>Currency:</b> {register.currency}<br />
-                  <b>Status:</b> <StatusTag status={register.status} /><br />
-                  {register.ownedBy   && <><b>Owned By:</b> {register.ownedBy}<br /></>}
-                  {register.startDate && <><b>From:</b> {register.startDate}<br /></>}
-                  {register.endDate   && <><b>To:</b> {register.endDate}</>}
+              <div style={{
+                background: '#fff',
+                borderRadius: 10,
+                border: `1px solid ${REDWOOD.neutral200}`,
+                borderTop: `3px solid #722ed1`,
+                padding: '12px 14px 10px',
+                height: '100%',
+                boxShadow: '0 1px 4px rgba(0,0,0,0.05)',
+                fontSize: 12,
+              }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
+                  Register Info
                 </div>
-              </Card>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <span style={{ color: REDWOOD.neutral600, flexShrink: 0 }}>Currency</span>
+                    <span style={{ fontWeight: 600, marginLeft: 'auto' }}>{register.currency}</span>
+                  </div>
+                  {register.ownedBy && (
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <span style={{ color: REDWOOD.neutral600, flexShrink: 0 }}>Owner</span>
+                      <span style={{ fontWeight: 500, marginLeft: 'auto', textAlign: 'right', maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{register.ownedBy}</span>
+                    </div>
+                  )}
+                  {register.startDate && (
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <span style={{ color: REDWOOD.neutral600, flexShrink: 0 }}>From</span>
+                      <span style={{ marginLeft: 'auto' }}>{register.startDate}</span>
+                    </div>
+                  )}
+                  {register.endDate && (
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <span style={{ color: REDWOOD.neutral600, flexShrink: 0 }}>To</span>
+                      <span style={{ marginLeft: 'auto' }}>{register.endDate}</span>
+                    </div>
+                  )}
+                  {register.cashAccountDesc && (
+                    <div style={{ marginTop: 4, paddingTop: 4, borderTop: `1px solid ${REDWOOD.neutral200}` }}>
+                      <div style={{ fontSize: 10, color: REDWOOD.neutral600 }}>Cash Account</div>
+                      <div style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info, fontWeight: 600 }}>
+                        {register.cashAccountDesc}
+                      </div>
+                      {cashAccountName && (
+                        <div style={{ fontSize: 10, color: REDWOOD.neutral600 }}>{cashAccountName}</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
             </Col>
           </Row>
         );
       })()}
 
-      {/* Cash Account — icon button opens a popover */}
-      {register.cashAccountDesc && (
-        <Tooltip title="Show Cash Account">
-          <Popover
-            title={<Space size={4}><BankOutlined style={{ color: REDWOOD.info }} /><span>Cash Account</span></Space>}
-            content={
-              <div style={{ maxWidth: 360 }}>
-                <div style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: 13, marginBottom: 4 }}>
-                  {register.cashAccountDesc}
-                </div>
-                {cashAccountName && (
-                  <div style={{ fontSize: 12, color: '#1677ff' }}>{cashAccountName}</div>
-                )}
-              </div>
-            }
-            trigger="click"
-            placement="bottomLeft"
-          >
-            <Button
-              size="small"
-              type="text"
-              icon={<BankOutlined style={{ color: REDWOOD.info }} />}
-              style={{ marginBottom: 8, fontSize: 12, color: REDWOOD.info }}
-            >
-              Cash Account
-            </Button>
-          </Popover>
-        </Tooltip>
-      )}
 
       {/* Action buttons */}
       {(() => {
@@ -2223,39 +2278,51 @@ const RegisterDetail: React.FC<{
             )
           : transactions;
       return (<>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <Space size={8}>
-          <Text style={{ fontSize: 12, color: REDWOOD.neutral600, whiteSpace: 'nowrap' }}>Transactions</Text>
+      {/* ── Toolbar ── */}
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        background: '#fff', border: `1px solid ${REDWOOD.neutral200}`,
+        borderRadius: 8, padding: '8px 12px', marginBottom: 10,
+        boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+        gap: 8,
+      }}>
+        {/* Left: label + search */}
+        <Space size={6} style={{ flexShrink: 0 }}>
+          <Text style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.neutral600, whiteSpace: 'nowrap' }}>
+            Transactions
+            {transactions.length > 0 && (
+              <span style={{
+                marginLeft: 6, background: REDWOOD.neutral200,
+                borderRadius: 10, padding: '1px 7px', fontSize: 11, fontWeight: 500,
+              }}>{transactions.length}</span>
+            )}
+          </Text>
           <Input.Search
             size="small"
             allowClear
-            placeholder="Search transactions…"
-            style={{ width: 220 }}
+            placeholder="Search…"
+            style={{ width: 200 }}
             value={txnSearch}
             onChange={e => setTxnSearch(e.target.value)}
           />
           {q && (
             <Text style={{ fontSize: 11, color: REDWOOD.neutral600, whiteSpace: 'nowrap' }}>
-              {filteredTxns.length} / {transactions.length}
+              {filteredTxns.length}/{transactions.length}
             </Text>
           )}
         </Space>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Button
-            size="small"
-            icon={<ReloadOutlined />}
-            onClick={onRefresh}
-            loading={tab.txnLoading}
-          >
+
+        {/* Right: actions */}
+        <Space size={4} style={{ flexWrap: 'nowrap' }}>
+          <Button size="small" icon={<ReloadOutlined />} onClick={onRefresh} loading={tab.txnLoading}>
             Refresh
           </Button>
-          <Button
-            size="small"
-            icon={<DownloadOutlined />}
-            onClick={() => exportRegisterToExcel(register, transactions)}
-          >
+          <Button size="small" icon={<DownloadOutlined />} onClick={() => exportRegisterToExcel(register, transactions)}>
             Export Excel
           </Button>
+
+          <Divider type="vertical" style={{ margin: '0 2px', height: 20 }} />
+
           {(() => {
             const postedSelected = transactions.filter(t =>
               selectedRowKeys.includes(t.transactionId) && t.postingStatus === 'Posted'
@@ -2263,12 +2330,10 @@ const RegisterDetail: React.FC<{
             const disabled = postedSelected.length === 0;
             return (
               <Tooltip title={disabled ? 'Select one or more posted transactions to view accounting' : undefined}>
-                <Button
+                <Button size="small"
                   icon={<BookOutlined />}
                   disabled={disabled}
-                  onClick={() => {
-                    openViewAccounting(postedSelected[0], postedSelected);
-                  }}
+                  onClick={() => openViewAccounting(postedSelected[0], postedSelected)}
                 >
                   View Accounting{postedSelected.length > 1 ? ` (${postedSelected.length})` : ''}
                 </Button>
@@ -2276,7 +2341,7 @@ const RegisterDetail: React.FC<{
             );
           })()}
           <Tooltip title={selectedRowKeys.length === 0 ? 'Select expense transactions to account' : undefined}>
-            <Button
+            <Button size="small"
               icon={<CheckCircleOutlined />}
               disabled={isClosed || selectedRowKeys.length === 0}
               style={!isClosed && selectedRowKeys.length > 0
@@ -2287,42 +2352,47 @@ const RegisterDetail: React.FC<{
               Create Accounting{selectedRowKeys.length > 0 ? ` (${selectedRowKeys.length})` : ''}
             </Button>
           </Tooltip>
+
+          <Divider type="vertical" style={{ margin: '0 2px', height: 20 }} />
+
           <Tooltip title={register.limit == null ? 'Set a limit on this register before adding money' : undefined}>
-          <Button
-            icon={<DollarOutlined />}
-            style={!isClosed && register.limit != null ? { background: REDWOOD.success, borderColor: REDWOOD.success, color: '#fff' } : {}}
-            disabled={isClosed || register.limit == null}
-            onClick={() => {
-              moneyForm.resetFields();
-              setMoneyAcctDesc('');
-              setLinkedBankTxnRef('');
-              setBankTxnPostResponse(null);
-              setBankTxnLookupResult(null);
-              setBankTxnPayload(null);
-              setBankTxnRawError('');
-              if (register.cashAccountDesc) {
-                moneyForm.setFieldsValue({ chargeAccountDesc: register.cashAccountDesc });
-                setMoneyAcctDesc(cashAccountName ?? '');
-              }
-              if (register.limit != null && register.limit > 0) {
-                const canAdd = register.limit - register.balance;
-                if (canAdd <= 0) {
-                  message.warning(`Register is already at its limit (${fmt(register.limit)} ${register.currency}). No more money can be added.`);
-                  return;
+            <Button
+              icon={<DollarOutlined />}
+              style={!isClosed && register.limit != null
+                ? { background: REDWOOD.success, borderColor: REDWOOD.success, color: '#fff', fontWeight: 600 }
+                : {}}
+              disabled={isClosed || register.limit == null}
+              onClick={() => {
+                moneyForm.resetFields();
+                setMoneyAcctDesc('');
+                setLinkedBankTxnRef('');
+                setBankTxnPostResponse(null);
+                setBankTxnLookupResult(null);
+                setBankTxnPayload(null);
+                setBankTxnRawError('');
+                if (register.cashAccountDesc) {
+                  moneyForm.setFieldsValue({ chargeAccountDesc: register.cashAccountDesc });
+                  setMoneyAcctDesc(cashAccountName ?? '');
                 }
-                moneyForm.setFieldsValue({ amount: Math.round(canAdd * 100) / 100 });
-              }
-              setAddMoneyOpen(true);
-            }}
-          >
-            Add Money
-          </Button>
+                if (register.limit != null && register.limit > 0) {
+                  const canAdd = register.limit - register.balance;
+                  if (canAdd <= 0) {
+                    message.warning(`Register is already at its limit (${fmt(register.limit)} ${register.currency}). No more money can be added.`);
+                    return;
+                  }
+                  moneyForm.setFieldsValue({ amount: Math.round(canAdd * 100) / 100 });
+                }
+                setAddMoneyOpen(true);
+              }}
+            >
+              Add Money
+            </Button>
           </Tooltip>
           <Tooltip title={noBalance ? 'No available balance to record an expense' : undefined}>
             <Button
               icon={<MinusCircleOutlined />}
               style={!isClosed && !noBalance
-                ? { background: REDWOOD.warning, borderColor: REDWOOD.warning, color: '#fff' }
+                ? { background: REDWOOD.warning, borderColor: REDWOOD.warning, color: '#fff', fontWeight: 600 }
                 : {}}
               disabled={isClosed || noBalance}
               onClick={() => { expenseForm.resetFields(); setAddAcctDesc(''); setAddExpenseOpen(true); }}
@@ -2330,7 +2400,7 @@ const RegisterDetail: React.FC<{
               Add Expense
             </Button>
           </Tooltip>
-        </div>
+        </Space>
       </div>
 
       {/* Transactions table */}
@@ -4840,16 +4910,45 @@ const PettyCash: React.FC = () => {
       closable: true,
       children: (
         <div style={{ padding: '12px 0' }}>
-          {/* Register header bar */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <div>
-              <Title level={5} style={{ margin: 0 }}>{tab.register.registerName}</Title>
-              <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>
-                Register #{tab.register.registerId} &nbsp;·&nbsp;
-                <StatusTag status={tab.register.status} />
-              </Text>
+          {/* ── Register header banner ── */}
+          <div style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            background: '#fff',
+            border: `1px solid ${REDWOOD.neutral200}`,
+            borderLeft: `4px solid ${REDWOOD.primary}`,
+            borderRadius: 8, padding: '10px 16px', marginBottom: 14,
+            boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: 8,
+                background: `linear-gradient(135deg, ${REDWOOD.primary} 0%, ${REDWOOD.primaryLight} 100%)`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0,
+              }}>
+                <WalletOutlined style={{ color: '#fff', fontSize: 16 }} />
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 15, color: REDWOOD.neutral900, lineHeight: 1.2 }}>
+                  {tab.register.registerName}
+                </div>
+                <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginTop: 2, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontFamily: 'monospace', background: REDWOOD.neutral100, padding: '1px 6px', borderRadius: 4, fontSize: 11 }}>
+                    #{tab.register.registerId}
+                  </span>
+                  <StatusTag status={tab.register.status} />
+                  {tab.register.businessUnit && (
+                    <span style={{ color: REDWOOD.neutral600 }}>{tab.register.businessUnit}</span>
+                  )}
+                  {tab.register.ownedBy && (
+                    <span style={{ color: REDWOOD.neutral600 }}>
+                      <UserOutlined style={{ marginRight: 3 }} />{tab.register.ownedBy}
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
-            <Space>
+            <Space size={6}>
               <Button size="small" icon={<ReloadOutlined />}
                 onClick={() => refreshTab(tab.key)}>
                 Refresh
