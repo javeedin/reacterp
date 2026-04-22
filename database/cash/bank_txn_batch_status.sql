@@ -1,8 +1,9 @@
 -- ============================================================
--- GET cash/externaltransactions/batchstatus
--- Returns STATUS + ACCOUNTING_FLAG for a comma-separated list
--- of external transaction IDs supplied in the :ids bind var.
--- Usage: GET .../batchstatus?ids=101,102,103
+-- GET cash/externaltransactions/batchstatus/:ids
+-- Returns STATUS + ACCOUNTING_FLAG for a slash-delimited path
+-- of comma-separated external transaction IDs.
+-- Usage: GET .../batchstatus/101,102,103
+--        GET .../batchstatus/1000000014
 -- Run this in Oracle APEX SQL Workshop (reerp module must exist)
 -- ============================================================
 
@@ -24,23 +25,40 @@ BEGIN
     EXCEPTION WHEN OTHERS THEN NULL;
     END;
 
+    BEGIN
+        ORDS.DELETE_HANDLER(
+            p_module_name => 'reerp',
+            p_pattern     => 'cash/externaltransactions/batchstatus/:ids',
+            p_method      => 'GET'
+        );
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+
+    BEGIN
+        ORDS.DELETE_TEMPLATE(
+            p_module_name => 'reerp',
+            p_pattern     => 'cash/externaltransactions/batchstatus/:ids'
+        );
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+
     ORDS.DEFINE_TEMPLATE(
         p_module_name => 'reerp',
-        p_pattern     => 'cash/externaltransactions/batchstatus',
+        p_pattern     => 'cash/externaltransactions/batchstatus/:ids',
         p_priority    => 0,
         p_etag_type   => 'HASH',
         p_etag_query  => NULL,
-        p_comments    => 'Batch-fetch STATUS + ACCOUNTING_FLAG for multiple bank transaction IDs'
+        p_comments    => 'Batch-fetch STATUS + ACCOUNTING_FLAG for comma-separated bank transaction IDs'
     );
 
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'reerp',
-        p_pattern        => 'cash/externaltransactions/batchstatus',
+        p_pattern        => 'cash/externaltransactions/batchstatus/:ids',
         p_method         => 'GET',
         p_source_type    => ORDS.source_type_plsql,
         p_items_per_page => 0,
         p_mimes_allowed  => '',
-        p_comments       => 'ids = comma-separated EXTERNAL_TRANSACTION_ID values',
+        p_comments       => ':ids = comma-separated EXTERNAL_TRANSACTION_ID values in the URL path',
         p_source         => q'[
 DECLARE
     l_json  VARCHAR2(32767) := '[';
@@ -58,8 +76,8 @@ BEGIN
         IF NOT l_first THEN l_json := l_json || ','; END IF;
         l_json := l_json
             || '{"externalTransactionId":' || r.EXTERNAL_TRANSACTION_ID
-            || ',"status":"'        || REPLACE(r.STATUS,           '"', '\"') || '"'
-            || ',"accountingFlag":"'|| REPLACE(r.ACCOUNTING_FLAG,  '"', '\"') || '"'
+            || ',"status":"'         || REPLACE(r.STATUS,          '"', '\"') || '"'
+            || ',"accountingFlag":"' || REPLACE(r.ACCOUNTING_FLAG, '"', '\"') || '"'
             || '}';
         l_first := FALSE;
     END LOOP;

@@ -630,7 +630,7 @@ const RegisterDetail: React.FC<{
         .map(t => t.bankTxnId!)
     )];
     if (!ids.length) { setBankTxnStatusMap(new Map()); return; }
-    const url = `${APEX_DB_CONFIG.baseUrl}/cash/externaltransactions/batchstatus?ids=${ids.join(',')}`;
+    const url = `${APEX_DB_CONFIG.baseUrl}/cash/externaltransactions/batchstatus/${ids.join(',')}`;
     fetch(url, { headers: { Accept: 'application/json' } })
       .then(r => r.json())
       .then((data: { items?: { externalTransactionId: number; status: string; accountingFlag: string }[] }) => {
