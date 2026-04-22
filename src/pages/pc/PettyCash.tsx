@@ -630,6 +630,7 @@ const RegisterDetail: React.FC<{
   cashAccountName?: string;
 }> = ({ tab, onRefresh, currentUser, cashAccountName }) => {
   const { register, transactions, txnLoading } = tab;
+  const { addSessionEntry } = useGlValidation();
   const [addMoneyOpen, setAddMoneyOpen]     = useState(false);
   const [addExpenseOpen, setAddExpenseOpen] = useState(false);
   const [editTxnOpen, setEditTxnOpen]       = useState(false);
@@ -4575,7 +4576,6 @@ const PC_API_ENDPOINTS: ApiEndpoint[] = [
 const PettyCash: React.FC = () => {
   const { user } = useAuth();
   const currentUser = user?.username || 'SYSTEM';
-  const { addSessionEntry } = useGlValidation();
 
   const [searchForm]    = Form.useForm();
   const [registerForm]  = Form.useForm();
