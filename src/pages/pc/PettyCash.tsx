@@ -4278,11 +4278,17 @@ const RegisterDetail: React.FC<{
               render: (v, r) => <Text style={{ fontSize: 13, fontWeight: 700 }}>{fmt(v)} <span style={{ fontSize: 11, fontWeight: 400 }}>{r.currency}</span></Text> },
             { title: 'Period', dataIndex: 'periodName', width: 90,
               render: (v) => <Tag color="blue" style={{ fontSize: 11 }}>{v || '—'}</Tag> },
-            { title: 'CR Cash Account', dataIndex: 'crAccount',
+            { title: 'CR Cash Account', dataIndex: 'crAccount', width: 180,
               render: (v, r) => (
                 <div>
                   <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.success }}>{v || '—'}</Text>
-                  {r.crAccountDesc && <div style={{ fontSize: 10, color: REDWOOD.neutral600 }}>{r.crAccountDesc}</div>}
+                  {r.crAccountDesc && (
+                    <Tooltip title={r.crAccountDesc}>
+                      <div style={{ fontSize: 10, color: REDWOOD.neutral600, marginTop: 1, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {r.crAccountDesc}
+                      </div>
+                    </Tooltip>
+                  )}
                 </div>
               )},
             { title: 'Status', dataIndex: 'status', width: 150,
