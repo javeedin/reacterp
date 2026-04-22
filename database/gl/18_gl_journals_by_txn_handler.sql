@@ -3,11 +3,10 @@
 -- Package: RR_GL_JOURNALS_PKG
 -- Handler: GET reerp/gl/journals/by-txn?txn_id=:txn_id
 -- =============================================================================
--- Returns the GL journal header + all lines for a given source transaction.
--- Dr lines are stored with REFERENCE1 = txnId, REFERENCE3 = 'EXPENSE'.
--- Queries RR_GL_LINES_ALL first, falls back to RR_GL_JE_LINES_ALL.
--- Response shape matches SlaGetResult (TypeScript) so the view modal needs
--- no changes.
+-- Tables used:
+--   RR_GL_JE_LINES_ALL      -- journal lines  (REFERENCE1 = txnId, REFERENCE3 = 'EXPENSE')
+--   RR_GL_JE_HEADERS        -- journal headers
+--   RR_GL_JOURNAL_BATCHES   -- journal batches (JE_BATCH_ID)
 --
 -- Run each block separately in SQL Workshop > SQL Commands (as schema owner)
 -- =============================================================================
@@ -59,131 +58,69 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_JOURNALS_PKG AS
 
     -- -----------------------------------------------------------------------
     -- find_je_header_id
-    --   Resolves JE_HEADER_ID + BATCH_ID for the given txn from whichever
-    --   GL lines table contains data for it.
+    --   Resolves JE_HEADER_ID + JE_BATCH_ID from RR_GL_JE_LINES_ALL
+    --   using REFERENCE1 = txnId, REFERENCE3 = 'EXPENSE'.
     -- -----------------------------------------------------------------------
     PROCEDURE find_je_header_id (
         p_txn_id       IN  VARCHAR2,
         p_je_header_id OUT NUMBER,
-        p_batch_id     OUT NUMBER
+        p_je_batch_id  OUT NUMBER
     ) IS
     BEGIN
-        p_je_header_id := NULL;
-        p_batch_id     := NULL;
-
-        -- Primary table
-        BEGIN
-            SELECT JE_HEADER_ID, BATCH_ID
-              INTO p_je_header_id, p_batch_id
-              FROM RR_GL_LINES_ALL
-             WHERE REFERENCE1 = p_txn_id
-               AND REFERENCE3 = 'EXPENSE'
-               AND ROWNUM     = 1;
-        EXCEPTION
-            WHEN NO_DATA_FOUND THEN NULL;
-            WHEN OTHERS        THEN NULL;
-        END;
-
-        -- Fallback: alternate table name used by some ORDS handlers
-        IF p_je_header_id IS NULL THEN
-            BEGIN
-                SELECT JE_HEADER_ID, BATCH_ID
-                  INTO p_je_header_id, p_batch_id
-                  FROM RR_GL_JE_LINES_ALL
-                 WHERE REFERENCE1 = p_txn_id
-                   AND REFERENCE3 = 'EXPENSE'
-                   AND ROWNUM     = 1;
-            EXCEPTION
-                WHEN NO_DATA_FOUND THEN NULL;
-                WHEN OTHERS        THEN NULL;
-            END;
-        END IF;
+        SELECT JE_HEADER_ID, BATCH_ID
+          INTO p_je_header_id, p_je_batch_id
+          FROM RR_GL_JE_LINES_ALL
+         WHERE REFERENCE1 = p_txn_id
+           AND REFERENCE3 = 'EXPENSE'
+           AND ROWNUM     = 1;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            p_je_header_id := NULL;
+            p_je_batch_id  := NULL;
     END find_je_header_id;
 
     -- -----------------------------------------------------------------------
     -- build_lines_json
-    --   Appends the JSON lines array for a given JE_HEADER_ID.
-    --   Tries RR_GL_LINES_ALL first; falls back to RR_GL_JE_LINES_ALL.
+    --   Returns a JSON array of all lines for a given JE_HEADER_ID
+    --   from RR_GL_JE_LINES_ALL.
     -- -----------------------------------------------------------------------
     FUNCTION build_lines_json (
         p_je_header_id IN NUMBER
     ) RETURN CLOB IS
         v_buf   CLOB    := '[';
         v_first BOOLEAN := TRUE;
-        v_count NUMBER  := 0;
-
-        PROCEDURE append_row (
-            p_line_id  NUMBER,
-            p_line_num NUMBER,
-            p_dr       NUMBER,
-            p_cr       NUMBER,
-            p_acc_dr   NUMBER,
-            p_acc_cr   NUMBER,
-            p_account  VARCHAR2,
-            p_desc     VARCHAR2,
-            p_curr     VARCHAR2,
-            p_ref3     VARCHAR2
-        ) IS
-        BEGIN
-            IF NOT v_first THEN v_buf := v_buf || ','; END IF;
-            v_first := FALSE;
-            v_buf   := v_buf || '{'
-                || '"lineId":'             || jnum(p_line_id)  || ','
-                || '"lineNumber":'         || jnum(p_line_num) || ','
-                || '"lineType":'           || jstr(CASE WHEN p_dr > 0 THEN 'DR' ELSE 'CR' END) || ','
-                || '"accountingClass":'    || jstr(NVL(p_ref3, '—')) || ','
-                || '"accountCombination":' || jstr(p_account)  || ','
-                || '"enteredDr":'          || jnum(p_dr)       || ','
-                || '"enteredCr":'          || jnum(p_cr)       || ','
-                || '"accountedDr":'        || jnum(p_acc_dr)   || ','
-                || '"accountedCr":'        || jnum(p_acc_cr)   || ','
-                || '"currencyCode":'       || jstr(p_curr)     || ','
-                || '"description":'        || jstr(p_desc)
-            || '}';
-            v_count := v_count + 1;
-        END append_row;
-
     BEGIN
-        -- Try primary table
         FOR r IN (
-            SELECT LINE_ID, JE_LINE_NUMBER,
-                   NVL(ENTERED_DR,    0) AS ENTERED_DR,
-                   NVL(ENTERED_CR,    0) AS ENTERED_CR,
-                   NVL(ACCOUNTED_DR,  0) AS ACCOUNTED_DR,
-                   NVL(ACCOUNTED_CR,  0) AS ACCOUNTED_CR,
-                   ACCOUNT_COMBINATION, DESCRIPTION, CURRENCY_CODE, REFERENCE3
-              FROM RR_GL_LINES_ALL
+            SELECT LINE_ID,
+                   JE_LINE_NUMBER,
+                   NVL(ENTERED_DR,   0) AS ENTERED_DR,
+                   NVL(ENTERED_CR,   0) AS ENTERED_CR,
+                   NVL(ACCOUNTED_DR, 0) AS ACCOUNTED_DR,
+                   NVL(ACCOUNTED_CR, 0) AS ACCOUNTED_CR,
+                   ACCOUNT_COMBINATION,
+                   DESCRIPTION,
+                   CURRENCY_CODE,
+                   REFERENCE3
+              FROM RR_GL_JE_LINES_ALL
              WHERE JE_HEADER_ID = p_je_header_id
              ORDER BY JE_LINE_NUMBER
         ) LOOP
-            append_row(r.LINE_ID, r.JE_LINE_NUMBER,
-                       r.ENTERED_DR, r.ENTERED_CR, r.ACCOUNTED_DR, r.ACCOUNTED_CR,
-                       r.ACCOUNT_COMBINATION, r.DESCRIPTION, r.CURRENCY_CODE, r.REFERENCE3);
+            IF NOT v_first THEN v_buf := v_buf || ','; END IF;
+            v_first := FALSE;
+            v_buf   := v_buf || '{'
+                || '"lineId":'             || jnum(r.LINE_ID)       || ','
+                || '"lineNumber":'         || jnum(r.JE_LINE_NUMBER) || ','
+                || '"lineType":'           || jstr(CASE WHEN r.ENTERED_DR > 0 THEN 'DR' ELSE 'CR' END) || ','
+                || '"accountingClass":'    || jstr(NVL(r.REFERENCE3, '—')) || ','
+                || '"accountCombination":' || jstr(r.ACCOUNT_COMBINATION)  || ','
+                || '"enteredDr":'          || jnum(r.ENTERED_DR)    || ','
+                || '"enteredCr":'          || jnum(r.ENTERED_CR)    || ','
+                || '"accountedDr":'        || jnum(r.ACCOUNTED_DR)  || ','
+                || '"accountedCr":'        || jnum(r.ACCOUNTED_CR)  || ','
+                || '"currencyCode":'       || jstr(r.CURRENCY_CODE)  || ','
+                || '"description":'        || jstr(r.DESCRIPTION)
+            || '}';
         END LOOP;
-
-        -- Fallback table if primary returned nothing
-        IF v_count = 0 THEN
-            v_first := TRUE;
-            BEGIN
-                FOR r IN (
-                    SELECT LINE_ID, JE_LINE_NUMBER,
-                           NVL(ENTERED_DR,    0) AS ENTERED_DR,
-                           NVL(ENTERED_CR,    0) AS ENTERED_CR,
-                           NVL(ACCOUNTED_DR,  0) AS ACCOUNTED_DR,
-                           NVL(ACCOUNTED_CR,  0) AS ACCOUNTED_CR,
-                           ACCOUNT_COMBINATION, DESCRIPTION, CURRENCY_CODE, REFERENCE3
-                      FROM RR_GL_JE_LINES_ALL
-                     WHERE JE_HEADER_ID = p_je_header_id
-                     ORDER BY JE_LINE_NUMBER
-                ) LOOP
-                    append_row(r.LINE_ID, r.JE_LINE_NUMBER,
-                               r.ENTERED_DR, r.ENTERED_CR, r.ACCOUNTED_DR, r.ACCOUNTED_CR,
-                               r.ACCOUNT_COMBINATION, r.DESCRIPTION, r.CURRENCY_CODE, r.REFERENCE3);
-                END LOOP;
-            EXCEPTION
-                WHEN OTHERS THEN NULL;
-            END;
-        END IF;
 
         RETURN v_buf || ']';
     END build_lines_json;
@@ -195,7 +132,7 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_JOURNALS_PKG AS
         p_txn_id  IN VARCHAR2
     ) RETURN CLOB IS
         v_je_header_id  NUMBER;
-        v_batch_id      NUMBER;
+        v_je_batch_id   NUMBER;
 
         v_journal_name  VARCHAR2(240);
         v_period_name   VARCHAR2(15);
@@ -204,60 +141,51 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_JOURNALS_PKG AS
         v_batch_status  VARCHAR2(30);
         v_created_by    VARCHAR2(200);
         v_creation_date VARCHAR2(30);
-        v_currency      VARCHAR2(15);
-
-        v_result        CLOB;
     BEGIN
-        -- 1. Resolve the header
-        find_je_header_id(p_txn_id, v_je_header_id, v_batch_id);
+        -- 1. Locate the header via lines
+        find_je_header_id(p_txn_id, v_je_header_id, v_je_batch_id);
 
         IF v_je_header_id IS NULL THEN
             RETURN not_found_json;
         END IF;
 
-        -- 2. Load header details
+        -- 2. Load header details from RR_GL_JE_HEADERS
         BEGIN
             SELECT h.JOURNAL_NAME,
                    h.PERIOD_NAME,
                    TO_CHAR(h.DEFAULT_EFFECTIVE_DATE, 'YYYY-MM-DD'),
-                   h.CURRENCY_CODE,
                    h.CREATED_BY,
                    TO_CHAR(CAST(h.CREATION_DATE AS DATE), 'YYYY-MM-DD"T"HH24:MI:SS')
               INTO v_journal_name, v_period_name, v_acct_date,
-                   v_currency, v_created_by, v_creation_date
-              FROM RR_GL_HEADERS h
+                   v_created_by, v_creation_date
+              FROM RR_GL_JE_HEADERS h
              WHERE h.JE_HEADER_ID = v_je_header_id;
         EXCEPTION WHEN OTHERS THEN NULL;
         END;
 
-        -- 3. Load batch name + status
+        -- 3. Load batch name + status from RR_GL_JOURNAL_BATCHES
         BEGIN
             SELECT b.BATCH_NAME, b.STATUS
               INTO v_batch_name, v_batch_status
               FROM RR_GL_JOURNAL_BATCHES b
-             WHERE b.BATCH_SYNC_ID = v_batch_id
-                OR b.JE_BATCH_ID   = v_batch_id
-             FETCH FIRST 1 ROWS ONLY;
+             WHERE b.JE_BATCH_ID = v_je_batch_id;
         EXCEPTION WHEN OTHERS THEN NULL;
         END;
 
-        -- 4. Assemble JSON
-        v_result :=
-              '{"found":true'
-           || ',"headerId":'           || jnum(v_je_header_id)
-           || ',"glHeaderId":'         || jnum(v_je_header_id)
-           || ',"accountingStatus":'   || jstr(NVL(v_batch_status, 'POSTED'))
-           || ',"postingStatus":'      || jstr(NVL(v_batch_status, 'POSTED'))
-           || ',"accountingDate":'     || jstr(v_acct_date)
-           || ',"periodName":'         || jstr(v_period_name)
-           || ',"description":'        || jstr(v_journal_name)
-           || ',"glBatchName":'        || jstr(v_batch_name)
-           || ',"postedBy":'           || jstr(v_created_by)
-           || ',"postedDate":'         || jstr(v_creation_date)
-           || ',"lines":'              || build_lines_json(v_je_header_id)
-           || '}';
-
-        RETURN v_result;
+        -- 4. Assemble and return JSON
+        RETURN '{"found":true'
+            || ',"headerId":'         || jnum(v_je_header_id)
+            || ',"glHeaderId":'       || jnum(v_je_header_id)
+            || ',"accountingStatus":' || jstr(NVL(v_batch_status, 'POSTED'))
+            || ',"postingStatus":'    || jstr(NVL(v_batch_status, 'POSTED'))
+            || ',"accountingDate":'   || jstr(v_acct_date)
+            || ',"periodName":'       || jstr(v_period_name)
+            || ',"description":'      || jstr(v_journal_name)
+            || ',"glBatchName":'      || jstr(v_batch_name)
+            || ',"postedBy":'         || jstr(v_created_by)
+            || ',"postedDate":'       || jstr(v_creation_date)
+            || ',"lines":'            || build_lines_json(v_je_header_id)
+            || '}';
 
     EXCEPTION
         WHEN OTHERS THEN
