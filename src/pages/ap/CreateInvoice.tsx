@@ -1022,13 +1022,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
     activeLines.forEach((l) => {
       const amt = Math.abs(l.amount || 0);
-      const isMpa = !!(l.startDate && l.endDate && l.accrualAccount);
-      const drAccount = isMpa ? l.accrualAccount : (l.distributionCombination || l.distributionSet || '');
+      const drAccount = l.distributionCombination || l.distributionSet || '';
       // DR line (for credit memo this becomes CR)
       result.push({
         lineNumber: lineNum++,
         lineType: isCreditMemo ? 'CR' : 'DR',
-        accountingClass: isMpa ? 'PREPAYMENT' : 'EXPENSE',
+        accountingClass: 'EXPENSE',
         accountCombination: drAccount,
         enteredDr:   isCreditMemo ? 0   : amt,
         enteredCr:   isCreditMemo ? amt : 0,
@@ -1877,6 +1876,23 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       .then(data => setDistCombinations(data))
       .catch(() => {});
   }, []);
+
+  // In edit mode, if LIABILITY_DISTRIBUTION was not stored (old invoice or null),
+  // derive it from the business unit once BUs have loaded.
+  useEffect(() => {
+    if (!initialData?.invoiceId || businessUnits.length === 0) return;
+    const current = form.getFieldValue('liabilityDistribution');
+    if (current) return; // already set — do nothing
+    const buName = form.getFieldValue('businessUnit') || initialData.businessUnit;
+    if (!buName) return;
+    const selectedBU = businessUnits.find(bu => bu.name === buName);
+    if (selectedBU?.company) {
+      const derived = `${selectedBU.company}-00-00-2313101-0000-000-00-000-000`;
+      form.setFieldValue('liabilityDistribution', derived);
+      setHeaderValues(prev => ({ ...prev, liabilityDistribution: derived }));
+      setLines(prev => prev.map(line => ({ ...line, accrualAccount: line.accrualAccount || derived })));
+    }
+  }, [businessUnits]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pre-fill from initialData (Quick Create or Edit mode)
   useEffect(() => {
