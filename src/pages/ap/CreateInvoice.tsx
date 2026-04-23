@@ -4432,20 +4432,18 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             />
           </Tooltip>
           {/* Attachment count button — jumps to Attachments tab */}
-          {(savedInvoiceId || initialData?.invoiceId) && (
-            <Tooltip title={attachmentCount > 0 ? `${attachmentCount} attachment(s)` : 'Attachments'}>
-              <Badge count={attachmentCount} size="small" offset={[-4, 4]}>
-                <Button
-                  icon={<PaperClipOutlined />}
-                  onClick={() => setActiveTabKey('attachments')}
-                  style={{
-                    color: attachmentCount > 0 ? REDWOOD.primary : undefined,
-                    borderColor: attachmentCount > 0 ? REDWOOD.primary : undefined,
-                  }}
-                />
-              </Badge>
-            </Tooltip>
-          )}
+          <Tooltip title={attachmentCount > 0 ? `${attachmentCount} attachment(s)` : 'Attachments'}>
+            <Badge count={attachmentCount} size="small" offset={[-4, 4]}>
+              <Button
+                icon={<PaperClipOutlined />}
+                onClick={() => setActiveTabKey('attachments')}
+                style={{
+                  color: attachmentCount > 0 ? REDWOOD.primary : undefined,
+                  borderColor: attachmentCount > 0 ? REDWOOD.primary : undefined,
+                }}
+              />
+            </Badge>
+          </Tooltip>
           {/* Invoice Actions Dropdown */}
           <Dropdown
             menu={{
