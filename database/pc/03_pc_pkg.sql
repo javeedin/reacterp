@@ -428,6 +428,7 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         l_period_cnt    NUMBER;
         l_period        VARCHAR2(30);
         l_bank_txn_id   NUMBER;
+        l_suspense      NUMBER;
     BEGIN
         p_error := NULL;
         APEX_JSON.PARSE(p_json);
@@ -443,6 +444,7 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         l_currency     := APEX_JSON.GET_VARCHAR2(p_path => 'currency');
         l_debit        := APEX_JSON.GET_NUMBER  (p_path => 'debitAmount');
         l_credit       := APEX_JSON.GET_NUMBER  (p_path => 'creditAmount');
+        l_suspense     := APEX_JSON.GET_NUMBER  (p_path => 'suspenseAmount');
         l_comments     := APEX_JSON.GET_VARCHAR2(p_path => 'comments');
         l_ref_no       := APEX_JSON.GET_VARCHAR2(p_path => 'referenceNo');
         l_attach       := APEX_JSON.GET_VARCHAR2(p_path => 'attachment');
@@ -482,6 +484,7 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
             CURRENCY            = NVL(l_currency,   CURRENCY),
             DEBIT_AMOUNT        = NVL(l_debit,      DEBIT_AMOUNT),
             CREDIT_AMOUNT       = NVL(l_credit,     CREDIT_AMOUNT),
+            SUSPENSE_AMOUNT     = NVL(l_suspense,   SUSPENSE_AMOUNT),
             COMMENTS            = NVL(l_comments,   COMMENTS),
             REFERENCE_NO        = NVL(l_ref_no,     REFERENCE_NO),
             ATTACHMENT          = NVL(l_attach,     ATTACHMENT),

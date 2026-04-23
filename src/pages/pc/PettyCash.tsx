@@ -634,14 +634,22 @@ const RegisterDetail: React.FC<{
   const { addSessionEntry } = useGlValidation();
   const [addMoneyOpen, setAddMoneyOpen]     = useState(false);
   const [addExpenseOpen, setAddExpenseOpen]   = useState(false);
-  const [addSuspenseOpen, setAddSuspenseOpen] = useState(false);
-  const [editTxnOpen, setEditTxnOpen]         = useState(false);
-  const [editTxn, setEditTxn]                 = useState<PCTransaction | null>(null);
-  const [saving, setSaving]                   = useState(false);
-  const [moneyForm]     = Form.useForm();
-  const [expenseForm]   = Form.useForm();
-  const [suspenseForm]  = Form.useForm();
-  const [editTxnForm]   = Form.useForm();
+  const [addSuspenseOpen, setAddSuspenseOpen]           = useState(false);
+  const [convertSuspenseOpen, setConvertSuspenseOpen]   = useState(false);
+  const [convertSuspenseRec,  setConvertSuspenseRec]    = useState<PCTransaction | null>(null);
+  const [transferSuspenseOpen, setTransferSuspenseOpen] = useState(false);
+  const [transferSuspenseRec,  setTransferSuspenseRec]  = useState<PCTransaction | null>(null);
+  const [transferRegisters,    setTransferRegisters]    = useState<PCRegister[]>([]);
+  const [transferRegLoading,   setTransferRegLoading]   = useState(false);
+  const [editTxnOpen, setEditTxnOpen]                   = useState(false);
+  const [editTxn, setEditTxn]                           = useState<PCTransaction | null>(null);
+  const [saving, setSaving]                             = useState(false);
+  const [moneyForm]          = Form.useForm();
+  const [expenseForm]        = Form.useForm();
+  const [suspenseForm]       = Form.useForm();
+  const [convertSuspenseForm] = Form.useForm();
+  const [transferSuspenseForm] = Form.useForm();
+  const [editTxnForm]        = Form.useForm();
   const needsRefresh = React.useRef(false);
   const [distCombinations, setDistCombinations] = useState<DistCombination[]>([]);
   const [openPeriods, setOpenPeriods]           = useState<APPeriod[]>([]);
@@ -832,7 +840,9 @@ const RegisterDetail: React.FC<{
   };
 
   const isClosed   = register.status !== 'ACTIVE';
-  const noBalance  = register.balance <= 0;
+  const noBalance     = register.balance <= 0;
+  const totalSuspense = transactions.reduce((s, t) => s + (t.suspenseAmount || 0), 0);
+  const balanceWithSuspense = register.balance - totalSuspense;
 
   // ── Resolve charge account combination + description for table ─
   useEffect(() => {
@@ -1625,6 +1635,84 @@ const RegisterDetail: React.FC<{
     }
   };
 
+  // ── Convert Suspense to Expense ────────────────────────────
+  const handleConvertSuspense = async (values: any) => {
+    if (!convertSuspenseRec) return;
+    setSaving(true);
+    try {
+      const convertAmt = Number(values.convertAmount);
+      const remaining  = Math.max(0, (convertSuspenseRec.suspenseAmount || 0) - convertAmt);
+      await updateTransaction(convertSuspenseRec.transactionId, {
+        suspenseAmount: remaining,
+        comments: values.reason
+          ? `[Converted ${fmt(convertAmt)}] ${values.reason}`
+          : convertSuspenseRec.comments ?? undefined,
+        updatedBy: currentUser,
+      });
+      await createTransaction({
+        registerId:        register.registerId,
+        transactionDate:   convertSuspenseRec.transactionDate,
+        accountingDate:    convertSuspenseRec.accountingDate || undefined,
+        transactionType:   'Expense',
+        expenseType:       values.expenseType || 'CONVERTED SUSPENSE',
+        chargeAccountDesc: values.chargeAccountDesc || null,
+        chargeAccountCcid: values.chargeAccountCcid || null,
+        currency:          convertSuspenseRec.currency,
+        debitAmount:       0,
+        creditAmount:      convertAmt,
+        suspenseAmount:    0,
+        comments:          values.expenseComments || `Converted from suspense #${convertSuspenseRec.transactionId}`,
+        referenceNo:       convertSuspenseRec.referenceNo || null,
+        postingStatus:     'Unposted',
+        createdBy:         currentUser,
+      });
+      message.success(`Converted ${fmt(convertAmt)} to expense${remaining > 0 ? ` — ${fmt(remaining)} remains in suspense` : ''}`);
+      convertSuspenseForm.resetFields();
+      setConvertSuspenseOpen(false);
+      setConvertSuspenseRec(null);
+      onRefresh();
+    } catch (e: any) {
+      message.error(e?.message ?? 'Failed to convert suspense');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Transfer Suspense to Another Register ──────────────────
+  const handleTransferSuspense = async (values: any) => {
+    if (!transferSuspenseRec) return;
+    setSaving(true);
+    try {
+      const amount = transferSuspenseRec.suspenseAmount || 0;
+      await createTransaction({
+        registerId:      Number(values.targetRegisterId),
+        transactionDate: transferSuspenseRec.transactionDate,
+        transactionType: 'Expense',
+        expenseType:     'SUSPENSE',
+        currency:        transferSuspenseRec.currency,
+        debitAmount:     0,
+        creditAmount:    0,
+        suspenseAmount:  amount,
+        comments:        `Transferred from register #${register.registerId}${values.reason ? ` — ${values.reason}` : ''}`,
+        postingStatus:   'Unposted',
+        createdBy:       currentUser,
+      });
+      await updateTransaction(transferSuspenseRec.transactionId, {
+        suspenseAmount: 0,
+        comments: `[Transferred ${fmt(amount)} to register #${values.targetRegisterId}] ${transferSuspenseRec.comments || ''}`.trim(),
+        updatedBy: currentUser,
+      });
+      message.success(`Suspense of ${fmt(amount)} transferred to register #${values.targetRegisterId}`);
+      setTransferSuspenseOpen(false);
+      setTransferSuspenseRec(null);
+      onRefresh();
+    } catch (e: any) {
+      message.error(e?.message ?? 'Failed to transfer suspense');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // ── Add Multiple Expenses ──────────────────────────────────
   const handleAddMultiExpense = async () => {
     const vals = expenseForm.getFieldsValue(['transactionDate', 'accountingDate', 'currency', 'referenceDescription']);
@@ -2322,6 +2410,36 @@ const RegisterDetail: React.FC<{
                 />
               </Tooltip>
             )}
+            {/* Convert / Transfer — suspense rows only */}
+            {txn.expenseType === 'SUSPENSE' && (txn.suspenseAmount || 0) > 0 && !isClosed && (
+              <>
+                <Tooltip title={`Convert suspense to expense (${fmt(txn.suspenseAmount)})`}>
+                  <Button type="text" size="small"
+                    icon={<SwapOutlined style={{ color: '#722ed1' }} />}
+                    onClick={() => {
+                      setConvertSuspenseRec(txn);
+                      convertSuspenseForm.resetFields();
+                      convertSuspenseForm.setFieldsValue({ convertAmount: txn.suspenseAmount });
+                      setConvertSuspenseOpen(true);
+                    }}
+                  />
+                </Tooltip>
+                <Tooltip title="Transfer remaining suspense to another register">
+                  <Button type="text" size="small"
+                    icon={<BranchesOutlined style={{ color: REDWOOD.warning }} />}
+                    onClick={() => {
+                      setTransferSuspenseRec(txn);
+                      setTransferRegisters([]);
+                      setTransferSuspenseOpen(true);
+                      setTransferRegLoading(true);
+                      searchRegisters({ status: 'ACTIVE' })
+                        .then(regs => setTransferRegisters(regs.filter(r => r.registerId !== register.registerId)))
+                        .finally(() => setTransferRegLoading(false));
+                    }}
+                  />
+                </Tooltip>
+              </>
+            )}
             {/* Print — available on all transaction types */}
             {(() => {
               const siblings = transactions.filter(t => txn.referenceNo && t.referenceNo === txn.referenceNo);
@@ -2396,7 +2514,7 @@ const RegisterDetail: React.FC<{
           <>
           <Row gutter={10} style={{ marginBottom: 8 }} align="stretch">
             {/* Balance */}
-            <Col span={5}>
+            <Col span={4}>
               {kpiCard(
                 REDWOOD.info,
                 'Balance',
@@ -2427,8 +2545,33 @@ const RegisterDetail: React.FC<{
               )}
             </Col>
 
-            {/* Can Add */}
+            {/* Balance with Suspense */}
             <Col span={4}>
+              {kpiCard(
+                '#722ed1',
+                'Balance w/ Suspense',
+                <span>
+                  <span style={{ color: balanceWithSuspense >= 0 ? REDWOOD.success : REDWOOD.error }}>
+                    {fmt(balanceWithSuspense)}
+                  </span>
+                  {' '}
+                  <span style={{ fontSize: 12, fontWeight: 400, color: REDWOOD.neutral600 }}>{register.currency}</span>
+                </span>,
+                totalSuspense > 0 ? (
+                  <div style={{ fontSize: 10, color: '#722ed1' }}>
+                    <QuestionCircleOutlined style={{ marginRight: 3 }} />
+                    {fmt(totalSuspense)} in suspense
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 10, color: REDWOOD.neutral300 }}>No pending suspense</div>
+                ),
+                totalSuspense > 0 ? '#f9f0ff' : undefined,
+                <QuestionCircleOutlined />,
+              )}
+            </Col>
+
+            {/* Can Add */}
+            <Col span={3}>
               {hasLimit ? kpiCard(
                 canAdd! > 0 ? REDWOOD.success : REDWOOD.neutral300,
                 'Available to Add',
@@ -2448,13 +2591,13 @@ const RegisterDetail: React.FC<{
                 <DollarOutlined />,
               ) : kpiCard(
                 REDWOOD.neutral300, 'Available to Add',
-                <span style={{ color: REDWOOD.neutral300, fontSize: 18 }}>No Limit</span>,
+                <span style={{ color: REDWOOD.neutral300, fontSize: 16 }}>No Limit</span>,
                 undefined, undefined, <DollarOutlined />,
               )}
             </Col>
 
             {/* Limit */}
-            <Col span={3}>
+            <Col span={2}>
               {kpiCard(
                 REDWOOD.neutral600,
                 'Limit',
@@ -2469,7 +2612,7 @@ const RegisterDetail: React.FC<{
             </Col>
 
             {/* Total In */}
-            <Col span={4}>
+            <Col span={3}>
               {kpiCard(
                 REDWOOD.success,
                 'Total Money In',
@@ -2485,7 +2628,7 @@ const RegisterDetail: React.FC<{
             </Col>
 
             {/* Total Out */}
-            <Col span={4}>
+            <Col span={3}>
               {kpiCard(
                 REDWOOD.error,
                 'Total Money Out',
@@ -2501,7 +2644,7 @@ const RegisterDetail: React.FC<{
             </Col>
 
             {/* Register Info */}
-            <Col span={4}>
+            <Col span={5}>
               <div style={{
                 background: '#fff',
                 borderRadius: 8,
@@ -3614,6 +3757,147 @@ const RegisterDetail: React.FC<{
             </Button>
           </div>
         </Form>
+      </Modal>
+
+      {/* ── Convert Suspense to Expense Modal ─────────────── */}
+      <Modal
+        title={
+          <Space>
+            <SwapOutlined style={{ color: '#722ed1' }} />
+            Convert Suspense to Expense
+          </Space>
+        }
+        open={convertSuspenseOpen}
+        onCancel={() => { setConvertSuspenseOpen(false); setConvertSuspenseRec(null); convertSuspenseForm.resetFields(); }}
+        footer={null}
+        width={520}
+        destroyOnClose
+      >
+        {convertSuspenseRec && (
+          <Form form={convertSuspenseForm} layout="vertical" size="small" onFinish={handleConvertSuspense}>
+            <div style={{ background: '#f9f0ff', border: '1px solid #d3adf7', borderRadius: 6, padding: '8px 12px', marginBottom: 14 }}>
+              <div style={{ fontSize: 11, color: '#722ed1', fontWeight: 600, marginBottom: 2 }}>Current Suspense Amount</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: '#722ed1' }}>
+                {fmt(convertSuspenseRec.suspenseAmount)} <span style={{ fontSize: 13, fontWeight: 400 }}>{convertSuspenseRec.currency}</span>
+              </div>
+              {convertSuspenseRec.comments && (
+                <div style={{ fontSize: 11, color: '#595959', marginTop: 4 }}>{convertSuspenseRec.comments}</div>
+              )}
+            </div>
+            <Row gutter={12}>
+              <Col span={12}>
+                <Form.Item label="Amount to Convert" name="convertAmount"
+                  rules={[
+                    { required: true, message: 'Required' },
+                    { type: 'number', min: 0.01, message: 'Must be > 0' },
+                    { type: 'number', max: convertSuspenseRec.suspenseAmount, message: `Cannot exceed ${fmt(convertSuspenseRec.suspenseAmount)}` },
+                  ]}>
+                  <InputNumber style={{ width: '100%' }} precision={2} min={0.01} max={convertSuspenseRec.suspenseAmount} placeholder="0.00" />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item label="Expense Type" name="expenseType" rules={[{ required: true, message: 'Required' }]}>
+                  <Select placeholder="Select expense type" showSearch
+                    filterOption={(input, opt) => String(opt?.label ?? '').toLowerCase().includes(input.toLowerCase())}
+                    onChange={(val) => {
+                      const dist = distCombinations.find(d => d.combinationName === val);
+                      convertSuspenseForm.setFieldsValue({
+                        chargeAccountDesc: dist?.glAccountDesc ?? '',
+                        chargeAccountCcid: dist?.glAccountCcid ?? null,
+                      });
+                    }}
+                    options={distCombinations.map(d => ({ value: d.combinationName, label: d.combinationName }))}
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+            <Form.Item name="chargeAccountCcid" hidden><Input /></Form.Item>
+            <Form.Item label="Charge Account" name="chargeAccountDesc">
+              <Input placeholder="Auto-filled from expense type" readOnly />
+            </Form.Item>
+            <Form.Item label="Reason for Conversion (added to suspense comments)" name="reason">
+              <Input.TextArea rows={2} placeholder="Optional — will be prepended to original suspense comments" />
+            </Form.Item>
+            <Form.Item label="New Expense Entry Comments" name="expenseComments">
+              <Input.TextArea rows={2} placeholder="Comments for the new expense entry (optional)" />
+            </Form.Item>
+            <Form.Item shouldUpdate noStyle>
+              {({ getFieldValue }) => {
+                const amt = getFieldValue('convertAmount') || 0;
+                const remaining = Math.max(0, (convertSuspenseRec.suspenseAmount || 0) - amt);
+                return remaining > 0 ? (
+                  <div style={{ background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 6, padding: '6px 10px', marginBottom: 12, fontSize: 12 }}>
+                    <ExclamationCircleOutlined style={{ color: REDWOOD.warning, marginRight: 6 }} />
+                    {fmt(remaining)} {convertSuspenseRec.currency} will remain in suspense
+                  </div>
+                ) : null;
+              }}
+            </Form.Item>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <Button onClick={() => { setConvertSuspenseOpen(false); convertSuspenseForm.resetFields(); }}>Cancel</Button>
+              <Button type="primary" htmlType="submit" loading={saving}
+                style={{ background: '#722ed1', borderColor: '#722ed1' }}>
+                Convert to Expense
+              </Button>
+            </div>
+          </Form>
+        )}
+      </Modal>
+
+      {/* ── Transfer Suspense to Another Register Modal ─────── */}
+      <Modal
+        title={
+          <Space>
+            <BranchesOutlined style={{ color: REDWOOD.warning }} />
+            Transfer Suspense to Another Register
+          </Space>
+        }
+        open={transferSuspenseOpen}
+        onCancel={() => { setTransferSuspenseOpen(false); setTransferSuspenseRec(null); transferSuspenseForm.resetFields(); }}
+        footer={null}
+        width={480}
+        destroyOnClose
+      >
+        {transferSuspenseRec && (
+          <Form form={transferSuspenseForm} layout="vertical" size="small" onFinish={handleTransferSuspense}>
+            <div style={{ background: '#fff7e6', border: '1px solid #ffd591', borderRadius: 6, padding: '8px 12px', marginBottom: 14 }}>
+              <div style={{ fontSize: 11, color: REDWOOD.warning, fontWeight: 600, marginBottom: 2 }}>Suspense to Transfer</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: REDWOOD.warning }}>
+                {fmt(transferSuspenseRec.suspenseAmount)} <span style={{ fontSize: 13, fontWeight: 400 }}>{transferSuspenseRec.currency}</span>
+              </div>
+              <div style={{ fontSize: 11, color: '#595959', marginTop: 2 }}>
+                From register #{register.registerId} — {register.registerName}
+              </div>
+            </div>
+            <Form.Item label="Target Register" name="targetRegisterId"
+              rules={[{ required: true, message: 'Please select a target register' }]}>
+              <Select
+                placeholder={transferRegLoading ? 'Loading registers…' : 'Select register'}
+                loading={transferRegLoading}
+                showSearch
+                filterOption={(input, opt) => String(opt?.label ?? '').toLowerCase().includes(input.toLowerCase())}
+                options={transferRegisters.map(r => ({
+                  value: r.registerId,
+                  label: `#${r.registerId} — ${r.registerName} (${r.businessUnit}) — ${r.currency}`,
+                }))}
+              />
+            </Form.Item>
+            <Form.Item label="Reason / Notes" name="reason">
+              <Input.TextArea rows={2} placeholder="Optional — will be recorded on both entries" />
+            </Form.Item>
+            <div style={{ background: '#fff1f0', border: '1px solid #ffa39e', borderRadius: 6, padding: '6px 10px', marginBottom: 12, fontSize: 12, color: REDWOOD.error }}>
+              <ExclamationCircleOutlined style={{ marginRight: 6 }} />
+              This will zero out the suspense on the original entry and create a new suspense entry in the target register.
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <Button onClick={() => { setTransferSuspenseOpen(false); transferSuspenseForm.resetFields(); }}>Cancel</Button>
+              <Button type="primary" htmlType="submit" loading={saving}
+                style={{ background: REDWOOD.warning, borderColor: REDWOOD.warning }}>
+                Transfer Suspense
+              </Button>
+            </div>
+          </Form>
+        )}
       </Modal>
 
       {/* ── Edit Transaction Modal ─────────────────────────── */}
