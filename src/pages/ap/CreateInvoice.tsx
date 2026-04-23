@@ -87,6 +87,7 @@ import { searchCombinations, type DistCombination } from '../../services/distCom
 import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
 import { useAuth } from '../../context/AuthContext';
 import InvoiceAttachments from '../../components/InvoiceAttachments';
+import { listAttachments } from '../../services/invoiceAttachment.service';
 
 const { Text, Title } = Typography;
 const { Option } = Select;
@@ -529,7 +530,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const amountDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Validation state
-  const [isValidated, setIsValidated] = useState(false);
+  const [isValidated,     setIsValidated]     = useState(false);
+  const [activeTabKey,    setActiveTabKey]    = useState('distribution');
+  const [attachmentCount, setAttachmentCount] = useState(0);
   const [validationResults, setValidationResults] = useState<{ label: string; passed: boolean; detail?: string; action?: { label: string; onClick: () => void }; subItems?: { label: string; detail?: string; action?: { label: string; onClick: () => void } }[] }[]>([]);
   const [validationModalVisible, setValidationModalVisible] = useState(false);
 
@@ -3646,6 +3649,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     return invoiceId;
   };
 
+  // Load attachment count whenever the invoice is saved/opened
+  useEffect(() => {
+    const id = savedInvoiceId || initialData?.invoiceId;
+    if (!id) return;
+    listAttachments(id).then(rows => setAttachmentCount(rows.length)).catch(() => {});
+  }, [savedInvoiceId, initialData?.invoiceId]);
+
   // Save and create next handler
   const handleSaveAndCreateNext = async () => {
     try {
@@ -4531,10 +4541,20 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               Applied: {formatAmount(prepaymentBalance.totalApplied)}
             </Tag>
           )}
-          {!savedInvoiceId && !isReadOnly && (
-            <Button onClick={handleSaveAndCreateNext} loading={saving} disabled={saving || !isValidated}>
-              Save and Create Next
-            </Button>
+          {/* Attachment count button — jumps to Attachments tab */}
+          {(savedInvoiceId || initialData?.invoiceId) && (
+            <Tooltip title={attachmentCount > 0 ? `${attachmentCount} attachment(s)` : 'Attachments'}>
+              <Badge count={attachmentCount} size="small" offset={[-4, 4]}>
+                <Button
+                  icon={<PaperClipOutlined />}
+                  onClick={() => setActiveTabKey('attachments')}
+                  style={{
+                    color: attachmentCount > 0 ? REDWOOD.primary : undefined,
+                    borderColor: attachmentCount > 0 ? REDWOOD.primary : undefined,
+                  }}
+                />
+              </Badge>
+            </Tooltip>
           )}
           {!isReadOnly && (
             <Button
@@ -4542,22 +4562,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               onClick={handleSave}
               loading={saving}
               disabled={saving || !isValidated}
-              icon={savedInvoiceId ? <SaveOutlined /> : undefined}
+              icon={<SaveOutlined />}
               style={{ background: isValidated ? REDWOOD.primary : undefined, borderColor: isValidated ? REDWOOD.primary : undefined }}
               data-sat-id="invoice-save-button"
             >
               {savedInvoiceId ? 'Update Invoice' : 'Save'}
-            </Button>
-          )}
-          {!isReadOnly && (
-            <Button
-              type="primary"
-              onClick={async () => { const ok = await handleSave(); if (ok) onClose(); }}
-              loading={saving}
-              disabled={saving || !isValidated}
-              style={{ background: isValidated ? REDWOOD.primary : undefined, borderColor: isValidated ? REDWOOD.primary : undefined }}
-            >
-              {savedInvoiceId ? 'Update and Close' : 'Save and Close'}
             </Button>
           )}
           <Button onClick={onClose}>
@@ -5265,7 +5274,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           </div>
 
           <Tabs
-            defaultActiveKey="distribution"
+            activeKey={activeTabKey}
+            onChange={setActiveTabKey}
             size="small"
             items={[
               {
@@ -5801,6 +5811,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   <InvoiceAttachments
                     invoiceId={savedInvoiceId || initialData?.invoiceId}
                     readOnly={false}
+                    onCountChange={setAttachmentCount}
                   />
                 ),
               },

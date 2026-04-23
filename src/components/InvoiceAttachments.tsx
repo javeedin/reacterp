@@ -23,8 +23,9 @@ const MAX_FILE_MB = 10;
 const MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024;
 
 interface Props {
-  invoiceId: number | null | undefined;
-  readOnly?: boolean;
+  invoiceId:     number | null | undefined;
+  readOnly?:     boolean;
+  onCountChange?: (count: number) => void;
 }
 
 interface UploadingFile {
@@ -35,7 +36,7 @@ interface UploadingFile {
   error?:   string;
 }
 
-const InvoiceAttachments: React.FC<Props> = ({ invoiceId, readOnly = false }) => {
+const InvoiceAttachments: React.FC<Props> = ({ invoiceId, readOnly = false, onCountChange }) => {
   const { user } = useAuth();
 
   const [attachments,  setAttachments]  = useState<InvoiceAttachment[]>([]);
@@ -52,6 +53,7 @@ const InvoiceAttachments: React.FC<Props> = ({ invoiceId, readOnly = false }) =>
     try {
       const rows = await listAttachments(invoiceId);
       setAttachments(rows);
+      onCountChange?.(rows.length);
     } catch (e: any) {
       setFetchError(e?.message ?? 'Failed to load attachments');
     }
@@ -128,7 +130,11 @@ const InvoiceAttachments: React.FC<Props> = ({ invoiceId, readOnly = false }) =>
     );
     setDeleting(prev => { const s = new Set(prev); s.delete(rec.attachmentId); return s; });
     if (result.success) {
-      setAttachments(prev => prev.filter(a => a.attachmentId !== rec.attachmentId));
+      setAttachments(prev => {
+        const next = prev.filter(a => a.attachmentId !== rec.attachmentId);
+        onCountChange?.(next.length);
+        return next;
+      });
       message.success('Attachment deleted');
     } else {
       message.error(`Delete failed: ${result.error}`);
