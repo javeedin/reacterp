@@ -2934,7 +2934,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         {
           key: 'multiperiodSchedule',
           icon: <CalendarOutlined />,
-          label: 'Multiperiod Schedule',
+          label: 'Multiperiod Accounting',
         },
         ...(!isPaid && !isCreditMemoType ? [
           { type: 'divider' as const },
@@ -2955,7 +2955,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         {
           key: 'multiperiodSchedule',
           icon: <CalendarOutlined />,
-          label: 'Multiperiod Schedule',
+          label: 'Multiperiod Accounting',
         },
         { type: 'divider' as const },
         {
@@ -10686,7 +10686,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         title={
           <Space>
             <CalendarOutlined style={{ color: REDWOOD.primary }} />
-            <span>Multiperiod Schedule</span>
+            <span>Multiperiod Accounting Schedule</span>
             {mpaSchedule.length > 0 && (
               <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
                 ({mpaSchedule.length} row{mpaSchedule.length !== 1 ? 's' : ''})
