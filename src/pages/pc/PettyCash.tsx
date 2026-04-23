@@ -646,9 +646,12 @@ const RegisterDetail: React.FC<{
   const [txnActionLoading, setTxnActionLoading] = useState<number | null>(null);
   const [coaOpen, setCoaOpen]     = useState(false);
   const [coaTarget, setCoaTarget] = useState<'add' | 'edit' | 'money' | 'bankAsset' | 'bankOffset'>('edit');
-  const [addAcctDesc, setAddAcctDesc]     = useState<string>('');
-  const [editAcctDesc, setEditAcctDesc]   = useState<string>('');
-  const [moneyAcctDesc, setMoneyAcctDesc] = useState<string>('');
+  const [coaInitialValue, setCoaInitialValue] = useState<string>('');
+  const [addAcctDesc, setAddAcctDesc]         = useState<string>('');
+  const [editAcctDesc, setEditAcctDesc]       = useState<string>('');
+  const [moneyAcctDesc, setMoneyAcctDesc]     = useState<string>('');
+  const [bankOffsetDesc, setBankOffsetDesc]   = useState<string>('');
+  const [bankAssetDesc, setBankAssetDesc]     = useState<string>('');
   const [linkedBankTxnRef, setLinkedBankTxnRef] = useState<string>('');
   const [bankTxnModalOpen, setBankTxnModalOpen] = useState(false);
   const [bankTxnForm]     = Form.useForm();
@@ -884,14 +887,24 @@ const RegisterDetail: React.FC<{
     if (!bankTxnModalOpen) return;
     const mv = moneyForm.getFieldsValue();
     const bu = register.businessUnit;
+    const offsetAcct = mv.chargeAccountDesc || '';
+    setBankOffsetDesc('');
+    setBankAssetDesc('');
     bankTxnForm.setFieldsValue({
       businessUnitName:         bu,
       amount:                   mv.amount,
       transactionDate:          mv.transactionDate || dayjs(),
       currencyCode:             mv.currency || register.currency,
-      offsetAccountCombination: mv.chargeAccountDesc || '',
+      offsetAccountCombination: offsetAcct,
       description:              `Petty Cash Refill — ${register.registerName}`,
     });
+    // Fetch description for the pre-filled offset account
+    if (offsetAcct) {
+      validateAccountCode(offsetAcct).then(result => {
+        const seg4 = Object.values(result.segmentDetails)[3];
+        setBankOffsetDesc(seg4?.description || '');
+      }).catch(() => {});
+    }
     // Fetch BU list to resolve legal entity, then load bank accounts
     if (buLegalEntityMap.size > 0) {
       loadBankAccountsByBU(bu);
@@ -2858,7 +2871,7 @@ const RegisterDetail: React.FC<{
           </Space>
         }
         open={bankTxnModalOpen}
-        onCancel={() => setBankTxnModalOpen(false)}
+        onCancel={() => { setBankTxnModalOpen(false); setBankOffsetDesc(''); setBankAssetDesc(''); }}
         footer={null}
         width={620}
         destroyOnClose
@@ -2887,6 +2900,13 @@ const RegisterDetail: React.FC<{
                     const acct = bankAccounts.find(b => b.name === val);
                     if (acct) {
                       bankTxnForm.setFieldsValue({ assetAccountCombination: acct.cashAccount });
+                      setBankAssetDesc('');
+                      if (acct.cashAccount) {
+                        validateAccountCode(acct.cashAccount).then(result => {
+                          const seg4 = Object.values(result.segmentDetails)[3];
+                          setBankAssetDesc(seg4?.description || '');
+                        }).catch(() => {});
+                      }
                     }
                   }}
                 />
@@ -2935,8 +2955,15 @@ const RegisterDetail: React.FC<{
                   <Form.Item name="assetAccountCombination" noStyle>
                     <Input readOnly placeholder="Select cash/bank account" style={{ fontFamily: 'monospace', fontSize: 11 }} />
                   </Form.Item>
-                  <Button icon={<SearchOutlined />} onClick={() => { setCoaTarget('bankAsset'); setCoaOpen(true); }} />
+                  <Button icon={<SearchOutlined />} onClick={() => {
+                    setCoaInitialValue(bankTxnForm.getFieldValue('assetAccountCombination') || '');
+                    setCoaTarget('bankAsset');
+                    setCoaOpen(true);
+                  }} />
                 </Space.Compact>
+                {bankAssetDesc && (
+                  <div style={{ fontSize: 11, color: REDWOOD.info, marginTop: 2 }}>{bankAssetDesc}</div>
+                )}
               </Form.Item>
             </Col>
             <Col span={12}>
@@ -2946,11 +2973,15 @@ const RegisterDetail: React.FC<{
                     <Input readOnly placeholder="= Charge Account from Add Money" style={{ fontFamily: 'monospace', fontSize: 11 }} />
                   </Form.Item>
                   <Button icon={<SearchOutlined />} onClick={() => {
+                    setCoaInitialValue(bankTxnForm.getFieldValue('offsetAccountCombination') || '');
                     setCoaTarget('bankOffset');
                     setCoaOpen(true);
                   }} />
                 </Space.Compact>
-                <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 2 }}>Pre-filled from Charge Account</div>
+                {bankOffsetDesc
+                  ? <div style={{ fontSize: 11, color: REDWOOD.info, marginTop: 2 }}>{bankOffsetDesc}</div>
+                  : <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 2 }}>Pre-filled from Charge Account</div>
+                }
               </Form.Item>
             </Col>
           </Row>
@@ -3837,9 +3868,11 @@ const RegisterDetail: React.FC<{
       {/* ── Account (COA) Selector ────────────────────────── */}
       <AccountSelector
         visible={coaOpen}
-        onCancel={() => setCoaOpen(false)}
+        initialValue={coaInitialValue}
+        onCancel={() => { setCoaOpen(false); setCoaInitialValue(''); }}
         onSelect={(accountCode, segmentDetails) => {
           const seg4Desc = Object.values(segmentDetails)[3]?.description || '';
+          setCoaInitialValue('');
           if (coaTarget === 'add') {
             expenseForm.setFieldsValue({ chargeAccountDesc: accountCode, chargeAccountCcid: null });
             setAddAcctDesc(seg4Desc);
@@ -3852,8 +3885,10 @@ const RegisterDetail: React.FC<{
             bankTxnForm.setFieldsValue({ offsetAccountCombination: accountCode });
           } else if (coaTarget === 'bankAsset') {
             bankTxnForm.setFieldsValue({ assetAccountCombination: accountCode });
+            setBankAssetDesc(seg4Desc);
           } else if (coaTarget === 'bankOffset') {
             bankTxnForm.setFieldsValue({ offsetAccountCombination: accountCode });
+            setBankOffsetDesc(seg4Desc);
           }
           setCoaOpen(false);
         }}
