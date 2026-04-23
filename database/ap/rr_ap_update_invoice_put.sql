@@ -410,6 +410,12 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_UPDATE_INVOICE_PKG AS
         IF l_line_error = 0 THEN
             COMMIT;
             p_invoice_id := l_invoice_id;
+            -- Regenerate multiperiod schedule for any MPA lines (best-effort; does not affect invoice status)
+            BEGIN
+                RR_AP_MPA_PKG.generate_schedule(p_invoice_id => l_invoice_id);
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
             p_status     := 'SUCCESS';
             p_message    := 'Invoice ' || l_invoice_number || ' updated (ID: ' || l_invoice_id || ') with '
                          || l_line_success || ' lines (replaced ' || l_lines_deleted || ' previous lines)';

@@ -419,6 +419,12 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CREATE_INVOICE_PKG AS
         IF l_line_error = 0 THEN
             COMMIT;
             p_invoice_id := l_invoice_id;
+            -- Generate multiperiod schedule for any MPA lines (best-effort; does not affect invoice status)
+            BEGIN
+                RR_AP_MPA_PKG.generate_schedule(p_invoice_id => l_invoice_id);
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
             p_status := 'SUCCESS';
             p_message := 'Invoice ' || l_invoice_number || ' created (ID: ' || l_invoice_id || ') with ' || l_line_success || ' lines'
                       || ' [json=' || NVL(DBMS_LOB.GETLENGTH(p_json), 0) || ' bytes, parsed=' || l_line_count || ' lines]';

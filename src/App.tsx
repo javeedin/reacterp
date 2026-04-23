@@ -48,6 +48,7 @@ const InvoiceHolds            = lazy(() => import('./pages/ap/InvoiceHolds'));
 const ManageSLAJournals       = lazy(() => import('./pages/ap/ManageSLAJournals'));
 const CreateAccounting        = lazy(() => import('./pages/ap/CreateAccounting'));
 const PrepaymentApplications  = lazy(() => import('./pages/ap/PrepaymentApplications'));
+const ManageMultiperiod       = lazy(() => import('./pages/ap/ManageMultiperiod'));
 const ManageSuppliers         = lazy(() => import('./pages/suppliers/ManageSuppliers'));
 const SupplierBalance         = lazy(() => import('./pages/suppliers/SupplierBalance'));
 const SyncData                = lazy(() => import('./pages/sync/SyncData'));
@@ -172,6 +173,7 @@ function App() {
               <Route path="ap/sla-journals" element={<ManageSLAJournals />} />
               <Route path="ap/create-accounting" element={<CreateAccounting />} />
               <Route path="ap/prepayment-applications" element={<PrepaymentApplications />} />
+              <Route path="ap/multiperiod" element={<ManageMultiperiod />} />
               <Route path="ap/reports" element={<APReports />} />
               <Route path="ap/distribution-combinations" element={<ManageDistCombinations />} />
               <Route path="ap/*" element={<APModule />} />
