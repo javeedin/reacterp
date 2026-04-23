@@ -530,9 +530,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const amountDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Validation state
-  const [isValidated,     setIsValidated]     = useState(false);
-  const [activeTabKey,    setActiveTabKey]    = useState('distribution');
-  const [attachmentCount, setAttachmentCount] = useState(0);
+  const [isValidated,        setIsValidated]        = useState(false);
+  const [activeTabKey,       setActiveTabKey]       = useState('distribution');
+  const [attachmentCount,    setAttachmentCount]    = useState(0);
+  const [attachmentModalOpen, setAttachmentModalOpen] = useState(false);
   const [validationResults, setValidationResults] = useState<{ label: string; passed: boolean; detail?: string; action?: { label: string; onClick: () => void }; subItems?: { label: string; detail?: string; action?: { label: string; onClick: () => void } }[] }[]>([]);
   const [validationModalVisible, setValidationModalVisible] = useState(false);
 
@@ -4431,12 +4432,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
             />
           </Tooltip>
-          {/* Attachment count button — jumps to Attachments tab */}
+          {/* Attachment button — opens popup */}
           <Tooltip title={attachmentCount > 0 ? `${attachmentCount} attachment(s)` : 'Attachments'}>
             <Badge count={attachmentCount} size="small" offset={[-4, 4]}>
               <Button
                 icon={<PaperClipOutlined />}
-                onClick={() => setActiveTabKey('attachments')}
+                onClick={() => setAttachmentModalOpen(true)}
                 style={{
                   color: attachmentCount > 0 ? REDWOOD.primary : undefined,
                   borderColor: attachmentCount > 0 ? REDWOOD.primary : undefined,
@@ -5276,22 +5277,6 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             onChange={setActiveTabKey}
             size="small"
             items={[
-              {
-                key:   'attachments',
-                label: (
-                  <Space size={4}>
-                    <PaperClipOutlined />
-                    <span>Attachments</span>
-                  </Space>
-                ),
-                children: (
-                  <InvoiceAttachments
-                    invoiceId={savedInvoiceId || initialData?.invoiceId}
-                    readOnly={false}
-                    onCountChange={setAttachmentCount}
-                  />
-                ),
-              },
               {
                 key: 'distribution',
                 label: (
@@ -10616,6 +10601,35 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           background: #fef7f6 !important;
         }
       `}</style>
+
+      {/* ── Attachments Modal ───────────────────────────────────────────── */}
+      <Modal
+        open={attachmentModalOpen}
+        onCancel={() => setAttachmentModalOpen(false)}
+        footer={null}
+        title={
+          <Space>
+            <PaperClipOutlined style={{ color: REDWOOD.primary }} />
+            <span>
+              Invoice Attachments
+              {attachmentCount > 0 && (
+                <span style={{ marginLeft: 8, fontSize: 12, color: '#888', fontWeight: 400 }}>
+                  ({attachmentCount} file{attachmentCount !== 1 ? 's' : ''})
+                </span>
+              )}
+            </span>
+          </Space>
+        }
+        width={780}
+        styles={{ body: { padding: '16px 24px', maxHeight: '70vh', overflowY: 'auto' } }}
+        destroyOnClose={false}
+      >
+        <InvoiceAttachments
+          invoiceId={savedInvoiceId || initialData?.invoiceId}
+          readOnly={isReadOnly}
+          onCountChange={setAttachmentCount}
+        />
+      </Modal>
     </div>
   );
 };
