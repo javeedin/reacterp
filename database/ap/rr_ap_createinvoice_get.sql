@@ -4,7 +4,7 @@
 -- Purpose: Search AP Invoices from RR_AP_INVOICES_ALL
 --          Returns accounting_status (live from RR_SLA_ACCOUNTING_HEADERS)
 --          and applied_prepayments
--- Filters:  supplier_number, business_unit, invoice_number, supplier, invoice_date, invoice_amount, supplier_site, invoice_group
+-- Filters:  supplier_number, business_unit, invoice_number, supplier, invoice_date_from/to, invoice_amount, supplier_site, invoice_group
 -- =====================================================
 
 -- =====================================================
@@ -112,8 +112,8 @@ WHERE (i.supplier_number  = :supplier_number  OR :supplier_number  IS NULL)
        OR :invoice_number IS NULL)
   AND (UPPER(i.supplier)  LIKE '%' || UPPER(:supplier) || '%'
        OR :supplier IS NULL)
-  AND (TRUNC(i.invoice_date) = TO_DATE(:invoice_date, 'YYYY-MM-DD')
-       OR :invoice_date IS NULL)
+  AND (TRUNC(i.invoice_date) >= TO_DATE(:invoice_date_from, 'YYYY-MM-DD') OR :invoice_date_from IS NULL)
+  AND (TRUNC(i.invoice_date) <= TO_DATE(:invoice_date_to,   'YYYY-MM-DD') OR :invoice_date_to   IS NULL)
   AND (i.invoice_amount   = :invoice_amount   OR :invoice_amount   IS NULL)
   AND (i.supplier_site    = :supplier_site    OR :supplier_site    IS NULL)
   AND (UPPER(i.invoice_group) LIKE '%' || UPPER(:invoice_group) || '%'
