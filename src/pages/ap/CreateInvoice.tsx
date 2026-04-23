@@ -88,6 +88,7 @@ import AccountSelector, { validateAccountCode } from '../../components/AccountSe
 import { useAuth } from '../../context/AuthContext';
 import InvoiceAttachments from '../../components/InvoiceAttachments';
 import { listAttachments } from '../../services/invoiceAttachment.service';
+import { getMpaSchedule } from '../../services/multiperiod.service';
 
 const { Text, Title } = Typography;
 const { Option } = Select;
@@ -656,6 +657,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [unapplyModalVisible, setUnapplyModalVisible] = useState(false);
   const [unapplyRecord, setUnapplyRecord] = useState<AppliedPrepayment | null>(null);
   const [unapplyDate, setUnapplyDate] = useState<dayjs.Dayjs>(dayjs());
+
+  // Multiperiod schedule modal
+  const [mpaModalOpen,    setMpaModalOpen]    = useState(false);
+  const [mpaSchedule,     setMpaSchedule]     = useState<import('../../services/multiperiod.service').MpaScheduleLine[]>([]);
+  const [mpaLoading,      setMpaLoading]      = useState(false);
+  const [mpaError,        setMpaError]        = useState<string | null>(null);
   const [unapplyLoading, setUnapplyLoading] = useState(false);
 
   // Prepayment invoice view: balance + applied invoices
@@ -2923,6 +2930,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           icon: <ScheduleOutlined />,
           label: 'Manage Installments',
         },
+        { type: 'divider' as const },
+        {
+          key: 'multiperiodSchedule',
+          icon: <CalendarOutlined />,
+          label: 'Multiperiod Schedule',
+        },
         ...(!isPaid && !isCreditMemoType ? [
           { type: 'divider' as const },
           {
@@ -2937,6 +2950,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           key: 'manageInstallments',
           icon: <ScheduleOutlined />,
           label: 'Manage Installments',
+        },
+        { type: 'divider' as const },
+        {
+          key: 'multiperiodSchedule',
+          icon: <CalendarOutlined />,
+          label: 'Multiperiod Schedule',
         },
         { type: 'divider' as const },
         {
@@ -3292,6 +3311,18 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       case 'initiateApproval':
         message.info('Initiating approval...');
         break;
+      case 'multiperiodSchedule': {
+        const invId = savedInvoiceId ?? initialData?.invoiceId ?? null;
+        if (!invId) { message.warning('Save the invoice first to view its multiperiod schedule.'); return; }
+        setMpaModalOpen(true);
+        setMpaLoading(true);
+        setMpaError(null);
+        getMpaSchedule(invId)
+          .then(detail => { setMpaSchedule(detail.lines || []); })
+          .catch(e => setMpaError(e?.message ?? 'Failed to load schedule'))
+          .finally(() => setMpaLoading(false));
+        break;
+      }
       case 'cancelInvoice':
         openCancelModal();
         break;
@@ -10645,6 +10676,112 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           readOnly={isReadOnly}
           onCountChange={setAttachmentCount}
         />
+      </Modal>
+
+      {/* ── Multiperiod Schedule Modal ─────────────────────────────────── */}
+      <Modal
+        open={mpaModalOpen}
+        onCancel={() => { setMpaModalOpen(false); setMpaSchedule([]); setMpaError(null); }}
+        footer={null}
+        title={
+          <Space>
+            <CalendarOutlined style={{ color: REDWOOD.primary }} />
+            <span>Multiperiod Schedule</span>
+            {mpaSchedule.length > 0 && (
+              <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
+                ({mpaSchedule.length} row{mpaSchedule.length !== 1 ? 's' : ''})
+              </Text>
+            )}
+          </Space>
+        }
+        width={900}
+        styles={{ body: { padding: '12px 24px', maxHeight: '70vh', overflowY: 'auto' } }}
+        destroyOnClose
+      >
+        {mpaLoading && (
+          <div style={{ textAlign: 'center', padding: 40 }}>
+            <Spin size="large" />
+          </div>
+        )}
+        {mpaError && (
+          <Alert type="warning" showIcon message="Could not load multiperiod schedule" description={mpaError} />
+        )}
+        {!mpaLoading && !mpaError && mpaSchedule.length === 0 && (
+          <Alert
+            type="info"
+            showIcon
+            message="No multiperiod schedule found for this invoice"
+            description="Multiperiod schedule is generated when the invoice has lines with start/end dates and an accrual account set. Save the invoice to generate the schedule."
+            style={{ margin: '16px 0' }}
+          />
+        )}
+        {!mpaLoading && mpaSchedule.length > 0 && (() => {
+          const totalAmt = mpaSchedule.reduce((s, l) => s + (l.periodAmount || 0), 0);
+          const postedAmt = mpaSchedule.filter(l => l.postingStatus === 'Posted').reduce((s, l) => s + l.periodAmount, 0);
+          const notPostedAmt = mpaSchedule.filter(l => l.postingStatus === 'Not Posted').reduce((s, l) => s + l.periodAmount, 0);
+          return (
+            <>
+              <Row gutter={12} style={{ marginBottom: 12 }}>
+                {[
+                  { label: 'Total', value: totalAmt, color: '#000' },
+                  { label: 'Posted', value: postedAmt, color: REDWOOD.success },
+                  { label: 'Not Posted', value: notPostedAmt, color: REDWOOD.warning },
+                ].map(s => (
+                  <Col span={8} key={s.label}>
+                    <div style={{ background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 4, padding: '6px 12px' }}>
+                      <Text type="secondary" style={{ fontSize: 11 }}>{s.label}</Text>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: s.color }}>
+                        {Number(s.value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+                    </div>
+                  </Col>
+                ))}
+              </Row>
+              <Table
+                dataSource={mpaSchedule}
+                rowKey="scheduleId"
+                size="small"
+                pagination={false}
+                scroll={{ x: 820 }}
+                columns={[
+                  {
+                    title: 'Period', dataIndex: 'periodName', width: 90,
+                    render: v => <Text strong style={{ fontSize: 12 }}>{v}</Text>,
+                  },
+                  { title: 'Line', dataIndex: 'lineNumber', width: 50, align: 'center' as const },
+                  { title: 'Description', dataIndex: 'description', ellipsis: true,
+                    render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+                  {
+                    title: 'Amount', dataIndex: 'periodAmount', width: 110, align: 'right' as const,
+                    render: v => <Text strong style={{ fontSize: 12 }}>{Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text>,
+                  },
+                  {
+                    title: 'Charge A/C (Dr)', dataIndex: 'chargeAccount', width: 180, ellipsis: true,
+                    render: v => <Text code style={{ fontSize: 10 }}>{v || '—'}</Text>,
+                  },
+                  {
+                    title: 'Accrual A/C (Cr)', dataIndex: 'accrualAccount', width: 180, ellipsis: true,
+                    render: v => <Text code style={{ fontSize: 10 }}>{v || '—'}</Text>,
+                  },
+                  {
+                    title: 'Status', dataIndex: 'postingStatus', width: 110,
+                    render: v => (
+                      <Tag color={v === 'Posted' ? 'success' : v === 'Error' ? 'error' : 'warning'} style={{ fontSize: 11 }}>
+                        {v}
+                      </Tag>
+                    ),
+                  },
+                  {
+                    title: 'Posted By', width: 110, ellipsis: true,
+                    render: (_, rec) => rec.postingStatus === 'Posted'
+                      ? <Text type="secondary" style={{ fontSize: 11 }}>{rec.postedBy}</Text>
+                      : null,
+                  },
+                ]}
+              />
+            </>
+          );
+        })()}
       </Modal>
     </div>
   );
