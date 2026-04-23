@@ -5788,7 +5788,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     locale={{ emptyText: 'No prepayments applied to this invoice.' }}
                   />
                 ),
-              },
+              }],
               {
                 key:   'attachments',
                 label: (
