@@ -28,6 +28,7 @@ import {
   Spin,
   List,
   Badge,
+  Space as AntSpace,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -300,6 +301,9 @@ const ManageInvoices: React.FC = () => {
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [lastCalledUrl, setLastCalledUrl] = useState<string | null>(null);
   const [lastApiResponse, setLastApiResponse] = useState<string | null>(null);
+
+  // Invoice date operator state
+  const [invoiceDateOp, setInvoiceDateOp] = useState<string>('=');
 
   // Supplier lookup modal state
   const [supplierModalVisible, setSupplierModalVisible] = useState(false);
@@ -991,7 +995,42 @@ const ManageInvoices: React.FC = () => {
       if (values.businessUnit) params.append('business_unit', values.businessUnit);
       if (values.invoiceNumber) params.append('invoice_number', values.invoiceNumber);
       if (values.supplierOrParty) params.append('supplier', values.supplierOrParty);
-      if (values.invoiceDate) params.append('invoice_date', values.invoiceDate.format('YYYY-MM-DD'));
+
+      // Invoice date — convert operator + picker value(s) to date_from / date_to
+      const fmt = (d: import('dayjs').Dayjs) => d.format('YYYY-MM-DD');
+      const today = dayjs();
+      const op = invoiceDateOp;
+      if (op === '=' && values.invoiceDate) {
+        params.append('invoice_date_from', fmt(values.invoiceDate));
+        params.append('invoice_date_to',   fmt(values.invoiceDate));
+      } else if (op === 'between' && values.invoiceDateRange?.[0] && values.invoiceDateRange?.[1]) {
+        params.append('invoice_date_from', fmt(values.invoiceDateRange[0]));
+        params.append('invoice_date_to',   fmt(values.invoiceDateRange[1]));
+      } else if (op === 'before' && values.invoiceDate) {
+        params.append('invoice_date_to', fmt(values.invoiceDate));
+      } else if (op === 'after' && values.invoiceDate) {
+        params.append('invoice_date_from', fmt(values.invoiceDate));
+      } else if (op === 'past10') {
+        params.append('invoice_date_from', fmt(today.subtract(10, 'day')));
+        params.append('invoice_date_to',   fmt(today));
+      } else if (op === 'past20') {
+        params.append('invoice_date_from', fmt(today.subtract(20, 'day')));
+        params.append('invoice_date_to',   fmt(today));
+      } else if (op === 'past30') {
+        params.append('invoice_date_from', fmt(today.subtract(30, 'day')));
+        params.append('invoice_date_to',   fmt(today));
+      } else if (op === 'past60') {
+        params.append('invoice_date_from', fmt(today.subtract(60, 'day')));
+        params.append('invoice_date_to',   fmt(today));
+      } else if (op === 'this_month') {
+        params.append('invoice_date_from', fmt(today.startOf('month')));
+        params.append('invoice_date_to',   fmt(today.endOf('month')));
+      } else if (op === 'last_month') {
+        const lm = today.subtract(1, 'month');
+        params.append('invoice_date_from', fmt(lm.startOf('month')));
+        params.append('invoice_date_to',   fmt(lm.endOf('month')));
+      }
+
       if (values.invoiceAmount != null && values.invoiceAmount !== '') params.append('invoice_amount', values.invoiceAmount);
       if (values.supplierSite) params.append('supplier_site', values.supplierSite);
       if (values.invoiceGroup) params.append('invoice_group', values.invoiceGroup);
@@ -1395,12 +1434,57 @@ const ManageInvoices: React.FC = () => {
                           >
                             <InputNumber style={{ width: '100%' }} placeholder="0.00" />
                           </Form.Item>
+                          {/* Invoice Date with operator */}
                           <Form.Item
                             label={<Text style={{ fontSize: 12 }}><span style={{ color: REDWOOD.primary }}>**</span> Invoice Date</Text>}
-                            name="invoiceDate"
                             style={{ marginBottom: 8 }}
                           >
-                            <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
+                            <AntSpace.Compact style={{ width: '100%' }}>
+                              <Select
+                                value={invoiceDateOp}
+                                onChange={(v) => {
+                                  setInvoiceDateOp(v);
+                                  form.setFieldsValue({ invoiceDate: undefined, invoiceDateRange: undefined });
+                                }}
+                                style={{ width: 130, flexShrink: 0 }}
+                                options={[
+                                  { value: '=',          label: 'Equal to' },
+                                  { value: 'between',    label: 'Between' },
+                                  { value: 'before',     label: 'Before' },
+                                  { value: 'after',      label: 'After' },
+                                  { value: 'past10',     label: 'Past 10 days' },
+                                  { value: 'past20',     label: 'Past 20 days' },
+                                  { value: 'past30',     label: 'Past 30 days' },
+                                  { value: 'past60',     label: 'Past 60 days' },
+                                  { value: 'this_month', label: 'This month' },
+                                  { value: 'last_month', label: 'Last month' },
+                                ]}
+                              />
+                              {(invoiceDateOp === '=' || invoiceDateOp === 'before' || invoiceDateOp === 'after') && (
+                                <Form.Item name="invoiceDate" noStyle>
+                                  <DatePicker style={{ flex: 1 }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
+                                </Form.Item>
+                              )}
+                              {invoiceDateOp === 'between' && (
+                                <Form.Item name="invoiceDateRange" noStyle>
+                                  <DatePicker.RangePicker style={{ flex: 1 }} format="DD-MMM-YYYY" />
+                                </Form.Item>
+                              )}
+                              {['past10','past20','past30','past60','this_month','last_month'].includes(invoiceDateOp) && (
+                                <Input
+                                  disabled
+                                  style={{ flex: 1, color: '#666', background: '#f5f5f5', fontSize: 12 }}
+                                  value={
+                                    invoiceDateOp === 'past10'     ? `${dayjs().subtract(10,'day').format('DD-MMM-YYYY')} → Today` :
+                                    invoiceDateOp === 'past20'     ? `${dayjs().subtract(20,'day').format('DD-MMM-YYYY')} → Today` :
+                                    invoiceDateOp === 'past30'     ? `${dayjs().subtract(30,'day').format('DD-MMM-YYYY')} → Today` :
+                                    invoiceDateOp === 'past60'     ? `${dayjs().subtract(60,'day').format('DD-MMM-YYYY')} → Today` :
+                                    invoiceDateOp === 'this_month' ? `${dayjs().startOf('month').format('DD-MMM')} → ${dayjs().endOf('month').format('DD-MMM-YYYY')}` :
+                                    invoiceDateOp === 'last_month' ? (() => { const lm = dayjs().subtract(1,'month'); return `${lm.startOf('month').format('DD-MMM')} → ${lm.endOf('month').format('DD-MMM-YYYY')}`; })() : ''
+                                  }
+                                />
+                              )}
+                            </AntSpace.Compact>
                           </Form.Item>
                         </Col>
                         <Col span={12}>
