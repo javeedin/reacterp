@@ -338,6 +338,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_MPA_PKG AS
     v_bus_unit     VARCHAR2(200) := '';
     v_inv_date     DATE;
     v_currency     VARCHAR2(15)  := 'AED';
+    v_acct_status  VARCHAR2(30)  := NULL;
   BEGIN
     -- Fetch header fields from first schedule row
     BEGIN
@@ -350,13 +351,27 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_MPA_PKG AS
       WHEN NO_DATA_FOUND THEN NULL;
     END;
 
+    -- Fetch invoice accounting status from SLA headers
+    BEGIN
+      SELECT h.ACCOUNTING_STATUS
+        INTO v_acct_status
+        FROM RR_SLA_ACCOUNTING_HEADERS h
+       WHERE h.SOURCE_TABLE = 'AP_INVOICES'
+         AND h.SOURCE_ID    = p_invoice_id
+       ORDER BY h.HEADER_ID DESC
+       FETCH FIRST 1 ROWS ONLY;
+    EXCEPTION
+      WHEN NO_DATA_FOUND THEN NULL;
+    END;
+
     v_buf := '{'
-      || '"invoiceId":'     || jnum(p_invoice_id) || ','
-      || '"invoiceNumber":' || jstr(v_inv_number)  || ','
-      || '"supplier":'      || jstr(v_supplier)    || ','
-      || '"businessUnit":'  || jstr(v_bus_unit)    || ','
-      || '"invoiceDate":'   || jdate(v_inv_date)   || ','
-      || '"currencyCode":'  || jstr(v_currency)    || ','
+      || '"invoiceId":'                || jnum(p_invoice_id) || ','
+      || '"invoiceNumber":'            || jstr(v_inv_number)  || ','
+      || '"supplier":'                 || jstr(v_supplier)    || ','
+      || '"businessUnit":'             || jstr(v_bus_unit)    || ','
+      || '"invoiceDate":'              || jdate(v_inv_date)   || ','
+      || '"currencyCode":'             || jstr(v_currency)    || ','
+      || '"invoiceAccountingStatus":'  || jstr(v_acct_status) || ','
       || '"lines":[';
 
     FOR r IN (

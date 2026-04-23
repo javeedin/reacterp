@@ -9,6 +9,7 @@ import {
   HomeOutlined, SearchOutlined, ReloadOutlined, CalendarOutlined,
   CheckCircleOutlined, CloseOutlined, SyncOutlined, BookOutlined,
   FileTextOutlined, WarningOutlined, ApiOutlined, CopyOutlined,
+  EyeOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -18,8 +19,8 @@ import {
   type MpaInvoiceSummary, type MpaScheduleLine, type MpaInvoiceDetail,
 } from '../../services/multiperiod.service';
 import {
-  createAccounting, fetchLedgerByBusinessUnit,
-  type SlaCreatePayload,
+  createAccounting, fetchLedgerByBusinessUnit, getAccounting,
+  type SlaCreatePayload, type SlaGetResult,
 } from '../../services/sla.service';
 import { useAuth } from '../../context/AuthContext';
 
@@ -81,11 +82,15 @@ const ManageMultiperiod: React.FC = () => {
   const [postingTab,   setPostingTab]   = useState<string | null>(null);
   const [confirmOpen,  setConfirmOpen]  = useState(false);
   const [confirmTab,   setConfirmTab]   = useState<string | null>(null);
-  const [apiModalOpen,  setApiModalOpen]  = useState(false);
-  const [lastApiUrl,    setLastApiUrl]    = useState<string | null>(null);
-  const [lastApiStatus, setLastApiStatus] = useState<'success' | 'error' | null>(null);
-  const [lastApiNote,   setLastApiNote]   = useState<string | null>(null);
-  const [copiedUrl,     setCopiedUrl]     = useState(false);
+  const [apiModalOpen,       setApiModalOpen]       = useState(false);
+  const [lastApiUrl,         setLastApiUrl]         = useState<string | null>(null);
+  const [lastApiStatus,      setLastApiStatus]      = useState<'success' | 'error' | null>(null);
+  const [lastApiNote,        setLastApiNote]        = useState<string | null>(null);
+  const [copiedUrl,          setCopiedUrl]          = useState(false);
+  const [acctModalOpen,      setAcctModalOpen]      = useState(false);
+  const [acctModalInvoiceId, setAcctModalInvoiceId] = useState<number | null>(null);
+  const [acctData,           setAcctData]           = useState<SlaGetResult | null>(null);
+  const [acctLoading,        setAcctLoading]        = useState(false);
 
   // Load business units
   useEffect(() => {
@@ -277,9 +282,67 @@ const ManageMultiperiod: React.FC = () => {
   };
 
   const openPostConfirm = (tabKey: string) => {
+    const tab = detailTabs.find(t => t.key === tabKey);
+    if (!tab?.detail) return;
+
+    const period = currentPeriod();
+
+    // Validation 1: invoice must be posted
+    const invStatus = tab.detail.invoiceAccountingStatus?.toUpperCase();
+    if (!invStatus || invStatus !== 'POSTED') {
+      Modal.error({
+        title: 'Invoice Not Posted',
+        content: (
+          <span>
+            The invoice must be <strong>accounted and posted</strong> before posting multiperiod
+            accruals.
+            {tab.detail.invoiceAccountingStatus
+              ? ` Current accounting status: ${tab.detail.invoiceAccountingStatus}.`
+              : ' No accounting entries found for this invoice.'}
+            {' '}Use <em>Refresh</em> if the invoice was recently posted.
+          </span>
+        ),
+      });
+      return;
+    }
+
+    // Validation 2: current period only
+    const currentLines = (tab.detail.lines || []).filter(
+      l => l.periodName === period && l.postingStatus === 'Not Posted',
+    );
+    if (currentLines.length === 0) {
+      Modal.error({
+        title: 'Cannot Post Accrual',
+        content: (
+          <span>
+            Multiperiod accruals can only be posted for the <strong>current period ({period})</strong>.
+            No unposted lines were found for this period.
+          </span>
+        ),
+      });
+      return;
+    }
+
     setConfirmTab(tabKey);
     setConfirmOpen(true);
   };
+
+  // ── view accounting ───────────────────────────────────────────────────────
+
+  const openAccountingModal = useCallback(async (invoiceId: number) => {
+    setAcctModalInvoiceId(invoiceId);
+    setAcctModalOpen(true);
+    setAcctLoading(true);
+    setAcctData(null);
+    try {
+      const result = await getAccounting('RR_AP_INVOICE_MULTIPERIOD_SCHEDULE', invoiceId);
+      setAcctData(result);
+    } catch (e: any) {
+      message.error(`Failed to load accounting: ${e?.message}`);
+      setAcctModalOpen(false);
+    }
+    setAcctLoading(false);
+  }, []);
 
   // ── search columns ────────────────────────────────────────────────────────
 
@@ -385,6 +448,14 @@ const ManageMultiperiod: React.FC = () => {
     const currentLines = (d.lines || []).filter(l => l.periodName === period && l.postingStatus === 'Not Posted');
     const hasCurrentPeriod = currentLines.length > 0;
     const isPosting = postingTab === tab.key;
+    const isInvoicePosted = d.invoiceAccountingStatus?.toUpperCase() === 'POSTED';
+    const canPost = hasCurrentPeriod && isInvoicePosted;
+
+    const postDisabledReason = !isInvoicePosted
+      ? `Invoice must be Posted before posting accruals (current: ${d.invoiceAccountingStatus || 'Not Accounted'})`
+      : !hasCurrentPeriod
+      ? `No unposted lines for the current period (${period})`
+      : undefined;
 
     const totalAmt      = d.lines.reduce((s, l) => s + (l.periodAmount || 0), 0);
     const postedAmt     = d.lines.filter(l => l.postingStatus === 'Posted').reduce((s, l) => s + l.periodAmount, 0);
@@ -394,13 +465,19 @@ const ManageMultiperiod: React.FC = () => {
       <div style={{ padding: '0 8px' }}>
         {/* Invoice header */}
         <Card size="small" style={{ marginBottom: 12 }}>
-          <Descriptions size="small" column={4}>
+          <Descriptions size="small" column={5}>
             <Descriptions.Item label="Invoice Number">
               <Text strong>{d.invoiceNumber}</Text>
             </Descriptions.Item>
             <Descriptions.Item label="Invoice Date">{fmtDate(d.invoiceDate)}</Descriptions.Item>
             <Descriptions.Item label="Supplier">{d.supplier}</Descriptions.Item>
             <Descriptions.Item label="Business Unit">{d.businessUnit}</Descriptions.Item>
+            <Descriptions.Item label="Invoice Accounting">
+              {isInvoicePosted
+                ? <Tag color="success" icon={<CheckCircleOutlined />}>Posted</Tag>
+                : <Tag color="warning" icon={<WarningOutlined />}>{d.invoiceAccountingStatus || 'Not Accounted'}</Tag>
+              }
+            </Descriptions.Item>
           </Descriptions>
         </Card>
 
@@ -432,30 +509,29 @@ const ManageMultiperiod: React.FC = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
           <Space>
             <Button
-              icon={<SyncOutlined />}
-              size="small"
-              loading={generating.has(tab.invoiceId)}
-              onClick={() => handleGenerate(tab.invoiceId, tab.key)}
-            >
-              Regenerate Schedule
-            </Button>
-            <Button
               icon={<ReloadOutlined />}
               size="small"
               onClick={() => refreshDetail(tab.key, tab.invoiceId)}
             >
               Refresh
             </Button>
+            <Button
+              icon={<EyeOutlined />}
+              size="small"
+              onClick={() => openAccountingModal(tab.invoiceId)}
+            >
+              View Accounting
+            </Button>
           </Space>
 
-          <Tooltip title={!hasCurrentPeriod ? `No unposted lines for ${period}` : `Create Dr Expense / Cr Accrual entries for ${period}`}>
+          <Tooltip title={postDisabledReason ?? `Create Dr Expense / Cr Accrual entries for ${period}`}>
             <Button
               type="primary"
               icon={<BookOutlined />}
-              disabled={!hasCurrentPeriod}
+              disabled={!canPost}
               loading={isPosting}
               onClick={() => openPostConfirm(tab.key)}
-              style={{ background: hasCurrentPeriod ? REDWOOD.primary : undefined }}
+              style={{ background: canPost ? REDWOOD.primary : undefined }}
             >
               Post {period} Accrual
             </Button>
@@ -624,6 +700,90 @@ const ManageMultiperiod: React.FC = () => {
                 render: v => <Text strong>{fmtAmt(v)}</Text> },
             ]}
           />
+        </Modal>
+
+        {/* ── View Accounting Modal ────────────────────────────────────── */}
+        <Modal
+          open={acctModalOpen}
+          title={<Space><EyeOutlined style={{ color: REDWOOD.info }} />Multiperiod Accounting Journal</Space>}
+          onCancel={() => setAcctModalOpen(false)}
+          footer={<Button onClick={() => setAcctModalOpen(false)}>Close</Button>}
+          width={900}
+        >
+          {acctLoading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" /></div>
+          ) : !acctData?.found ? (
+            <Alert
+              type="warning"
+              showIcon
+              message="No accounting entries found"
+              description="No journal entries have been posted yet for this invoice's multiperiod schedule."
+            />
+          ) : (
+            <>
+              <Descriptions size="small" column={3} style={{ marginBottom: 12 }}>
+                <Descriptions.Item label="Journal #">{acctData.headerId}</Descriptions.Item>
+                <Descriptions.Item label="Period">{acctData.periodName}</Descriptions.Item>
+                <Descriptions.Item label="Accounting Date">{acctData.accountingDate ? dayjs(acctData.accountingDate).format('DD MMM YYYY') : '—'}</Descriptions.Item>
+                <Descriptions.Item label="Status">
+                  {acctData.accountingStatus === 'POSTED'
+                    ? <Tag color="success">Posted</Tag>
+                    : <Tag color="processing">{acctData.accountingStatus}</Tag>}
+                </Descriptions.Item>
+                <Descriptions.Item label="Posted By">{acctData.postedBy || '—'}</Descriptions.Item>
+                <Descriptions.Item label="GL Batch">{acctData.glBatchName || '—'}</Descriptions.Item>
+              </Descriptions>
+              <Table
+                dataSource={acctData.lines}
+                rowKey="lineId"
+                size="small"
+                pagination={false}
+                scroll={{ x: 800 }}
+                columns={[
+                  { title: '#', dataIndex: 'lineNumber', width: 45, align: 'center' as const },
+                  {
+                    title: 'Type', dataIndex: 'lineType', width: 55, align: 'center' as const,
+                    render: (v: string) => (
+                      <Tag color={v === 'DR' ? 'blue' : 'orange'} style={{ fontWeight: 600 }}>{v}</Tag>
+                    ),
+                  },
+                  { title: 'Class', dataIndex: 'accountingClass', width: 100 },
+                  {
+                    title: 'Account', dataIndex: 'accountCombination', ellipsis: true,
+                    render: (v: string) => <Text code style={{ fontSize: 11 }}>{v}</Text>,
+                  },
+                  { title: 'Description', dataIndex: 'description', ellipsis: true },
+                  {
+                    title: 'Dr Amount', dataIndex: 'enteredDr', width: 120, align: 'right' as const,
+                    render: (v: number) => v ? <Text style={{ color: REDWOOD.info }}>{fmtAmt(v)}</Text> : <Text type="secondary">—</Text>,
+                  },
+                  {
+                    title: 'Cr Amount', dataIndex: 'enteredCr', width: 120, align: 'right' as const,
+                    render: (v: number) => v ? <Text style={{ color: REDWOOD.success }}>{fmtAmt(v)}</Text> : <Text type="secondary">—</Text>,
+                  },
+                ]}
+                summary={() => {
+                  const totalDr = acctData.lines.reduce((s, l) => s + (l.enteredDr || 0), 0);
+                  const totalCr = acctData.lines.reduce((s, l) => s + (l.enteredCr || 0), 0);
+                  return (
+                    <Table.Summary fixed>
+                      <Table.Summary.Row>
+                        <Table.Summary.Cell index={0} colSpan={5} align="right">
+                          <Text strong>Total</Text>
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={5} align="right">
+                          <Text strong style={{ color: REDWOOD.info }}>{fmtAmt(totalDr)}</Text>
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={6} align="right">
+                          <Text strong style={{ color: REDWOOD.success }}>{fmtAmt(totalCr)}</Text>
+                        </Table.Summary.Cell>
+                      </Table.Summary.Row>
+                    </Table.Summary>
+                  );
+                }}
+              />
+            </>
+          )}
         </Modal>
 
         {/* ── API Debug Modal ──────────────────────────────────────────── */}

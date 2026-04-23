@@ -41,6 +41,7 @@ export interface MpaInvoiceDetail {
   businessUnit: string;
   invoiceDate: string;
   currencyCode: string;
+  invoiceAccountingStatus: string | null;
   lines: MpaScheduleLine[];
 }
 
