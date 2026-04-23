@@ -231,7 +231,7 @@ const ManageMultiperiod: React.FC = () => {
           ledgerId:       ledger.ledgerId,
           ledgerName:     ledger.ledgerName,
           currencyCode:   currency,
-          ledgerCurrency: ledger.ledgerCurrency,
+          ledgerCurrency: ledger.ledgerName,
           exchangeRate:   1,
           businessUnit:   tab.detail.businessUnit,
           description:    `Multiperiod Accrual – ${tab.detail.invoiceNumber} – ${period}`,

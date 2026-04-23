@@ -28,7 +28,8 @@ const GlobalMenuSearch: React.FC = () => {
   const [newWindow, setNewWindow] = useState(false);
   const selectRef = useRef<any>(null);
 
-  const handleSelect = (path: string) => {
+  const handleSelect = (path: string | null) => {
+    if (!path) return;
     setOpen(false);
     if (selectRef.current) selectRef.current.blur();
 

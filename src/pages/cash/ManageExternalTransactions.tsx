@@ -469,7 +469,7 @@ const ExternalTxnForm: React.FC<{
 // ────────────────────────────────────────────────────────────────────────────
 const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'cash' }) => {
   const { user } = useAuth();
-  const currentUser = user?.profile?.email ?? user?.profile?.sub ?? 'SYSTEM';
+  const currentUser = user?.email ?? user?.username ?? 'SYSTEM';
 
   const [transactions, setTransactions]   = useState<ExternalTxnRecord[]>([]);
   const [loading, setLoading]             = useState(false);
@@ -1103,7 +1103,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       children: (
         <ExternalTxnForm
           initialValues={t.record}
-          bankAccounts={bankAccounts}
+          bankAccounts={allBankAccounts}
           businessUnits={businessUnits}
           bankAccountMap={bankAccountMap}
           onSave={() => { closeTab(t.key); handleSearch(); loadLovs(); }}
