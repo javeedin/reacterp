@@ -1,19 +1,37 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import type { User, AuthContextType, LoginResult } from '../types';
 
 const APEX_AUTH_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/auth';
 const APEX_ADMIN_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/admin';
 
 
+const isElectron = !!(window as any).electronAPI?.isElectron;
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(() => {
+    // In Electron the file-based session is loaded asynchronously below;
+    // start with localStorage as a fast synchronous fallback.
     try {
       const saved = localStorage.getItem('erp_user');
       return saved ? JSON.parse(saved) : null;
     } catch { return null; }
   });
+
+  // On Electron startup, load the file-based session (overrides localStorage result
+  // because it's more reliable — Chromium's quota DB can fail on some Windows machines).
+  useEffect(() => {
+    if (!isElectron) return;
+    (window as any).electronAPI.getErpSession().then((session: { user: User; token: string } | null) => {
+      if (session?.user) {
+        setUser(session.user);
+        // Keep localStorage in sync for the synchronous initializer
+        try { localStorage.setItem('erp_user', JSON.stringify(session.user)); } catch { /* ignore */ }
+        try { localStorage.setItem('erp_token', session.token || ''); } catch { /* ignore */ }
+      }
+    }).catch(() => { /* ignore */ });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loginWithStatus = useCallback(async (username: string, password: string): Promise<LoginResult> => {
     try {
@@ -56,6 +74,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser(userData);
         localStorage.setItem('erp_user', JSON.stringify(userData));
         localStorage.setItem('erp_token', data.token || '');
+        if (isElectron) {
+          (window as any).electronAPI.saveErpSession(userData, data.token || '').catch(() => {});
+        }
       }
 
       return { status: data.status, message: data.message || '' };
@@ -170,6 +191,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null);
     localStorage.removeItem('erp_user');
     localStorage.removeItem('erp_token');
+    if (isElectron) {
+      (window as any).electronAPI.clearErpSession().catch(() => {});
+    }
   }, []);
 
   return (

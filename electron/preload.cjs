@@ -37,6 +37,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openRecordingsFolder: () => ipcRenderer.invoke('open-recordings-folder'),
   getFileUrl: (filePath) => ipcRenderer.invoke('get-file-url', filePath),
 
+  // ERP session persistence (file-based — survives Chromium quota DB failures)
+  saveErpSession: (user, token) => ipcRenderer.invoke('save-erp-session', { user, token }),
+  getErpSession: () => ipcRenderer.invoke('get-erp-session'),
+  clearErpSession: () => ipcRenderer.invoke('clear-erp-session'),
+
   // Oracle Fusion saved credentials
   saveFusionCredentials: (username, password) => ipcRenderer.invoke('save-fusion-credentials', { username, password }),
   getFusionCredentials: () => ipcRenderer.invoke('get-fusion-credentials'),

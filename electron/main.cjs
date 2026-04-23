@@ -816,6 +816,36 @@ ipcMain.handle('get-file-url', (_event, filePath) => {
   return 'file://' + filePath.split(path.sep).join('/');
 });
 
+// ── ERP session storage (plain JSON file — bypasses Chromium quota DB issues) ──
+const ERP_SESSION_FILE = path.join(app.getPath('userData'), 'erp-session.json');
+
+ipcMain.handle('save-erp-session', (_event, { user, token }) => {
+  try {
+    fs.writeFileSync(ERP_SESSION_FILE, JSON.stringify({ user, token }), 'utf8');
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('get-erp-session', () => {
+  try {
+    if (!fs.existsSync(ERP_SESSION_FILE)) return null;
+    return JSON.parse(fs.readFileSync(ERP_SESSION_FILE, 'utf8'));
+  } catch (e) {
+    return null;
+  }
+});
+
+ipcMain.handle('clear-erp-session', () => {
+  try {
+    if (fs.existsSync(ERP_SESSION_FILE)) fs.unlinkSync(ERP_SESSION_FILE);
+    return { success: true };
+  } catch (e) {
+    return { success: false };
+  }
+});
+
 // ── Oracle Fusion credential storage (OS-level encryption via safeStorage) ──
 const CREDS_FILE = path.join(app.getPath('userData'), 'fusion-creds.json');
 
