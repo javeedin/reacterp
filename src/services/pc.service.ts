@@ -37,6 +37,7 @@ export interface PCTransaction {
   currency: string;
   debitAmount: number;
   creditAmount: number;
+  suspenseAmount: number;
   comments: string | null;
   referenceDescription: string | null;
   referenceNo: string | null;

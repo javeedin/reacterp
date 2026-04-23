@@ -298,6 +298,7 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         l_by            VARCHAR2(150);
         l_period_cnt    NUMBER;
         l_period        VARCHAR2(30);
+        l_suspense      NUMBER;
     BEGIN
         p_error := NULL;
         APEX_JSON.PARSE(p_json);
@@ -328,8 +329,9 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
         l_acc_date  := NVL(parse_date(APEX_JSON.GET_VARCHAR2(p_path => 'accountingDate')), l_txn_date);
         l_post_stat := NVL(APEX_JSON.GET_VARCHAR2(p_path => 'postingStatus'), 'Unposted');
         l_currency  := NVL(APEX_JSON.GET_VARCHAR2(p_path => 'currency'), 'AED');
-        l_debit     := NVL(APEX_JSON.GET_NUMBER  (p_path => 'debitAmount'),  0);
-        l_credit    := NVL(APEX_JSON.GET_NUMBER  (p_path => 'creditAmount'), 0);
+        l_debit     := NVL(APEX_JSON.GET_NUMBER  (p_path => 'debitAmount'),   0);
+        l_credit    := NVL(APEX_JSON.GET_NUMBER  (p_path => 'creditAmount'),  0);
+        l_suspense  := NVL(APEX_JSON.GET_NUMBER  (p_path => 'suspenseAmount'), 0);
         l_comments     := APEX_JSON.GET_VARCHAR2(p_path => 'comments');
         l_ref_no       := APEX_JSON.GET_VARCHAR2(p_path => 'referenceNo');
         l_attach       := APEX_JSON.GET_VARCHAR2(p_path => 'attachment');
@@ -369,6 +371,7 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
             CHARGE_ACCOUNT_CCID, CHARGE_ACCOUNT_DESC,
             ACCOUNTING_DATE,     ACCOUNTING_PERIOD,   POSTING_STATUS,
             CURRENCY,            DEBIT_AMOUNT,        CREDIT_AMOUNT,
+            SUSPENSE_AMOUNT,
             COMMENTS,            REFERENCE_NO,        ATTACHMENT,
             ATTACHMENT_DATA,     EMPLOYEE_NAME,       RECEIPT_STATUS,
             BANK_TXN_ID,
@@ -380,6 +383,7 @@ CREATE OR REPLACE PACKAGE BODY RR_PC_PKG AS
             l_ca_ccid,   l_ca_desc,
             l_acc_date,  l_period,    l_post_stat,
             l_currency,  l_debit,     l_credit,
+            l_suspense,
             l_comments,  l_ref_no,    l_attach,
             l_attach_data, l_emp_name, l_receipt_stat,
             l_bank_txn_id,

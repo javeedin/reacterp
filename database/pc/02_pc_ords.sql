@@ -324,6 +324,7 @@ DECLARE
                t.CURRENCY,
                t.DEBIT_AMOUNT,
                t.CREDIT_AMOUNT,
+               NVL(t.SUSPENSE_AMOUNT, 0) AS SUSPENSE_AMOUNT,
                t.COMMENTS,
                t.REFERENCE_NO,
                t.ATTACHMENT,
@@ -359,6 +360,7 @@ BEGIN
         APEX_JSON.WRITE(''currency'',           NVL(rec.CURRENCY,''AED''));
         APEX_JSON.WRITE(''debitAmount'',        rec.DEBIT_AMOUNT);
         APEX_JSON.WRITE(''creditAmount'',       rec.CREDIT_AMOUNT);
+        APEX_JSON.WRITE(''suspenseAmount'',     rec.SUSPENSE_AMOUNT);
         APEX_JSON.WRITE(''comments'',           rec.COMMENTS);
         APEX_JSON.WRITE(''referenceNo'',        rec.REFERENCE_NO);
         APEX_JSON.WRITE(''attachment'',         rec.ATTACHMENT);

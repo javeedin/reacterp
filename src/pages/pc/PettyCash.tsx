@@ -21,6 +21,7 @@ import {
   SwapOutlined, UploadOutlined, PaperClipOutlined, EyeOutlined,
   BookOutlined, CheckCircleOutlined, SyncOutlined, ExclamationCircleOutlined,
   TagOutlined, PrinterOutlined, FilePdfOutlined, BranchesOutlined,
+  QuestionCircleOutlined,
 } from '@ant-design/icons';
 import FloatingMenu from '../../components/FloatingMenu';
 import ApiDocsModal, { type ApiEndpoint } from '../../components/ApiDocsModal';
@@ -632,13 +633,15 @@ const RegisterDetail: React.FC<{
   const { register, transactions, txnLoading } = tab;
   const { addSessionEntry } = useGlValidation();
   const [addMoneyOpen, setAddMoneyOpen]     = useState(false);
-  const [addExpenseOpen, setAddExpenseOpen] = useState(false);
-  const [editTxnOpen, setEditTxnOpen]       = useState(false);
-  const [editTxn, setEditTxn]               = useState<PCTransaction | null>(null);
-  const [saving, setSaving]                 = useState(false);
-  const [moneyForm]   = Form.useForm();
-  const [expenseForm] = Form.useForm();
-  const [editTxnForm] = Form.useForm();
+  const [addExpenseOpen, setAddExpenseOpen]   = useState(false);
+  const [addSuspenseOpen, setAddSuspenseOpen] = useState(false);
+  const [editTxnOpen, setEditTxnOpen]         = useState(false);
+  const [editTxn, setEditTxn]                 = useState<PCTransaction | null>(null);
+  const [saving, setSaving]                   = useState(false);
+  const [moneyForm]     = Form.useForm();
+  const [expenseForm]   = Form.useForm();
+  const [suspenseForm]  = Form.useForm();
+  const [editTxnForm]   = Form.useForm();
   const needsRefresh = React.useRef(false);
   const [distCombinations, setDistCombinations] = useState<DistCombination[]>([]);
   const [openPeriods, setOpenPeriods]           = useState<APPeriod[]>([]);
@@ -724,9 +727,10 @@ const RegisterDetail: React.FC<{
   const [reverseBankData, setReverseBankData]           = useState<any | null>(null);
   const [reverseBankLoading, setReverseBankLoading]     = useState(false);
   const [reverseScenario, setReverseScenario]           = useState<'no_bank' | 'bank_void' | 'bank_unr' | 'bank_accounted'>('no_bank');
-  const [addExpenseVoucherNo, setAddExpenseVoucherNo] = useState('');
-  const [addMoneyVoucherNo,   setAddMoneyVoucherNo]   = useState('');
-  const [voucherNoLoading,    setVoucherNoLoading]    = useState(false);
+  const [addExpenseVoucherNo,  setAddExpenseVoucherNo]  = useState('');
+  const [addMoneyVoucherNo,    setAddMoneyVoucherNo]    = useState('');
+  const [addSuspenseVoucherNo, setAddSuspenseVoucherNo] = useState('');
+  const [voucherNoLoading,     setVoucherNoLoading]     = useState(false);
 
   const updateLine = (key: string, patch: Partial<ExpenseLine>) =>
     setExpenseLines(prev => prev.map(l => l.key === key ? { ...l, ...patch } : l));
@@ -1008,6 +1012,23 @@ const RegisterDetail: React.FC<{
       })
       .finally(() => setVoucherNoLoading(false));
   }, [addMoneyOpen]);
+
+  useEffect(() => {
+    if (!addSuspenseOpen) return;
+    setVoucherNoLoading(true);
+    getNextVoucherNo(register.registerId)
+      .then(v => setAddSuspenseVoucherNo(v))
+      .catch(() => {
+        const pat = new RegExp(`^R${register.registerId}-(\\d+)$`);
+        const maxSeq = transactions.reduce((mx, t) => {
+          if (!t.referenceNo) return mx;
+          const m = t.referenceNo.match(pat);
+          return m ? Math.max(mx, parseInt(m[1], 10)) : mx;
+        }, 0);
+        setAddSuspenseVoucherNo(`R${register.registerId}-${String(maxSeq + 1).padStart(2, '0')}`);
+      })
+      .finally(() => setVoucherNoLoading(false));
+  }, [addSuspenseOpen]);
 
   // ── Derive AP period for a given date ────────────────────
   const findAPPeriod = (date: dayjs.Dayjs | null): APPeriod | null => {
@@ -1564,6 +1585,46 @@ const RegisterDetail: React.FC<{
     }
   };
 
+  // ── Add Suspense ────────────────────────────────────────────
+  const handleAddSuspense = async (values: any) => {
+    const accDate = values.accountingDate ?? values.transactionDate;
+    if (periodsLoaded && openPeriods.length > 0 && !findAPPeriod(accDate)) {
+      message.error(`Accounting date ${accDate.format('DD-MMM-YYYY')} does not fall within an open AP period`);
+      return;
+    }
+    setSaving(true);
+    try {
+      await createTransaction({
+        registerId:           register.registerId,
+        transactionDate:      values.transactionDate.format('YYYY-MM-DD'),
+        accountingDate:       accDate.format('YYYY-MM-DD'),
+        transactionType:      'Expense',
+        expenseType:          'SUSPENSE',
+        currency:             values.currency || register.currency,
+        debitAmount:          0,
+        creditAmount:         0,
+        suspenseAmount:       values.amount,
+        chargeAccountCcid:    values.chargeAccountCcid || null,
+        chargeAccountDesc:    values.chargeAccountDesc || null,
+        referenceNo:          addSuspenseVoucherNo || null,
+        comments:             values.comments,
+        postingStatus:        'Unposted',
+        createdBy:            currentUser,
+      });
+      const seq = addSuspenseVoucherNo.match(/(\d+)$/);
+      const nextSeq = seq ? parseInt(seq[1], 10) + 1 : 1;
+      setAddSuspenseVoucherNo(`R${register.registerId}-${String(nextSeq).padStart(2, '0')}`);
+      message.success('Suspense recorded');
+      suspenseForm.resetFields();
+      setAddSuspenseOpen(false);
+      onRefresh();
+    } catch (e: any) {
+      message.error(e?.message ?? 'Failed to record suspense');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // ── Add Multiple Expenses ──────────────────────────────────
   const handleAddMultiExpense = async () => {
     const vals = expenseForm.getFieldsValue(['transactionDate', 'accountingDate', 'currency', 'referenceDescription']);
@@ -2114,6 +2175,10 @@ const RegisterDetail: React.FC<{
       render: (v) => v > 0
         ? <Text style={{ fontSize: 12, color: REDWOOD.error }}>{fmt(v)}</Text>
         : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
+    { title: 'Suspense', dataIndex: 'suspenseAmount', width: 120, align: 'right',
+      render: (v) => v > 0
+        ? <Text style={{ fontSize: 12, color: '#722ed1' }}>{fmt(v)}</Text>
+        : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
     { title: 'Balance', dataIndex: 'runningBalance', width: 120, align: 'right',
       render: (v) => (
         <Text style={{ fontSize: 12, fontWeight: 600,
@@ -2651,6 +2716,15 @@ const RegisterDetail: React.FC<{
               onClick={() => { expenseForm.resetFields(); setAddAcctDesc(''); setAddExpenseOpen(true); }}
             >
               Add Expense
+            </Button>
+          </Tooltip>
+          <Tooltip title={isClosed ? 'Register is closed' : 'Record a suspense entry (not debit or credit)'}>
+            <Button
+              icon={<QuestionCircleOutlined />}
+              disabled={isClosed}
+              onClick={() => { suspenseForm.resetFields(); setAddSuspenseOpen(true); }}
+            >
+              Add Suspense
             </Button>
           </Tooltip>
         </Space>
@@ -3465,6 +3539,80 @@ const RegisterDetail: React.FC<{
               </div>
             </>
           )}
+        </Form>
+      </Modal>
+
+      {/* ── Add Suspense Modal ─────────────────────────────── */}
+      <Modal
+        title={
+          <Space>
+            <QuestionCircleOutlined style={{ color: '#722ed1' }} />
+            Add Suspense
+          </Space>
+        }
+        open={addSuspenseOpen}
+        onCancel={() => { setAddSuspenseOpen(false); suspenseForm.resetFields(); }}
+        footer={null}
+        width={520}
+        destroyOnClose
+      >
+        <Form form={suspenseForm} layout="vertical" size="small" onFinish={handleAddSuspense}>
+          <Row gutter={12}>
+            <Col span={8}>
+              <Form.Item label="Transaction Date" name="transactionDate"
+                rules={[{ required: true, message: 'Required' }]}
+                initialValue={dayjs()}>
+                <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY"
+                  onChange={v => { if (v) suspenseForm.setFieldsValue({ accountingDate: v }); }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item label="Accounting Date" name="accountingDate" initialValue={dayjs()}>
+                <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item label="Voucher No">
+                <Input
+                  value={addSuspenseVoucherNo}
+                  readOnly
+                  prefix={<TagOutlined />}
+                  suffix={voucherNoLoading ? <SyncOutlined spin style={{ fontSize: 11 }} /> : null}
+                  style={{ fontFamily: 'monospace', color: '#722ed1', fontWeight: 600, background: '#f9f0ff', cursor: 'not-allowed' }}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item label="Expense Type" name="expenseType" initialValue="SUSPENSE">
+                <Input disabled />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Amount" name="amount"
+                rules={[{ required: true, message: 'Required' }, { type: 'number', min: 0.01, message: 'Must be > 0' }]}>
+                <InputNumber style={{ width: '100%' }} precision={2} min={0} placeholder="0.00" />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item label="Employee Name" name="employeeName">
+            <Input prefix={<UserOutlined />} placeholder="Optional" />
+          </Form.Item>
+          <Form.Item label="Comments" name="comments">
+            <Input.TextArea rows={2} placeholder="Optional" />
+          </Form.Item>
+          <Form.Item label="Reference Description" name="referenceDescription"
+            help={<span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Used as GL Cr line description when posting</span>}>
+            <Input.TextArea rows={2} placeholder="Purpose or summary (optional)" />
+          </Form.Item>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+            <Button onClick={() => { setAddSuspenseOpen(false); suspenseForm.resetFields(); }}>Cancel</Button>
+            <Button type="primary" htmlType="submit" loading={saving}
+              style={{ background: '#722ed1', borderColor: '#722ed1' }}>
+              Save Suspense
+            </Button>
+          </div>
         </Form>
       </Modal>
 
