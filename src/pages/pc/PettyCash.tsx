@@ -313,7 +313,7 @@ async function exportRegisterToExcel(register: PCRegister, transactions: PCTrans
   });
   for (let col = 1; col <= 14; col++) {
     const c = totRow.getCell(col);
-    if (!c.fill || (c.fill as ExcelJS.PatternFill).fgColor?.argb === 'FF000000') c.fill = solid('FFE8F0FE');
+    if (!c.fill || (c.fill as any).fgColor?.argb === 'FF000000') c.fill = solid('FFE8F0FE');
   }
   totRow.height = 22;
 
@@ -462,7 +462,7 @@ async function exportRegisterToExcel(register: PCRegister, transactions: PCTrans
   });
   for (let col = 1; col <= 11; col++) {
     const c = sTot.getCell(col);
-    if (!c.fill || (c.fill as ExcelJS.PatternFill).fgColor?.argb === 'FF000000') c.fill = solid('FFE8F0FE');
+    if (!c.fill || (c.fill as any).fgColor?.argb === 'FF000000') c.fill = solid('FFE8F0FE');
   }
   sTot.height = 22;
 
@@ -614,7 +614,7 @@ function readFileAsEntry(file: File): Promise<FileEntry> {
       const comma   = dataUrl.indexOf(',');
       const base64  = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
       const mime    = dataUrl.slice(0, comma >= 0 ? comma : 0).match(/data:([^;]+)/)?.[1] || file.type;
-      resolve({ uid: file.uid ?? String(Date.now()), name: file.name, data: base64, mimeType: mime });
+      resolve({ uid: (file as any).uid ?? String(Date.now()), name: file.name, data: base64, mimeType: mime });
     };
     reader.onerror = reject;
   });
@@ -4505,7 +4505,7 @@ const RegisterDetail: React.FC<{
                   <Text style={{ fontSize: 11, color: item.error ? REDWOOD.error : REDWOOD.success }}>
                     {item.error ? `Error: ${item.error}` : 'Response:'}
                   </Text>
-                  {item.response && (
+                  {!!item.response && (
                     <pre style={{ fontSize: 11, background: item.error ? '#fff0f0' : '#f0fff4', color: '#333', padding: '8px 12px', borderRadius: 4, overflowX: 'auto', marginTop: 4 }}>
                       {JSON.stringify(item.response, null, 2)}
                     </pre>

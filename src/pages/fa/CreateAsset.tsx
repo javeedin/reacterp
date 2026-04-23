@@ -303,7 +303,7 @@ const CreateAsset: React.FC = () => {
 
     return (
       <div>
-        <Divider orientation={"left" as "left" | "right" | "center"}><BookOutlined /> Asset Details</Divider>
+        <Divider orientation={"left" as any}><BookOutlined /> Asset Details</Divider>
         <Descriptions column={2} size="small" bordered labelStyle={{ fontWeight: 500 }}>
           <Descriptions.Item label="Asset Number">{all.assetNumber || '—'}</Descriptions.Item>
           <Descriptions.Item label="Type">{assetTypeLabel(all.assetType)}</Descriptions.Item>
@@ -318,7 +318,7 @@ const CreateAsset: React.FC = () => {
           <Descriptions.Item label="Owned/Leased">{all.ownedLeased || '—'}</Descriptions.Item>
         </Descriptions>
 
-        <Divider orientation={"left" as "left" | "right" | "center"}><DollarOutlined /> Book & Financials</Divider>
+        <Divider orientation={"left" as any}><DollarOutlined /> Book & Financials</Divider>
         <Descriptions column={2} size="small" bordered labelStyle={{ fontWeight: 500 }}>
           <Descriptions.Item label="Book">{book ? `${book.bookTypeCode} — ${book.bookTypeName}` : all.bookTypeCode || '—'}</Descriptions.Item>
           <Descriptions.Item label="Date in Service">{dateStr}</Descriptions.Item>
@@ -330,7 +330,7 @@ const CreateAsset: React.FC = () => {
           <Descriptions.Item label="Capitalize">{all.capitalizedFlag || '—'}</Descriptions.Item>
         </Descriptions>
 
-        <Divider orientation={"left" as "left" | "right" | "center"}><EnvironmentOutlined /> Assignment</Divider>
+        <Divider orientation={"left" as any}><EnvironmentOutlined /> Assignment</Divider>
         <Descriptions column={2} size="small" bordered labelStyle={{ fontWeight: 500 }}>
           <Descriptions.Item label="Location">{loc ? loc.fullLocation : all.locationId || '—'}</Descriptions.Item>
           <Descriptions.Item label="CCID">{all.codeCombinationId || '—'}</Descriptions.Item>

@@ -125,11 +125,11 @@ const Retirements: React.FC = () => {
     { title: 'Type',        dataIndex: 'retirementTypeCode', key: 'type',   width: 100,
       render: (v) => v ? <Tag style={{ borderRadius: 4 }}>{v}</Tag> : '—' },
     { title: 'Cost Retired',dataIndex: 'costRetired',  key: 'costRetired',  width: 130, align: 'right' as const,
-      render: formatCurrency },
+      render: (v: any) => formatCurrency(v) },
     { title: 'NBV Retired', dataIndex: 'nbvRetired',   key: 'nbvRetired',   width: 120, align: 'right' as const,
-      render: formatCurrency },
+      render: (v: any) => formatCurrency(v) },
     { title: 'Proceeds',    dataIndex: 'proceedsOfSale',key: 'proceeds',    width: 120, align: 'right' as const,
-      render: formatCurrency },
+      render: (v: any) => formatCurrency(v) },
     { title: 'Gain / Loss', dataIndex: 'gainLossAmount',key: 'gainLoss',    width: 120, align: 'right' as const,
       render: (v) => {
         const n = parseFloat(v || '0');
