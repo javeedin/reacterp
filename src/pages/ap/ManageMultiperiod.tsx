@@ -8,7 +8,7 @@ import {
 import {
   HomeOutlined, SearchOutlined, ReloadOutlined, CalendarOutlined,
   CheckCircleOutlined, CloseOutlined, SyncOutlined, BookOutlined,
-  FileTextOutlined, WarningOutlined,
+  FileTextOutlined, WarningOutlined, ApiOutlined, CopyOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -81,6 +81,11 @@ const ManageMultiperiod: React.FC = () => {
   const [postingTab,   setPostingTab]   = useState<string | null>(null);
   const [confirmOpen,  setConfirmOpen]  = useState(false);
   const [confirmTab,   setConfirmTab]   = useState<string | null>(null);
+  const [apiModalOpen,  setApiModalOpen]  = useState(false);
+  const [lastApiUrl,    setLastApiUrl]    = useState<string | null>(null);
+  const [lastApiStatus, setLastApiStatus] = useState<'success' | 'error' | null>(null);
+  const [lastApiNote,   setLastApiNote]   = useState<string | null>(null);
+  const [copiedUrl,     setCopiedUrl]     = useState(false);
 
   // Load business units
   useEffect(() => {
@@ -96,6 +101,17 @@ const ManageMultiperiod: React.FC = () => {
     const vals = form.getFieldsValue();
     setSearching(true);
     setSearchErr(null);
+
+    // Build URL for debug display
+    const BASE_URL = `${APEX_DB_CONFIG.baseUrl}/ap/multiperiod`;
+    const q = new URLSearchParams();
+    if (vals.invoiceNumber) q.set('invoice_number', vals.invoiceNumber);
+    if (vals.supplier)      q.set('supplier',       vals.supplier);
+    if (vals.businessUnit)  q.set('business_unit',  vals.businessUnit);
+    if (vals.postingStatus) q.set('posting_status', vals.postingStatus);
+    const calledUrl = q.toString() ? `${BASE_URL}?${q.toString()}` : BASE_URL;
+    setLastApiUrl(calledUrl);
+
     try {
       const rows = await listMpaInvoices({
         invoiceNumber: vals.invoiceNumber || undefined,
@@ -104,8 +120,12 @@ const ManageMultiperiod: React.FC = () => {
         postingStatus: vals.postingStatus || undefined,
       });
       setSearchResult(rows);
+      setLastApiStatus('success');
+      setLastApiNote(`${rows.length} invoice(s) returned`);
     } catch (e: any) {
       setSearchErr(e?.message ?? 'Search failed');
+      setLastApiStatus('error');
+      setLastApiNote(e?.message ?? 'Unknown error');
     }
     setSearching(false);
   }, [form]);
@@ -546,9 +566,19 @@ const ManageMultiperiod: React.FC = () => {
         ]} />
 
         {/* Page title */}
-        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12, gap: 10 }}>
-          <CalendarOutlined style={{ fontSize: 22, color: REDWOOD.primary }} />
-          <Title level={4} style={{ margin: 0, color: REDWOOD.primary }}>Multiperiod Accounting</Title>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <Space size={10}>
+            <CalendarOutlined style={{ fontSize: 22, color: REDWOOD.primary }} />
+            <Title level={4} style={{ margin: 0, color: REDWOOD.primary }}>Multiperiod Accounting</Title>
+          </Space>
+          <Tooltip title="View Page APIs">
+            <Button
+              icon={<ApiOutlined />}
+              size="small"
+              style={{ color: REDWOOD.info }}
+              onClick={() => setApiModalOpen(true)}
+            />
+          </Tooltip>
         </div>
 
         <Card bodyStyle={{ padding: 12 }}>
@@ -594,6 +624,85 @@ const ManageMultiperiod: React.FC = () => {
                 render: v => <Text strong>{fmtAmt(v)}</Text> },
             ]}
           />
+        </Modal>
+
+        {/* ── API Debug Modal ──────────────────────────────────────────── */}
+        <Modal
+          open={apiModalOpen}
+          title={<Space><ApiOutlined style={{ color: REDWOOD.info }} />Page APIs — Multiperiod Accounting</Space>}
+          onCancel={() => setApiModalOpen(false)}
+          footer={<Button onClick={() => setApiModalOpen(false)}>Close</Button>}
+          width={800}
+        >
+          <div style={{ marginBottom: 12 }}>
+            <Tag color="blue">Module: ap</Tag>
+            <Tag color="green">Source: Oracle APEX ORDS</Tag>
+          </div>
+
+          {/* Endpoint reference table */}
+          <Table
+            size="small"
+            pagination={false}
+            style={{ marginBottom: lastApiUrl ? 16 : 0 }}
+            dataSource={[
+              { method: 'GET',  endpoint: `${APEX_DB_CONFIG.baseUrl}/ap/multiperiod`,                  purpose: 'Search — list invoices with MPA schedules' },
+              { method: 'GET',  endpoint: `${APEX_DB_CONFIG.baseUrl}/ap/multiperiod/:invoice_id`,      purpose: 'Detail — schedule lines for one invoice' },
+              { method: 'POST', endpoint: `${APEX_DB_CONFIG.baseUrl}/ap/multiperiod/generate`,         purpose: 'Generate / refresh schedule for an invoice' },
+              { method: 'POST', endpoint: `${APEX_DB_CONFIG.baseUrl}/ap/multiperiod/mark-posted`,      purpose: 'Mark period lines as Posted after SLA create' },
+            ]}
+            rowKey="endpoint"
+            columns={[
+              { title: 'Method', dataIndex: 'method', width: 70,
+                render: v => <Tag color={v === 'GET' ? 'blue' : 'orange'}>{v}</Tag> },
+              { title: 'Endpoint', dataIndex: 'endpoint', ellipsis: true,
+                render: v => <Text code style={{ fontSize: 11 }}>{v}</Text> },
+              { title: 'Purpose', dataIndex: 'purpose' },
+            ]}
+          />
+
+          {/* Last called URL */}
+          {lastApiUrl && (
+            <Card
+              size="small"
+              title={
+                <Space>
+                  <span style={{ color: lastApiStatus === 'error' ? '#ff4d4f' : '#52c41a' }}>●</span>
+                  <Text strong>Last Search Request</Text>
+                  <Tag color={lastApiStatus === 'error' ? 'red' : 'green'}>
+                    {lastApiStatus === 'error' ? 'Failed' : 'Success'}
+                  </Tag>
+                  {lastApiNote && <Text type="secondary" style={{ fontSize: 12 }}>{lastApiNote}</Text>}
+                </Space>
+              }
+              style={{ border: `1px solid ${lastApiStatus === 'error' ? '#ff4d4f' : '#52c41a'}` }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Text code style={{ fontSize: 11, flex: 1, wordBreak: 'break-all' }}>{lastApiUrl}</Text>
+                <Tooltip title={copiedUrl ? 'Copied!' : 'Copy URL'}>
+                  <Button
+                    size="small"
+                    icon={<CopyOutlined />}
+                    onClick={() => {
+                      navigator.clipboard.writeText(lastApiUrl);
+                      setCopiedUrl(true);
+                      setTimeout(() => setCopiedUrl(false), 2000);
+                    }}
+                  />
+                </Tooltip>
+                <Tooltip title="Open in new tab">
+                  <Button
+                    size="small"
+                    icon={<ApiOutlined />}
+                    onClick={() => window.open(lastApiUrl, '_blank')}
+                  />
+                </Tooltip>
+              </div>
+            </Card>
+          )}
+
+          {!lastApiUrl && (
+            <Alert type="info" showIcon message="Run a search to see the last called API URL here." />
+          )}
         </Modal>
       </Content>
     </Layout>
