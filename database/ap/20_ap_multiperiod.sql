@@ -136,7 +136,6 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_MPA_PKG AS
     v_invoice_number  VARCHAR2(50);
     v_supplier        VARCHAR2(500);
     v_supplier_number VARCHAR2(30);
-    v_supplier_id     NUMBER;
     v_business_unit   VARCHAR2(200);
     v_invoice_date    DATE;
     v_currency        VARCHAR2(15);
@@ -162,11 +161,10 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_MPA_PKG AS
       SELECT INV.INVOICE_NUMBER,
              INV.SUPPLIER,
              INV.SUPPLIER_NUMBER,
-             INV.SUPPLIER_ID,
              INV.BUSINESS_UNIT,
              INV.INVOICE_DATE,
              INV.INVOICE_CURRENCY
-        INTO v_invoice_number, v_supplier, v_supplier_number, v_supplier_id,
+        INTO v_invoice_number, v_supplier, v_supplier_number,
              v_business_unit, v_invoice_date, v_currency
         FROM RR_AP_INVOICES_ALL INV
        WHERE INV.INVOICE_ID = p_invoice_id;
@@ -219,7 +217,6 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_MPA_PKG AS
           BUSINESS_UNIT,
           SUPPLIER,
           SUPPLIER_NUMBER,
-          SUPPLIER_ID,
           INVOICE_DATE,
           PERIOD_DATE,
           PERIOD_NAME,
@@ -242,7 +239,6 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_MPA_PKG AS
           v_business_unit,
           v_supplier,
           v_supplier_number,
-          v_supplier_id,
           v_invoice_date,
           v_cur_month,
           v_period_name,
