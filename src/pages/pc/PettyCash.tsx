@@ -2091,10 +2091,12 @@ const RegisterDetail: React.FC<{
       render: (v) => v ? <Tag color="blue" style={{ fontSize: 11 }}>{v}</Tag> : <Text style={{ fontSize: 12, color: '#ccc' }}>—</Text> },
     { title: 'Type', dataIndex: 'transactionType', width: 130,
       render: (v) => {
-        const color = v === 'Balance Refill'      ? 'blue'
-          : v === 'Balance Return'      ? 'cyan'
-          : v === 'Balance Brought Fwd' ? 'geekblue'
-          : v === 'Expense'             ? 'orange'
+        const color = v === 'Balance Refill'        ? 'blue'
+          : v === 'Balance Refund'       ? 'green'
+          : v === 'Opening Fund Balance' ? 'gold'
+          : v === 'Balance Return'       ? 'cyan'
+          : v === 'Balance Brought Fwd'  ? 'geekblue'
+          : v === 'Expense'              ? 'orange'
           : 'purple';
         return <Tag color={color} style={{ fontSize: 11 }}>{v}</Tag>;
       }},
@@ -3474,7 +3476,7 @@ const RegisterDetail: React.FC<{
             {editTxn && (
               <>
                 Edit Line #{editTxn.lineNumber}
-                <Tag color={editTxn.transactionType === 'Balance Refill' ? 'blue' : editTxn.transactionType === 'Expense' ? 'orange' : 'purple'} style={{ fontSize: 11 }}>
+                <Tag color={editTxn.transactionType === 'Balance Refill' ? 'blue' : editTxn.transactionType === 'Balance Refund' ? 'green' : editTxn.transactionType === 'Opening Fund Balance' ? 'gold' : editTxn.transactionType === 'Expense' ? 'orange' : 'purple'} style={{ fontSize: 11 }}>
                   {editTxn.transactionType}
                 </Tag>
               </>
@@ -3859,7 +3861,7 @@ const RegisterDetail: React.FC<{
               render: (v) => <Text style={{ fontSize: 12 }}>{v}</Text> },
             { title: 'Type', dataIndex: 'transactionType', width: 110,
               render: (v) => {
-                const color = v === 'Balance Refill' ? 'blue' : v === 'Expense' ? 'orange' : 'purple';
+                const color = v === 'Balance Refill' ? 'blue' : v === 'Balance Refund' ? 'green' : v === 'Opening Fund Balance' ? 'gold' : v === 'Expense' ? 'orange' : 'purple';
                 return <Tag color={color} style={{ fontSize: 11 }}>{v}</Tag>;
               }},
             { title: 'Expense Type', dataIndex: 'expenseType', width: 130,
