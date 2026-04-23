@@ -75,6 +75,7 @@ import {
   EditOutlined,
   BugOutlined,
   EyeOutlined,
+  PaperClipOutlined,
 } from '@ant-design/icons';
 
 dayjs.extend(customParseFormat);
@@ -85,6 +86,7 @@ import { fetchLedgerByBusinessUnit, checkAccountingExists, getAccounting } from 
 import { searchCombinations, type DistCombination } from '../../services/distCombinations.service';
 import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
 import { useAuth } from '../../context/AuthContext';
+import InvoiceAttachments from '../../components/InvoiceAttachments';
 
 const { Text, Title } = Typography;
 const { Option } = Select;
@@ -5786,7 +5788,22 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     locale={{ emptyText: 'No prepayments applied to this invoice.' }}
                   />
                 ),
-              }],
+              },
+              {
+                key:   'attachments',
+                label: (
+                  <Space size={4}>
+                    <PaperClipOutlined />
+                    <span>Attachments</span>
+                  </Space>
+                ),
+                children: (
+                  <InvoiceAttachments
+                    invoiceId={savedInvoiceId || initialData?.invoiceId}
+                    readOnly={false}
+                  />
+                ),
+              },
             ]}
           />
         </Card>
