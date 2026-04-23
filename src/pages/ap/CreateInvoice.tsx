@@ -5279,6 +5279,22 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             size="small"
             items={[
               {
+                key:   'attachments',
+                label: (
+                  <Space size={4}>
+                    <PaperClipOutlined />
+                    <span>Attachments</span>
+                  </Space>
+                ),
+                children: (
+                  <InvoiceAttachments
+                    invoiceId={savedInvoiceId || initialData?.invoiceId}
+                    readOnly={false}
+                    onCountChange={setAttachmentCount}
+                  />
+                ),
+              },
+              {
                 key: 'distribution',
                 label: (
                   <Space size={4}>
@@ -5799,22 +5815,6 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   />
                 ),
               }],
-              {
-                key:   'attachments',
-                label: (
-                  <Space size={4}>
-                    <PaperClipOutlined />
-                    <span>Attachments</span>
-                  </Space>
-                ),
-                children: (
-                  <InvoiceAttachments
-                    invoiceId={savedInvoiceId || initialData?.invoiceId}
-                    readOnly={false}
-                    onCountChange={setAttachmentCount}
-                  />
-                ),
-              },
             ]}
           />
         </Card>
