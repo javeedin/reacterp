@@ -3,7 +3,7 @@ import {
   Layout, Card, Typography, Breadcrumb, Tabs, Form, Input, Select,
   DatePicker, Button, Table, Tag, Row, Col, Space, Divider,
   Modal, InputNumber, message, Tooltip, Statistic, Collapse, Progress, Descriptions, Upload,
-  Spin, Alert, Switch, Dropdown, Popover, Badge,
+  Spin, Alert, Switch, Dropdown, Popover, Badge, Segmented,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { Link } from 'react-router-dom';
@@ -645,13 +645,15 @@ const RegisterDetail: React.FC<{
   const [periodsLoaded, setPeriodsLoaded]       = useState(false);
   const [txnActionLoading, setTxnActionLoading] = useState<number | null>(null);
   const [coaOpen, setCoaOpen]     = useState(false);
-  const [coaTarget, setCoaTarget] = useState<'add' | 'edit' | 'money' | 'bankAsset' | 'bankOffset'>('edit');
+  const [coaTarget, setCoaTarget] = useState<'add' | 'edit' | 'money' | 'bankAsset' | 'bankOffset' | 'refundCash'>('edit');
   const [coaInitialValue, setCoaInitialValue] = useState<string>('');
   const [addAcctDesc, setAddAcctDesc]         = useState<string>('');
   const [editAcctDesc, setEditAcctDesc]       = useState<string>('');
   const [moneyAcctDesc, setMoneyAcctDesc]     = useState<string>('');
   const [bankOffsetDesc, setBankOffsetDesc]   = useState<string>('');
   const [bankAssetDesc, setBankAssetDesc]     = useState<string>('');
+  const [fundingSource, setFundingSource]     = useState<'bank' | 'refund'>('bank');
+  const [refundCashDesc, setRefundCashDesc]   = useState<string>('');
   const [linkedBankTxnRef, setLinkedBankTxnRef] = useState<string>('');
   const [bankTxnModalOpen, setBankTxnModalOpen] = useState(false);
   const [bankTxnForm]     = Form.useForm();
@@ -1367,20 +1369,29 @@ const RegisterDetail: React.FC<{
       message.error(`Accounting date ${accDate.format('DD-MMM-YYYY')} does not fall within an open AP period`);
       return;
     }
+    if (fundingSource === 'bank' && !linkedBankTxnRef) {
+      message.error('Create a bank transaction first before saving');
+      return;
+    }
+    if (fundingSource === 'refund' && !values.refundCashAccount) {
+      message.error('Cash Account is required for Balance Refund');
+      return;
+    }
     setSaving(true);
     try {
+      const isRefund = fundingSource === 'refund';
       await createTransaction({
         registerId:         register.registerId,
         transactionDate:    values.transactionDate.format('YYYY-MM-DD'),
         accountingDate:     accDate.format('YYYY-MM-DD'),
-        transactionType:    'Balance Refill',
+        transactionType:    isRefund ? 'Balance Refund' : 'Balance Refill',
         currency:           values.currency || register.currency,
         debitAmount:        values.amount,
         creditAmount:       0,
-        chargeAccountCcid:  values.chargeAccountCcid || null,
-        chargeAccountDesc:  values.chargeAccountDesc || null,
+        chargeAccountCcid:  isRefund ? null : (values.chargeAccountCcid || null),
+        chargeAccountDesc:  isRefund ? values.refundCashAccount : (values.chargeAccountDesc || null),
         referenceNo:        addMoneyVoucherNo || null,
-        bankTxnId:          linkedBankTxnRef ? (Number(linkedBankTxnRef) || null) : null,
+        bankTxnId:          isRefund ? null : (linkedBankTxnRef ? (Number(linkedBankTxnRef) || null) : null),
         comments:           values.comments,
         postingStatus:      'Unposted',
         createdBy:          currentUser,
@@ -1388,9 +1399,11 @@ const RegisterDetail: React.FC<{
       const seqMn = addMoneyVoucherNo.match(/(\d+)$/);
       const nextSeqN = seqMn ? parseInt(seqMn[1], 10) + 1 : 1;
       setAddMoneyVoucherNo(`R${register.registerId}-${String(nextSeqN).padStart(2, '0')}`);
-      message.success('Money added to register');
+      message.success(isRefund ? 'Refund recorded' : 'Money added to register');
       moneyForm.resetFields();
       setMoneyAcctDesc('');
+      setRefundCashDesc('');
+      setFundingSource('bank');
       setLinkedBankTxnRef('');
       setBankTxnPostResponse(null);
       setBankTxnLookupResult(null);
@@ -2691,12 +2704,32 @@ const RegisterDetail: React.FC<{
       <Modal
         title={<Space><DollarOutlined style={{ color: REDWOOD.success }} /> Add Money to Register</Space>}
         open={addMoneyOpen}
-        onCancel={() => { setAddMoneyOpen(false); if (needsRefresh.current) { needsRefresh.current = false; onRefresh(); } }}
+        onCancel={() => {
+          setAddMoneyOpen(false);
+          setFundingSource('bank');
+          setRefundCashDesc('');
+          if (needsRefresh.current) { needsRefresh.current = false; onRefresh(); }
+        }}
         footer={null}
         width={520}
         destroyOnClose
       >
         <Form form={moneyForm} layout="vertical" size="small" onFinish={handleAddMoney}>
+          {/* Funding source selector */}
+          <Segmented
+            block
+            options={[
+              { label: <Space><BankOutlined />From Bank</Space>,   value: 'bank' },
+              { label: <Space><RollbackOutlined />From Refund</Space>, value: 'refund' },
+            ]}
+            value={fundingSource}
+            onChange={v => {
+              setFundingSource(v as 'bank' | 'refund');
+              setMoneyAcctDesc('');
+              setRefundCashDesc('');
+            }}
+            style={{ marginBottom: 14 }}
+          />
           <Row gutter={12}>
             <Col span={8}>
               <Form.Item label="Transaction Date" name="transactionDate"
@@ -2763,72 +2796,99 @@ const RegisterDetail: React.FC<{
             </Col>
           </Row>
 
-          {/* ── Charge Account ── */}
-          <Form.Item name="chargeAccountCcid" hidden><Input /></Form.Item>
-          <Form.Item label="Charge Account">
-            <Space.Compact style={{ width: '100%' }}>
-              <Form.Item name="chargeAccountDesc" noStyle>
-                <Input placeholder="Browse to select account" readOnly />
-              </Form.Item>
-              <Button icon={<BankOutlined />} onClick={() => { setCoaTarget('money'); setCoaOpen(true); }}>
-                Browse
-              </Button>
-            </Space.Compact>
-            {moneyAcctDesc && (
-              <div style={{ marginTop: 4, fontSize: 11, color: '#1677ff', paddingLeft: 2 }}>
-                {moneyAcctDesc}
-              </div>
-            )}
-          </Form.Item>
+          {/* ── From Bank: Charge Account + Bank Transaction ── */}
+          {fundingSource === 'bank' && (<>
+            <Form.Item name="chargeAccountCcid" hidden><Input /></Form.Item>
+            <Form.Item label="Charge Account">
+              <Space.Compact style={{ width: '100%' }}>
+                <Form.Item name="chargeAccountDesc" noStyle>
+                  <Input placeholder="Browse to select account" readOnly />
+                </Form.Item>
+                <Button icon={<BankOutlined />} onClick={() => {
+                  setCoaInitialValue(moneyForm.getFieldValue('chargeAccountDesc') || '');
+                  setCoaTarget('money');
+                  setCoaOpen(true);
+                }}>Browse</Button>
+              </Space.Compact>
+              {moneyAcctDesc && (
+                <div style={{ marginTop: 4, fontSize: 11, color: REDWOOD.info, paddingLeft: 2 }}>{moneyAcctDesc}</div>
+              )}
+            </Form.Item>
 
-          {/* ── Bank Transaction link ── */}
-          <Divider style={{ margin: '8px 0', fontSize: 12 }}>Bank Transaction</Divider>
-          {linkedBankTxnRef ? (
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ padding: '8px 12px', background: '#f6ffed', borderRadius: 6, border: '1px solid #b7eb8f', fontSize: 12, marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Space>
-                  <BankOutlined style={{ color: REDWOOD.success }} />
-                  <span><b>Bank Txn ID:</b> <Text style={{ fontFamily: 'monospace', fontWeight: 700, color: REDWOOD.success, fontSize: 13 }}>{linkedBankTxnRef}</Text></span>
-                  <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>(saved to Bank Txn ID column)</Text>
-                </Space>
-                <Tooltip title="Download bank transaction receipt as PDF">
-                  <Button
-                    size="small"
-                    icon={<FilePdfOutlined />}
-                    onClick={() => {
+            <Divider style={{ margin: '8px 0', fontSize: 12 }}>Bank Transaction</Divider>
+            {linkedBankTxnRef ? (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ padding: '8px 12px', background: '#f6ffed', borderRadius: 6, border: '1px solid #b7eb8f', fontSize: 12, marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Space>
+                    <BankOutlined style={{ color: REDWOOD.success }} />
+                    <span><b>Bank Txn ID:</b> <Text style={{ fontFamily: 'monospace', fontWeight: 700, color: REDWOOD.success, fontSize: 13 }}>{linkedBankTxnRef}</Text></span>
+                    <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>(saved to Bank Txn ID column)</Text>
+                  </Space>
+                  <Tooltip title="Download bank transaction receipt as PDF">
+                    <Button size="small" icon={<FilePdfOutlined />} onClick={() => {
                       const bankData = (bankTxnLookupResult?.items || [])[0];
                       if (bankData) printBankTxnPDF(bankData, register.registerName);
                       else message.warning('Bank transaction data not available for printing');
-                    }}
-                  >
-                    Print Receipt
-                  </Button>
-                </Tooltip>
+                    }}>Print Receipt</Button>
+                  </Tooltip>
+                </div>
+                <Collapse size="small" ghost>
+                  <Collapse.Panel header={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>POST response</Text>} key="post">
+                    <pre style={{ fontSize: 10, maxHeight: 160, overflow: 'auto', background: '#f5f5f5', padding: 8, borderRadius: 4, margin: 0 }}>
+                      {JSON.stringify(bankTxnPostResponse, null, 2)}
+                    </pre>
+                  </Collapse.Panel>
+                  <Collapse.Panel header={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Lookup result (transaction_id source)</Text>} key="lookup">
+                    <pre style={{ fontSize: 10, maxHeight: 160, overflow: 'auto', background: '#f5f5f5', padding: 8, borderRadius: 4, margin: 0 }}>
+                      {JSON.stringify(bankTxnLookupResult, null, 2)}
+                    </pre>
+                  </Collapse.Panel>
+                </Collapse>
               </div>
-              <Collapse size="small" ghost>
-                <Collapse.Panel header={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>POST response</Text>} key="post">
-                  <pre style={{ fontSize: 10, maxHeight: 160, overflow: 'auto', background: '#f5f5f5', padding: 8, borderRadius: 4, margin: 0 }}>
-                    {JSON.stringify(bankTxnPostResponse, null, 2)}
-                  </pre>
-                </Collapse.Panel>
-                <Collapse.Panel header={<Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Lookup result (transaction_id source)</Text>} key="lookup">
-                  <pre style={{ fontSize: 10, maxHeight: 160, overflow: 'auto', background: '#f5f5f5', padding: 8, borderRadius: 4, margin: 0 }}>
-                    {JSON.stringify(bankTxnLookupResult, null, 2)}
-                  </pre>
-                </Collapse.Panel>
-              </Collapse>
-            </div>
-          ) : (
-            <div style={{ marginBottom: 12 }}>
-              <Button
-                icon={<BankOutlined />}
-                onClick={() => setBankTxnModalOpen(true)}
-                style={{ width: '100%', borderStyle: 'dashed' }}
-              >
-                Create Bank Transaction
-              </Button>
-            </div>
-          )}
+            ) : (
+              <div style={{ marginBottom: 12 }}>
+                <Button icon={<BankOutlined />} onClick={() => setBankTxnModalOpen(true)} style={{ width: '100%', borderStyle: 'dashed' }}>
+                  Create Bank Transaction
+                </Button>
+              </div>
+            )}
+          </>)}
+
+          {/* ── From Refund: Cash Account + Offset Account ── */}
+          {fundingSource === 'refund' && (<>
+            <Divider style={{ margin: '8px 0', fontSize: 12 }}>Account Coding</Divider>
+            <Row gutter={12}>
+              <Col span={12}>
+                <Form.Item label="Cash Account" required>
+                  <Space.Compact style={{ width: '100%' }}>
+                    <Form.Item name="refundCashAccount" noStyle>
+                      <Input readOnly placeholder="Browse to select account" style={{ fontFamily: 'monospace', fontSize: 11 }} />
+                    </Form.Item>
+                    <Button icon={<BankOutlined />} onClick={() => {
+                      setCoaInitialValue(moneyForm.getFieldValue('refundCashAccount') || '');
+                      setCoaTarget('refundCash');
+                      setCoaOpen(true);
+                    }}>Browse</Button>
+                  </Space.Compact>
+                  {refundCashDesc && (
+                    <div style={{ marginTop: 4, fontSize: 11, color: REDWOOD.info }}>{refundCashDesc}</div>
+                  )}
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item label="Offset Account (from Register)">
+                  <Input
+                    value={register.cashAccountDesc || '—'}
+                    readOnly
+                    style={{ fontFamily: 'monospace', fontSize: 11, background: '#fafafa', color: '#595959' }}
+                  />
+                  {cashAccountName && (
+                    <div style={{ marginTop: 4, fontSize: 11, color: REDWOOD.neutral600 }}>{cashAccountName}</div>
+                  )}
+                </Form.Item>
+              </Col>
+            </Row>
+          </>)}
 
           <Form.Item label="Voucher No">
             <Input
@@ -2843,12 +2903,12 @@ const RegisterDetail: React.FC<{
             <Input.TextArea rows={2} placeholder="Optional" />
           </Form.Item>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
-            <Button onClick={() => setAddMoneyOpen(false)}>Cancel</Button>
-            <Tooltip title={!linkedBankTxnRef ? 'Create a bank transaction first' : undefined}>
+            <Button onClick={() => { setAddMoneyOpen(false); setFundingSource('bank'); setRefundCashDesc(''); }}>Cancel</Button>
+            <Tooltip title={fundingSource === 'bank' && !linkedBankTxnRef ? 'Create a bank transaction first' : undefined}>
               <Button type="primary" htmlType="submit" loading={saving}
-                disabled={!linkedBankTxnRef}
-                style={{ background: linkedBankTxnRef ? REDWOOD.success : undefined, borderColor: linkedBankTxnRef ? REDWOOD.success : undefined }}>
-                Add Money
+                disabled={fundingSource === 'bank' && !linkedBankTxnRef}
+                style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>
+                {fundingSource === 'refund' ? 'Record Refund' : 'Add Money'}
               </Button>
             </Tooltip>
           </div>
@@ -3889,6 +3949,9 @@ const RegisterDetail: React.FC<{
           } else if (coaTarget === 'bankOffset') {
             bankTxnForm.setFieldsValue({ offsetAccountCombination: accountCode });
             setBankOffsetDesc(seg4Desc);
+          } else if (coaTarget === 'refundCash') {
+            moneyForm.setFieldsValue({ refundCashAccount: accountCode });
+            setRefundCashDesc(seg4Desc);
           }
           setCoaOpen(false);
         }}

@@ -27,7 +27,7 @@ export interface PCTransaction {
   registerId: number;
   lineNumber: number;
   transactionDate: string;
-  transactionType: 'Balance Refill' | 'Expense' | 'Adjustment' | 'Balance Return' | 'Balance Brought Fwd';
+  transactionType: 'Balance Refill' | 'Balance Refund' | 'Expense' | 'Adjustment' | 'Balance Return' | 'Balance Brought Fwd';
   expenseType: string | null;
   chargeAccountCcid: number | null;
   chargeAccountDesc: string | null;
