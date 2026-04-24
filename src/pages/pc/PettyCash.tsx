@@ -1820,8 +1820,8 @@ const RegisterDetail: React.FC<{
     loadViewAcctTxn(txn);
   };
 
-  const openCreateAccountingModal = () => {
-    const selected = transactions.filter(t => selectedRowKeys.includes(t.transactionId));
+  const openCreateAccountingModal = (overrideTxns?: PCTransaction[]) => {
+    const selected = overrideTxns ?? transactions.filter(t => selectedRowKeys.includes(t.transactionId));
     if (selected.length === 0) { message.warning('Select at least one transaction.'); return; }
 
     const noAcct = selected.filter(t => !t.chargeAccountDesc);
@@ -4360,7 +4360,36 @@ const RegisterDetail: React.FC<{
         title={<Space><BankOutlined style={{ color: REDWOOD.info }} /> Bank Transaction {bankTxnDetail?.transactionId ?? ''}</Space>}
         open={bankTxnDetailOpen}
         onCancel={() => setBankTxnDetailOpen(false)}
-        footer={<Button onClick={() => setBankTxnDetailOpen(false)}>Close</Button>}
+        footer={(() => {
+          const pcTxn = bankTxnDetail
+            ? transactions.find(t => t.bankTxnId === bankTxnDetail.transactionId)
+            : undefined;
+          const alreadyPosted = pcTxn?.postingStatus === 'Posted' || bankTxnDetail?.accountingFlag === 'Y';
+          return (
+            <Space>
+              {pcTxn && !alreadyPosted && (
+                <Tooltip title={!pcTxn.chargeAccountDesc ? 'No charge account set on this transaction' : 'Create GL accounting entry for this transaction'}>
+                  <Button
+                    type="primary"
+                    icon={<CheckCircleOutlined />}
+                    disabled={!pcTxn.chargeAccountDesc}
+                    style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+                    onClick={() => {
+                      setBankTxnDetailOpen(false);
+                      openCreateAccountingModal([pcTxn]);
+                    }}
+                  >
+                    Create Accounting
+                  </Button>
+                </Tooltip>
+              )}
+              {alreadyPosted && (
+                <Tag color="green" icon={<CheckCircleOutlined />} style={{ fontSize: 12 }}>Already Accounted</Tag>
+              )}
+              <Button onClick={() => setBankTxnDetailOpen(false)}>Close</Button>
+            </Space>
+          );
+        })()}
         width={620}
         zIndex={1050}
       >
