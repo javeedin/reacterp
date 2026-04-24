@@ -637,6 +637,9 @@ const RegisterDetail: React.FC<{
   const [addSuspenseOpen, setAddSuspenseOpen]           = useState(false);
   const [convertSuspenseOpen, setConvertSuspenseOpen]   = useState(false);
   const [convertSuspenseRec,  setConvertSuspenseRec]    = useState<PCTransaction | null>(null);
+  const [convertApiPayload,   setConvertApiPayload]     = useState<any>(null);
+  const [convertApiResponse,  setConvertApiResponse]    = useState<any>(null);
+  const [convertApiError,     setConvertApiError]       = useState<string>('');
   const [transferSuspenseOpen, setTransferSuspenseOpen] = useState(false);
   const [transferSuspenseRec,  setTransferSuspenseRec]  = useState<PCTransaction | null>(null);
   const [transferRegisters,    setTransferRegisters]    = useState<PCRegister[]>([]);
@@ -1639,9 +1642,13 @@ const RegisterDetail: React.FC<{
   const handleConvertSuspense = async (values: any) => {
     if (!convertSuspenseRec) return;
     setSaving(true);
+    setConvertApiError('');
+    setConvertApiResponse(null);
     try {
       const convertAmt = Number(values.convertAmount);
       const remaining  = Math.max(0, (convertSuspenseRec.suspenseAmount || 0) - convertAmt);
+
+      // 1. Reduce suspense amount on original entry
       await updateTransaction(convertSuspenseRec.transactionId, {
         suspenseAmount: remaining,
         comments: values.reason
@@ -1649,11 +1656,15 @@ const RegisterDetail: React.FC<{
           : convertSuspenseRec.comments ?? undefined,
         updatedBy: currentUser,
       });
-      await createTransaction({
+
+      // 2. Create new expense — dates must be YYYY-MM-DD for parse_date
+      const txnDate = toIsoDate(convertSuspenseRec.transactionDate);
+      const accDate = toIsoDate(convertSuspenseRec.accountingDate);
+      const payload = {
         registerId:        register.registerId,
-        transactionDate:   convertSuspenseRec.transactionDate,
-        accountingDate:    convertSuspenseRec.accountingDate || undefined,
-        transactionType:   'Expense',
+        transactionDate:   txnDate,
+        accountingDate:    accDate || txnDate,
+        transactionType:   'Expense' as const,
         expenseType:       values.expenseType || 'CONVERTED SUSPENSE',
         chargeAccountDesc: values.chargeAccountDesc || null,
         chargeAccountCcid: values.chargeAccountCcid || null,
@@ -1663,15 +1674,19 @@ const RegisterDetail: React.FC<{
         suspenseAmount:    0,
         comments:          values.expenseComments || `Converted from suspense #${convertSuspenseRec.transactionId}`,
         referenceNo:       convertSuspenseRec.referenceNo || null,
-        postingStatus:     'Unposted',
+        postingStatus:     'Unposted' as const,
         createdBy:         currentUser,
-      });
+      };
+      setConvertApiPayload(payload);
+      const result = await createTransaction(payload);
+      setConvertApiResponse(result);
       message.success(`Converted ${fmt(convertAmt)} to expense${remaining > 0 ? ` — ${fmt(remaining)} remains in suspense` : ''}`);
       convertSuspenseForm.resetFields();
       setConvertSuspenseOpen(false);
       setConvertSuspenseRec(null);
       onRefresh();
     } catch (e: any) {
+      setConvertApiError(e?.message ?? 'Failed to convert suspense');
       message.error(e?.message ?? 'Failed to convert suspense');
     } finally {
       setSaving(false);
@@ -3833,6 +3848,42 @@ const RegisterDetail: React.FC<{
                 ) : null;
               }}
             </Form.Item>
+            {/* API Inspector */}
+            <Collapse size="small" style={{ marginBottom: 8 }}>
+              <Collapse.Panel
+                header={
+                  <Space size={4}>
+                    <ApiOutlined style={{ color: REDWOOD.info }} />
+                    <Text style={{ fontSize: 11 }}>API Inspector</Text>
+                    {convertApiError && <Tag color="error" style={{ fontSize: 10 }}>Error</Tag>}
+                    {convertApiResponse && <Tag color="success" style={{ fontSize: 10 }}>Success</Tag>}
+                  </Space>
+                }
+                key="api"
+              >
+                <Collapse size="small" ghost defaultActiveKey={['payload']}>
+                  <Collapse.Panel header={<Text style={{ fontSize: 11 }}>POST /pc/transactions — Request Payload</Text>} key="payload">
+                    <pre style={{ fontSize: 10, maxHeight: 200, overflow: 'auto', background: '#f0f5ff', padding: 8, borderRadius: 4, margin: 0, border: '1px solid #adc6ff' }}>
+                      {convertApiPayload ? JSON.stringify(convertApiPayload, null, 2) : '— submit form to see payload —'}
+                    </pre>
+                  </Collapse.Panel>
+                  {convertApiResponse && (
+                    <Collapse.Panel header={<Text style={{ fontSize: 11 }}>Response</Text>} key="response">
+                      <pre style={{ fontSize: 10, maxHeight: 120, overflow: 'auto', background: '#f6ffed', padding: 8, borderRadius: 4, margin: 0, border: '1px solid #b7eb8f' }}>
+                        {JSON.stringify(convertApiResponse, null, 2)}
+                      </pre>
+                    </Collapse.Panel>
+                  )}
+                  {convertApiError && (
+                    <Collapse.Panel header={<Text style={{ fontSize: 11, color: REDWOOD.error }}>Error</Text>} key="rawerr">
+                      <pre style={{ fontSize: 10, maxHeight: 120, overflow: 'auto', background: '#fff2f0', padding: 8, borderRadius: 4, margin: 0, border: '1px solid #ffccc7', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                        {convertApiError}
+                      </pre>
+                    </Collapse.Panel>
+                  )}
+                </Collapse>
+              </Collapse.Panel>
+            </Collapse>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <Button onClick={() => { setConvertSuspenseOpen(false); convertSuspenseForm.resetFields(); }}>Cancel</Button>
               <Button type="primary" htmlType="submit" loading={saving}
