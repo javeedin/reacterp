@@ -645,6 +645,9 @@ const RegisterDetail: React.FC<{
   const [convertApiPayload,   setConvertApiPayload]     = useState<any>(null);
   const [convertApiResponse,  setConvertApiResponse]    = useState<any>(null);
   const [convertApiError,     setConvertApiError]       = useState<string>('');
+  const [suspenseRefundOpen,  setSuspenseRefundOpen]    = useState(false);
+  const [suspenseRefundRec,   setSuspenseRefundRec]     = useState<PCTransaction | null>(null);
+  const [suspenseRefundForm]                            = Form.useForm();
   const [editTxnOpen, setEditTxnOpen]                   = useState(false);
   const [editTxn, setEditTxn]                           = useState<PCTransaction | null>(null);
   const [saving, setSaving]                             = useState(false);
@@ -1728,6 +1731,51 @@ const RegisterDetail: React.FC<{
     }
   };
 
+  // ── Suspense Refund ────────────────────────────────────────
+  const handleSuspenseRefund = async (values: any) => {
+    if (!suspenseRefundRec) return;
+    const refundAmt: number = values.amount;
+    if (!refundAmt || refundAmt <= 0) { message.error('Amount is required'); return; }
+    setSaving(true);
+    try {
+      const remaining = Math.max(0, (suspenseRefundRec.suspenseAmount || 0) - refundAmt);
+      await updateTransaction(suspenseRefundRec.transactionId, {
+        suspenseAmount: remaining,
+        updatedBy: currentUser,
+      });
+      const txnDate = toIsoDate(suspenseRefundRec.transactionDate);
+      await createTransaction({
+        registerId:        register.registerId,
+        transactionDate:   values.transactionDate.format('YYYY-MM-DD'),
+        accountingDate:    values.transactionDate.format('YYYY-MM-DD'),
+        transactionType:   'Expense' as const,
+        expenseType:       'REFUND',
+        currency:          suspenseRefundRec.currency,
+        debitAmount:       refundAmt,
+        creditAmount:      0,
+        suspenseAmount:    0,
+        chargeAccountCcid: null,
+        chargeAccountDesc: null,
+        referenceNo:       suspenseRefundRec.referenceNo || null,
+        employeeName:      suspenseRefundRec.employeeName || null,
+        comments:          values.comments
+          ? `${fmt(refundAmt)} ${suspenseRefundRec.currency} — ${values.comments}`
+          : `${fmt(refundAmt)} ${suspenseRefundRec.currency} — Suspense refund`,
+        postingStatus:     'Unposted' as const,
+        createdBy:         currentUser,
+      });
+      message.success(`Refund of ${fmt(refundAmt)} recorded${remaining > 0 ? ` — ${fmt(remaining)} remains in suspense` : ''}`);
+      suspenseRefundForm.resetFields();
+      setSuspenseRefundOpen(false);
+      setSuspenseRefundRec(null);
+      onRefresh();
+    } catch (e: any) {
+      message.error(e?.message ?? 'Failed to record refund');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // ── Add Multiple Expenses ──────────────────────────────────
   const handleAddMultiExpense = async () => {
     const vals = expenseForm.getFieldsValue(['transactionDate', 'accountingDate', 'currency', 'referenceDescription']);
@@ -2483,6 +2531,21 @@ const RegisterDetail: React.FC<{
                     firstCvLine.paidTo = txn.employeeName || '';
                     setConvertLines([firstCvLine]);
                     setConvertSuspenseOpen(true);
+                  }}
+                />
+              </Tooltip>
+            )}
+            {txn.expenseType === 'SUSPENSE' && (txn.suspenseAmount || 0) > 0 && !isClosed && (
+              <Tooltip title={`Refund suspense (${fmt(txn.suspenseAmount)})`}>
+                <Button type="text" size="small"
+                  icon={<RollbackOutlined style={{ color: REDWOOD.success }} />}
+                  onClick={() => {
+                    setSuspenseRefundRec(txn);
+                    suspenseRefundForm.setFieldsValue({
+                      transactionDate: dayjs(),
+                      amount: txn.suspenseAmount,
+                    });
+                    setSuspenseRefundOpen(true);
                   }}
                 />
               </Tooltip>
@@ -4040,6 +4103,73 @@ const RegisterDetail: React.FC<{
               <Button type="primary" htmlType="submit" loading={saving}
                 style={{ background: '#722ed1', borderColor: '#722ed1' }}>
                 Convert to Expense
+              </Button>
+            </div>
+          </Form>
+        )}
+      </Modal>
+
+      {/* ── Suspense Refund Modal ──────────────────────────── */}
+      <Modal
+        title={<Space><RollbackOutlined style={{ color: REDWOOD.success }} />Suspense Refund</Space>}
+        open={suspenseRefundOpen}
+        onCancel={() => { setSuspenseRefundOpen(false); setSuspenseRefundRec(null); suspenseRefundForm.resetFields(); }}
+        footer={null}
+        width={460}
+        destroyOnClose
+      >
+        {suspenseRefundRec && (
+          <Form form={suspenseRefundForm} layout="vertical" size="small" onFinish={handleSuspenseRefund}>
+            {/* Info row */}
+            <div style={{ background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 6, padding: '8px 12px', marginBottom: 16, display: 'flex', gap: 24 }}>
+              <div>
+                <div style={{ fontSize: 11, color: '#595959' }}>Suspense Balance</div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: '#722ed1' }}>
+                  {fmt(suspenseRefundRec.suspenseAmount)} <span style={{ fontSize: 13, fontWeight: 400 }}>{suspenseRefundRec.currency}</span>
+                </div>
+              </div>
+              {suspenseRefundRec.employeeName && (
+                <div>
+                  <div style={{ fontSize: 11, color: '#595959' }}>Paid To</div>
+                  <div style={{ fontSize: 13 }}>{suspenseRefundRec.employeeName}</div>
+                </div>
+              )}
+              {suspenseRefundRec.referenceNo && (
+                <div>
+                  <div style={{ fontSize: 11, color: '#595959' }}>Reference</div>
+                  <div style={{ fontSize: 13, fontFamily: 'monospace' }}>{suspenseRefundRec.referenceNo}</div>
+                </div>
+              )}
+            </div>
+
+            <Row gutter={12}>
+              <Col span={12}>
+                <Form.Item label="Refund Date" name="transactionDate" rules={[{ required: true, message: 'Required' }]}>
+                  <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item label="Refund Amount" name="amount" rules={[{ required: true, message: 'Required' }]}>
+                  <InputNumber
+                    style={{ width: '100%' }}
+                    min={0.01}
+                    max={suspenseRefundRec.suspenseAmount || undefined}
+                    precision={2}
+                    placeholder="0.00"
+                    addonAfter={suspenseRefundRec.currency}
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+
+            <Form.Item label="Comments" name="comments">
+              <Input.TextArea rows={2} placeholder="Optional notes about this refund" />
+            </Form.Item>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+              <Button onClick={() => { setSuspenseRefundOpen(false); setSuspenseRefundRec(null); suspenseRefundForm.resetFields(); }}>Cancel</Button>
+              <Button type="primary" htmlType="submit" loading={saving} style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>
+                Record Refund
               </Button>
             </div>
           </Form>
