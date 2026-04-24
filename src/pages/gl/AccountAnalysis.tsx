@@ -2492,16 +2492,28 @@ const AccountAnalysis: React.FC = () => {
               pagination={{ pageSize: 20, size: 'small', showTotal: (t) => `${t} lines` }}
               scroll={{ x: 900 }}
               columns={[
-                { title: '#', dataIndex: 'lineNum', key: 'lineNum', width: 50 },
+                { title: '#', dataIndex: 'lineNum', key: 'lineNum', width: 44 },
                 {
                   title: 'Account',
                   dataIndex: 'account',
                   key: 'account',
-                  width: 220,
+                  width: 230,
                   render: (v: string) => <Text code style={{ fontSize: 11 }}>{v || '-'}</Text>,
                 },
                 {
-                  title: 'Description',
+                  title: 'Account Desc',
+                  dataIndex: 'accountDescription',
+                  key: 'accountDescription',
+                  width: 150,
+                  ellipsis: true,
+                  render: (v: string) => (
+                    <Tooltip title={v}>
+                      <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{v || '-'}</span>
+                    </Tooltip>
+                  ),
+                },
+                {
+                  title: 'Line Description',
                   dataIndex: 'description',
                   key: 'description',
                   ellipsis: true,
@@ -2517,7 +2529,7 @@ const AccountAnalysis: React.FC = () => {
                   key: 'enteredDr',
                   width: 120,
                   align: 'right' as const,
-                  render: (v: number) => v > 0
+                  render: (v: number) => (v && v !== 0)
                     ? <span style={{ color: REDWOOD.success, fontSize: 11 }}>{formatNumber(v)}</span>
                     : <span style={{ color: REDWOOD.neutral300, fontSize: 11 }}>—</span>,
                 },
@@ -2527,7 +2539,7 @@ const AccountAnalysis: React.FC = () => {
                   key: 'enteredCr',
                   width: 120,
                   align: 'right' as const,
-                  render: (v: number) => v > 0
+                  render: (v: number) => (v && v !== 0)
                     ? <span style={{ color: REDWOOD.primary, fontSize: 11 }}>{formatNumber(v)}</span>
                     : <span style={{ color: REDWOOD.neutral300, fontSize: 11 }}>—</span>,
                 },
@@ -2537,7 +2549,7 @@ const AccountAnalysis: React.FC = () => {
                   key: 'accountedDr',
                   width: 120,
                   align: 'right' as const,
-                  render: (v: number) => v > 0
+                  render: (v: number) => (v && v !== 0)
                     ? <span style={{ color: REDWOOD.success, fontSize: 11 }}>{formatNumber(v)}</span>
                     : <span style={{ color: REDWOOD.neutral300, fontSize: 11 }}>—</span>,
                 },
@@ -2547,15 +2559,15 @@ const AccountAnalysis: React.FC = () => {
                   key: 'accountedCr',
                   width: 120,
                   align: 'right' as const,
-                  render: (v: number) => v > 0
+                  render: (v: number) => (v && v !== 0)
                     ? <span style={{ color: REDWOOD.primary, fontSize: 11 }}>{formatNumber(v)}</span>
                     : <span style={{ color: REDWOOD.neutral300, fontSize: 11 }}>—</span>,
                 },
                 {
-                  title: 'Currency',
+                  title: 'Ccy',
                   dataIndex: 'currency',
                   key: 'currency',
-                  width: 70,
+                  width: 60,
                   render: (v: string) => <Tag style={{ fontSize: 10 }}>{v}</Tag>,
                 },
               ]}
@@ -2565,16 +2577,16 @@ const AccountAnalysis: React.FC = () => {
                 return (
                   <Table.Summary fixed>
                     <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
-                      <Table.Summary.Cell index={0} colSpan={3}>
+                      <Table.Summary.Cell index={0} colSpan={4}>
                         <Text strong style={{ fontSize: 11 }}>Total</Text>
                       </Table.Summary.Cell>
-                      <Table.Summary.Cell index={3} align="right">
+                      <Table.Summary.Cell index={4} align="right">
                         <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>{formatNumber(totDr)}</Text>
                       </Table.Summary.Cell>
-                      <Table.Summary.Cell index={4} align="right">
+                      <Table.Summary.Cell index={5} align="right">
                         <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>{formatNumber(totCr)}</Text>
                       </Table.Summary.Cell>
-                      <Table.Summary.Cell index={5} colSpan={3} />
+                      <Table.Summary.Cell index={6} colSpan={3} />
                     </Table.Summary.Row>
                   </Table.Summary>
                 );
