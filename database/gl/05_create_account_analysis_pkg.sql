@@ -89,7 +89,8 @@ CREATE OR REPLACE PACKAGE BODY REERP_ACCOUNT_ANALYSIS_PKG AS
           AND (p_analysis IS NULL OR jls.ANALYSIS = p_analysis)
           AND (p_intercompany IS NULL OR jls.INTERCOMPANY = p_intercompany)
           AND (p_je_source IS NULL OR jls.USER_JE_SOURCE_NAME = p_je_source)
-          AND (p_je_category IS NULL OR jls.USER_JE_CATEGORY_NAME = p_je_category);
+          AND (p_je_category IS NULL OR jls.USER_JE_CATEGORY_NAME = p_je_category)
+          AND jls.APPROVAL_STATUS_MEANING = 'Posted';
 
         -- Build JSON response
         APEX_JSON.OPEN_OBJECT;
@@ -105,6 +106,7 @@ CREATE OR REPLACE PACKAGE BODY REERP_ACCOUNT_ANALYSIS_PKG AS
                 BATCH_ID,
                 JE_HEADER_ID,
                 JE_LINE_NUMBER,
+                DESCRIPTION,
                 CURRENCY_CODE,
                 COMPANY,
                 LOB,
@@ -145,6 +147,7 @@ CREATE OR REPLACE PACKAGE BODY REERP_ACCOUNT_ANALYSIS_PKG AS
               AND (p_intercompany IS NULL OR jls.INTERCOMPANY = p_intercompany)
               AND (p_je_source IS NULL OR jls.USER_JE_SOURCE_NAME = p_je_source)
               AND (p_je_category IS NULL OR jls.USER_JE_CATEGORY_NAME = p_je_category)
+              AND jls.APPROVAL_STATUS_MEANING = 'Posted'
             ORDER BY jls.DEFAULT_PERIOD_NAME, jls.BATCH_NAME, jls.JE_LINE_NUMBER
             OFFSET v_offset ROWS FETCH NEXT p_page_size ROWS ONLY
         ) LOOP
@@ -152,6 +155,7 @@ CREATE OR REPLACE PACKAGE BODY REERP_ACCOUNT_ANALYSIS_PKG AS
             APEX_JSON.WRITE('batchId', rec.BATCH_ID);
             APEX_JSON.WRITE('jeHeaderId', rec.JE_HEADER_ID);
             APEX_JSON.WRITE('jeLineNumber', rec.JE_LINE_NUMBER);
+            APEX_JSON.WRITE('description', rec.DESCRIPTION);
             APEX_JSON.WRITE('currencyCode', rec.CURRENCY_CODE);
             APEX_JSON.WRITE('company', rec.COMPANY);
             APEX_JSON.WRITE('lob', rec.LOB);

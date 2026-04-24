@@ -97,6 +97,7 @@ interface JournalLineSegment {
   ledgerName: string;
   legalEntityName: string;
   userJeCategoryName: string;
+  jeLineDescription?: string;
   concatenatedSegments?: string;
   accountDescription?: string;
 }
@@ -218,6 +219,7 @@ const AccountAnalysis: React.FC = () => {
   const [accountsList, setAccountsList] = useState<AccountItem[]>([]);
   const [accountsLoading, setAccountsLoading] = useState(false);
   const [accountSearchText, setAccountSearchText] = useState('');
+  const [accountFilterDesc, setAccountFilterDesc] = useState<string>('');
 
   // Pivot view options
   const [showDrCrColumns, setShowDrCrColumns] = useState(false);
@@ -384,8 +386,9 @@ const AccountAnalysis: React.FC = () => {
   };
 
   // Select account from lookup
-  const handleAccountSelect = (account: string) => {
+  const handleAccountSelect = (account: string, description?: string) => {
     setAccountFilter(account);
+    setAccountFilterDesc(description || '');
     setAccountLookupVisible(false);
   };
 
@@ -449,6 +452,7 @@ const AccountAnalysis: React.FC = () => {
         key: `${index}`,
         concatenatedSegments: `${item.company}-${item.lob}-${item.department}-${item.account}-${item.subAccount}-${item.analysis}-${item.intercompany}`,
         accountDescription: item.ACCOUNT_DESCRIPTION || item.account_description || item.accountDescription || '',
+        jeLineDescription: item.description || item.DESCRIPTION || '',
       }));
 
       setSearchData(items);
@@ -539,6 +543,7 @@ const AccountAnalysis: React.FC = () => {
           userJeCategoryName: item.user_je_category_name,
           concatenatedSegments: item.account_combination || `${item.company}-${item.lob}-${item.department}-${item.account}-${item.sub_account}-${item.analysis}-${item.intercompany}`,
           accountDescription: item.account_description || '',
+          jeLineDescription: item.description || item.DESCRIPTION || '',
         }));
 
         allItems.push(...items);
@@ -846,6 +851,18 @@ const AccountAnalysis: React.FC = () => {
       dataIndex: 'accountDescription',
       key: 'accountDescription',
       width: 180,
+      ellipsis: true,
+      render: (text: string) => (
+        <Tooltip title={text}>
+          <span style={{ fontSize: 11 }}>{text || '-'}</span>
+        </Tooltip>
+      ),
+    },
+    {
+      title: 'Line Description',
+      dataIndex: 'jeLineDescription',
+      key: 'jeLineDescription',
+      width: 200,
       ellipsis: true,
       render: (text: string) => (
         <Tooltip title={text}>
@@ -1318,13 +1335,21 @@ const AccountAnalysis: React.FC = () => {
               <Input.Search
                 allowClear
                 value={accountFilter}
-                onChange={(e) => setAccountFilter(e.target.value)}
+                onChange={(e) => {
+                  setAccountFilter(e.target.value);
+                  if (!e.target.value) setAccountFilterDesc('');
+                }}
                 style={{ width: '100%' }}
                 size="small"
                 placeholder="e.g. 1116100"
                 enterButton={<SearchOutlined />}
                 onSearch={openAccountLookup}
               />
+              {accountFilterDesc && (
+                <Text style={{ fontSize: 11, color: REDWOOD.info, display: 'block', marginTop: 2 }}>
+                  {accountFilterDesc}
+                </Text>
+              )}
             </Col>
             <Col xs={24} sm={12} md={7}>
               <Text style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>&nbsp;</Text>
@@ -2419,7 +2444,7 @@ const AccountAnalysis: React.FC = () => {
             pagination={{ pageSize: 10, size: 'small', showTotal: (total) => `${total} accounts` }}
             rowKey="account"
             onRow={(record) => ({
-              onClick: () => handleAccountSelect(record.account),
+              onClick: () => handleAccountSelect(record.account, record.description),
               style: { cursor: 'pointer' },
             })}
             columns={[
