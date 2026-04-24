@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import dayjs, { Dayjs } from 'dayjs';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import {
@@ -22,6 +23,7 @@ import {
   message,
   Modal,
   Checkbox,
+  DatePicker,
 } from 'antd';
 import {
   HomeOutlined,
@@ -216,6 +218,8 @@ const AccountAnalysis: React.FC = () => {
   const [selectedLedger, setSelectedLedger] = useState<string>('BUIMERC LEDGER');
   const [selectedCompany, setSelectedCompany] = useState<string>('01');
   const [selectedPeriods, setSelectedPeriods] = useState<string[]>([]);
+  const [fromDate, setFromDate] = useState<Dayjs | null>(null);
+  const [toDate, setToDate] = useState<Dayjs | null>(null);
   const [accountFilter, setAccountFilter] = useState<string>('');
 
   // Account lookup modal state
@@ -414,9 +418,9 @@ const AccountAnalysis: React.FC = () => {
 
   // Group searchData by jeHeaderId for the drill popup — filtered to the clicked account
   const journalGroups = useMemo(() => {
-    // Only show journals containing lines for the specific account that was drilled into
+    // Only show the specific journal header that was drilled into
     const baseLines = journalDrillRecord
-      ? searchData.filter(l => l.account === journalDrillRecord.account && l.company === journalDrillRecord.company)
+      ? searchData.filter(l => l.jeHeaderId === journalDrillRecord.jeHeaderId)
       : searchData;
 
     const map = new Map<number, {
@@ -511,8 +515,8 @@ const AccountAnalysis: React.FC = () => {
 
   // Search function - calls real API
   const handleSearch = async () => {
-    if (selectedPeriods.length === 0) {
-      message.warning('Please select at least one period');
+    if (selectedPeriods.length === 0 && !fromDate && !toDate) {
+      message.warning('Please select at least one period or specify accounting date range');
       return;
     }
 
@@ -521,7 +525,9 @@ const AccountAnalysis: React.FC = () => {
       // Build query parameters
       const params = new URLSearchParams();
       params.append('ledger_name', selectedLedger);
-      params.append('period_names', selectedPeriods.join(','));
+      if (selectedPeriods.length > 0) params.append('period_names', selectedPeriods.join(','));
+      if (fromDate) params.append('from_date', fromDate.format('YYYY-MM-DD'));
+      if (toDate)   params.append('to_date',   toDate.format('YYYY-MM-DD'));
       params.append('company', selectedCompany);
 
       // Add account filter if provided
@@ -571,7 +577,9 @@ const AccountAnalysis: React.FC = () => {
   const showSearchApiUrl = () => {
     const params = new URLSearchParams();
     params.append('ledger_name', selectedLedger);
-    params.append('period_names', selectedPeriods.join(','));
+    if (selectedPeriods.length > 0) params.append('period_names', selectedPeriods.join(','));
+    if (fromDate) params.append('from_date', fromDate.format('YYYY-MM-DD'));
+    if (toDate)   params.append('to_date',   toDate.format('YYYY-MM-DD'));
     params.append('company', selectedCompany);
     if (accountFilter) {
       params.append('account', accountFilter);
@@ -662,6 +670,8 @@ const AccountAnalysis: React.FC = () => {
     setSelectedLedger('BUIMERC LEDGER');
     setSelectedCompany('01');
     setSelectedPeriods([]);
+    setFromDate(null);
+    setToDate(null);
     setAccountFilter('');
     setSearchData([]);
     setTotalCount(0);
@@ -1591,6 +1601,31 @@ const AccountAnalysis: React.FC = () => {
                 ))}
               </Select>
             </Col>
+            <Col xs={24} sm={12} md={3}>
+              <Text style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Acctg Date From</Text>
+              <DatePicker
+                value={fromDate}
+                onChange={setFromDate}
+                style={{ width: '100%' }}
+                size="small"
+                format="DD-MMM-YYYY"
+                placeholder="From date"
+                allowClear
+              />
+            </Col>
+            <Col xs={24} sm={12} md={3}>
+              <Text style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Acctg Date To</Text>
+              <DatePicker
+                value={toDate}
+                onChange={setToDate}
+                style={{ width: '100%' }}
+                size="small"
+                format="DD-MMM-YYYY"
+                placeholder="To date"
+                allowClear
+                disabledDate={(d) => !!fromDate && d.isBefore(fromDate, 'day')}
+              />
+            </Col>
             <Col xs={24} sm={12} md={4}>
               <Text style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Account</Text>
               <Input.Search
@@ -1691,29 +1726,30 @@ const AccountAnalysis: React.FC = () => {
                 searchData.length > 0 ? (
                   <Table.Summary fixed>
                     <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
-                      <Table.Summary.Cell index={0} colSpan={6}>
+                      <Table.Summary.Cell index={0} colSpan={8}>
                         <Text strong style={{ fontSize: 11 }}>Total</Text>
                       </Table.Summary.Cell>
-                      <Table.Summary.Cell index={6} align="right">
+                      <Table.Summary.Cell index={8} align="right">
                         <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>
                           {formatNumber(totals.enteredDr)}
                         </Text>
                       </Table.Summary.Cell>
-                      <Table.Summary.Cell index={7} align="right">
+                      <Table.Summary.Cell index={9} align="right">
                         <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>
                           {formatNumber(totals.enteredCr)}
                         </Text>
                       </Table.Summary.Cell>
-                      <Table.Summary.Cell index={8} align="right">
+                      <Table.Summary.Cell index={10} align="right">
                         <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>
                           {formatNumber(totals.accountedDr)}
                         </Text>
                       </Table.Summary.Cell>
-                      <Table.Summary.Cell index={9} align="right">
+                      <Table.Summary.Cell index={11} align="right">
                         <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>
                           {formatNumber(totals.accountedCr)}
                         </Text>
                       </Table.Summary.Cell>
+                      <Table.Summary.Cell index={12} />
                     </Table.Summary.Row>
                   </Table.Summary>
                 ) : null
