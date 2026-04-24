@@ -649,6 +649,7 @@ const RegisterDetail: React.FC<{
   const [suspenseRefundRec,      setSuspenseRefundRec]     = useState<PCTransaction | null>(null);
   const [suspenseRefundForm]                               = Form.useForm();
   const [suspenseRefundAcctDesc, setSuspenseRefundAcctDesc] = useState<string>('');
+  const [suspenseListOpen,       setSuspenseListOpen]      = useState(false);
   const [editTxnOpen, setEditTxnOpen]                   = useState(false);
   const [editTxn, setEditTxn]                           = useState<PCTransaction | null>(null);
   const [saving, setSaving]                             = useState(false);
@@ -2596,18 +2597,26 @@ const RegisterDetail: React.FC<{
           sub?: React.ReactNode,
           bg?: string,
           icon?: React.ReactNode,
+          onClick?: () => void,
         ) => (
-          <div style={{
-            background: bg || '#fff',
-            borderRadius: 8,
-            border: `1px solid ${REDWOOD.neutral200}`,
-            borderTop: `3px solid ${accent}`,
-            padding: '7px 12px 6px',
-            position: 'relative',
-            overflow: 'hidden',
-            height: '100%',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-          }}>
+          <div
+            onClick={onClick}
+            style={{
+              background: bg || '#fff',
+              borderRadius: 8,
+              border: `1px solid ${REDWOOD.neutral200}`,
+              borderTop: `3px solid ${accent}`,
+              padding: '7px 12px 6px',
+              position: 'relative',
+              overflow: 'hidden',
+              height: '100%',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+              cursor: onClick ? 'pointer' : undefined,
+              transition: onClick ? 'box-shadow 0.15s' : undefined,
+            }}
+            onMouseEnter={onClick ? (e) => { (e.currentTarget as HTMLDivElement).style.boxShadow = '0 4px 12px rgba(114,46,209,0.18)'; } : undefined}
+            onMouseLeave={onClick ? (e) => { (e.currentTarget as HTMLDivElement).style.boxShadow = '0 1px 3px rgba(0,0,0,0.04)'; } : undefined}
+          >
             {icon && (
               <div style={{ position: 'absolute', top: 6, right: 8, fontSize: 22, color: accent, opacity: 0.10, lineHeight: 1 }}>
                 {icon}
@@ -2679,6 +2688,7 @@ const RegisterDetail: React.FC<{
                 ),
                 totalSuspense > 0 ? '#f9f0ff' : undefined,
                 <QuestionCircleOutlined />,
+                totalSuspense > 0 ? () => setSuspenseListOpen(true) : undefined,
               )}
             </Col>
 
@@ -4205,6 +4215,88 @@ const RegisterDetail: React.FC<{
           </Form>
         )}
       </Modal>
+
+      {/* ── Suspense List Modal ───────────────────────────────── */}
+      {(() => {
+        const suspenseTxns = transactions.filter(t => t.expenseType === 'SUSPENSE' && (t.suspenseAmount || 0) > 0);
+        const total = suspenseTxns.reduce((s, t) => s + (t.suspenseAmount || 0), 0);
+        return (
+          <Modal
+            title={<Space><QuestionCircleOutlined style={{ color: '#722ed1' }} />Pending Suspense Transactions</Space>}
+            open={suspenseListOpen}
+            onCancel={() => setSuspenseListOpen(false)}
+            footer={null}
+            width={900}
+            destroyOnClose
+          >
+            <Table<PCTransaction>
+              size="small"
+              pagination={false}
+              rowKey="transactionId"
+              dataSource={suspenseTxns}
+              scroll={{ x: 860 }}
+              columns={[
+                { title: 'Date', dataIndex: 'transactionDate', width: 100,
+                  render: (v) => <Text style={{ fontSize: 12 }}>{v}</Text> },
+                { title: 'Reference', dataIndex: 'referenceNo', width: 120,
+                  render: (v) => v ? <Text style={{ fontSize: 12, fontFamily: 'monospace', color: '#722ed1' }}>{v}</Text> : '—' },
+                { title: 'Paid To', dataIndex: 'employeeName', width: 140, ellipsis: true,
+                  render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+                { title: 'Suspense Amt', dataIndex: 'suspenseAmount', width: 110, align: 'right' as const,
+                  render: (v) => <Text style={{ fontSize: 12, fontWeight: 600, color: '#722ed1' }}>{fmt(v)}</Text> },
+                { title: 'Comments', dataIndex: 'comments', ellipsis: true,
+                  render: (v) => <Text style={{ fontSize: 11 }}>{v || '—'}</Text> },
+                ...(!isClosed ? [{
+                  title: '',
+                  key: 'actions',
+                  width: 90,
+                  align: 'center' as const,
+                  render: (_: any, row: PCTransaction) => (
+                    <Space size={4}>
+                      <Tooltip title={`Convert to expense (${fmt(row.suspenseAmount)})`}>
+                        <Button type="text" size="small"
+                          icon={<SwapOutlined style={{ color: '#722ed1' }} />}
+                          onClick={() => {
+                            setSuspenseListOpen(false);
+                            setConvertSuspenseRec(row);
+                            convertSuspenseForm.resetFields();
+                            const firstLine = makeNewLine();
+                            firstLine.paidTo = row.employeeName || '';
+                            setConvertLines([firstLine]);
+                            setConvertSuspenseOpen(true);
+                          }}
+                        />
+                      </Tooltip>
+                      <Tooltip title={`Refund (${fmt(row.suspenseAmount)})`}>
+                        <Button type="text" size="small"
+                          icon={<RollbackOutlined style={{ color: REDWOOD.success }} />}
+                          onClick={() => {
+                            setSuspenseListOpen(false);
+                            setSuspenseRefundRec(row);
+                            suspenseRefundForm.setFieldsValue({ transactionDate: dayjs(), amount: row.suspenseAmount });
+                            setSuspenseRefundOpen(true);
+                          }}
+                        />
+                      </Tooltip>
+                    </Space>
+                  ),
+                }] : []),
+              ]}
+              summary={() => (
+                <Table.Summary.Row style={{ background: '#f9f0ff' }}>
+                  <Table.Summary.Cell index={0} colSpan={3}>
+                    <Text strong style={{ fontSize: 12 }}>Total ({suspenseTxns.length} transactions)</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={3} align="right">
+                    <Text strong style={{ fontSize: 12, color: '#722ed1' }}>{fmt(total)}</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={4} colSpan={2} />
+                </Table.Summary.Row>
+              )}
+            />
+          </Modal>
+        );
+      })()}
 
       {/* ── Edit Transaction Modal ─────────────────────────── */}
       <Modal
