@@ -1829,7 +1829,7 @@ const RegisterDetail: React.FC<{
     loadViewAcctTxn(txn);
   };
 
-  const openCreateAccountingModal = (overrideTxns?: PCTransaction[]) => {
+  const openCreateAccountingModal = (overrideTxns?: PCTransaction[], crAccountOverride?: string) => {
     const selected = overrideTxns ?? transactions.filter(t => selectedRowKeys.includes(t.transactionId));
     if (selected.length === 0) { message.warning('Select at least one transaction.'); return; }
 
@@ -1838,7 +1838,7 @@ const RegisterDetail: React.FC<{
     if (noAcct.length > 0) message.warning(`${noAcct.length} line(s) skipped — no charge account assigned.`);
     if (eligible.length === 0) { message.error('None of the selected transactions have a charge account.'); return; }
 
-    const cashCode = register.cashAccountDesc ?? '';
+    const cashCode = crAccountOverride ?? register.cashAccountDesc ?? '';
     const cashDesc = cashAccountName ?? '';
 
     // Group by referenceNo, always expanding to the FULL reference group from
@@ -4491,7 +4491,7 @@ const RegisterDetail: React.FC<{
                     style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
                     onClick={() => {
                       setBankTxnDetailOpen(false);
-                      openCreateAccountingModal([pcTxn]);
+                      openCreateAccountingModal([pcTxn], bankTxnDetail?.assetAccountCombination || undefined);
                     }}
                   >
                     Create Accounting
