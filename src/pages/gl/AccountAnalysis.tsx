@@ -38,6 +38,7 @@ import {
   LoadingOutlined,
   BugOutlined,
   AuditOutlined,
+  LinkOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -409,8 +410,13 @@ const AccountAnalysis: React.FC = () => {
     setJournalDrillVisible(true);
   };
 
-  // Group searchData by jeHeaderId for the drill popup
+  // Group searchData by jeHeaderId for the drill popup — filtered to the clicked account
   const journalGroups = useMemo(() => {
+    // Only show journals containing lines for the specific account that was drilled into
+    const baseLines = journalDrillRecord
+      ? searchData.filter(l => l.account === journalDrillRecord.account && l.company === journalDrillRecord.company)
+      : searchData;
+
     const map = new Map<number, {
       key: string;
       jeHeaderId: number;
@@ -425,12 +431,12 @@ const AccountAnalysis: React.FC = () => {
       totalAccountedCr: number;
     }>();
 
-    searchData.forEach(line => {
+    baseLines.forEach(line => {
       if (!map.has(line.jeHeaderId)) {
         map.set(line.jeHeaderId, {
           key: `jg-${line.jeHeaderId}`,
           jeHeaderId: line.jeHeaderId,
-          batchName: line.batchName,
+          batchName: line.batchName || '',
           defaultPeriodName: line.defaultPeriodName,
           userJeSourceName: line.userJeSourceName,
           userJeCategoryName: line.userJeCategoryName,
@@ -442,18 +448,21 @@ const AccountAnalysis: React.FC = () => {
         });
       }
       const g = map.get(line.jeHeaderId)!;
-      g.lines.push(line);
-      g.totalEnteredDr  += line.enteredDr  || 0;
-      g.totalEnteredCr  += line.enteredCr  || 0;
-      g.totalAccountedDr += line.accountedDr || 0;
-      g.totalAccountedCr += line.accountedCr || 0;
+      // Deduplicate lines within the same journal group
+      if (!g.lines.find(existing => existing.jeLineNumber === line.jeLineNumber)) {
+        g.lines.push(line);
+        g.totalEnteredDr   += line.enteredDr   || 0;
+        g.totalEnteredCr   += line.enteredCr   || 0;
+        g.totalAccountedDr += line.accountedDr || 0;
+        g.totalAccountedCr += line.accountedCr || 0;
+      }
     });
 
     return Array.from(map.values()).sort((a, b) =>
       a.defaultPeriodName.localeCompare(b.defaultPeriodName) ||
       a.batchName.localeCompare(b.batchName)
     );
-  }, [searchData]);
+  }, [searchData, journalDrillRecord]);
 
   // Open full journal — fetch ALL lines for a jeHeaderId (not just the filtered account)
   const openFullJournal = async (jeHeaderId: number, batchName: string, period: string) => {
@@ -2530,11 +2539,25 @@ const AccountAnalysis: React.FC = () => {
               <AuditOutlined style={{ color: REDWOOD.info }} />
               <Text strong>Journal Breakdown</Text>
               {journalDrillRecord && (
-                <Tag color="blue">{journalDrillRecord.account}</Tag>
+                <>
+                  <Tag color="blue">{journalDrillRecord.account}</Tag>
+                  {journalDrillRecord.accountDescription && (
+                    <Text type="secondary" style={{ fontSize: 11 }}>{journalDrillRecord.accountDescription}</Text>
+                  )}
+                </>
               )}
-              <Text type="secondary" style={{ fontSize: 11 }}>
+              <Tag color="geekblue" style={{ fontSize: 11 }}>
                 {journalGroups.length} journal{journalGroups.length !== 1 ? 's' : ''}
-              </Text>
+              </Tag>
+              <Tooltip title="Show search API URL">
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<LinkOutlined />}
+                  style={{ color: REDWOOD.info, fontSize: 11 }}
+                  onClick={() => showSearchApiUrl()}
+                />
+              </Tooltip>
             </Space>
           }
           open={journalDrillVisible}
@@ -2645,11 +2668,13 @@ const AccountAnalysis: React.FC = () => {
                 key: 'batchName',
                 ellipsis: true,
                 render: (v: string, rec) => (
-                  <Tooltip title={v}>
-                    <Space size={4}>
-                      <Text style={{ fontSize: 11 }}>{v}</Text>
-                      <Text type="secondary" style={{ fontSize: 10 }}>#{rec.jeHeaderId}</Text>
-                    </Space>
+                  <Tooltip title={v || `JE Header #${rec.jeHeaderId}`}>
+                    <div style={{ lineHeight: 1.3 }}>
+                      <Text strong style={{ fontSize: 11, display: 'block' }}>
+                        {v || <Text type="secondary" style={{ fontSize: 11 }}>JE Header #{rec.jeHeaderId}</Text>}
+                      </Text>
+                      <Text type="secondary" style={{ fontSize: 10 }}>ID: {rec.jeHeaderId}</Text>
+                    </div>
                   </Tooltip>
                 ),
               },
@@ -2695,22 +2720,44 @@ const AccountAnalysis: React.FC = () => {
               {
                 title: '',
                 key: 'fullJournal',
-                width: 90,
+                width: 130,
                 render: (_: any, rec) => (
-                  <Tooltip title="View full journal (all lines)">
-                    <Button
-                      size="small"
-                      type="link"
-                      icon={<AuditOutlined />}
-                      style={{ fontSize: 11 }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openFullJournal(rec.jeHeaderId, rec.batchName, rec.defaultPeriodName);
-                      }}
-                    >
-                      Full Journal
-                    </Button>
-                  </Tooltip>
+                  <Space size={4}>
+                    <Tooltip title="View full journal (all lines)">
+                      <Button
+                        size="small"
+                        type="link"
+                        icon={<AuditOutlined />}
+                        style={{ fontSize: 11 }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openFullJournal(rec.jeHeaderId, rec.batchName, rec.defaultPeriodName);
+                        }}
+                      >
+                        Full Journal
+                      </Button>
+                    </Tooltip>
+                    <Tooltip title={`${API_BASE_URL}/journals/${rec.jeHeaderId}/lines`} placement="topRight">
+                      <Button
+                        size="small"
+                        type="text"
+                        icon={<LinkOutlined />}
+                        style={{ color: REDWOOD.info, fontSize: 11 }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          Modal.info({
+                            title: 'Drill API Endpoint',
+                            width: 680,
+                            content: (
+                              <div style={{ wordBreak: 'break-all', fontFamily: 'monospace', fontSize: 12, padding: '8px 0' }}>
+                                {`${API_BASE_URL}/journals/${rec.jeHeaderId}/lines`}
+                              </div>
+                            ),
+                          });
+                        }}
+                      />
+                    </Tooltip>
+                  </Space>
                 ),
               },
             ]}
