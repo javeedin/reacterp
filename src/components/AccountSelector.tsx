@@ -43,9 +43,30 @@ let segmentsCache: Segment[] = [];
 let valuesCache: Map<string, SegmentValue[]> = new Map();
 
 // Clear all caches
-const clearCache = () => {
-  segmentsCache = [];
-  valuesCache = new Map();
+const clearCache = () => { segmentsCache = []; valuesCache = new Map(); };
+
+// Apply default segment values: Account = blank, Sub-Account = '0000', rest = first value
+const applyDefaults = (
+  segs: Segment[],
+  valMap: Record<string, SegmentValue[]>,
+  locked?: string
+): Record<string, string> => {
+  const out: Record<string, string> = {};
+  segs.forEach((seg, index) => {
+    const prompt = (seg.prompt || seg.segment_name || '').toLowerCase();
+    const vals = valMap[seg.segment_code] || valuesCache.get(seg.segment_code) || [];
+    const isAccount    = prompt === 'account' || (prompt.includes('account') && !prompt.includes('sub') && !prompt.includes('chart') && !prompt.includes('offset'));
+    const isSubAccount = prompt.includes('sub');
+    if (isAccount) {
+      out[seg.segment_code] = ''; // leave blank so user must choose
+    } else if (isSubAccount) {
+      out[seg.segment_code] = vals.find(v => v.Value === '0000')?.Value ?? (vals[0]?.Value || '');
+    } else if (vals.length > 0) {
+      out[seg.segment_code] = vals[0].Value;
+    }
+    if (index === 0 && locked) out[seg.segment_code] = locked;
+  });
+  return out;
 };
 
 // Validation result interface
@@ -267,10 +288,7 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
           if (parts[index]) newValues[seg.segment_code] = parts[index];
         });
       } else {
-        segments.forEach(seg => {
-          const values = segmentValues[seg.segment_code] || valuesCache.get(seg.segment_code) || [];
-          if (values.length > 0) newValues[seg.segment_code] = values[0].Value;
-        });
+        Object.assign(newValues, applyDefaults(segments, segmentValues, lockedFirstSegment));
       }
       // Always override first segment with locked value when provided
       if (lockedFirstSegment && segments.length > 0) {
@@ -314,16 +332,7 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
 
   // Handle Reset
   const handleReset = () => {
-    const defaults: Record<string, string> = {};
-    segments.forEach((seg, index) => {
-      if (index === 0 && lockedFirstSegment) {
-        defaults[seg.segment_code] = lockedFirstSegment;
-      } else {
-        const values = segmentValues[seg.segment_code] || valuesCache.get(seg.segment_code) || [];
-        if (values.length > 0) defaults[seg.segment_code] = values[0].Value;
-      }
-    });
-    setSelectedValues(defaults);
+    setSelectedValues(applyDefaults(segments, segmentValues, lockedFirstSegment));
   };
 
   // Handle Refresh - clear cache and re-fetch data
@@ -369,13 +378,9 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
       const allValues = await Promise.all(valuesPromises);
 
       // Set default values
-      const defaults: Record<string, string> = {};
-      allValues.forEach(({ segmentCode, values }) => {
-        if (values.length > 0) {
-          defaults[segmentCode] = values[0].Value;
-        }
-      });
-      setSelectedValues(defaults);
+      const mergedMap: Record<string, SegmentValue[]> = {};
+      allValues.forEach(({ segmentCode, values }) => { mergedMap[segmentCode] = values; });
+      setSelectedValues(applyDefaults(segmentData, mergedMap, lockedFirstSegment));
 
       message.success('Data refreshed successfully');
     } catch (error) {

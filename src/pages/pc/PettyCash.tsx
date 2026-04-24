@@ -4401,16 +4401,21 @@ const RegisterDetail: React.FC<{
             <Input placeholder="Optional description" />
           </Form.Item>
           <Form.Item label="GL Account" name="glAccountDesc">
-            <Space.Compact style={{ width: '100%' }}>
-              <Input placeholder="e.g. 01-000-5100-000-000-000-000" id="newDistAcct" />
-              <Tooltip title="Browse accounts">
-                <Button icon={<SearchOutlined />} onClick={() => {
-                  setCoaTarget('newDist');
-                  setCoaInitialValue(newDistForm.getFieldValue('glAccountDesc') || '');
-                  setCoaOpen(true);
-                }} />
-              </Tooltip>
-            </Space.Compact>
+            <Input
+              placeholder="e.g. 01-000-5100-000-000-000-000"
+              suffix={
+                <Tooltip title="Browse accounts">
+                  <SearchOutlined
+                    style={{ cursor: 'pointer', color: '#1677ff' }}
+                    onClick={() => {
+                      setCoaTarget('newDist');
+                      setCoaInitialValue(newDistForm.getFieldValue('glAccountDesc') || '');
+                      setCoaOpen(true);
+                    }}
+                  />
+                </Tooltip>
+              }
+            />
           </Form.Item>
           <Form.Item label="Business Unit" name="businessUnit">
             <Input placeholder="e.g. BUIMERC" />
