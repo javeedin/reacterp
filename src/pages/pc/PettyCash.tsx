@@ -2780,13 +2780,13 @@ const RegisterDetail: React.FC<{
 
           <Divider type="vertical" style={{ margin: '0 2px', height: 20 }} />
 
-          <Tooltip title={register.limit == null ? 'Set a limit on this register before adding money' : undefined}>
+          <Tooltip title={isClosed ? 'Register is closed' : undefined}>
             <Button
               icon={<DollarOutlined />}
-              style={!isClosed && register.limit != null
+              style={!isClosed
                 ? { background: REDWOOD.success, borderColor: REDWOOD.success, color: '#fff', fontWeight: 600 }
                 : {}}
-              disabled={isClosed || register.limit == null}
+              disabled={isClosed}
               onClick={() => {
                 moneyForm.resetFields();
                 setMoneyAcctDesc('');
