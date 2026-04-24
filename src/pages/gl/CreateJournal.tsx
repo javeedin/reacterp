@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Resizable } from 'react-resizable';
+import 'react-resizable/css/styles.css';
 import {
   Layout,
   Card,
@@ -287,6 +289,23 @@ interface CreateJournalProps {
   embeddedMode?: boolean;   // true = rendered inside ManageJournals tab
   onSaved?: () => void;     // called after save/post/cancel so parent can close the tab
 }
+
+// Resizable column header
+const ResizableTitle = (props: any) => {
+  const { onResize, width, ...restProps } = props;
+  if (!width) return <th {...restProps} />;
+  return (
+    <Resizable
+      width={width}
+      height={0}
+      handle={<span className="react-resizable-handle" onClick={e => e.stopPropagation()} />}
+      onResize={onResize}
+      draggableOpts={{ enableUserSelectHack: false }}
+    >
+      <th {...restProps} />
+    </Resizable>
+  );
+};
 
 const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onSaved }) => {
   const navigate = useNavigate();
@@ -1171,14 +1190,27 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
     { key: 'wrap', label: 'Wrap Text' },
   ];
 
+  // Resizable column widths
+  const [colWidths, setColWidths] = useState<Record<string, number>>({
+    lineNum: 60, account: 350, currency: 140,
+    enteredDr: 100, enteredCr: 100,
+    conversionDate: 110,
+    accountedDr: 100, accountedCr: 100,
+    description: 200,
+  });
+  const handleColResize = useCallback((key: string) => (_: React.SyntheticEvent, { size }: { size: { width: number } }) => {
+    setColWidths(prev => ({ ...prev, [key]: size.width }));
+  }, []);
+
   // Line columns
   const lineColumns: ColumnsType<JournalLine> = [
     {
       title: 'Line',
       dataIndex: 'lineNum',
       key: 'lineNum',
-      width: 60,
+      width: colWidths.lineNum,
       fixed: 'left',
+      onHeaderCell: () => ({ width: colWidths.lineNum, onResize: handleColResize('lineNum') } as any),
       render: (num) => (
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <span style={{ cursor: 'pointer', color: REDWOOD.neutral600 }}>&#9654;</span>
@@ -1190,7 +1222,8 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
       title: <span><span style={{ color: REDWOOD.primary }}>*</span> Account</span>,
       dataIndex: 'account',
       key: 'account',
-      width: 350,
+      width: colWidths.account,
+      onHeaderCell: () => ({ width: colWidths.account, onResize: handleColResize('account') } as any),
       render: (value, record) => (
         <div>
           <Space.Compact style={{ width: '100%' }}>
@@ -1255,7 +1288,8 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
       title: 'Currency',
       dataIndex: 'currency',
       key: 'currency',
-      width: 140,
+      width: colWidths.currency,
+      onHeaderCell: () => ({ width: colWidths.currency, onResize: handleColResize('currency') } as any),
     },
     {
       title: `Entered (${journalData.currency})`,
@@ -1264,8 +1298,9 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
           title: 'Debit',
           dataIndex: 'enteredDr',
           key: 'enteredDr',
-          width: 100,
+          width: colWidths.enteredDr,
           align: 'right',
+          onHeaderCell: () => ({ width: colWidths.enteredDr, onResize: handleColResize('enteredDr') } as any),
           render: (value, record) => (
             <InputNumber
               value={value}
@@ -1281,8 +1316,9 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
           title: 'Credit',
           dataIndex: 'enteredCr',
           key: 'enteredCr',
-          width: 100,
+          width: colWidths.enteredCr,
           align: 'right',
+          onHeaderCell: () => ({ width: colWidths.enteredCr, onResize: handleColResize('enteredCr') } as any),
           render: (value, record) => (
             <InputNumber
               value={value}
@@ -1303,7 +1339,8 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
           title: 'Date',
           dataIndex: 'conversionDate',
           key: 'conversionDate',
-          width: 110,
+          width: colWidths.conversionDate,
+          onHeaderCell: () => ({ width: colWidths.conversionDate, onResize: handleColResize('conversionDate') } as any),
         },
       ],
     },
@@ -1314,8 +1351,9 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
           title: 'Debit',
           dataIndex: 'accountedDr',
           key: 'accountedDr',
-          width: 100,
+          width: colWidths.accountedDr,
           align: 'right',
+          onHeaderCell: () => ({ width: colWidths.accountedDr, onResize: handleColResize('accountedDr') } as any),
           render: (value, record) => (
             <InputNumber
               value={value}
@@ -1331,8 +1369,9 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
           title: 'Credit',
           dataIndex: 'accountedCr',
           key: 'accountedCr',
-          width: 100,
+          width: colWidths.accountedCr,
           align: 'right',
+          onHeaderCell: () => ({ width: colWidths.accountedCr, onResize: handleColResize('accountedCr') } as any),
           render: (value, record) => (
             <InputNumber
               value={value}
@@ -1350,7 +1389,8 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
       title: 'Description',
       dataIndex: 'description',
       key: 'description',
-      width: 200,
+      width: colWidths.description,
+      onHeaderCell: () => ({ width: colWidths.description, onResize: handleColResize('description') } as any),
       render: (value, record) => (
         <Input
           value={value}
@@ -1988,6 +2028,7 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
             bodyStyle={{ padding: 0 }}
           >
             <div
+              onClick={() => setBatchExpanded(v => !v)}
               style={{
                 padding: '8px 12px',
                 background: REDWOOD.neutral100,
@@ -1995,28 +2036,25 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
+                cursor: 'pointer',
+                userSelect: 'none',
               }}
             >
               <Space>
                 <Text strong style={{ fontSize: 13 }}>
-                  <span style={{ marginRight: 4 }}>&#9660;</span> Journal Batch
+                  <span style={{ marginRight: 4, display: 'inline-block', transition: 'transform 0.2s', transform: batchExpanded ? 'rotate(0deg)' : 'rotate(-90deg)' }}>▼</span>
+                  Journal Batch
                 </Text>
-                <QuestionCircleOutlined style={{ color: REDWOOD.neutral600, cursor: 'pointer' }} />
-                <a
-                  onClick={() => setBatchExpanded(!batchExpanded)}
-                  style={{ color: REDWOOD.info, fontSize: 12 }}
-                >
+                <QuestionCircleOutlined style={{ color: REDWOOD.neutral600 }} onClick={e => e.stopPropagation()} />
+                <Text style={{ color: REDWOOD.info, fontSize: 12 }}>
                   {batchExpanded ? 'Show Less' : 'Show More'}
-                </a>
+                </Text>
               </Space>
-              <Dropdown menu={{ items: batchActionsMenu }}>
-                <Button size="small" style={{ fontSize: 11 }}>
-                  Batch Actions <DownOutlined />
-                </Button>
-              </Dropdown>
             </div>
 
-            {batchExpanded && renderBatchTabs()}
+            <div style={{ display: batchExpanded ? 'block' : 'none' }}>
+              {renderBatchTabs()}
+            </div>
           </Card>
 
           {/* Journal Section */}
@@ -2034,17 +2072,18 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
                 alignItems: 'center',
               }}
             >
-              <Space>
+              <Space
+                onClick={() => setJournalExpanded(v => !v)}
+                style={{ cursor: 'pointer', userSelect: 'none' }}
+              >
                 <Text strong style={{ fontSize: 13 }}>
-                  <span style={{ marginRight: 4 }}>&#9660;</span> Journal
+                  <span style={{ marginRight: 4, display: 'inline-block', transition: 'transform 0.2s', transform: journalExpanded ? 'rotate(0deg)' : 'rotate(-90deg)' }}>▼</span>
+                  Journal
                 </Text>
-                <QuestionCircleOutlined style={{ color: REDWOOD.neutral600, cursor: 'pointer' }} />
-                <a
-                  onClick={() => setJournalExpanded(!journalExpanded)}
-                  style={{ color: REDWOOD.info, fontSize: 12 }}
-                >
+                <QuestionCircleOutlined style={{ color: REDWOOD.neutral600 }} onClick={e => e.stopPropagation()} />
+                <Text style={{ color: REDWOOD.info, fontSize: 12 }}>
                   {journalExpanded ? 'Show Less' : 'Show More'}
-                </a>
+                </Text>
               </Space>
               <Space size="small">
                 <Tooltip title="Previous Journal">
@@ -2084,11 +2123,6 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
                 <Tooltip title="Delete Journal">
                   <Button size="small" icon={<DeleteOutlined />} onClick={handleDeleteJournal} />
                 </Tooltip>
-                <Dropdown menu={{ items: journalActionsMenu }}>
-                  <Button size="small" style={{ fontSize: 11 }}>
-                    Journal Actions <DownOutlined />
-                  </Button>
-                </Dropdown>
                 <Tooltip title="Export Journal to PDF">
                   <Button
                     size="small"
@@ -2102,7 +2136,9 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
               </Space>
             </div>
 
-            {journalExpanded && renderJournalTabs()}
+            <div style={{ display: journalExpanded ? 'block' : 'none' }}>
+              {renderJournalTabs()}
+            </div>
           </Card>
 
           {/* Journal Lines Section */}
@@ -2135,35 +2171,34 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
               background: REDWOOD.surface,
             }}>
               <Space size="small">
-                <Dropdown menu={{ items: linesActionsMenu }}>
-                  <Button size="small" style={{ fontSize: 11 }}>Actions <DownOutlined /></Button>
-                </Dropdown>
-                <Dropdown menu={{ items: linesViewMenu }}>
-                  <Button size="small" style={{ fontSize: 11 }}>View <DownOutlined /></Button>
-                </Dropdown>
-                <Dropdown menu={{ items: linesFormatMenu }}>
-                  <Button size="small" style={{ fontSize: 11 }}>Format <DownOutlined /></Button>
-                </Dropdown>
-                <Tooltip title="Add Row">
-                  <Button size="small" icon={<PlusOutlined />} onClick={handleAddLine} />
-                </Tooltip>
-                <Tooltip title="Show as Table">
-                  <Button size="small" icon={<TableOutlined />} />
-                </Tooltip>
-                <Tooltip title="Freeze Columns">
-                  <Button size="small" icon={<ColumnWidthOutlined />} type="primary" style={{ background: REDWOOD.info }} />
-                </Tooltip>
-                <Tooltip title={isDetached ? "Close Detached View" : "Detach to Full Page"}>
+                <Button
+                  size="small"
+                  icon={<PlusOutlined />}
+                  onClick={handleAddLine}
+                  type="primary"
+                  style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+                >
+                  Add Row
+                </Button>
+                <Button
+                  size="small"
+                  icon={<DeleteOutlined />}
+                  onClick={handleDeleteLines}
+                  disabled={selectedLineKeys.length === 0}
+                  danger
+                >
+                  Delete Row{selectedLineKeys.length > 1 ? `s (${selectedLineKeys.length})` : ''}
+                </Button>
+                <Tooltip title={isDetached ? 'Close Detached View' : 'Detach to Full Page'}>
                   <Button
                     size="small"
                     icon={<SplitCellsOutlined />}
                     onClick={() => setIsDetached(true)}
-                    type={isDetached ? "primary" : "default"}
+                    type={isDetached ? 'primary' : 'default'}
                   >
                     Detach
                   </Button>
                 </Tooltip>
-                <Button size="small" style={{ fontSize: 11 }}>Wrap</Button>
               </Space>
             </div>
 
@@ -2193,6 +2228,7 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
             <Table
               columns={lineColumns}
               dataSource={filteredLines}
+              components={{ header: { cell: ResizableTitle } }}
               rowSelection={{
                 selectedRowKeys: selectedLineKeys,
                 onChange: setSelectedLineKeys,
