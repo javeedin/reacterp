@@ -44,7 +44,7 @@ import {
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
-import { PROXY_CONFIG } from '../../config/api.config';
+
 
 const { Content } = Layout;
 const { Text } = Typography;
@@ -310,7 +310,7 @@ const AccountAnalysis: React.FC = () => {
       params.append('P_APPLICATION_NAME', 'General Ledger');
       params.append('P_LEDGER_NAME', selectedLedger);
 
-      const url = `${PROXY_CONFIG.baseUrl}/apex/periodsstatus/create?${params.toString()}`;
+      const url = `https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/periodsstatus/create?${params.toString()}`;
       console.log('Fetching all periods from:', url);
 
       const response = await fetch(url);
@@ -370,7 +370,7 @@ const AccountAnalysis: React.FC = () => {
   const fetchAccounts = useCallback(async () => {
     setAccountsLoading(true);
     try {
-      const url = `${PROXY_CONFIG.baseUrl}/apex/glaccountslist`;
+      const url = `https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/glaccountslist`;
       console.log('Fetching accounts from:', url);
 
       const response = await fetch(url);
