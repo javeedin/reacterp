@@ -645,9 +645,10 @@ const RegisterDetail: React.FC<{
   const [convertApiPayload,   setConvertApiPayload]     = useState<any>(null);
   const [convertApiResponse,  setConvertApiResponse]    = useState<any>(null);
   const [convertApiError,     setConvertApiError]       = useState<string>('');
-  const [suspenseRefundOpen,  setSuspenseRefundOpen]    = useState(false);
-  const [suspenseRefundRec,   setSuspenseRefundRec]     = useState<PCTransaction | null>(null);
-  const [suspenseRefundForm]                            = Form.useForm();
+  const [suspenseRefundOpen,     setSuspenseRefundOpen]    = useState(false);
+  const [suspenseRefundRec,      setSuspenseRefundRec]     = useState<PCTransaction | null>(null);
+  const [suspenseRefundForm]                               = Form.useForm();
+  const [suspenseRefundAcctDesc, setSuspenseRefundAcctDesc] = useState<string>('');
   const [editTxnOpen, setEditTxnOpen]                   = useState(false);
   const [editTxn, setEditTxn]                           = useState<PCTransaction | null>(null);
   const [saving, setSaving]                             = useState(false);
@@ -662,7 +663,7 @@ const RegisterDetail: React.FC<{
   const [periodsLoaded, setPeriodsLoaded]       = useState(false);
   const [txnActionLoading, setTxnActionLoading] = useState<number | null>(null);
   const [coaOpen, setCoaOpen]         = useState(false);
-  const [coaTarget, setCoaTarget]     = useState<'add' | 'edit' | 'money' | 'bankAsset' | 'bankOffset' | 'refundCash' | 'multiLine' | 'newDist' | 'convertLine'>('edit');
+  const [coaTarget, setCoaTarget]     = useState<'add' | 'edit' | 'money' | 'bankAsset' | 'bankOffset' | 'refundCash' | 'multiLine' | 'newDist' | 'convertLine' | 'suspenseRefund'>('edit');
   const [coaInitialValue, setCoaInitialValue] = useState<string>('');
   const [coaMultiLineKey, setCoaMultiLineKey] = useState<string | null>(null);
   const [coaConvertLineKey, setCoaConvertLineKey] = useState<string | null>(null);
@@ -1754,8 +1755,8 @@ const RegisterDetail: React.FC<{
         debitAmount:       refundAmt,
         creditAmount:      0,
         suspenseAmount:    0,
-        chargeAccountCcid: null,
-        chargeAccountDesc: null,
+        chargeAccountCcid: values.chargeAccountCcid || null,
+        chargeAccountDesc: values.chargeAccountDesc || null,
         referenceNo:       suspenseRefundRec.referenceNo || null,
         employeeName:      suspenseRefundRec.employeeName || null,
         comments:          values.comments
@@ -1766,6 +1767,7 @@ const RegisterDetail: React.FC<{
       });
       message.success(`Refund of ${fmt(refundAmt)} recorded${remaining > 0 ? ` — ${fmt(remaining)} remains in suspense` : ''}`);
       suspenseRefundForm.resetFields();
+      setSuspenseRefundAcctDesc('');
       setSuspenseRefundOpen(false);
       setSuspenseRefundRec(null);
       onRefresh();
@@ -4113,9 +4115,9 @@ const RegisterDetail: React.FC<{
       <Modal
         title={<Space><RollbackOutlined style={{ color: REDWOOD.success }} />Suspense Refund</Space>}
         open={suspenseRefundOpen}
-        onCancel={() => { setSuspenseRefundOpen(false); setSuspenseRefundRec(null); suspenseRefundForm.resetFields(); }}
+        onCancel={() => { setSuspenseRefundOpen(false); setSuspenseRefundRec(null); suspenseRefundForm.resetFields(); setSuspenseRefundAcctDesc(''); }}
         footer={null}
-        width={460}
+        width={520}
         destroyOnClose
       >
         {suspenseRefundRec && (
@@ -4162,12 +4164,40 @@ const RegisterDetail: React.FC<{
               </Col>
             </Row>
 
+            <Form.Item label="Charge Account" name="chargeAccountDesc">
+              <Input
+                readOnly
+                placeholder="Select account combination"
+                suffix={
+                  <SearchOutlined
+                    style={{ cursor: 'pointer', color: REDWOOD.info }}
+                    onClick={() => {
+                      setCoaInitialValue(suspenseRefundForm.getFieldValue('chargeAccountDesc') || '');
+                      setCoaTarget('suspenseRefund');
+                      setCoaOpen(true);
+                    }}
+                  />
+                }
+                onClick={() => {
+                  setCoaInitialValue(suspenseRefundForm.getFieldValue('chargeAccountDesc') || '');
+                  setCoaTarget('suspenseRefund');
+                  setCoaOpen(true);
+                }}
+              />
+            </Form.Item>
+            {suspenseRefundAcctDesc && (
+              <div style={{ marginTop: -12, marginBottom: 12, fontSize: 11, color: '#1677ff', paddingLeft: 2 }}>
+                {suspenseRefundAcctDesc}
+              </div>
+            )}
+            <Form.Item name="chargeAccountCcid" hidden><Input /></Form.Item>
+
             <Form.Item label="Comments" name="comments">
               <Input.TextArea rows={2} placeholder="Optional notes about this refund" />
             </Form.Item>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
-              <Button onClick={() => { setSuspenseRefundOpen(false); setSuspenseRefundRec(null); suspenseRefundForm.resetFields(); }}>Cancel</Button>
+              <Button onClick={() => { setSuspenseRefundOpen(false); setSuspenseRefundRec(null); suspenseRefundForm.resetFields(); setSuspenseRefundAcctDesc(''); }}>Cancel</Button>
               <Button type="primary" htmlType="submit" loading={saving} style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>
                 Record Refund
               </Button>
@@ -4789,6 +4819,9 @@ const RegisterDetail: React.FC<{
           } else if (coaTarget === 'newDist') {
             newDistForm.setFieldsValue({ glAccountDesc: accountCode });
             setNewDistAcctDesc(seg4Desc);
+          } else if (coaTarget === 'suspenseRefund') {
+            suspenseRefundForm.setFieldsValue({ chargeAccountDesc: accountCode, chargeAccountCcid: null });
+            setSuspenseRefundAcctDesc(seg4Desc);
           }
           setCoaOpen(false);
         }}
