@@ -153,6 +153,7 @@ interface ExpenseLine {
   expenseType:      string;
   amount:           number | null;
   description:      string;
+  paidTo:           string;
   chargeAccountDesc: string;
   chargeAccountCcid: number | null;
   acctDesc:         string;
@@ -160,7 +161,7 @@ interface ExpenseLine {
 let _lineSeq = 0;
 const makeNewLine = (): ExpenseLine => ({
   key: String(++_lineSeq), expenseType: '', amount: null,
-  description: '', chargeAccountDesc: '', chargeAccountCcid: null, acctDesc: '',
+  description: '', paidTo: '', chargeAccountDesc: '', chargeAccountCcid: null, acctDesc: '',
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -551,7 +552,7 @@ function printPCTxnPDF(txn: PCTransaction, register: PCRegister) {
   if (txn.referenceNo)       rows.push(['Reference No',    txn.referenceNo]);
   if (txn.bankTxnId)         rows.push(['Bank Txn ID',     String(txn.bankTxnId)]);
   if (txn.chargeAccountDesc) rows.push(['Charge Account',  txn.chargeAccountDesc]);
-  if (txn.employeeName)      rows.push(['Employee',        txn.employeeName]);
+  if (txn.employeeName)      rows.push(['Paid To',          txn.employeeName]);
   rows.push(['Posting Status', txn.postingStatus ?? 'Unposted']);
   if (txn.comments)          rows.push(['Comments',        txn.comments]);
   rows.push(['Created By',   txn.createdBy ?? '—']);
@@ -1723,6 +1724,7 @@ const RegisterDetail: React.FC<{
           creditAmount:         line.amount!,
           chargeAccountCcid:    line.chargeAccountCcid || null,
           chargeAccountDesc:    line.chargeAccountDesc || null,
+          employeeName:         line.paidTo || null,
           referenceNo:          addExpenseVoucherNo || null,
           comments:             line.description || null,
           referenceDescription: vals.referenceDescription || null,
@@ -2284,7 +2286,7 @@ const RegisterDetail: React.FC<{
           </div>
         );
       }},
-    { title: 'Employee', dataIndex: 'employeeName', width: 130, ellipsis: true,
+    { title: 'Paid To', dataIndex: 'employeeName', width: 130, ellipsis: true,
       render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Receipt', dataIndex: 'receiptStatus', width: 75, align: 'center' as const,
       render: (v) => v === 'YES' ? <Tag color="green" style={{ fontSize: 11 }}>YES</Tag>
@@ -3417,7 +3419,7 @@ const RegisterDetail: React.FC<{
               </Form.Item>
               <Row gutter={12}>
                 <Col span={12}>
-                  <Form.Item label="Employee Name" name="employeeName">
+                  <Form.Item label="Paid To" name="employeeName">
                     <Input prefix={<UserOutlined />} placeholder="Optional" />
                   </Form.Item>
                 </Col>
@@ -3479,13 +3481,13 @@ const RegisterDetail: React.FC<{
               {/* Column headers */}
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: '40px 1fr 110px 1fr 1fr 36px',
+                gridTemplateColumns: '40px 1fr 110px 1fr 1fr 1fr 36px',
                 gap: 6,
                 padding: '4px 0',
                 borderBottom: `1px solid ${REDWOOD.neutral200}`,
                 marginBottom: 4,
               }}>
-                {['S.No', 'Expense Type', 'Amount', 'Description', 'Account', ''].map((h, i) => (
+                {['S.No', 'Expense Type', 'Amount', 'Paid To', 'Description', 'Account', ''].map((h, i) => (
                   <div key={i} style={{ fontSize: 11, fontWeight: 600, color: REDWOOD.neutral600, textAlign: i === 0 ? 'center' : 'left' }}>{h}</div>
                 ))}
               </div>
@@ -3495,7 +3497,7 @@ const RegisterDetail: React.FC<{
                 {expenseLines.map((line, idx) => (
                   <div key={line.key} style={{
                     display: 'grid',
-                    gridTemplateColumns: '40px 1fr 110px 1fr 1fr 36px',
+                    gridTemplateColumns: '40px 1fr 110px 1fr 1fr 1fr 36px',
                     gap: 6,
                     marginBottom: 6,
                     alignItems: 'start',
@@ -3534,6 +3536,14 @@ const RegisterDetail: React.FC<{
                       placeholder="0.00"
                       value={line.amount ?? undefined}
                       onChange={v => updateLine(line.key, { amount: v as number | null })}
+                    />
+
+                    {/* Paid To */}
+                    <Input
+                      size="small"
+                      placeholder="Paid to"
+                      value={line.paidTo}
+                      onChange={e => updateLine(line.key, { paidTo: e.target.value })}
                     />
 
                     {/* Description */}
@@ -3698,7 +3708,7 @@ const RegisterDetail: React.FC<{
               </Form.Item>
             </Col>
           </Row>
-          <Form.Item label="Employee Name" name="employeeName">
+          <Form.Item label="Paid To" name="employeeName">
             <Input prefix={<UserOutlined />} placeholder="Optional" />
           </Form.Item>
           <Form.Item label="Comments" name="comments">
@@ -3989,7 +3999,7 @@ const RegisterDetail: React.FC<{
             {editTxn.transactionType === 'Expense' && (
               <Row gutter={12}>
                 <Col span={12}>
-                  <Form.Item label="Employee Name" name="employeeName">
+                  <Form.Item label="Paid To" name="employeeName">
                     <Input prefix={<UserOutlined />} placeholder="Optional" />
                   </Form.Item>
                 </Col>
