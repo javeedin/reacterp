@@ -631,7 +631,8 @@ const RegisterDetail: React.FC<{
   onRefresh: () => void;
   currentUser: string;
   cashAccountName?: string;
-}> = ({ tab, onRefresh, currentUser, cashAccountName }) => {
+  businessUnits?: string[];
+}> = ({ tab, onRefresh, currentUser, cashAccountName, businessUnits = [] }) => {
   const { register, transactions, txnLoading } = tab;
   const { addSessionEntry } = useGlValidation();
   const [addMoneyOpen, setAddMoneyOpen]     = useState(false);
@@ -3414,9 +3415,22 @@ const RegisterDetail: React.FC<{
                       }))}
                       notFoundContent={
                         distCombinations.length === 0
-                          ? <span style={{ fontSize: 12, color: REDWOOD.neutral600 }}>No combinations found — add them in AP Setup &gt; Manage Distribution Combinations</span>
+                          ? <span style={{ fontSize: 12, color: REDWOOD.neutral600 }}>No combinations found</span>
                           : 'No match'
                       }
+                      dropdownRender={menu => (
+                        <>
+                          {menu}
+                          <Divider style={{ margin: '4px 0' }} />
+                          <div
+                            style={{ padding: '4px 8px', cursor: 'pointer', color: REDWOOD.info, fontSize: 12 }}
+                            onMouseDown={e => e.preventDefault()}
+                            onClick={() => { newDistForm.resetFields(); newDistForm.setFieldsValue({ businessUnit: register.businessUnit || undefined }); setNewDistOpen(true); }}
+                          >
+                            <PlusOutlined /> Add New Expense Type
+                          </div>
+                        </>
+                      )}
                     />
                   </Form.Item>
                 </Col>
@@ -3558,7 +3572,7 @@ const RegisterDetail: React.FC<{
                           <div
                             style={{ padding: '4px 8px', cursor: 'pointer', color: REDWOOD.info, fontSize: 12 }}
                             onMouseDown={e => e.preventDefault()}
-                            onClick={() => { newDistForm.resetFields(); setNewDistOpen(true); }}
+                            onClick={() => { newDistForm.resetFields(); newDistForm.setFieldsValue({ businessUnit: register.businessUnit || undefined }); setNewDistOpen(true); }}
                           >
                             <PlusOutlined /> Add New Expense Type
                           </div>
@@ -4396,6 +4410,17 @@ const RegisterDetail: React.FC<{
             }
           }}
         >
+          <Form.Item label="Business Unit" name="businessUnit" rules={[{ required: true, message: 'Required' }]}>
+            <Select
+              placeholder="Select business unit"
+              showSearch
+              filterOption={(input, option) =>
+                String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+              }
+              options={businessUnits.map(bu => ({ value: bu, label: bu }))}
+              notFoundContent={businessUnits.length === 0 ? 'Loading…' : 'No match'}
+            />
+          </Form.Item>
           <Form.Item label="Expense Type Name" name="combinationName" rules={[{ required: true, message: 'Required' }]}>
             <Input placeholder="e.g. Office Supplies" />
           </Form.Item>
@@ -4418,9 +4443,6 @@ const RegisterDetail: React.FC<{
                 </Tooltip>
               }
             />
-          </Form.Item>
-          <Form.Item label="Business Unit" name="businessUnit">
-            <Input placeholder="e.g. BUIMERC" />
           </Form.Item>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
             <Button onClick={() => { setNewDistOpen(false); newDistForm.resetFields(); }}>Cancel</Button>
@@ -5986,6 +6008,7 @@ const PettyCash: React.FC = () => {
             onRefresh={() => refreshTab(tab.key)}
             currentUser={currentUser}
             cashAccountName={cashAccountNames.get(tab.register.registerId)}
+            businessUnits={businessUnits}
           />
         </div>
       ),
