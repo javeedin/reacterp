@@ -665,6 +665,7 @@ const RegisterDetail: React.FC<{
   const [newDistOpen, setNewDistOpen]       = useState(false);
   const [newDistSaving, setNewDistSaving]   = useState(false);
   const [newDistForm]                       = Form.useForm();
+  const [newDistAcctDesc, setNewDistAcctDesc] = useState<string>('');
   const [addAcctDesc, setAddAcctDesc]         = useState<string>('');
   const [editAcctDesc, setEditAcctDesc]       = useState<string>('');
   const [moneyAcctDesc, setMoneyAcctDesc]     = useState<string>('');
@@ -3407,7 +3408,7 @@ const RegisterDetail: React.FC<{
                           chargeAccountDesc: dist?.glAccountDesc ?? '',
                           chargeAccountCcid: dist?.glAccountCcid ?? null,
                         });
-                        setAddAcctDesc(dist?.combinationName ?? '');
+                        setAddAcctDesc(dist?.description ?? dist?.combinationName ?? '');
                       }}
                       options={distCombinations.map(d => ({
                         value: d.combinationName,
@@ -3560,7 +3561,7 @@ const RegisterDetail: React.FC<{
                           expenseType:       val,
                           chargeAccountDesc: dist?.glAccountDesc ?? '',
                           chargeAccountCcid: dist?.glAccountCcid ?? null,
-                          acctDesc:          dist?.combinationName ?? '',
+                          acctDesc:          dist?.description ?? dist?.combinationName ?? '',
                         });
                       }}
                       options={distCombinations.map(d => ({ value: d.combinationName, label: d.combinationName }))}
@@ -3996,7 +3997,7 @@ const RegisterDetail: React.FC<{
                           chargeAccountDesc: dist?.glAccountDesc ?? editTxnForm.getFieldValue('chargeAccountDesc'),
                           chargeAccountCcid: dist?.glAccountCcid ?? editTxnForm.getFieldValue('chargeAccountCcid'),
                         });
-                        setEditAcctDesc(dist?.combinationName ?? '');
+                        setEditAcctDesc(dist?.description ?? dist?.combinationName ?? '');
                       }}
                       options={distCombinations.map(d => ({ value: d.combinationName, label: d.combinationName }))}
                     />
@@ -4380,7 +4381,7 @@ const RegisterDetail: React.FC<{
       <Modal
         title={<Space><PlusOutlined style={{ color: REDWOOD.success }} /> New Expense Type</Space>}
         open={newDistOpen}
-        onCancel={() => { setNewDistOpen(false); newDistForm.resetFields(); }}
+        onCancel={() => { setNewDistOpen(false); newDistForm.resetFields(); setNewDistAcctDesc(''); }}
         footer={null}
         width={440}
         destroyOnClose
@@ -4430,6 +4431,7 @@ const RegisterDetail: React.FC<{
           <Form.Item label="GL Account" name="glAccountDesc">
             <Input
               placeholder="e.g. 01-000-5100-000-000-000-000"
+              onChange={() => setNewDistAcctDesc('')}
               suffix={
                 <Tooltip title="Browse accounts">
                   <SearchOutlined
@@ -4443,9 +4445,14 @@ const RegisterDetail: React.FC<{
                 </Tooltip>
               }
             />
+            {newDistAcctDesc && (
+              <div style={{ marginTop: 4, fontSize: 11, color: '#1677ff', paddingLeft: 2 }}>
+                {newDistAcctDesc}
+              </div>
+            )}
           </Form.Item>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
-            <Button onClick={() => { setNewDistOpen(false); newDistForm.resetFields(); }}>Cancel</Button>
+            <Button onClick={() => { setNewDistOpen(false); newDistForm.resetFields(); setNewDistAcctDesc(''); }}>Cancel</Button>
             <Button type="primary" htmlType="submit" loading={newDistSaving}
               style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>
               Create
@@ -4486,6 +4493,7 @@ const RegisterDetail: React.FC<{
             setCoaMultiLineKey(null);
           } else if (coaTarget === 'newDist') {
             newDistForm.setFieldsValue({ glAccountDesc: accountCode });
+            setNewDistAcctDesc(seg4Desc);
           }
           setCoaOpen(false);
         }}
