@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 import {
   Layout,
   Typography,
@@ -779,6 +781,152 @@ const AccountAnalysis: React.FC = () => {
     );
   };
 
+  // Export to Excel
+  const exportToExcel = async (data: JournalLineSegment[], title: string) => {
+    if (data.length === 0) { message.warning('No data to export'); return; }
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'ReactERP';
+    wb.created = new Date();
+    const ws = wb.addWorksheet('Account Analysis');
+
+    // ── Style helpers ────────────────────────────────────────────────
+    const headerFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC74634' } };
+    const filterLabelFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0D6' } };
+    const columnHeaderFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3D3D3D' } };
+    const totalFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F0F0' } };
+    const white = { argb: 'FFFFFFFF' };
+    const numFmt = '#,##0.00';
+    const COLS = 13; // number of data columns
+
+    const mergeFull = (row: number) => ws.mergeCells(row, 1, row, COLS);
+
+    // ── Title row ─────────────────────────────────────────────────────
+    mergeFull(1);
+    const titleCell = ws.getCell('A1');
+    titleCell.value = title;
+    titleCell.font = { bold: true, size: 13, color: white };
+    titleCell.fill = headerFill;
+    titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    ws.getRow(1).height = 22;
+
+    // ── Filters section ────────────────────────────────────────────────
+    const filterRows: [string, string][] = [
+      ['Ledger',   selectedLedger || '—'],
+      ['Company',  selectedCompany || '—'],
+      ['Periods',  selectedPeriods.length ? selectedPeriods.join(', ') : '—'],
+      ['Account',  accountFilter ? `${accountFilter}${accountFilterDesc ? ' — ' + accountFilterDesc : ''}` : '—'],
+      ['Exported', new Date().toLocaleString()],
+      ['Records',  String(data.length)],
+    ];
+
+    let rowIdx = 2;
+    for (const [label, val] of filterRows) {
+      ws.mergeCells(rowIdx, 1, rowIdx, 3);
+      ws.mergeCells(rowIdx, 4, rowIdx, COLS);
+      const lc = ws.getCell(rowIdx, 1);
+      const vc = ws.getCell(rowIdx, 4);
+      lc.value = label;
+      vc.value = val;
+      lc.font = { bold: true, size: 10 };
+      vc.font = { size: 10 };
+      lc.fill = filterLabelFill;
+      lc.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
+      vc.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+      ws.getRow(rowIdx).height = 16;
+      rowIdx++;
+    }
+
+    // blank separator row
+    rowIdx++;
+
+    // ── Column headers ─────────────────────────────────────────────────
+    const headers = [
+      'Account Combination', 'Account Description', 'Line Description',
+      'Period', 'Batch / Journal', 'Source', 'Category', 'Currency',
+      'Entered Dr', 'Entered Cr', 'Accounted Dr', 'Accounted Cr', 'JE Header ID',
+    ];
+    const colWidths = [30, 28, 32, 12, 30, 14, 16, 10, 16, 16, 16, 16, 14];
+
+    const hRow = ws.getRow(rowIdx);
+    hRow.height = 18;
+    headers.forEach((h, i) => {
+      const cell = ws.getCell(rowIdx, i + 1);
+      cell.value = h;
+      cell.font = { bold: true, size: 10, color: white };
+      cell.fill = columnHeaderFill;
+      cell.alignment = { horizontal: i >= 8 && i <= 11 ? 'right' : 'left', vertical: 'middle', indent: 1 };
+      cell.border = { bottom: { style: 'thin', color: { argb: 'FF888888' } } };
+      ws.getColumn(i + 1).width = colWidths[i];
+    });
+    rowIdx++;
+
+    // ── Data rows ─────────────────────────────────────────────────────
+    const altFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F9' } };
+    data.forEach((r, idx) => {
+      const dr = ws.getRow(rowIdx);
+      dr.height = 15;
+      const isAlt = idx % 2 === 1;
+      const vals: (string | number)[] = [
+        r.concatenatedSegments || `${r.company}-${r.lob}-${r.department}-${r.account}-${r.subAccount}-${r.analysis}-${r.intercompany}`,
+        r.accountDescription || '',
+        r.jeLineDescription || '',
+        r.defaultPeriodName || '',
+        r.batchName || `JE Header #${r.jeHeaderId}`,
+        r.userJeSourceName || '',
+        r.userJeCategoryName || '',
+        r.currencyCode || '',
+        r.enteredDr || 0,
+        r.enteredCr || 0,
+        r.accountedDr || 0,
+        r.accountedCr || 0,
+        r.jeHeaderId,
+      ];
+      vals.forEach((v, i) => {
+        const cell = ws.getCell(rowIdx, i + 1);
+        cell.value = v;
+        cell.font = { size: 10 };
+        if (isAlt) cell.fill = altFill;
+        cell.alignment = { horizontal: i >= 8 && i <= 11 ? 'right' : 'left', vertical: 'middle', indent: 1 };
+        if (i >= 8 && i <= 11) cell.numFmt = numFmt;
+      });
+      rowIdx++;
+    });
+
+    // ── Totals row ─────────────────────────────────────────────────────
+    const totals = calculateTotals(data);
+    const tRow = ws.getRow(rowIdx);
+    tRow.height = 16;
+    ws.mergeCells(rowIdx, 1, rowIdx, 8);
+    const tLabel = ws.getCell(rowIdx, 1);
+    tLabel.value = `Total  (${data.length} lines)`;
+    tLabel.font = { bold: true, size: 10 };
+    tLabel.fill = totalFill;
+    tLabel.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
+
+    const totVals = [totals.enteredDr, totals.enteredCr, totals.accountedDr, totals.accountedCr];
+    totVals.forEach((v, i) => {
+      const cell = ws.getCell(rowIdx, 9 + i);
+      cell.value = v;
+      cell.font = { bold: true, size: 10 };
+      cell.fill = totalFill;
+      cell.numFmt = numFmt;
+      cell.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
+    });
+    // blank last col
+    ws.getCell(rowIdx, 13).fill = totalFill;
+
+    // ── Freeze panes & auto-filter ─────────────────────────────────────
+    const dataStart = rowIdx - data.length; // first data row
+    ws.views = [{ state: 'frozen', xSplit: 0, ySplit: dataStart - 1 }];
+    ws.autoFilter = { from: { row: dataStart - 1, column: 1 }, to: { row: dataStart - 1 + data.length, column: COLS } };
+
+    // ── Save ───────────────────────────────────────────────────────────
+    const buf = await wb.xlsx.writeBuffer();
+    const safe = title.replace(/[^a-zA-Z0-9 _-]/g, '').replace(/\s+/g, '_');
+    saveAs(new Blob([buf], { type: 'application/octet-stream' }), `${safe}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    message.success('Excel file downloaded');
+  };
+
   // Show all journals modal
   const showAllJournals = (tab: AccountTab) => {
     setJournalModalData(tab.data);
@@ -1519,7 +1667,12 @@ const AccountAnalysis: React.FC = () => {
               >
                 View Pivot for All Accounts
               </Button>
-              <Button size="small" icon={<DownloadOutlined />}>
+              <Button
+                size="small"
+                icon={<DownloadOutlined />}
+                disabled={searchData.length === 0}
+                onClick={() => exportToExcel(searchData, `GL_Account_Analysis_${selectedPeriods.join('_') || 'All_Periods'}`)}
+              >
                 Export
               </Button>
             </Space>
@@ -1634,7 +1787,12 @@ const AccountAnalysis: React.FC = () => {
                 >
                   Log
                 </Button>
-                <Button size="small" icon={<DownloadOutlined />}>
+                <Button
+                  size="small"
+                  icon={<DownloadOutlined />}
+                  disabled={tab.data.length === 0}
+                  onClick={() => exportToExcel(tab.data, `GL_Account_${tab.account}_${selectedPeriods.join('_') || 'All_Periods'}`)}
+                >
                   Export
                 </Button>
                 <Checkbox
@@ -2041,7 +2199,12 @@ const AccountAnalysis: React.FC = () => {
               </Space>
             </Col>
             <Col>
-              <Button size="small" icon={<DownloadOutlined />}>
+              <Button
+                size="small"
+                icon={<DownloadOutlined />}
+                disabled={searchData.length === 0}
+                onClick={() => exportToExcel(searchData, `GL_All_Accounts_Pivot_${selectedPeriods.join('_') || 'All_Periods'}`)}
+              >
                 Export
               </Button>
             </Col>
