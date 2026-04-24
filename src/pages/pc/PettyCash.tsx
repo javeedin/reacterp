@@ -673,6 +673,7 @@ const RegisterDetail: React.FC<{
   const [bankTxnDetailOpen, setBankTxnDetailOpen]     = useState(false);
   const [bankTxnDetail, setBankTxnDetail]             = useState<any>(null);
   const [bankTxnDetailLoading, setBankTxnDetailLoading] = useState(false);
+  const [bankTxnDetailSourceId, setBankTxnDetailSourceId] = useState<number | null>(null);
   const [bankTxnPostResponse, setBankTxnPostResponse]   = useState<any>(null);
   const [bankTxnLookupResult, setBankTxnLookupResult]   = useState<any>(null);
   const [bankTxnPayload, setBankTxnPayload]             = useState<any>(null);
@@ -1450,6 +1451,7 @@ const RegisterDetail: React.FC<{
 
   // ── Open bank transaction detail popup ────────────────────
   const openBankTxnDetail = async (bankTxnId: number) => {
+    setBankTxnDetailSourceId(bankTxnId);   // store so footer can find the PC transaction
     setBankTxnDetailLoading(true);
     setBankTxnDetailOpen(true);
     setBankTxnDetail(null);
@@ -4361,8 +4363,11 @@ const RegisterDetail: React.FC<{
         open={bankTxnDetailOpen}
         onCancel={() => setBankTxnDetailOpen(false)}
         footer={(() => {
-          const pcTxn = bankTxnDetail
-            ? transactions.find(t => t.bankTxnId === bankTxnDetail.transactionId)
+          // Use the bankTxnId that opened the modal (bankTxnDetailSourceId) rather than
+          // bankTxnDetail.transactionId — the API field name / type may differ from
+          // what is stored in the PC transaction's bankTxnId column.
+          const pcTxn = bankTxnDetailSourceId != null
+            ? transactions.find(t => t.bankTxnId === bankTxnDetailSourceId)
             : undefined;
           const alreadyPosted = pcTxn?.postingStatus === 'Posted' || bankTxnDetail?.accountingFlag === 'Y';
           return (
