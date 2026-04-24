@@ -4394,13 +4394,17 @@ const RegisterDetail: React.FC<{
               }},
             { title: 'Expense Type', dataIndex: 'expenseType', width: 130,
               render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
-            { title: 'Money In', dataIndex: 'debitAmount', width: 100, align: 'right' as const,
+            { title: 'Money In', dataIndex: 'debitAmount', width: 90, align: 'right' as const,
               render: (v) => v > 0
                 ? <Text style={{ fontSize: 12, color: REDWOOD.success }}>{fmt(v)}</Text>
                 : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
-            { title: 'Money Out', dataIndex: 'creditAmount', width: 100, align: 'right' as const,
+            { title: 'Money Out', dataIndex: 'creditAmount', width: 90, align: 'right' as const,
               render: (v) => v > 0
                 ? <Text style={{ fontSize: 12, color: REDWOOD.error }}>{fmt(v)}</Text>
+                : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
+            { title: 'Suspense', dataIndex: 'suspenseAmount', width: 90, align: 'right' as const,
+              render: (v) => v > 0
+                ? <Text style={{ fontSize: 12, color: '#722ed1' }}>{fmt(v)}</Text>
                 : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
             { title: 'Comments', dataIndex: 'comments', ellipsis: true,
               render: (v) => <Text style={{ fontSize: 11 }}>{v || '—'}</Text> },
@@ -4427,8 +4431,9 @@ const RegisterDetail: React.FC<{
             }] : []),
           ]}
           summary={(rows) => {
-            const totalDr = rows.reduce((s, r) => s + (r.debitAmount  || 0), 0);
-            const totalCr = rows.reduce((s, r) => s + (r.creditAmount || 0), 0);
+            const totalDr  = rows.reduce((s, r) => s + (r.debitAmount    || 0), 0);
+            const totalCr  = rows.reduce((s, r) => s + (r.creditAmount   || 0), 0);
+            const totalSus = rows.reduce((s, r) => s + (r.suspenseAmount || 0), 0);
             return (
               <Table.Summary.Row style={{ background: '#fafafa' }}>
                 <Table.Summary.Cell index={0} colSpan={4}>
@@ -4440,7 +4445,10 @@ const RegisterDetail: React.FC<{
                 <Table.Summary.Cell index={5} align="right">
                   <Text strong style={{ fontSize: 12, color: REDWOOD.error }}>{totalCr > 0 ? fmt(totalCr) : '—'}</Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={6} />
+                <Table.Summary.Cell index={6} align="right">
+                  <Text strong style={{ fontSize: 12, color: '#722ed1' }}>{totalSus > 0 ? fmt(totalSus) : '—'}</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={7} />
               </Table.Summary.Row>
             );
           }}
