@@ -2772,7 +2772,7 @@ const RegisterDetail: React.FC<{
               style={!isClosed && selectedRowKeys.length > 0
                 ? { background: REDWOOD.info, borderColor: REDWOOD.info, color: '#fff' }
                 : {}}
-              onClick={openCreateAccountingModal}
+              onClick={() => openCreateAccountingModal()}
             >
               Create Accounting{selectedRowKeys.length > 0 ? ` (${selectedRowKeys.length})` : ''}
             </Button>
