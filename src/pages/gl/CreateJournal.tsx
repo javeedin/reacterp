@@ -1355,15 +1355,10 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
           width: colWidths.accountedDr,
           align: 'right',
           onHeaderCell: () => ({ width: colWidths.accountedDr, onResize: handleColResize('accountedDr') } as any),
-          render: (value, record) => (
-            <InputNumber
-              value={value}
-              onChange={(val) => updateLine(record.key, 'accountedDr', val)}
-              size="small"
-              style={{ width: '100%' }}
-              min={0}
-              precision={2}
-            />
+          render: (value: number) => (
+            <span style={{ fontSize: 12, color: value ? REDWOOD.neutral900 : REDWOOD.neutral300 }}>
+              {value ? formatNumber(value) : '—'}
+            </span>
           ),
         },
         {
@@ -1373,15 +1368,10 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
           width: colWidths.accountedCr,
           align: 'right',
           onHeaderCell: () => ({ width: colWidths.accountedCr, onResize: handleColResize('accountedCr') } as any),
-          render: (value, record) => (
-            <InputNumber
-              value={value}
-              onChange={(val) => updateLine(record.key, 'accountedCr', val)}
-              size="small"
-              style={{ width: '100%' }}
-              min={0}
-              precision={2}
-            />
+          render: (value: number) => (
+            <span style={{ fontSize: 12, color: value ? REDWOOD.neutral900 : REDWOOD.neutral300 }}>
+              {value ? formatNumber(value) : '—'}
+            </span>
           ),
         },
       ],
