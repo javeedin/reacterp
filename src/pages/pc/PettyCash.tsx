@@ -21,7 +21,7 @@ import {
   SwapOutlined, UploadOutlined, PaperClipOutlined, EyeOutlined,
   BookOutlined, CheckCircleOutlined, SyncOutlined, ExclamationCircleOutlined,
   TagOutlined, PrinterOutlined, FilePdfOutlined, BranchesOutlined,
-  QuestionCircleOutlined,
+  QuestionCircleOutlined, FullscreenOutlined, FullscreenExitOutlined,
 } from '@ant-design/icons';
 import FloatingMenu from '../../components/FloatingMenu';
 import ApiDocsModal, { type ApiEndpoint } from '../../components/ApiDocsModal';
@@ -708,6 +708,8 @@ const RegisterDetail: React.FC<{
   const [filePreviewLoading, setFilePreviewLoading] = useState(false);
   const [filePreviewUrl, setFilePreviewUrl]         = useState<string>('');
   const [filePreviewError, setFilePreviewError]     = useState<string>('');
+  const [filePreviewMaximized, setFilePreviewMaximized] = useState(false);
+  const [attachListMaximized, setAttachListMaximized]   = useState(false);
   // ── Accounting state ──────────────────────────────────────────────────────
   const [selectedRowKeys, setSelectedRowKeys]   = useState<number[]>([]);
   const [txnSearch, setTxnSearch]               = useState('');
@@ -4562,6 +4564,15 @@ const RegisterDetail: React.FC<{
                 </Tag>
               )}
             </Space>
+            <Space size={4}>
+              <Tooltip title={attachListMaximized ? 'Restore' : 'Maximize'}>
+                <Button
+                  type="text" size="small"
+                  icon={attachListMaximized ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+                  onClick={() => setAttachListMaximized(m => !m)}
+                  style={{ color: REDWOOD.neutral600 }}
+                />
+              </Tooltip>
             {attachListTxn && (
               <Tooltip
                 title={
@@ -4596,12 +4607,15 @@ const RegisterDetail: React.FC<{
                 </Tag>
               </Tooltip>
             )}
+            </Space>
           </Space>
         }
         open={attachListOpen}
-        onCancel={() => setAttachListOpen(false)}
+        onCancel={() => { setAttachListOpen(false); setAttachListMaximized(false); }}
         footer={null}
-        width={580}
+        width={attachListMaximized ? '100%' : 580}
+        style={attachListMaximized ? { top: 0, padding: 0, maxWidth: '100vw' } : undefined}
+        styles={attachListMaximized ? { body: { height: 'calc(100vh - 110px)', overflowY: 'auto' } } : undefined}
         destroyOnClose
         zIndex={1050}
       >
@@ -4721,13 +4735,23 @@ const RegisterDetail: React.FC<{
       {/* ── File Preview Modal ────────────────────────────────── */}
       <Modal
         title={
-          <Space>
-            <EyeOutlined style={{ color: REDWOOD.info }} />
-            {filePreviewItem?.name ?? 'File Preview'}
+          <Space style={{ width: '100%', justifyContent: 'space-between', paddingRight: 32 }}>
+            <Space>
+              <EyeOutlined style={{ color: REDWOOD.info }} />
+              {filePreviewItem?.name ?? 'File Preview'}
+            </Space>
+            <Tooltip title={filePreviewMaximized ? 'Restore' : 'Maximize'}>
+              <Button
+                type="text" size="small"
+                icon={filePreviewMaximized ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+                onClick={() => setFilePreviewMaximized(m => !m)}
+                style={{ color: REDWOOD.neutral600 }}
+              />
+            </Tooltip>
           </Space>
         }
         open={filePreviewOpen}
-        onCancel={() => { setFilePreviewOpen(false); setFilePreviewError(''); }}
+        onCancel={() => { setFilePreviewOpen(false); setFilePreviewError(''); setFilePreviewMaximized(false); }}
         footer={[
           filePreviewItem && (
             <Button key="download" icon={<DownloadOutlined />}
@@ -4740,9 +4764,11 @@ const RegisterDetail: React.FC<{
               Download
             </Button>
           ),
-          <Button key="close" onClick={() => setFilePreviewOpen(false)}>Close</Button>,
+          <Button key="close" onClick={() => { setFilePreviewOpen(false); setFilePreviewMaximized(false); }}>Close</Button>,
         ]}
-        width={720}
+        width={filePreviewMaximized ? '100%' : 720}
+        style={filePreviewMaximized ? { top: 0, padding: 0, maxWidth: '100vw' } : undefined}
+        styles={filePreviewMaximized ? { body: { height: 'calc(100vh - 110px)', overflowY: 'auto' } } : undefined}
         destroyOnClose
         zIndex={1100}
       >
@@ -4777,10 +4803,11 @@ const RegisterDetail: React.FC<{
           (() => {
             const mt   = filePreviewItem.mimeType || 'application/octet-stream';
             const src  = `data:${mt};base64,${filePreviewItem.data}`;
+            const previewH = filePreviewMaximized ? 'calc(100vh - 220px)' : '60vh';
             if (mt.startsWith('image/')) {
               return (
                 <img src={src} alt={filePreviewItem.name}
-                  style={{ maxWidth: '100%', maxHeight: '60vh', objectFit: 'contain', display: 'block', margin: '0 auto' }}
+                  style={{ maxWidth: '100%', maxHeight: previewH, objectFit: 'contain', display: 'block', margin: '0 auto' }}
                   onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                 />
               );
@@ -4788,9 +4815,9 @@ const RegisterDetail: React.FC<{
             if (mt === 'application/pdf') {
               return (
                 <object data={src} type="application/pdf"
-                  style={{ width: '100%', height: '60vh', border: 'none' }}>
+                  style={{ width: '100%', height: previewH, border: 'none' }}>
                   <iframe src={src} title={filePreviewItem.name}
-                    style={{ width: '100%', height: '60vh', border: 'none' }} />
+                    style={{ width: '100%', height: previewH, border: 'none' }} />
                 </object>
               );
             }
