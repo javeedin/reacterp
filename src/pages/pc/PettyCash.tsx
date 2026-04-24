@@ -1712,6 +1712,17 @@ const RegisterDetail: React.FC<{
       message.error(`Accounting date ${accDate.format('DD-MMM-YYYY')} does not fall within an open AP period`);
       return;
     }
+    // Any line that has been started (type or amount filled) must have both
+    const missingAmount = expenseLines.filter(l => l.expenseType && !(l.amount && l.amount > 0));
+    if (missingAmount.length > 0) {
+      message.error(`Row ${missingAmount.map(l => expenseLines.indexOf(l) + 1).join(', ')}: Amount is required`);
+      return;
+    }
+    const missingType = expenseLines.filter(l => !l.expenseType && (l.amount ?? 0) > 0);
+    if (missingType.length > 0) {
+      message.error(`Row ${missingType.map(l => expenseLines.indexOf(l) + 1).join(', ')}: Expense Type is required`);
+      return;
+    }
     const validLines = expenseLines.filter(l => l.expenseType && (l.amount ?? 0) > 0);
     if (validLines.length === 0) {
       message.error('Add at least one line with Expense Type and Amount > 0');
