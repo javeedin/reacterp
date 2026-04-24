@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   Layout,
   Typography,
@@ -254,8 +254,6 @@ const AccountAnalysis: React.FC = () => {
 
   // Journal drill-down modal state
   const [journalDrillVisible, setJournalDrillVisible] = useState(false);
-  const [journalDrillLoading, setJournalDrillLoading] = useState(false);
-  const [journalDrillLines, setJournalDrillLines] = useState<any[]>([]);
   const [journalDrillRecord, setJournalDrillRecord] = useState<JournalLineSegment | null>(null);
 
   // All accounts pivot tab state
@@ -399,22 +397,57 @@ const AccountAnalysis: React.FC = () => {
     setAccountLookupVisible(false);
   };
 
-  // Drill down to journal — fetch all lines for a given JE_HEADER_ID
-  const openJournalDrill = async (record: JournalLineSegment) => {
+  // Drill down — group searchData by journal (no extra API call)
+  const openJournalDrill = (record: JournalLineSegment) => {
     setJournalDrillRecord(record);
-    setJournalDrillLines([]);
     setJournalDrillVisible(true);
-    setJournalDrillLoading(true);
-    try {
-      const res = await fetch(`${API_BASE_URL}/journals/${record.jeHeaderId}/lines`);
-      const data = await res.json();
-      setJournalDrillLines(data.items || []);
-    } catch {
-      message.error('Failed to load journal lines');
-    } finally {
-      setJournalDrillLoading(false);
-    }
   };
+
+  // Group searchData by jeHeaderId for the drill popup
+  const journalGroups = useMemo(() => {
+    const map = new Map<number, {
+      key: string;
+      jeHeaderId: number;
+      batchName: string;
+      defaultPeriodName: string;
+      userJeSourceName: string;
+      userJeCategoryName: string;
+      lines: JournalLineSegment[];
+      totalEnteredDr: number;
+      totalEnteredCr: number;
+      totalAccountedDr: number;
+      totalAccountedCr: number;
+    }>();
+
+    searchData.forEach(line => {
+      if (!map.has(line.jeHeaderId)) {
+        map.set(line.jeHeaderId, {
+          key: `jg-${line.jeHeaderId}`,
+          jeHeaderId: line.jeHeaderId,
+          batchName: line.batchName,
+          defaultPeriodName: line.defaultPeriodName,
+          userJeSourceName: line.userJeSourceName,
+          userJeCategoryName: line.userJeCategoryName,
+          lines: [],
+          totalEnteredDr: 0,
+          totalEnteredCr: 0,
+          totalAccountedDr: 0,
+          totalAccountedCr: 0,
+        });
+      }
+      const g = map.get(line.jeHeaderId)!;
+      g.lines.push(line);
+      g.totalEnteredDr  += line.enteredDr  || 0;
+      g.totalEnteredCr  += line.enteredCr  || 0;
+      g.totalAccountedDr += line.accountedDr || 0;
+      g.totalAccountedCr += line.accountedCr || 0;
+    });
+
+    return Array.from(map.values()).sort((a, b) =>
+      a.defaultPeriodName.localeCompare(b.defaultPeriodName) ||
+      a.batchName.localeCompare(b.batchName)
+    );
+  }, [searchData]);
 
   // Filter accounts based on search text
   const filteredAccounts = accountsList.filter((item) => {
@@ -2459,140 +2492,203 @@ const AccountAnalysis: React.FC = () => {
           />
         </Modal>
 
-        {/* Journal Drill-Down Modal */}
+        {/* Journal Drill-Down Modal — grouped by journal */}
         <Modal
           title={
-            journalDrillRecord && (
-              <Space direction="vertical" size={0}>
-                <Space>
-                  <AuditOutlined style={{ color: REDWOOD.info }} />
-                  <Text strong>Journal Lines</Text>
-                  <Tag color="blue">{journalDrillRecord.batchName}</Tag>
-                  <Tag color="geekblue">{journalDrillRecord.defaultPeriodName}</Tag>
-                  <Tag>{journalDrillRecord.userJeSourceName}</Tag>
-                </Space>
-                <Text type="secondary" style={{ fontSize: 11 }}>
-                  Header ID: {journalDrillRecord.jeHeaderId} &nbsp;|&nbsp;
-                  Account: {journalDrillRecord.concatenatedSegments} &nbsp;|&nbsp;
-                  Category: {journalDrillRecord.userJeCategoryName}
-                </Text>
-              </Space>
-            )
+            <Space>
+              <AuditOutlined style={{ color: REDWOOD.info }} />
+              <Text strong>Journal Breakdown</Text>
+              {journalDrillRecord && (
+                <Tag color="blue">{journalDrillRecord.account}</Tag>
+              )}
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                {journalGroups.length} journal{journalGroups.length !== 1 ? 's' : ''}
+              </Text>
+            </Space>
           }
           open={journalDrillVisible}
           onCancel={() => setJournalDrillVisible(false)}
           footer={null}
-          width={1100}
-          style={{ top: 30 }}
+          width={1200}
+          style={{ top: 20 }}
         >
-          <Spin spinning={journalDrillLoading} indicator={<LoadingOutlined />}>
-            <Table
-              dataSource={journalDrillLines.map((l: any, i: number) => ({ ...l, key: i }))}
-              size="small"
-              pagination={{ pageSize: 20, size: 'small', showTotal: (t) => `${t} lines` }}
-              scroll={{ x: 900 }}
-              columns={[
-                { title: '#', dataIndex: 'lineNum', key: 'lineNum', width: 44 },
-                {
-                  title: 'Account',
-                  dataIndex: 'account',
-                  key: 'account',
-                  width: 230,
-                  render: (v: string) => <Text code style={{ fontSize: 11 }}>{v || '-'}</Text>,
-                },
-                {
-                  title: 'Account Desc',
-                  dataIndex: 'accountDescription',
-                  key: 'accountDescription',
-                  width: 150,
-                  ellipsis: true,
-                  render: (v: string) => (
-                    <Tooltip title={v}>
-                      <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{v || '-'}</span>
-                    </Tooltip>
-                  ),
-                },
-                {
-                  title: 'Line Description',
-                  dataIndex: 'description',
-                  key: 'description',
-                  ellipsis: true,
-                  render: (v: string) => (
-                    <Tooltip title={v}>
-                      <span style={{ fontSize: 11 }}>{v || '-'}</span>
-                    </Tooltip>
-                  ),
-                },
-                {
-                  title: 'Entered Dr',
-                  dataIndex: 'enteredDr',
-                  key: 'enteredDr',
-                  width: 120,
-                  align: 'right' as const,
-                  render: (v: number) => (v && v !== 0)
-                    ? <span style={{ color: REDWOOD.success, fontSize: 11 }}>{formatNumber(v)}</span>
-                    : <span style={{ color: REDWOOD.neutral300, fontSize: 11 }}>—</span>,
-                },
-                {
-                  title: 'Entered Cr',
-                  dataIndex: 'enteredCr',
-                  key: 'enteredCr',
-                  width: 120,
-                  align: 'right' as const,
-                  render: (v: number) => (v && v !== 0)
-                    ? <span style={{ color: REDWOOD.primary, fontSize: 11 }}>{formatNumber(v)}</span>
-                    : <span style={{ color: REDWOOD.neutral300, fontSize: 11 }}>—</span>,
-                },
-                {
-                  title: 'Accounted Dr',
-                  dataIndex: 'accountedDr',
-                  key: 'accountedDr',
-                  width: 120,
-                  align: 'right' as const,
-                  render: (v: number) => (v && v !== 0)
-                    ? <span style={{ color: REDWOOD.success, fontSize: 11 }}>{formatNumber(v)}</span>
-                    : <span style={{ color: REDWOOD.neutral300, fontSize: 11 }}>—</span>,
-                },
-                {
-                  title: 'Accounted Cr',
-                  dataIndex: 'accountedCr',
-                  key: 'accountedCr',
-                  width: 120,
-                  align: 'right' as const,
-                  render: (v: number) => (v && v !== 0)
-                    ? <span style={{ color: REDWOOD.primary, fontSize: 11 }}>{formatNumber(v)}</span>
-                    : <span style={{ color: REDWOOD.neutral300, fontSize: 11 }}>—</span>,
-                },
-                {
-                  title: 'Ccy',
-                  dataIndex: 'currency',
-                  key: 'currency',
-                  width: 60,
-                  render: (v: string) => <Tag style={{ fontSize: 10 }}>{v}</Tag>,
-                },
-              ]}
-              summary={(pageData) => {
-                const totDr = pageData.reduce((s: number, r: any) => s + (r.enteredDr || 0), 0);
-                const totCr = pageData.reduce((s: number, r: any) => s + (r.enteredCr || 0), 0);
-                return (
-                  <Table.Summary fixed>
-                    <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
-                      <Table.Summary.Cell index={0} colSpan={4}>
-                        <Text strong style={{ fontSize: 11 }}>Total</Text>
-                      </Table.Summary.Cell>
-                      <Table.Summary.Cell index={4} align="right">
-                        <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>{formatNumber(totDr)}</Text>
-                      </Table.Summary.Cell>
-                      <Table.Summary.Cell index={5} align="right">
-                        <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>{formatNumber(totCr)}</Text>
-                      </Table.Summary.Cell>
-                      <Table.Summary.Cell index={6} colSpan={3} />
-                    </Table.Summary.Row>
-                  </Table.Summary>
-                );
-              }}
-            />
-          </Spin>
+          <Table
+            dataSource={journalGroups}
+            rowKey="key"
+            size="small"
+            pagination={false}
+            scroll={{ x: 900 }}
+            expandable={{
+              defaultExpandedRowKeys: journalDrillRecord
+                ? [`jg-${journalDrillRecord.jeHeaderId}`]
+                : [],
+              expandedRowRender: (group) => (
+                <Table
+                  dataSource={group.lines.map((l, i) => ({ ...l, key: `${group.jeHeaderId}-${i}` }))}
+                  size="small"
+                  pagination={false}
+                  style={{ margin: '4px 0' }}
+                  columns={[
+                    {
+                      title: 'Line Description',
+                      dataIndex: 'jeLineDescription',
+                      key: 'jeLineDescription',
+                      ellipsis: true,
+                      render: (v: string) => (
+                        <Tooltip title={v}>
+                          <span style={{ fontSize: 11 }}>{v || '-'}</span>
+                        </Tooltip>
+                      ),
+                    },
+                    {
+                      title: 'Account Desc',
+                      dataIndex: 'accountDescription',
+                      key: 'accountDescription',
+                      width: 160,
+                      ellipsis: true,
+                      render: (v: string) => (
+                        <Tooltip title={v}>
+                          <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{v || '-'}</span>
+                        </Tooltip>
+                      ),
+                    },
+                    {
+                      title: 'Entered Dr',
+                      dataIndex: 'enteredDr',
+                      key: 'enteredDr',
+                      width: 120,
+                      align: 'right' as const,
+                      render: (v: number) => v
+                        ? <span style={{ color: REDWOOD.success, fontSize: 11 }}>{formatNumber(v)}</span>
+                        : <span style={{ color: REDWOOD.neutral300, fontSize: 11 }}>—</span>,
+                    },
+                    {
+                      title: 'Entered Cr',
+                      dataIndex: 'enteredCr',
+                      key: 'enteredCr',
+                      width: 120,
+                      align: 'right' as const,
+                      render: (v: number) => v
+                        ? <span style={{ color: REDWOOD.primary, fontSize: 11 }}>{formatNumber(v)}</span>
+                        : <span style={{ color: REDWOOD.neutral300, fontSize: 11 }}>—</span>,
+                    },
+                    {
+                      title: 'Accounted Dr',
+                      dataIndex: 'accountedDr',
+                      key: 'accountedDr',
+                      width: 120,
+                      align: 'right' as const,
+                      render: (v: number) => v
+                        ? <span style={{ color: REDWOOD.success, fontSize: 11 }}>{formatNumber(v)}</span>
+                        : <span style={{ color: REDWOOD.neutral300, fontSize: 11 }}>—</span>,
+                    },
+                    {
+                      title: 'Accounted Cr',
+                      dataIndex: 'accountedCr',
+                      key: 'accountedCr',
+                      width: 120,
+                      align: 'right' as const,
+                      render: (v: number) => v
+                        ? <span style={{ color: REDWOOD.primary, fontSize: 11 }}>{formatNumber(v)}</span>
+                        : <span style={{ color: REDWOOD.neutral300, fontSize: 11 }}>—</span>,
+                    },
+                    {
+                      title: 'Ccy',
+                      dataIndex: 'currencyCode',
+                      key: 'currencyCode',
+                      width: 55,
+                      render: (v: string) => <Tag style={{ fontSize: 10 }}>{v}</Tag>,
+                    },
+                  ]}
+                />
+              ),
+            }}
+            columns={[
+              {
+                title: 'Period',
+                dataIndex: 'defaultPeriodName',
+                key: 'defaultPeriodName',
+                width: 80,
+                render: (v: string) => <Tag color="geekblue" style={{ fontSize: 11 }}>{v}</Tag>,
+              },
+              {
+                title: 'Batch / Journal',
+                dataIndex: 'batchName',
+                key: 'batchName',
+                ellipsis: true,
+                render: (v: string, rec) => (
+                  <Tooltip title={v}>
+                    <Space size={4}>
+                      <Text style={{ fontSize: 11 }}>{v}</Text>
+                      <Text type="secondary" style={{ fontSize: 10 }}>#{rec.jeHeaderId}</Text>
+                    </Space>
+                  </Tooltip>
+                ),
+              },
+              {
+                title: 'Source',
+                dataIndex: 'userJeSourceName',
+                key: 'userJeSourceName',
+                width: 110,
+                render: (v: string) => <span style={{ fontSize: 11 }}>{v}</span>,
+              },
+              {
+                title: 'Category',
+                dataIndex: 'userJeCategoryName',
+                key: 'userJeCategoryName',
+                width: 120,
+                render: (v: string) => <span style={{ fontSize: 11 }}>{v}</span>,
+              },
+              {
+                title: 'Lines',
+                key: 'lineCount',
+                width: 55,
+                align: 'center' as const,
+                render: (_: any, rec) => (
+                  <Tag style={{ fontSize: 10 }}>{rec.lines.length}</Tag>
+                ),
+              },
+              {
+                title: 'Total Dr',
+                key: 'totalEnteredDr',
+                width: 130,
+                align: 'right' as const,
+                render: (_: any, rec) => rec.totalEnteredDr
+                  ? <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>{formatNumber(rec.totalEnteredDr)}</Text>
+                  : <span style={{ color: REDWOOD.neutral300, fontSize: 11 }}>—</span>,
+              },
+              {
+                title: 'Total Cr',
+                key: 'totalEnteredCr',
+                width: 130,
+                align: 'right' as const,
+                render: (_: any, rec) => rec.totalEnteredCr
+                  ? <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>{formatNumber(rec.totalEnteredCr)}</Text>
+                  : <span style={{ color: REDWOOD.neutral300, fontSize: 11 }}>—</span>,
+              },
+            ]}
+            summary={() => {
+              const totDr = journalGroups.reduce((s, g) => s + g.totalEnteredDr, 0);
+              const totCr = journalGroups.reduce((s, g) => s + g.totalEnteredCr, 0);
+              return (
+                <Table.Summary fixed>
+                  <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
+                    <Table.Summary.Cell index={0} colSpan={5}>
+                      <Text strong style={{ fontSize: 11 }}>
+                        Grand Total ({journalGroups.length} journals)
+                      </Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={5} align="right">
+                      <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>{formatNumber(totDr)}</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={6} align="right">
+                      <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>{formatNumber(totCr)}</Text>
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                </Table.Summary>
+              );
+            }}
+          />
         </Modal>
 
         {/* Account Lookup Modal */}
