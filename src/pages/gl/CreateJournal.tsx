@@ -46,6 +46,7 @@ import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
 dayjs.extend(customParseFormat);
+import type { Dayjs } from 'dayjs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
@@ -194,6 +195,21 @@ const periodEndDates: Record<string, string> = {
 const getPeriodEndDate = (period: string): string => {
   return periodEndDates[period] || dayjs().endOf('month').format('D-MMM-YYYY');
 };
+
+// Safely parse a date string in multiple formats — returns null if invalid
+const parseDateSafe = (str: string | null | undefined): Dayjs | null => {
+  if (!str) return null;
+  for (const fmt of ['YYYY-MM-DD', 'D-MMM-YYYY', 'DD-MMM-YYYY', 'DD-MMM-YY', 'YYYY-MM-DDTHH:mm:ss']) {
+    const d = dayjs(str, fmt, true);
+    if (d.isValid()) return d;
+  }
+  // Last resort — let dayjs try on its own
+  const d = dayjs(str);
+  return d.isValid() ? d : null;
+};
+
+// Parse Oracle API end_date which may be ISO or Oracle DD-MON-YY format
+const parseOracleDate = (str: string | null | undefined): Dayjs | null => parseDateSafe(str);
 
 // Conversion rates (mock data - in real app, fetch from API)
 const conversionRates: Record<string, Record<string, number>> = {
@@ -440,8 +456,8 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
     const selectedPeriod = periods.find(p => p.period_name_id === batchData.accountingPeriod);
     let periodEndDate: string;
     if (selectedPeriod?.end_date) {
-      // Format the API date to D-MMM-YYYY format
-      periodEndDate = dayjs(selectedPeriod.end_date).format('D-MMM-YYYY');
+      const parsed = parseOracleDate(selectedPeriod.end_date);
+      periodEndDate = parsed ? parsed.format('D-MMM-YYYY') : getPeriodEndDate(batchData.accountingPeriod);
     } else {
       periodEndDate = getPeriodEndDate(batchData.accountingPeriod);
     }
@@ -1567,13 +1583,24 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
                       <Text style={{ fontSize: 13 }}><span style={{ color: REDWOOD.primary }}>*</span> Accounting Date</Text>
                     </Col>
                     <Col span={14}>
-                      <DatePicker
-                        value={dayjs(journalData.accountingDate, 'D-MMM-YYYY')}
-                        onChange={(date) => setJournalData({ ...journalData, accountingDate: date?.format('D-MMM-YYYY') || '' })}
-                        size="small"
-                        style={{ width: '100%' }}
-                        format="D-MMM-YYYY"
-                      />
+                      {(() => {
+                        const selPeriod = periods.find(p => p.period_name_id === batchData.accountingPeriod);
+                        const pStart = selPeriod?.start_date ? parseOracleDate(selPeriod.start_date) : null;
+                        const pEnd   = selPeriod?.end_date   ? parseOracleDate(selPeriod.end_date)   : null;
+                        return (
+                          <DatePicker
+                            value={parseDateSafe(journalData.accountingDate)}
+                            onChange={(date) => setJournalData({ ...journalData, accountingDate: date?.format('D-MMM-YYYY') || '' })}
+                            size="small"
+                            style={{ width: '100%' }}
+                            format="D-MMM-YYYY"
+                            disabledDate={(current) => {
+                              if (!pStart || !pEnd) return false;
+                              return current.isBefore(pStart, 'day') || current.isAfter(pEnd, 'day');
+                            }}
+                          />
+                        );
+                      })()}
                     </Col>
 
                     <Col span={10}>
@@ -1623,7 +1650,7 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
                     </Col>
                     <Col span={12}>
                       <DatePicker
-                        value={dayjs(journalData.conversionDate, 'D-MMM-YYYY')}
+                        value={parseDateSafe(journalData.conversionDate)}
                         onChange={(date) => setJournalData({ ...journalData, conversionDate: date?.format('D-MMM-YYYY') || '' })}
                         size="small"
                         style={{ width: '100%' }}
