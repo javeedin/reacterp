@@ -133,7 +133,7 @@ CREATE OR REPLACE PACKAGE BODY REERP_ACCOUNT_ANALYSIS_PKG AS
                 jls.LEGAL_ENTITY_NAME,
                 jls.USER_JE_CATEGORY_NAME
             FROM V_GL_JOURNAL_LINES_SEGMENTS jls
-            LEFT JOIN RR_GL_LINES_ALL gl
+            LEFT JOIN RR_GL_JE_LINES_ALL gl
                    ON gl.JE_HEADER_ID  = jls.JE_HEADER_ID
                   AND gl.JE_LINE_NUMBER = jls.JE_LINE_NUMBER
             WHERE (p_ledger_name IS NULL OR jls.LEDGER_NAME = p_ledger_name)
