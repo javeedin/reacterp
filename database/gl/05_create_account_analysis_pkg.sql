@@ -107,7 +107,7 @@ CREATE OR REPLACE PACKAGE BODY REERP_ACCOUNT_ANALYSIS_PKG AS
                 jls.BATCH_ID,
                 jls.JE_HEADER_ID,
                 jls.JE_LINE_NUMBER,
-                gl.DESCRIPTION,
+                COALESCE(gl.DESCRIPTION, h.JOURNAL_DESCRIPTION, h.JOURNAL_NAME) AS DESCRIPTION,
                 jls.CURRENCY_CODE,
                 jls.COMPANY,
                 jls.LOB,
@@ -136,6 +136,8 @@ CREATE OR REPLACE PACKAGE BODY REERP_ACCOUNT_ANALYSIS_PKG AS
             LEFT JOIN RR_GL_JE_LINES_ALL gl
                    ON gl.JE_HEADER_ID  = jls.JE_HEADER_ID
                   AND gl.JE_LINE_NUMBER = jls.JE_LINE_NUMBER
+            LEFT JOIN RR_GL_JE_HEADERS h
+                   ON h.JE_HEADER_ID   = jls.JE_HEADER_ID
             WHERE (p_ledger_name IS NULL OR jls.LEDGER_NAME = p_ledger_name)
               AND (p_period_names IS NULL OR jls.DEFAULT_PERIOD_NAME IN (
                    SELECT TRIM(REGEXP_SUBSTR(p_period_names, '[^,]+', 1, LEVEL))

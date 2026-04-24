@@ -37,6 +37,7 @@ import {
   PieChartOutlined,
   LoadingOutlined,
   BugOutlined,
+  AuditOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -251,6 +252,12 @@ const AccountAnalysis: React.FC = () => {
   const [journalModalTitle, setJournalModalTitle] = useState('');
   const [journalModalFilters, setJournalModalFilters] = useState<Record<string, string>>({});
 
+  // Journal drill-down modal state
+  const [journalDrillVisible, setJournalDrillVisible] = useState(false);
+  const [journalDrillLoading, setJournalDrillLoading] = useState(false);
+  const [journalDrillLines, setJournalDrillLines] = useState<any[]>([]);
+  const [journalDrillRecord, setJournalDrillRecord] = useState<JournalLineSegment | null>(null);
+
   // All accounts pivot tab state
   const [allAccountsPivotOpen, setAllAccountsPivotOpen] = useState(false);
   const [allAccountsPivotSegmentsBefore, setAllAccountsPivotSegmentsBefore] = useState<string[]>([]);
@@ -390,6 +397,23 @@ const AccountAnalysis: React.FC = () => {
     setAccountFilter(account);
     setAccountFilterDesc(description || '');
     setAccountLookupVisible(false);
+  };
+
+  // Drill down to journal — fetch all lines for a given JE_HEADER_ID
+  const openJournalDrill = async (record: JournalLineSegment) => {
+    setJournalDrillRecord(record);
+    setJournalDrillLines([]);
+    setJournalDrillVisible(true);
+    setJournalDrillLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/journals/${record.jeHeaderId}/lines`);
+      const data = await res.json();
+      setJournalDrillLines(data.items || []);
+    } catch {
+      message.error('Failed to load journal lines');
+    } finally {
+      setJournalDrillLoading(false);
+    }
   };
 
   // Filter accounts based on search text
@@ -906,6 +930,22 @@ const AccountAnalysis: React.FC = () => {
       width: 110,
       align: 'right',
       render: (v: number) => <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span>,
+    },
+    {
+      title: '',
+      key: 'drillDown',
+      width: 36,
+      fixed: 'right' as const,
+      render: (_: any, record: JournalLineSegment) => (
+        <Tooltip title={`View Journal (Header ${record.jeHeaderId})`}>
+          <Button
+            type="text"
+            size="small"
+            icon={<AuditOutlined style={{ color: REDWOOD.info }} />}
+            onClick={(e) => { e.stopPropagation(); openJournalDrill(record); }}
+          />
+        </Tooltip>
+      ),
     },
   ];
 
@@ -2417,6 +2457,130 @@ const AccountAnalysis: React.FC = () => {
               );
             }}
           />
+        </Modal>
+
+        {/* Journal Drill-Down Modal */}
+        <Modal
+          title={
+            journalDrillRecord && (
+              <Space direction="vertical" size={0}>
+                <Space>
+                  <AuditOutlined style={{ color: REDWOOD.info }} />
+                  <Text strong>Journal Lines</Text>
+                  <Tag color="blue">{journalDrillRecord.batchName}</Tag>
+                  <Tag color="geekblue">{journalDrillRecord.defaultPeriodName}</Tag>
+                  <Tag>{journalDrillRecord.userJeSourceName}</Tag>
+                </Space>
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                  Header ID: {journalDrillRecord.jeHeaderId} &nbsp;|&nbsp;
+                  Account: {journalDrillRecord.concatenatedSegments} &nbsp;|&nbsp;
+                  Category: {journalDrillRecord.userJeCategoryName}
+                </Text>
+              </Space>
+            )
+          }
+          open={journalDrillVisible}
+          onCancel={() => setJournalDrillVisible(false)}
+          footer={null}
+          width={1100}
+          style={{ top: 30 }}
+        >
+          <Spin spinning={journalDrillLoading} indicator={<LoadingOutlined />}>
+            <Table
+              dataSource={journalDrillLines.map((l: any, i: number) => ({ ...l, key: i }))}
+              size="small"
+              pagination={{ pageSize: 20, size: 'small', showTotal: (t) => `${t} lines` }}
+              scroll={{ x: 900 }}
+              columns={[
+                { title: '#', dataIndex: 'lineNum', key: 'lineNum', width: 50 },
+                {
+                  title: 'Account',
+                  dataIndex: 'account',
+                  key: 'account',
+                  width: 220,
+                  render: (v: string) => <Text code style={{ fontSize: 11 }}>{v || '-'}</Text>,
+                },
+                {
+                  title: 'Description',
+                  dataIndex: 'description',
+                  key: 'description',
+                  ellipsis: true,
+                  render: (v: string) => (
+                    <Tooltip title={v}>
+                      <span style={{ fontSize: 11 }}>{v || '-'}</span>
+                    </Tooltip>
+                  ),
+                },
+                {
+                  title: 'Entered Dr',
+                  dataIndex: 'enteredDr',
+                  key: 'enteredDr',
+                  width: 120,
+                  align: 'right' as const,
+                  render: (v: number) => v > 0
+                    ? <span style={{ color: REDWOOD.success, fontSize: 11 }}>{formatNumber(v)}</span>
+                    : <span style={{ color: REDWOOD.neutral300, fontSize: 11 }}>—</span>,
+                },
+                {
+                  title: 'Entered Cr',
+                  dataIndex: 'enteredCr',
+                  key: 'enteredCr',
+                  width: 120,
+                  align: 'right' as const,
+                  render: (v: number) => v > 0
+                    ? <span style={{ color: REDWOOD.primary, fontSize: 11 }}>{formatNumber(v)}</span>
+                    : <span style={{ color: REDWOOD.neutral300, fontSize: 11 }}>—</span>,
+                },
+                {
+                  title: 'Accounted Dr',
+                  dataIndex: 'accountedDr',
+                  key: 'accountedDr',
+                  width: 120,
+                  align: 'right' as const,
+                  render: (v: number) => v > 0
+                    ? <span style={{ color: REDWOOD.success, fontSize: 11 }}>{formatNumber(v)}</span>
+                    : <span style={{ color: REDWOOD.neutral300, fontSize: 11 }}>—</span>,
+                },
+                {
+                  title: 'Accounted Cr',
+                  dataIndex: 'accountedCr',
+                  key: 'accountedCr',
+                  width: 120,
+                  align: 'right' as const,
+                  render: (v: number) => v > 0
+                    ? <span style={{ color: REDWOOD.primary, fontSize: 11 }}>{formatNumber(v)}</span>
+                    : <span style={{ color: REDWOOD.neutral300, fontSize: 11 }}>—</span>,
+                },
+                {
+                  title: 'Currency',
+                  dataIndex: 'currency',
+                  key: 'currency',
+                  width: 70,
+                  render: (v: string) => <Tag style={{ fontSize: 10 }}>{v}</Tag>,
+                },
+              ]}
+              summary={(pageData) => {
+                const totDr = pageData.reduce((s: number, r: any) => s + (r.enteredDr || 0), 0);
+                const totCr = pageData.reduce((s: number, r: any) => s + (r.enteredCr || 0), 0);
+                return (
+                  <Table.Summary fixed>
+                    <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
+                      <Table.Summary.Cell index={0} colSpan={3}>
+                        <Text strong style={{ fontSize: 11 }}>Total</Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={3} align="right">
+                        <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>{formatNumber(totDr)}</Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={4} align="right">
+                        <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>{formatNumber(totCr)}</Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={5} colSpan={3} />
+                    </Table.Summary.Row>
+                  </Table.Summary>
+                );
+              }}
+            />
+          </Spin>
         </Modal>
 
         {/* Account Lookup Modal */}
