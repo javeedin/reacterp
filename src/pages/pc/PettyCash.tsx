@@ -640,10 +640,6 @@ const RegisterDetail: React.FC<{
   const [convertApiPayload,   setConvertApiPayload]     = useState<any>(null);
   const [convertApiResponse,  setConvertApiResponse]    = useState<any>(null);
   const [convertApiError,     setConvertApiError]       = useState<string>('');
-  const [transferSuspenseOpen, setTransferSuspenseOpen] = useState(false);
-  const [transferSuspenseRec,  setTransferSuspenseRec]  = useState<PCTransaction | null>(null);
-  const [transferRegisters,    setTransferRegisters]    = useState<PCRegister[]>([]);
-  const [transferRegLoading,   setTransferRegLoading]   = useState(false);
   const [editTxnOpen, setEditTxnOpen]                   = useState(false);
   const [editTxn, setEditTxn]                           = useState<PCTransaction | null>(null);
   const [saving, setSaving]                             = useState(false);
@@ -651,7 +647,6 @@ const RegisterDetail: React.FC<{
   const [expenseForm]        = Form.useForm();
   const [suspenseForm]       = Form.useForm();
   const [convertSuspenseForm] = Form.useForm();
-  const [transferSuspenseForm] = Form.useForm();
   const [editTxnForm]        = Form.useForm();
   const needsRefresh = React.useRef(false);
   const [distCombinations, setDistCombinations] = useState<DistCombination[]>([]);
@@ -1693,41 +1688,6 @@ const RegisterDetail: React.FC<{
     }
   };
 
-  // ── Transfer Suspense to Another Register ──────────────────
-  const handleTransferSuspense = async (values: any) => {
-    if (!transferSuspenseRec) return;
-    setSaving(true);
-    try {
-      const amount = transferSuspenseRec.suspenseAmount || 0;
-      await createTransaction({
-        registerId:      Number(values.targetRegisterId),
-        transactionDate: transferSuspenseRec.transactionDate,
-        transactionType: 'Expense',
-        expenseType:     'SUSPENSE',
-        currency:        transferSuspenseRec.currency,
-        debitAmount:     0,
-        creditAmount:    0,
-        suspenseAmount:  amount,
-        comments:        `Transferred from register #${register.registerId}${values.reason ? ` — ${values.reason}` : ''}`,
-        postingStatus:   'Unposted',
-        createdBy:       currentUser,
-      });
-      await updateTransaction(transferSuspenseRec.transactionId, {
-        suspenseAmount: 0,
-        comments: `[Transferred ${fmt(amount)} to register #${values.targetRegisterId}] ${transferSuspenseRec.comments || ''}`.trim(),
-        updatedBy: currentUser,
-      });
-      message.success(`Suspense of ${fmt(amount)} transferred to register #${values.targetRegisterId}`);
-      setTransferSuspenseOpen(false);
-      setTransferSuspenseRec(null);
-      onRefresh();
-    } catch (e: any) {
-      message.error(e?.message ?? 'Failed to transfer suspense');
-    } finally {
-      setSaving(false);
-    }
-  };
-
   // ── Add Multiple Expenses ──────────────────────────────────
   const handleAddMultiExpense = async () => {
     const vals = expenseForm.getFieldsValue(['transactionDate', 'accountingDate', 'currency', 'referenceDescription']);
@@ -2425,35 +2385,19 @@ const RegisterDetail: React.FC<{
                 />
               </Tooltip>
             )}
-            {/* Convert / Transfer — suspense rows only */}
+            {/* Convert suspense to expense */}
             {txn.expenseType === 'SUSPENSE' && (txn.suspenseAmount || 0) > 0 && !isClosed && (
-              <>
-                <Tooltip title={`Convert suspense to expense (${fmt(txn.suspenseAmount)})`}>
-                  <Button type="text" size="small"
-                    icon={<SwapOutlined style={{ color: '#722ed1' }} />}
-                    onClick={() => {
-                      setConvertSuspenseRec(txn);
-                      convertSuspenseForm.resetFields();
-                      convertSuspenseForm.setFieldsValue({ convertAmount: txn.suspenseAmount });
-                      setConvertSuspenseOpen(true);
-                    }}
-                  />
-                </Tooltip>
-                <Tooltip title="Transfer remaining suspense to another register">
-                  <Button type="text" size="small"
-                    icon={<BranchesOutlined style={{ color: REDWOOD.warning }} />}
-                    onClick={() => {
-                      setTransferSuspenseRec(txn);
-                      setTransferRegisters([]);
-                      setTransferSuspenseOpen(true);
-                      setTransferRegLoading(true);
-                      searchRegisters({ status: 'ACTIVE' })
-                        .then(regs => setTransferRegisters(regs.filter(r => r.registerId !== register.registerId)))
-                        .finally(() => setTransferRegLoading(false));
-                    }}
-                  />
-                </Tooltip>
-              </>
+              <Tooltip title={`Convert suspense to expense (${fmt(txn.suspenseAmount)})`}>
+                <Button type="text" size="small"
+                  icon={<SwapOutlined style={{ color: '#722ed1' }} />}
+                  onClick={() => {
+                    setConvertSuspenseRec(txn);
+                    convertSuspenseForm.resetFields();
+                    convertSuspenseForm.setFieldsValue({ convertAmount: txn.suspenseAmount });
+                    setConvertSuspenseOpen(true);
+                  }}
+                />
+              </Tooltip>
             )}
             {/* Print — available on all transaction types */}
             {(() => {
@@ -3889,62 +3833,6 @@ const RegisterDetail: React.FC<{
               <Button type="primary" htmlType="submit" loading={saving}
                 style={{ background: '#722ed1', borderColor: '#722ed1' }}>
                 Convert to Expense
-              </Button>
-            </div>
-          </Form>
-        )}
-      </Modal>
-
-      {/* ── Transfer Suspense to Another Register Modal ─────── */}
-      <Modal
-        title={
-          <Space>
-            <BranchesOutlined style={{ color: REDWOOD.warning }} />
-            Transfer Suspense to Another Register
-          </Space>
-        }
-        open={transferSuspenseOpen}
-        onCancel={() => { setTransferSuspenseOpen(false); setTransferSuspenseRec(null); transferSuspenseForm.resetFields(); }}
-        footer={null}
-        width={480}
-        destroyOnClose
-      >
-        {transferSuspenseRec && (
-          <Form form={transferSuspenseForm} layout="vertical" size="small" onFinish={handleTransferSuspense}>
-            <div style={{ background: '#fff7e6', border: '1px solid #ffd591', borderRadius: 6, padding: '8px 12px', marginBottom: 14 }}>
-              <div style={{ fontSize: 11, color: REDWOOD.warning, fontWeight: 600, marginBottom: 2 }}>Suspense to Transfer</div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: REDWOOD.warning }}>
-                {fmt(transferSuspenseRec.suspenseAmount)} <span style={{ fontSize: 13, fontWeight: 400 }}>{transferSuspenseRec.currency}</span>
-              </div>
-              <div style={{ fontSize: 11, color: '#595959', marginTop: 2 }}>
-                From register #{register.registerId} — {register.registerName}
-              </div>
-            </div>
-            <Form.Item label="Target Register" name="targetRegisterId"
-              rules={[{ required: true, message: 'Please select a target register' }]}>
-              <Select
-                placeholder={transferRegLoading ? 'Loading registers…' : 'Select register'}
-                loading={transferRegLoading}
-                showSearch
-                filterOption={(input, opt) => String(opt?.label ?? '').toLowerCase().includes(input.toLowerCase())}
-                options={transferRegisters.map(r => ({
-                  value: r.registerId,
-                  label: `#${r.registerId} — ${r.registerName} (${r.businessUnit}) — ${r.currency}`,
-                }))}
-              />
-            </Form.Item>
-            <Form.Item label="Reason / Notes" name="reason">
-              <Input.TextArea rows={2} placeholder="Optional — will be recorded on both entries" />
-            </Form.Item>
-            <div style={{ background: '#fff1f0', border: '1px solid #ffa39e', borderRadius: 6, padding: '6px 10px', marginBottom: 12, fontSize: 12, color: REDWOOD.error }}>
-              <ExclamationCircleOutlined style={{ marginRight: 6 }} />
-              This will zero out the suspense on the original entry and create a new suspense entry in the target register.
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <Button onClick={() => { setTransferSuspenseOpen(false); transferSuspenseForm.resetFields(); }}>Cancel</Button>
-              <Button type="primary" htmlType="submit" loading={saving}
-                style={{ background: REDWOOD.warning, borderColor: REDWOOD.warning }}>
-                Transfer Suspense
               </Button>
             </div>
           </Form>
@@ -5434,10 +5322,13 @@ const PettyCash: React.FC = () => {
 
   // ── Transfer to New Register ──────────────────────────────
   const openTransfer = (tab: RegisterTab) => {
-    const unposted = tab.transactions.filter(t => t.postingStatus !== 'Posted');
+    // Suspense entries are always Unposted by design — exclude them from the check
+    const unposted = tab.transactions.filter(
+      t => t.postingStatus !== 'Posted' && t.expenseType !== 'SUSPENSE'
+    );
     if (unposted.length > 0) {
       message.error(
-        `${unposted.length} transaction(s) are not yet Posted. Account all lines before transferring.`
+        `${unposted.length} transaction(s) are not yet Posted. Account all non-suspense lines before transferring.`
       );
       return;
     }
@@ -5482,11 +5373,37 @@ const PettyCash: React.FC = () => {
         currency:        transferTarget.register.currency,
         debitAmount:     transferTarget.register.balance,
         creditAmount:    0,
+        suspenseAmount:  0,
         postingStatus:   'Posted',
         comments:        `Balance b/fwd from Register #${transferTarget.register.registerId} — ${transferTarget.register.registerName}`,
         referenceNo:     bfVoucherNo,
         createdBy:       currentUser,
       });
+
+      // 3b. Transfer any open suspense lines to the new register
+      const suspenseLines = transferTarget.transactions.filter(
+        t => t.expenseType === 'SUSPENSE' && (t.suspenseAmount || 0) > 0
+      );
+      for (const sl of suspenseLines) {
+        await createTransaction({
+          registerId:      newRegResult.registerId,
+          transactionDate: txnDate,
+          transactionType: 'Expense',
+          expenseType:     'SUSPENSE',
+          currency:        sl.currency,
+          debitAmount:     0,
+          creditAmount:    0,
+          suspenseAmount:  sl.suspenseAmount,
+          comments:        `Transferred from Register #${transferTarget.register.registerId} — ${sl.comments || ''}`.trimEnd(),
+          postingStatus:   'Unposted',
+          createdBy:       currentUser,
+        });
+        await updateTransaction(sl.transactionId, {
+          suspenseAmount: 0,
+          comments: `[Transferred to Register #${newRegResult.registerId}] ${sl.comments || ''}`.trimEnd(),
+          updatedBy: currentUser,
+        });
+      }
 
       // 4. Mark old register as Transferred (preserve fields to avoid NVL nullification)
       await updateRegister(transferTarget.register.registerId, {
@@ -5500,7 +5417,10 @@ const PettyCash: React.FC = () => {
       });
 
       setTransferOpen(false);
-      message.success(`Transfer complete. New register #${newRegResult.registerId} is now open.`);
+      message.success(
+        `Transfer complete. New register #${newRegResult.registerId} is now open.` +
+        (suspenseLines.length > 0 ? ` ${suspenseLines.length} suspense line(s) carried forward.` : '')
+      );
 
       // 5. Refresh old tab (now Transferred — all actions disabled)
       await refreshTab(transferTarget.key);
