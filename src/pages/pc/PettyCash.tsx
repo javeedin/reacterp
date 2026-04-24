@@ -1573,7 +1573,7 @@ const RegisterDetail: React.FC<{
       return;
     }
     if (values.amount > register.balance) {
-      message.error(`Expense amount (${fmt(values.amount)}) exceeds available balance (${fmt(register.balance)} ${register.currency})`);
+      message.error(`Expense amount (${fmt(values.amount)}) exceeds available balance (${fmt(register.balance)} ${register.currency}). Balance cannot go negative.`);
       return;
     }
     setSaving(true);
@@ -1678,6 +1678,10 @@ const RegisterDetail: React.FC<{
     if (validLines.length === 0) { message.error('Add at least one expense line'); return; }
 
     const totalConvert = validLines.reduce((s, l) => s + (l.amount ?? 0), 0);
+    if (totalConvert > register.balance) {
+      message.error(`Total (${fmt(totalConvert)}) exceeds available balance (${fmt(register.balance)} ${register.currency}). Balance cannot go negative.`);
+      return;
+    }
 
     setSaving(true);
     setConvertApiError('');
@@ -1806,7 +1810,7 @@ const RegisterDetail: React.FC<{
     }
     const totalAmt = validLines.reduce((s, l) => s + (l.amount ?? 0), 0);
     if (totalAmt > register.balance) {
-      message.error(`Total (${fmt(totalAmt)}) exceeds available balance (${fmt(register.balance)} ${register.currency})`);
+      message.error(`Total (${fmt(totalAmt)}) exceeds available balance (${fmt(register.balance)} ${register.currency}). Balance cannot go negative.`);
       return;
     }
     setSaving(true);
