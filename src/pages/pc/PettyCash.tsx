@@ -3948,6 +3948,7 @@ const RegisterDetail: React.FC<{
         onCancel={() => { setEditTxnOpen(false); setEditTxn(null); editTxnForm.resetFields(); }}
         footer={null}
         width={580}
+        zIndex={1060}
       >
         {editTxn && (
           <Form form={editTxnForm} layout="vertical" size="small" onFinish={handleSaveEditTransaction}>
@@ -4305,7 +4306,7 @@ const RegisterDetail: React.FC<{
         open={refGroupOpen}
         onCancel={() => setRefGroupOpen(false)}
         footer={null}
-        width={680}
+        width={760}
         destroyOnClose
       >
         {/* Lines in this reference group */}
@@ -4337,6 +4338,27 @@ const RegisterDetail: React.FC<{
                 : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
             { title: 'Comments', dataIndex: 'comments', ellipsis: true,
               render: (v) => <Text style={{ fontSize: 11 }}>{v || '—'}</Text> },
+            ...(!isClosed ? [{
+              title: '',
+              key: 'actions',
+              width: 50,
+              align: 'center' as const,
+              render: (_: any, row: PCTransaction) => {
+                const isPosted = row.postingStatus === 'Posted';
+                return (
+                  <Tooltip title={isPosted ? 'Posted — cannot edit' : 'Edit this line'}>
+                    <Button
+                      type="text"
+                      size="small"
+                      disabled={isPosted}
+                      icon={<EditOutlined style={{ color: isPosted ? undefined : REDWOOD.info }} />}
+                      loading={txnActionLoading === row.transactionId}
+                      onClick={() => openEditTransaction(row)}
+                    />
+                  </Tooltip>
+                );
+              },
+            }] : []),
           ]}
           summary={(rows) => {
             const totalDr = rows.reduce((s, r) => s + (r.debitAmount  || 0), 0);
