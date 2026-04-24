@@ -4178,7 +4178,7 @@ const RegisterDetail: React.FC<{
               </Col>
             </Row>
 
-            <Form.Item label="Charge Account" name="chargeAccountDesc">
+            <Form.Item label="Charge Account" name="chargeAccountDesc" rules={[{ required: true, message: 'Charge account is required' }]}>
               <Input
                 readOnly
                 placeholder="Select account combination"
