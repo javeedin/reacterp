@@ -4423,7 +4423,7 @@ const RegisterDetail: React.FC<{
         open={refGroupOpen}
         onCancel={() => setRefGroupOpen(false)}
         footer={null}
-        width={760}
+        width={1100}
         destroyOnClose
       >
         {/* Lines in this reference group */}
@@ -4433,6 +4433,7 @@ const RegisterDetail: React.FC<{
           rowKey="transactionId"
           dataSource={transactions.filter(t => t.referenceNo === refGroupRef)}
           style={{ marginBottom: 16 }}
+          scroll={{ x: 1000 }}
           columns={[
             { title: '#',    dataIndex: 'lineNumber',    width: 50,  align: 'center' as const,
               render: (v) => <Text style={{ fontSize: 12 }}>{v}</Text> },
