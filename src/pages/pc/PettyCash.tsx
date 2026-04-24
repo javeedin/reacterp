@@ -149,6 +149,8 @@ interface ApiDebugItem {
   error?:    string;
 }
 
+type TxnRow = PCTransaction & { __group?: true; __childOf?: string; children?: TxnRow[] };
+
 interface ExpenseLine {
   key:              string;
   expenseType:      string;
@@ -2231,40 +2233,42 @@ const RegisterDetail: React.FC<{
   };
 
   // ── Transaction columns ────────────────────────────────────
-  const txnColumns: ColumnsType<PCTransaction> = [
+  const txnColumns: ColumnsType<TxnRow> = [
     { title: '#', dataIndex: 'lineNumber', width: 50, align: 'center',
-      render: (v) => <Text style={{ fontSize: 12 }}>{v}</Text> },
+      render: (v, rec) => rec.__group
+        ? <Tag style={{ fontSize: 11, margin: 0 }}>{rec.children!.length} lines</Tag>
+        : <Text style={{ fontSize: 12 }}>{v}</Text> },
     { title: 'Txn ID', dataIndex: 'transactionId', width: 76, align: 'center' as const,
-      render: (v) => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.neutral600 }}>{v}</Text> },
+      render: (v, rec) => rec.__group ? null
+        : <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.neutral600 }}>{v}</Text> },
     { title: 'Reference', dataIndex: 'referenceNo', width: 140,
-      render: (v: string | null) => {
-        if (!v) return <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text>;
-        const siblings = transactions.filter(t => t.referenceNo === v);
-        const totalDr  = siblings.reduce((s, t) => s + (t.debitAmount  || 0), 0);
-        const totalCr  = siblings.reduce((s, t) => s + (t.creditAmount || 0), 0);
-        const multi    = siblings.length > 1;
-        return (
-          <div>
-            <a style={{ fontSize: 12, fontWeight: 600 }}
-              onClick={() => { setRefGroupRef(v); refGroupForm.setFieldsValue({ referenceNo: v }); setRefGroupOpen(true); }}>
+      render: (v: string | null, rec: TxnRow) => {
+        if (rec.__group) {
+          return (
+            <a style={{ fontSize: 12, fontWeight: 700 }}
+              onClick={() => { setRefGroupRef(v!); refGroupForm.setFieldsValue({ referenceNo: v! }); setRefGroupOpen(true); }}>
               {v}
             </a>
-            {multi && (
-              <div style={{ fontSize: 10, color: REDWOOD.neutral600, marginTop: 1 }}>
-                {siblings.length} lines
-                {totalDr  > 0 && <span style={{ color: REDWOOD.success, marginLeft: 4 }}>↑{fmt(totalDr)}</span>}
-                {totalCr  > 0 && <span style={{ color: REDWOOD.error,   marginLeft: 4 }}>↓{fmt(totalCr)}</span>}
-              </div>
-            )}
-          </div>
+          );
+        }
+        if (rec.__childOf) return null; // child row — reference shown in group header
+        if (!v) return <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text>;
+        return (
+          <a style={{ fontSize: 12, fontWeight: 600 }}
+            onClick={() => { setRefGroupRef(v); refGroupForm.setFieldsValue({ referenceNo: v }); setRefGroupOpen(true); }}>
+            {v}
+          </a>
         );
       }},
     { title: 'Date', dataIndex: 'transactionDate', width: 100,
       render: (v) => <Text style={{ fontSize: 12 }}>{v}</Text> },
     { title: 'Period', dataIndex: 'accountingPeriod', width: 100,
-      render: (v) => v ? <Tag color="blue" style={{ fontSize: 11 }}>{v}</Tag> : <Text style={{ fontSize: 12, color: '#ccc' }}>—</Text> },
+      render: (v, rec) => rec.__group ? null
+        : v ? <Tag color="blue" style={{ fontSize: 11 }}>{v}</Tag>
+        : <Text style={{ fontSize: 12, color: '#ccc' }}>—</Text> },
     { title: 'Type', dataIndex: 'transactionType', width: 130,
-      render: (v) => {
+      render: (v, rec) => {
+        if (rec.__group) return null;
         const color = v === 'Balance Refill'        ? 'blue'
           : v === 'Balance Refund'       ? 'green'
           : v === 'Opening Fund Balance' ? 'gold'
@@ -2275,48 +2279,62 @@ const RegisterDetail: React.FC<{
         return <Tag color={color} style={{ fontSize: 11 }}>{v}</Tag>;
       }},
     { title: 'Expense Type', dataIndex: 'expenseType', width: 120,
-      render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+      render: (v, rec) => rec.__group ? null : <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Comments', dataIndex: 'comments', width: 160, ellipsis: true,
-      render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+      render: (v, rec) => rec.__group ? null : <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Currency', dataIndex: 'currency', width: 80, align: 'center',
       render: (v) => <Text style={{ fontSize: 12 }}>{v}</Text> },
     { title: 'Money In', dataIndex: 'debitAmount', width: 130, align: 'right',
-      render: (v) => v > 0
-        ? <Text style={{ fontSize: 12, color: REDWOOD.success }}>{fmt(v)}</Text>
-        : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
+      render: (v, rec) => {
+        const val = rec.__group ? rec.debitAmount : v;
+        return val > 0
+          ? <Text style={{ fontSize: 12, color: REDWOOD.success, fontWeight: rec.__group ? 600 : 400 }}>{fmt(val)}</Text>
+          : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text>;
+      }},
     { title: 'Money Out', dataIndex: 'creditAmount', width: 130, align: 'right',
-      render: (v) => v > 0
-        ? <Text style={{ fontSize: 12, color: REDWOOD.error }}>{fmt(v)}</Text>
-        : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
+      render: (v, rec) => {
+        const val = rec.__group ? rec.creditAmount : v;
+        return val > 0
+          ? <Text style={{ fontSize: 12, color: REDWOOD.error, fontWeight: rec.__group ? 600 : 400 }}>{fmt(val)}</Text>
+          : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text>;
+      }},
     { title: 'Suspense', dataIndex: 'suspenseAmount', width: 120, align: 'right',
-      render: (v) => v > 0
-        ? <Text style={{ fontSize: 12, color: '#722ed1' }}>{fmt(v)}</Text>
-        : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
+      render: (v, rec) => {
+        const val = rec.__group ? rec.suspenseAmount : v;
+        return val > 0
+          ? <Text style={{ fontSize: 12, color: '#722ed1', fontWeight: rec.__group ? 600 : 400 }}>{fmt(val)}</Text>
+          : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text>;
+      }},
     { title: 'Balance', dataIndex: 'runningBalance', width: 120, align: 'right',
-      render: (v) => (
-        <Text style={{ fontSize: 12, fontWeight: 600,
-          color: v >= 0 ? REDWOOD.success : REDWOOD.error }}>
-          {fmt(v)}
-        </Text>
-      )},
+      render: (v, rec) => {
+        if (rec.__group) return null;
+        return (
+          <Text style={{ fontSize: 12, fontWeight: 600, color: v >= 0 ? REDWOOD.success : REDWOOD.error }}>
+            {fmt(v)}
+          </Text>
+        );
+      }},
     { title: 'Charge Account', dataIndex: 'chargeAccountDesc', width: 180,
       render: (_v, rec) => {
+        if (rec.__group) return null;
         const r = chargeAcctResolved.get(rec.transactionId);
         const code = r?.code || rec.chargeAccountDesc || '';
         return <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{code || '—'}</Text>;
       }},
     { title: 'Acct Description', dataIndex: 'chargeAccountDesc', width: 160,
       render: (_v, rec) => {
+        if (rec.__group) return null;
         const r = chargeAcctResolved.get(rec.transactionId);
         const desc = r?.desc || '';
         return <Text style={{ fontSize: 11 }}>{desc || '—'}</Text>;
       }},
     { title: 'Acct Date', dataIndex: 'accountingDate', width: 100,
-      render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+      render: (v, rec) => rec.__group ? null : <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Posting', dataIndex: 'postingStatus', width: 90,
-      render: (v) => <PostingTag status={v} /> },
+      render: (v, rec) => rec.__group ? null : <PostingTag status={v} /> },
     { title: 'Bank Txn ID', dataIndex: 'bankTxnId', width: 118,
-      render: (v: number | null) => {
+      render: (v: number | null, rec: TxnRow) => {
+        if (rec.__group) return null;
         if (!v) return <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text>;
         const bankSt = bankTxnStatusMap.get(v);
         const stColor = bankSt?.status === 'VOID' ? 'red' : bankSt?.status === 'REC' ? 'blue' : 'default';
@@ -2335,13 +2353,20 @@ const RegisterDetail: React.FC<{
         );
       }},
     { title: 'Paid To', dataIndex: 'employeeName', width: 130, ellipsis: true,
-      render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+      render: (v, rec) => rec.__group ? null : <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Receipt', dataIndex: 'receiptStatus', width: 75, align: 'center' as const,
-      render: (v) => v === 'YES' ? <Tag color="green" style={{ fontSize: 11 }}>YES</Tag>
+      render: (v, rec) => rec.__group ? null
+        : v === 'YES' ? <Tag color="green" style={{ fontSize: 11 }}>YES</Tag>
         : v === 'NO' ? <Tag color="orange" style={{ fontSize: 11 }}>NO</Tag>
         : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text> },
     { title: 'Attachment', dataIndex: 'hasAttachment', width: 100, align: 'center' as const,
-      render: (_v: string | null, rec: PCTransaction) => {
+      render: (_v: string | null, rec: TxnRow) => {
+        if (rec.__group) {
+          const total = rec.children!.reduce((s, c) => s + (c.attachmentCount ?? 0), 0);
+          return total > 0
+            ? <Badge count={total} size="small"><PaperClipOutlined style={{ color: REDWOOD.neutral600 }} /></Badge>
+            : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text>;
+        }
         const count = rec.attachmentCount ?? 0;
         if (count > 0) {
           return (
@@ -2374,9 +2399,20 @@ const RegisterDetail: React.FC<{
         return <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text>;
       }},
     { title: 'Created By', dataIndex: 'createdBy', width: 130, ellipsis: true,
-      render: (v) => <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{v || '—'}</Text> },
+      render: (v, rec) => rec.__group ? null : <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{v || '—'}</Text> },
     { title: '', key: 'actions', width: 100, align: 'center' as const, fixed: 'right' as const,
-      render: (_: any, txn: PCTransaction) => {
+      render: (_: any, txn: TxnRow) => {
+        // Group header row — only show reference group button
+        if (txn.__group) {
+          return (
+            <Tooltip title="View / edit reference group">
+              <Button type="text" size="small"
+                icon={<TagOutlined style={{ color: REDWOOD.info }} />}
+                onClick={() => { setRefGroupRef(txn.referenceNo!); refGroupForm.setFieldsValue({ referenceNo: txn.referenceNo! }); setRefGroupOpen(true); }}
+              />
+            </Tooltip>
+          );
+        }
         const isPosted  = txn.postingStatus === 'Posted';
         const isLoading = txnActionLoading === txn.transactionId;
         return (
@@ -2884,49 +2920,64 @@ const RegisterDetail: React.FC<{
         </Space>
       </div>
 
-      {/* Transactions table */}
-      <Table<PCTransaction>
-        dataSource={filteredTxns}
-        columns={txnColumns}
-        rowKey="transactionId"
-        size="small"
-        loading={txnLoading}
-        pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `${t} transaction${t !== 1 ? 's' : ''}` }}
-        scroll={{ x: 1600 }}
-        locale={{ emptyText: q ? 'No transactions match your search.' : 'No transactions yet — use Add Money or Add Expense to begin.' }}
-        rowClassName={(r) => r.transactionType === 'Balance Refill' ? 'pc-row-refill' : ''}
-        rowSelection={{
-          type:            'checkbox',
-          selectedRowKeys,
-          onChange: (keys) => {
-            const newKeys  = keys as number[];
-            const added    = newKeys.filter(k => !selectedRowKeys.includes(k));
-            const removed  = selectedRowKeys.filter(k => !newKeys.includes(k));
-            const expanded = new Set(newKeys);
-
-            // Selecting any line of a reference → select all lines of that reference
-            added.forEach(key => {
-              const ref = transactions.find(t => t.transactionId === key)?.referenceNo;
-              if (ref) transactions
-                .filter(t => t.referenceNo === ref && t.transactionType !== 'Balance Refill')
-                .forEach(t => expanded.add(t.transactionId));
-            });
-
-            // Deselecting any line of a reference → deselect all lines of that reference
-            removed.forEach(key => {
-              const ref = transactions.find(t => t.transactionId === key)?.referenceNo;
-              if (ref) transactions
-                .filter(t => t.referenceNo === ref)
-                .forEach(t => expanded.delete(t.transactionId));
-            });
-
-            setSelectedRowKeys([...expanded]);
-          },
-          getCheckboxProps: (rec) => ({
-            disabled: rec.transactionType === 'Balance Refill',
-          }),
-        }}
-      />
+      {/* Transactions table — grouped by reference */}
+      {(() => {
+        const seenRefs = new Set<string>();
+        let grpIdx = 0;
+        const groupedRows: TxnRow[] = [];
+        for (const txn of filteredTxns) {
+          if (!txn.referenceNo) { groupedRows.push(txn); continue; }
+          if (seenRefs.has(txn.referenceNo)) continue;
+          seenRefs.add(txn.referenceNo);
+          const lines = filteredTxns.filter(t => t.referenceNo === txn.referenceNo);
+          if (lines.length === 1) { groupedRows.push(lines[0]); continue; }
+          groupedRows.push({
+            ...lines[0],
+            transactionId: -(++grpIdx),
+            __group: true,
+            debitAmount:    lines.reduce((s, l) => s + (l.debitAmount    || 0), 0),
+            creditAmount:   lines.reduce((s, l) => s + (l.creditAmount   || 0), 0),
+            suspenseAmount: lines.reduce((s, l) => s + (l.suspenseAmount || 0), 0),
+            children: lines.map(l => ({ ...l, __childOf: txn.referenceNo! })),
+          });
+        }
+        return (
+          <Table<TxnRow>
+            dataSource={groupedRows}
+            columns={txnColumns}
+            rowKey={(r) => r.__group ? `grp-${r.referenceNo}` : String(r.transactionId)}
+            size="small"
+            loading={txnLoading}
+            pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `${t} row${t !== 1 ? 's' : ''}` }}
+            scroll={{ x: 1600 }}
+            expandable={{ defaultExpandAllRows: true, indentSize: 16 }}
+            locale={{ emptyText: q ? 'No transactions match your search.' : 'No transactions yet — use Add Money or Add Expense to begin.' }}
+            rowClassName={(r) => r.__group ? 'pc-row-group' : r.transactionType === 'Balance Refill' ? 'pc-row-refill' : r.__childOf ? 'pc-row-child' : ''}
+            rowSelection={{
+              type: 'checkbox',
+              selectedRowKeys,
+              onChange: (keys) => {
+                const newKeys  = (keys as Array<string | number>).filter((k): k is number => typeof k === 'number');
+                const added    = newKeys.filter(k => !selectedRowKeys.includes(k));
+                const removed  = selectedRowKeys.filter(k => !newKeys.includes(k));
+                const expanded = new Set(newKeys);
+                added.forEach(key => {
+                  const ref = transactions.find(t => t.transactionId === key)?.referenceNo;
+                  if (ref) transactions.filter(t => t.referenceNo === ref && t.transactionType !== 'Balance Refill').forEach(t => expanded.add(t.transactionId));
+                });
+                removed.forEach(key => {
+                  const ref = transactions.find(t => t.transactionId === key)?.referenceNo;
+                  if (ref) transactions.filter(t => t.referenceNo === ref).forEach(t => expanded.delete(t.transactionId));
+                });
+                setSelectedRowKeys([...expanded]);
+              },
+              getCheckboxProps: (rec) => ({
+                disabled: !!(rec.__group) || rec.transactionType === 'Balance Refill',
+              }),
+            }}
+          />
+        );
+      })()}
       </>);
       })()}
 

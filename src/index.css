@@ -50,6 +50,12 @@ body {
   color: #444 !important;
 }
 
+/* PC Transactions table row styles */
+.pc-row-refill td { background: #e6f4ff !important; }
+.pc-row-group  td { background: #f0f5ff !important; font-weight: 600; border-top: 1px solid #adc6ff !important; }
+.pc-row-child  td { background: #fff !important; }
+.pc-row-group:hover td { background: #dbeafe !important; }
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 8px;
