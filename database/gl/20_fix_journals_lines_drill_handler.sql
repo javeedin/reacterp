@@ -1,8 +1,9 @@
 -- ============================================================
 -- Fix: gl/journals/:id/lines ORDS handler
--- Switches source from RR_GL_JE_LINES_ALL to
--- V_GL_JOURNAL_LINES_SEGMENTS so Dr/Cr amounts are always present.
--- Description still comes from RR_GL_JE_LINES_ALL / RR_GL_JE_HEADERS.
+-- V_GL_JOURNAL_LINES_SEGMENTS is already built FROM RR_GL_JE_LINES_ALL,
+-- so amounts are always present. JOIN back to RR_GL_JE_LINES_ALL only
+-- for the DESCRIPTION column (not exposed in the view) and to
+-- RR_GL_JE_HEADERS for the journal-level description fallback.
 -- Run this in APEX SQL Workshop.
 -- ============================================================
 
@@ -14,7 +15,7 @@ BEGIN
         p_source_type    => 'plsql/block',
         p_items_per_page => 0,
         p_mimes_allowed  => NULL,
-        p_comments       => 'Get all journal lines from view by JE_HEADER_ID',
+        p_comments       => 'Get all journal lines for a JE_HEADER_ID',
         p_source         => q'[
 DECLARE
     v_je_header_id NUMBER := TO_NUMBER(:id);
@@ -25,14 +26,12 @@ BEGIN
     FOR rec IN (
         SELECT
             jls.JE_LINE_NUMBER,
-            jls.COMPANY || '-' || jls.LOB || '-' || jls.DEPARTMENT || '-' ||
-            jls.ACCOUNT || '-' || jls.SUB_ACCOUNT || '-' ||
-            jls.ANALYSIS || '-' || jls.INTERCOMPANY  AS ACCOUNT_COMBINATION,
+            jls.ACCOUNT_COMBINATION,
             jls.ACCOUNT_DESCRIPTION,
-            NVL(jls.ENTERED_DR,   0)   AS ENTERED_DR,
-            NVL(jls.ENTERED_CR,   0)   AS ENTERED_CR,
-            NVL(jls.ACCOUNTED_DR, 0)   AS ACCOUNTED_DR,
-            NVL(jls.ACCOUNTED_CR, 0)   AS ACCOUNTED_CR,
+            NVL(jls.ENTERED_DR,   0) AS ENTERED_DR,
+            NVL(jls.ENTERED_CR,   0) AS ENTERED_CR,
+            NVL(jls.ACCOUNTED_DR, 0) AS ACCOUNTED_DR,
+            NVL(jls.ACCOUNTED_CR, 0) AS ACCOUNTED_CR,
             jls.CURRENCY_CODE,
             COALESCE(l.DESCRIPTION, h.JOURNAL_DESCRIPTION, h.JOURNAL_NAME) AS LINE_DESCRIPTION
         FROM V_GL_JOURNAL_LINES_SEGMENTS jls
