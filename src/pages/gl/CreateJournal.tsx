@@ -444,7 +444,8 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
           });
           setPeriods(sortedPeriods);
           // Auto-select current open period or first available
-          const currentPeriod = sortedPeriods.find((p: Period) => p.status === 'Open') || sortedPeriods[0];
+          // Only allow Open or Future Entry periods; auto-select the current Open one
+          const currentPeriod = sortedPeriods.find((p: Period) => p.status === 'Open') || sortedPeriods.find((p: Period) => p.status === 'Future Entry') || sortedPeriods[0];
           if (currentPeriod) {
             setBatchData(prev => ({ ...prev, accountingPeriod: currentPeriod.period_name_id }));
           }
@@ -1454,11 +1455,13 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
                         loading={loadingPeriods}
                         placeholder="Select period"
                       >
-                        {periods.map(period => (
-                          <Option key={period.period_name_id} value={period.period_name_id}>
-                            {period.period_year} - {period.period_name_id} ({period.status})
-                          </Option>
-                        ))}
+                        {periods
+                          .filter(p => p.status === 'Open' || p.status === 'Future Entry')
+                          .map(period => (
+                            <Option key={period.period_name_id} value={period.period_name_id}>
+                              {period.period_name_id} ({period.status})
+                            </Option>
+                          ))}
                       </Select>
                     </Col>
 
@@ -1949,72 +1952,28 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
             <QuestionCircleOutlined style={{ color: REDWOOD.neutral600, cursor: 'pointer' }} />
           </Space>
           <Space size="small">
-            <Space.Compact size="small">
-              <Button
-                type="primary"
-                size="small"
-                loading={saving}
-                style={{ background: REDWOOD.warning, borderColor: REDWOOD.warning }}
-                onClick={handleSave}
-                icon={<SaveOutlined />}
-              >
-                Save
-              </Button>
-              <Dropdown menu={{ items: saveMenu }} placement="bottomRight">
-                <Button type="primary" size="small" style={{ background: REDWOOD.warning, borderColor: REDWOOD.warning }} icon={<DownOutlined />} />
-              </Dropdown>
-            </Space.Compact>
-            <Tooltip
-              title={
-                <div style={{ fontSize: 11 }}>
-                  <div><b>Save endpoint</b></div>
-                  <div>POST reerp/journals/create</div>
-                  <div style={{ color: '#aaa', marginTop: 4 }}>Creates journal with status=NEW</div>
-                  <div style={{ color: '#aaa' }}>Validates: lines &gt; 0, Dr = Cr</div>
-                </div>
-              }
-              placement="bottom"
-            >
-              <ApiOutlined style={{ color: REDWOOD.info, fontSize: 14, cursor: 'pointer' }} />
-            </Tooltip>
-            <Space.Compact size="small">
-              <Button
-                type="primary"
-                size="small"
-                style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
-              >
-                Complete
-              </Button>
-              <Dropdown menu={{ items: completeMenu }} placement="bottomRight">
-                <Button type="primary" size="small" style={{ background: REDWOOD.success, borderColor: REDWOOD.success }} icon={<DownOutlined />} />
-              </Dropdown>
-            </Space.Compact>
             <Button
+              type="primary"
               size="small"
-              onClick={handlePost}
               loading={saving}
+              onClick={handleSave}
+              icon={<SaveOutlined />}
+            >
+              Save
+            </Button>
+            <Button
+              type="primary"
+              size="small"
+              loading={saving}
+              onClick={handlePost}
               icon={<CheckSquareOutlined />}
-              style={{ background: REDWOOD.warning, borderColor: REDWOOD.warning, color: '#fff' }}
+              style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
             >
               Post
             </Button>
-            <Tooltip
-              title={
-                <div style={{ fontSize: 11 }}>
-                  <div><b>Post endpoint</b></div>
-                  <div>POST reerp/journals/create</div>
-                  <div style={{ color: '#aaa', marginTop: 4 }}>Creates journal with status=P (Posted)</div>
-                  <div style={{ color: '#aaa' }}>Validates: lines &gt; 0, Dr = Cr (strict)</div>
-                </div>
-              }
-              placement="bottom"
-            >
-              <ApiOutlined style={{ color: REDWOOD.info, fontSize: 14, cursor: 'pointer' }} />
-            </Tooltip>
             <Button
               size="small"
               onClick={handleCancel}
-              style={{ background: REDWOOD.warning, color: '#fff', borderColor: REDWOOD.warning }}
             >
               Cancel
             </Button>
