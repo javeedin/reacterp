@@ -657,9 +657,11 @@ const RegisterDetail: React.FC<{
   const [periodsLoaded, setPeriodsLoaded]       = useState(false);
   const [txnActionLoading, setTxnActionLoading] = useState<number | null>(null);
   const [coaOpen, setCoaOpen]         = useState(false);
-  const [coaTarget, setCoaTarget]     = useState<'add' | 'edit' | 'money' | 'bankAsset' | 'bankOffset' | 'refundCash' | 'multiLine' | 'newDist'>('edit');
+  const [coaTarget, setCoaTarget]     = useState<'add' | 'edit' | 'money' | 'bankAsset' | 'bankOffset' | 'refundCash' | 'multiLine' | 'newDist' | 'convertLine'>('edit');
   const [coaInitialValue, setCoaInitialValue] = useState<string>('');
   const [coaMultiLineKey, setCoaMultiLineKey] = useState<string | null>(null);
+  const [coaConvertLineKey, setCoaConvertLineKey] = useState<string | null>(null);
+  const [convertLines, setConvertLines] = useState<ExpenseLine[]>([makeNewLine()]);
 
   // New Expense Type (distribution combination) modal
   const [newDistOpen, setNewDistOpen]       = useState(false);
@@ -753,6 +755,8 @@ const RegisterDetail: React.FC<{
 
   const updateLine = (key: string, patch: Partial<ExpenseLine>) =>
     setExpenseLines(prev => prev.map(l => l.key === key ? { ...l, ...patch } : l));
+  const updateConvertLine = (key: string, patch: Partial<ExpenseLine>) =>
+    setConvertLines(prev => prev.map(l => l.key === key ? { ...l, ...patch } : l));
 
   const handleSaveRefGroup = async (values: any) => {
     const newRef = (values.referenceNo ?? '').trim() || null;
@@ -1630,6 +1634,7 @@ const RegisterDetail: React.FC<{
         chargeAccountCcid:    values.chargeAccountCcid || null,
         chargeAccountDesc:    values.chargeAccountDesc || null,
         referenceNo:          addSuspenseVoucherNo || null,
+        employeeName:         values.employeeName || null,
         comments:             values.comments,
         postingStatus:        'Unposted',
         createdBy:            currentUser,
@@ -1648,50 +1653,68 @@ const RegisterDetail: React.FC<{
     }
   };
 
-  // ── Convert Suspense to Expense ────────────────────────────
+  // ── Convert Suspense to Expense (multi-line) ──────────────
   const handleConvertSuspense = async (values: any) => {
     if (!convertSuspenseRec) return;
+
+    const missingAmount = convertLines.filter(l => l.expenseType && !(l.amount && l.amount > 0));
+    if (missingAmount.length > 0) {
+      message.error(`Row ${missingAmount.map(l => convertLines.indexOf(l) + 1).join(', ')}: Amount is required`);
+      return;
+    }
+    const missingType = convertLines.filter(l => !l.expenseType && (l.amount ?? 0) > 0);
+    if (missingType.length > 0) {
+      message.error(`Row ${missingType.map(l => convertLines.indexOf(l) + 1).join(', ')}: Expense Type is required`);
+      return;
+    }
+    const validLines = convertLines.filter(l => l.expenseType && (l.amount ?? 0) > 0);
+    if (validLines.length === 0) { message.error('Add at least one expense line'); return; }
+
+    const totalConvert = validLines.reduce((s, l) => s + (l.amount ?? 0), 0);
+
     setSaving(true);
     setConvertApiError('');
     setConvertApiResponse(null);
     try {
-      const convertAmt = Number(values.convertAmount);
-      const remaining  = Math.max(0, (convertSuspenseRec.suspenseAmount || 0) - convertAmt);
+      const remaining = Math.max(0, (convertSuspenseRec.suspenseAmount || 0) - totalConvert);
 
-      // 1. Reduce suspense amount on original entry
       await updateTransaction(convertSuspenseRec.transactionId, {
         suspenseAmount: remaining,
         comments: values.reason
-          ? `[Converted ${fmt(convertAmt)}] ${values.reason}`
+          ? `[Converted ${fmt(totalConvert)}] ${values.reason}`
           : convertSuspenseRec.comments ?? undefined,
         updatedBy: currentUser,
       });
 
-      // 2. Create new expense — dates must be YYYY-MM-DD for parse_date
       const txnDate = toIsoDate(convertSuspenseRec.transactionDate);
       const accDate = toIsoDate(convertSuspenseRec.accountingDate);
-      const payload = {
-        registerId:        register.registerId,
-        transactionDate:   txnDate,
-        accountingDate:    accDate || txnDate,
-        transactionType:   'Expense' as const,
-        expenseType:       values.expenseType || 'CONVERTED SUSPENSE',
-        chargeAccountDesc: values.chargeAccountDesc || null,
-        chargeAccountCcid: values.chargeAccountCcid || null,
-        currency:          convertSuspenseRec.currency,
-        debitAmount:       0,
-        creditAmount:      convertAmt,
-        suspenseAmount:    0,
-        comments:          values.expenseComments || `Converted from suspense #${convertSuspenseRec.transactionId}`,
-        referenceNo:       convertSuspenseRec.referenceNo || null,
-        postingStatus:     'Unposted' as const,
-        createdBy:         currentUser,
-      };
-      setConvertApiPayload(payload);
-      const result = await createTransaction(payload);
-      setConvertApiResponse(result);
-      message.success(`Converted ${fmt(convertAmt)} to expense${remaining > 0 ? ` — ${fmt(remaining)} remains in suspense` : ''}`);
+      for (const line of validLines) {
+        const payload = {
+          registerId:        register.registerId,
+          transactionDate:   txnDate,
+          accountingDate:    accDate || txnDate,
+          transactionType:   'Expense' as const,
+          expenseType:       line.expenseType,
+          chargeAccountDesc: line.chargeAccountDesc || null,
+          chargeAccountCcid: null as number | null,
+          currency:          convertSuspenseRec.currency,
+          debitAmount:       0,
+          creditAmount:      line.amount!,
+          suspenseAmount:    0,
+          employeeName:      line.paidTo || null,
+          comments:          line.description || `Converted from suspense #${convertSuspenseRec.transactionId}`,
+          referenceNo:       convertSuspenseRec.referenceNo || null,
+          postingStatus:     'Unposted' as const,
+          createdBy:         currentUser,
+        };
+        setConvertApiPayload(payload);
+        const result = await createTransaction(payload);
+        setConvertApiResponse(result);
+      }
+
+      message.success(`Converted ${fmt(totalConvert)} to ${validLines.length} expense(s)${remaining > 0 ? ` — ${fmt(remaining)} remains in suspense` : ''}`);
       convertSuspenseForm.resetFields();
+      setConvertLines([makeNewLine()]);
       setConvertSuspenseOpen(false);
       setConvertSuspenseRec(null);
       onRefresh();
@@ -2420,7 +2443,9 @@ const RegisterDetail: React.FC<{
                   onClick={() => {
                     setConvertSuspenseRec(txn);
                     convertSuspenseForm.resetFields();
-                    convertSuspenseForm.setFieldsValue({ convertAmount: txn.suspenseAmount });
+                    const firstCvLine = makeNewLine();
+                    firstCvLine.paidTo = txn.employeeName || '';
+                    setConvertLines([firstCvLine]);
                     setConvertSuspenseOpen(true);
                   }}
                 />
@@ -3817,109 +3842,150 @@ const RegisterDetail: React.FC<{
           </Space>
         }
         open={convertSuspenseOpen}
-        onCancel={() => { setConvertSuspenseOpen(false); setConvertSuspenseRec(null); convertSuspenseForm.resetFields(); }}
+        onCancel={() => { setConvertSuspenseOpen(false); setConvertSuspenseRec(null); convertSuspenseForm.resetFields(); setConvertLines([makeNewLine()]); }}
         footer={null}
-        width={520}
+        width={860}
         destroyOnClose
       >
         {convertSuspenseRec && (
           <Form form={convertSuspenseForm} layout="vertical" size="small" onFinish={handleConvertSuspense}>
-            <div style={{ background: '#f9f0ff', border: '1px solid #d3adf7', borderRadius: 6, padding: '8px 12px', marginBottom: 14 }}>
-              <div style={{ fontSize: 11, color: '#722ed1', fontWeight: 600, marginBottom: 2 }}>Current Suspense Amount</div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: '#722ed1' }}>
-                {fmt(convertSuspenseRec.suspenseAmount)} <span style={{ fontSize: 13, fontWeight: 400 }}>{convertSuspenseRec.currency}</span>
+            {/* Suspense summary header */}
+            <div style={{ background: '#f9f0ff', border: '1px solid #d3adf7', borderRadius: 6, padding: '8px 12px', marginBottom: 14, display: 'flex', gap: 24, alignItems: 'center' }}>
+              <div>
+                <div style={{ fontSize: 11, color: '#722ed1', fontWeight: 600, marginBottom: 2 }}>Suspense Amount</div>
+                <div style={{ fontSize: 20, fontWeight: 700, color: '#722ed1' }}>
+                  {fmt(convertSuspenseRec.suspenseAmount)} <span style={{ fontSize: 13, fontWeight: 400 }}>{convertSuspenseRec.currency}</span>
+                </div>
               </div>
+              {convertSuspenseRec.employeeName && (
+                <div>
+                  <div style={{ fontSize: 11, color: '#722ed1', fontWeight: 600, marginBottom: 2 }}>Paid To</div>
+                  <div style={{ fontSize: 13 }}>{convertSuspenseRec.employeeName}</div>
+                </div>
+              )}
               {convertSuspenseRec.comments && (
-                <div style={{ fontSize: 11, color: '#595959', marginTop: 4 }}>{convertSuspenseRec.comments}</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11, color: '#722ed1', fontWeight: 600, marginBottom: 2 }}>Comments</div>
+                  <div style={{ fontSize: 12, color: '#595959' }}>{convertSuspenseRec.comments}</div>
+                </div>
               )}
             </div>
-            <Row gutter={12}>
-              <Col span={12}>
-                <Form.Item label="Amount to Convert" name="convertAmount"
-                  rules={[
-                    { required: true, message: 'Required' },
-                    { type: 'number', min: 0.01, message: 'Must be > 0' },
-                    { type: 'number', max: convertSuspenseRec.suspenseAmount, message: `Cannot exceed ${fmt(convertSuspenseRec.suspenseAmount)}` },
-                  ]}>
-                  <InputNumber style={{ width: '100%' }} precision={2} min={0.01} max={convertSuspenseRec.suspenseAmount} placeholder="0.00" />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item label="Expense Type" name="expenseType" rules={[{ required: true, message: 'Required' }]}>
-                  <Select placeholder="Select expense type" showSearch
-                    filterOption={(input, opt) => String(opt?.label ?? '').toLowerCase().includes(input.toLowerCase())}
+
+            {/* Column headers */}
+            <div style={{ display: 'grid', gridTemplateColumns: '36px 1fr 110px 130px 1fr 1fr 36px', gap: 6, padding: '4px 0', borderBottom: `1px solid ${REDWOOD.neutral200}`, marginBottom: 4 }}>
+              {['#', 'Expense Type', 'Amount', 'Paid To', 'Description', 'Account', ''].map((h, i) => (
+                <div key={i} style={{ fontSize: 11, fontWeight: 600, color: REDWOOD.neutral600, textAlign: i === 0 ? 'center' : 'left' }}>{h}</div>
+              ))}
+            </div>
+
+            {/* Lines */}
+            <div style={{ maxHeight: 300, overflowY: 'auto', marginBottom: 8 }}>
+              {convertLines.map((line, idx) => (
+                <div key={line.key} style={{ display: 'grid', gridTemplateColumns: '36px 1fr 110px 130px 1fr 1fr 36px', gap: 6, marginBottom: 6, alignItems: 'start' }}>
+                  <div style={{ textAlign: 'center', paddingTop: 6, fontSize: 12, color: REDWOOD.neutral600 }}>{idx + 1}</div>
+                  <Select
+                    size="small" placeholder="Expense type" showSearch
+                    value={line.expenseType || undefined}
+                    filterOption={(input, option) => String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
                     onChange={(val) => {
                       const dist = distCombinations.find(d => d.combinationName === val);
-                      convertSuspenseForm.setFieldsValue({
+                      updateConvertLine(line.key, {
+                        expenseType:       val,
                         chargeAccountDesc: dist?.glAccountDesc ?? '',
                         chargeAccountCcid: dist?.glAccountCcid ?? null,
+                        acctDesc:          dist?.description ?? dist?.combinationName ?? '',
                       });
                     }}
                     options={distCombinations.map(d => ({ value: d.combinationName, label: d.combinationName }))}
+                    dropdownRender={menu => (
+                      <>
+                        {menu}
+                        <Divider style={{ margin: '4px 0' }} />
+                        <div
+                          style={{ padding: '4px 8px', cursor: 'pointer', color: REDWOOD.info, fontSize: 12 }}
+                          onMouseDown={e => e.preventDefault()}
+                          onClick={() => { newDistForm.resetFields(); newDistForm.setFieldsValue({ businessUnit: register.businessUnit || undefined }); setNewDistOpen(true); }}
+                        >
+                          <PlusOutlined /> Add New Expense Type
+                        </div>
+                      </>
+                    )}
                   />
-                </Form.Item>
-              </Col>
-            </Row>
-            <Form.Item name="chargeAccountCcid" hidden><Input /></Form.Item>
-            <Form.Item label="Charge Account" name="chargeAccountDesc">
-              <Input placeholder="Auto-filled from expense type" readOnly />
-            </Form.Item>
-            <Form.Item label="Reason for Conversion (added to suspense comments)" name="reason">
-              <Input.TextArea rows={2} placeholder="Optional — will be prepended to original suspense comments" />
-            </Form.Item>
-            <Form.Item label="New Expense Entry Comments" name="expenseComments">
-              <Input.TextArea rows={2} placeholder="Comments for the new expense entry (optional)" />
-            </Form.Item>
-            <Form.Item shouldUpdate noStyle>
-              {({ getFieldValue }) => {
-                const amt = getFieldValue('convertAmount') || 0;
-                const remaining = Math.max(0, (convertSuspenseRec.suspenseAmount || 0) - amt);
-                return remaining > 0 ? (
-                  <div style={{ background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 6, padding: '6px 10px', marginBottom: 12, fontSize: 12 }}>
-                    <ExclamationCircleOutlined style={{ color: REDWOOD.warning, marginRight: 6 }} />
-                    {fmt(remaining)} {convertSuspenseRec.currency} will remain in suspense
+                  <InputNumber size="small" style={{ width: '100%' }} precision={2} min={0} placeholder="0.00"
+                    value={line.amount ?? undefined}
+                    onChange={v => updateConvertLine(line.key, { amount: v as number | null })}
+                  />
+                  <Input size="small" placeholder="Paid to" value={line.paidTo}
+                    onChange={e => updateConvertLine(line.key, { paidTo: e.target.value })}
+                  />
+                  <Input size="small" placeholder="Description" value={line.description}
+                    onChange={e => updateConvertLine(line.key, { description: e.target.value })}
+                  />
+                  <div>
+                    <Space.Compact size="small" style={{ width: '100%' }}>
+                      <Input size="small" placeholder="Auto-filled" value={line.chargeAccountDesc}
+                        onChange={e => updateConvertLine(line.key, { chargeAccountDesc: e.target.value })}
+                        style={{ width: 'calc(100% - 28px)' }}
+                      />
+                      <Tooltip title="Browse accounts">
+                        <Button size="small" icon={<SearchOutlined />}
+                          onClick={() => { setCoaConvertLineKey(line.key); setCoaInitialValue(line.chargeAccountDesc || ''); setCoaTarget('convertLine'); setCoaOpen(true); }}
+                        />
+                      </Tooltip>
+                    </Space.Compact>
+                    {line.acctDesc && (
+                      <div style={{ fontSize: 10, color: '#1677ff', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{line.acctDesc}</div>
+                    )}
                   </div>
-                ) : null;
-              }}
+                  <Button size="small" danger type="text" icon={<MinusCircleOutlined />}
+                    disabled={convertLines.length === 1}
+                    onClick={() => setConvertLines(prev => prev.filter(l => l.key !== line.key))}
+                  />
+                </div>
+              ))}
+            </div>
+
+            {/* Add row + totals */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <Button size="small" type="dashed" icon={<PlusOutlined />}
+                onClick={() => setConvertLines(prev => [...prev, makeNewLine()])}
+                style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}>
+                Add Line
+              </Button>
+              <div style={{ fontSize: 12, display: 'flex', gap: 16 }}>
+                {(() => {
+                  const total = convertLines.reduce((s, l) => s + (l.amount ?? 0), 0);
+                  const remaining = (convertSuspenseRec.suspenseAmount || 0) - total;
+                  return (
+                    <>
+                      <span>Total: <b>{fmt(total)} {convertSuspenseRec.currency}</b></span>
+                      {remaining > 0 && (
+                        <span style={{ color: REDWOOD.warning }}>
+                          <ExclamationCircleOutlined style={{ marginRight: 4 }} />
+                          {fmt(remaining)} will remain in suspense
+                        </span>
+                      )}
+                      {remaining < 0 && (
+                        <span style={{ color: REDWOOD.info }}>
+                          <ExclamationCircleOutlined style={{ marginRight: 4 }} />
+                          {fmt(Math.abs(remaining))} over suspense (allowed)
+                        </span>
+                      )}
+                      {remaining === 0 && total > 0 && (
+                        <span style={{ color: REDWOOD.success }}>Fully converted</span>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+
+            <Form.Item label="Reason (appended to suspense comments)" name="reason">
+              <Input.TextArea rows={2} placeholder="Optional — will be prepended to suspense comments" />
             </Form.Item>
-            {/* API Inspector */}
-            <Collapse size="small" style={{ marginBottom: 8 }}>
-              <Collapse.Panel
-                header={
-                  <Space size={4}>
-                    <ApiOutlined style={{ color: REDWOOD.info }} />
-                    <Text style={{ fontSize: 11 }}>API Inspector</Text>
-                    {convertApiError && <Tag color="error" style={{ fontSize: 10 }}>Error</Tag>}
-                    {convertApiResponse && <Tag color="success" style={{ fontSize: 10 }}>Success</Tag>}
-                  </Space>
-                }
-                key="api"
-              >
-                <Collapse size="small" ghost defaultActiveKey={['payload']}>
-                  <Collapse.Panel header={<Text style={{ fontSize: 11 }}>POST /pc/transactions — Request Payload</Text>} key="payload">
-                    <pre style={{ fontSize: 10, maxHeight: 200, overflow: 'auto', background: '#f0f5ff', padding: 8, borderRadius: 4, margin: 0, border: '1px solid #adc6ff' }}>
-                      {convertApiPayload ? JSON.stringify(convertApiPayload, null, 2) : '— submit form to see payload —'}
-                    </pre>
-                  </Collapse.Panel>
-                  {convertApiResponse && (
-                    <Collapse.Panel header={<Text style={{ fontSize: 11 }}>Response</Text>} key="response">
-                      <pre style={{ fontSize: 10, maxHeight: 120, overflow: 'auto', background: '#f6ffed', padding: 8, borderRadius: 4, margin: 0, border: '1px solid #b7eb8f' }}>
-                        {JSON.stringify(convertApiResponse, null, 2)}
-                      </pre>
-                    </Collapse.Panel>
-                  )}
-                  {convertApiError && (
-                    <Collapse.Panel header={<Text style={{ fontSize: 11, color: REDWOOD.error }}>Error</Text>} key="rawerr">
-                      <pre style={{ fontSize: 10, maxHeight: 120, overflow: 'auto', background: '#fff2f0', padding: 8, borderRadius: 4, margin: 0, border: '1px solid #ffccc7', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                        {convertApiError}
-                      </pre>
-                    </Collapse.Panel>
-                  )}
-                </Collapse>
-              </Collapse.Panel>
-            </Collapse>
+
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <Button onClick={() => { setConvertSuspenseOpen(false); convertSuspenseForm.resetFields(); }}>Cancel</Button>
+              <Button onClick={() => { setConvertSuspenseOpen(false); convertSuspenseForm.resetFields(); setConvertLines([makeNewLine()]); }}>Cancel</Button>
               <Button type="primary" htmlType="submit" loading={saving}
                 style={{ background: '#722ed1', borderColor: '#722ed1' }}>
                 Convert to Expense
@@ -4525,6 +4591,9 @@ const RegisterDetail: React.FC<{
           } else if (coaTarget === 'multiLine' && coaMultiLineKey) {
             updateLine(coaMultiLineKey, { chargeAccountDesc: accountCode, chargeAccountCcid: null, acctDesc: seg4Desc });
             setCoaMultiLineKey(null);
+          } else if (coaTarget === 'convertLine' && coaConvertLineKey) {
+            updateConvertLine(coaConvertLineKey, { chargeAccountDesc: accountCode, chargeAccountCcid: null, acctDesc: seg4Desc });
+            setCoaConvertLineKey(null);
           } else if (coaTarget === 'newDist') {
             newDistForm.setFieldsValue({ glAccountDesc: accountCode });
             setNewDistAcctDesc(seg4Desc);
