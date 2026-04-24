@@ -1637,7 +1637,7 @@ const RegisterDetail: React.FC<{
         chargeAccountDesc:    values.chargeAccountDesc || null,
         referenceNo:          addSuspenseVoucherNo || null,
         employeeName:         values.employeeName || null,
-        comments:             values.comments,
+        comments:             `${fmt(values.amount)} ${values.currency || register.currency}${values.comments ? ' — ' + values.comments : ''}`,
         postingStatus:        'Unposted',
         createdBy:            currentUser,
       });
