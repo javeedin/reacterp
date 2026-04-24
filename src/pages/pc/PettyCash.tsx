@@ -4445,6 +4445,8 @@ const RegisterDetail: React.FC<{
               }},
             { title: 'Expense Type', dataIndex: 'expenseType', width: 130,
               render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+            { title: 'Paid To', dataIndex: 'employeeName', width: 130, ellipsis: true,
+              render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
             { title: 'Money In', dataIndex: 'debitAmount', width: 90, align: 'right' as const,
               render: (v) => v > 0
                 ? <Text style={{ fontSize: 12, color: REDWOOD.success }}>{fmt(v)}</Text>
@@ -4487,19 +4489,19 @@ const RegisterDetail: React.FC<{
             const totalSus = rows.reduce((s, r) => s + (r.suspenseAmount || 0), 0);
             return (
               <Table.Summary.Row style={{ background: '#fafafa' }}>
-                <Table.Summary.Cell index={0} colSpan={4}>
+                <Table.Summary.Cell index={0} colSpan={5}>
                   <Text strong style={{ fontSize: 12 }}>Total ({rows.length} lines)</Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={4} align="right">
+                <Table.Summary.Cell index={5} align="right">
                   <Text strong style={{ fontSize: 12, color: REDWOOD.success }}>{totalDr > 0 ? fmt(totalDr) : '—'}</Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={5} align="right">
+                <Table.Summary.Cell index={6} align="right">
                   <Text strong style={{ fontSize: 12, color: REDWOOD.error }}>{totalCr > 0 ? fmt(totalCr) : '—'}</Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={6} align="right">
+                <Table.Summary.Cell index={7} align="right">
                   <Text strong style={{ fontSize: 12, color: '#722ed1' }}>{totalSus > 0 ? fmt(totalSus) : '—'}</Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={7} />
+                <Table.Summary.Cell index={8} />
               </Table.Summary.Row>
             );
           }}
