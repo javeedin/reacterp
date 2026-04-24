@@ -44,6 +44,7 @@ import {
 } from '../../services/pc.service';
 import {
   searchCombinations,
+  createCombination,
   type DistCombination,
 } from '../../services/distCombinations.service';
 import {
@@ -654,9 +655,15 @@ const RegisterDetail: React.FC<{
   const [openPeriods, setOpenPeriods]           = useState<APPeriod[]>([]);
   const [periodsLoaded, setPeriodsLoaded]       = useState(false);
   const [txnActionLoading, setTxnActionLoading] = useState<number | null>(null);
-  const [coaOpen, setCoaOpen]     = useState(false);
-  const [coaTarget, setCoaTarget] = useState<'add' | 'edit' | 'money' | 'bankAsset' | 'bankOffset' | 'refundCash'>('edit');
+  const [coaOpen, setCoaOpen]         = useState(false);
+  const [coaTarget, setCoaTarget]     = useState<'add' | 'edit' | 'money' | 'bankAsset' | 'bankOffset' | 'refundCash' | 'multiLine' | 'newDist'>('edit');
   const [coaInitialValue, setCoaInitialValue] = useState<string>('');
+  const [coaMultiLineKey, setCoaMultiLineKey] = useState<string | null>(null);
+
+  // New Expense Type (distribution combination) modal
+  const [newDistOpen, setNewDistOpen]       = useState(false);
+  const [newDistSaving, setNewDistSaving]   = useState(false);
+  const [newDistForm]                       = Form.useForm();
   const [addAcctDesc, setAddAcctDesc]         = useState<string>('');
   const [editAcctDesc, setEditAcctDesc]       = useState<string>('');
   const [moneyAcctDesc, setMoneyAcctDesc]     = useState<string>('');
@@ -3542,6 +3549,19 @@ const RegisterDetail: React.FC<{
                       }}
                       options={distCombinations.map(d => ({ value: d.combinationName, label: d.combinationName }))}
                       style={{ width: '100%' }}
+                      dropdownRender={menu => (
+                        <>
+                          {menu}
+                          <Divider style={{ margin: '4px 0' }} />
+                          <div
+                            style={{ padding: '4px 8px', cursor: 'pointer', color: REDWOOD.info, fontSize: 12 }}
+                            onMouseDown={e => e.preventDefault()}
+                            onClick={() => { newDistForm.resetFields(); setNewDistOpen(true); }}
+                          >
+                            <PlusOutlined /> Add New Expense Type
+                          </div>
+                        </>
+                      )}
                     />
 
                     {/* Amount */}
@@ -3573,12 +3593,27 @@ const RegisterDetail: React.FC<{
 
                     {/* Account (code + desc stacked) */}
                     <div>
-                      <Input
-                        size="small"
-                        placeholder="Auto-filled"
-                        value={line.chargeAccountDesc}
-                        onChange={e => updateLine(line.key, { chargeAccountDesc: e.target.value })}
-                      />
+                      <Space.Compact size="small" style={{ width: '100%' }}>
+                        <Input
+                          size="small"
+                          placeholder="Auto-filled"
+                          value={line.chargeAccountDesc}
+                          onChange={e => updateLine(line.key, { chargeAccountDesc: e.target.value })}
+                          style={{ width: 'calc(100% - 28px)' }}
+                        />
+                        <Tooltip title="Browse accounts">
+                          <Button
+                            size="small"
+                            icon={<SearchOutlined />}
+                            onClick={() => {
+                              setCoaMultiLineKey(line.key);
+                              setCoaInitialValue(line.chargeAccountDesc || '');
+                              setCoaTarget('multiLine');
+                              setCoaOpen(true);
+                            }}
+                          />
+                        </Tooltip>
+                      </Space.Compact>
                       {line.acctDesc && (
                         <div style={{ fontSize: 10, color: '#1677ff', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           {line.acctDesc}
@@ -4325,6 +4360,71 @@ const RegisterDetail: React.FC<{
         )}
       </Modal>
 
+      {/* ── New Expense Type (Distribution Combination) Modal ── */}
+      <Modal
+        title={<Space><PlusOutlined style={{ color: REDWOOD.success }} /> New Expense Type</Space>}
+        open={newDistOpen}
+        onCancel={() => { setNewDistOpen(false); newDistForm.resetFields(); }}
+        footer={null}
+        width={440}
+        destroyOnClose
+      >
+        <Form form={newDistForm} layout="vertical" size="small"
+          onFinish={async (values) => {
+            setNewDistSaving(true);
+            try {
+              await createCombination({
+                combinationName: values.combinationName,
+                description:     values.description || null,
+                glAccountDesc:   values.glAccountDesc || null,
+                businessUnit:    values.businessUnit || null,
+                module:          'PC',
+                status:          'ACTIVE',
+              });
+              message.success(`Expense type "${values.combinationName}" created`);
+              // Reload combinations
+              const fresh = await searchCombinations({ status: 'ACTIVE' });
+              setDistCombinations(fresh.filter(d => d.module === 'PC' || d.module === 'ALL'));
+              setNewDistOpen(false);
+              newDistForm.resetFields();
+            } catch (e: any) {
+              message.error(e.message || 'Failed to create expense type');
+            } finally {
+              setNewDistSaving(false);
+            }
+          }}
+        >
+          <Form.Item label="Expense Type Name" name="combinationName" rules={[{ required: true, message: 'Required' }]}>
+            <Input placeholder="e.g. Office Supplies" />
+          </Form.Item>
+          <Form.Item label="Description" name="description">
+            <Input placeholder="Optional description" />
+          </Form.Item>
+          <Form.Item label="GL Account" name="glAccountDesc">
+            <Space.Compact style={{ width: '100%' }}>
+              <Input placeholder="e.g. 01-000-5100-000-000-000-000" id="newDistAcct" />
+              <Tooltip title="Browse accounts">
+                <Button icon={<SearchOutlined />} onClick={() => {
+                  setCoaTarget('newDist');
+                  setCoaInitialValue(newDistForm.getFieldValue('glAccountDesc') || '');
+                  setCoaOpen(true);
+                }} />
+              </Tooltip>
+            </Space.Compact>
+          </Form.Item>
+          <Form.Item label="Business Unit" name="businessUnit">
+            <Input placeholder="e.g. BUIMERC" />
+          </Form.Item>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+            <Button onClick={() => { setNewDistOpen(false); newDistForm.resetFields(); }}>Cancel</Button>
+            <Button type="primary" htmlType="submit" loading={newDistSaving}
+              style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>
+              Create
+            </Button>
+          </div>
+        </Form>
+      </Modal>
+
       {/* ── Account (COA) Selector ────────────────────────── */}
       <AccountSelector
         visible={coaOpen}
@@ -4352,6 +4452,11 @@ const RegisterDetail: React.FC<{
           } else if (coaTarget === 'refundCash') {
             moneyForm.setFieldsValue({ refundCashAccount: accountCode });
             setRefundCashDesc(seg4Desc);
+          } else if (coaTarget === 'multiLine' && coaMultiLineKey) {
+            updateLine(coaMultiLineKey, { chargeAccountDesc: accountCode, chargeAccountCcid: null, acctDesc: seg4Desc });
+            setCoaMultiLineKey(null);
+          } else if (coaTarget === 'newDist') {
+            newDistForm.setFieldsValue({ glAccountDesc: accountCode });
           }
           setCoaOpen(false);
         }}
