@@ -4417,6 +4417,7 @@ const RegisterDetail: React.FC<{
         onCancel={() => { setNewDistOpen(false); newDistForm.resetFields(); setNewDistAcctDesc(''); }}
         footer={null}
         width={440}
+        zIndex={1050}
         destroyOnClose
       >
         <Form form={newDistForm} layout="vertical" size="small"
@@ -4478,12 +4479,12 @@ const RegisterDetail: React.FC<{
                 </Tooltip>
               }
             />
-            {newDistAcctDesc && (
-              <div style={{ marginTop: 4, fontSize: 11, color: '#1677ff', paddingLeft: 2 }}>
-                {newDistAcctDesc}
-              </div>
-            )}
           </Form.Item>
+          {newDistAcctDesc && (
+            <div style={{ marginTop: -8, marginBottom: 8, fontSize: 11, color: '#1677ff', paddingLeft: 2 }}>
+              {newDistAcctDesc}
+            </div>
+          )}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
             <Button onClick={() => { setNewDistOpen(false); newDistForm.resetFields(); setNewDistAcctDesc(''); }}>Cancel</Button>
             <Button type="primary" htmlType="submit" loading={newDistSaving}
