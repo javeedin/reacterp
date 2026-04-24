@@ -662,7 +662,7 @@ const RegisterDetail: React.FC<{
   const [moneyAcctDesc, setMoneyAcctDesc]     = useState<string>('');
   const [bankOffsetDesc, setBankOffsetDesc]   = useState<string>('');
   const [bankAssetDesc, setBankAssetDesc]     = useState<string>('');
-  const [fundingSource, setFundingSource]     = useState<'bank' | 'refund'>('bank');
+  const [fundingSource, setFundingSource]     = useState<'bank' | 'refund' | 'opening'>('bank');
   const [refundCashDesc, setRefundCashDesc]   = useState<string>('');
   const [linkedBankTxnRef, setLinkedBankTxnRef] = useState<string>('');
   const [bankTxnModalOpen, setBankTxnModalOpen] = useState(false);
@@ -1409,27 +1409,28 @@ const RegisterDetail: React.FC<{
     }
     setSaving(true);
     try {
-      const isRefund = fundingSource === 'refund';
+      const isRefund  = fundingSource === 'refund';
+      const isOpening = fundingSource === 'opening';
       await createTransaction({
         registerId:         register.registerId,
         transactionDate:    values.transactionDate.format('YYYY-MM-DD'),
         accountingDate:     accDate.format('YYYY-MM-DD'),
-        transactionType:    isRefund ? 'Balance Refund' : 'Balance Refill',
+        transactionType:    isRefund ? 'Balance Refund' : isOpening ? 'Opening Fund Balance' : 'Balance Refill',
         currency:           values.currency || register.currency,
         debitAmount:        values.amount,
         creditAmount:       0,
-        chargeAccountCcid:  isRefund ? null : (values.chargeAccountCcid || null),
-        chargeAccountDesc:  isRefund ? values.refundCashAccount : (values.chargeAccountDesc || null),
+        chargeAccountCcid:  isRefund || isOpening ? null : (values.chargeAccountCcid || null),
+        chargeAccountDesc:  isRefund ? values.refundCashAccount : isOpening ? null : (values.chargeAccountDesc || null),
         referenceNo:        addMoneyVoucherNo || null,
-        bankTxnId:          isRefund ? null : (linkedBankTxnRef ? (Number(linkedBankTxnRef) || null) : null),
+        bankTxnId:          isRefund || isOpening ? null : (linkedBankTxnRef ? (Number(linkedBankTxnRef) || null) : null),
         comments:           values.comments,
-        postingStatus:      'Unposted',
+        postingStatus:      isOpening ? 'Posted' : 'Unposted',
         createdBy:          currentUser,
       });
       const seqMn = addMoneyVoucherNo.match(/(\d+)$/);
       const nextSeqN = seqMn ? parseInt(seqMn[1], 10) + 1 : 1;
       setAddMoneyVoucherNo(`R${register.registerId}-${String(nextSeqN).padStart(2, '0')}`);
-      message.success(isRefund ? 'Refund recorded' : 'Money added to register');
+      message.success(isRefund ? 'Refund recorded' : isOpening ? 'Opening balance recorded' : 'Money added to register');
       moneyForm.resetFields();
       setMoneyAcctDesc('');
       setRefundCashDesc('');
@@ -2899,12 +2900,13 @@ const RegisterDetail: React.FC<{
           <Segmented
             block
             options={[
-              { label: <Space><BankOutlined />From Bank</Space>,   value: 'bank' },
-              { label: <Space><RollbackOutlined />From Refund</Space>, value: 'refund' },
+              { label: <Space><BankOutlined />From Bank</Space>,        value: 'bank' },
+              { label: <Space><RollbackOutlined />From Refund</Space>,   value: 'refund' },
+              { label: <Space><DollarOutlined />Opening Balance</Space>, value: 'opening' },
             ]}
             value={fundingSource}
             onChange={v => {
-              setFundingSource(v as 'bank' | 'refund');
+              setFundingSource(v as 'bank' | 'refund' | 'opening');
               setMoneyAcctDesc('');
               setRefundCashDesc('');
             }}
@@ -3070,6 +3072,19 @@ const RegisterDetail: React.FC<{
             </Row>
           </>)}
 
+          {/* ── Opening Balance ── */}
+          {fundingSource === 'opening' && (
+            <div style={{ background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 6, padding: '10px 12px', marginBottom: 10 }}>
+              <Space size={6}>
+                <CheckCircleOutlined style={{ color: REDWOOD.success }} />
+                <Text style={{ fontSize: 12, color: '#389e0d' }}>
+                  This entry will be recorded as <b>Opening Fund Balance</b> and automatically marked as <b>Posted</b>.
+                  No bank transaction required.
+                </Text>
+              </Space>
+            </div>
+          )}
+
           <Form.Item label="Voucher No">
             <Input
               value={addMoneyVoucherNo}
@@ -3088,7 +3103,7 @@ const RegisterDetail: React.FC<{
               <Button type="primary" htmlType="submit" loading={saving}
                 disabled={fundingSource === 'bank' && !linkedBankTxnRef}
                 style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>
-                {fundingSource === 'refund' ? 'Record Refund' : 'Add Money'}
+                {fundingSource === 'refund' ? 'Record Refund' : fundingSource === 'opening' ? 'Record Opening Balance' : 'Add Money'}
               </Button>
             </Tooltip>
           </div>
