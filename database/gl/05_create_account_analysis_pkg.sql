@@ -92,6 +92,7 @@ CREATE OR REPLACE PACKAGE BODY REERP_ACCOUNT_ANALYSIS_PKG AS
           AND (p_je_category IS NULL OR jls.USER_JE_CATEGORY_NAME = p_je_category)
           AND jls.APPROVAL_STATUS_MEANING = 'Posted';
 
+
         -- Build JSON response
         APEX_JSON.OPEN_OBJECT;
         APEX_JSON.WRITE('totalCount', v_total_count);
@@ -103,35 +104,38 @@ CREATE OR REPLACE PACKAGE BODY REERP_ACCOUNT_ANALYSIS_PKG AS
 
         FOR rec IN (
             SELECT
-                BATCH_ID,
-                JE_HEADER_ID,
-                JE_LINE_NUMBER,
-                DESCRIPTION,
-                CURRENCY_CODE,
-                COMPANY,
-                LOB,
-                DEPARTMENT,
-                ACCOUNT,
-                SUB_ACCOUNT,
-                ANALYSIS,
-                INTERCOMPANY,
-                FUTURE1,
-                FUTURE2,
-                ENTERED_DR,
-                ENTERED_CR,
-                ACCOUNTED_DR,
-                ACCOUNTED_CR,
-                CHART_OF_ACCOUNTS_NAME,
-                DEFAULT_PERIOD_NAME,
-                BATCH_NAME,
-                ACTUAL_FLAG_MEANING,
-                APPROVAL_STATUS_MEANING,
-                USER_PERIOD_SET_NAME,
-                USER_JE_SOURCE_NAME,
-                LEDGER_NAME,
-                LEGAL_ENTITY_NAME,
-                USER_JE_CATEGORY_NAME
+                jls.BATCH_ID,
+                jls.JE_HEADER_ID,
+                jls.JE_LINE_NUMBER,
+                gl.DESCRIPTION,
+                jls.CURRENCY_CODE,
+                jls.COMPANY,
+                jls.LOB,
+                jls.DEPARTMENT,
+                jls.ACCOUNT,
+                jls.SUB_ACCOUNT,
+                jls.ANALYSIS,
+                jls.INTERCOMPANY,
+                jls.FUTURE1,
+                jls.FUTURE2,
+                jls.ENTERED_DR,
+                jls.ENTERED_CR,
+                jls.ACCOUNTED_DR,
+                jls.ACCOUNTED_CR,
+                jls.CHART_OF_ACCOUNTS_NAME,
+                jls.DEFAULT_PERIOD_NAME,
+                jls.BATCH_NAME,
+                jls.ACTUAL_FLAG_MEANING,
+                jls.APPROVAL_STATUS_MEANING,
+                jls.USER_PERIOD_SET_NAME,
+                jls.USER_JE_SOURCE_NAME,
+                jls.LEDGER_NAME,
+                jls.LEGAL_ENTITY_NAME,
+                jls.USER_JE_CATEGORY_NAME
             FROM V_GL_JOURNAL_LINES_SEGMENTS jls
+            LEFT JOIN RR_GL_LINES_ALL gl
+                   ON gl.JE_HEADER_ID  = jls.JE_HEADER_ID
+                  AND gl.JE_LINE_NUMBER = jls.JE_LINE_NUMBER
             WHERE (p_ledger_name IS NULL OR jls.LEDGER_NAME = p_ledger_name)
               AND (p_period_names IS NULL OR jls.DEFAULT_PERIOD_NAME IN (
                    SELECT TRIM(REGEXP_SUBSTR(p_period_names, '[^,]+', 1, LEVEL))
