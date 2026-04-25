@@ -1951,6 +1951,25 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           setAppliedPrepaymentsList(list);
           loadAppSlaStatuses(list);
         });
+
+        // Fetch full invoice header to get fields not returned by the search endpoint
+        // (accounting_date, conversion_rate, conversion_rate_type, conversion_date, payment_currency)
+        fetch(`${APEX_DB_CONFIG.baseUrl}/ap/createinvoicefull/${initialData.invoiceId}`, { headers: { Accept: 'application/json' } })
+          .then(r => r.json())
+          .then(data => {
+            const hdr = data?.header || data;
+            const patch: Record<string, any> = {};
+            if (hdr.AccountingDate || hdr.accounting_date) patch.accountingDate = dayjs(hdr.AccountingDate || hdr.accounting_date, ['YYYY-MM-DD', 'DD-MMM-YYYY']);
+            if (hdr.ConversionRateType || hdr.conversion_rate_type) patch.conversionRateType = hdr.ConversionRateType || hdr.conversion_rate_type;
+            if (hdr.ConversionDate || hdr.conversion_date) patch.conversionDate = dayjs(hdr.ConversionDate || hdr.conversion_date, ['YYYY-MM-DD', 'DD-MMM-YYYY']);
+            if (hdr.ConversionRate || hdr.conversion_rate) patch.conversionRate = Number(hdr.ConversionRate || hdr.conversion_rate);
+            if (hdr.PaymentCurrency || hdr.payment_currency) patch.paymentCurrency = hdr.PaymentCurrency || hdr.payment_currency;
+            if (Object.keys(patch).length > 0) {
+              form.setFieldsValue(patch);
+              setHeaderValues(prev => ({ ...prev, ...patch }));
+            }
+          })
+          .catch(() => {}); // silently ignore if endpoint doesn't support GET
         // When viewing a Prepayment invoice, also load balance + applied invoices
         if ((initialData.invoiceType || '').toLowerCase() === 'prepayment') {
           fetchPrepaymentBalance(initialData.invoiceId);
