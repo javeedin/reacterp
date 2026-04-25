@@ -268,8 +268,21 @@ const ManageJournals: React.FC = () => {
   const [loadingPeriods, setLoadingPeriods] = useState(false);
 
   // Accounting date range filter
+  const [acctDatePreset, setAcctDatePreset] = useState<string | null>(null);
   const [acctFromDate, setAcctFromDate] = useState<Dayjs | null>(null);
   const [acctToDate, setAcctToDate] = useState<Dayjs | null>(null);
+
+  const getAcctDateRange = (): { from: Dayjs | null; to: Dayjs | null } => {
+    const today = dayjs();
+    switch (acctDatePreset) {
+      case 'today':  return { from: today, to: today };
+      case 'last15': return { from: today.subtract(14, 'day'), to: today };
+      case 'last30': return { from: today.subtract(29, 'day'), to: today };
+      case 'last60': return { from: today.subtract(59, 'day'), to: today };
+      case 'custom': return { from: acctFromDate, to: acctToDate };
+      default:       return { from: null, to: null };
+    }
+  };
 
   // Debug log state
   const [debugLogs, setDebugLogs] = useState<DebugLogEntry[]>([]);
@@ -658,8 +671,9 @@ const ManageJournals: React.FC = () => {
       if (values.batchStatus && values.batchStatus !== 'All') {
         baseParams.append('statusMeaning', values.batchStatus);
       }
-      if (acctFromDate) baseParams.append('from_date', acctFromDate.format('YYYY-MM-DD'));
-      if (acctToDate)   baseParams.append('to_date',   acctToDate.format('YYYY-MM-DD'));
+      const { from: acctFrom, to: acctTo } = getAcctDateRange();
+      if (acctFrom) baseParams.append('from_date', acctFrom.format('YYYY-MM-DD'));
+      if (acctTo)   baseParams.append('to_date',   acctTo.format('YYYY-MM-DD'));
 
       // Fetch with pagination - get ALL records
       const PAGE_SIZE = 500; // ORDS default max
@@ -855,6 +869,7 @@ const ManageJournals: React.FC = () => {
     setJournals([]);
     setTotalCount(0);
     setSelectedRowKeys([]);
+    setAcctDatePreset(null);
     setAcctFromDate(null);
     setAcctToDate(null);
     sessionStorage.removeItem(STORAGE_KEY);
@@ -2667,28 +2682,48 @@ const ManageJournals: React.FC = () => {
                       </Select>
                     </Form.Item>
 
-                    {/* Accounting Date Range */}
-                    <Form.Item label="Acctg Date From">
-                      <DatePicker
-                        value={acctFromDate}
-                        onChange={setAcctFromDate}
-                        style={{ width: '100%' }}
-                        format="DD-MMM-YYYY"
-                        placeholder="From date"
+                    {/* Accounting Date */}
+                    <Form.Item label="Accounting Date">
+                      <Select
+                        placeholder="Select date range"
                         allowClear
-                      />
-                    </Form.Item>
-                    <Form.Item label="Acctg Date To">
-                      <DatePicker
-                        value={acctToDate}
-                        onChange={setAcctToDate}
+                        value={acctDatePreset}
+                        onChange={(v) => {
+                          setAcctDatePreset(v ?? null);
+                          if (v !== 'custom') { setAcctFromDate(null); setAcctToDate(null); }
+                        }}
                         style={{ width: '100%' }}
-                        format="DD-MMM-YYYY"
-                        placeholder="To date"
-                        allowClear
-                        disabledDate={(d) => !!acctFromDate && d.isBefore(acctFromDate, 'day')}
-                      />
+                      >
+                        <Option value="today">Today</Option>
+                        <Option value="last15">Last 15 Days</Option>
+                        <Option value="last30">Last 30 Days</Option>
+                        <Option value="last60">Last 60 Days</Option>
+                        <Option value="custom">Custom Range</Option>
+                      </Select>
                     </Form.Item>
+                    {acctDatePreset === 'custom' && (
+                      <Form.Item label=" " colon={false}>
+                        <Space.Compact style={{ width: '100%' }}>
+                          <DatePicker
+                            value={acctFromDate}
+                            onChange={setAcctFromDate}
+                            style={{ width: '50%' }}
+                            format="DD-MMM-YYYY"
+                            placeholder="From"
+                            allowClear
+                          />
+                          <DatePicker
+                            value={acctToDate}
+                            onChange={setAcctToDate}
+                            style={{ width: '50%' }}
+                            format="DD-MMM-YYYY"
+                            placeholder="To"
+                            allowClear
+                            disabledDate={(d) => !!acctFromDate && d.isBefore(acctFromDate, 'day')}
+                          />
+                        </Space.Compact>
+                      </Form.Item>
+                    )}
                   </Col>
                 </Row>
 
