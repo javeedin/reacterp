@@ -1128,6 +1128,7 @@ const AccountAnalysis: React.FC = () => {
       ),
     },
     { title: 'Period', dataIndex: 'defaultPeriodName', key: 'defaultPeriodName', width: 80 },
+    { title: 'Acctg Date', dataIndex: 'accountingDate', key: 'accountingDate', width: 100 },
     { title: 'Batch', dataIndex: 'batchName', key: 'batchName', width: 150, ellipsis: true },
     { title: 'Source', dataIndex: 'userJeSourceName', key: 'userJeSourceName', width: 100 },
     { title: 'Category', dataIndex: 'userJeCategoryName', key: 'userJeCategoryName', width: 120 },
@@ -1728,30 +1729,30 @@ const AccountAnalysis: React.FC = () => {
                 searchData.length > 0 ? (
                   <Table.Summary fixed>
                     <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
-                      <Table.Summary.Cell index={0} colSpan={8}>
+                      <Table.Summary.Cell index={0} colSpan={9}>
                         <Text strong style={{ fontSize: 11 }}>Total</Text>
                       </Table.Summary.Cell>
-                      <Table.Summary.Cell index={8} align="right">
+                      <Table.Summary.Cell index={9} align="right">
                         <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>
                           {formatNumber(totals.enteredDr)}
                         </Text>
                       </Table.Summary.Cell>
-                      <Table.Summary.Cell index={9} align="right">
+                      <Table.Summary.Cell index={10} align="right">
                         <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>
                           {formatNumber(totals.enteredCr)}
                         </Text>
                       </Table.Summary.Cell>
-                      <Table.Summary.Cell index={10} align="right">
+                      <Table.Summary.Cell index={11} align="right">
                         <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>
                           {formatNumber(totals.accountedDr)}
                         </Text>
                       </Table.Summary.Cell>
-                      <Table.Summary.Cell index={11} align="right">
+                      <Table.Summary.Cell index={12} align="right">
                         <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>
                           {formatNumber(totals.accountedCr)}
                         </Text>
                       </Table.Summary.Cell>
-                      <Table.Summary.Cell index={12} />
+                      <Table.Summary.Cell index={13} />
                     </Table.Summary.Row>
                   </Table.Summary>
                 ) : null
