@@ -4136,7 +4136,7 @@ const RegisterDetail: React.FC<{
       <Modal
         title={<Space><RollbackOutlined style={{ color: REDWOOD.success }} />Suspense Refund</Space>}
         open={suspenseRefundOpen}
-        onCancel={() => { setSuspenseRefundOpen(false); setSuspenseRefundRec(null); suspenseRefundForm.resetFields(); setSuspenseRefundAcctDesc(''); }}
+        onCancel={() => { setSuspenseRefundOpen(false); setSuspenseRefundRec(null); suspenseRefundForm.resetFields(); }}
         footer={null}
         width={520}
         destroyOnClose
@@ -4905,7 +4905,6 @@ const RegisterDetail: React.FC<{
             setNewDistAcctDesc(seg4Desc);
           } else if (coaTarget === 'suspenseRefund') {
             suspenseRefundForm.setFieldsValue({ chargeAccountDesc: accountCode, chargeAccountCcid: null });
-            setSuspenseRefundAcctDesc(seg4Desc);
           }
           setCoaOpen(false);
         }}
