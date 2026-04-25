@@ -3526,6 +3526,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
     try {
       console.log(`${httpMethod} Invoice (${actionLabel}):`, url, payload);
+      console.log('[Payload JSON]', JSON.stringify(payload, null, 2));
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s covers fetch + body read
@@ -3728,7 +3729,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     try {
       const coreFields = ['businessUnit', 'invoiceNumber', 'invoiceCurrency', 'invoiceAmount', 'invoiceDate', 'supplier', 'invoiceType', 'paymentTerms'];
       await form.validateFields(coreFields);
-      const values = { ...form.getFieldsValue(), ...form.getFieldsValue(coreFields) };
+      const values = { ...headerValues, ...form.getFieldsValue(true) };
       if (!validateTally()) return;
       const invoiceId = await saveInvoiceWithInstallments(values);
       if (invoiceId) {
@@ -3753,8 +3754,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     try {
       const coreFields = ['businessUnit', 'invoiceNumber', 'invoiceCurrency', 'invoiceAmount', 'invoiceDate', 'supplier', 'invoiceType', 'paymentTerms'];
       await form.validateFields(coreFields);
-      // Merge all form field values (including accounting tab fields not in coreFields)
-      const values = { ...form.getFieldsValue(), ...form.getFieldsValue(coreFields) };
+      // Use headerValues as base (always up-to-date from onValuesChange + setFieldsValue),
+      // then override with form.getFieldsValue(true) for any form-registered field values
+      const values = { ...headerValues, ...form.getFieldsValue(true) };
+      console.log('[Save] values.conversionRate:', values.conversionRate, '| values.conversionRateType:', values.conversionRateType, '| values.conversionDate:', values.conversionDate, '| values.accountingDate:', values.accountingDate);
       if (!validateTally()) return false;
       const result = await saveInvoiceWithInstallments(values);
       if (result) message.success('Invoice saved successfully');
