@@ -648,7 +648,7 @@ const RegisterDetail: React.FC<{
   const [suspenseRefundOpen,     setSuspenseRefundOpen]    = useState(false);
   const [suspenseRefundRec,      setSuspenseRefundRec]     = useState<PCTransaction | null>(null);
   const [suspenseRefundForm]                               = Form.useForm();
-  const [suspenseRefundAcctDesc, setSuspenseRefundAcctDesc] = useState<string>('');
+
   const [suspenseListOpen,       setSuspenseListOpen]      = useState(false);
   const [editTxnOpen, setEditTxnOpen]                   = useState(false);
   const [editTxn, setEditTxn]                           = useState<PCTransaction | null>(null);
@@ -1637,7 +1637,8 @@ const RegisterDetail: React.FC<{
         currency:             values.currency || register.currency,
         debitAmount:          0,
         creditAmount:         0,
-        suspenseAmount:       values.amount,
+        suspenseAmount:         values.amount,
+        originalSuspenseAmount: values.amount,
         chargeAccountCcid:    values.chargeAccountCcid || null,
         chargeAccountDesc:    values.chargeAccountDesc || null,
         referenceNo:          addSuspenseVoucherNo || null,
@@ -1745,34 +1746,32 @@ const RegisterDetail: React.FC<{
     setSaving(true);
     try {
       const remaining = Math.max(0, (suspenseRefundRec.suspenseAmount || 0) - refundAmt);
+      // Reduce the original suspense transaction's balance
       await updateTransaction(suspenseRefundRec.transactionId, {
         suspenseAmount: remaining,
         updatedBy: currentUser,
       });
-      const txnDate = toIsoDate(suspenseRefundRec.transactionDate);
+      // Create the refund record — negative suspense, no debit (not money-in), no account needed
       await createTransaction({
-        registerId:        register.registerId,
-        transactionDate:   values.transactionDate.format('YYYY-MM-DD'),
-        accountingDate:    values.transactionDate.format('YYYY-MM-DD'),
-        transactionType:   'Expense' as const,
-        expenseType:       'REFUND',
-        currency:          suspenseRefundRec.currency,
-        debitAmount:       refundAmt,
-        creditAmount:      0,
-        suspenseAmount:    0,
-        chargeAccountCcid: values.chargeAccountCcid || null,
-        chargeAccountDesc: values.chargeAccountDesc || null,
-        referenceNo:       suspenseRefundRec.referenceNo || null,
-        employeeName:      suspenseRefundRec.employeeName || null,
-        comments:          values.comments
+        registerId:      register.registerId,
+        transactionDate: values.transactionDate.format('YYYY-MM-DD'),
+        accountingDate:  values.transactionDate.format('YYYY-MM-DD'),
+        transactionType: 'Expense' as const,
+        expenseType:     'SUSPENSE_REFUND',
+        currency:        suspenseRefundRec.currency,
+        debitAmount:     0,
+        creditAmount:    0,
+        suspenseAmount:  -refundAmt,
+        referenceNo:     suspenseRefundRec.referenceNo || null,
+        employeeName:    suspenseRefundRec.employeeName || null,
+        comments:        values.comments
           ? `${fmt(refundAmt)} ${suspenseRefundRec.currency} — ${values.comments}`
           : `${fmt(refundAmt)} ${suspenseRefundRec.currency} — Suspense refund`,
-        postingStatus:     'Unposted' as const,
-        createdBy:         currentUser,
+        postingStatus:   'Posted' as const,
+        createdBy:       currentUser,
       });
       message.success(`Refund of ${fmt(refundAmt)} recorded${remaining > 0 ? ` — ${fmt(remaining)} remains in suspense` : ''}`);
       suspenseRefundForm.resetFields();
-      setSuspenseRefundAcctDesc('');
       setSuspenseRefundOpen(false);
       setSuspenseRefundRec(null);
       onRefresh();
@@ -1928,8 +1927,8 @@ const RegisterDetail: React.FC<{
     const selected = overrideTxns ?? transactions.filter(t => selectedRowKeys.includes(t.transactionId));
     if (selected.length === 0) { message.warning('Select at least one transaction.'); return; }
 
-    const noAcct = selected.filter(t => !t.chargeAccountDesc);
-    const eligible = selected.filter(t => !!t.chargeAccountDesc);
+    const noAcct = selected.filter(t => !t.chargeAccountDesc && t.expenseType !== 'SUSPENSE_REFUND');
+    const eligible = selected.filter(t => !!t.chargeAccountDesc && t.expenseType !== 'SUSPENSE_REFUND');
     if (noAcct.length > 0) message.warning(`${noAcct.length} line(s) skipped — no charge account assigned.`);
     if (eligible.length === 0) { message.error('None of the selected transactions have a charge account.'); return; }
 
@@ -2355,12 +2354,18 @@ const RegisterDetail: React.FC<{
           ? <Text style={{ fontSize: 12, color: REDWOOD.error, fontWeight: rec.__group ? 600 : 400 }}>{fmt(val)}</Text>
           : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text>;
       }},
-    { title: 'Suspense', dataIndex: 'suspenseAmount', width: 120, align: 'right',
+    { title: 'Orig. Suspense', dataIndex: 'originalSuspenseAmount', width: 120, align: 'right',
+      render: (v, rec) => {
+        if (rec.__group) return null;
+        return v != null && v !== 0
+          ? <Text style={{ fontSize: 12, color: '#722ed1' }}>{fmt(v)}</Text>
+          : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text>;
+      }},
+    { title: 'Suspense', dataIndex: 'suspenseAmount', width: 110, align: 'right',
       render: (v, rec) => {
         const val = rec.__group ? rec.suspenseAmount : v;
-        return val > 0
-          ? <Text style={{ fontSize: 12, color: '#722ed1', fontWeight: rec.__group ? 600 : 400 }}>{fmt(val)}</Text>
-          : <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text>;
+        if (!val) return <Text style={{ fontSize: 12, color: REDWOOD.neutral300 }}>—</Text>;
+        return <Text style={{ fontSize: 12, color: val < 0 ? REDWOOD.error : '#722ed1', fontWeight: rec.__group ? 600 : 400 }}>{fmt(val)}</Text>;
       }},
     { title: 'Balance', dataIndex: 'runningBalance', width: 120, align: 'right',
       render: (v, rec) => {
@@ -4180,40 +4185,12 @@ const RegisterDetail: React.FC<{
               </Col>
             </Row>
 
-            <Form.Item label="Charge Account" name="chargeAccountDesc" rules={[{ required: true, message: 'Charge account is required' }]}>
-              <Input
-                readOnly
-                placeholder="Select account combination"
-                suffix={
-                  <SearchOutlined
-                    style={{ cursor: 'pointer', color: REDWOOD.info }}
-                    onClick={() => {
-                      setCoaInitialValue(suspenseRefundForm.getFieldValue('chargeAccountDesc') || '');
-                      setCoaTarget('suspenseRefund');
-                      setCoaOpen(true);
-                    }}
-                  />
-                }
-                onClick={() => {
-                  setCoaInitialValue(suspenseRefundForm.getFieldValue('chargeAccountDesc') || '');
-                  setCoaTarget('suspenseRefund');
-                  setCoaOpen(true);
-                }}
-              />
-            </Form.Item>
-            {suspenseRefundAcctDesc && (
-              <div style={{ marginTop: -12, marginBottom: 12, fontSize: 11, color: '#1677ff', paddingLeft: 2 }}>
-                {suspenseRefundAcctDesc}
-              </div>
-            )}
-            <Form.Item name="chargeAccountCcid" hidden><Input /></Form.Item>
-
             <Form.Item label="Comments" name="comments">
               <Input.TextArea rows={2} placeholder="Optional notes about this refund" />
             </Form.Item>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
-              <Button onClick={() => { setSuspenseRefundOpen(false); setSuspenseRefundRec(null); suspenseRefundForm.resetFields(); setSuspenseRefundAcctDesc(''); }}>Cancel</Button>
+              <Button onClick={() => { setSuspenseRefundOpen(false); setSuspenseRefundRec(null); suspenseRefundForm.resetFields(); }}>Cancel</Button>
               <Button type="primary" htmlType="submit" loading={saving} style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>
                 Record Refund
               </Button>
@@ -4248,7 +4225,9 @@ const RegisterDetail: React.FC<{
                   render: (v) => v ? <Text style={{ fontSize: 12, fontFamily: 'monospace', color: '#722ed1' }}>{v}</Text> : '—' },
                 { title: 'Paid To', dataIndex: 'employeeName', width: 140, ellipsis: true,
                   render: (v) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
-                { title: 'Suspense Amt', dataIndex: 'suspenseAmount', width: 110, align: 'right' as const,
+                { title: 'Orig. Suspense', dataIndex: 'originalSuspenseAmount', width: 110, align: 'right' as const,
+                  render: (v) => v != null ? <Text style={{ fontSize: 12, color: '#722ed1' }}>{fmt(v)}</Text> : <Text style={{ color: REDWOOD.neutral300 }}>—</Text> },
+                { title: 'Balance', dataIndex: 'suspenseAmount', width: 110, align: 'right' as const,
                   render: (v) => <Text style={{ fontSize: 12, fontWeight: 600, color: '#722ed1' }}>{fmt(v)}</Text> },
                 { title: 'Comments', dataIndex: 'comments', ellipsis: true,
                   render: (v) => <Text style={{ fontSize: 11 }}>{v || '—'}</Text> },
@@ -5976,7 +5955,7 @@ const PettyCash: React.FC = () => {
   const openTransfer = (tab: RegisterTab) => {
     // Suspense entries are always Unposted by design — exclude them from the check
     const unposted = tab.transactions.filter(
-      t => t.postingStatus !== 'Posted' && t.expenseType !== 'SUSPENSE'
+      t => t.postingStatus !== 'Posted' && t.expenseType !== 'SUSPENSE' && t.expenseType !== 'SUSPENSE_REFUND'
     );
     if (unposted.length > 0) {
       message.error(
