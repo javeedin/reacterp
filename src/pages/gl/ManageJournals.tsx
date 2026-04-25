@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import dayjs, { type Dayjs } from 'dayjs';
 import {
   Layout,
   Card,
@@ -18,6 +19,7 @@ import {
   Dropdown,
   Collapse,
   message,
+  DatePicker,
   Tabs,
   Modal,
   Spin,
@@ -264,6 +266,10 @@ const ManageJournals: React.FC = () => {
   const [periods, setPeriods] = useState<Period[]>([]);
   const [loadingLedgers, setLoadingLedgers] = useState(false);
   const [loadingPeriods, setLoadingPeriods] = useState(false);
+
+  // Accounting date range filter
+  const [acctFromDate, setAcctFromDate] = useState<Dayjs | null>(null);
+  const [acctToDate, setAcctToDate] = useState<Dayjs | null>(null);
 
   // Debug log state
   const [debugLogs, setDebugLogs] = useState<DebugLogEntry[]>([]);
@@ -652,6 +658,8 @@ const ManageJournals: React.FC = () => {
       if (values.batchStatus && values.batchStatus !== 'All') {
         baseParams.append('statusMeaning', values.batchStatus);
       }
+      if (acctFromDate) baseParams.append('from_date', acctFromDate.format('YYYY-MM-DD'));
+      if (acctToDate)   baseParams.append('to_date',   acctToDate.format('YYYY-MM-DD'));
 
       // Fetch with pagination - get ALL records
       const PAGE_SIZE = 500; // ORDS default max
@@ -847,6 +855,8 @@ const ManageJournals: React.FC = () => {
     setJournals([]);
     setTotalCount(0);
     setSelectedRowKeys([]);
+    setAcctFromDate(null);
+    setAcctToDate(null);
     sessionStorage.removeItem(STORAGE_KEY);
   };
 
@@ -2655,6 +2665,29 @@ const ManageJournals: React.FC = () => {
                       <Select placeholder="Select status" allowClear>
                         {batchStatuses.map(s => <Option key={s} value={s}>{s}</Option>)}
                       </Select>
+                    </Form.Item>
+
+                    {/* Accounting Date Range */}
+                    <Form.Item label="Acctg Date From">
+                      <DatePicker
+                        value={acctFromDate}
+                        onChange={setAcctFromDate}
+                        style={{ width: '100%' }}
+                        format="DD-MMM-YYYY"
+                        placeholder="From date"
+                        allowClear
+                      />
+                    </Form.Item>
+                    <Form.Item label="Acctg Date To">
+                      <DatePicker
+                        value={acctToDate}
+                        onChange={setAcctToDate}
+                        style={{ width: '100%' }}
+                        format="DD-MMM-YYYY"
+                        placeholder="To date"
+                        allowClear
+                        disabledDate={(d) => !!acctFromDate && d.isBefore(acctFromDate, 'day')}
+                      />
                     </Form.Item>
                   </Col>
                 </Row>

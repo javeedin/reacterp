@@ -544,6 +544,19 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
     }
   };
 
+  // Reset to a fresh blank journal (after save/post) — stays on same page
+  const handleResetForNewJournal = () => {
+    const freshJournal = createNewJournal('1');
+    setJournals([freshJournal]);
+    setCurrentJournalIndex(0);
+    setBatchData({
+      batchName: generateBatchName(),
+      description: '',
+      balanceType: 'Actual',
+      accountingPeriod: batchData.accountingPeriod,
+    });
+  };
+
   // Open account selector for a line
   const openAccountSelector = (lineKey: string, initialValue?: string) => {
     setEditingLineKey(lineKey);
@@ -1083,13 +1096,16 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
     }
   };
 
-  // Close JSON modal and reset — if save succeeded in embedded mode, close the tab
+  // Close JSON modal — on success reset to blank journal (stay on page); in embedded mode also notify parent
   const handleCloseJsonModal = () => {
     const wasSuccessful = saveResponse && !saveResponse.error;
     setJsonPreviewVisible(false);
     setJsonPayload(null);
     setSaveResponse(null);
-    if (wasSuccessful && embeddedMode && onSaved) { onSaved(); }
+    if (wasSuccessful) {
+      handleResetForNewJournal();
+      if (embeddedMode && onSaved) { onSaved(); }
+    }
   };
 
   // Handle Post - requires balanced journal with lines
@@ -1127,7 +1143,8 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
       }
 
       message.success('Journal posted successfully');
-      if (embeddedMode && onSaved) { onSaved(); } else { navigate('/gl/manage-journals'); }
+      handleResetForNewJournal();
+      if (embeddedMode && onSaved) { onSaved(); }
     } catch (error: any) {
       message.error(`Failed to post journal: ${error.message || 'Unknown error'}`);
     } finally {
@@ -1281,6 +1298,11 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
               maxWidth: 320,
             }}>
               {record.accountDescription}
+            </div>
+          )}
+          {!record.account && (
+            <div style={{ fontSize: 10, color: REDWOOD.neutral300, marginTop: 2 }}>
+              {journalData.company ? `${journalData.company} – … – [Account] – …` : '– select account combination –'}
             </div>
           )}
         </div>
@@ -2446,7 +2468,7 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
               <Space>
                 {saveResponse ? (
                   <Button type="primary" onClick={handleCloseJsonModal}>
-                    Close
+                    {saveResponse.error ? 'Close' : 'New Journal'}
                   </Button>
                 ) : (
                   <>
