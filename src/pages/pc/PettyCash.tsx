@@ -2290,10 +2290,10 @@ const RegisterDetail: React.FC<{
 
   // ── Transaction columns ────────────────────────────────────
   const txnColumns: ColumnsType<TxnRow> = [
-    { title: '#', dataIndex: 'lineNumber', width: 50, align: 'center',
+    { title: '#', dataIndex: 'lineNumber', width: 64, align: 'center',
       render: (v, rec) => rec.__group
         ? <Tag style={{ fontSize: 11, margin: 0 }}>{rec.children!.length} lines</Tag>
-        : <Text style={{ fontSize: 12 }}>{v}</Text> },
+        : <Text style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{v}</Text> },
     { title: 'Txn ID', dataIndex: 'transactionId', width: 76, align: 'center' as const,
       render: (v, rec) => rec.__group ? null
         : <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.neutral600 }}>{v}</Text> },
