@@ -3728,7 +3728,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     try {
       const coreFields = ['businessUnit', 'invoiceNumber', 'invoiceCurrency', 'invoiceAmount', 'invoiceDate', 'supplier', 'invoiceType', 'paymentTerms'];
       await form.validateFields(coreFields);
-      const values = form.getFieldsValue(true);
+      const values = { ...form.getFieldsValue(), ...form.getFieldsValue(coreFields) };
       if (!validateTally()) return;
       const invoiceId = await saveInvoiceWithInstallments(values);
       if (invoiceId) {
@@ -3753,7 +3753,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     try {
       const coreFields = ['businessUnit', 'invoiceNumber', 'invoiceCurrency', 'invoiceAmount', 'invoiceDate', 'supplier', 'invoiceType', 'paymentTerms'];
       await form.validateFields(coreFields);
-      const values = form.getFieldsValue(true);
+      // Merge all form field values (including accounting tab fields not in coreFields)
+      const values = { ...form.getFieldsValue(), ...form.getFieldsValue(coreFields) };
       if (!validateTally()) return false;
       const result = await saveInvoiceWithInstallments(values);
       if (result) message.success('Invoice saved successfully');
@@ -4705,7 +4706,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               }
               // Copy invoice date to all lines' accounting date + derive multiperiod dates
               if (changedValues.invoiceDate) {
-                form.setFieldValue('accountingDate', changedValues.invoiceDate);
+                // Only auto-set header accounting date for new invoices, not when editing existing ones
+                if (!initialData?.invoiceId) {
+                  form.setFieldValue('accountingDate', changedValues.invoiceDate);
+                }
                 const formattedDate = changedValues.invoiceDate.format('DD-MMM-YYYY');
                 const endDate = getEndOfMonth(formattedDate);
                 setLines((prev) => prev.map((line) => ({
