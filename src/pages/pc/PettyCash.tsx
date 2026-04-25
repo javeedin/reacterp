@@ -3034,8 +3034,8 @@ const RegisterDetail: React.FC<{
             rowKey={(r) => r.__group ? `grp-${r.referenceNo}` : r.transactionId}
             size="small"
             loading={txnLoading}
-            pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `${t} row${t !== 1 ? 's' : ''}` }}
-            scroll={{ x: 1600 }}
+            pagination={false}
+            scroll={{ x: 1600, y: 'calc(100vh - 420px)' }}
             expandable={{ defaultExpandAllRows: true, indentSize: 16 }}
             locale={{ emptyText: q ? 'No transactions match your search.' : 'No transactions yet — use Add Money or Add Expense to begin.' }}
             rowClassName={(r) => r.__group ? 'pc-row-group' : r.transactionType === 'Balance Refill' ? 'pc-row-refill' : r.__childOf ? 'pc-row-child' : ''}
