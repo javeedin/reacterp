@@ -3754,11 +3754,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     try {
       const coreFields = ['businessUnit', 'invoiceNumber', 'invoiceCurrency', 'invoiceAmount', 'invoiceDate', 'supplier', 'invoiceType', 'paymentTerms'];
       await form.validateFields(coreFields);
-      // Use headerValues as base (always up-to-date from onValuesChange + setFieldsValue),
-      // then override with form.getFieldsValue(true) for any form-registered field values
       const values = { ...headerValues, ...form.getFieldsValue(true) };
-      console.log('[Save] values.conversionRate:', values.conversionRate, '| values.conversionRateType:', values.conversionRateType, '| values.conversionDate:', values.conversionDate, '| values.accountingDate:', values.accountingDate);
       if (!validateTally()) return false;
+      // In edit mode: show preview modal so user can inspect full URL + JSON before sending
+      if (savedInvoiceId) {
+        handleApiPreview(values);
+        return false;
+      }
       const result = await saveInvoiceWithInstallments(values);
       if (result) message.success('Invoice saved successfully');
       return Boolean(result);
@@ -3770,8 +3772,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   };
 
   // Show API preview (URL + JSON body for Postman testing)
-  const handleApiPreview = () => {
-    const values = form.getFieldsValue();
+  const handleApiPreview = (previewValues?: any) => {
+    const values = previewValues || { ...headerValues, ...form.getFieldsValue(true) };
     const payload = buildInvoicePayload(values);
     const isUpdate = savedInvoiceId !== null;
     const url = isUpdate
@@ -7270,13 +7272,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         title={
           <Space>
             <ApiOutlined style={{ color: REDWOOD.info }} />
-            <span>API Preview — Postman</span>
+            <span>{apiPreviewData?.url?.startsWith('PUT') ? 'Update Invoice — Review & Confirm' : 'API Preview — Postman'}</span>
           </Space>
         }
         open={apiPreviewVisible}
         onCancel={() => setApiPreviewVisible(false)}
         footer={<Button onClick={() => setApiPreviewVisible(false)}>Close</Button>}
-        width={800}
+        width={900}
         styles={{ body: { padding: '16px 24px', maxHeight: '75vh', overflowY: 'auto' } }}
         destroyOnClose
       >
@@ -7310,10 +7312,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                         <Button
                           size="small" type="primary" icon={<PlayCircleOutlined />}
                           loading={r?.loading}
-                          style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+                          style={{ background: apiPreviewData.url.startsWith('PUT') ? REDWOOD.warning : REDWOOD.primary, borderColor: apiPreviewData.url.startsWith('PUT') ? REDWOOD.warning : REDWOOD.primary }}
                           onClick={executePreviewInvoiceApi}
                         >
-                          Execute
+                          {apiPreviewData.url.startsWith('PUT') ? 'Update Invoice' : 'Execute'}
                         </Button>
                       </Space>
                     </Row>
