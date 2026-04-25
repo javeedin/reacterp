@@ -479,6 +479,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [supplierSearchText, setSupplierSearchText] = useState('');
   const [selectedSupplierInfo, setSelectedSupplierInfo] = useState<{ number: string; id: number } | null>(null);
   const [businessUnits, setBusinessUnits] = useState<{ name: string; company: string }[]>([]);
+  const [buSelected, setBuSelected] = useState<boolean>(!!initialData?.businessUnit);
 
   // Supplier sites
   const [supplierSites, setSupplierSites] = useState<SupplierSiteRecord[]>([]);
@@ -1925,6 +1926,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       if (initialData.liabilityDistribution) formValues.liabilityDistribution = initialData.liabilityDistribution;
       form.setFieldsValue(formValues);
       setHeaderValues((prev) => ({ ...prev, ...formValues }));
+      if (initialData.businessUnit) setBuSelected(true);
 
       // Edit mode: fetch existing lines, payments, holds, installments, applied prepayments
       if (initialData.invoiceId) {
@@ -4643,7 +4645,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             labelCol={{ span: 9 }}
             wrapperCol={{ span: 15 }}
             size="small"
-            disabled={isReadOnly}
+            disabled={isReadOnly || !buSelected}
             initialValues={{
               invoiceType: 'Standard',
               invoiceCurrency: 'AED',
@@ -4722,6 +4724,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   description: line.description ? line.description : (changedValues.description || ''),
                 })));
               }
+              // When business unit changes, update buSelected gate
+              if ('businessUnit' in changedValues) {
+                setBuSelected(!!changedValues.businessUnit);
+              }
               // When business unit changes, build liability distribution:
               // segment 1 = company from BU webservice; rest is fixed
               if ('businessUnit' in changedValues && changedValues.businessUnit) {
@@ -4763,8 +4769,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           rules={[{ required: true, message: 'Required' }]}
                           style={{ marginBottom: 4 }}
                           data-sat-id="invoice-business-unit"
+                          extra={!buSelected && !isReadOnly
+                            ? <Text style={{ fontSize: 11, color: REDWOOD.warning }}>Select a Business Unit to enable the rest of the form</Text>
+                            : undefined}
                         >
-                          <Select placeholder="Select Business Unit" showSearch allowClear>
+                          <Select
+                            placeholder="Select Business Unit"
+                            showSearch
+                            allowClear
+                            disabled={isReadOnly}
+                          >
                             {businessUnits.map(bu => (
                               <Option key={bu.name} value={bu.name}>{bu.name}</Option>
                             ))}
