@@ -3026,7 +3026,7 @@ const RegisterDetail: React.FC<{
           <Table<TxnRow>
             dataSource={groupedRows}
             columns={txnColumns}
-            rowKey={(r) => r.__group ? `grp-${r.referenceNo}` : String(r.transactionId)}
+            rowKey={(r) => r.__group ? `grp-${r.referenceNo}` : r.transactionId}
             size="small"
             loading={txnLoading}
             pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `${t} row${t !== 1 ? 's' : ''}` }}
