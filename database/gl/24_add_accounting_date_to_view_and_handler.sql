@@ -1,6 +1,7 @@
 -- ============================================================
--- Add ACCOUNTING_DATE (DEFAULT_EFFECTIVE_DATE) to view and
+-- Add ACCOUNTING_DATE (H.EFFECTIVE_DATE) to view and
 -- add from_date / to_date filter to the accountanalysis handler.
+-- Note: RR_GL_JE_HEADERS uses EFFECTIVE_DATE (not DEFAULT_EFFECTIVE_DATE).
 -- Run in APEX SQL Workshop.
 -- ============================================================
 
@@ -44,7 +45,7 @@ SELECT
     H.LEDGER_NAME,
     H.LEGAL_ENTITY_NAME,
     H.USER_JE_CATEGORY_NAME,
-    H.DEFAULT_EFFECTIVE_DATE AS ACCOUNTING_DATE
+    H.EFFECTIVE_DATE AS ACCOUNTING_DATE
 FROM RR_GL_JE_LINES_ALL L
 JOIN RR_GL_JE_HEADERS H ON L.JE_HEADER_ID = H.JE_HEADER_ID
 JOIN RR_GL_JOURNAL_BATCHES B ON B.JE_BATCH_ID = L.BATCH_ID
