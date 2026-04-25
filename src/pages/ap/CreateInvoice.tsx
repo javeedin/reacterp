@@ -447,6 +447,11 @@ export interface InvoiceInitialData {
   termsDate?: string;
   goodsReceivedDate?: string;
   liabilityDistribution?: string;
+  accountingDate?: string;
+  conversionRateType?: string;
+  conversionDate?: string;
+  conversionRate?: number | null;
+  paymentCurrency?: string;
   // Synced invoice (from Oracle Fusion) — read-only except Pay in Full
   isSynced?: boolean;
 }
@@ -1924,6 +1929,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       if (initialData.termsDate) formValues.termsDate = dayjs(initialData.termsDate, ['YYYY-MM-DD', 'DD-MMM-YYYY', 'DD MMM YYYY']);
       if (initialData.goodsReceivedDate) formValues.goodsReceivedDate = dayjs(initialData.goodsReceivedDate, ['YYYY-MM-DD', 'DD-MMM-YYYY', 'DD MMM YYYY']);
       if (initialData.liabilityDistribution) formValues.liabilityDistribution = initialData.liabilityDistribution;
+      if (initialData.accountingDate) formValues.accountingDate = dayjs(initialData.accountingDate, ['YYYY-MM-DD', 'DD-MMM-YYYY', 'DD MMM YYYY']);
+      if (initialData.conversionRateType) formValues.conversionRateType = initialData.conversionRateType;
+      if (initialData.conversionDate) formValues.conversionDate = dayjs(initialData.conversionDate, ['YYYY-MM-DD', 'DD-MMM-YYYY', 'DD MMM YYYY']);
+      if (initialData.conversionRate) formValues.conversionRate = initialData.conversionRate;
+      if (initialData.paymentCurrency) formValues.paymentCurrency = initialData.paymentCurrency;
       form.setFieldsValue(formValues);
       setHeaderValues((prev) => ({ ...prev, ...formValues }));
       if (initialData.businessUnit) setBuSelected(true);
@@ -6782,8 +6792,21 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           const invoiceDate = form.getFieldValue('invoiceDate');
           const defaultAcctDate = invoiceDate?.format?.('DD-MMM-YYYY') || 'N/A';
           const invoiceCurrency = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
-          const convRate = headerValues.conversionRate || form.getFieldValue('conversionRate') || 1;
+          const convRate = headerValues.conversionRate || form.getFieldValue('conversionRate') || 0;
           const isForeignCurrency = invoiceCurrency !== 'AED';
+          if (isForeignCurrency && !convRate) {
+            return (
+              <div style={{ textAlign: 'center', padding: '40px 0' }}>
+                <Text type="danger" style={{ fontSize: 14 }}>
+                  Conversion rate is required for foreign currency invoices ({invoiceCurrency}) before checking accounting.
+                </Text>
+                <div style={{ marginTop: 8, color: REDWOOD.neutral600, fontSize: 12 }}>
+                  Please enter the Conversion Rate in the Accounting tab and save the invoice.
+                </div>
+              </div>
+            );
+          }
+          const effectiveRate = convRate || 1;
           type AcctEntry = { key: number; period: string; line: string; account: string; description: string; lineClass: string; debit: number; credit: number; accountedDebit: number; accountedCredit: number; isGroupHeader?: boolean; isPeriodSubtotal?: boolean; subtotalDebit?: number; subtotalCredit?: number; subtotalAccountedDebit?: number; subtotalAccountedCredit?: number };
 
           // ── Shared table renderer ────────────────────────────────────────────
@@ -6976,7 +6999,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
               periodLines.forEach((l) => {
                 const amt = l.amount || 0;
-                const acctAmt = Math.round(amt * convRate * 100) / 100;
+                const acctAmt = Math.round(amt * effectiveRate * 100) / 100;
                 // Not MPA if start and end are in the same calendar month
                 const isMpa = !!(l.startDate && l.endDate && l.accrualAccount &&
                   dayjs(l.startDate, ['DD-MMM-YYYY', 'YYYY-MM-DD']).format('YYYY-MM') !==
@@ -6991,7 +7014,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
               const periodLineTax = periodLines.reduce((sum, l) => sum + Math.round((l.amount || 0) * (getTaxRateForClassification(l.taxClassification) / 100) * 100) / 100, 0);
               if (periodLineTax > 0) {
-                const acctTax = Math.round(periodLineTax * convRate * 100) / 100;
+                const acctTax = Math.round(periodLineTax * effectiveRate * 100) / 100;
                 allEntries.push({ key: keyIdx++, period, line: 'Tax', account: 'Tax Recoverable', description: 'Input VAT', lineClass: 'Tax Recoverable', debit: periodLineTax, credit: 0, accountedDebit: acctTax, accountedCredit: 0 });
                 periodDebit += periodLineTax;
                 periodAccountedDebit += acctTax;
@@ -6999,14 +7022,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
               periodLines.forEach((l) => {
                 const amt = l.amount || 0;
-                const acctAmt = Math.round(amt * convRate * 100) / 100;
+                const acctAmt = Math.round(amt * effectiveRate * 100) / 100;
                 allEntries.push({ key: keyIdx++, period, line: `Line ${l.lineNumber}`, account: liabilityDist, description: `AP — ${l.description || l.type || 'Item'}`, lineClass: 'Liability', debit: 0, credit: amt, accountedDebit: 0, accountedCredit: acctAmt });
                 periodCredit += amt;
                 periodAccountedCredit += acctAmt;
               });
 
               if (periodLineTax > 0) {
-                const acctTax = Math.round(periodLineTax * convRate * 100) / 100;
+                const acctTax = Math.round(periodLineTax * effectiveRate * 100) / 100;
                 allEntries.push({ key: keyIdx++, period, line: 'Tax', account: liabilityDist, description: 'AP — Input VAT', lineClass: 'Liability', debit: 0, credit: periodLineTax, accountedDebit: 0, accountedCredit: acctTax });
                 periodCredit += periodLineTax;
                 periodAccountedCredit += acctTax;

@@ -133,6 +133,11 @@ interface InvoiceRecord {
   termsDate: string;
   goodsReceivedDate: string;
   liabilityDistribution: string;
+  accountingDate: string;
+  conversionRateType: string;
+  conversionDate: string;
+  conversionRate: number | null;
+  paymentCurrency: string;
   syncStatus: string;
 }
 
@@ -276,6 +281,11 @@ const mapApiToInvoiceRecord = (item: any, index: number): InvoiceRecord => ({
   termsDate: item.terms_date || '',
   goodsReceivedDate: item.goods_received_date || '',
   liabilityDistribution: item.liability_distribution || '',
+  accountingDate: item.accounting_date || '',
+  conversionRateType: item.conversion_rate_type || '',
+  conversionDate: item.conversion_date || '',
+  conversionRate: item.conversion_rate != null ? Number(item.conversion_rate) : null,
+  paymentCurrency: item.payment_currency || item.invoice_currency || 'AED',
   // Invoices created in this app have invoice_source='MANUAL'.
   // Any other source (Oracle Fusion sync, import, etc.) is read-only.
   syncStatus: (item.invoice_source && item.invoice_source !== 'MANUAL') ? 'SYNCED' : '',
@@ -882,6 +892,11 @@ const ManageInvoices: React.FC = () => {
       termsDate: record.termsDate,
       goodsReceivedDate: record.goodsReceivedDate,
       liabilityDistribution: record.liabilityDistribution,
+      accountingDate: record.accountingDate,
+      conversionRateType: record.conversionRateType,
+      conversionDate: record.conversionDate,
+      conversionRate: record.conversionRate,
+      paymentCurrency: record.paymentCurrency,
     };
 
     const newTab: InvoiceTab = {
