@@ -188,6 +188,17 @@ interface AccountItem {
   account_type: string;
 }
 
+interface SegmentValues {
+  companies: string[];
+  lobs: string[];
+  departments: string[];
+  subAccounts: string[];
+  analyses: string[];
+  intercompanies: string[];
+  sources: string[];
+  categories: string[];
+}
+
 // Helper to parse period string to sortable date
 const parsePeriodToDate = (period: string): Date => {
   const monthMap: Record<string, number> = {
@@ -230,6 +241,13 @@ const AccountAnalysis: React.FC = () => {
   const [intercompanyFilter, setIntercompanyFilter] = useState<string>('');
   const [jeSourceFilter, setJeSourceFilter] = useState<string>('');
   const [jeCategoryFilter, setJeCategoryFilter] = useState<string>('');
+
+  // Segment LOV state
+  const [segmentValues, setSegmentValues] = useState<SegmentValues>({
+    companies: availableCompanies,
+    lobs: [], departments: [], subAccounts: [],
+    analyses: [], intercompanies: [], sources: [], categories: [],
+  });
 
   // Account lookup modal state
   const [accountLookupVisible, setAccountLookupVisible] = useState(false);
@@ -378,6 +396,30 @@ const AccountAnalysis: React.FC = () => {
   useEffect(() => {
     fetchPeriods();
   }, [fetchPeriods]);
+
+  // Fetch distinct segment LOV values
+  const fetchSegmentValues = useCallback(async () => {
+    try {
+      const params = new URLSearchParams({ ledger_name: selectedLedger });
+      const res = await fetch(`${API_BASE_URL}/segment-values?${params.toString()}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setSegmentValues({
+        companies: data.companies?.length ? data.companies : availableCompanies,
+        lobs:          data.lobs          || [],
+        departments:   data.departments   || [],
+        subAccounts:   data.subAccounts   || [],
+        analyses:      data.analyses      || [],
+        intercompanies: data.intercompanies || [],
+        sources:       data.sources       || [],
+        categories:    data.categories    || [],
+      });
+    } catch {
+      // silently ignore — inputs fall back to free-text
+    }
+  }, [selectedLedger]);
+
+  useEffect(() => { fetchSegmentValues(); }, [fetchSegmentValues]);
 
   // Fetch accounts list from APEX glaccountslist endpoint
   const fetchAccounts = useCallback(async () => {
@@ -1664,7 +1706,7 @@ const AccountAnalysis: React.FC = () => {
             </Text>
           </div>
 
-          {/* Row 2: All account combination segments */}
+          {/* Row 2: All account combination segments — Select LOVs */}
           <Row gutter={[10, 8]} align="bottom">
             <Col xs={12} sm={8} md={3}>
               <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Company</Text>
@@ -1675,29 +1717,38 @@ const AccountAnalysis: React.FC = () => {
                 size="small"
                 placeholder="All"
                 allowClear
+                showSearch
               >
-                {availableCompanies.map((c) => <Option key={c} value={c}>{c}</Option>)}
+                {segmentValues.companies.map((c) => <Option key={c} value={c}>{c}</Option>)}
               </Select>
             </Col>
             <Col xs={12} sm={8} md={3}>
               <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>LOB</Text>
-              <Input
-                value={lobFilter}
-                onChange={(e) => setLobFilter(e.target.value)}
+              <Select
+                value={lobFilter || undefined}
+                onChange={(v) => setLobFilter(v ?? '')}
+                style={{ width: '100%' }}
                 size="small"
                 placeholder="Any"
                 allowClear
-              />
+                showSearch
+              >
+                {segmentValues.lobs.map((v) => <Option key={v} value={v}>{v}</Option>)}
+              </Select>
             </Col>
             <Col xs={12} sm={8} md={3}>
               <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Department</Text>
-              <Input
-                value={departmentFilter}
-                onChange={(e) => setDepartmentFilter(e.target.value)}
+              <Select
+                value={departmentFilter || undefined}
+                onChange={(v) => setDepartmentFilter(v ?? '')}
+                style={{ width: '100%' }}
                 size="small"
                 placeholder="Any"
                 allowClear
-              />
+                showSearch
+              >
+                {segmentValues.departments.map((v) => <Option key={v} value={v}>{v}</Option>)}
+              </Select>
             </Col>
             <Col xs={12} sm={8} md={4}>
               <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Account</Text>
@@ -1719,53 +1770,73 @@ const AccountAnalysis: React.FC = () => {
             </Col>
             <Col xs={12} sm={8} md={3}>
               <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Sub Account</Text>
-              <Input
-                value={subAccountFilter}
-                onChange={(e) => setSubAccountFilter(e.target.value)}
+              <Select
+                value={subAccountFilter || undefined}
+                onChange={(v) => setSubAccountFilter(v ?? '')}
+                style={{ width: '100%' }}
                 size="small"
                 placeholder="Any"
                 allowClear
-              />
+                showSearch
+              >
+                {segmentValues.subAccounts.map((v) => <Option key={v} value={v}>{v}</Option>)}
+              </Select>
             </Col>
             <Col xs={12} sm={8} md={3}>
               <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Analysis</Text>
-              <Input
-                value={analysisFilter}
-                onChange={(e) => setAnalysisFilter(e.target.value)}
+              <Select
+                value={analysisFilter || undefined}
+                onChange={(v) => setAnalysisFilter(v ?? '')}
+                style={{ width: '100%' }}
                 size="small"
                 placeholder="Any"
                 allowClear
-              />
+                showSearch
+              >
+                {segmentValues.analyses.map((v) => <Option key={v} value={v}>{v}</Option>)}
+              </Select>
             </Col>
             <Col xs={12} sm={8} md={3}>
               <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Intercompany</Text>
-              <Input
-                value={intercompanyFilter}
-                onChange={(e) => setIntercompanyFilter(e.target.value)}
+              <Select
+                value={intercompanyFilter || undefined}
+                onChange={(v) => setIntercompanyFilter(v ?? '')}
+                style={{ width: '100%' }}
                 size="small"
                 placeholder="Any"
                 allowClear
-              />
+                showSearch
+              >
+                {segmentValues.intercompanies.map((v) => <Option key={v} value={v}>{v}</Option>)}
+              </Select>
             </Col>
             <Col xs={12} sm={8} md={2}>
               <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Source</Text>
-              <Input
-                value={jeSourceFilter}
-                onChange={(e) => setJeSourceFilter(e.target.value)}
+              <Select
+                value={jeSourceFilter || undefined}
+                onChange={(v) => setJeSourceFilter(v ?? '')}
+                style={{ width: '100%' }}
                 size="small"
                 placeholder="Any"
                 allowClear
-              />
+                showSearch
+              >
+                {segmentValues.sources.map((v) => <Option key={v} value={v}>{v}</Option>)}
+              </Select>
             </Col>
             <Col xs={12} sm={8} md={2}>
               <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Category</Text>
-              <Input
-                value={jeCategoryFilter}
-                onChange={(e) => setJeCategoryFilter(e.target.value)}
+              <Select
+                value={jeCategoryFilter || undefined}
+                onChange={(v) => setJeCategoryFilter(v ?? '')}
+                style={{ width: '100%' }}
                 size="small"
                 placeholder="Any"
                 allowClear
-              />
+                showSearch
+              >
+                {segmentValues.categories.map((v) => <Option key={v} value={v}>{v}</Option>)}
+              </Select>
             </Col>
           </Row>
         </Card>
@@ -2917,7 +2988,7 @@ const AccountAnalysis: React.FC = () => {
                         title: 'Entered Dr',
                         dataIndex: 'enteredDr',
                         key: 'enteredDr',
-                        width: 115,
+                        width: 105,
                         align: 'right' as const,
                         render: (v: number) => v
                           ? <span style={{ color: REDWOOD.success, fontSize: 11 }}>{formatNumber(v)}</span>
@@ -2927,7 +2998,27 @@ const AccountAnalysis: React.FC = () => {
                         title: 'Entered Cr',
                         dataIndex: 'enteredCr',
                         key: 'enteredCr',
-                        width: 115,
+                        width: 105,
+                        align: 'right' as const,
+                        render: (v: number) => v
+                          ? <span style={{ color: REDWOOD.primary, fontSize: 11 }}>{formatNumber(v)}</span>
+                          : <span style={{ color: REDWOOD.neutral300, fontSize: 11 }}>—</span>,
+                      },
+                      {
+                        title: 'Accounted Dr',
+                        dataIndex: 'accountedDr',
+                        key: 'accountedDr',
+                        width: 110,
+                        align: 'right' as const,
+                        render: (v: number) => v
+                          ? <span style={{ color: REDWOOD.success, fontSize: 11 }}>{formatNumber(v)}</span>
+                          : <span style={{ color: REDWOOD.neutral300, fontSize: 11 }}>—</span>,
+                      },
+                      {
+                        title: 'Accounted Cr',
+                        dataIndex: 'accountedCr',
+                        key: 'accountedCr',
+                        width: 110,
                         align: 'right' as const,
                         render: (v: number) => v
                           ? <span style={{ color: REDWOOD.primary, fontSize: 11 }}>{formatNumber(v)}</span>
@@ -2991,21 +3082,39 @@ const AccountAnalysis: React.FC = () => {
                 render: (_: any, rec) => <Tag style={{ fontSize: 10 }}>{rec.lines.length}</Tag>,
               },
               {
-                title: 'Total Dr',
+                title: 'Entered Dr',
                 key: 'totalEnteredDr',
-                width: 120,
+                width: 110,
                 align: 'right' as const,
                 render: (_: any, rec) => rec.totalEnteredDr
                   ? <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>{formatNumber(rec.totalEnteredDr)}</Text>
                   : <span style={{ color: REDWOOD.neutral300, fontSize: 11 }}>—</span>,
               },
               {
-                title: 'Total Cr',
+                title: 'Entered Cr',
                 key: 'totalEnteredCr',
-                width: 120,
+                width: 110,
                 align: 'right' as const,
                 render: (_: any, rec) => rec.totalEnteredCr
                   ? <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>{formatNumber(rec.totalEnteredCr)}</Text>
+                  : <span style={{ color: REDWOOD.neutral300, fontSize: 11 }}>—</span>,
+              },
+              {
+                title: 'Accounted Dr',
+                key: 'totalAccountedDr',
+                width: 110,
+                align: 'right' as const,
+                render: (_: any, rec) => rec.totalAccountedDr
+                  ? <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>{formatNumber(rec.totalAccountedDr)}</Text>
+                  : <span style={{ color: REDWOOD.neutral300, fontSize: 11 }}>—</span>,
+              },
+              {
+                title: 'Accounted Cr',
+                key: 'totalAccountedCr',
+                width: 110,
+                align: 'right' as const,
+                render: (_: any, rec) => rec.totalAccountedCr
+                  ? <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>{formatNumber(rec.totalAccountedCr)}</Text>
                   : <span style={{ color: REDWOOD.neutral300, fontSize: 11 }}>—</span>,
               },
               {
@@ -3053,8 +3162,10 @@ const AccountAnalysis: React.FC = () => {
               },
             ]}
             summary={() => {
-              const totDr = journalGroups.reduce((s, g) => s + g.totalEnteredDr, 0);
-              const totCr = journalGroups.reduce((s, g) => s + g.totalEnteredCr, 0);
+              const totEntDr  = journalGroups.reduce((s, g) => s + g.totalEnteredDr,   0);
+              const totEntCr  = journalGroups.reduce((s, g) => s + g.totalEnteredCr,   0);
+              const totAccDr  = journalGroups.reduce((s, g) => s + g.totalAccountedDr, 0);
+              const totAccCr  = journalGroups.reduce((s, g) => s + g.totalAccountedCr, 0);
               return (
                 <Table.Summary fixed>
                   <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
@@ -3064,12 +3175,18 @@ const AccountAnalysis: React.FC = () => {
                       </Text>
                     </Table.Summary.Cell>
                     <Table.Summary.Cell index={6} align="right">
-                      <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>{formatNumber(totDr)}</Text>
+                      <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>{formatNumber(totEntDr)}</Text>
                     </Table.Summary.Cell>
                     <Table.Summary.Cell index={7} align="right">
-                      <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>{formatNumber(totCr)}</Text>
+                      <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>{formatNumber(totEntCr)}</Text>
                     </Table.Summary.Cell>
-                    <Table.Summary.Cell index={8} />
+                    <Table.Summary.Cell index={8} align="right">
+                      <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>{formatNumber(totAccDr)}</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={9} align="right">
+                      <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>{formatNumber(totAccCr)}</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={10} />
                   </Table.Summary.Row>
                 </Table.Summary>
               );
