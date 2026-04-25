@@ -2653,34 +2653,6 @@ const ManageJournals: React.FC = () => {
                         </Form.Item>
                       </Space.Compact>
                     </Form.Item>
-                  </Col>
-
-                  <Col span={12}>
-                    {/* Journal Description */}
-                    <Form.Item label="Journal Desc">
-                      <Space.Compact style={{ width: '100%' }}>
-                        <Form.Item name="journalOperator" noStyle>
-                          <Select style={{ width: 120 }}>
-                            {operators.map(op => <Option key={op} value={op}>{op}</Option>)}
-                          </Select>
-                        </Form.Item>
-                        <Form.Item name="journalDescription" noStyle>
-                          <Input style={{ flex: 1 }} placeholder="Enter description" />
-                        </Form.Item>
-                      </Space.Compact>
-                    </Form.Item>
-
-                    {/* Source */}
-                    <Form.Item label="Source" name="source">
-                      <Input placeholder="Enter source" allowClear />
-                    </Form.Item>
-
-                    {/* Batch Status */}
-                    <Form.Item label="Batch Status" name="batchStatus">
-                      <Select placeholder="Select status" allowClear>
-                        {batchStatuses.map(s => <Option key={s} value={s}>{s}</Option>)}
-                      </Select>
-                    </Form.Item>
 
                     {/* Accounting Date */}
                     <Form.Item label="Accounting Date">
@@ -2724,6 +2696,34 @@ const ManageJournals: React.FC = () => {
                         </Space.Compact>
                       </Form.Item>
                     )}
+                  </Col>
+
+                  <Col span={12}>
+                    {/* Journal Description */}
+                    <Form.Item label="Journal Desc">
+                      <Space.Compact style={{ width: '100%' }}>
+                        <Form.Item name="journalOperator" noStyle>
+                          <Select style={{ width: 120 }}>
+                            {operators.map(op => <Option key={op} value={op}>{op}</Option>)}
+                          </Select>
+                        </Form.Item>
+                        <Form.Item name="journalDescription" noStyle>
+                          <Input style={{ flex: 1 }} placeholder="Enter description" />
+                        </Form.Item>
+                      </Space.Compact>
+                    </Form.Item>
+
+                    {/* Source */}
+                    <Form.Item label="Source" name="source">
+                      <Input placeholder="Enter source" allowClear />
+                    </Form.Item>
+
+                    {/* Batch Status */}
+                    <Form.Item label="Batch Status" name="batchStatus">
+                      <Select placeholder="Select status" allowClear>
+                        {batchStatuses.map(s => <Option key={s} value={s}>{s}</Option>)}
+                      </Select>
+                    </Form.Item>
                   </Col>
                 </Row>
 
