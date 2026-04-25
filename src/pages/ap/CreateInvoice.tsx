@@ -3266,6 +3266,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // ────────────────────────────────────────────────────────────────────────
 
   const handleInvoiceAction = async ({ key }: { key: string }) => {
+    const viewOnlyActions = ['viewAccounting', 'validate'];
+    if (!isValidated && !isInvoiceSynced && !viewOnlyActions.includes(key)) {
+      message.warning('Please validate the invoice before performing this action.');
+      return;
+    }
     switch (key) {
       case 'viewAccounting':
         setAccountingModalVisible(true);
@@ -4552,6 +4557,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 }] : []),
               ],
               onClick: ({ key }: { key: string }) => {
+                if (key !== 'viewAccounting' && key !== 'viewSlaLines' && !isValidated && !isInvoiceSynced) {
+                  message.warning('Please validate the invoice before performing this action.');
+                  return;
+                }
                 if (key === 'viewAccounting') setAccountingModalVisible(true);
                 else if (key === 'createAccounting') handleCreateAccounting();
                 else if (key === 'postToLedger') handlePostToLedger();
