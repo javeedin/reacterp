@@ -3711,7 +3711,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // Save and create next handler
   const handleSaveAndCreateNext = async () => {
     try {
-      const values = await form.validateFields();
+      const coreFields = ['businessUnit', 'invoiceNumber', 'invoiceCurrency', 'invoiceAmount', 'invoiceDate', 'supplier', 'invoiceType', 'paymentTerms'];
+      await form.validateFields(coreFields);
+      const values = form.getFieldsValue(true);
       if (!validateTally()) return;
       const invoiceId = await saveInvoiceWithInstallments(values);
       if (invoiceId) {
@@ -3734,7 +3736,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // Save handler
   const handleSave = async (): Promise<boolean> => {
     try {
-      const values = await form.validateFields();
+      const coreFields = ['businessUnit', 'invoiceNumber', 'invoiceCurrency', 'invoiceAmount', 'invoiceDate', 'supplier', 'invoiceType', 'paymentTerms'];
+      await form.validateFields(coreFields);
+      const values = form.getFieldsValue(true);
       if (!validateTally()) return false;
       const result = await saveInvoiceWithInstallments(values);
       if (result) message.success('Invoice saved successfully');
@@ -4676,12 +4680,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               }
               setHeaderValues(allValues);
               if (changedValues.invoiceCurrency) {
-                form.validateFields(['conversionRateType', 'conversionDate', 'conversionRate']);
                 form.setFieldValue('paymentCurrency', changedValues.invoiceCurrency);
                 setHeaderValues((prev) => ({ ...prev, paymentCurrency: changedValues.invoiceCurrency }));
               }
               // Copy invoice date to all lines' accounting date + derive multiperiod dates
               if (changedValues.invoiceDate) {
+                form.setFieldValue('accountingDate', changedValues.invoiceDate);
                 const formattedDate = changedValues.invoiceDate.format('DD-MMM-YYYY');
                 const endDate = getEndOfMonth(formattedDate);
                 setLines((prev) => prev.map((line) => ({
@@ -5188,7 +5192,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Conversion Rate Type</Text>}
                           name="conversionRateType"
                           style={{ marginBottom: 4 }}
-                          rules={[{ required: (headerValues.invoiceCurrency || 'AED') !== 'AED', message: 'Conversion rate type is required for foreign currency invoices' }]}
+                          required={(headerValues.invoiceCurrency || 'AED') !== 'AED'}
                         >
                           <Select placeholder="Select rate type" allowClear>
                             <Option value="User">User</Option>
@@ -5200,7 +5204,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Conversion Date</Text>}
                           name="conversionDate"
                           style={{ marginBottom: 4 }}
-                          rules={[{ required: (headerValues.invoiceCurrency || 'AED') !== 'AED', message: 'Conversion date is required for foreign currency invoices' }]}
+                          required={(headerValues.invoiceCurrency || 'AED') !== 'AED'}
                         >
                           <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
                         </Form.Item>
@@ -5208,7 +5212,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Conversion Rate</Text>}
                           name="conversionRate"
                           style={{ marginBottom: 4 }}
-                          rules={[{ required: (headerValues.invoiceCurrency || 'AED') !== 'AED', message: 'Conversion rate is required for foreign currency invoices' }]}
+                          required={(headerValues.invoiceCurrency || 'AED') !== 'AED'}
                         >
                           <InputNumber style={{ width: '100%' }} placeholder="0.000000" precision={6} min={0} />
                         </Form.Item>
