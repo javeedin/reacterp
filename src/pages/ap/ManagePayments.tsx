@@ -1794,6 +1794,7 @@ const ManagePayments: React.FC = () => {
           currencyConversionType: 'User',
           currencyConversionDate: viewAcctData.accountingDate,
           currencyConversionRate: 1,
+          defaultEffectiveDate:   viewAcctData.accountingDate,
           status:                 'NEW',
           runningTotalDr:         totalDr, runningTotalCr: totalCr,
           createdBy:              'SYSTEM',

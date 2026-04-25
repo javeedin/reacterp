@@ -534,6 +534,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
           currencyConversionType: 'User',
           currencyConversionDate: acctData.accountingDate,
           currencyConversionRate: 1,
+          defaultEffectiveDate:   acctData.accountingDate,
           status:                 'NEW',
           runningTotalDr:         totalDr,
           runningTotalCr:         totalCr,

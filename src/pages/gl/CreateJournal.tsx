@@ -996,6 +996,7 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
         currencyConversionType: journalData.conversionRateType,
         currencyConversionDate: formatDateForApi(journalData.conversionDate),
         currencyConversionRate: journalData.conversionRate,
+        defaultEffectiveDate: formatDateForApi(journalData.accountingDate),
         status: 'NEW',
         runningTotalDr: lineTotals.enteredDr,
         runningTotalCr: lineTotals.enteredCr,

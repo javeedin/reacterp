@@ -737,6 +737,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
             currencyCode: txn.currencyCode || 'AED',
             currencyConversionType: 'User', currencyConversionDate: row.txnDate,
             currencyConversionRate: txn.bankConversionRate || 1,
+            defaultEffectiveDate: row.txnDate,
             status: 'NEW', runningTotalDr: absAmount, runningTotalCr: absAmount,
             createdBy: currentUser,
           },

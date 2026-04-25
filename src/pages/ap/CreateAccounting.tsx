@@ -528,6 +528,7 @@ const CreateAccounting: React.FC = () => {
                 currencyCode: currency, currencyConversionType: 'User',
                 currencyConversionDate: toApiDate(inv.invoiceDate),
                 currencyConversionRate: 1, status: 'NEW',
+                defaultEffectiveDate: toApiDate(inv.invoiceDate),
                 runningTotalDr: totalDr, runningTotalCr: totalDr, createdBy: 'user',
               },
               lines: payload.lines.map((l, i) => ({
@@ -615,6 +616,7 @@ const CreateAccounting: React.FC = () => {
                 journalName: `AP Payment ${pmt.paymentNumber}`, description: `Payment ${pmt.paymentNumber}`,
                 currencyCode: pmt.currency, currencyConversionType: 'User',
                 currencyConversionDate: toApiDate(pmt.paymentDate), currencyConversionRate: 1,
+                defaultEffectiveDate: toApiDate(pmt.paymentDate),
                 status: 'NEW', runningTotalDr: totalAmt, runningTotalCr: totalAmt, createdBy: 'user',
               },
               lines: payloads.flatMap(pl => pl.lines.map(l => ({
@@ -767,6 +769,7 @@ const CreateAccounting: React.FC = () => {
               description: `Prepayment Applied – ${row.prepayNumber} on Invoice ${row.invoiceNumber}`,
               currencyCode: row.currency, currencyConversionType: 'User',
               currencyConversionDate: acctDate, currencyConversionRate: 1,
+              defaultEffectiveDate: acctDate,
               status: 'NEW', runningTotalDr: row.appliedAmount, runningTotalCr: row.appliedAmount, createdBy: 'user',
             },
             lines: slaPayload.lines.map(l => ({

@@ -395,6 +395,7 @@ const ManageSLAJournals: React.FC = () => {
         currencyConversionType:   'User',
         currencyConversionDate:   hdr.accountingDate,
         currencyConversionRate:   1,
+        defaultEffectiveDate:     hdr.accountingDate,
         status:                   'NEW',
         runningTotalDr:           totalDr,
         runningTotalCr:           totalCr,
