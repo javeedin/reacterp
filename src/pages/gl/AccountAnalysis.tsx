@@ -215,13 +215,21 @@ const AccountAnalysis: React.FC = () => {
   const [availablePeriods, setAvailablePeriods] = useState<string[]>([]);
   const [periodsLoading, setPeriodsLoading] = useState(false);
 
-  // Search filters - default ledger is BUIMERC LEDGER
+  // Search filters
   const [selectedLedger, setSelectedLedger] = useState<string>('BUIMERC LEDGER');
-  const [selectedCompany, setSelectedCompany] = useState<string>('01');
+  const [selectedCompany, setSelectedCompany] = useState<string>('');
   const [selectedPeriods, setSelectedPeriods] = useState<string[]>([]);
   const [fromDate, setFromDate] = useState<Dayjs | null>(null);
   const [toDate, setToDate] = useState<Dayjs | null>(null);
+  // Account combination segment filters
   const [accountFilter, setAccountFilter] = useState<string>('');
+  const [lobFilter, setLobFilter] = useState<string>('');
+  const [departmentFilter, setDepartmentFilter] = useState<string>('');
+  const [subAccountFilter, setSubAccountFilter] = useState<string>('');
+  const [analysisFilter, setAnalysisFilter] = useState<string>('');
+  const [intercompanyFilter, setIntercompanyFilter] = useState<string>('');
+  const [jeSourceFilter, setJeSourceFilter] = useState<string>('');
+  const [jeCategoryFilter, setJeCategoryFilter] = useState<string>('');
 
   // Account lookup modal state
   const [accountLookupVisible, setAccountLookupVisible] = useState(false);
@@ -529,12 +537,15 @@ const AccountAnalysis: React.FC = () => {
       if (selectedPeriods.length > 0) params.append('period_names', selectedPeriods.join(','));
       if (fromDate) params.append('from_date', fromDate.format('YYYY-MM-DD'));
       if (toDate)   params.append('to_date',   toDate.format('YYYY-MM-DD'));
-      params.append('company', selectedCompany);
-
-      // Add account filter if provided
-      if (accountFilter) {
-        params.append('account', accountFilter);
-      }
+      if (selectedCompany)   params.append('company',      selectedCompany);
+      if (lobFilter)         params.append('lob',          lobFilter);
+      if (departmentFilter)  params.append('department',   departmentFilter);
+      if (accountFilter)     params.append('account',      accountFilter);
+      if (subAccountFilter)  params.append('sub_account',  subAccountFilter);
+      if (analysisFilter)    params.append('analysis',     analysisFilter);
+      if (intercompanyFilter) params.append('intercompany', intercompanyFilter);
+      if (jeSourceFilter)    params.append('je_source',    jeSourceFilter);
+      if (jeCategoryFilter)  params.append('je_category',  jeCategoryFilter);
 
       const response = await fetch(`${API_BASE_URL}/accountanalysis?${params.toString()}`);
 
@@ -581,10 +592,15 @@ const AccountAnalysis: React.FC = () => {
     if (selectedPeriods.length > 0) params.append('period_names', selectedPeriods.join(','));
     if (fromDate) params.append('from_date', fromDate.format('YYYY-MM-DD'));
     if (toDate)   params.append('to_date',   toDate.format('YYYY-MM-DD'));
-    params.append('company', selectedCompany);
-    if (accountFilter) {
-      params.append('account', accountFilter);
-    }
+    if (selectedCompany)   params.append('company',      selectedCompany);
+    if (lobFilter)         params.append('lob',          lobFilter);
+    if (departmentFilter)  params.append('department',   departmentFilter);
+    if (accountFilter)     params.append('account',      accountFilter);
+    if (subAccountFilter)  params.append('sub_account',  subAccountFilter);
+    if (analysisFilter)    params.append('analysis',     analysisFilter);
+    if (intercompanyFilter) params.append('intercompany', intercompanyFilter);
+    if (jeSourceFilter)    params.append('je_source',    jeSourceFilter);
+    if (jeCategoryFilter)  params.append('je_category',  jeCategoryFilter);
     const url = `${API_BASE_URL}/accountanalysis?${params.toString()}`;
     Modal.info({
       title: 'Search API Endpoint',
@@ -670,11 +686,19 @@ const AccountAnalysis: React.FC = () => {
   // Reset filters
   const handleReset = () => {
     setSelectedLedger('BUIMERC LEDGER');
-    setSelectedCompany('01');
+    setSelectedCompany('');
     setSelectedPeriods([]);
     setFromDate(null);
     setToDate(null);
     setAccountFilter('');
+    setAccountFilterDesc('');
+    setLobFilter('');
+    setDepartmentFilter('');
+    setSubAccountFilter('');
+    setAnalysisFilter('');
+    setIntercompanyFilter('');
+    setJeSourceFilter('');
+    setJeCategoryFilter('');
     setSearchData([]);
     setTotalCount(0);
   };
@@ -1549,95 +1573,138 @@ const AccountAnalysis: React.FC = () => {
       <div style={{ padding: 16 }}>
         {/* Search Filters */}
         <Card
-          style={{ marginBottom: 16, borderRadius: 8 }}
-          bodyStyle={{ padding: 16 }}
+          style={{ marginBottom: 16, borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
+          bodyStyle={{ padding: '14px 16px 10px' }}
         >
-          <Row gutter={[16, 12]} align="middle">
-            <Col xs={24} sm={12} md={4}>
-              <Text style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Ledger</Text>
+          {/* Row 1: Ledger | Periods | Acctg Date From | Acctg Date To | Buttons */}
+          <Row gutter={[12, 10]} align="bottom">
+            <Col xs={24} md={5}>
+              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Ledger</Text>
               <Select
                 value={selectedLedger}
                 onChange={setSelectedLedger}
                 style={{ width: '100%' }}
                 size="small"
               >
-                {availableLedgers.map((ledger) => (
-                  <Option key={ledger} value={ledger}>
-                    {ledger}
-                  </Option>
-                ))}
+                {availableLedgers.map((l) => <Option key={l} value={l}>{l}</Option>)}
               </Select>
             </Col>
-            <Col xs={24} sm={12} md={3}>
-              <Text style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Company</Text>
-              <Select
-                value={selectedCompany}
-                onChange={setSelectedCompany}
-                style={{ width: '100%' }}
-                size="small"
-              >
-                {availableCompanies.map((company) => (
-                  <Option key={company} value={company}>
-                    {company}
-                  </Option>
-                ))}
-              </Select>
-            </Col>
-            <Col xs={24} sm={12} md={6}>
-              <Text style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Periods (Multiple)</Text>
+            <Col xs={24} md={8}>
+              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Periods (Multiple)</Text>
               <Select
                 mode="multiple"
                 value={selectedPeriods}
                 onChange={setSelectedPeriods}
                 style={{ width: '100%' }}
                 size="small"
-                maxTagCount={3}
-                placeholder={periodsLoading ? 'Loading periods...' : 'Select periods'}
+                maxTagCount={4}
+                placeholder={periodsLoading ? 'Loading…' : 'Select periods'}
                 loading={periodsLoading}
-                notFoundContent={periodsLoading ? <Spin size="small" indicator={<LoadingOutlined />} /> : 'No periods found'}
+                notFoundContent={periodsLoading ? <Spin size="small" indicator={<LoadingOutlined />} /> : 'No periods'}
                 disabled={periodsLoading}
+                allowClear
               >
-                {availablePeriods.map((period) => (
-                  <Option key={period} value={period}>
-                    {period}
-                  </Option>
-                ))}
+                {availablePeriods.map((p) => <Option key={p} value={p}>{p}</Option>)}
               </Select>
             </Col>
-            <Col xs={24} sm={12} md={3}>
-              <Text style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Acctg Date From</Text>
+            <Col xs={12} md={3}>
+              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Acctg Date From</Text>
               <DatePicker
                 value={fromDate}
                 onChange={setFromDate}
                 style={{ width: '100%' }}
                 size="small"
                 format="DD-MMM-YYYY"
-                placeholder="From date"
+                placeholder="From"
                 allowClear
               />
             </Col>
-            <Col xs={24} sm={12} md={3}>
-              <Text style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Acctg Date To</Text>
+            <Col xs={12} md={3}>
+              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Acctg Date To</Text>
               <DatePicker
                 value={toDate}
                 onChange={setToDate}
                 style={{ width: '100%' }}
                 size="small"
                 format="DD-MMM-YYYY"
-                placeholder="To date"
+                placeholder="To"
                 allowClear
                 disabledDate={(d) => !!fromDate && d.isBefore(fromDate, 'day')}
               />
             </Col>
-            <Col xs={24} sm={12} md={4}>
-              <Text style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Account</Text>
+            <Col xs={24} md={5} style={{ display: 'flex', alignItems: 'flex-end' }}>
+              <Space size={6}>
+                <Button
+                  type="primary"
+                  icon={<SearchOutlined />}
+                  onClick={handleSearch}
+                  loading={loading}
+                  size="small"
+                  style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+                >
+                  Search
+                </Button>
+                <Button icon={<ReloadOutlined />} size="small" onClick={handleReset}>Reset</Button>
+                <Button
+                  icon={<BugOutlined />}
+                  size="small"
+                  onClick={showSearchApiUrl}
+                  style={{ background: '#f0f5ff', borderColor: '#adc6ff', color: '#1d39c4' }}
+                >
+                  Log
+                </Button>
+              </Space>
+            </Col>
+          </Row>
+
+          {/* Divider for segment section */}
+          <div style={{ margin: '12px 0 8px', borderTop: `1px solid ${REDWOOD.neutral200}`, paddingTop: 8 }}>
+            <Text style={{ fontSize: 10, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>
+              Account Combination Segments
+            </Text>
+          </div>
+
+          {/* Row 2: All account combination segments */}
+          <Row gutter={[10, 8]} align="bottom">
+            <Col xs={12} sm={8} md={3}>
+              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Company</Text>
+              <Select
+                value={selectedCompany || undefined}
+                onChange={(v) => setSelectedCompany(v ?? '')}
+                style={{ width: '100%' }}
+                size="small"
+                placeholder="All"
+                allowClear
+              >
+                {availableCompanies.map((c) => <Option key={c} value={c}>{c}</Option>)}
+              </Select>
+            </Col>
+            <Col xs={12} sm={8} md={3}>
+              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>LOB</Text>
+              <Input
+                value={lobFilter}
+                onChange={(e) => setLobFilter(e.target.value)}
+                size="small"
+                placeholder="Any"
+                allowClear
+              />
+            </Col>
+            <Col xs={12} sm={8} md={3}>
+              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Department</Text>
+              <Input
+                value={departmentFilter}
+                onChange={(e) => setDepartmentFilter(e.target.value)}
+                size="small"
+                placeholder="Any"
+                allowClear
+              />
+            </Col>
+            <Col xs={12} sm={8} md={4}>
+              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Account</Text>
               <Input.Search
                 allowClear
                 value={accountFilter}
-                onChange={(e) => {
-                  setAccountFilter(e.target.value);
-                  if (!e.target.value) setAccountFilterDesc('');
-                }}
+                onChange={(e) => { setAccountFilter(e.target.value); if (!e.target.value) setAccountFilterDesc(''); }}
                 style={{ width: '100%' }}
                 size="small"
                 placeholder="e.g. 1116100"
@@ -1645,38 +1712,60 @@ const AccountAnalysis: React.FC = () => {
                 onSearch={openAccountLookup}
               />
               {accountFilterDesc && (
-                <Text style={{ fontSize: 11, color: REDWOOD.info, display: 'block', marginTop: 2 }}>
+                <Text style={{ fontSize: 10, color: REDWOOD.info, display: 'block', marginTop: 2 }}>
                   {accountFilterDesc}
                 </Text>
               )}
             </Col>
-            <Col xs={24} sm={12} md={7}>
-              <Text style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>&nbsp;</Text>
-              <Space>
-                <Button
-                  icon={<SearchOutlined />}
-                  onClick={handleSearch}
-                  loading={loading}
-                  size="small"
-                >
-                  Search
-                </Button>
-                <Button icon={<ReloadOutlined />} size="small" onClick={handleReset}>
-                  Reset
-                </Button>
-                <Button
-                  icon={<BugOutlined />}
-                  size="small"
-                  onClick={showSearchApiUrl}
-                  style={{
-                    background: '#f0f5ff',
-                    borderColor: '#adc6ff',
-                    color: '#1d39c4',
-                  }}
-                >
-                  Log
-                </Button>
-              </Space>
+            <Col xs={12} sm={8} md={3}>
+              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Sub Account</Text>
+              <Input
+                value={subAccountFilter}
+                onChange={(e) => setSubAccountFilter(e.target.value)}
+                size="small"
+                placeholder="Any"
+                allowClear
+              />
+            </Col>
+            <Col xs={12} sm={8} md={3}>
+              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Analysis</Text>
+              <Input
+                value={analysisFilter}
+                onChange={(e) => setAnalysisFilter(e.target.value)}
+                size="small"
+                placeholder="Any"
+                allowClear
+              />
+            </Col>
+            <Col xs={12} sm={8} md={3}>
+              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Intercompany</Text>
+              <Input
+                value={intercompanyFilter}
+                onChange={(e) => setIntercompanyFilter(e.target.value)}
+                size="small"
+                placeholder="Any"
+                allowClear
+              />
+            </Col>
+            <Col xs={12} sm={8} md={2}>
+              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Source</Text>
+              <Input
+                value={jeSourceFilter}
+                onChange={(e) => setJeSourceFilter(e.target.value)}
+                size="small"
+                placeholder="Any"
+                allowClear
+              />
+            </Col>
+            <Col xs={12} sm={8} md={2}>
+              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Category</Text>
+              <Input
+                value={jeCategoryFilter}
+                onChange={(e) => setJeCategoryFilter(e.target.value)}
+                size="small"
+                placeholder="Any"
+                allowClear
+              />
             </Col>
           </Row>
         </Card>
