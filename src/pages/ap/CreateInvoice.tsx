@@ -464,7 +464,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [ciVoidForm] = Form.useForm();
 
   // Unified invoice lines - shared across both tabs
-  const [lines, setLines] = useState<InvoiceLine[]>([createBlankLine(1)]);
+  const [lines, setLines] = useState<InvoiceLine[]>([createBlankLine(1, { accountingDate: initialData?.invoiceId ? '' : dayjs().format('DD-MMM-YYYY') })]);
 
   // Distribution combinations (AP + ALL modules)
   const [distCombinations, setDistCombinations] = useState<DistCombination[]>([]);
@@ -4615,9 +4615,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               type="primary"
               onClick={handleSave}
               loading={saving}
-              disabled={saving || !isValidated}
+              disabled={saving}
               icon={<SaveOutlined />}
-              style={{ background: isValidated ? REDWOOD.primary : undefined, borderColor: isValidated ? REDWOOD.primary : undefined }}
+              style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
               data-sat-id="invoice-save-button"
             >
               {savedInvoiceId ? 'Update Invoice' : 'Save'}
@@ -5316,16 +5316,6 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   Import Lines
                 </Button>
               )}
-              <Button
-                size="small"
-                icon={<DeleteOutlined />}
-                danger
-                onClick={removeLines}
-                disabled={!isHeaderComplete || selectedLineKeys.length === 0}
-                style={{ fontSize: 12 }}
-              >
-                Delete {selectedLineKeys.length > 0 ? `(${selectedLineKeys.length})` : ''}
-              </Button>
             </Space>
           </div>
 
@@ -5858,7 +5848,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             ]}
           />
           {!isReadOnly && activeTabKey === 'distribution' && (
-            <div style={{ marginTop: 8 }}>
+            <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
               <Button
                 size="small"
                 type="primary"
@@ -5868,6 +5858,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 style={{ background: isHeaderComplete ? REDWOOD.info : undefined, borderColor: isHeaderComplete ? REDWOOD.info : undefined, fontSize: 12 }}
               >
                 Add Line
+              </Button>
+              <Button
+                size="small"
+                icon={<DeleteOutlined />}
+                danger
+                onClick={removeLines}
+                disabled={selectedLineKeys.length === 0}
+                style={{ fontSize: 12 }}
+              >
+                Delete {selectedLineKeys.length > 0 ? `(${selectedLineKeys.length})` : ''}
               </Button>
             </div>
           )}
