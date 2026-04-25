@@ -5312,18 +5312,6 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   Import Lines
                 </Button>
               )}
-              {!isReadOnly && (
-                <Button
-                  size="small"
-                  type="primary"
-                  icon={<PlusOutlined />}
-                  onClick={addLine}
-                  disabled={!isHeaderComplete}
-                  style={{ background: isHeaderComplete ? REDWOOD.info : undefined, borderColor: isHeaderComplete ? REDWOOD.info : undefined, fontSize: 12 }}
-                >
-                  Add Line
-                </Button>
-              )}
               <Button
                 size="small"
                 icon={<DeleteOutlined />}
@@ -5361,15 +5349,15 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     summary={() => (
                       <Table.Summary fixed>
                         <Table.Summary.Row>
-                          <Table.Summary.Cell index={0} colSpan={2}>
+                          <Table.Summary.Cell index={0} colSpan={3}>
                             <Text strong style={{ fontSize: 12, paddingLeft: 8 }}>Total</Text>
                           </Table.Summary.Cell>
-                          <Table.Summary.Cell index={2} align="right">
+                          <Table.Summary.Cell index={3} align="right">
                             <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>
                               {formatAmount(linesTotal)}
                             </Text>
                           </Table.Summary.Cell>
-                          <Table.Summary.Cell index={3} colSpan={8} />
+                          <Table.Summary.Cell index={4} colSpan={7} />
                         </Table.Summary.Row>
                       </Table.Summary>
                     )}
@@ -5865,6 +5853,20 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               }],
             ]}
           />
+          {!isReadOnly && activeTabKey === 'distribution' && (
+            <div style={{ marginTop: 8 }}>
+              <Button
+                size="small"
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={addLine}
+                disabled={!isHeaderComplete}
+                style={{ background: isHeaderComplete ? REDWOOD.info : undefined, borderColor: isHeaderComplete ? REDWOOD.info : undefined, fontSize: 12 }}
+              >
+                Add Line
+              </Button>
+            </div>
+          )}
         </Card>
 
         {/* ========== TAXES & TOTALS ========== */}
