@@ -4648,8 +4648,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             disabled={isReadOnly || !buSelected}
             initialValues={{
               invoiceType: 'Standard',
-              invoiceCurrency: 'AED',
-              paymentCurrency: 'AED',
+              invoiceCurrency: initialData?.invoiceCurrency || 'AED',
+              paymentCurrency: initialData?.invoiceCurrency || 'AED',
               legalEntity: '',
               payGroup: '',
               payAlone: 'No',
@@ -4677,6 +4677,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               setHeaderValues(allValues);
               if (changedValues.invoiceCurrency) {
                 form.validateFields(['conversionRateType', 'conversionDate', 'conversionRate']);
+                form.setFieldValue('paymentCurrency', changedValues.invoiceCurrency);
+                setHeaderValues((prev) => ({ ...prev, paymentCurrency: changedValues.invoiceCurrency }));
               }
               // Copy invoice date to all lines' accounting date + derive multiperiod dates
               if (changedValues.invoiceDate) {
