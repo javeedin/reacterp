@@ -466,7 +466,7 @@ export interface InvoiceInitialData {
   firstPartyTaxRegistrationNum?: string;
   taxationCountry?: string;
   documentCategory?: string;
-  documentSequence?: string;
+  documentSequence?: number | string;
   voucherNumber?: string;
   // Synced invoice (from Oracle Fusion) — read-only except Pay in Full
   isSynced?: boolean;
@@ -1951,7 +1951,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       if (initialData.conversionRate) formValues.conversionRate = initialData.conversionRate;
       if (initialData.paymentCurrency) formValues.paymentCurrency = initialData.paymentCurrency;
       if (initialData.documentCategory) formValues.documentCategory = initialData.documentCategory;
-      if (initialData.documentSequence) formValues.documentSequence = initialData.documentSequence;
+      if (initialData.documentSequence != null && initialData.documentSequence !== '') formValues.documentSequence = Number(initialData.documentSequence) || initialData.documentSequence;
       if (initialData.voucherNumber) formValues.voucherNumber = initialData.voucherNumber;
       form.setFieldsValue(formValues);
       setHeaderValues((prev) => ({ ...prev, ...formValues }));
@@ -3543,7 +3543,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       ConversionDate: values.conversionDate?.format?.('YYYY-MM-DD') || null,
       ConversionRate: values.conversionRate || null,
       DocumentCategory: values.documentCategory || null,
-      DocumentSequence: values.documentSequence || null,
+      DocumentSequence: values.documentSequence != null && values.documentSequence !== '' ? Number(values.documentSequence) : null,
       VoucherNumber: values.voucherNumber || null,
       FirstPartyTaxRegistrationNumber: values.firstPartyTaxRegistrationNumber || null,
       SupplierTaxRegistrationNumber: values.supplierTaxRegistrationNumber || null,
@@ -5299,7 +5299,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           name="documentSequence"
                           style={{ marginBottom: 4 }}
                         >
-                          <Input placeholder="Document sequence" />
+                          <InputNumber placeholder="Document sequence" style={{ width: '100%' }} precision={0} />
                         </Form.Item>
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Voucher Number</Text>}

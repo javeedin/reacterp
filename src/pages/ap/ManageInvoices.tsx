@@ -152,7 +152,7 @@ interface InvoiceRecord {
   firstPartyTaxRegistrationNum: string;
   taxationCountry: string;
   documentCategory: string;
-  documentSequence: string;
+  documentSequence: number | string;
   voucherNumber: string;
 }
 
@@ -317,7 +317,7 @@ const mapApiToInvoiceRecord = (item: any, index: number): InvoiceRecord => ({
   firstPartyTaxRegistrationNum:item.first_party_tax_registration_num|| '',
   taxationCountry:             item.taxation_country                || '',
   documentCategory:            item.document_category               || '',
-  documentSequence:            item.document_sequence               || '',
+  documentSequence:            item.document_sequence != null ? Number(item.document_sequence) || item.document_sequence : '',
   voucherNumber:               item.voucher_number                  || '',
 });
 
