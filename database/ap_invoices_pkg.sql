@@ -256,7 +256,7 @@ CREATE OR REPLACE PACKAGE BODY XXAP_INVOICES_PKG AS
         l_taxation_country := JSON_VALUE(p_invoice_json, '$.TaxationCountry');
         l_liability_distribution := JSON_VALUE(p_invoice_json, '$.LiabilityDistribution');
         l_document_category := JSON_VALUE(p_invoice_json, '$.DocumentCategory');
-        l_document_sequence := JSON_VALUE(p_invoice_json, '$.DocumentSequence' RETURNING NUMBER);
+        -- document_sequence is auto-assigned via sequence on INSERT; preserved on UPDATE
         l_voucher_number := JSON_VALUE(p_invoice_json, '$.VoucherNumber');
         l_validation_status := JSON_VALUE(p_invoice_json, '$.ValidationStatus');
         l_approval_status := JSON_VALUE(p_invoice_json, '$.ApprovalStatus');
@@ -285,7 +285,7 @@ CREATE OR REPLACE PACKAGE BODY XXAP_INVOICES_PKG AS
         l_fusion_last_update_login := JSON_VALUE(p_invoice_json, '$.LastUpdateLogin');
 
         -- Merge (Insert or Update)
-        MERGE INTO XXAP_INVOICES_STG tgt
+        MERGE INTO RR_AP_INVOICES_ALL tgt
         USING (SELECT l_invoice_id AS invoice_id FROM DUAL) src
         ON (tgt.invoice_id = src.invoice_id)
         WHEN MATCHED THEN
@@ -324,7 +324,7 @@ CREATE OR REPLACE PACKAGE BODY XXAP_INVOICES_PKG AS
                 taxation_country = l_taxation_country,
                 liability_distribution = l_liability_distribution,
                 document_category = l_document_category,
-                document_sequence = l_document_sequence,
+                -- document_sequence intentionally excluded: auto-assigned at creation, never overwritten on update
                 voucher_number = l_voucher_number,
                 validation_status = l_validation_status,
                 approval_status = l_approval_status,
@@ -373,7 +373,7 @@ CREATE OR REPLACE PACKAGE BODY XXAP_INVOICES_PKG AS
                 l_conversion_date, l_conversion_rate, l_base_amount, l_accounting_date, l_terms_date,
                 l_pay_group, l_payment_terms, l_payment_method_code, l_payment_method, l_pay_alone_flag,
                 l_amount_paid, l_control_amount, l_delivery_channel_code, l_delivery_channel,
-                l_taxation_country, l_liability_distribution, l_document_category, l_document_sequence,
+                l_taxation_country, l_liability_distribution, l_document_category, seq_ap_document_seq.NEXTVAL,
                 l_voucher_number, l_validation_status, l_approval_status, l_paid_status,
                 l_accounting_status, l_account_coding_status, l_funds_status, l_canceled_flag,
                 l_canceled_date, l_canceled_by, l_budget_date, l_legal_entity, l_legal_entity_identifier,
@@ -514,7 +514,7 @@ CREATE OR REPLACE PACKAGE BODY XXAP_INVOICES_PKG AS
         p_message                           OUT VARCHAR2
     ) AS
     BEGIN
-        MERGE INTO XXAP_INVOICES_STG tgt
+        MERGE INTO RR_AP_INVOICES_ALL tgt
         USING (SELECT p_invoice_id AS invoice_id FROM DUAL) src
         ON (tgt.invoice_id = src.invoice_id)
         WHEN MATCHED THEN
@@ -553,7 +553,7 @@ CREATE OR REPLACE PACKAGE BODY XXAP_INVOICES_PKG AS
                 taxation_country = p_taxation_country,
                 liability_distribution = p_liability_distribution,
                 document_category = p_document_category,
-                document_sequence = p_document_sequence,
+                -- document_sequence intentionally excluded: auto-assigned at creation, never overwritten on update
                 validation_status = p_validation_status,
                 approval_status = p_approval_status,
                 paid_status = p_paid_status,
@@ -595,7 +595,7 @@ CREATE OR REPLACE PACKAGE BODY XXAP_INVOICES_PKG AS
                 p_conversion_rate, p_accounting_date, p_terms_date, p_pay_group, p_payment_terms,
                 p_payment_method_code, p_payment_method, p_pay_alone_flag, p_amount_paid,
                 p_delivery_channel_code, p_delivery_channel, p_taxation_country,
-                p_liability_distribution, p_document_category, p_document_sequence,
+                p_liability_distribution, p_document_category, seq_ap_document_seq.NEXTVAL,
                 p_validation_status, p_approval_status, p_paid_status, p_accounting_status,
                 p_account_coding_status, p_canceled_flag, p_budget_date, p_fusion_created_by,
                 p_fusion_creation_date, p_fusion_last_updated_by, p_fusion_last_update_date,
