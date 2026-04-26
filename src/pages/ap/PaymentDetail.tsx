@@ -173,6 +173,7 @@ import {
   getAccounting,
 } from '../../services/sla.service';
 import type { SlaExistsResult, SlaGetResult } from '../../services/sla.service';
+import { eventTypeToRef5 } from '../../services/glPosting.service';
 
 // Fusion API config - direct URL
 const FUSION_CONFIG = {
@@ -537,33 +538,38 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
           currencyCode:           payment.paymentCurrency || 'AED',
           currencyConversionType: 'User',
           currencyConversionDate: acctData.accountingDate,
-          currencyConversionRate: 1,
+          currencyConversionRate: (payment.conversionRate && payment.conversionRate > 0) ? payment.conversionRate : 1,
           defaultEffectiveDate:   acctData.accountingDate,
           status:                 'NEW',
           runningTotalDr:         totalDr,
           runningTotalCr:         totalCr,
           createdBy:              'SYSTEM',
         },
-        lines: lines.map((l) => ({
-          enteredDr:                  l.lineType === 'DR' ? (l.enteredDr || null) : null,
-          enteredCr:                  l.lineType === 'CR' ? (l.enteredCr || null) : null,
-          accountedDr:                l.accountedDr || null,
-          accountedCr:                l.accountedCr || null,
-          statAmount:                 null,
-          description:                l.description || acctData.description || '',
-          currencyCode:               l.currencyCode || payment.paymentCurrency || 'AED',
-          currencyConversionDate:     acctData.accountingDate,
-          currencyConversionRate:     1,
-          userCurrencyConversionType: 'User',
-          accountCombination:         l.accountCombination || '',
-          chartOfAccountsName:        'Chart of Accounts',
-          reference1:                 String(payment.paymentNumber || ''),
-          reference2:                 String(payment.checkId || ''),
-          reference3:                 l.accountingClass || null,
-          reference4:                 payment.legalEntity || null,
-          reference5:                 null,
-          createdBy:                  'SYSTEM',
-        })),
+        lines: lines.map((l) => {
+          const eDr  = l.lineType === 'DR' ? (l.enteredDr  || null) : null;
+          const eCr  = l.lineType === 'CR' ? (l.enteredCr  || null) : null;
+          const rate = (payment.conversionRate && payment.conversionRate > 0) ? payment.conversionRate : 1;
+          return {
+            enteredDr:                  eDr,
+            enteredCr:                  eCr,
+            accountedDr:                eDr != null ? Math.round(eDr * rate * 100) / 100 : null,
+            accountedCr:                eCr != null ? Math.round(eCr * rate * 100) / 100 : null,
+            statAmount:                 null,
+            description:                l.description || acctData.description || '',
+            currencyCode:               payment.paymentCurrency || 'AED',
+            currencyConversionDate:     acctData.accountingDate,
+            currencyConversionRate:     rate,
+            userCurrencyConversionType: 'User',
+            accountCombination:         l.accountCombination || '',
+            chartOfAccountsName:        'Chart of Accounts',
+            reference1:                 String(payment.paymentNumber || ''),
+            reference2:                 String(payment.checkId || ''),
+            reference3:                 l.accountingClass || null,
+            reference4:                 payment.businessUnit || null,
+            reference5:                 eventTypeToRef5(acctData.eventTypeCode || 'PAYMENT_CREATED'),
+            createdBy:                  'SYSTEM',
+          };
+        }),
       });
       setPostModalOpen(true);
     } catch (err: any) {
@@ -2021,14 +2027,21 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
               pagination={false}
               dataSource={(viewAcctData.lines || []).map((l, i) => ({ ...l, key: i }))}
               columns={[
-                { title: '#', dataIndex: 'lineNumber', width: 45 },
-                { title: 'Type', dataIndex: 'lineType', width: 55, render: (v: string) => <Tag color={v === 'DR' ? 'blue' : 'green'}>{v}</Tag> },
-                { title: 'Class', dataIndex: 'accountingClass', width: 130 },
-                { title: 'Account', dataIndex: 'accountCombination', width: 190 },
+                { title: '#', dataIndex: 'lineNumber', width: 40 },
+                { title: 'Type', dataIndex: 'lineType', width: 50, render: (v: string) => <Tag color={v === 'DR' ? 'blue' : 'green'}>{v}</Tag> },
+                { title: 'Class', dataIndex: 'accountingClass', width: 120 },
+                { title: 'Account', dataIndex: 'accountCombination', width: 170, render: (v: string, r: any) => (
+                  <div>
+                    <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{v || '—'}</span>
+                    {r.accountDescription && <div style={{ fontSize: 10, color: '#888', marginTop: 1 }}>{r.accountDescription}</div>}
+                  </div>
+                )},
                 { title: 'Description', dataIndex: 'description', ellipsis: true },
-                { title: 'Dr', dataIndex: 'enteredDr', width: 120, align: 'right' as const, render: (v: number) => v ? v.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—' },
-                { title: 'Cr', dataIndex: 'enteredCr', width: 120, align: 'right' as const, render: (v: number) => v ? v.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—' },
-                { title: 'CCY', dataIndex: 'currencyCode', width: 60 },
+                { title: 'Ent. Dr', dataIndex: 'enteredDr',   width: 105, align: 'right' as const, render: (v: number) => v ? v.toLocaleString('en-US', { minimumFractionDigits: 2 }) : <span style={{ color: '#bbb' }}>—</span> },
+                { title: 'Ent. Cr', dataIndex: 'enteredCr',   width: 105, align: 'right' as const, render: (v: number) => v ? v.toLocaleString('en-US', { minimumFractionDigits: 2 }) : <span style={{ color: '#bbb' }}>—</span> },
+                { title: 'Acc. Dr', dataIndex: 'accountedDr', width: 105, align: 'right' as const, render: (v: number) => v ? v.toLocaleString('en-US', { minimumFractionDigits: 2 }) : <span style={{ color: '#bbb' }}>—</span> },
+                { title: 'Acc. Cr', dataIndex: 'accountedCr', width: 105, align: 'right' as const, render: (v: number) => v ? v.toLocaleString('en-US', { minimumFractionDigits: 2 }) : <span style={{ color: '#bbb' }}>—</span> },
+                { title: 'CCY', dataIndex: 'currencyCode', width: 55 },
               ]}
             />
           </Space>
