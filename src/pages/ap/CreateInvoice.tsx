@@ -2435,7 +2435,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     setCancelEligLoading(true);
     setCancelModalOpen(true);
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/invoices/${invoiceId}/cancel-eligibility`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/${invoiceId}/cancel-eligibility`;
       const res = await fetch(url, { headers: { Accept: 'application/json' } });
       const data = await res.json();
       setCancelEligibility({
@@ -2461,7 +2461,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     if (!invoiceId) return;
     setCancelExecuting(true);
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/invoices/${invoiceId}/cancel`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/${invoiceId}/cancel`;
       const res = await fetch(url, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -10735,7 +10735,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
                   {cancelApiExpanded && (() => {
                     const invoiceId = savedInvoiceId || initialData?.invoiceId;
-                    const eligUrl = `${APEX_DB_CONFIG.baseUrl}/invoices/${invoiceId}/cancel-eligibility`;
+                    const eligUrl = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/${invoiceId}/cancel-eligibility`;
                     return (
                       <div style={{
                         marginTop: 6, padding: '10px 12px', borderRadius: 6,
@@ -10836,7 +10836,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             {/* ── API Info Panel (POST cancel) ──────────────────────── */}
             {(() => {
               const invoiceId = savedInvoiceId || initialData?.invoiceId;
-              const cancelUrl = `${APEX_DB_CONFIG.baseUrl}/invoices/${invoiceId}/cancel`;
+              const cancelUrl = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/${invoiceId}/cancel`;
               const cancelBody = JSON.stringify({ cancelledBy: user?.username || 'SYSTEM' }, null, 2);
               return (
                 <div style={{ marginTop: 14 }}>
