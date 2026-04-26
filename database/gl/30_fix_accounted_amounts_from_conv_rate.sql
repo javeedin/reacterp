@@ -127,13 +127,17 @@ BEGIN
     l_header_obj := l_input_obj.get_Object('header');
     l_lines_arr  := l_input_obj.get_Array('lines');
 
+    l_step := 'Getting sequence values';
+    l_batch_id  := RR_GL_BATCH_SEQ.NEXTVAL;
+    l_header_id := RR_GL_HEADER_SEQ.NEXTVAL;
+
     -- ── Batch ────────────────────────────────────────────────────────────────
-    l_step := 'Reading batch fields';
+    l_step := 'Extracting batch values';
     v_batch_name          := safe_get_string(l_batch_obj, 'batchName');
     v_batch_description   := safe_get_string(l_batch_obj, 'batchDescription');
     v_batch_ledger_name   := safe_get_string(l_batch_obj, 'ledgerName');
     v_batch_ledger_id     := safe_get_number(l_batch_obj, 'ledgerId');
-    v_batch_status        := safe_get_string(l_batch_obj, 'status');
+    v_batch_status        := NVL(safe_get_string(l_batch_obj, 'status'), 'NEW');
     v_batch_period        := safe_get_string(l_batch_obj, 'accountingPeriod');
     v_batch_control_total := safe_get_number(l_batch_obj, 'controlTotal');
     v_batch_total_dr      := safe_get_number(l_batch_obj, 'runningTotalDr');
@@ -142,25 +146,22 @@ BEGIN
     v_batch_created_by    := safe_get_string(l_batch_obj, 'createdBy');
 
     l_step := 'Inserting batch';
-    l_batch_id := RR_GL_BATCH_SEQ.NEXTVAL;
     INSERT INTO RR_GL_JOURNAL_BATCHES (
-        JE_BATCH_ID, BATCH_SYNC_ID, BATCH_NAME, BATCH_DESCRIPTION,
-        USER_JE_SOURCE_NAME, STATUS, STATUS_MEANING,
-        APPROVAL_STATUS_MEANING, DEFAULT_PERIOD_NAME,
-        RUNNING_TOTAL_DR, RUNNING_TOTAL_CR,
-        CONTROL_TOTAL, LEDGER_NAME, LEDGER_ID,
+        BATCH_SYNC_ID, JE_BATCH_ID, BATCH_NAME, BATCH_DESCRIPTION,
+        LEDGER_NAME, LEDGER_ID, STATUS_MEANING, DEFAULT_PERIOD_NAME,
+        CONTROL_TOTAL, RUNNING_TOTAL_DR, RUNNING_TOTAL_CR,
+        USER_JE_SOURCE_NAME,
         CREATED_BY, CREATION_DATE, LAST_UPDATED_BY, LAST_UPDATE_DATE
     ) VALUES (
         l_batch_id, l_batch_id, v_batch_name, v_batch_description,
-        v_batch_source, NVL(v_batch_status, 'NEW'), 'Unposted',
-        'Not Required', v_batch_period,
-        NVL(v_batch_total_dr, 0), NVL(v_batch_total_cr, 0),
-        v_batch_control_total, v_batch_ledger_name, v_batch_ledger_id,
+        v_batch_ledger_name, v_batch_ledger_id, v_batch_status, v_batch_period,
+        v_batch_control_total, v_batch_total_dr, v_batch_total_cr,
+        v_batch_source,
         v_batch_created_by, SYSDATE, v_batch_created_by, SYSDATE
     );
 
     -- ── Header ───────────────────────────────────────────────────────────────
-    l_step := 'Reading header fields';
+    l_step := 'Extracting header values';
     v_header_ledger_id      := safe_get_number(l_header_obj, 'ledgerId');
     v_header_ledger_name    := safe_get_string(l_header_obj, 'ledgerName');
     v_header_je_category    := safe_get_string(l_header_obj, 'jeCategory');
@@ -179,31 +180,33 @@ BEGIN
     v_header_effective_date := safe_get_date(l_header_obj,   'defaultEffectiveDate');
 
     l_step := 'Inserting header';
-    l_header_id := RR_GL_HEADER_ID_SEQ.NEXTVAL;
-    INSERT INTO RR_GL_HEADERS (
-        JE_HEADER_ID, BATCH_ID, JOURNAL_NAME, JOURNAL_DESCRIPTION,
-        PERIOD_NAME, DEFAULT_EFFECTIVE_DATE,
-        USER_JE_CATEGORY_NAME, LEDGER_NAME, LEDGER_ID,
-        CURRENCY_CODE, CURRENCY_CONVERSION_TYPE,
+    INSERT INTO RR_GL_JE_HEADERS (
+        JE_HEADER_ID, BATCH_ID,
+        LEDGER_ID, LEDGER_NAME,
+        USER_JE_CATEGORY_NAME, USER_JE_SOURCE_NAME,
+        PERIOD_NAME, JOURNAL_NAME, DESCRIPTION,
+        CURRENCY_CODE, USER_CURRENCY_CONVERSION_TYPE,
         CURRENCY_CONVERSION_DATE, CURRENCY_CONVERSION_RATE,
-        STATUS, RUNNING_TOTAL_DR, RUNNING_TOTAL_CR,
-        RUNNING_TOTAL_ACCOUNTED_DR, RUNNING_TOTAL_ACCOUNTED_CR,
+        DEFAULT_EFFECTIVE_DATE, POSTING_STATUS,
+        RUNNING_TOTAL_DR, RUNNING_TOTAL_CR,
         CREATED_BY, CREATION_DATE, LAST_UPDATED_BY, LAST_UPDATE_DATE
     ) VALUES (
-        l_header_id, l_batch_id, v_header_journal_name, v_header_description,
-        v_header_period_name, NVL(v_header_effective_date, SYSDATE),
-        v_header_je_category, v_header_ledger_name, v_header_ledger_id,
+        l_header_id, l_batch_id,
+        v_header_ledger_id, v_header_ledger_name,
+        v_header_je_category, v_header_je_source,
+        v_header_period_name, v_header_journal_name, v_header_description,
         v_header_currency, v_header_conv_type,
         v_header_conv_date, v_header_conv_rate,
-        NVL(v_header_status, 'NEW'), NVL(v_header_total_dr, 0), NVL(v_header_total_cr, 0),
+        NVL(v_header_effective_date, SYSDATE), NVL(v_header_status, 'NEW'),
         NVL(v_header_total_dr, 0), NVL(v_header_total_cr, 0),
         v_header_created_by, SYSDATE, v_header_created_by, SYSDATE
     );
 
     -- ── Lines ────────────────────────────────────────────────────────────────
+    l_step := 'Processing lines';
     FOR i IN 0 .. l_lines_arr.get_size() - 1 LOOP
-        l_line_obj := TREAT(l_lines_arr.get(i) AS JSON_OBJECT_T);
-        l_line_id  := RR_GL_LINE_SEQ.NEXTVAL;
+        l_line_obj   := JSON_OBJECT_T(l_lines_arr.get(i));
+        l_line_id    := RR_GL_LINE_SEQ.NEXTVAL;
         l_line_count := l_line_count + 1;
 
         l_step := 'Extracting line ' || l_line_count || ' values';
@@ -224,7 +227,7 @@ BEGIN
         v_line_ref5         := safe_get_string(l_line_obj, 'reference5');
         v_line_created_by   := safe_get_string(l_line_obj, 'createdBy');
 
-        -- ── Calculate accounted = entered × effective rate ──────────────────
+        -- ── Always recalculate accounted = entered × effective rate ──────────
         -- Line rate takes priority over header rate; fallback to 1
         v_eff_rate := NVL(v_line_conv_rate, NVL(v_header_conv_rate, 1));
         IF v_eff_rate IS NULL OR v_eff_rate <= 0 THEN
