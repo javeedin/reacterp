@@ -209,6 +209,44 @@ export async function getLinesByHeaderId(headerId: number): Promise<{ items: Sla
   return apexGet<{ items: SlaLine[] }>(url);
 }
 
+// ── GL journal duplicate-check ─────────────────────────────────────────────
+
+export interface GlJournalExistsResult {
+  exists:    boolean;
+  batchId:   number | null;
+  headerId:  number | null;
+  status:    string | null;   // 'P' = Posted, 'NEW' = unposted
+  period:    string | null;
+  lineCount: number;
+}
+
+export async function checkGLJournalExists(
+  reference1: string,
+  reference2: string | number,
+  reference5: string,
+): Promise<GlJournalExistsResult> {
+  const qs  = new URLSearchParams({
+    reference1: String(reference1),
+    reference2: String(reference2),
+    reference5,
+  });
+  const url = `${BASE}/gl/journals/check?${qs.toString()}`;
+  try {
+    const res  = await fetch(url, { headers: { Accept: 'application/json' } });
+    const data = await res.json();
+    return {
+      exists:    data.exists    ?? false,
+      batchId:   data.batchId   ?? null,
+      headerId:  data.headerId  ?? null,
+      status:    data.status    ?? null,
+      period:    data.period    ?? null,
+      lineCount: data.lineCount ?? 0,
+    };
+  } catch {
+    return { exists: false, batchId: null, headerId: null, status: null, period: null, lineCount: 0 };
+  }
+}
+
 // ── Ledger lookup ──────────────────────────────────────────────────────────
 
 export interface LedgerInfo {

@@ -82,7 +82,7 @@ dayjs.extend(customParseFormat);
 import * as XLSX from 'xlsx';
 import type { ColumnsType } from 'antd/es/table';
 import { APEX_DB_CONFIG } from '../../config/api.config';
-import { fetchLedgerByBusinessUnit, checkAccountingExists, getAccounting, getLinesByHeaderId } from '../../services/sla.service';
+import { fetchLedgerByBusinessUnit, checkAccountingExists, getAccounting, getLinesByHeaderId, checkGLJournalExists } from '../../services/sla.service';
 import { searchCombinations, type DistCombination } from '../../services/distCombinations.service';
 import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
 import { useAuth } from '../../context/AuthContext';
@@ -1485,7 +1485,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           reference2:               String(savedInvoiceId || initialData?.invoiceId || ''),
           reference3:               l.accountingClass || null,
           reference4:               l.legalEntity || bu || null,
-          reference5:               null,
+          reference5:               'AP-INVOICE-CREATION',
           createdBy:                'user',
         })),
       };
@@ -1494,9 +1494,65 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       const debugLog: { step: string; method: string; url: string; requestBody?: any; status?: number; response?: any }[] = [];
       setGlPayloadDebug({ steps: debugLog });
 
+      // ── Idempotency check: abort if journal already exists in GL ─────────────
+      const invoiceIdStr = String(savedInvoiceId || initialData?.invoiceId || '');
+      debugLog[0] = { step: '0 — Duplicate check (GL exists?)', method: 'GET', url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/check?reference1=${invoiceNumber}&reference2=${invoiceIdStr}&reference5=AP-INVOICE-CREATION` };
+      setGlPayloadDebug({ steps: [...debugLog] });
+      const glExists = await checkGLJournalExists(invoiceNumber, invoiceIdStr, 'AP-INVOICE-CREATION');
+      debugLog[0].status   = 200;
+      debugLog[0].response = glExists;
+      setGlPayloadDebug({ steps: [...debugLog] });
+
+      if (glExists.exists) {
+        // Journal already in GL — use existing batchId, skip creation
+        const existingBatchId   = glExists.batchId;
+        const existingBatchName = batchName;
+        if (glExists.status === 'P') {
+          // Already posted — just stamp SLA and finish
+          message.info('Journal already posted in GL. Stamping SLA header.');
+          const slaPostUrl  = `${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`;
+          const slaPostBody = { headerId: slaHeaderId, postedBy: 'user', glBatchId: existingBatchId, glBatchName: existingBatchName, glHeaderId: glExists.headerId };
+          await fetch(slaPostUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(slaPostBody) });
+          setSlaStatus('POSTED');
+          setSlaPostingStatus('POSTED');
+          setIsEditing(false);
+          message.success('GL journal already existed and is posted. SLA updated.');
+          return;
+        }
+        // Exists but not yet posted — run POST validation step only
+        debugLog[1] = { step: '1 — Create Journal (SKIPPED — already exists)', method: 'POST', url: `${APEX_DB_CONFIG.baseUrl}/journals/create`, response: { skipped: true, reason: 'Journal already exists', batchId: existingBatchId } };
+        debugLog[1].status = 200;
+        setGlPayloadDebug({ steps: [...debugLog] });
+
+        // Jump straight to step 2 using existing batch
+        const postGlUrl2  = `${APEX_DB_CONFIG.baseUrl}/gl/journals/${existingBatchId}/post`;
+        debugLog[2] = { step: '2 — Post to GL (existing batch)', method: 'PUT', url: postGlUrl2 };
+        setGlPayloadDebug({ steps: [...debugLog] });
+        const postGlRes2  = await fetch(postGlUrl2, { method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: '{}' });
+        const postGlData2 = await postGlRes2.json().catch(() => ({}));
+        debugLog[2].status = postGlRes2.status; debugLog[2].response = postGlData2;
+        setGlPayloadDebug({ steps: [...debugLog] });
+        if (!postGlRes2.ok || postGlData2?.success === false) {
+          const err2 = Array.isArray(postGlData2?.errors) && postGlData2.errors.length > 0 ? postGlData2.errors[0] : postGlData2?.error || `HTTP ${postGlRes2.status}`;
+          setSlaStatus('ERROR');
+          throw new Error(`GL posting failed: ${err2}`);
+        }
+        const slaPostUrl2  = `${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`;
+        const slaPostBody2 = { headerId: slaHeaderId, postedBy: 'user', glBatchId: existingBatchId, glBatchName: existingBatchName, glHeaderId: glExists.headerId };
+        debugLog[3] = { step: '3 — Stamp GL IDs on SLA header', method: 'POST', url: slaPostUrl2, requestBody: slaPostBody2 };
+        setGlPayloadDebug({ steps: [...debugLog] });
+        const slaRes2 = await fetch(slaPostUrl2, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(slaPostBody2) });
+        const slaDat2 = await slaRes2.json().catch(() => ({}));
+        debugLog[3].status = slaRes2.status; debugLog[3].response = slaDat2;
+        setGlPayloadDebug({ steps: [...debugLog] });
+        setSlaStatus('POSTED'); setSlaPostingStatus('POSTED'); setIsEditing(false);
+        message.success('Posted to General Ledger successfully.');
+        return;
+      }
+
       // Step 1 — POST to journals/create
       const glUrl = `${APEX_DB_CONFIG.baseUrl}/journals/create`;
-      debugLog[0] = { step: '1 — Create Journal', method: 'POST', url: glUrl, requestBody: journalPayload };
+      debugLog[1] = { step: '1 — Create Journal', method: 'POST', url: glUrl, requestBody: journalPayload };
       setGlPayloadDebug({ steps: [...debugLog] });
 
       const glRes = await fetch(glUrl, {
@@ -1505,12 +1561,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         body:    JSON.stringify(journalPayload),
       });
       const glData = await glRes.json().catch(() => ({}));
-      debugLog[0].status   = glRes.status;
-      debugLog[0].response = glData;
+      debugLog[1].status   = glRes.status;
+      debugLog[1].response = glData;
       setGlPayloadDebug({ steps: [...debugLog] });
 
       if (!glRes.ok) {
-        // Mark SLA as ERROR
         await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/error`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1525,20 +1580,20 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       const glHeaderId  = glData.jeHeaderId ?? glData.je_header_id ?? glData.headerId ?? glData.header_id ?? null;
       const glBatchName = glData.batchName  ?? glData.batch_name   ?? batchName;
 
-      // Step 2 — POST to GL via RR_POST_JOURNAL (validates period format, period open, balance, accounts)
+      // Step 2 — PUT to RR_POST_JOURNAL (validates period format, period open, balance, accounts)
       if (glBatchId) {
         const postGlUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/${glBatchId}/post`;
-        debugLog[1] = { step: '2 — Post to GL (RR_POST_JOURNAL)', method: 'PUT', url: postGlUrl };
+        debugLog[2] = { step: '2 — Post to GL (RR_POST_JOURNAL)', method: 'PUT', url: postGlUrl };
         setGlPayloadDebug({ steps: [...debugLog] });
 
         const postGlRes  = await fetch(postGlUrl, {
           method:  'PUT',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body:    '{}',   // ORDS requires a body when Content-Type is application/json
+          body:    '{}',
         });
         const postGlData = await postGlRes.json().catch(() => ({}));
-        debugLog[1].status   = postGlRes.status;
-        debugLog[1].response = postGlData;
+        debugLog[2].status   = postGlRes.status;
+        debugLog[2].response = postGlData;
         setGlPayloadDebug({ steps: [...debugLog] });
 
         if (!postGlRes.ok || postGlData?.success === false) {
@@ -1554,15 +1609,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           throw new Error(`GL posting failed: ${firstError}`);
         }
       } else {
-        // glBatchId missing — record in debug log and skip step 2
-        debugLog[1] = { step: '2 — Post to GL (SKIPPED — no batchId in step 1 response)', method: 'PUT', url: 'n/a', response: glData };
+        debugLog[2] = { step: '2 — Post to GL (SKIPPED — no batchId in step 1 response)', method: 'PUT', url: 'n/a', response: glData };
         setGlPayloadDebug({ steps: [...debugLog] });
       }
 
-      // Step 3 — stamp GL IDs back on the SLA header (same as ManageSLAJournals)
-      const slaPostUrl = `${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`;
+      // Step 3 — stamp GL IDs back on the SLA header
+      const slaPostUrl  = `${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`;
       const slaPostBody = { headerId: slaHeaderId, postedBy: 'user', glBatchId, glBatchName, glHeaderId };
-      debugLog[2] = { step: '3 — Stamp GL IDs on SLA header', method: 'POST', url: slaPostUrl, requestBody: slaPostBody };
+      debugLog[3] = { step: '3 — Stamp GL IDs on SLA header', method: 'POST', url: slaPostUrl, requestBody: slaPostBody };
       setGlPayloadDebug({ steps: [...debugLog] });
 
       if (glBatchId || glHeaderId) {
@@ -1572,8 +1626,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           body:    JSON.stringify(slaPostBody),
         });
         const postData = await postRes.json().catch(() => ({}));
-        debugLog[2].status   = postRes.status;
-        debugLog[2].response = postData;
+        debugLog[3].status   = postRes.status;
+        debugLog[3].response = postData;
         setGlPayloadDebug({ steps: [...debugLog] });
         if (!postRes.ok) throw new Error(`SLA post update failed: ${JSON.stringify(postData)}`);
       }
@@ -1639,7 +1693,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 userCurrencyConversionType: 'User', accountCombination: l.accountCombination || '',
                 chartOfAccountsName: 'Chart of Accounts', reference1: record.prepaymentNumber,
                 reference2: String(record.applicationId), reference3: l.accountingClass || null,
-                reference4: l.legalEntity || bu || null, reference5: null, createdBy: 'user',
+                reference4: l.legalEntity || bu || null, reference5: 'AP-PREPAYMENT-APPLICATION', createdBy: 'user',
               })),
             };
 
@@ -1818,7 +1872,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           reference2:                 String(applicationId),
           reference3:                 l.accountingClass || null,
           reference4:                 l.legalEntity || bu || null,
-          reference5:                 null,
+          reference5:                 'AP-PREPAYMENT-APPLICATION',
           createdBy:                  'user',
         })),
       };
