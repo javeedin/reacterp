@@ -9,6 +9,7 @@ import {
   Col,
   Space,
   Button,
+  Collapse,
   Dropdown,
   Tag,
   Descriptions,
@@ -172,6 +173,7 @@ import {
   buildApPaymentSlaPayloads,
   getAccounting,
   getLinesByHeaderId,
+  getAccountingLinesBySourceNumber,
   checkGLJournalExists,
 } from '../../services/sla.service';
 import type { SlaExistsResult, SlaGetResult } from '../../services/sla.service';
@@ -238,6 +240,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
   const [viewAcctOpen, setViewAcctOpen] = useState(false);
   const [viewAcctLoading, setViewAcctLoading] = useState(false);
   const [viewAcctData, setViewAcctData] = useState<SlaGetResult | null>(null);
+  const [viewAcctAllEvents, setViewAcctAllEvents] = useState<{ headerId: number; eventTypeCode: string; accountingStatus: string; accountingDate: string; lines: any[] }[]>([]);
   // ─────────────────────────────────────────────────────────────────────────
 
   // Actions menu
@@ -658,8 +661,14 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
     setViewAcctOpen(true);
     setViewAcctLoading(true);
     setViewAcctData(null);
+    setViewAcctAllEvents([]);
     try {
-      const result = await getAccounting('AP_PAYMENTS', payment.checkId);
+      const [result, allLinesData] = await Promise.all([
+        getAccounting('AP_PAYMENTS', payment.checkId),
+        payment.paymentNumber
+          ? getAccountingLinesBySourceNumber(String(payment.paymentNumber), 'AP').catch(() => ({ items: [] }))
+          : Promise.resolve({ items: [] }),
+      ]);
       if (result.headerId) {
         try {
           const linesData = await getLinesByHeaderId(result.headerId);
@@ -668,6 +677,13 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
         } catch { /* non-critical */ }
       }
       setViewAcctData(result);
+      const eventsMap = new Map<number, { headerId: number; eventTypeCode: string; accountingStatus: string; accountingDate: string; lines: any[] }>();
+      for (const line of (allLinesData.items || [])) {
+        const hid = line.headerId as number;
+        if (!eventsMap.has(hid)) eventsMap.set(hid, { headerId: hid, eventTypeCode: (line as any).eventTypeCode || '', accountingStatus: (line as any).accountingStatus || '', accountingDate: (line as any).accountingDate || '', lines: [] });
+        eventsMap.get(hid)!.lines.push(line);
+      }
+      setViewAcctAllEvents(Array.from(eventsMap.values()).sort((a, b) => a.headerId - b.headerId));
     } catch (err: any) {
       message.error(`Failed to fetch accounting: ${err.message}`);
       setViewAcctOpen(false);
@@ -2053,46 +2069,85 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
       >
         {viewAcctLoading ? (
           <div style={{ textAlign: 'center', padding: 32 }}><Spin /></div>
-        ) : viewAcctData?.found ? (
-          <Space direction="vertical" style={{ width: '100%' }}>
-            <Descriptions size="small" column={3} bordered>
-              <Descriptions.Item label="Header ID">{viewAcctData.headerId}</Descriptions.Item>
-              <Descriptions.Item label="Status">
-                <Tag color={viewAcctData.accountingStatus === 'POSTED' ? 'green' : viewAcctData.accountingStatus === 'DRAFT' ? 'blue' : 'default'}>
-                  {viewAcctData.accountingStatus}
-                </Tag>
-              </Descriptions.Item>
-              <Descriptions.Item label="Period">{viewAcctData.periodName}</Descriptions.Item>
-              <Descriptions.Item label="Accounting Date">{viewAcctData.accountingDate}</Descriptions.Item>
-              <Descriptions.Item label="Description" span={2}>{viewAcctData.description}</Descriptions.Item>
-              {viewAcctData.postedDate && (
-                <Descriptions.Item label="Posted Date">{viewAcctData.postedDate}</Descriptions.Item>
-              )}
-            </Descriptions>
-            <Table
-              size="small"
-              pagination={false}
-              dataSource={(viewAcctData.lines || []).map((l, i) => ({ ...l, key: i }))}
-              columns={[
-                { title: '#', dataIndex: 'lineNumber', width: 40 },
-                { title: 'Type', dataIndex: 'lineType', width: 50, render: (v: string) => <Tag color={v === 'DR' ? 'blue' : 'green'}>{v}</Tag> },
-                { title: 'Class', dataIndex: 'accountingClass', width: 120 },
-                { title: 'Account', dataIndex: 'accountCombination', width: 170, render: (v: string, r: any) => (
-                  <div>
-                    <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{v || '—'}</span>
-                    {r.accountDescription && <div style={{ fontSize: 10, color: '#888', marginTop: 1 }}>{r.accountDescription}</div>}
-                  </div>
-                )},
-                { title: 'Description', dataIndex: 'description', ellipsis: true },
-                { title: 'Ent. Dr', dataIndex: 'enteredDr',   width: 105, align: 'right' as const, render: (v: number) => v ? v.toLocaleString('en-US', { minimumFractionDigits: 2 }) : <span style={{ color: '#bbb' }}>—</span> },
-                { title: 'Ent. Cr', dataIndex: 'enteredCr',   width: 105, align: 'right' as const, render: (v: number) => v ? v.toLocaleString('en-US', { minimumFractionDigits: 2 }) : <span style={{ color: '#bbb' }}>—</span> },
-                { title: 'Acc. Dr', dataIndex: 'accountedDr', width: 105, align: 'right' as const, render: (v: number) => v ? v.toLocaleString('en-US', { minimumFractionDigits: 2 }) : <span style={{ color: '#bbb' }}>—</span> },
-                { title: 'Acc. Cr', dataIndex: 'accountedCr', width: 105, align: 'right' as const, render: (v: number) => v ? v.toLocaleString('en-US', { minimumFractionDigits: 2 }) : <span style={{ color: '#bbb' }}>—</span> },
-                { title: 'CCY', dataIndex: 'currencyCode', width: 55 },
-              ]}
-            />
-          </Space>
-        ) : (
+        ) : viewAcctData?.found ? (() => {
+          const acctLineColumns = [
+            { title: '#', dataIndex: 'lineNumber', width: 40 },
+            { title: 'Type', dataIndex: 'lineType', width: 50, render: (v: string) => <Tag color={v === 'DR' ? 'blue' : 'green'}>{v}</Tag> },
+            { title: 'Class', dataIndex: 'accountingClass', width: 120 },
+            { title: 'Account', dataIndex: 'accountCombination', width: 170, render: (v: string, r: any) => (
+              <div>
+                <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{v || '—'}</span>
+                {r.accountDescription && <div style={{ fontSize: 10, color: '#888', marginTop: 1 }}>{r.accountDescription}</div>}
+              </div>
+            )},
+            { title: 'Description', dataIndex: 'description', ellipsis: true },
+            { title: 'Ent. Dr',  dataIndex: 'enteredDr',   width: 105, align: 'right' as const, render: (v: number) => v ? v.toLocaleString('en-US', { minimumFractionDigits: 2 }) : <span style={{ color: '#bbb' }}>—</span> },
+            { title: 'Ent. Cr',  dataIndex: 'enteredCr',   width: 105, align: 'right' as const, render: (v: number) => v ? v.toLocaleString('en-US', { minimumFractionDigits: 2 }) : <span style={{ color: '#bbb' }}>—</span> },
+            { title: 'Acc. Dr',  dataIndex: 'accountedDr', width: 105, align: 'right' as const, render: (v: number) => v ? v.toLocaleString('en-US', { minimumFractionDigits: 2 }) : <span style={{ color: '#bbb' }}>—</span> },
+            { title: 'Acc. Cr',  dataIndex: 'accountedCr', width: 105, align: 'right' as const, render: (v: number) => v ? v.toLocaleString('en-US', { minimumFractionDigits: 2 }) : <span style={{ color: '#bbb' }}>—</span> },
+            { title: 'CCY', dataIndex: 'currencyCode', width: 55 },
+          ];
+          const isVoid     = (code: string) => code?.includes('VOID') || code?.includes('void');
+          const eventLabel = (code: string) =>
+            isVoid(code) ? 'Void Reversal' : code?.includes('PAYMENT') ? 'Payment Accounting' : code || 'Accounting';
+
+          if (viewAcctAllEvents.length > 1) {
+            return (
+              <Collapse
+                defaultActiveKey={viewAcctAllEvents.map(e => String(e.headerId))}
+                style={{ background: 'transparent' }}
+                items={viewAcctAllEvents.map(event => ({
+                  key: String(event.headerId),
+                  label: (
+                    <Space>
+                      <Tag color={isVoid(event.eventTypeCode) ? 'orange' : 'blue'} style={{ fontWeight: 600 }}>
+                        {eventLabel(event.eventTypeCode)}
+                      </Tag>
+                      <Tag color={event.accountingStatus === 'POSTED' ? 'green' : event.accountingStatus === 'DRAFT' ? 'blue' : 'default'}>
+                        {event.accountingStatus}
+                      </Tag>
+                      <span style={{ fontSize: 12, color: '#888' }}>{event.accountingDate}</span>
+                      <span style={{ fontSize: 12, color: '#999' }}>Header #{event.headerId}</span>
+                    </Space>
+                  ),
+                  children: (
+                    <Table
+                      size="small"
+                      pagination={false}
+                      dataSource={event.lines.map((l: any, i: number) => ({ ...l, key: i }))}
+                      columns={acctLineColumns}
+                    />
+                  ),
+                }))}
+              />
+            );
+          }
+
+          return (
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <Descriptions size="small" column={3} bordered>
+                <Descriptions.Item label="Header ID">{viewAcctData.headerId}</Descriptions.Item>
+                <Descriptions.Item label="Status">
+                  <Tag color={viewAcctData.accountingStatus === 'POSTED' ? 'green' : viewAcctData.accountingStatus === 'DRAFT' ? 'blue' : 'default'}>
+                    {viewAcctData.accountingStatus}
+                  </Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label="Period">{viewAcctData.periodName}</Descriptions.Item>
+                <Descriptions.Item label="Accounting Date">{viewAcctData.accountingDate}</Descriptions.Item>
+                <Descriptions.Item label="Description" span={2}>{viewAcctData.description}</Descriptions.Item>
+                {viewAcctData.postedDate && (
+                  <Descriptions.Item label="Posted Date">{viewAcctData.postedDate}</Descriptions.Item>
+                )}
+              </Descriptions>
+              <Table
+                size="small"
+                pagination={false}
+                dataSource={(viewAcctData.lines || []).map((l, i) => ({ ...l, key: i }))}
+                columns={acctLineColumns}
+              />
+            </Space>
+          );
+        })() : (
           <Alert message="No accounting entries found for this payment." type="info" />
         )}
       </Modal>

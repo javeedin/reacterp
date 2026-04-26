@@ -210,6 +210,20 @@ export async function getLinesByHeaderId(headerId: number): Promise<{ items: Sla
   return apexGet<{ items: SlaLine[] }>(url);
 }
 
+/**
+ * Fetch ALL SLA lines for a source number (e.g. payment number) across all events.
+ * Returns { items: any[] } — each item has all SlaLine fields plus headerId, accountingStatus,
+ * accountingDate, moduleName, sourceNumber, accountDescription etc from the header JOIN.
+ */
+export async function getAccountingLinesBySourceNumber(
+  sourceNumber: string,
+  moduleName?: string,
+): Promise<{ items: any[] }> {
+  const qs = new URLSearchParams({ sourceNumber, limit: '500' });
+  if (moduleName) qs.set('moduleName', moduleName);
+  return apexGet<{ items: any[] }>(`${BASE}/sla/journals/lines?${qs}`);
+}
+
 // ── GL journal duplicate-check ─────────────────────────────────────────────
 
 export interface GlJournalExistsResult {
