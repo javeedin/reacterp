@@ -474,6 +474,15 @@ const ManageSLAJournals: React.FC = () => {
       // Fallback legalEntity from first line that has one
       const legalEntity = postGLLines.find(l => l.legalEntity)?.legalEntity || '';
 
+      // Derive conversion rate from first line that has both entered and accounted amounts
+      const rateLine = postGLLines.find(l => (l.enteredDr || l.enteredCr) && (l.accountedDr || l.accountedCr));
+      const derivedRate = rateLine
+        ? ((rateLine.enteredDr || 0) > 0
+            ? (rateLine.accountedDr || 0) / (rateLine.enteredDr || 1)
+            : (rateLine.accountedCr || 0) / (rateLine.enteredCr || 1))
+        : 1;
+      const conversionRate = Math.round(derivedRate * 100000) / 100000; // 5dp precision
+
       const result = await postSlaToGL({
         slaHeaderId:    postGLRecord.headerId,
         sourceNumber:   postGLRecord.sourceNumber,
@@ -485,9 +494,10 @@ const ManageSLAJournals: React.FC = () => {
         currency:       postGLRecord.currencyCode,
         accountingDate: postGLRecord.accountingDate,
         legalEntity,
-        businessUnit:   postGLRecord.businessUnit || '',
-        lines:          glLines,
-        createdBy:      postGLRecord.createdBy || 'SYSTEM',
+        businessUnit:    postGLRecord.businessUnit || '',
+        conversionRate,
+        lines:           glLines,
+        createdBy:       postGLRecord.createdBy || 'SYSTEM',
       });
 
       setPostGLResult(result);

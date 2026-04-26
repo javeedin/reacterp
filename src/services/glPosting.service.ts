@@ -51,9 +51,10 @@ export interface GlPostingOptions {
   ledgerName:     string;
   ledgerId:       number;
   currency:       string;
-  accountingDate: string;          // YYYY-MM-DD
-  legalEntity:    string;
-  businessUnit:   string;
+  accountingDate:  string;          // YYYY-MM-DD
+  legalEntity:     string;
+  businessUnit:    string;
+  conversionRate?: number;          // 1 for functional currency, actual rate otherwise
   // Lines
   lines:          GlPostingLine[];
   createdBy?:     string;
@@ -73,9 +74,11 @@ export async function postSlaToGL(opts: GlPostingOptions): Promise<GlPostingResu
     slaHeaderId, sourceNumber, sourceId, eventTypeCode,
     periodName, ledgerName, ledgerId, currency, accountingDate,
     legalEntity, businessUnit, lines, createdBy = 'user',
+    conversionRate = 1,
   } = opts;
 
-  const ref5      = eventTypeToRef5(eventTypeCode);
+  const rate = (conversionRate && conversionRate > 0) ? conversionRate : 1;
+  const ref5 = eventTypeToRef5(eventTypeCode);
   const batchName = `${ref5}-${sourceNumber}-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Date.now().toString().slice(-6)}`;
 
   // ── 0. Duplicate check ────────────────────────────────────────────────────
@@ -120,23 +123,26 @@ export async function postSlaToGL(opts: GlPostingOptions): Promise<GlPostingResu
       currencyCode:           currency,
       currencyConversionType: 'User',
       currencyConversionDate: accountingDate,
-      currencyConversionRate: 1,
+      currencyConversionRate: rate,
       defaultEffectiveDate:   accountingDate,
       status:                 'NEW',
       runningTotalDr:         totalDr,
       runningTotalCr:         totalCr,
       createdBy,
     },
-    lines: lines.map(l => ({
-      enteredDr:                l.lineType === 'DR' ? (l.enteredDr || null) : null,
-      enteredCr:                l.lineType === 'CR' ? (l.enteredCr || null) : null,
-      accountedDr:              l.accountedDr || null,
-      accountedCr:              l.accountedCr || null,
+    lines: lines.map(l => {
+      const eDr = l.lineType === 'DR' ? (l.enteredDr || null) : null;
+      const eCr = l.lineType === 'CR' ? (l.enteredCr || null) : null;
+      return {
+      enteredDr:                eDr,
+      enteredCr:                eCr,
+      accountedDr:              eDr != null ? Math.round(eDr * rate * 100) / 100 : null,
+      accountedCr:              eCr != null ? Math.round(eCr * rate * 100) / 100 : null,
       statAmount:               null,
       description:              l.description || '',
       currencyCode:             l.currencyCode || currency,
       currencyConversionDate:   l.accountingDate || accountingDate,
-      currencyConversionRate:   1,
+      currencyConversionRate:   rate,
       userCurrencyConversionType: 'User',
       accountCombination:       l.accountCombination || '',
       chartOfAccountsName:      'Chart of Accounts',
@@ -146,7 +152,8 @@ export async function postSlaToGL(opts: GlPostingOptions): Promise<GlPostingResu
       reference4:               businessUnit || null,
       reference5:               ref5,
       createdBy,
-    })),
+    };
+    }),
   };
 
   const createRes  = await fetch(`${BASE}/journals/create`, {

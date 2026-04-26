@@ -1075,7 +1075,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const buildSlaLines = useCallback(() => {
     const liabilityDist = form.getFieldValue('liabilityDistribution') || '';
     const currency = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
-    const exchangeRate = 1;
+    const exchangeRate = Number(headerValues.conversionRate || form.getFieldValue('conversionRate') || 1);
     const supplierId = Number(form.getFieldValue('supplierId')) || null;
     const invoiceType = form.getFieldValue('invoiceType') || '';
     const isCreditMemo = invoiceType === 'Credit Memo';
@@ -1400,14 +1400,15 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
     setSlaPosting(true);
     try {
-      const invoiceDate   = form.getFieldValue('invoiceDate');
-      const currency      = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
-      const invoiceNumber = form.getFieldValue('invoiceNumber');
-      const bu            = form.getFieldValue('businessUnit') || '';
-      const acctDate      = invoiceDate ? dayjs(invoiceDate).format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD');
-      const d             = invoiceDate ? dayjs(invoiceDate).toDate() : new Date();
-      const months        = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-      const periodName    = `${months[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
+      const invoiceDate    = form.getFieldValue('invoiceDate');
+      const currency       = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
+      const invoiceNumber  = form.getFieldValue('invoiceNumber');
+      const bu             = form.getFieldValue('businessUnit') || '';
+      const conversionRate = Number(headerValues.conversionRate || form.getFieldValue('conversionRate') || 1);
+      const acctDate       = invoiceDate ? dayjs(invoiceDate).format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD');
+      const d              = invoiceDate ? dayjs(invoiceDate).toDate() : new Date();
+      const months         = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const periodName     = `${months[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
 
       // Validate period format: must be Mon-YY (e.g. Apr-26)
       if (!/^[A-Z][a-z]{2}-\d{2}$/.test(periodName)) {
@@ -1456,23 +1457,26 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           currencyCode:           currency,
           currencyConversionType: 'User',
           currencyConversionDate: acctDate,
-          currencyConversionRate: 1,
+          currencyConversionRate: conversionRate,
           defaultEffectiveDate:   acctDate,
           status:                 'NEW',
           runningTotalDr:         totalDr,
           runningTotalCr:         totalCr,
           createdBy:              'user',
         },
-        lines: fetchedLines.map((l: any) => ({
-          enteredDr:                l.lineType === 'DR' ? (l.enteredDr || null) : null,
-          enteredCr:                l.lineType === 'CR' ? (l.enteredCr || null) : null,
-          accountedDr:              l.accountedDr || null,
-          accountedCr:              l.accountedCr || null,
+        lines: fetchedLines.map((l: any) => {
+          const eDr = l.lineType === 'DR' ? (l.enteredDr || null) : null;
+          const eCr = l.lineType === 'CR' ? (l.enteredCr || null) : null;
+          return {
+          enteredDr:                eDr,
+          enteredCr:                eCr,
+          accountedDr:              eDr != null ? Math.round(eDr * conversionRate * 100) / 100 : null,
+          accountedCr:              eCr != null ? Math.round(eCr * conversionRate * 100) / 100 : null,
           statAmount:               null,
           description:              l.description || '',
           currencyCode:             l.currencyCode || currency,
           currencyConversionDate:   l.accountingDate || acctDate,
-          currencyConversionRate:   1,
+          currencyConversionRate:   conversionRate,
           userCurrencyConversionType: 'User',
           accountCombination:       l.accountCombination || '',
           chartOfAccountsName:      'Chart of Accounts',
@@ -1482,7 +1486,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           reference4:               bu || null,
           reference5:               'AP-INVOICE-CREATION',
           createdBy:                'user',
-        })),
+        };
+        }),
       };
 
       // Init debug log — updated at each step
@@ -2886,9 +2891,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 currency,
                 accountingDate: acctDate,
                 legalEntity,
-                businessUnit:   form.getFieldValue('businessUnit') || '',
-                lines:          glLines,
-                createdBy:      'user',
+                businessUnit:    form.getFieldValue('businessUnit') || '',
+                conversionRate:  Number(headerValues.conversionRate || form.getFieldValue('conversionRate') || 1),
+                lines:           glLines,
+                createdBy:       'user',
               });
 
               steps[glStepIdx].ok       = glResult.success;
