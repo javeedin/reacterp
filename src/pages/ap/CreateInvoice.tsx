@@ -553,7 +553,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   // Saving state
   const [saving, setSaving] = useState(false);
-  const amountDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const amountDebounceRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const invalidateDebounceRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Validation state
   const [isValidated,        setIsValidated]        = useState(false);
@@ -4165,6 +4166,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       // Store invoice ID — switch to update mode
       if (!isUpdate && invoiceId) {
         setSavedInvoiceId(invoiceId);
+        setIsEditing(true); // keep form in edit mode so Update Invoice button shows immediately
         // Seed live status for a freshly created invoice so the refresh button works immediately
         setLiveHoldPaidStatus('Unpaid');
         setLiveValidationStatus('Never Validated');
@@ -4322,6 +4324,15 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       const coreFields = ['businessUnit', 'invoiceNumber', 'invoiceCurrency', 'invoiceAmount', 'invoiceDate', 'supplier', 'invoiceType', 'paymentTerms'];
       await form.validateFields(coreFields);
       const values = { ...headerValues, ...form.getFieldsValue(true) };
+      // Require conversion rate for non-functional currencies
+      const invoiceCcy = (values.invoiceCurrency || 'AED').toUpperCase();
+      if (invoiceCcy !== 'AED') {
+        const rate = Number(values.conversionRate);
+        if (!rate || rate <= 0) {
+          message.error('Conversion rate is required for non-AED currencies. Please enter a valid rate before saving.');
+          return false;
+        }
+      }
       if (!validateTally()) return false;
       const result = await saveInvoiceWithInstallments(values);
       if (result) message.success('Invoice saved successfully');
@@ -5265,6 +5276,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             }}
             onValuesChange={(changedValues, allValues) => {
               setIsValidated(false);
+              // Auto-invalidate when the user edits a saved, non-locked invoice
+              if (savedInvoiceId && !isPermanentlyLocked) {
+                setLiveValidationStatus('Needs Revalidation');
+                if (invalidateDebounceRef.current) clearTimeout(invalidateDebounceRef.current);
+                invalidateDebounceRef.current = setTimeout(() => {
+                  saveValidationStatus(savedInvoiceId, 'Needs Revalidation');
+                }, 1500);
+              }
               // Debounce invoiceAmount — every keystroke triggers onValuesChange, which
               // causes expensive re-renders of the lines table. Delay state sync by 300ms.
               if ('invoiceAmount' in changedValues) {
@@ -5591,7 +5610,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           <Select
                             placeholder={supplierSiteLoading ? 'Loading sites...' : 'Select site'}
                             loading={supplierSiteLoading}
-                            disabled={supplierSiteLoading}
+                            disabled={supplierSiteLoading || isReadOnly}
                             allowClear
                             notFoundContent={supplierSiteLoading ? 'Loading…' : 'No sites — select a supplier first'}
                           >
@@ -5818,7 +5837,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           style={{ marginBottom: 4 }}
                           required={!isFuncCcy}
                         >
-                          <Select placeholder={isFuncCcy ? 'N/A – functional currency' : 'Select rate type'} allowClear disabled={isFuncCcy}>
+                          <Select placeholder={isFuncCcy ? 'N/A – functional currency' : 'Select rate type'} allowClear disabled={isFuncCcy || isReadOnly}>
                             <Option value="User">User</Option>
                             <Option value="Corporate">Corporate</Option>
                             <Option value="Spot">Spot</Option>
@@ -5830,7 +5849,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           style={{ marginBottom: 4 }}
                           required={!isFuncCcy}
                         >
-                          <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder={isFuncCcy ? 'N/A' : 'dd-mmm-yyyy'} disabled={isFuncCcy} />
+                          <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder={isFuncCcy ? 'N/A' : 'dd-mmm-yyyy'} disabled={isFuncCcy || isReadOnly} />
                         </Form.Item>
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Conversion Rate</Text>}
@@ -5838,7 +5857,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           style={{ marginBottom: 4 }}
                           required={!isFuncCcy}
                         >
-                          <InputNumber style={{ width: '100%' }} placeholder={isFuncCcy ? '1' : '0.000000'} precision={6} min={0} disabled={isFuncCcy} />
+                          <InputNumber style={{ width: '100%' }} placeholder={isFuncCcy ? '1' : '0.000000'} precision={6} min={0} disabled={isFuncCcy || isReadOnly} />
                         </Form.Item>
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Inverse Rate</Text>}
