@@ -806,14 +806,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const { isReadOnly, isPermanentlyLocked, isPaid, isPostedToGL } = useMemo(() => {
     if (!initialData?.invoiceId) return { isReadOnly: false, isPermanentlyLocked: false, isPaid: false, isPostedToGL: false };
     const status = (initialData.holdPaidStatus || '').toLowerCase();
-    const isPostedToGL = initialData.validationStatus === 'Validated';
+    const isPostedToGL = slaStatus === 'POSTED';   // true only when accounting is actually posted to GL
     const isPaid = status === 'fully paid' || status === 'paid' || status === 'available';
     // Note: 'partially paid' is NOT isPaid — Pay in Full must remain available while balance exists
-    const permanentlyLocked = isPostedToGL || isPaid;
+    const permanentlyLocked = isPaid;  // posting to GL does not lock the invoice
     // Synced invoices are always read-only (can't be edited in this app)
     const ro = initialData.isSynced ? true : (permanentlyLocked || !isEditing);
     return { isReadOnly: ro, isPermanentlyLocked: permanentlyLocked || !!initialData.isSynced, isPaid, isPostedToGL };
-  }, [initialData, isEditing]);
+  }, [initialData, isEditing, slaStatus]);
 
   // True when applied prepayments fully cover the invoice amount
   const isPrepaymentFullyPaid = useMemo(() => {
