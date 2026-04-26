@@ -89,6 +89,10 @@ interface PaymentRecord {
   paymentReference: number;
   paymentFileReference: number;
   paymentProcessRequest: string;
+  // Payment-level currency conversion
+  conversionRate: number | null;
+  conversionDate: string | null;
+  conversionRateType: string | null;
   clearingDate: string | null;
   clearingAmount: number | null;
   clearingLedgerAmount: number | null;
@@ -991,6 +995,41 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
         </Row>
       </Card>
 
+      {/* Currency Conversion Section */}
+      <Card
+        title={<Text strong>Currency Conversion</Text>}
+        size="small"
+        style={{ marginBottom: 16, borderRadius: 8 }}
+        styles={{ body: { padding: 16 } }}
+      >
+        <Row gutter={[48, 12]}>
+          <Col span={12}>
+            <Descriptions column={1} size="small" labelStyle={{ width: 180, color: REDWOOD.neutral600 }}>
+              <Descriptions.Item label="Payment Currency">
+                {payment.paymentCurrency || '—'}
+              </Descriptions.Item>
+              <Descriptions.Item label="Conversion Rate Type">
+                {payment.conversionRateType || (payment.paymentCurrency === 'AED' ? 'N/A – Functional' : '—')}
+              </Descriptions.Item>
+            </Descriptions>
+          </Col>
+          <Col span={12}>
+            <Descriptions column={1} size="small" labelStyle={{ width: 180, color: REDWOOD.neutral600 }}>
+              <Descriptions.Item label="Conversion Rate">
+                {payment.paymentCurrency === 'AED'
+                  ? <Text type="secondary">1 (functional)</Text>
+                  : payment.conversionRate != null
+                    ? <Text strong style={{ color: REDWOOD.info }}>{payment.conversionRate}</Text>
+                    : <Text type="secondary">—</Text>}
+              </Descriptions.Item>
+              <Descriptions.Item label="Conversion Date">
+                {payment.conversionDate ? formatDate(payment.conversionDate) : '—'}
+              </Descriptions.Item>
+            </Descriptions>
+          </Col>
+        </Row>
+      </Card>
+
       {/* General Information Section */}
       <Card
         title={<Text strong>General Information</Text>}
@@ -1358,6 +1397,18 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
                 <br />
                 <Text type="secondary">{payment.paymentCurrency}</Text>
               </Descriptions.Item>
+              {payment.paymentCurrency && payment.paymentCurrency !== 'AED' && (
+                <Descriptions.Item label="Conv. Rate">
+                  {payment.conversionRate != null
+                    ? <><Text strong>{payment.conversionRate}</Text><Text type="secondary"> ({payment.conversionRateType || 'User'})</Text></>
+                    : <Text type="secondary">—</Text>}
+                </Descriptions.Item>
+              )}
+              {payment.paymentCurrency && payment.paymentCurrency !== 'AED' && (
+                <Descriptions.Item label="Conv. Date">
+                  {payment.conversionDate ? formatDate(payment.conversionDate) : '—'}
+                </Descriptions.Item>
+              )}
               <Descriptions.Item label="Business Unit">{payment.businessUnit}</Descriptions.Item>
               <Descriptions.Item label="Legal Entity">{payment.legalEntity}</Descriptions.Item>
               <Descriptions.Item label="Stop Date"></Descriptions.Item>
