@@ -1667,6 +1667,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       }
     } catch (err: any) {
       message.error(`Post to Ledger failed: ${err.message}`);
+      // Auto-open debug modal so user can see which step failed
+      setGlPayloadModalVisible(true);
     } finally {
       setSlaPosting(false);
     }
@@ -10206,7 +10208,19 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
       {/* ── GL Payload Debug Modal ────────────────────────────────────────── */}
       <Modal
-        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>GL Journal Payload</span></Space>}
+        title={
+          <Space>
+            <ApiOutlined style={{ color: REDWOOD.info }} />
+            <span>Post to Ledger — API Debug</span>
+            {(() => {
+              const steps: any[] = (glPayloadDebug as any)?.steps || [];
+              const failedStep = steps.find(s => s.status && s.status >= 400);
+              return failedStep
+                ? <Tag color="red">Failed at: {failedStep.step}</Tag>
+                : steps.length > 0 ? <Tag color="green">All steps OK</Tag> : null;
+            })()}
+          </Space>
+        }
         open={glPayloadModalVisible}
         onCancel={() => setGlPayloadModalVisible(false)}
         footer={
