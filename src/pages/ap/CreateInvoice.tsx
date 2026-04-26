@@ -579,6 +579,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [slaPosting, setSlaPosting]                 = useState(false);
   const [cancelSlaPosting, setCancelSlaPosting]     = useState(false);
   const [cancelPostError,  setCancelPostError]      = useState<string | null>(null);
+  const [cancelFlowDebug,  setCancelFlowDebug]      = useState<Array<{step: string; method: string; url: string; status?: number; request?: string; response?: string; ok?: boolean}>>([]);
+  const [cancelFlowModalVisible, setCancelFlowModalVisible] = useState(false);
   const [slaFetching, setSlaFetching]               = useState(false);
   const [slaGlBatchId, setSlaGlBatchId]       = useState<number | null>(null);
   const [slaGlBatchName, setSlaGlBatchName]   = useState<string | null>(null);
@@ -2788,20 +2790,71 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     if (!invoiceId) return;
     setCancelExecuting(true);
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/${invoiceId}/cancel`;
-      const res = await fetch(url, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body:    JSON.stringify({ cancelledBy: user?.username || 'SYSTEM' }),
+      const steps: typeof cancelFlowDebug = [];
+
+      // ── Step 1: Cancel invoice ────────────────────────────────────────
+      const cancelUrl  = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/${invoiceId}/cancel`;
+      const cancelBody = { cancelledBy: user?.username || 'SYSTEM' };
+      steps.push({ step: '1 — Cancel Invoice', method: 'POST', url: cancelUrl, request: JSON.stringify(cancelBody, null, 2) });
+      const res  = await fetch(cancelUrl, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body:   JSON.stringify(cancelBody),
       });
-      const data = await res.json();
-      if (data.success === false || (res.status >= 400)) {
+      const data = await res.json().catch(() => ({}));
+      steps[0].status   = res.status;
+      steps[0].ok       = res.ok && data.success !== false;
+      steps[0].response = JSON.stringify(data, null, 2);
+
+      if (data.success === false || res.status >= 400) {
+        setCancelFlowDebug([...steps]);
+        setCancelFlowModalVisible(true);
         message.error(data.message || data.error || 'Cancellation failed');
         return;
       }
       setCancelDone(true);
       setLiveHoldPaidStatus('Cancelled');
       message.success('Invoice cancelled successfully');
+
+      // ── Step 2: Check for cancellation SLA header ─────────────────────
+      const slaExistsUrl = `${APEX_DB_CONFIG.baseUrl}/sla/accounting/exists?sourceTable=AP_INVOICES&sourceId=${invoiceId}&eventType=INVOICE_CANCELLED`;
+      steps.push({ step: '2 — Check Cancellation SLA (INVOICE_CANCELLED)', method: 'GET', url: slaExistsUrl });
+      try {
+        const slaRes  = await fetch(slaExistsUrl, { headers: { Accept: 'application/json' } });
+        const slaData = await slaRes.json().catch(() => ({}));
+        steps[1].status   = slaRes.status;
+        steps[1].ok       = slaRes.ok;
+        steps[1].response = JSON.stringify(slaData, null, 2);
+
+        if (slaData.exists && slaData.headerId) {
+          setCancelSlaHeaderId(slaData.headerId);
+          setCancelSlaStatus(slaData.accountingStatus);
+
+          // ── Step 3: Fetch SLA lines for cancellation header ─────────
+          const linesUrl = `${APEX_DB_CONFIG.baseUrl}/sla/journals/lines?headerId=${slaData.headerId}&limit=500`;
+          steps.push({ step: `3 — Fetch Cancellation SLA Lines (headerId=${slaData.headerId})`, method: 'GET', url: linesUrl });
+          try {
+            const linesRes  = await fetch(linesUrl, { headers: { Accept: 'application/json' } });
+            const linesData = await linesRes.json().catch(() => ({}));
+            steps[2].status   = linesRes.status;
+            steps[2].ok       = linesRes.ok;
+            steps[2].response = JSON.stringify(linesData, null, 2);
+            setCancelSlaLines(linesData.items || []);
+          } catch (le: any) {
+            steps[2].ok       = false;
+            steps[2].response = `Network error: ${le.message}`;
+          }
+        } else {
+          steps[1].ok = false;
+          // no cancellation SLA found — push info step
+          steps.push({ step: '3 — Fetch Cancellation SLA Lines', method: 'GET', url: '(skipped — no SLA header found in step 2)', ok: false });
+        }
+      } catch (se: any) {
+        steps[1].ok       = false;
+        steps[1].response = `Network error: ${se.message}`;
+      }
+
+      setCancelFlowDebug([...steps]);
+      setCancelFlowModalVisible(true);
       handleRefreshStatus();
     } catch (err) {
       message.error(`Cancellation error: ${err instanceof Error ? err.message : String(err)}`);
@@ -11069,6 +11122,70 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         )}
       </Modal>
       {/* ── End Prepayment API Explorer Modal ────────────────────────────── */}
+
+      {/* ── Cancel Flow Debug Modal ──────────────────────────────────────── */}
+      <Modal
+        open={cancelFlowModalVisible}
+        onCancel={() => setCancelFlowModalVisible(false)}
+        title={
+          <Space>
+            <ApiOutlined style={{ color: REDWOOD.info }} />
+            <span style={{ fontWeight: 600 }}>Cancellation Flow — API Steps</span>
+            {cancelFlowDebug.every(s => s.ok !== false) ? (
+              <Tag color="success">All steps passed</Tag>
+            ) : (
+              <Tag color="error">One or more steps failed</Tag>
+            )}
+          </Space>
+        }
+        footer={<Button onClick={() => setCancelFlowModalVisible(false)}>Close</Button>}
+        width={820}
+        destroyOnClose
+        style={{ top: 20 }}
+        styles={{ body: { maxHeight: 'calc(100vh - 200px)', overflowY: 'auto', padding: 16 } }}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {cancelFlowDebug.map((s, idx) => (
+            <div key={idx} style={{
+              border: `1px solid ${s.ok === false ? '#ffa39e' : s.ok === true ? '#b7eb8f' : '#d9d9d9'}`,
+              borderRadius: 6, overflow: 'hidden',
+            }}>
+              {/* Step header */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px',
+                background: s.ok === false ? '#fff2f0' : s.ok === true ? '#f6ffed' : '#fafafa',
+              }}>
+                <Tag color={s.method === 'POST' ? 'orange' : s.method === 'PUT' ? 'blue' : 'default'}
+                  style={{ margin: 0, fontSize: 10, fontWeight: 700 }}>{s.method || '—'}</Tag>
+                <Tag color={s.ok === false ? 'error' : s.ok === true ? 'success' : 'default'}
+                  style={{ margin: 0, fontSize: 10 }}>{s.status ?? '—'}</Tag>
+                <span style={{ fontWeight: 600, fontSize: 12 }}>{s.step}</span>
+                <span style={{ marginLeft: 'auto', fontSize: 10, color: '#888' }}>
+                  {s.ok === false ? '✗ Failed' : s.ok === true ? '✓ OK' : ''}
+                </span>
+              </div>
+              {/* URL */}
+              <div style={{ padding: '6px 12px', background: '#1e1e2e' }}>
+                <code style={{ fontSize: 11, color: '#89d85d', wordBreak: 'break-all' }}>{s.url}</code>
+              </div>
+              {/* Request body */}
+              {s.request && (
+                <div style={{ padding: '6px 12px', borderTop: '1px solid #f0f0f0', background: '#fafafa' }}>
+                  <div style={{ fontSize: 10, color: '#8c8c8c', marginBottom: 2 }}>REQUEST BODY</div>
+                  <pre style={{ margin: 0, fontSize: 11, color: '#333', whiteSpace: 'pre-wrap' }}>{s.request}</pre>
+                </div>
+              )}
+              {/* Response */}
+              {s.response && (
+                <div style={{ padding: '6px 12px', borderTop: '1px solid #f0f0f0', background: s.ok === false ? '#fff2f0' : '#f6ffed' }}>
+                  <div style={{ fontSize: 10, color: '#8c8c8c', marginBottom: 2 }}>RESPONSE</div>
+                  <pre style={{ margin: 0, fontSize: 11, color: '#333', whiteSpace: 'pre-wrap', maxHeight: 200, overflowY: 'auto' }}>{s.response}</pre>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </Modal>
 
       {/* ── Cancel Invoice Modal ─────────────────────────────────────────── */}
       <Modal
