@@ -15,6 +15,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import { fetchLedgerByBusinessUnit, getAccounting } from '../../services/sla.service';
+import { postSlaToGL, GlPostingLine, eventTypeToRef5 } from '../../services/glPosting.service';
 
 const { Text, Title } = Typography;
 const { RangePicker } = DatePicker;
@@ -418,7 +419,7 @@ const ManageSLAJournals: React.FC = () => {
         reference2:               String(hdr.sourceId || ''),
         reference3:               l.accountingClass || null,
         reference4:               l.legalEntity   || null,
-        reference5:               null,
+        reference5:               eventTypeToRef5(hdr.eventTypeCode),
         createdBy:                hdr.createdBy || 'SYSTEM',
       })),
     };
@@ -454,39 +455,52 @@ const ManageSLAJournals: React.FC = () => {
     if (!postGLRecord) return;
     setPostGLLoading(true);
     try {
-      // Step 1 — POST to journals/create (use ledger resolved when modal opened)
-      const payload = buildGLPayload(postGLRecord, postGLLines, postGLLedger?.ledgerName, postGLLedger?.ledgerId);
-      const res     = await fetch(GL_CREATE_URL, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body:    JSON.stringify(payload),
+      // Map SLA lines → GlPostingLine[] for the central service
+      const glLines: GlPostingLine[] = postGLLines.map(l => ({
+        lineType:           l.lineType as 'DR' | 'CR',
+        enteredDr:          l.enteredDr  || null,
+        enteredCr:          l.enteredCr  || null,
+        accountedDr:        l.accountedDr || null,
+        accountedCr:        l.accountedCr || null,
+        description:        l.description || postGLRecord.description || '',
+        currencyCode:       l.currencyCode || postGLRecord.currencyCode,
+        accountingDate:     l.accountingDate || postGLRecord.accountingDate,
+        accountCombination: l.accountCombination || '',
+        accountingClass:    l.accountingClass || null,
+        legalEntity:        l.legalEntity || null,
+      }));
+
+      // Fallback legalEntity from first line that has one
+      const legalEntity = postGLLines.find(l => l.legalEntity)?.legalEntity || '';
+
+      const result = await postSlaToGL({
+        slaHeaderId:    postGLRecord.headerId,
+        sourceNumber:   postGLRecord.sourceNumber,
+        sourceId:       postGLRecord.sourceId,
+        eventTypeCode:  postGLRecord.eventTypeCode,
+        periodName:     postGLRecord.periodName,
+        ledgerName:     postGLLedger?.ledgerName ?? postGLRecord.ledgerName,
+        ledgerId:       postGLLedger?.ledgerId   ?? 0,
+        currency:       postGLRecord.currencyCode,
+        accountingDate: postGLRecord.accountingDate,
+        legalEntity,
+        lines:          glLines,
+        createdBy:      postGLRecord.createdBy || 'SYSTEM',
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.message || `HTTP ${res.status}`);
 
-      // Step 2 — stamp GL IDs back on the SLA header
-      const glBatchId   = data.batchId   || data.batch_id   || null;
-      const glHeaderId  = data.headerId  || data.header_id  || null;
-      const glBatchName = data.batchName || payload.batch.batchName;
-      if (glBatchId || glHeaderId) {
-        await fetch(SLA_POST_URL, {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({
-            headerId:    postGLRecord.headerId,
-            glBatchId,
-            glBatchName,
-            glHeaderId,
-            postedBy:   'SYSTEM',
-          }),
-        });
+      setPostGLResult(result);
+      if (result.success) {
+        if (result.skipped) {
+          message.warning('GL journal already exists — SLA stamped with existing batch');
+        } else {
+          message.success('SLA journal posted to GL successfully');
+        }
+        headerForm.submit();
+      } else {
+        message.error(`Post to GL failed: ${result.error}`);
       }
-
-      setPostGLResult({ success: true, journalsCreate: data });
-      message.success('SLA journal posted to GL successfully');
-      headerForm.submit();
     } catch (err: any) {
-      setPostGLResult({ success: false, error: err.message });
+      setPostGLResult({ success: false, skipped: false, batchId: null, headerId: null, batchName: '', error: err.message });
       message.error(`Post to GL failed: ${err.message}`);
     } finally {
       setPostGLLoading(false);
@@ -1422,27 +1436,19 @@ const ManageSLAJournals: React.FC = () => {
       >
         {postGLRecord && (
           <div>
-            {/* Endpoint */}
+            {/* Endpoint — 4-step flow via central GL posting service */}
             <div style={{ marginBottom: 12 }}>
               <Text strong style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 4, letterSpacing: 1 }}>
-                ENDPOINT
+                GL POSTING FLOW (4 steps via central service)
               </Text>
-              <div style={{
-                background: '#1e1e2e', borderRadius: 6, padding: '10px 14px',
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-              }}>
-                <code style={{ color: '#89d85d', fontSize: 12, wordBreak: 'break-all' }}>
-                  <span style={{ color: '#f59e0b', marginRight: 8, fontWeight: 700 }}>POST</span>
-                  {GL_CREATE_URL}
-                </code>
-                <Button
-                  size="small" icon={<CopyOutlined />}
-                  style={{ flexShrink: 0, background: 'transparent', border: '1px solid #555', color: '#aaa' }}
-                  onClick={() => { navigator.clipboard.writeText(GL_CREATE_URL); message.success('Endpoint copied'); }}
-                />
+              <div style={{ background: '#1e1e2e', borderRadius: 6, padding: '10px 14px', fontSize: 12, color: '#cdd6f4', lineHeight: 2 }}>
+                <div><span style={{ color: '#89b4fa', fontWeight: 700 }}>0.</span> <span style={{ color: '#f59e0b' }}>GET</span>  <code style={{ color: '#89d85d' }}>{GL_CREATE_URL.replace('/journals/create', '/gl/journals/check')}</code> — duplicate check</div>
+                <div><span style={{ color: '#89b4fa', fontWeight: 700 }}>1.</span> <span style={{ color: '#f59e0b' }}>POST</span> <code style={{ color: '#89d85d' }}>{GL_CREATE_URL}</code> — create journal</div>
+                <div><span style={{ color: '#89b4fa', fontWeight: 700 }}>2.</span> <span style={{ color: '#f59e0b' }}>PUT</span>  <code style={{ color: '#89d85d' }}>{GL_CREATE_URL.replace('/journals/create', '/gl/journals/:id/post')}</code> — validate &amp; post</div>
+                <div><span style={{ color: '#89b4fa', fontWeight: 700 }}>3.</span> <span style={{ color: '#f59e0b' }}>POST</span> <code style={{ color: '#89d85d' }}>{SLA_POST_URL}</code> — stamp SLA</div>
               </div>
               <Text style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 4, display: 'block' }}>
-                After success, also stamps GL IDs back via: <code style={{ fontSize: 10 }}>POST {SLA_POST_URL}</code>
+                reference5 = <code style={{ fontSize: 10 }}>{eventTypeToRef5(postGLRecord?.eventTypeCode || '')}</code>
               </Text>
             </div>
 
