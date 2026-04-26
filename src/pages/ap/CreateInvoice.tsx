@@ -601,6 +601,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [paymentSlaData, setPaymentSlaData]             = useState<Record<number, any>>({});   // full SlaGetResult per checkId
   const [slaModalPrepayLoading, setSlaModalPrepayLoading]   = useState(false);
   const [slaModalPaymentLoading, setSlaModalPaymentLoading] = useState(false);
+  // GL payload debug modal
+  const [glPayloadDebug, setGlPayloadDebug]             = useState<object | null>(null);
+  const [glPayloadModalVisible, setGlPayloadModalVisible] = useState(false);
   // Debug GET tab – per-application accounting check results
   const [slaDebugGetPrepayResults, setSlaDebugGetPrepayResults] =
     useState<Record<number, { status: number; ok: boolean; data?: any; error?: string }>>({});
@@ -1486,6 +1489,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           createdBy:                'user',
         })),
       };
+
+      // Store payload for debug inspection
+      setGlPayloadDebug({ url: `${APEX_DB_CONFIG.baseUrl}/journals/create`, method: 'POST', body: journalPayload });
 
       // Step 1 — POST to journals/create
       const glUrl = `${APEX_DB_CONFIG.baseUrl}/journals/create`;
@@ -9923,6 +9929,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 Post to Ledger
               </Button>
             )}
+            {glPayloadDebug && (
+              <Button
+                icon={<ApiOutlined />}
+                onClick={() => setGlPayloadModalVisible(true)}
+              >
+                View Payload
+              </Button>
+            )}
             <Button onClick={() => setSlaModalVisible(false)}>Close</Button>
           </Space>
         }
@@ -10163,6 +10177,49 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         </Spin>
       </Modal>
       {/* ── End SLA Modal ─────────────────────────────────────────────────── */}
+
+      {/* ── GL Payload Debug Modal ────────────────────────────────────────── */}
+      <Modal
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>GL Journal Payload</span></Space>}
+        open={glPayloadModalVisible}
+        onCancel={() => setGlPayloadModalVisible(false)}
+        footer={
+          <Space>
+            <Button
+              icon={<CopyOutlined />}
+              onClick={() => {
+                const text = JSON.stringify(glPayloadDebug, null, 2);
+                navigator.clipboard.writeText(text).then(
+                  () => message.success('Copied to clipboard'),
+                  () => message.error('Copy failed — select and copy manually'),
+                );
+              }}
+            >
+              Copy JSON
+            </Button>
+            <Button onClick={() => setGlPayloadModalVisible(false)}>Close</Button>
+          </Space>
+        }
+        width={820}
+        destroyOnClose
+      >
+        {glPayloadDebug && (
+          <div>
+            <div style={{ marginBottom: 8 }}>
+              <Tag color="orange">POST</Tag>
+              <Text code style={{ fontSize: 11 }}>{(glPayloadDebug as any).url}</Text>
+            </div>
+            <pre style={{
+              fontSize: 11, background: '#1a1a1a', color: '#e6e6e6',
+              borderRadius: 6, padding: '10px 14px', maxHeight: 500,
+              overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+            }}>
+              {JSON.stringify((glPayloadDebug as any).body, null, 2)}
+            </pre>
+          </div>
+        )}
+      </Modal>
+      {/* ── End GL Payload Debug Modal ────────────────────────────────────── */}
 
       {/* ── SLA Debug Modal ───────────────────────────────────────────────── */}
       <Modal
