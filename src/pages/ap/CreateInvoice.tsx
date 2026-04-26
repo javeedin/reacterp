@@ -1411,6 +1411,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       const months        = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
       const periodName    = `${months[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
 
+      // Validate period format: must be Mon-YY (e.g. Apr-26)
+      if (!/^[A-Z][a-z]{2}-\d{2}$/.test(periodName)) {
+        message.error(`Invalid accounting period "${periodName}". Expected format: Mon-YY (e.g. Apr-26). Check the invoice date.`);
+        setSlaPosting(false);
+        return;
+      }
+
       // Fetch lines via sla/accounting (filtered by sourceId) — same approach as ManagePayments
       const invoiceId = savedInvoiceId || initialData?.invoiceId;
       const fullData  = await getAccounting('AP_INVOICES', invoiceId!);
@@ -1539,6 +1546,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             const d          = record.applicationAccountingDate ? dayjs(record.applicationAccountingDate).toDate() : new Date();
             const months_    = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
             const periodName_ = `${months_[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
+            if (!/^[A-Z][a-z]{2}-\d{2}$/.test(periodName_)) return; // skip invalid period
 
             const fullData_    = await getAccounting('RR_AP_APPLIED_PREPAYMENTS', record.applicationId);
             const appLines: any[] = fullData_.lines || [];
@@ -1681,6 +1689,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       const d          = record.applicationAccountingDate ? dayjs(record.applicationAccountingDate).toDate() : new Date();
       const months     = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
       const periodName = `${months[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
+
+      // Validate period format: must be Mon-YY (e.g. Apr-26)
+      if (!/^[A-Z][a-z]{2}-\d{2}$/.test(periodName)) {
+        message.error(`Invalid accounting period "${periodName}". Expected format: Mon-YY (e.g. Apr-26). Check the application accounting date.`);
+        setAppSlaLoadingId(null);
+        return;
+      }
 
       // Fetch lines via sla/accounting (filtered by sourceId) — same approach as ManagePayments
       const fullData     = await getAccounting('RR_AP_APPLIED_PREPAYMENTS', applicationId);
