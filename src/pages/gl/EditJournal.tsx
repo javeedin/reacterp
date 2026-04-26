@@ -225,7 +225,7 @@ const mapToJournalData = (journal: any): JournalData => ({
     accountedDr: line.accountedDr || 0,
     accountedCr: line.accountedCr || 0,
     description: line.description || '',
-    accountDescription: journal.legalEntityName || '',
+    accountDescription: line.accountDescription || '',
   })),
 });
 
@@ -791,6 +791,16 @@ const EditJournal: React.FC = () => {
       dataIndex: 'account',
       key: 'account',
       width: 280,
+      render: (account: string, record: JournalLine) => (
+        <div>
+          <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{account}</span>
+          {record.accountDescription && (
+            <div style={{ fontSize: 11, color: '#888', marginTop: 1 }}>
+              {record.accountDescription}
+            </div>
+          )}
+        </div>
+      ),
     },
     {
       title: 'Currency',
@@ -856,13 +866,6 @@ const EditJournal: React.FC = () => {
       dataIndex: 'description',
       key: 'description',
       width: 250,
-      ellipsis: true,
-    },
-    {
-      title: 'Account Description',
-      dataIndex: 'accountDescription',
-      key: 'accountDescription',
-      width: 180,
       ellipsis: true,
     },
   ];
