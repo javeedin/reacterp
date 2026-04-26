@@ -10323,8 +10323,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 {r.accountDescription && <div style={{ fontSize: 10, color: '#888', marginTop: 1 }}>{r.accountDescription}</div>}
               </div>
             ) },
-            { title: 'Debit', dataIndex: 'enteredDr', width: 120, align: 'right' as const, render: (v: number, r: any) => r.lineType === 'DR' ? <Text strong style={{ fontSize: 12, color: REDWOOD.info }}>{formatAmount(v)}</Text> : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text> },
-            { title: 'Credit', dataIndex: 'enteredCr', width: 120, align: 'right' as const, render: (v: number, r: any) => r.lineType === 'CR' ? <Text strong style={{ fontSize: 12, color: REDWOOD.error }}>{formatAmount(v)}</Text> : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text> },
+            { title: 'Ent. Dr',  dataIndex: 'enteredDr',   width: 110, align: 'right' as const, render: (v: number, r: any) => v ? <Text strong style={{ fontSize: 11, color: REDWOOD.info }}>{formatAmount(v)}</Text>   : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text> },
+            { title: 'Ent. Cr',  dataIndex: 'enteredCr',   width: 110, align: 'right' as const, render: (v: number, r: any) => v ? <Text strong style={{ fontSize: 11, color: REDWOOD.error }}>{formatAmount(v)}</Text>  : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text> },
+            { title: 'Acc. Dr',  dataIndex: 'accountedDr', width: 110, align: 'right' as const, render: (v: number, r: any) => v ? <Text style={{ fontSize: 11, color: REDWOOD.info }}>{formatAmount(v)}</Text>          : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text> },
+            { title: 'Acc. Cr',  dataIndex: 'accountedCr', width: 110, align: 'right' as const, render: (v: number, r: any) => v ? <Text style={{ fontSize: 11, color: REDWOOD.error }}>{formatAmount(v)}</Text>         : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text> },
             { title: 'Description', dataIndex: 'description', ellipsis: true, render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
           ];
 
@@ -10333,13 +10335,17 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               dataSource={lines.map((l, i) => ({ ...l, key: l.lineId || i }))}
               size="small" pagination={false} bordered scroll={{ x: 800 }}
               summary={(data) => {
-                const totalDr = data.filter(r => r.lineType === 'DR').reduce((s, r) => s + (r.enteredDr || 0), 0);
-                const totalCr = data.filter(r => r.lineType === 'CR').reduce((s, r) => s + (r.enteredCr || 0), 0);
+                const totEntDr  = data.reduce((s, r) => s + (r.enteredDr   || 0), 0);
+                const totEntCr  = data.reduce((s, r) => s + (r.enteredCr   || 0), 0);
+                const totAccDr  = data.reduce((s, r) => s + (r.accountedDr || 0), 0);
+                const totAccCr  = data.reduce((s, r) => s + (r.accountedCr || 0), 0);
                 return (
                   <Table.Summary.Row style={{ background: '#f5f5f5', fontWeight: 700 }}>
                     <Table.Summary.Cell index={0} colSpan={4}>Total</Table.Summary.Cell>
-                    <Table.Summary.Cell index={4} align="right"><Text strong style={{ color: REDWOOD.info }}>{formatAmount(totalDr)}</Text></Table.Summary.Cell>
-                    <Table.Summary.Cell index={5} align="right"><Text strong style={{ color: REDWOOD.error }}>{formatAmount(totalCr)}</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={4} align="right"><Text strong style={{ color: REDWOOD.info }}>{formatAmount(totEntDr)}</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={5} align="right"><Text strong style={{ color: REDWOOD.error }}>{formatAmount(totEntCr)}</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={6} align="right"><Text style={{ color: REDWOOD.info }}>{formatAmount(totAccDr)}</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={7} align="right"><Text style={{ color: REDWOOD.error }}>{formatAmount(totAccCr)}</Text></Table.Summary.Cell>
                   </Table.Summary.Row>
                 );
               }}

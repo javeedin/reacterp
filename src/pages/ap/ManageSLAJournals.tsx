@@ -682,7 +682,12 @@ const ManageSLAJournals: React.FC = () => {
       title: 'Account Combination',
       dataIndex: 'accountCombination',
       ellipsis: true,
-      render: (v: string) => <Text code style={{ fontSize: 11 }}>{v || '—'}</Text>,
+      render: (v: string, r: SlaLine) => (
+        <div>
+          <Text code style={{ fontSize: 11 }}>{v || '—'}</Text>
+          {(r as any).accountDescription && <div style={{ fontSize: 10, color: '#888', marginTop: 1 }}>{(r as any).accountDescription}</div>}
+        </div>
+      ),
     },
     {
       title: 'Status',
@@ -693,22 +698,32 @@ const ManageSLAJournals: React.FC = () => {
       ),
     },
     {
-      title: 'Debit',
+      title: 'Ent. Dr',
       dataIndex: 'enteredDr',
-      width: 120,
+      width: 115,
       align: 'right' as const,
-      render: (v: number, r: SlaLine) => r.lineType === 'DR'
-        ? <Text strong style={{ fontSize: 12, color: REDWOOD.info }}>{formatAmount(v)}</Text>
-        : <Text style={{ color: REDWOOD.neutral600, fontSize: 11 }}>—</Text>,
+      render: (v: number) => v ? <Text strong style={{ fontSize: 11, color: REDWOOD.info }}>{formatAmount(v)}</Text> : <Text style={{ color: REDWOOD.neutral600, fontSize: 11 }}>—</Text>,
     },
     {
-      title: 'Credit',
+      title: 'Ent. Cr',
       dataIndex: 'enteredCr',
-      width: 120,
+      width: 115,
       align: 'right' as const,
-      render: (v: number, r: SlaLine) => r.lineType === 'CR'
-        ? <Text strong style={{ fontSize: 12, color: REDWOOD.error }}>{formatAmount(v)}</Text>
-        : <Text style={{ color: REDWOOD.neutral600, fontSize: 11 }}>—</Text>,
+      render: (v: number) => v ? <Text strong style={{ fontSize: 11, color: REDWOOD.error }}>{formatAmount(v)}</Text> : <Text style={{ color: REDWOOD.neutral600, fontSize: 11 }}>—</Text>,
+    },
+    {
+      title: 'Acc. Dr',
+      dataIndex: 'accountedDr',
+      width: 115,
+      align: 'right' as const,
+      render: (v: number) => v ? <Text style={{ fontSize: 11, color: REDWOOD.info }}>{formatAmount(v)}</Text> : <Text style={{ color: REDWOOD.neutral600, fontSize: 11 }}>—</Text>,
+    },
+    {
+      title: 'Acc. Cr',
+      dataIndex: 'accountedCr',
+      width: 115,
+      align: 'right' as const,
+      render: (v: number) => v ? <Text style={{ fontSize: 11, color: REDWOOD.error }}>{formatAmount(v)}</Text> : <Text style={{ color: REDWOOD.neutral600, fontSize: 11 }}>—</Text>,
     },
     {
       title: 'Currency',
