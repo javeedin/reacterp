@@ -2836,15 +2836,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             steps[2].response = `Network error: ${le.message}`;
           }
 
-          // ── If SLA already POSTED → cancel procedure already posted to GL ──
-          if (slaData.accountingStatus === 'POSTED') {
-            setCancelSlaStatus('POSTED');
-            setCancelPostError(null);
-            steps.push({ step: '4 — Resolve Ledger',               method: 'GET', url: '(skipped — SLA already POSTED by cancel procedure)', ok: true });
-            steps.push({ step: '5-8 — Post Cancellation Journal to GL', method: 'POST', url: '(skipped — SLA already POSTED)', ok: true, response: 'Cancel procedure auto-posted the reversal journal. No further action needed.' });
-            message.success('Cancellation SLA was already posted to GL by the cancel procedure.');
-          } else {
-            // ── Step 4: Resolve ledger ──────────────────────────────────
+          // ── Step 4: Resolve ledger ──────────────────────────────────
+          {
             const bu = form.getFieldValue('businessUnit') || '';
             const ledgerInfo = await fetchLedgerByBusinessUnit(bu).catch(() => null);
             steps.push({
