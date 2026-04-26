@@ -1972,7 +1972,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         });
 
         // Fetch full invoice header to get fields not returned by the search endpoint
-        fetch(`${APEX_DB_CONFIG.baseUrl}/ap/createinvoicefull/${initialData.invoiceId}`, { headers: { Accept: 'application/json' } })
+        fetch(`${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/${initialData.invoiceId}`, { headers: { Accept: 'application/json' } })
           .then(r => r.json())
           .then(data => {
             const hdr = data?.header || data;
@@ -3593,8 +3593,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     const httpMethod = isUpdate ? 'PUT' : 'POST';
     const actionLabel = isUpdate ? 'Update Invoice' : 'Create Invoice';
     const url = isUpdate
-      ? `${APEX_DB_CONFIG.baseUrl}/ap/createinvoicefull/${savedInvoiceId}`
-      : `${APEX_DB_CONFIG.baseUrl}/ap/createinvoicefull`;
+      ? `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/${savedInvoiceId}`
+      : `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice`;
 
     // Include InvoiceId in payload for updates
     if (isUpdate) {
@@ -3864,8 +3864,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     const payload = buildInvoicePayload(values);
     const isUpdate = savedInvoiceId !== null;
     const url = isUpdate
-      ? `${APEX_DB_CONFIG.baseUrl}/ap/createinvoicefull/${savedInvoiceId}`
-      : `${APEX_DB_CONFIG.baseUrl}/ap/createinvoicefull`;
+      ? `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/${savedInvoiceId}`
+      : `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice`;
     if (isUpdate) payload.InvoiceId = savedInvoiceId;
 
     const previewLoginUser = user?.username || null;
