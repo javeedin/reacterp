@@ -3052,31 +3052,7 @@ const ManagePayments: React.FC = () => {
             ]}
           />
           <Space>
-            {/* Data Source Toggle */}
-            <Space size="small" style={{
-              background: REDWOOD.neutral100,
-              padding: '4px 12px',
-              borderRadius: 6,
-              border: `1px solid ${REDWOOD.neutral200}`,
-            }}>
-              <SwapOutlined style={{ color: REDWOOD.info, fontSize: 14 }} />
-              <Text style={{ fontSize: 12 }}>Fusion</Text>
-              <Switch
-                checked={useApex}
-                onChange={(checked) => {
-                  setUseApex(checked);
-                  setPayments([]);
-                  message.info(`Switched to ${checked ? 'APEX' : 'Fusion'} data source`);
-                }}
-                checkedChildren="APEX"
-                unCheckedChildren="Fusion"
-                style={{ background: useApex ? REDWOOD.success : REDWOOD.info }}
-              />
-              <Text style={{ fontSize: 12 }}>APEX</Text>
-              <Tag color={useApex ? 'green' : 'blue'} style={{ margin: 0, fontSize: 10 }}>
-                {useApex ? 'Active' : 'Active'}
-              </Tag>
-            </Space>
+            {/* Data source is always APEX */}
             <Tooltip title="View Page APIs">
               <Button
                 icon={<ApiOutlined />}
