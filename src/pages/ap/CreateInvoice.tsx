@@ -83,6 +83,8 @@ import * as XLSX from 'xlsx';
 import type { ColumnsType } from 'antd/es/table';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import { fetchLedgerByBusinessUnit, checkAccountingExists, getAccounting, getLinesByHeaderId, checkGLJournalExists } from '../../services/sla.service';
+import { postSlaToGL } from '../../services/glPosting.service';
+import type { GlPostingLine } from '../../services/glPosting.service';
 import { searchCombinations, type DistCombination } from '../../services/distCombinations.service';
 import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
 import { useAuth } from '../../context/AuthContext';
@@ -2822,7 +2824,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         const slaRes  = await fetch(slaExistsUrl, { headers: { Accept: 'application/json' } });
         const slaData = await slaRes.json().catch(() => ({}));
         steps[1].status   = slaRes.status;
-        steps[1].ok       = slaRes.ok;
+        steps[1].ok       = slaRes.ok && slaData.exists === true;
         steps[1].response = JSON.stringify(slaData, null, 2);
 
         if (slaData.exists && slaData.headerId) {
@@ -2832,21 +2834,96 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           // ── Step 3: Fetch SLA lines for cancellation header ─────────
           const linesUrl = `${APEX_DB_CONFIG.baseUrl}/sla/journals/lines?headerId=${slaData.headerId}&limit=500`;
           steps.push({ step: `3 — Fetch Cancellation SLA Lines (headerId=${slaData.headerId})`, method: 'GET', url: linesUrl });
+          let fetchedLines: any[] = [];
           try {
             const linesRes  = await fetch(linesUrl, { headers: { Accept: 'application/json' } });
             const linesData = await linesRes.json().catch(() => ({}));
             steps[2].status   = linesRes.status;
             steps[2].ok       = linesRes.ok;
             steps[2].response = JSON.stringify(linesData, null, 2);
-            setCancelSlaLines(linesData.items || []);
+            fetchedLines = linesData.items || [];
+            setCancelSlaLines(fetchedLines);
           } catch (le: any) {
             steps[2].ok       = false;
             steps[2].response = `Network error: ${le.message}`;
           }
+
+          // ── Step 4: Resolve ledger ────────────────────────────────────
+          const bu = form.getFieldValue('businessUnit') || '';
+          const ledgerInfo = await fetchLedgerByBusinessUnit(bu).catch(() => null);
+          steps.push({
+            step: '4 — Resolve Ledger',
+            method: 'GET',
+            url: `${APEX_DB_CONFIG.baseUrl}/gl/ledgers?businessUnit=${encodeURIComponent(bu)}`,
+            ok: !!ledgerInfo,
+            response: ledgerInfo ? JSON.stringify(ledgerInfo, null, 2) : 'No ledger found for business unit',
+          });
+
+          // ── Steps 5-8: Post to GL (duplicate check → create → PUT → stamp SLA) ──
+          if (fetchedLines.length > 0) {
+            const invoiceNumber = form.getFieldValue('invoiceNumber');
+            const currency      = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
+            const months        = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            const d             = new Date();
+            const periodName    = `${months[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
+            const acctDate      = dayjs().format('YYYY-MM-DD');
+            const legalEntity   = fetchedLines.find((l: any) => l.legalEntity)?.legalEntity || '';
+
+            const glLines: GlPostingLine[] = fetchedLines.map((l: any) => ({
+              lineType:           l.lineType as 'DR' | 'CR',
+              enteredDr:          l.enteredDr  || null,
+              enteredCr:          l.enteredCr  || null,
+              accountedDr:        l.accountedDr || null,
+              accountedCr:        l.accountedCr || null,
+              description:        l.description || '',
+              currencyCode:       l.currencyCode || currency,
+              accountingDate:     l.accountingDate || acctDate,
+              accountCombination: l.accountCombination || '',
+              accountingClass:    l.accountingClass || null,
+              legalEntity:        l.legalEntity || null,
+            }));
+
+            steps.push({ step: '5–8 — Post Cancellation Journal to GL (duplicate check → create → PUT post → stamp SLA)', method: 'POST', url: '(postSlaToGL service — see glPosting.service.ts)' });
+            const glStepIdx = steps.length - 1;
+
+            const glResult = await postSlaToGL({
+              slaHeaderId:    slaData.headerId,
+              sourceNumber:   invoiceNumber,
+              sourceId:       invoiceId,
+              eventTypeCode:  'INVOICE_CANCELLED',
+              periodName,
+              ledgerName:     ledgerInfo?.ledgerName ?? '',
+              ledgerId:       ledgerInfo?.ledgerId   ?? 0,
+              currency,
+              accountingDate: acctDate,
+              legalEntity,
+              lines:          glLines,
+              createdBy:      'user',
+            });
+
+            steps[glStepIdx].ok       = glResult.success;
+            steps[glStepIdx].response = JSON.stringify(glResult, null, 2);
+
+            if (glResult.success) {
+              setCancelSlaStatus('POSTED');
+              setCancelPostError(null);
+              if (glResult.skipped) {
+                message.warning('Cancellation journal already in GL — SLA stamped.');
+              } else {
+                message.success('Cancellation journal posted to GL successfully.');
+              }
+            } else {
+              setCancelPostError(glResult.error || 'GL posting failed');
+              message.error(`Post Cancellation failed: ${glResult.error}`);
+            }
+          } else {
+            steps.push({ step: '5-8 — Post Cancellation Journal to GL', method: 'POST', url: '(skipped — no SLA lines found in step 3)', ok: false });
+          }
         } else {
           steps[1].ok = false;
-          // no cancellation SLA found — push info step
           steps.push({ step: '3 — Fetch Cancellation SLA Lines', method: 'GET', url: '(skipped — no SLA header found in step 2)', ok: false });
+          steps.push({ step: '4 — Resolve Ledger',               method: 'GET', url: '(skipped)', ok: false });
+          steps.push({ step: '5-8 — Post Cancellation Journal to GL', method: 'POST', url: '(skipped)', ok: false });
         }
       } catch (se: any) {
         steps[1].ok       = false;
@@ -2861,7 +2938,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     } finally {
       setCancelExecuting(false);
     }
-  }, [savedInvoiceId, initialData, user, handleRefreshStatus]);
+  }, [savedInvoiceId, initialData, user, handleRefreshStatus, form, headerValues, fetchLedgerByBusinessUnit]);
 
   const filteredSuppliers = useMemo(() => {
     if (!supplierSearchText) return suppliers;
