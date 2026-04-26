@@ -4423,19 +4423,20 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       {/* Action Bar - matching Fusion Payables layout */}
       <div
         style={{
-          padding: '8px 24px',
+          padding: '6px 24px',
           background: REDWOOD.surface,
           borderBottom: `1px solid ${REDWOOD.neutral200}`,
           display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
+          flexDirection: 'column',
           position: 'sticky',
           top: 0,
           zIndex: 10,
         }}
       >
+        {/* Row 1: Title + Balance + Action Buttons */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Space size={12}>
-          <Title level={5} style={{ margin: 0 }}>
+          <Title level={5} style={{ margin: 0, whiteSpace: 'nowrap' }}>
             <FileTextOutlined style={{ marginRight: 8, color: REDWOOD.primary }} />
             {isEditMode ? (isReadOnly ? 'View Invoice' : 'Edit Invoice') : 'Create Invoice'}
           </Title>
@@ -4443,57 +4444,29 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             (() => {
               const balUrl = `${APEX_DB_CONFIG.baseUrl}/ap/applied-prepayments/balances?prepayment_invoice_id=${initialData?.invoiceId || ''}`;
               return prepaymentBalance ? (
-                <Space size={4} style={{ marginLeft: 8 }}>
-                  <Tag color={prepaymentBalance.availableBalance === 0 ? 'green' : 'cyan'} style={{ fontSize: 12, fontWeight: 600, margin: 0 }}>
-                    Available Balance: {formatAmount(prepaymentBalance.availableBalance)} {initialData?.invoiceCurrency || headerValues.invoiceCurrency || 'AED'}
-                  </Tag>
+                <Space size={4}>
+                  <Text strong style={{ fontSize: 15, color: REDWOOD.primary }}>
+                    Available: {formatAmount(prepaymentBalance.availableBalance)} {initialData?.invoiceCurrency || headerValues.invoiceCurrency || 'AED'}
+                  </Text>
                   <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>{balUrl}</span>} placement="bottom">
                     <InfoCircleOutlined style={{ fontSize: 13, color: '#1677ff', cursor: 'pointer' }} />
                   </Tooltip>
                 </Space>
               ) : (
-                <Space size={4} style={{ marginLeft: 8 }}>
-                  <Tag color="default" style={{ fontSize: 12, margin: 0 }}>Loading balance...</Tag>
-                  <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>{balUrl}</span>} placement="bottom">
-                    <InfoCircleOutlined style={{ fontSize: 13, color: '#faad14', cursor: 'pointer' }} />
-                  </Tooltip>
-                </Space>
+                <Text type="secondary" style={{ fontSize: 13 }}>Loading balance...</Text>
               );
             })()
           ) : isEditMode ? (
-            <Tag
-              color={invoiceBalanceLoading ? 'default' : invoiceBalance === 0 ? 'green' : 'blue'}
-              style={{ marginLeft: 8, fontSize: 12 }}
-            >
+            <Text strong style={{ fontSize: 15, color: invoiceBalance === 0 ? REDWOOD.success : REDWOOD.primary }}>
               {invoiceBalanceLoading
-                ? 'Loading balance...'
+                ? 'Loading...'
                 : invoiceBalance !== null
                   ? `Balance: ${formatAmount(invoiceBalance)} ${initialData?.invoiceCurrency || headerValues.invoiceCurrency || 'AED'}`
                   : initialData?.unpaidAmount !== undefined
                     ? `Unpaid: ${formatAmount(initialData.unpaidAmount)} ${initialData.invoiceCurrency || 'AED'}`
                     : null}
-            </Tag>
+            </Text>
           ) : null}
-          {isEditMode && isReadOnly && (
-            <Tag color="warning" style={{ fontSize: 12 }}>Read-Only</Tag>
-          )}
-          {isEditMode && liveHoldPaidStatus && (
-            <Tag
-              color={(() => {
-                const s = liveHoldPaidStatus.toLowerCase();
-                if (s === 'fully paid' || s === 'paid') return 'green';
-                if (s.includes('partial')) return 'warning';
-                if (s === 'available') return 'cyan';
-                return 'default';
-              })()}
-              style={{ fontSize: 12 }}
-            >
-              {liveHoldPaidStatus}
-            </Tag>
-          )}
-          {isEditMode && liveValidationStatus && !((hasAnyPayment || isPaid || isPostedToGL) && liveValidationStatus === 'Needs Revalidation') && (
-            <Tag color="green" style={{ fontSize: 12 }}>{liveValidationStatus}</Tag>
-          )}
           {(isEditMode || !!savedInvoiceId) && (
             <Space size={4}>
               <Tooltip title="Refresh status">
@@ -4677,6 +4650,32 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             {isReadOnly ? 'Close' : 'Cancel'}
           </Button>
         </Space>
+        </div>{/* end Row 1 */}
+
+        {/* Row 2: Status tags */}
+        {isEditMode && (
+          <div style={{ display: 'flex', gap: 6, paddingTop: 4, paddingBottom: 2 }}>
+            {isReadOnly && (
+              <Tag color="warning" style={{ fontSize: 12 }}>Read-Only</Tag>
+            )}
+            {liveHoldPaidStatus && (
+              <Tag
+                color={liveHoldPaidStatus === 'Paid' ? 'blue' : liveHoldPaidStatus === 'On Hold' ? 'red' : 'orange'}
+                style={{ fontSize: 12 }}
+              >
+                {liveHoldPaidStatus}
+              </Tag>
+            )}
+            {liveValidationStatus && (
+              <Tag
+                color={liveValidationStatus === 'Validated' ? 'green' : 'orange'}
+                style={{ fontSize: 12 }}
+              >
+                {liveValidationStatus}
+              </Tag>
+            )}
+          </div>
+        )}
       </div>
 
       <div style={{ padding: '16px 24px' }}>
