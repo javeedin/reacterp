@@ -622,10 +622,10 @@ CREATE OR REPLACE PACKAGE BODY XXAP_INVOICES_PKG AS
         l_count NUMBER;
     BEGIN
         IF p_status IS NULL THEN
-            SELECT COUNT(*) INTO l_count FROM XXAP_INVOICES_STG;
+            SELECT COUNT(*) INTO l_count FROM RR_AP_INVOICES_ALL;
         ELSE
             SELECT COUNT(*) INTO l_count
-            FROM XXAP_INVOICES_STG
+            FROM RR_AP_INVOICES_ALL
             WHERE sync_status = p_status;
         END IF;
 
