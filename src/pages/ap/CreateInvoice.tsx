@@ -3283,11 +3283,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         : computedTotal - invoicePayments
           .filter(p => p.status !== 'Voided')
           .reduce((sum, p) => sum + p.paidAmount, 0),
-      currency:         headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED',
-      paymentDate:      dayjs(),
-      conversionRateType: form.getFieldValue('conversionRateType') || undefined,
-      conversionDate:     form.getFieldValue('conversionDate') || undefined,
-      conversionRate:     form.getFieldValue('conversionRate') || undefined,
+      currency:            headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED',
+      paymentCurrency:     headerValues.paymentCurrency || headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED',
+      paymentBaseCurrency: 'AED',
+      paymentDate:         dayjs(),
+      conversionRateType:  form.getFieldValue('conversionRateType') || undefined,
+      conversionDate:      form.getFieldValue('conversionDate') || undefined,
+      conversionRate:      form.getFieldValue('conversionRate') || undefined,
     });
     setPayInFullOpen(true);
 
@@ -7938,7 +7940,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 PaymentDescription: values.description || null,
                 PaymentStatus: 'Negotiable', PaymentType: 'Quick',
                 PaymentMode: null, PaymentFunction: 'Supplier Payments',
-                PaymentCurrency: currency, PaymentBaseCurrency: currency,
+                PaymentCurrency: values.paymentCurrency || currency,
+                PaymentBaseCurrency: values.paymentBaseCurrency || 'AED',
                 ConversionRate: values.conversionRate || headerValues.conversionRate || null,
                 ConversionRateType: values.conversionRateType || headerValues.conversionRateType || null,
                 CrossCurrencyRateType: 'Corporate',
@@ -8205,7 +8208,29 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             </Select>
           </Form.Item>
 
-          {/* Row 4: Conversion fields + Maturity Date (shown for all, required for foreign currency) */}
+          {/* Row 4: Payment Currency | Payment Base Currency */}
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item label="Payment Currency" name="paymentCurrency">
+                <Select placeholder="Select currency" showSearch>
+                  {['AED','USD','EUR','GBP','SAR','QAR','KWD','BHD','OMR','JOD','EGP','INR'].map(c => (
+                    <Select.Option key={c} value={c}>{c}</Select.Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Payment Base Currency" name="paymentBaseCurrency">
+                <Select placeholder="Select base currency" showSearch>
+                  {['AED','USD','EUR','GBP','SAR','QAR','KWD','BHD','OMR','JOD','EGP','INR'].map(c => (
+                    <Select.Option key={c} value={c}>{c}</Select.Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+
+          {/* Row 5: Conversion fields + Maturity Date (shown for all, required for foreign currency) */}
           <Row gutter={12}>
             <Col span={6}>
               <Form.Item
