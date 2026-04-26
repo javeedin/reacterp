@@ -575,9 +575,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [slaPostingStatus, setSlaPostingStatus] = useState<string | null>(null);
   const [slaLines, setSlaLines]               = useState<any[]>([]);
   const [slaModalVisible, setSlaModalVisible] = useState(false);
-  const [slaCreating, setSlaCreating]         = useState(false);
-  const [slaPosting, setSlaPosting]           = useState(false);
-  const [slaFetching, setSlaFetching]         = useState(false);
+  const [slaCreating, setSlaCreating]               = useState(false);
+  const [slaPosting, setSlaPosting]                 = useState(false);
+  const [cancelSlaPosting, setCancelSlaPosting]     = useState(false);
+  const [slaFetching, setSlaFetching]               = useState(false);
   const [slaGlBatchId, setSlaGlBatchId]       = useState<number | null>(null);
   const [slaGlBatchName, setSlaGlBatchName]   = useState<string | null>(null);
   const [slaGlHeaderId, setSlaGlHeaderId]     = useState<number | null>(null);
@@ -1786,6 +1787,147 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       setAppSlaLoadingId(null);
     }
   }, [appSlaMap, form, savedInvoiceId, initialData]);
+
+  // ── Cancellation Reversal SLA: Post to Ledger ────────────────────────────
+  const handlePostCancellationToLedger = useCallback(async () => {
+    if (!cancelSlaHeaderId) { message.warning('No cancellation accounting header found.'); return; }
+    if (cancelSlaStatus === 'POSTED') { message.warning('Cancellation journal already posted.'); return; }
+
+    setCancelSlaPosting(true);
+    try {
+      const invoiceNumber = form.getFieldValue('invoiceNumber');
+      const invoiceId     = savedInvoiceId || initialData?.invoiceId;
+      const currency      = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
+      const bu            = form.getFieldValue('businessUnit') || '';
+      const months        = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const d             = new Date();
+      const periodName    = `${months[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
+      const acctDate      = dayjs().format('YYYY-MM-DD');
+
+      if (!/^[A-Z][a-z]{2}-\d{2}$/.test(periodName)) {
+        message.error(`Invalid accounting period "${periodName}". Expected Mon-YY (e.g. Apr-26).`);
+        return;
+      }
+
+      const linesData = await getLinesByHeaderId(cancelSlaHeaderId);
+      const fetchedLines: any[] = linesData.items || [];
+      if (fetchedLines.length === 0) throw new Error('No cancellation SLA lines found.');
+
+      const ledgerInfo         = await fetchLedgerByBusinessUnit(bu);
+      const resolvedLedgerName = ledgerInfo?.ledgerName ?? '';
+      const resolvedLedgerId   = ledgerInfo?.ledgerId   ?? 0;
+      const totalDr   = fetchedLines.reduce((s: number, l: any) => s + (l.enteredDr || 0), 0);
+      const totalCr   = fetchedLines.reduce((s: number, l: any) => s + (l.enteredCr || 0), 0);
+      const batchName = `AP-CANCEL-${invoiceNumber}-${dayjs().format('YYYYMMDD-HHmmss')}`;
+
+      // Step 0 — duplicate check
+      const glExists = await checkGLJournalExists(invoiceNumber, String(invoiceId), 'AP-INVOICE-CANCELLATION');
+      if (glExists.exists) {
+        message.warning(`Cancellation journal already exists in GL (Batch #${glExists.batchId}). Reusing existing journal.`);
+        if (glExists.status === 'P') {
+          await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ headerId: cancelSlaHeaderId, postedBy: 'user', glBatchId: glExists.batchId, glBatchName: batchName, glHeaderId: glExists.headerId }),
+          });
+          setCancelSlaStatus('POSTED');
+          message.success('Cancellation journal already posted. SLA updated.');
+          return;
+        }
+        // Exists unposted — post it
+        const putRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/${glExists.batchId}/post`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: '{}',
+        });
+        const putData = await putRes.json().catch(() => ({}));
+        if (!putRes.ok || putData?.success === false) {
+          const err = Array.isArray(putData?.errors) && putData.errors.length > 0 ? putData.errors[0] : putData?.error || `HTTP ${putRes.status}`;
+          throw new Error(`GL posting failed: ${err}`);
+        }
+        await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ headerId: cancelSlaHeaderId, postedBy: 'user', glBatchId: glExists.batchId, glBatchName: batchName, glHeaderId: glExists.headerId }),
+        });
+        setCancelSlaStatus('POSTED');
+        message.success('Cancellation journal posted to GL successfully.');
+        return;
+      }
+
+      // Step 1 — create journal
+      const journalPayload = {
+        batch: {
+          batchName, batchDescription: `AP Invoice Cancellation ${invoiceNumber}`,
+          ledgerName: resolvedLedgerName, ledgerId: resolvedLedgerId,
+          status: 'NEW', accountingPeriod: periodName,
+          controlTotal: totalDr, runningTotalDr: totalDr, runningTotalCr: totalCr,
+          batchSource: 'Payables', createdBy: 'user',
+        },
+        header: {
+          ledgerId: resolvedLedgerId, ledgerName: resolvedLedgerName,
+          jeCategory: 'Purchase Invoices', jeSource: 'Payables',
+          periodName, journalName: `AP Cancellation ${invoiceNumber}`,
+          description: `Cancellation reversal – Invoice ${invoiceNumber}`,
+          currencyCode: currency, currencyConversionType: 'User',
+          currencyConversionDate: acctDate, currencyConversionRate: 1,
+          defaultEffectiveDate: acctDate, status: 'NEW',
+          runningTotalDr: totalDr, runningTotalCr: totalCr, createdBy: 'user',
+        },
+        lines: fetchedLines.map((l: any) => ({
+          enteredDr:   l.lineType === 'DR' ? (l.enteredDr || null) : null,
+          enteredCr:   l.lineType === 'CR' ? (l.enteredCr || null) : null,
+          accountedDr: l.accountedDr || null,
+          accountedCr: l.accountedCr || null,
+          statAmount:  null,
+          description: l.description || '',
+          currencyCode: l.currencyCode || currency,
+          currencyConversionDate: acctDate, currencyConversionRate: 1,
+          userCurrencyConversionType: 'User',
+          accountCombination: l.accountCombination || '',
+          chartOfAccountsName: 'Chart of Accounts',
+          reference1: invoiceNumber,
+          reference2: String(invoiceId),
+          reference3: l.accountingClass || null,
+          reference4: l.legalEntity || bu || null,
+          reference5: 'AP-INVOICE-CANCELLATION',
+          createdBy:  'user',
+        })),
+      };
+
+      const glRes  = await fetch(`${APEX_DB_CONFIG.baseUrl}/journals/create`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(journalPayload),
+      });
+      const glData = await glRes.json().catch(() => ({}));
+      if (!glRes.ok) throw new Error(`GL journal creation failed: HTTP ${glRes.status} – ${glData?.message || JSON.stringify(glData)}`);
+
+      const glBatchId   = glData.jeBatchId  ?? glData.je_batch_id  ?? glData.batchId  ?? null;
+      const glHeaderId  = glData.jeHeaderId ?? glData.je_header_id ?? glData.headerId ?? null;
+      const glBatchName = glData.batchName  ?? batchName;
+
+      // Step 2 — post to GL
+      if (glBatchId) {
+        const putRes  = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/${glBatchId}/post`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: '{}',
+        });
+        const putData = await putRes.json().catch(() => ({}));
+        if (!putRes.ok || putData?.success === false) {
+          const err = Array.isArray(putData?.errors) && putData.errors.length > 0 ? putData.errors[0] : putData?.error || `HTTP ${putRes.status}`;
+          throw new Error(`GL posting failed: ${err}`);
+        }
+      }
+
+      // Step 3 — stamp SLA
+      await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ headerId: cancelSlaHeaderId, postedBy: 'user', glBatchId, glBatchName, glHeaderId }),
+      });
+
+      setCancelSlaStatus('POSTED');
+      message.success('Cancellation journal posted to GL successfully.');
+    } catch (err: any) {
+      message.error(`Post Cancellation failed: ${err.message}`);
+    } finally {
+      setCancelSlaPosting(false);
+    }
+  }, [cancelSlaHeaderId, cancelSlaStatus, form, headerValues, savedInvoiceId, initialData, fetchLedgerByBusinessUnit]);
 
   // ── Applied Prepayment SLA: Post to Ledger ────────────────────────────────
   const handleAppPostToLedger = useCallback(async (record: AppliedPrepayment) => {
@@ -10013,6 +10155,17 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 onClick={handlePostToLedger}
               >
                 Post to Ledger
+              </Button>
+            )}
+            {cancelSlaHeaderId && cancelSlaStatus !== 'POSTED' && (
+              <Button
+                type="primary"
+                icon={<SendOutlined />}
+                loading={cancelSlaPosting}
+                style={{ background: REDWOOD.error, borderColor: REDWOOD.error }}
+                onClick={handlePostCancellationToLedger}
+              >
+                Post Cancellation to GL
               </Button>
             )}
             {glPayloadDebug && (
