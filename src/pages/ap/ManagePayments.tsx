@@ -78,6 +78,7 @@ import {
   fetchLedgerByBusinessUnit,
   buildApPaymentSlaPayloads,
   getAccounting,
+  checkGLJournalExists,
 } from '../../services/sla.service';
 import type { SlaGetResult } from '../../services/sla.service';
 import { eventTypeToRef5 } from '../../services/glPosting.service';
@@ -1595,15 +1596,16 @@ const ManagePayments: React.FC = () => {
                 onClick={() => openVoidModal(record)}
               />
             </Tooltip>
-            <Tooltip title={record.accountingStatus === 'Accounted' ? 'Accounting locked (Posted)' : 'Create Accounting'}>
-              <Button
-                type="link"
-                size="small"
-                icon={<AccountBookOutlined />}
-                disabled={record.accountingStatus === 'Accounted'}
-                onClick={() => handleCreateAccounting(record)}
-              />
-            </Tooltip>
+            {record.accountingStatus !== 'Accounted' && (
+              <Tooltip title="Create Accounting">
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<AccountBookOutlined />}
+                  onClick={() => handleCreateAccounting(record)}
+                />
+              </Tooltip>
+            )}
             <Tooltip title="View / Post Accounting">
               <Button
                 type="link"
@@ -1874,38 +1876,69 @@ const ManagePayments: React.FC = () => {
   };
 
   const handlePostToLedgerConfirm = async () => {
-    if (!postGLPayload || !postModalHeadId) return;
+    if (!postGLPayload || !postModalHeadId || !viewAcctRecord) return;
     setSlaActionLoading(true);
     try {
-      // Step 1 — POST to journals/create (same API as invoices / ManageSLAJournals)
-      const glRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/journals/create`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body:    JSON.stringify(postGLPayload),
-      });
-      const glData = await glRes.json();
-      if (!glRes.ok) throw new Error(glData?.message || `HTTP ${glRes.status}`);
+      // Step 1 — Duplicate check by ref1/ref2/ref5
+      const ref5 = postGLPayload.lines?.[0]?.reference5 || eventTypeToRef5('PAYMENT_CREATED');
+      const glExists = await checkGLJournalExists(
+        String(viewAcctRecord.paymentNumber || ''),
+        String(viewAcctRecord.checkId || ''),
+        ref5,
+      );
 
-      const retBatchId   = glData.batchId   || glData.batch_id   || null;
-      const retHeaderId  = glData.headerId  || glData.header_id  || null;
-      const retBatchName = glData.batchName || glData.batch_name || postGLPayload.batch.batchName;
+      let retBatchId: number | null  = glExists.batchId;
+      let retHeaderId: number | null = glExists.headerId;
+      let retBatchName: string       = postGLPayload.batch.batchName;
 
-      // Step 2 — stamp GL IDs back on the SLA header
-      if (retBatchId || retHeaderId) {
-        await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`, {
+      if (glExists.exists && glExists.status === 'P') {
+        message.info('GL journal already posted. Stamping SLA header.');
+      } else if (glExists.exists && glExists.batchId) {
+        // Exists but unposted — post via PUT
+        const putRes  = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/${glExists.batchId}/post`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: '{}',
+        });
+        const putData = await putRes.json().catch(() => ({}));
+        if (!putRes.ok || putData?.success === false) {
+          throw new Error(Array.isArray(putData?.errors) ? putData.errors[0] : putData?.error || `HTTP ${putRes.status}`);
+        }
+      } else {
+        // Step 2 — Create the GL journal
+        const glRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/journals/create`, {
           method:  'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body:    JSON.stringify({ headerId: postModalHeadId, glBatchId: retBatchId, glBatchName: retBatchName, glHeaderId: retHeaderId, postedBy: 'SYSTEM' }),
+          body:    JSON.stringify(postGLPayload),
         });
+        const glData = await glRes.json();
+        if (!glRes.ok) throw new Error(glData?.message || `HTTP ${glRes.status}`);
+
+        retBatchId   = glData.jeBatchId  ?? glData.batchId  ?? null;
+        retHeaderId  = glData.jeHeaderId ?? glData.headerId ?? null;
+        retBatchName = glData.batchName  ?? retBatchName;
+
+        // Step 3 — Post the newly created batch
+        if (retBatchId) {
+          const putRes  = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/${retBatchId}/post`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: '{}',
+          });
+          const putData = await putRes.json().catch(() => ({}));
+          if (!putRes.ok || putData?.success === false) {
+            throw new Error(Array.isArray(putData?.errors) ? putData.errors[0] : putData?.error || `HTTP ${putRes.status}`);
+          }
+        }
       }
 
-      setPostGLResult({ success: true, data: glData });
-      message.success(`Posted to GL. Header ${postModalHeadId} is now POSTED and locked.`);
-      // Refresh view
-      if (viewAcctRecord) {
-        const refreshed = await getAccounting('AP_PAYMENTS', viewAcctRecord.checkId);
-        setViewAcctData(refreshed);
-      }
+      // Step 4 — Stamp SLA header
+      await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body:    JSON.stringify({ headerId: postModalHeadId, glBatchId: retBatchId, glBatchName: retBatchName, glHeaderId: retHeaderId, postedBy: 'SYSTEM' }),
+      });
+
+      setPostGLResult({ success: true, data: { batchId: retBatchId, headerId: retHeaderId } });
+      message.success('Posted to GL successfully.');
+      const refreshed = await getAccounting('AP_PAYMENTS', viewAcctRecord.checkId);
+      setViewAcctData(refreshed);
     } catch (err: any) {
       setPostGLResult({ success: false, error: err.message });
       message.error(`Post to GL failed: ${err.message}`);

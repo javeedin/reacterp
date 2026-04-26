@@ -171,6 +171,7 @@ import {
   fetchLedgerByBusinessUnit,
   buildApPaymentSlaPayloads,
   getAccounting,
+  checkGLJournalExists,
 } from '../../services/sla.service';
 import type { SlaExistsResult, SlaGetResult } from '../../services/sla.service';
 import { eventTypeToRef5 } from '../../services/glPosting.service';
@@ -584,30 +585,65 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
     if (!postGLPayload || !postModalHeadId) return;
     setSlaActionLoading(true);
     try {
-      // Step 1 — POST to journals/create (same API as invoices)
-      const glRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/journals/create`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body:    JSON.stringify(postGLPayload),
-      });
-      const glData = await glRes.json();
-      if (!glRes.ok) throw new Error(glData?.message || `HTTP ${glRes.status}`);
+      // Step 1 — Duplicate check: search existing GL journal by ref1/ref2/ref5
+      const ref5 = postGLPayload.lines?.[0]?.reference5 || eventTypeToRef5('PAYMENT_CREATED');
+      const glExists = await checkGLJournalExists(
+        String(payment.paymentNumber || ''),
+        String(payment.checkId || ''),
+        ref5,
+      );
 
-      const retBatchId   = glData.batchId   || glData.batch_id   || null;
-      const retHeaderId  = glData.headerId  || glData.header_id  || null;
-      const retBatchName = glData.batchName || glData.batch_name || postGLPayload.batch.batchName;
+      let retBatchId: number | null   = glExists.batchId;
+      let retHeaderId: number | null  = glExists.headerId;
+      let retBatchName: string        = postGLPayload.batch.batchName;
 
-      // Step 2 — stamp GL IDs back on the SLA header
-      if (retBatchId || retHeaderId) {
-        await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`, {
+      if (glExists.exists && glExists.status === 'P') {
+        // Already fully posted — just stamp SLA and close
+        message.info('GL journal already posted. Stamping SLA header.');
+      } else if (glExists.exists && glExists.batchId) {
+        // Journal exists but not yet posted — post it via PUT
+        const putRes  = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/${glExists.batchId}/post`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: '{}',
+        });
+        const putData = await putRes.json().catch(() => ({}));
+        if (!putRes.ok || putData?.success === false) {
+          throw new Error(Array.isArray(putData?.errors) ? putData.errors[0] : putData?.error || `HTTP ${putRes.status}`);
+        }
+      } else {
+        // Step 2 — Create the GL journal
+        const glRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/journals/create`, {
           method:  'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body:    JSON.stringify({ headerId: postModalHeadId, glBatchId: retBatchId, glBatchName: retBatchName, glHeaderId: retHeaderId, postedBy: 'SYSTEM' }),
+          body:    JSON.stringify(postGLPayload),
         });
+        const glData = await glRes.json();
+        if (!glRes.ok) throw new Error(glData?.message || `HTTP ${glRes.status}`);
+
+        retBatchId   = glData.jeBatchId  ?? glData.batchId  ?? null;
+        retHeaderId  = glData.jeHeaderId ?? glData.headerId ?? null;
+        retBatchName = glData.batchName  ?? retBatchName;
+
+        // Step 3 — Post the newly created batch
+        if (retBatchId) {
+          const putRes  = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/${retBatchId}/post`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: '{}',
+          });
+          const putData = await putRes.json().catch(() => ({}));
+          if (!putRes.ok || putData?.success === false) {
+            throw new Error(Array.isArray(putData?.errors) ? putData.errors[0] : putData?.error || `HTTP ${putRes.status}`);
+          }
+        }
       }
 
-      setPostGLResult({ success: true, data: glData });
-      message.success(`Posted to GL. Header ${postModalHeadId} is now POSTED and locked.`);
+      // Step 4 — Stamp SLA header with GL batch info
+      await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body:    JSON.stringify({ headerId: postModalHeadId, glBatchId: retBatchId, glBatchName: retBatchName, glHeaderId: retHeaderId, postedBy: 'SYSTEM' }),
+      });
+
+      setPostGLResult({ success: true, data: { batchId: retBatchId, headerId: retHeaderId } });
+      message.success(`Posted to GL successfully.`);
       await fetchSlaStatus();
     } catch (err: any) {
       setPostGLResult({ success: false, error: err.message });
@@ -1341,15 +1377,16 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
               <Button>Actions <DownOutlined /></Button>
             </Dropdown>
             {getAccountingStatusDisplay()}
-            <Tooltip title={slaStatus?.accountingStatus === 'POSTED' ? 'Accounting is locked (POSTED)' : 'Create accounting entries in DRAFT'}>
-              <Button
-                icon={<AccountBookOutlined />}
-                onClick={handleCreateAccounting}
-                disabled={slaStatus?.accountingStatus === 'POSTED'}
-              >
-                {slaStatus?.accountingStatus === 'DRAFT' ? 'Re-create Accounting' : 'Create Accounting'}
-              </Button>
-            </Tooltip>
+            {slaStatus?.accountingStatus !== 'POSTED' && (
+              <Tooltip title="Create accounting entries in DRAFT">
+                <Button
+                  icon={<AccountBookOutlined />}
+                  onClick={handleCreateAccounting}
+                >
+                  {slaStatus?.accountingStatus === 'DRAFT' ? 'Re-create Accounting' : 'Create Accounting'}
+                </Button>
+              </Tooltip>
+            )}
             {slaStatus?.exists && slaStatus.accountingStatus === 'DRAFT' && (
               <Tooltip title="Post accounting to General Ledger and lock">
                 <Button
