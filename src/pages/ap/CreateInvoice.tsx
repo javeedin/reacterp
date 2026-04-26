@@ -818,7 +818,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     const isPostedToGL = slaStatus === 'POSTED';
     const isCancelled = status === 'cancelled';
     const isPaid = status === 'fully paid' || status === 'paid' || status === 'available';
-    const permanentlyLocked = isPaid || isCancelled;
+    const permanentlyLocked = isPaid || isCancelled || isPostedToGL;
     const ro = initialData.isSynced ? true : (permanentlyLocked || !isEditing);
     return { isReadOnly: ro, isPermanentlyLocked: permanentlyLocked || !!initialData.isSynced, isPaid, isPostedToGL, isCancelled };
   }, [initialData, isEditing, slaStatus, liveHoldPaidStatus]);
