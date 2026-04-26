@@ -379,7 +379,15 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CANCEL_INVOICE_PKG AS
               AND  accounting_status IN ('DRAFT', 'ERROR');
         END IF;
 
-        -- 5. Cancel the invoice
+        -- 5. Cancel multiperiod schedule lines (if any)
+        UPDATE RR_AP_INVOICE_MULTIPERIOD_SCHEDULE
+        SET    transaction_status = 'Cancelled',
+               last_updated_by    = p_cancelled_by,
+               last_update_date   = SYSTIMESTAMP
+        WHERE  invoice_id         = p_invoice_id
+          AND  transaction_status = 'Active';
+
+        -- 6. Cancel the invoice
         UPDATE RR_AP_INVOICES_ALL
         SET    canceled_flag = 'Y',
                paid_status   = 'Cancelled',

@@ -2982,9 +2982,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // For cancelled invoices: only view actions (no edits, no payments, no new actions)
   // Create Accounting is NOT available for synced invoices (they are accounted in Oracle Fusion)
   const isCreditMemoType = headerValues.invoiceType === 'Credit Memo';
+  // Cancelled invoices: only view actions; hide accounting items if never posted
   const cancelledOnlyActions: MenuProps['items'] = [
-    { key: 'viewAccounting', icon: <AccountBookOutlined />, label: 'View Accounting' },
-    { type: 'divider' as const },
+    ...(isPostedToGL ? [
+      { key: 'viewAccounting', icon: <AccountBookOutlined />, label: 'View Accounting' } as const,
+      { type: 'divider' as const },
+    ] : []),
     { key: 'manageInstallments', icon: <ScheduleOutlined />, label: 'Manage Installments' },
     { type: 'divider' as const },
     { key: 'multiperiodSchedule', icon: <CalendarOutlined />, label: 'Multiperiod Accounting' },
@@ -4610,7 +4613,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               Invoice Actions <DownOutlined style={{ fontSize: 10 }} />
             </Button>
           </Dropdown>
-          {!hasAnyPayment && !isPostedToGL && (
+          {!isCancelled && !hasAnyPayment && !isPostedToGL && (
             <Button
               icon={<CheckSquareOutlined />}
               onClick={runValidation}
@@ -4623,8 +4626,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               {isValidated ? 'Validated' : 'Validate'}
             </Button>
           )}
-          {/* Accounting Actions Dropdown */}
-          <Dropdown
+          {/* Accounting Actions Dropdown — hidden when cancelled and not yet posted */}
+          {(!isCancelled || isPostedToGL) && <Dropdown
             menu={{
               items: [
                 {
@@ -4672,7 +4675,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             >
               Accounting Actions <DownOutlined style={{ fontSize: 10 }} />
             </Button>
-          </Dropdown>
+          </Dropdown>}
           {/* Accounting Status Tag */}
           {slaStatus ? (
             <Tag
