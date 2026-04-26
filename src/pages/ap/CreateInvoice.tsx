@@ -3053,6 +3053,19 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         },
       ];
 
+  // Persist validation status to RR_AP_INVOICES_ALL.VALIDATION_STATUS
+  const saveValidationStatus = async (invoiceId: number, status: string) => {
+    try {
+      await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/invoices/${invoiceId}/validation-status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ VALIDATION_STATUS: status }),
+      });
+    } catch (e) {
+      console.warn('saveValidationStatus failed:', e);
+    }
+  };
+
   // Handle invoice action menu clicks
   // Run all validations and show checklist
   const runValidation = () => {
@@ -3162,7 +3175,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     const allPassed = results.every((r) => r.passed);
     setValidationResults(results);
     setIsValidated(allPassed);
+    const newStatus = allPassed ? 'Validated' : 'Needs Revalidation';
+    setLiveValidationStatus(newStatus);
     setValidationModalVisible(true);
+
+    const invoiceId = savedInvoiceId ?? initialData?.invoiceId ?? null;
+    if (invoiceId) {
+      saveValidationStatus(invoiceId, newStatus);
+    }
 
     if (allPassed) {
       message.success('Validation passed — invoice is ready to save');
@@ -3638,8 +3658,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         // Seed live status for a freshly created invoice so the refresh button works immediately
         setLiveHoldPaidStatus('Unpaid');
         setLiveValidationStatus('Never Validated');
+        saveValidationStatus(invoiceId, 'Never Validated');
         fetchInvoiceBalance(invoiceId);
         fetchInvoicePayments(invoiceId);
+      } else if (isUpdate && invoiceId) {
+        // Data changed — mark as needing revalidation
+        setIsValidated(false);
+        setLiveValidationStatus('Needs Revalidation');
+        saveValidationStatus(invoiceId, 'Needs Revalidation');
       }
 
       message.success(data.message || `Invoice ${isUpdate ? 'updated' : 'created'} (ID: ${invoiceId})`);
