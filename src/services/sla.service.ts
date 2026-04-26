@@ -68,6 +68,7 @@ export interface SlaLine {
   accountedCr: number;
   currencyCode: string;
   description: string;
+  accountDescription?: string;
 }
 
 export interface SlaCreatePayload {

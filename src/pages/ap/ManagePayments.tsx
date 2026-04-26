@@ -78,6 +78,7 @@ import {
   fetchLedgerByBusinessUnit,
   buildApPaymentSlaPayloads,
   getAccounting,
+  getLinesByHeaderId,
   checkGLJournalExists,
 } from '../../services/sla.service';
 import type { SlaGetResult } from '../../services/sla.service';
@@ -1782,6 +1783,13 @@ const ManagePayments: React.FC = () => {
     setViewAcctData(null);
     try {
       const result = await getAccounting('AP_PAYMENTS', record.checkId);
+      if (result.headerId) {
+        try {
+          const linesData = await getLinesByHeaderId(result.headerId);
+          const descMap = new Map(linesData.items.map(l => [l.lineId, l.accountDescription]));
+          result.lines = result.lines.map(l => ({ ...l, accountDescription: descMap.get(l.lineId) || undefined }));
+        } catch { /* non-critical */ }
+      }
       setViewAcctData(result);
     } catch (err: any) {
       message.error(`Failed to fetch accounting: ${err.message}`);
@@ -1938,6 +1946,13 @@ const ManagePayments: React.FC = () => {
       setPostGLResult({ success: true, data: { batchId: retBatchId, headerId: retHeaderId } });
       message.success('Posted to GL successfully.');
       const refreshed = await getAccounting('AP_PAYMENTS', viewAcctRecord.checkId);
+      if (refreshed.headerId) {
+        try {
+          const linesData = await getLinesByHeaderId(refreshed.headerId);
+          const descMap = new Map(linesData.items.map(l => [l.lineId, l.accountDescription]));
+          refreshed.lines = refreshed.lines.map(l => ({ ...l, accountDescription: descMap.get(l.lineId) || undefined }));
+        } catch { /* non-critical */ }
+      }
       setViewAcctData(refreshed);
     } catch (err: any) {
       setPostGLResult({ success: false, error: err.message });

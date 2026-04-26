@@ -171,6 +171,7 @@ import {
   fetchLedgerByBusinessUnit,
   buildApPaymentSlaPayloads,
   getAccounting,
+  getLinesByHeaderId,
   checkGLJournalExists,
 } from '../../services/sla.service';
 import type { SlaExistsResult, SlaGetResult } from '../../services/sla.service';
@@ -659,6 +660,13 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
     setViewAcctData(null);
     try {
       const result = await getAccounting('AP_PAYMENTS', payment.checkId);
+      if (result.headerId) {
+        try {
+          const linesData = await getLinesByHeaderId(result.headerId);
+          const descMap = new Map(linesData.items.map(l => [l.lineId, l.accountDescription]));
+          result.lines = result.lines.map(l => ({ ...l, accountDescription: descMap.get(l.lineId) || undefined }));
+        } catch { /* non-critical */ }
+      }
       setViewAcctData(result);
     } catch (err: any) {
       message.error(`Failed to fetch accounting: ${err.message}`);
