@@ -1490,17 +1490,24 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         })),
       };
 
-      // Store payload for debug inspection
-      setGlPayloadDebug({ url: `${APEX_DB_CONFIG.baseUrl}/journals/create`, method: 'POST', body: journalPayload });
+      // Init debug log — updated at each step
+      const debugLog: { step: string; method: string; url: string; requestBody?: any; status?: number; response?: any }[] = [];
+      setGlPayloadDebug({ steps: debugLog });
 
       // Step 1 — POST to journals/create
       const glUrl = `${APEX_DB_CONFIG.baseUrl}/journals/create`;
+      debugLog[0] = { step: '1 — Create Journal', method: 'POST', url: glUrl, requestBody: journalPayload };
+      setGlPayloadDebug({ steps: [...debugLog] });
+
       const glRes = await fetch(glUrl, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body:    JSON.stringify(journalPayload),
       });
-      const glData = await glRes.json();
+      const glData = await glRes.json().catch(() => ({}));
+      debugLog[0].status   = glRes.status;
+      debugLog[0].response = glData;
+      setGlPayloadDebug({ steps: [...debugLog] });
 
       if (!glRes.ok) {
         // Mark SLA as ERROR
@@ -1510,24 +1517,30 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           body: JSON.stringify({ headerId: slaHeaderId, errorMessage: `HTTP ${glRes.status}: ${glData?.message || ''}`, postedBy: 'user' }),
         });
         setSlaStatus('ERROR');
-        throw new Error(`GL journal creation failed: HTTP ${glRes.status} – ${glData?.message || ''}`);
+        throw new Error(`GL journal creation failed: HTTP ${glRes.status} – ${glData?.message || JSON.stringify(glData)}`);
       }
 
-      const glBatchId   = glData.batchId   || glData.batch_id   || null;
-      const glHeaderId  = glData.headerId  || glData.header_id  || null;
-      const glBatchName = glData.batchName || glData.batch_name || batchName;
+      // Accept any field name the create endpoint returns for the batch ID
+      const glBatchId   = glData.batchId   ?? glData.batch_id   ?? glData.jeBatchId ?? glData.je_batch_id ?? null;
+      const glHeaderId  = glData.headerId  ?? glData.header_id  ?? glData.jeHeaderId ?? null;
+      const glBatchName = glData.batchName ?? glData.batch_name ?? batchName;
 
       // Step 2 — POST to GL via RR_POST_JOURNAL (validates period format, period open, balance, accounts)
       if (glBatchId) {
         const postGlUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/${glBatchId}/post`;
-        const postGlRes = await fetch(postGlUrl, {
+        debugLog[1] = { step: '2 — Post to GL (RR_POST_JOURNAL)', method: 'PUT', url: postGlUrl };
+        setGlPayloadDebug({ steps: [...debugLog] });
+
+        const postGlRes  = await fetch(postGlUrl, {
           method:  'PUT',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         });
         const postGlData = await postGlRes.json().catch(() => ({}));
+        debugLog[1].status   = postGlRes.status;
+        debugLog[1].response = postGlData;
+        setGlPayloadDebug({ steps: [...debugLog] });
 
         if (!postGlRes.ok || postGlData?.success === false) {
-          // Extract first error from errors array if present
           const firstError = Array.isArray(postGlData?.errors) && postGlData.errors.length > 0
             ? postGlData.errors[0]
             : postGlData?.error || `HTTP ${postGlRes.status}`;
@@ -1539,16 +1552,29 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           setSlaStatus('ERROR');
           throw new Error(`GL posting failed: ${firstError}`);
         }
+      } else {
+        // glBatchId missing — record in debug log and skip step 2
+        debugLog[1] = { step: '2 — Post to GL (SKIPPED — no batchId in step 1 response)', method: 'PUT', url: 'n/a', response: glData };
+        setGlPayloadDebug({ steps: [...debugLog] });
       }
 
       // Step 3 — stamp GL IDs back on the SLA header (same as ManageSLAJournals)
+      const slaPostUrl = `${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`;
+      const slaPostBody = { headerId: slaHeaderId, postedBy: 'user', glBatchId, glBatchName, glHeaderId };
+      debugLog[2] = { step: '3 — Stamp GL IDs on SLA header', method: 'POST', url: slaPostUrl, requestBody: slaPostBody };
+      setGlPayloadDebug({ steps: [...debugLog] });
+
       if (glBatchId || glHeaderId) {
-        const postRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`, {
+        const postRes  = await fetch(slaPostUrl, {
           method:  'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body:    JSON.stringify({ headerId: slaHeaderId, postedBy: 'user', glBatchId, glBatchName, glHeaderId }),
+          body:    JSON.stringify(slaPostBody),
         });
-        if (!postRes.ok) { const t = await postRes.text(); throw new Error(`SLA post update failed: ${t}`); }
+        const postData = await postRes.json().catch(() => ({}));
+        debugLog[2].status   = postRes.status;
+        debugLog[2].response = postData;
+        setGlPayloadDebug({ steps: [...debugLog] });
+        if (!postRes.ok) throw new Error(`SLA post update failed: ${JSON.stringify(postData)}`);
       }
 
       setSlaStatus('POSTED');
@@ -10188,36 +10214,71 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             <Button
               icon={<CopyOutlined />}
               onClick={() => {
-                const text = JSON.stringify(glPayloadDebug, null, 2);
+                const text = JSON.stringify((glPayloadDebug as any)?.steps ?? glPayloadDebug, null, 2);
                 navigator.clipboard.writeText(text).then(
-                  () => message.success('Copied to clipboard'),
-                  () => message.error('Copy failed — select and copy manually'),
+                  () => message.success('All steps copied to clipboard'),
+                  () => message.error('Copy failed — select manually'),
                 );
               }}
             >
-              Copy JSON
+              Copy All
             </Button>
             <Button onClick={() => setGlPayloadModalVisible(false)}>Close</Button>
           </Space>
         }
-        width={820}
+        width={860}
         destroyOnClose
       >
-        {glPayloadDebug && (
-          <div>
-            <div style={{ marginBottom: 8 }}>
-              <Tag color="orange">POST</Tag>
-              <Text code style={{ fontSize: 11 }}>{(glPayloadDebug as any).url}</Text>
+        {glPayloadDebug && (() => {
+          const steps: any[] = (glPayloadDebug as any).steps || [];
+          const methodColor = (m: string) => m === 'POST' ? 'orange' : m === 'PUT' ? 'purple' : 'blue';
+          const statusColor = (s?: number) => !s ? 'default' : s < 300 ? 'green' : s < 500 ? 'orange' : 'red';
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {steps.map((s, i) => (
+                <div key={i} style={{ border: `1px solid ${s.status && s.status >= 400 ? '#ff4d4f' : '#f0f0f0'}`, borderRadius: 6, overflow: 'hidden' }}>
+                  {/* Step header */}
+                  <div style={{ background: s.status && s.status >= 400 ? '#fff1f0' : '#fafafa', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 8, borderBottom: '1px solid #f0f0f0' }}>
+                    <Tag color={methodColor(s.method)} style={{ fontWeight: 700, margin: 0 }}>{s.method}</Tag>
+                    <Text code style={{ fontSize: 11, flex: 1 }}>{s.url}</Text>
+                    {s.status && <Tag color={statusColor(s.status)}>{s.status}</Tag>}
+                  </div>
+                  {/* Request body */}
+                  {s.requestBody && (
+                    <div style={{ padding: '4px 12px 0' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <Text type="secondary" style={{ fontSize: 11 }}>Request Body</Text>
+                        <Button size="small" type="link" icon={<CopyOutlined />} style={{ fontSize: 11 }}
+                          onClick={() => navigator.clipboard.writeText(JSON.stringify(s.requestBody, null, 2)).then(() => message.success('Copied'))}>
+                          Copy
+                        </Button>
+                      </div>
+                      <pre style={{ fontSize: 11, background: '#1a1a1a', color: '#e6e6e6', borderRadius: 4, padding: '6px 10px', maxHeight: 220, overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: '4px 0 8px' }}>
+                        {JSON.stringify(s.requestBody, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                  {/* Response */}
+                  {s.response !== undefined && (
+                    <div style={{ padding: '4px 12px 8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <Text type="secondary" style={{ fontSize: 11 }}>Response</Text>
+                        <Button size="small" type="link" icon={<CopyOutlined />} style={{ fontSize: 11 }}
+                          onClick={() => navigator.clipboard.writeText(JSON.stringify(s.response, null, 2)).then(() => message.success('Copied'))}>
+                          Copy
+                        </Button>
+                      </div>
+                      <pre style={{ fontSize: 11, background: '#1a1a1a', color: s.status && s.status >= 400 ? '#ff7875' : '#e6e6e6', borderRadius: 4, padding: '6px 10px', maxHeight: 160, overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: '4px 0' }}>
+                        {JSON.stringify(s.response, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              ))}
+              {steps.length === 0 && <Text type="secondary">Click Post to Ledger first to capture the API calls.</Text>}
             </div>
-            <pre style={{
-              fontSize: 11, background: '#1a1a1a', color: '#e6e6e6',
-              borderRadius: 6, padding: '10px 14px', maxHeight: 500,
-              overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-            }}>
-              {JSON.stringify((glPayloadDebug as any).body, null, 2)}
-            </pre>
-          </div>
-        )}
+          );
+        })()}
       </Modal>
       {/* ── End GL Payload Debug Modal ────────────────────────────────────── */}
 
