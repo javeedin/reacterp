@@ -803,17 +803,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [isEditing, setIsEditing] = useState(false);
   const isInvoiceSynced = !!initialData?.isSynced;
 
-  const { isReadOnly, isPermanentlyLocked, isPaid, isPostedToGL } = useMemo(() => {
-    if (!initialData?.invoiceId) return { isReadOnly: false, isPermanentlyLocked: false, isPaid: false, isPostedToGL: false };
-    const status = (initialData.holdPaidStatus || '').toLowerCase();
-    const isPostedToGL = slaStatus === 'POSTED';   // true only when accounting is actually posted to GL
+  const { isReadOnly, isPermanentlyLocked, isPaid, isPostedToGL, isCancelled } = useMemo(() => {
+    if (!initialData?.invoiceId) return { isReadOnly: false, isPermanentlyLocked: false, isPaid: false, isPostedToGL: false, isCancelled: false };
+    const status = (liveHoldPaidStatus || initialData.holdPaidStatus || '').toLowerCase();
+    const isPostedToGL = slaStatus === 'POSTED';
+    const isCancelled = status === 'cancelled';
     const isPaid = status === 'fully paid' || status === 'paid' || status === 'available';
-    // Note: 'partially paid' is NOT isPaid — Pay in Full must remain available while balance exists
-    const permanentlyLocked = isPaid;  // posting to GL does not lock the invoice
-    // Synced invoices are always read-only (can't be edited in this app)
+    const permanentlyLocked = isPaid || isCancelled;
     const ro = initialData.isSynced ? true : (permanentlyLocked || !isEditing);
-    return { isReadOnly: ro, isPermanentlyLocked: permanentlyLocked || !!initialData.isSynced, isPaid, isPostedToGL };
-  }, [initialData, isEditing, slaStatus]);
+    return { isReadOnly: ro, isPermanentlyLocked: permanentlyLocked || !!initialData.isSynced, isPaid, isPostedToGL, isCancelled };
+  }, [initialData, isEditing, slaStatus, liveHoldPaidStatus]);
 
   // True when applied prepayments fully cover the invoice amount
   const isPrepaymentFullyPaid = useMemo(() => {
@@ -2980,9 +2979,19 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   // Invoice Actions dropdown menu items
   // For synced invoices: only show View Accounting, Manage Installments, Pay in Full (if unpaid)
+  // For cancelled invoices: only view actions (no edits, no payments, no new actions)
   // Create Accounting is NOT available for synced invoices (they are accounted in Oracle Fusion)
   const isCreditMemoType = headerValues.invoiceType === 'Credit Memo';
-  const invoiceActionItems: MenuProps['items'] = isInvoiceSynced
+  const cancelledOnlyActions: MenuProps['items'] = [
+    { key: 'viewAccounting', icon: <AccountBookOutlined />, label: 'View Accounting' },
+    { type: 'divider' as const },
+    { key: 'manageInstallments', icon: <ScheduleOutlined />, label: 'Manage Installments' },
+    { type: 'divider' as const },
+    { key: 'multiperiodSchedule', icon: <CalendarOutlined />, label: 'Multiperiod Accounting' },
+  ];
+  const invoiceActionItems: MenuProps['items'] = isCancelled
+    ? cancelledOnlyActions
+    : isInvoiceSynced
     ? [
         {
           key: 'viewAccounting',
@@ -4683,7 +4692,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               <CheckCircleOutlined /> Invoice ID: {savedInvoiceId}
             </Tag>
           )}
-          {isEditMode && !isEditing && (hasAnyPayment || isPostedToGL || isPaid || isPrepaymentFullyPaid) ? (
+          {isCancelled ? (
+            <Tag
+              color="red"
+              style={{ fontSize: 12, padding: '4px 12px', fontWeight: 600, borderRadius: 6 }}
+            >
+              CANCELLED
+            </Tag>
+          ) : isEditMode && !isEditing && (hasAnyPayment || isPostedToGL || isPaid || isPrepaymentFullyPaid) ? (
             <Tag
               color={isPaid || hasAnyPayment || isPrepaymentFullyPaid ? 'blue' : 'purple'}
               style={{ fontSize: 12, padding: '4px 12px', fontWeight: 600, borderRadius: 6 }}
@@ -4736,7 +4752,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             {isReadOnly && (
               <Tag color="warning" style={{ fontSize: 12 }}>Read-Only</Tag>
             )}
-            {liveHoldPaidStatus && (
+            {liveHoldPaidStatus && !isCancelled && (
               <Tag
                 color={liveHoldPaidStatus === 'Paid' ? 'blue' : liveHoldPaidStatus === 'On Hold' ? 'red' : 'orange'}
                 style={{ fontSize: 12 }}

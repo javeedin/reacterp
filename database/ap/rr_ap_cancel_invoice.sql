@@ -8,6 +8,27 @@
 -- ============================================================
 
 -- ============================================================
+-- Step 0: One-time migration — copy old wrong-named columns
+-- (cancellation_date → canceled_date, cancelled_by → canceled_by)
+-- Safe to run multiple times; skips silently if columns don't exist.
+-- ============================================================
+DECLARE
+    PROCEDURE migrate_col(p_src VARCHAR2, p_dst VARCHAR2) IS
+    BEGIN
+        EXECUTE IMMEDIATE
+            'UPDATE RR_AP_INVOICES_ALL '
+            || 'SET ' || p_dst || ' = ' || p_src || ' '
+            || 'WHERE ' || p_src || ' IS NOT NULL AND (' || p_dst || ' IS NULL)';
+        COMMIT;
+    EXCEPTION WHEN OTHERS THEN NULL;  -- column may not exist — skip
+    END;
+BEGIN
+    migrate_col('cancellation_date', 'canceled_date');
+    migrate_col('cancelled_by',      'canceled_by');
+END;
+/
+
+-- ============================================================
 -- Step 1: Add cancellation columns to RR_AP_INVOICES_ALL
 -- (safe — skips if columns already exist)
 -- ============================================================

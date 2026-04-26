@@ -70,15 +70,19 @@ SELECT
         - NVL(pay.total_paid, NVL(i.amount_paid, 0))
         - NVL(prep.total_prep, 0)
     ) AS unpaid_amount,
-    -- paid status considers both cash payments and prepayment applications
+    -- paid status: cancelled takes priority, then computed from payments
     CASE
-        WHEN NVL(i.invoice_amount, 0) = 0 THEN NVL(i.paid_status, 'Unpaid')
+        WHEN NVL(i.canceled_flag, 'N') = 'Y'                              THEN 'Cancelled'
+        WHEN NVL(i.invoice_amount, 0) = 0                                  THEN NVL(i.paid_status, 'Unpaid')
         WHEN (NVL(pay.total_paid, NVL(i.amount_paid, 0)) + NVL(prep.total_prep, 0))
              >= NVL(i.invoice_amount, 0)                                   THEN 'Fully Paid'
         WHEN (NVL(pay.total_paid, NVL(i.amount_paid, 0)) + NVL(prep.total_prep, 0))
              > 0                                                            THEN 'Partially Paid'
         ELSE NVL(i.paid_status, 'Unpaid')
     END AS paid_status,
+    i.canceled_flag,
+    TO_CHAR(NVL(i.canceled_date, i.cancellation_date), 'YYYY-MM-DD') AS canceled_date,
+    NVL(i.canceled_by, i.cancelled_by)                               AS canceled_by,
     i.validation_status,
     i.approval_status,
     (SELECT h.accounting_status
