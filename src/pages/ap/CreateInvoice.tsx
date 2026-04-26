@@ -1948,7 +1948,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       if (initialData.accountingDate) formValues.accountingDate = dayjs(initialData.accountingDate, ['YYYY-MM-DD', 'DD-MMM-YYYY', 'DD MMM YYYY']);
       if (initialData.conversionRateType) formValues.conversionRateType = initialData.conversionRateType;
       if (initialData.conversionDate) formValues.conversionDate = dayjs(initialData.conversionDate, ['YYYY-MM-DD', 'DD-MMM-YYYY', 'DD MMM YYYY']);
-      if (initialData.conversionRate) formValues.conversionRate = initialData.conversionRate;
+      // For functional currency (AED) always use rate 1; otherwise load from DB
+      const isFuncCcy = (initialData.invoiceCurrency || 'AED') === 'AED';
+      formValues.conversionRate = isFuncCcy ? 1 : (initialData.conversionRate || undefined);
       if (initialData.paymentCurrency) formValues.paymentCurrency = initialData.paymentCurrency;
       if (initialData.documentCategory) formValues.documentCategory = initialData.documentCategory;
       if (initialData.documentSequence != null && initialData.documentSequence !== '') formValues.documentSequence = Number(initialData.documentSequence) || initialData.documentSequence;
@@ -4802,6 +4804,15 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               if (changedValues.invoiceCurrency) {
                 form.setFieldValue('paymentCurrency', changedValues.invoiceCurrency);
                 setHeaderValues((prev) => ({ ...prev, paymentCurrency: changedValues.invoiceCurrency }));
+                // Auto-set conversion rate to 1 when switching to functional currency (AED)
+                if (changedValues.invoiceCurrency === 'AED') {
+                  form.setFieldsValue({ conversionRate: 1, conversionRateType: undefined, conversionDate: undefined });
+                  setHeaderValues((prev) => ({ ...prev, conversionRate: 1, conversionRateType: undefined, conversionDate: undefined }));
+                } else {
+                  // Clear rate fields when switching to a foreign currency so user must fill them
+                  form.setFieldsValue({ conversionRate: undefined, conversionRateType: undefined, conversionDate: undefined });
+                  setHeaderValues((prev) => ({ ...prev, conversionRate: undefined, conversionRateType: undefined, conversionDate: undefined }));
+                }
               }
               // Copy invoice date to all lines' accounting date + derive multiperiod dates
               if (changedValues.invoiceDate) {
@@ -5305,7 +5316,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           name="documentSequence"
                           style={{ marginBottom: 4 }}
                         >
-                          <InputNumber placeholder="Document sequence" style={{ width: '100%' }} precision={0} />
+                          <InputNumber placeholder="Auto-generated" style={{ width: '100%' }} precision={0} disabled />
                         </Form.Item>
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Voucher Number</Text>}
@@ -5318,13 +5329,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
                       {/* Column 2 */}
                       <Col span={8}>
+                        {(() => {
+                          const isFuncCcy = (headerValues.invoiceCurrency || 'AED') === 'AED';
+                          return (<>
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Conversion Rate Type</Text>}
                           name="conversionRateType"
                           style={{ marginBottom: 4 }}
-                          required={(headerValues.invoiceCurrency || 'AED') !== 'AED'}
+                          required={!isFuncCcy}
                         >
-                          <Select placeholder="Select rate type" allowClear>
+                          <Select placeholder={isFuncCcy ? 'N/A – functional currency' : 'Select rate type'} allowClear disabled={isFuncCcy}>
                             <Option value="User">User</Option>
                             <Option value="Corporate">Corporate</Option>
                             <Option value="Spot">Spot</Option>
@@ -5334,17 +5348,17 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Conversion Date</Text>}
                           name="conversionDate"
                           style={{ marginBottom: 4 }}
-                          required={(headerValues.invoiceCurrency || 'AED') !== 'AED'}
+                          required={!isFuncCcy}
                         >
-                          <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
+                          <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder={isFuncCcy ? 'N/A' : 'dd-mmm-yyyy'} disabled={isFuncCcy} />
                         </Form.Item>
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Conversion Rate</Text>}
                           name="conversionRate"
                           style={{ marginBottom: 4 }}
-                          required={(headerValues.invoiceCurrency || 'AED') !== 'AED'}
+                          required={!isFuncCcy}
                         >
-                          <InputNumber style={{ width: '100%' }} placeholder="0.000000" precision={6} min={0} />
+                          <InputNumber style={{ width: '100%' }} placeholder={isFuncCcy ? '1' : '0.000000'} precision={6} min={0} disabled={isFuncCcy} />
                         </Form.Item>
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Inverse Rate</Text>}
@@ -5355,9 +5369,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                             placeholder="Auto-calculated"
                             precision={6}
                             disabled
-                            value={headerValues?.conversionRate ? (1 / headerValues.conversionRate) : undefined}
+                            value={isFuncCcy ? 1 : (headerValues?.conversionRate ? (1 / headerValues.conversionRate) : undefined)}
                           />
                         </Form.Item>
+                          </>);
+                        })()}
                       </Col>
 
                       {/* Column 3 */}
