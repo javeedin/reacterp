@@ -1504,19 +1504,20 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       setGlPayloadDebug({ steps: [...debugLog] });
 
       if (glExists.exists) {
-        // Journal already in GL — use existing batchId, skip creation
+        // Journal already in GL — warn user and reuse existing batchId
         const existingBatchId   = glExists.batchId;
         const existingBatchName = batchName;
+        message.warning(`GL journal already exists for this invoice (Batch #${existingBatchId}). Reusing existing journal — no duplicate will be created.`);
+
         if (glExists.status === 'P') {
           // Already posted — just stamp SLA and finish
-          message.info('Journal already posted in GL. Stamping SLA header.');
           const slaPostUrl  = `${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`;
           const slaPostBody = { headerId: slaHeaderId, postedBy: 'user', glBatchId: existingBatchId, glBatchName: existingBatchName, glHeaderId: glExists.headerId };
           await fetch(slaPostUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(slaPostBody) });
           setSlaStatus('POSTED');
           setSlaPostingStatus('POSTED');
           setIsEditing(false);
-          message.success('GL journal already existed and is posted. SLA updated.');
+          message.success('GL journal already posted. SLA header updated.');
           return;
         }
         // Exists but not yet posted — run POST validation step only
