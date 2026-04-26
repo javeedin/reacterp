@@ -533,6 +533,7 @@ export function buildApInvoiceSlaPayload(opts: ApInvoiceSlaOptions): SlaCreatePa
     currencyCode:       currency,
     exchangeRate:       exRate,
     description:        `AP Liability – Invoice ${opts.invoiceNumber}`,
+    sourceLineNumber:   lineNum,
   });
 
   return {
@@ -575,6 +576,8 @@ export interface ApPaymentInvoiceLine {
 export interface ApPaymentSlaOptions {
   checkId: number;
   paymentNumber: string;
+  /** Paper document number (check/EFT doc number) — used as sourceNumber in SLA */
+  paperDocumentNumber?: string;
   paymentDate: string;           // YYYY-MM-DD
   currencyCode: string;
   businessUnit?: string;
@@ -602,6 +605,8 @@ export function buildApPaymentSlaPayloads(opts: ApPaymentSlaOptions): SlaCreateP
   const currency   = opts.currencyCode || 'AED';
   const exRate     = opts.exchangeRate  ?? 1;
 
+  const docNum = opts.paperDocumentNumber || opts.paymentNumber;
+
   return opts.appliedInvoices.map((inv) => {
     const amt = inv.amountPaid;
     return {
@@ -609,7 +614,7 @@ export function buildApPaymentSlaPayloads(opts: ApPaymentSlaOptions): SlaCreateP
         moduleName:       'AP',
         sourceTable:      'AP_PAYMENTS',
         sourceId:         opts.checkId,
-        sourceNumber:     opts.paymentNumber,
+        sourceNumber:     docNum,
         sourceType:       'PAYMENT',
         eventTypeCode:    'AP_PAYMENT_CREATED',
         eventDate:        acctDate,
@@ -623,7 +628,7 @@ export function buildApPaymentSlaPayloads(opts: ApPaymentSlaOptions): SlaCreateP
         exchangeRateType: 'Corporate',
         businessUnit:     opts.businessUnit,
         legalEntity:      opts.legalEntity,
-        description:      `AP Payment ${opts.paymentNumber} – Invoice ${inv.invoiceNumber}`,
+        description:      `AP Payment ${docNum} – Invoice ${inv.invoiceNumber}`,
         createdBy:        opts.createdBy ?? 'SYSTEM',
       },
       lines: [
@@ -638,7 +643,8 @@ export function buildApPaymentSlaPayloads(opts: ApPaymentSlaOptions): SlaCreateP
           accountedCr:        0,
           currencyCode:       currency,
           exchangeRate:       exRate,
-          description:        `AP Liability – Invoice ${inv.invoiceNumber}`,
+          description:        `AP Liability – Payment ${docNum} / Invoice ${inv.invoiceNumber}`,
+          sourceLineNumber:   1,
         },
         {
           lineNumber:         2,
@@ -651,7 +657,8 @@ export function buildApPaymentSlaPayloads(opts: ApPaymentSlaOptions): SlaCreateP
           accountedCr:        Math.round(amt * exRate * 100) / 100,
           currencyCode:       currency,
           exchangeRate:       exRate,
-          description:        `Cash Clearing – Payment ${opts.paymentNumber}`,
+          description:        `Cash Clearing – Payment ${docNum} / Invoice ${inv.invoiceNumber}`,
+          sourceLineNumber:   2,
         },
       ],
     };

@@ -8729,12 +8729,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   const paymentCcy  = values.paymentCurrency || currency;
                   const exRate      = (paymentCcy !== 'AED' && (values.conversionRate || headerValues.conversionRate))
                     ? Number(values.conversionRate || headerValues.conversionRate) : 1;
-                  const paymentNum  = generatedPaymentNumber || String(capturedCheckId);
-                  const payDate2    = payDate || dayjs().format('YYYY-MM-DD');
+                  const paperDocNum  = values.paperDocumentNumber || generatedPaymentNumber || String(capturedCheckId);
+                  const paymentNum   = generatedPaymentNumber || String(capturedCheckId);
+                  const payDate2     = payDate || dayjs().format('YYYY-MM-DD');
 
                   const payloads = buildApPaymentSlaPayloads({
-                    checkId:             capturedCheckId!,
-                    paymentNumber:       paymentNum,
+                    checkId:              capturedCheckId!,
+                    paymentNumber:        paymentNum,
+                    paperDocumentNumber:  paperDocNum,
                     paymentDate:         payDate2,
                     currencyCode:        paymentCcy,
                     exchangeRate:        exRate,
@@ -8779,7 +8781,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     }));
                     const glResult = await postSlaToGL({
                       slaHeaderId:    headerId,
-                      sourceNumber:   paymentNum,
+                      sourceNumber:   paperDocNum,
                       sourceId:       capturedCheckId!,
                       eventTypeCode:  'AP_PAYMENT_CREATED',
                       jeCategory:     'AP_PAYMENT_CREATED',
