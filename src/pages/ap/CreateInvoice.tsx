@@ -2836,76 +2836,85 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             steps[2].response = `Network error: ${le.message}`;
           }
 
-          // ── Step 4: Resolve ledger ────────────────────────────────────
-          const bu = form.getFieldValue('businessUnit') || '';
-          const ledgerInfo = await fetchLedgerByBusinessUnit(bu).catch(() => null);
-          steps.push({
-            step: '4 — Resolve Ledger',
-            method: 'GET',
-            url: `${APEX_DB_CONFIG.baseUrl}/gl/ledgers?businessUnit=${encodeURIComponent(bu)}`,
-            ok: !!ledgerInfo,
-            response: ledgerInfo ? JSON.stringify(ledgerInfo, null, 2) : 'No ledger found for business unit',
-          });
-
-          // ── Steps 5-8: Post to GL (duplicate check → create → PUT → stamp SLA) ──
-          if (fetchedLines.length > 0) {
-            const invoiceNumber = form.getFieldValue('invoiceNumber');
-            const currency      = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
-            const months        = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-            const d             = new Date();
-            const periodName    = `${months[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
-            const acctDate      = dayjs().format('YYYY-MM-DD');
-            const legalEntity   = fetchedLines.find((l: any) => l.legalEntity)?.legalEntity || '';
-
-            const glLines: GlPostingLine[] = fetchedLines.map((l: any) => ({
-              lineType:           l.lineType as 'DR' | 'CR',
-              enteredDr:          l.enteredDr  || null,
-              enteredCr:          l.enteredCr  || null,
-              accountedDr:        l.accountedDr || null,
-              accountedCr:        l.accountedCr || null,
-              description:        l.description || '',
-              currencyCode:       l.currencyCode || currency,
-              accountingDate:     l.accountingDate || acctDate,
-              accountCombination: l.accountCombination || '',
-              accountingClass:    l.accountingClass || null,
-              legalEntity:        l.legalEntity || null,
-            }));
-
-            steps.push({ step: '5–8 — Post Cancellation Journal to GL (duplicate check → create → PUT post → stamp SLA)', method: 'POST', url: '(postSlaToGL service — see glPosting.service.ts)' });
-            const glStepIdx = steps.length - 1;
-
-            const glResult = await postSlaToGL({
-              slaHeaderId:    slaData.headerId,
-              sourceNumber:   invoiceNumber,
-              sourceId:       invoiceId,
-              eventTypeCode:  'INVOICE_CANCELLED',
-              periodName,
-              ledgerName:     ledgerInfo?.ledgerName ?? '',
-              ledgerId:       ledgerInfo?.ledgerId   ?? 0,
-              currency,
-              accountingDate: acctDate,
-              legalEntity,
-              lines:          glLines,
-              createdBy:      'user',
+          // ── If SLA already POSTED → cancel procedure already posted to GL ──
+          if (slaData.accountingStatus === 'POSTED') {
+            setCancelSlaStatus('POSTED');
+            setCancelPostError(null);
+            steps.push({ step: '4 — Resolve Ledger',               method: 'GET', url: '(skipped — SLA already POSTED by cancel procedure)', ok: true });
+            steps.push({ step: '5-8 — Post Cancellation Journal to GL', method: 'POST', url: '(skipped — SLA already POSTED)', ok: true, response: 'Cancel procedure auto-posted the reversal journal. No further action needed.' });
+            message.success('Cancellation SLA was already posted to GL by the cancel procedure.');
+          } else {
+            // ── Step 4: Resolve ledger ──────────────────────────────────
+            const bu = form.getFieldValue('businessUnit') || '';
+            const ledgerInfo = await fetchLedgerByBusinessUnit(bu).catch(() => null);
+            steps.push({
+              step: '4 — Resolve Ledger',
+              method: 'GET',
+              url: `${APEX_DB_CONFIG.baseUrl}/gl/ledgers?businessUnit=${encodeURIComponent(bu)}`,
+              ok: !!ledgerInfo,
+              response: ledgerInfo ? JSON.stringify(ledgerInfo, null, 2) : 'No ledger found for business unit',
             });
 
-            steps[glStepIdx].ok       = glResult.success;
-            steps[glStepIdx].response = JSON.stringify(glResult, null, 2);
+            // ── Steps 5-8: Post to GL ────────────────────────────────────
+            if (fetchedLines.length > 0) {
+              const invoiceNumber = form.getFieldValue('invoiceNumber');
+              const currency      = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
+              const months        = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+              const d             = new Date();
+              const periodName    = `${months[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
+              const acctDate      = dayjs().format('YYYY-MM-DD');
+              const legalEntity   = fetchedLines.find((l: any) => l.legalEntity)?.legalEntity || '';
 
-            if (glResult.success) {
-              setCancelSlaStatus('POSTED');
-              setCancelPostError(null);
-              if (glResult.skipped) {
-                message.warning('Cancellation journal already in GL — SLA stamped.');
+              const glLines: GlPostingLine[] = fetchedLines.map((l: any) => ({
+                lineType:           l.lineType as 'DR' | 'CR',
+                enteredDr:          l.enteredDr  || null,
+                enteredCr:          l.enteredCr  || null,
+                accountedDr:        l.accountedDr || null,
+                accountedCr:        l.accountedCr || null,
+                description:        l.description || '',
+                currencyCode:       l.currencyCode || currency,
+                accountingDate:     l.accountingDate || acctDate,
+                accountCombination: l.accountCombination || '',
+                accountingClass:    l.accountingClass || null,
+                legalEntity:        l.legalEntity || null,
+              }));
+
+              steps.push({ step: '5–8 — Post Cancellation Journal to GL (duplicate check → create → PUT post → stamp SLA)', method: 'POST', url: '(postSlaToGL service — see glPosting.service.ts)' });
+              const glStepIdx = steps.length - 1;
+
+              const glResult = await postSlaToGL({
+                slaHeaderId:    slaData.headerId,
+                sourceNumber:   invoiceNumber,
+                sourceId:       invoiceId,
+                eventTypeCode:  'INVOICE_CANCELLED',
+                periodName,
+                ledgerName:     ledgerInfo?.ledgerName ?? '',
+                ledgerId:       ledgerInfo?.ledgerId   ?? 0,
+                currency,
+                accountingDate: acctDate,
+                legalEntity,
+                lines:          glLines,
+                createdBy:      'user',
+              });
+
+              steps[glStepIdx].ok       = glResult.success;
+              steps[glStepIdx].response = JSON.stringify(glResult, null, 2);
+
+              if (glResult.success) {
+                setCancelSlaStatus('POSTED');
+                setCancelPostError(null);
+                if (glResult.skipped) {
+                  message.warning('Cancellation journal already in GL — SLA stamped.');
+                } else {
+                  message.success('Cancellation journal posted to GL successfully.');
+                }
               } else {
-                message.success('Cancellation journal posted to GL successfully.');
+                setCancelPostError(glResult.error || 'GL posting failed');
+                message.error(`Post Cancellation failed: ${glResult.error}`);
               }
             } else {
-              setCancelPostError(glResult.error || 'GL posting failed');
-              message.error(`Post Cancellation failed: ${glResult.error}`);
+              steps.push({ step: '5-8 — Post Cancellation Journal to GL', method: 'POST', url: '(skipped — no SLA lines returned in step 3; re-run sla_journals_ords.sql in APEX to fix the 500)', ok: false });
             }
-          } else {
-            steps.push({ step: '5-8 — Post Cancellation Journal to GL', method: 'POST', url: '(skipped — no SLA lines found in step 3)', ok: false });
           }
         } else {
           steps[1].ok = false;
