@@ -3593,8 +3593,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     const httpMethod = isUpdate ? 'PUT' : 'POST';
     const actionLabel = isUpdate ? 'Update Invoice' : 'Create Invoice';
     const url = isUpdate
-      ? `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/${savedInvoiceId}`
-      : `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice`;
+      ? `${APEX_DB_CONFIG.baseUrl}/ap/createinvoicefull/${savedInvoiceId}`
+      : `${APEX_DB_CONFIG.baseUrl}/ap/createinvoicefull`;
 
     // Include InvoiceId in payload for updates
     if (isUpdate) {
@@ -3864,8 +3864,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     const payload = buildInvoicePayload(values);
     const isUpdate = savedInvoiceId !== null;
     const url = isUpdate
-      ? `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/${savedInvoiceId}`
-      : `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice`;
+      ? `${APEX_DB_CONFIG.baseUrl}/ap/createinvoicefull/${savedInvoiceId}`
+      : `${APEX_DB_CONFIG.baseUrl}/ap/createinvoicefull`;
     if (isUpdate) payload.InvoiceId = savedInvoiceId;
 
     const previewLoginUser = user?.username || null;

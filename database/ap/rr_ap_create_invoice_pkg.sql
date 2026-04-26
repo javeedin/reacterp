@@ -29,6 +29,26 @@ BEGIN
 END;
 /
 
+-- Create document sequence (run once)
+DECLARE
+    l_count NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO l_count
+    FROM user_sequences
+    WHERE sequence_name = 'SEQ_AP_DOCUMENT_SEQ';
+
+    IF l_count = 0 THEN
+        EXECUTE IMMEDIATE '
+            CREATE SEQUENCE SEQ_AP_DOCUMENT_SEQ
+                START WITH 1000
+                INCREMENT BY 1
+                NOCACHE
+                NOCYCLE
+        ';
+    END IF;
+END;
+/
+
 -- =====================================================
 -- 2. Package Specification
 -- =====================================================
@@ -109,6 +129,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CREATE_INVOICE_PKG AS
         l_conversion_date           DATE;
         l_conversion_rate           NUMBER;
         l_document_category         VARCHAR2(80);
+        l_document_sequence         NUMBER;
         l_voucher_number            VARCHAR2(50);
         l_first_party_tax_reg_num   VARCHAR2(50);
         l_supplier_tax_reg_num      VARCHAR2(50);
@@ -232,8 +253,9 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CREATE_INVOICE_PKG AS
             RETURN;
         END IF;
 
-        -- Generate InvoiceId from sequence
+        -- Generate InvoiceId and DocumentSequence from sequences
         SELECT RR_AP_INVOICES_ALL_SEQ.NEXTVAL INTO l_invoice_id FROM DUAL;
+        SELECT SEQ_AP_DOCUMENT_SEQ.NEXTVAL INTO l_document_sequence FROM DUAL;
 
         -- ========== INSERT HEADER ==========
         INSERT INTO RR_AP_INVOICES_ALL (
@@ -264,6 +286,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CREATE_INVOICE_PKG AS
             CONVERSION_DATE,
             CONVERSION_RATE,
             DOCUMENT_CATEGORY,
+            DOCUMENT_SEQUENCE,
             VOUCHER_NUMBER,
             FIRST_PARTY_TAX_REGISTRATION_NUM,
             SUPPLIER_TAX_REGISTRATION_NUMBER,
@@ -303,6 +326,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CREATE_INVOICE_PKG AS
             l_conversion_date,
             l_conversion_rate,
             l_document_category,
+            l_document_sequence,
             l_voucher_number,
             l_first_party_tax_reg_num,
             l_supplier_tax_reg_num,
@@ -481,9 +505,10 @@ DECLARE
     l_src_offset    INTEGER := 1;
     l_lang_context  INTEGER := DBMS_LOB.DEFAULT_LANG_CTX;
     l_warning       INTEGER;
-    l_invoice_id    NUMBER;
-    l_status        VARCHAR2(20);
-    l_message       VARCHAR2(4000);
+    l_invoice_id        NUMBER;
+    l_status            VARCHAR2(20);
+    l_message           VARCHAR2(4000);
+    l_document_sequence NUMBER;
 BEGIN
     -- Convert BLOB to CLOB (avoids :body_text VARCHAR2 truncation)
     IF l_blob IS NOT NULL AND DBMS_LOB.GETLENGTH(l_blob) > 0 THEN
@@ -510,11 +535,22 @@ BEGIN
         p_message    => l_message
     );
 
+    -- Read back the auto-generated document_sequence
+    IF l_status = 'SUCCESS' AND l_invoice_id IS NOT NULL THEN
+        BEGIN
+            SELECT document_sequence INTO l_document_sequence
+            FROM RR_AP_INVOICES_ALL
+            WHERE invoice_id = l_invoice_id;
+        EXCEPTION WHEN OTHERS THEN NULL;
+        END;
+    END IF;
+
     :status_code := CASE WHEN l_status = 'SUCCESS' THEN 201 ELSE 400 END;
 
     HTP.P('{"status": "' || l_status || '",'
-       || '"message": "' || l_message || '",'
+       || '"message": "' || REPLACE(l_message, '"', '\"') || '",'
        || '"invoiceId": ' || NVL(TO_CHAR(l_invoice_id), 'null') || ','
+       || '"documentSequence": ' || NVL(TO_CHAR(l_document_sequence), 'null') || ','
        || '"success": ' || CASE WHEN l_status = 'SUCCESS' THEN 'true' ELSE 'false' END
        || '}');
 
