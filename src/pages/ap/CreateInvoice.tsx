@@ -7189,9 +7189,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 const isMpa = !!(l.startDate && l.endDate && l.accrualAccount &&
                   dayjs(l.startDate, ['DD-MMM-YYYY', 'YYYY-MM-DD']).format('YYYY-MM') !==
                   dayjs(l.endDate, ['DD-MMM-YYYY', 'YYYY-MM-DD']).format('YYYY-MM'));
-                const debitAccount = isMpa ? l.accrualAccount : (l.distributionCombination || l.distributionSet || '—');
-                const debitDesc = isMpa ? `Prepaid/Accrual — ${l.description || l.type || 'Item'}` : (l.description || l.type || 'Item');
-                const itemClass = isMpa ? 'Deferred item expense' : 'Item expense';
+                // Invoice accounting always uses the expense account (Normal), regardless of MPA
+                const debitAccount = l.distributionCombination || l.distributionSet || '—';
+                const debitDesc = l.description || l.type || 'Item';
+                const itemClass = isMpa ? 'Item expense (MPA)' : 'Item expense';
                 allEntries.push({ key: keyIdx++, period, line: `Line ${l.lineNumber}`, account: debitAccount, description: debitDesc, lineClass: itemClass, debit: amt, credit: 0, accountedDebit: acctAmt, accountedCredit: 0 });
                 periodDebit += amt;
                 periodAccountedDebit += acctAmt;
@@ -7292,9 +7293,30 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               let lineTotalDebit = 0;
               let lineTotalCredit = 0;
 
+              // ── Entry 1: Initial deferral in invoice period (full amount) ──
+              // DR Accrual/Prepaid / CR Expense — reverses the expense posted in invoice accounting
+              const invoicePeriod = slices[0]?.period || '';
+              allPeriods.add(invoicePeriod);
+              allEntries.push({
+                key: keyIdx++, period: invoicePeriod,
+                line: `Line ${line.lineNumber}`,
+                account: accrualAcc,
+                description: `Dr Accrual — Defer expense ${lineDesc}`,
+                lineClass: 'Prepaid / Accrual',
+                debit: totalAmt, credit: 0,
+              });
+              allEntries.push({
+                key: keyIdx++, period: invoicePeriod,
+                line: `Line ${line.lineNumber}`,
+                account: expAccount,
+                description: `Cr Expense — Defer expense ${lineDesc}`,
+                lineClass: 'Item expense',
+                debit: 0, credit: totalAmt,
+              });
+
+              // ── Entry 2: Monthly recognition — DR Expense / CR Accrual ──
               slices.forEach(({ period, days, amount }) => {
                 allPeriods.add(period);
-                // Dr Expense
                 allEntries.push({
                   key: keyIdx++, period,
                   line: `Line ${line.lineNumber}`,
@@ -7303,7 +7325,6 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   lineClass: 'Item expense',
                   debit: amount, credit: 0,
                 });
-                // Cr Accrual/Prepaid
                 allEntries.push({
                   key: keyIdx++, period,
                   line: `Line ${line.lineNumber}`,
