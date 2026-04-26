@@ -1953,7 +1953,6 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         });
 
         // Fetch full invoice header to get fields not returned by the search endpoint
-        // (accounting_date, conversion_rate, conversion_rate_type, conversion_date, payment_currency)
         fetch(`${APEX_DB_CONFIG.baseUrl}/ap/createinvoicefull/${initialData.invoiceId}`, { headers: { Accept: 'application/json' } })
           .then(r => r.json())
           .then(data => {
@@ -1967,6 +1966,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             if (Object.keys(patch).length > 0) {
               form.setFieldsValue(patch);
               setHeaderValues(prev => ({ ...prev, ...patch }));
+            }
+            // Update live validation status from DB — overrides the ManageInvoices snapshot
+            const dbValidationStatus = hdr.ValidationStatus || hdr.validation_status || '';
+            if (dbValidationStatus) {
+              setLiveValidationStatus(dbValidationStatus);
+              setIsValidated(dbValidationStatus === 'Validated');
             }
           })
           .catch(() => {}); // silently ignore if endpoint doesn't support GET
