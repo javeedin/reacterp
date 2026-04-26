@@ -1125,45 +1125,33 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       }
     });
 
-    // Liability lines: CR in standard, DR in credit memo
-    activeLines.forEach((l) => {
-      const amt = Math.abs(l.amount || 0);
+    // Single summed Liability line: CR for standard invoice, DR for credit memo
+    const totalLiability = Math.round(
+      activeLines.reduce((sum, l) => {
+        const amt = Math.abs(l.amount || 0);
+        const taxRate = getTaxRateForClassification(l.taxClassification);
+        const taxAmt  = taxRate > 0 ? Math.round(amt * taxRate / 100 * 100) / 100 : 0;
+        return sum + amt + taxAmt;
+      }, 0) * 100
+    ) / 100;
+
+    if (totalLiability > 0) {
       result.push({
         lineNumber: lineNum++,
         lineType: isCreditMemo ? 'DR' : 'CR',
         accountingClass: 'LIABILITY',
         accountCombination: liabilityDist,
-        enteredDr:   isCreditMemo ? amt : 0,
-        enteredCr:   isCreditMemo ? 0   : amt,
-        accountedDr: isCreditMemo ? Math.round(amt * exchangeRate * 100) / 100 : 0,
-        accountedCr: isCreditMemo ? 0   : Math.round(amt * exchangeRate * 100) / 100,
+        enteredDr:   isCreditMemo ? totalLiability : 0,
+        enteredCr:   isCreditMemo ? 0 : totalLiability,
+        accountedDr: isCreditMemo ? Math.round(totalLiability * exchangeRate * 100) / 100 : 0,
+        accountedCr: isCreditMemo ? 0 : Math.round(totalLiability * exchangeRate * 100) / 100,
         currencyCode: currency,
         exchangeRate,
-        description: l.description || `Line ${l.lineNumber}`,
-        sourceLineId: l.id || null,
-        sourceLineNumber: l.lineNumber,
+        description: 'AP Liability',
         partyId: supplierId || null,
         partyType: 'SUPPLIER',
       });
-      const taxRate = getTaxRateForClassification(l.taxClassification);
-      if (taxRate > 0) {
-        const taxAmt = Math.round(amt * taxRate / 100 * 100) / 100;
-        result.push({
-          lineNumber: lineNum++,
-          lineType: isCreditMemo ? 'DR' : 'CR',
-          accountingClass: 'LIABILITY',
-          accountCombination: liabilityDist,
-          enteredDr:   isCreditMemo ? taxAmt : 0,
-          enteredCr:   isCreditMemo ? 0      : taxAmt,
-          accountedDr: isCreditMemo ? taxAmt : 0,
-          accountedCr: isCreditMemo ? 0      : taxAmt,
-          currencyCode: currency,
-          exchangeRate,
-          description: `AP Liability – Input VAT`,
-          sourceLineNumber: l.lineNumber,
-        });
-      }
-    });
+    }
 
     return result;
   }, [form, lines, headerValues]);
