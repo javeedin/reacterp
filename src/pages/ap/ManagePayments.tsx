@@ -464,6 +464,8 @@ const ManagePayments: React.FC = () => {
   >([]);
   const [voidEligApiRunning, setVoidEligApiRunning] = useState(false);
   const [voidEligApiResult, setVoidEligApiResult]   = useState<any>(null);
+  // Captures actual request/response for each void API step
+  const [voidApiLog, setVoidApiLog] = useState<{ step: string; method: string; url: string; request?: any; response?: any; error?: string }[]>([]);
   // ────────────────────────────────────────────────────────────────────────
 
   // Create Payment tab state
@@ -1723,6 +1725,7 @@ const ManagePayments: React.FC = () => {
       { step: 3, label: 'Post reversal to GL',      status: 'idle' as const },
     ];
     setVoidStepStatus(steps);
+    setVoidApiLog([]);
     setVoidSubmitting(true);
 
     const setStep = (step: number, status: 'running' | 'success' | 'error', detail?: string) =>
@@ -1768,33 +1771,39 @@ const ManagePayments: React.FC = () => {
         `Voided — New balance: ${voidData.newBalance != null ? Number(voidData.newBalance).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—'}`
       );
 
-      // Step 2: Reverse accounting
+      // ── Step 2: Reverse accounting ──────────────────────────────────────
       setStep(2, 'running');
       let reversalHeaderId: number | null = null;
       try {
+        // 2a. Fetch existing accounting
+        const acctUrl = `${APEX_DB_CONFIG.baseUrl}/sla/accounting?sourceTable=AP_PAYMENTS&sourceId=${voidTargetPayment.checkId}`;
         const acctData = await getAccounting('AP_PAYMENTS', voidTargetPayment.checkId);
-        if (!acctData.found || !acctData.headerId || !acctData.lines?.length) {
-          setStep(2, 'success', 'No accounting found — skipped');
-          setStep(3, 'success', 'Skipped');
-          message.success('Payment voided successfully');
-        } else if (acctData.accountingStatus !== 'POSTED' && acctData.accountingStatus !== 'FINAL') {
-          setStep(2, 'success', `Accounting status is ${acctData.accountingStatus} — skipped`);
-          setStep(3, 'success', 'Skipped');
-          message.success('Payment voided successfully');
-        } else {
-          // Build reversal SLA payload (swap DR ↔ CR on every line)
-          const buName   = voidTargetPayment.businessUnit || '';
-          const ledger   = await fetchLedgerByBusinessUnit(buName);
-          const exRate   = (voidTargetPayment.conversionRate && voidTargetPayment.conversionRate > 0) ? voidTargetPayment.conversionRate : 1;
-          const ccy      = voidTargetPayment.paymentCurrency || 'AED';
-          const voidPeriod = derivePeriodName(new Date(voidDate));
+        setVoidApiLog(prev => [...prev, {
+          step: 'Check accounting (GET)',
+          method: 'GET',
+          url: acctUrl,
+          response: { found: acctData.found, headerId: acctData.headerId, status: acctData.accountingStatus, lineCount: acctData.lines?.length ?? 0 },
+        }]);
 
+        if (!acctData.found || !acctData.headerId || !acctData.lines?.length) {
+          setStep(2, 'error', 'No accounting found for this payment — cannot create reversal');
+          setStep(3, 'error', 'Skipped');
+          message.warning('Payment voided. No SLA accounting found to reverse — create accounting first, then void.');
+        } else {
+          const buName     = voidTargetPayment.businessUnit || '';
+          const ledger     = await fetchLedgerByBusinessUnit(buName);
+          const exRate     = (voidTargetPayment.conversionRate && voidTargetPayment.conversionRate > 0) ? voidTargetPayment.conversionRate : 1;
+          const ccy        = voidTargetPayment.paymentCurrency || 'AED';
+          const voidPeriod = derivePeriodName(new Date(voidDate));
+          const paymentNum = String(voidTargetPayment.paymentNumber || voidTargetPayment.checkId);
+
+          // 2b. Build reversal SLA payload (swap DR ↔ CR)
           const reversePayload: SlaCreatePayload = {
             header: {
               moduleName:       'AP',
               sourceTable:      'AP_PAYMENTS',
               sourceId:         voidTargetPayment.checkId,
-              sourceNumber:     String(voidTargetPayment.paymentNumber || voidTargetPayment.checkId),
+              sourceNumber:     paymentNum,
               sourceType:       'PAYMENT',
               eventTypeCode:    'AP_PAYMENT_VOID',
               eventDate:        voidDate,
@@ -1807,7 +1816,7 @@ const ManagePayments: React.FC = () => {
               exchangeRate:     exRate,
               exchangeRateType: 'Corporate',
               businessUnit:     buName || undefined,
-              description:      `AP Payment Void — ${voidTargetPayment.paymentNumber}`,
+              description:      `AP Payment Void — ${paymentNum}`,
               createdBy:        'SYSTEM',
             },
             lines: acctData.lines.map((l, idx) => ({
@@ -1825,39 +1834,59 @@ const ManagePayments: React.FC = () => {
             })),
           };
 
+          // 2c. Create SLA reversal entry
+          const slaCreateUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.slaAccountingCreate}`;
           const reversalResult = await createAccounting(reversePayload);
-          reversalHeaderId = reversalResult.headerId;
-          setStep(2, 'success', `Reversal created — Header #${reversalResult.headerId}, ${reversalResult.lineCount} line(s)`);
+          setVoidApiLog(prev => [...prev, {
+            step: 'Create SLA reversal (POST)',
+            method: 'POST',
+            url: slaCreateUrl,
+            request: { sourceId: reversePayload.header.sourceId, eventTypeCode: reversePayload.header.eventTypeCode, lineCount: reversePayload.lines.length },
+            response: reversalResult,
+          }]);
 
-          // Step 3: Post reversal to GL
+          // Explicitly check for error status (apexPost only throws on non-2xx, not on status:'error' JSON)
+          if ((reversalResult as any).status === 'error' || !(reversalResult.headerId > 0)) {
+            throw new Error((reversalResult as any).message || 'SLA create returned error — headerId not valid');
+          }
+
+          reversalHeaderId = reversalResult.headerId;
+          setStep(2, 'success', `SLA reversal created — Header #${reversalResult.headerId}, ${reversalResult.lineCount} line(s)`);
+
+          // ── Step 3: Post reversal to GL ──────────────────────────────────
           setStep(3, 'running');
           const ref5 = eventTypeToRef5('AP_PAYMENT_VOID');
-          const glExists = await checkGLJournalExists(
-            String(voidTargetPayment.paymentNumber || ''),
-            String(voidTargetPayment.checkId),
-            ref5,
-          );
+
+          const glExists = await checkGLJournalExists(paymentNum, String(voidTargetPayment.checkId), ref5);
+          setVoidApiLog(prev => [...prev, {
+            step: 'GL duplicate check (GET)',
+            method: 'GET',
+            url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/check?reference1=${paymentNum}&reference2=${voidTargetPayment.checkId}&reference5=${ref5}`,
+            response: glExists,
+          }]);
 
           let retBatchId: number | null  = glExists.batchId;
           let retHeaderId: number | null = glExists.headerId;
-          const batchName = `${ref5}-${voidTargetPayment.paymentNumber}-${voidDate.replace(/-/g, '')}-${Date.now().toString().slice(-6)}`;
+          const batchName = `${ref5}-${paymentNum}-${voidDate.replace(/-/g, '')}-${Date.now().toString().slice(-6)}`;
 
           if (glExists.exists && glExists.status === 'P') {
-            setStep(3, 'success', 'GL reversal already posted');
+            setStep(3, 'success', 'GL reversal already posted — stamping SLA');
           } else if (glExists.exists && glExists.batchId) {
-            const putRes  = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/${glExists.batchId}/post`, {
+            const putRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/${glExists.batchId}/post`, {
               method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: '{}',
             });
+            const putData = await putRes.json().catch(() => ({}));
+            setVoidApiLog(prev => [...prev, { step: 'GL post existing batch (PUT)', method: 'PUT', url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/${glExists.batchId}/post`, response: putData }]);
             if (!putRes.ok) throw new Error(`GL post HTTP ${putRes.status}`);
-            setStep(3, 'success', `GL reversal batch #${glExists.batchId} posted`);
+            setStep(3, 'success', `Existing GL batch #${glExists.batchId} posted`);
           } else {
-            const rate = exRate;
+            // Build GL payload — structure: { batch, header (singular), lines (top-level) }
             const totalDr = reversePayload.lines.reduce((s, l) => s + (l.enteredDr || 0), 0);
             const totalCr = reversePayload.lines.reduce((s, l) => s + (l.enteredCr || 0), 0);
             const glPayload = {
               batch: {
                 batchName,
-                batchDescription:  `AP-PAYMENT-VOID – ${voidTargetPayment.paymentNumber}`,
+                batchDescription:  `AP-PAYMENT-VOID – ${paymentNum}`,
                 ledgerName:         ledger?.ledgerName ?? 'BCL DIFC',
                 ledgerId:           ledger?.ledgerId   ?? 300000003259529,
                 status:             'NEW',
@@ -1865,77 +1894,88 @@ const ManagePayments: React.FC = () => {
                 controlTotal:       totalDr,
                 runningTotalDr:     totalDr,
                 runningTotalCr:     totalCr,
+                batchSource:        'Payables',
                 createdBy:          'SYSTEM',
               },
-              headers: [{
-                headerName:             batchName,
-                description:            `AP Payment Void — ${voidTargetPayment.paymentNumber}`,
-                ledgerName:             ledger?.ledgerName ?? 'BCL DIFC',
+              header: {
                 ledgerId:               ledger?.ledgerId   ?? 300000003259529,
-                currency:               ccy,
+                ledgerName:             ledger?.ledgerName ?? 'BCL DIFC',
+                jeCategory:             'AP_PAYMENT_VOID',
+                jeSource:               'Payables',
                 periodName:             voidPeriod,
-                effectiveDate:          voidDate,
-                conversionType:         'Corporate',
-                currencyConversionRate: rate,
+                journalName:            batchName,
+                description:            `AP Payment Void — ${paymentNum}`,
+                currencyCode:           ccy,
+                currencyConversionType: 'User',
+                currencyConversionDate: voidDate,
+                currencyConversionRate: exRate,
                 defaultEffectiveDate:   voidDate,
                 status:                 'NEW',
                 runningTotalDr:         totalDr,
                 runningTotalCr:         totalCr,
                 createdBy:              'SYSTEM',
-                lines: reversePayload.lines.map(l => ({
-                  enteredDr:                  l.enteredDr || null,
-                  enteredCr:                  l.enteredCr || null,
-                  accountedDr:                l.accountedDr || null,
-                  accountedCr:                l.accountedCr || null,
-                  statAmount:                 null,
-                  description:                l.description || '',
-                  currencyCode:               l.currencyCode || ccy,
-                  currencyConversionDate:     voidDate,
-                  currencyConversionRate:     rate,
-                  userCurrencyConversionType: 'User',
-                  accountCombination:         l.accountCombination || '',
-                  chartOfAccountsName:        'Chart of Accounts',
-                  reference1:                 String(voidTargetPayment.paymentNumber || ''),
-                  reference2:                 String(voidTargetPayment.checkId || ''),
-                  reference3:                 l.accountingClass || null,
-                  reference4:                 buName || null,
-                  reference5:                 ref5,
-                  createdBy:                  'SYSTEM',
-                })),
-              }],
+              },
+              lines: reversePayload.lines.map(l => ({
+                enteredDr:                  l.enteredDr || null,
+                enteredCr:                  l.enteredCr || null,
+                accountedDr:                l.accountedDr || null,
+                accountedCr:                l.accountedCr || null,
+                statAmount:                 null,
+                description:                l.description || '',
+                currencyCode:               l.currencyCode || ccy,
+                currencyConversionDate:     voidDate,
+                currencyConversionRate:     exRate,
+                userCurrencyConversionType: 'User',
+                accountCombination:         l.accountCombination || '',
+                chartOfAccountsName:        'Chart of Accounts',
+                reference1:                 paymentNum,
+                reference2:                 String(voidTargetPayment.checkId || ''),
+                reference3:                 l.accountingClass || null,
+                reference4:                 buName || null,
+                reference5:                 ref5,
+                createdBy:                  'SYSTEM',
+              })),
             };
 
-            const glRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/journals/create`, {
-              method:  'POST',
+            const glCreateUrl = `${APEX_DB_CONFIG.baseUrl}/journals/create`;
+            const glRes  = await fetch(glCreateUrl, {
+              method: 'POST',
               headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-              body:    JSON.stringify(glPayload),
+              body: JSON.stringify(glPayload),
             });
             const glData = await glRes.json();
+            setVoidApiLog(prev => [...prev, { step: 'GL journal create (POST)', method: 'POST', url: glCreateUrl, request: { batchName, lineCount: glPayload.lines.length }, response: glData }]);
             if (!glRes.ok) throw new Error(glData?.message || `GL create HTTP ${glRes.status}`);
 
             retBatchId  = glData.jeBatchId  ?? glData.batchId  ?? null;
             retHeaderId = glData.jeHeaderId ?? glData.headerId ?? null;
 
             if (retBatchId) {
-              const putRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/${retBatchId}/post`, {
+              const postUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/${retBatchId}/post`;
+              const putRes  = await fetch(postUrl, {
                 method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: '{}',
               });
+              const putData = await putRes.json().catch(() => ({}));
+              setVoidApiLog(prev => [...prev, { step: 'GL post batch (PUT)', method: 'PUT', url: postUrl, response: putData }]);
               if (!putRes.ok) throw new Error(`GL post HTTP ${putRes.status}`);
             }
             setStep(3, 'success', `GL reversal posted — Batch #${retBatchId}`);
           }
 
-          // Stamp the reversal SLA header
+          // Stamp the reversal SLA header as POSTED
           if (reversalHeaderId) {
-            await postToLedger(reversalHeaderId, retBatchId ?? 0, batchName, retHeaderId ?? 0, 'SYSTEM');
+            const stampBody = { headerId: reversalHeaderId, glBatchId: retBatchId ?? 0, glBatchName: batchName, glHeaderId: retHeaderId ?? 0, postedBy: 'SYSTEM' };
+            const stampUrl = `${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`;
+            const stampRes = await postToLedger(reversalHeaderId, retBatchId ?? 0, batchName, retHeaderId ?? 0, 'SYSTEM');
+            setVoidApiLog(prev => [...prev, { step: 'Stamp SLA header (POST)', method: 'POST', url: stampUrl, request: stampBody, response: stampRes }]);
           }
 
-          message.success('Payment voided and accounting reversed successfully');
+          message.success('Payment voided and accounting reversed + posted successfully');
         }
       } catch (acctErr: any) {
         setStep(2, 'error', acctErr.message ?? 'Accounting reversal failed');
         setStep(3, 'error', 'Skipped due to reversal error');
-        message.warning('Payment voided but accounting reversal failed: ' + acctErr.message);
+        message.error('Void accounting reversal failed: ' + (acctErr.message ?? 'Unknown error'));
       }
 
       // Refresh the payments list after a short delay
@@ -4157,6 +4197,51 @@ const ManagePayments: React.FC = () => {
               }, null, 2)}
             </pre>
           </Card>
+
+          {/* Dynamic log — populated during void execution */}
+          {voidApiLog.length > 0 && (
+            <>
+              <Divider orientation="left" style={{ fontSize: 12, color: '#888', margin: '20px 0 12px' }}>
+                Execution Log ({voidApiLog.length} call{voidApiLog.length !== 1 ? 's' : ''})
+              </Divider>
+              {voidApiLog.map((entry, idx) => {
+                const methodColor: Record<string, string> = { GET: 'blue', POST: 'green', PUT: 'orange', DELETE: 'red' };
+                const isError = !!entry.error || entry.response?.status === 'error' || entry.response?.success === false;
+                return (
+                  <Card
+                    key={idx}
+                    size="small"
+                    style={{ marginBottom: 10, borderColor: isError ? '#ff4d4f' : undefined }}
+                    title={
+                      <Space>
+                        <Tag color={methodColor[entry.method] ?? 'default'} style={{ marginRight: 0 }}>{entry.method}</Tag>
+                        <Text strong style={{ fontSize: 11 }}>{entry.step}</Text>
+                        {isError && <Tag color="error" style={{ marginLeft: 4 }}>Error</Tag>}
+                      </Space>
+                    }
+                  >
+                    <code style={{ fontSize: 10, background: '#f5f5f5', padding: '3px 6px', borderRadius: 3, display: 'block', wordBreak: 'break-all', marginBottom: 8, color: '#333' }}>
+                      {entry.url}
+                    </code>
+                    {entry.request && (
+                      <>
+                        <Text type="secondary" style={{ fontSize: 10 }}>Request:</Text>
+                        <pre style={{ fontSize: 10, background: '#1e1e1e', color: '#9cdcfe', padding: 8, borderRadius: 4, margin: '4px 0 6px', maxHeight: 120, overflowY: 'auto' }}>
+                          {JSON.stringify(entry.request, null, 2)}
+                        </pre>
+                      </>
+                    )}
+                    <Text type="secondary" style={{ fontSize: 10 }}>Response:</Text>
+                    <pre style={{ fontSize: 10, background: '#1e1e1e', color: isError ? '#f48771' : '#b5cea8', padding: 8, borderRadius: 4, margin: '4px 0 0', maxHeight: 140, overflowY: 'auto' }}>
+                      {entry.error
+                        ? entry.error
+                        : JSON.stringify(entry.response, null, 2)}
+                    </pre>
+                  </Card>
+                );
+              })}
+            </>
+          )}
         </Drawer>
 
       </Content>
