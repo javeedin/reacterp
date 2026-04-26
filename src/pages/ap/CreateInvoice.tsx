@@ -3696,6 +3696,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         saveValidationStatus(invoiceId, 'Never Validated');
         fetchInvoiceBalance(invoiceId);
         fetchInvoicePayments(invoiceId);
+        // Show the DB-generated document sequence in the form field
+        if (data.documentSequence != null) {
+          const docSeq = Number(data.documentSequence);
+          form.setFieldValue('documentSequence', docSeq);
+          setHeaderValues((prev) => ({ ...prev, documentSequence: docSeq }));
+        }
       } else if (isUpdate && invoiceId) {
         // Data changed — mark as needing revalidation
         setIsValidated(false);

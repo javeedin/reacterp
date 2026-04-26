@@ -59,8 +59,11 @@ BEGIN
         p_comments       => 'Save single invoice from JSON',
         p_source         => '
 DECLARE
-    l_status    VARCHAR2(20);
-    l_message   VARCHAR2(4000);
+    l_status            VARCHAR2(20);
+    l_message           VARCHAR2(4000);
+    l_invoice_number    VARCHAR2(50);
+    l_invoice_id        NUMBER;
+    l_document_sequence NUMBER;
 BEGIN
     XXAP_INVOICES_PKG.save_invoice(
         p_invoice_json => :body_text,
@@ -68,18 +71,75 @@ BEGIN
         p_message      => l_message
     );
 
+    IF l_status = ''SUCCESS'' THEN
+        l_invoice_number := JSON_VALUE(:body_text, ''$.InvoiceNumber'');
+        BEGIN
+            SELECT invoice_id, document_sequence
+              INTO l_invoice_id, l_document_sequence
+              FROM (SELECT invoice_id, document_sequence
+                      FROM RR_AP_INVOICES_ALL
+                     WHERE invoice_number = l_invoice_number
+                     ORDER BY creation_date DESC)
+             WHERE ROWNUM = 1;
+        EXCEPTION WHEN OTHERS THEN NULL;
+        END;
+    END IF;
+
     :status_code := CASE WHEN l_status = ''SUCCESS'' THEN 201 ELSE 400 END;
 
-    HTP.P(''{'');
-    HTP.P(''"status": "'' || l_status || ''",'' );
-    HTP.P(''"message": "'' || l_message || ''"'');
-    HTP.P(''}'');
+    HTP.P(''{"status":"'' || l_status ||
+          ''","message":"'' || REPLACE(l_message, ''"'', ''\"'') ||
+          ''","invoiceId":'' || NVL(TO_CHAR(l_invoice_id), ''null'') ||
+          '',"documentSequence":'' || NVL(TO_CHAR(l_document_sequence), ''null'') ||
+          ''}'');
 END;
 '
     );
     COMMIT;
 END;
 /
+
+-- =====================================================
+-- POST Handler for ap/createinvoicefull (APEX handler)
+-- Paste this PL/SQL block directly into the APEX handler source
+-- =====================================================
+/*
+DECLARE
+    l_status            VARCHAR2(20);
+    l_message           VARCHAR2(4000);
+    l_invoice_number    VARCHAR2(50);
+    l_invoice_id        NUMBER;
+    l_document_sequence NUMBER;
+BEGIN
+    XXAP_INVOICES_PKG.save_invoice(
+        p_invoice_json => :body_text,
+        p_status       => l_status,
+        p_message      => l_message
+    );
+
+    IF l_status = 'SUCCESS' THEN
+        l_invoice_number := JSON_VALUE(:body_text, '$.InvoiceNumber');
+        BEGIN
+            SELECT invoice_id, document_sequence
+              INTO l_invoice_id, l_document_sequence
+              FROM (SELECT invoice_id, document_sequence
+                      FROM RR_AP_INVOICES_ALL
+                     WHERE invoice_number = l_invoice_number
+                     ORDER BY creation_date DESC)
+             WHERE ROWNUM = 1;
+        EXCEPTION WHEN OTHERS THEN NULL;
+        END;
+    END IF;
+
+    :status_code := CASE WHEN l_status = 'SUCCESS' THEN 201 ELSE 400 END;
+
+    HTP.P('{"status":"' || l_status ||
+          '","message":"' || REPLACE(l_message, '"', '\"') ||
+          '","invoiceId":' || NVL(TO_CHAR(l_invoice_id), 'null') ||
+          ',"documentSequence":' || NVL(TO_CHAR(l_document_sequence), 'null') ||
+          '}');
+END;
+*/
 
 -- =====================================================
 -- 5. POST Handler - Save Multiple Invoices (Bulk)
