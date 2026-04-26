@@ -1957,11 +1957,14 @@ const ManagePayments: React.FC = () => {
 
       // 5. Build one journal payload per invoice and post
       const paymentDate = toApiDate(record.paymentDate || record.checkDate || '');
+      const paymentCcy = record.currency || record.paymentCurrency || 'AED';
       const payloads = buildApPaymentSlaPayloads({
         checkId: record.checkId,
         paymentNumber: String(record.paymentNumber || record.checkId),
         paymentDate,
-        currencyCode: record.currency || 'AED',
+        currencyCode: paymentCcy,
+        exchangeRate: (paymentCcy !== 'AED' && record.conversionRate && record.conversionRate > 0)
+          ? record.conversionRate : 1,
         businessUnit: record.businessUnit,
         legalEntity: record.legalEntityName,
         ledgerId: ledgerInfo?.ledgerId,

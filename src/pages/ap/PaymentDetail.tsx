@@ -755,6 +755,8 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
           paymentNumber: String(payment.paymentNumber || payment.checkId),
           paymentDate,
           currencyCode: payment.paymentCurrency || 'AED',
+          exchangeRate: (payment.paymentCurrency && payment.paymentCurrency !== 'AED' && payment.conversionRate && payment.conversionRate > 0)
+            ? payment.conversionRate : 1,
           businessUnit: payment.businessUnit,
           legalEntity: payment.legalEntity,
           ledgerId: ledgerInfo?.ledgerId,
