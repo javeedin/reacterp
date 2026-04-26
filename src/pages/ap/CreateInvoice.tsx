@@ -452,6 +452,22 @@ export interface InvoiceInitialData {
   conversionDate?: string;
   conversionRate?: number | null;
   paymentCurrency?: string;
+  // Audit / system info
+  creationDate?: string;
+  createdBy?: string;
+  lastUpdatedBy?: string;
+  lastUpdateDate?: string;
+  syncDate?: string;
+  cancellationDate?: string;
+  cancelledBy?: string;
+  deliveryChannelCode?: string;
+  deliveryChannel?: string;
+  firstPartyTaxRegistrationId?: string;
+  firstPartyTaxRegistrationNum?: string;
+  taxationCountry?: string;
+  documentCategory?: string;
+  documentSequence?: string;
+  voucherNumber?: string;
   // Synced invoice (from Oracle Fusion) — read-only except Pay in Full
   isSynced?: boolean;
 }
@@ -5931,6 +5947,65 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   />
                 ),
               }],
+              // System Info tab (edit mode only)
+              ...(isEditMode ? [{
+                key: 'systemInfo',
+                label: (
+                  <Space size={4}>
+                    <InfoCircleOutlined />
+                    <span>System Info</span>
+                  </Space>
+                ),
+                children: (() => {
+                  const field = (label: string, value?: string | null) => (
+                    <Col span={6}>
+                      <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>{label}</div>
+                      <div style={{ fontSize: 13, fontWeight: value ? 500 : 400, color: value ? REDWOOD.neutral900 : REDWOOD.neutral400 }}>
+                        {value || '—'}
+                      </div>
+                    </Col>
+                  );
+                  return (
+                    <div style={{ padding: '14px 4px' }}>
+                      {/* Audit */}
+                      <div style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.neutral700, marginBottom: 8 }}>Audit</div>
+                      <Row gutter={[24, 14]} style={{ marginBottom: 16 }}>
+                        {field('Created By',        initialData?.createdBy)}
+                        {field('Creation Date',     initialData?.creationDate)}
+                        {field('Last Updated By',   initialData?.lastUpdatedBy)}
+                        {field('Last Update Date',  initialData?.lastUpdateDate)}
+                      </Row>
+
+                      {/* Sync */}
+                      <div style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.neutral700, marginBottom: 8 }}>Sync</div>
+                      <Row gutter={[24, 14]} style={{ marginBottom: 16 }}>
+                        {field('Sync Status',       initialData?.isSynced ? 'SYNCED' : 'MANUAL')}
+                        {field('Sync Date',         initialData?.syncDate)}
+                        {field('Cancellation Date', initialData?.cancellationDate)}
+                        {field('Cancelled By',      initialData?.cancelledBy)}
+                      </Row>
+
+                      {/* Document */}
+                      <div style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.neutral700, marginBottom: 8 }}>Document</div>
+                      <Row gutter={[24, 14]} style={{ marginBottom: 16 }}>
+                        {field('Document Category', initialData?.documentCategory)}
+                        {field('Document Sequence', initialData?.documentSequence)}
+                        {field('Voucher Number',    initialData?.voucherNumber)}
+                        {field('Delivery Channel',  initialData?.deliveryChannel || initialData?.deliveryChannelCode)}
+                      </Row>
+
+                      {/* Tax */}
+                      <div style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.neutral700, marginBottom: 8 }}>Tax & Registration</div>
+                      <Row gutter={[24, 14]}>
+                        {field('Taxation Country',  initialData?.taxationCountry)}
+                        {field('Tax Reg Number',    initialData?.firstPartyTaxRegistrationNum)}
+                        {field('Tax Reg ID',        initialData?.firstPartyTaxRegistrationId)}
+                        <Col span={6} />
+                      </Row>
+                    </div>
+                  );
+                })(),
+              }] : []),
             ]}
           />
           {!isReadOnly && activeTabKey === 'distribution' && (

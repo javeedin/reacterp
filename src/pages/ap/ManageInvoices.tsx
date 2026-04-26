@@ -139,6 +139,21 @@ interface InvoiceRecord {
   conversionRate: number | null;
   paymentCurrency: string;
   syncStatus: string;
+  // Audit / system info fields
+  createdBy: string;
+  lastUpdatedBy: string;
+  lastUpdateDate: string;
+  syncDate: string;
+  cancellationDate: string;
+  cancelledBy: string;
+  deliveryChannelCode: string;
+  deliveryChannel: string;
+  firstPartyTaxRegistrationId: string;
+  firstPartyTaxRegistrationNum: string;
+  taxationCountry: string;
+  documentCategory: string;
+  documentSequence: string;
+  voucherNumber: string;
 }
 
 // Tab item interface
@@ -289,6 +304,21 @@ const mapApiToInvoiceRecord = (item: any, index: number): InvoiceRecord => ({
   // Invoices created in this app have invoice_source='MANUAL'.
   // Any other source (Oracle Fusion sync, import, etc.) is read-only.
   syncStatus: (item.invoice_source && item.invoice_source !== 'MANUAL') ? 'SYNCED' : '',
+  // Audit / system info
+  createdBy:                   item.created_by                      || '',
+  lastUpdatedBy:               item.last_updated_by                 || '',
+  lastUpdateDate:              item.last_update_date                || '',
+  syncDate:                    item.sync_date                       || '',
+  cancellationDate:            item.cancellation_date               || '',
+  cancelledBy:                 item.cancelled_by                    || '',
+  deliveryChannelCode:         item.delivery_channel_code           || '',
+  deliveryChannel:             item.delivery_channel                || '',
+  firstPartyTaxRegistrationId: item.first_party_tax_registration_id || '',
+  firstPartyTaxRegistrationNum:item.first_party_tax_registration_num|| '',
+  taxationCountry:             item.taxation_country                || '',
+  documentCategory:            item.document_category               || '',
+  documentSequence:            item.document_sequence               || '',
+  voucherNumber:               item.voucher_number                  || '',
 });
 
 const ManageInvoices: React.FC = () => {
@@ -897,6 +927,22 @@ const ManageInvoices: React.FC = () => {
       conversionDate: record.conversionDate,
       conversionRate: record.conversionRate,
       paymentCurrency: record.paymentCurrency,
+      // Audit / system info
+      creationDate:                record.creationDate,
+      createdBy:                   record.createdBy,
+      lastUpdatedBy:               record.lastUpdatedBy,
+      lastUpdateDate:              record.lastUpdateDate,
+      syncDate:                    record.syncDate,
+      cancellationDate:            record.cancellationDate,
+      cancelledBy:                 record.cancelledBy,
+      deliveryChannelCode:         record.deliveryChannelCode,
+      deliveryChannel:             record.deliveryChannel,
+      firstPartyTaxRegistrationId: record.firstPartyTaxRegistrationId,
+      firstPartyTaxRegistrationNum:record.firstPartyTaxRegistrationNum,
+      taxationCountry:             record.taxationCountry,
+      documentCategory:            record.documentCategory,
+      documentSequence:            record.documentSequence,
+      voucherNumber:               record.voucherNumber,
     };
 
     const newTab: InvoiceTab = {
