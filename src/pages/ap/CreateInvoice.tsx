@@ -1534,6 +1534,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         const postGlRes  = await fetch(postGlUrl, {
           method:  'PUT',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body:    '{}',   // ORDS requires a body when Content-Type is application/json
         });
         const postGlData = await postGlRes.json().catch(() => ({}));
         debugLog[1].status   = postGlRes.status;
@@ -1849,6 +1850,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         const postGlRes  = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/${glBatchId}/post`, {
           method:  'PUT',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body:    '{}',   // ORDS requires a body when Content-Type is application/json
         });
         const postGlData = await postGlRes.json().catch(() => ({}));
 
