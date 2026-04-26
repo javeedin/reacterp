@@ -1520,10 +1520,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         throw new Error(`GL journal creation failed: HTTP ${glRes.status} – ${glData?.message || JSON.stringify(glData)}`);
       }
 
-      // Accept any field name the create endpoint returns for the batch ID
-      const glBatchId   = glData.batchId   ?? glData.batch_id   ?? glData.jeBatchId ?? glData.je_batch_id ?? null;
-      const glHeaderId  = glData.headerId  ?? glData.header_id  ?? glData.jeHeaderId ?? null;
-      const glBatchName = glData.batchName ?? glData.batch_name ?? batchName;
+      // journals/create returns jeBatchId / jeHeaderId / batchName
+      const glBatchId   = glData.jeBatchId  ?? glData.je_batch_id  ?? glData.batchId  ?? glData.batch_id  ?? null;
+      const glHeaderId  = glData.jeHeaderId ?? glData.je_header_id ?? glData.headerId ?? glData.header_id ?? null;
+      const glBatchName = glData.batchName  ?? glData.batch_name   ?? batchName;
 
       // Step 2 — POST to GL via RR_POST_JOURNAL (validates period format, period open, balance, accounts)
       if (glBatchId) {
@@ -1649,9 +1649,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             const glData_ = await glRes_.json();
             if (!glRes_.ok) return;
 
-            const glBatchId_   = glData_.batchId   || glData_.batch_id   || null;
-            const glHeaderId_  = glData_.headerId  || glData_.header_id  || null;
-            const glBatchName_ = glData_.batchName || glData_.batch_name || batchName_;
+            const glBatchId_   = glData_.jeBatchId  ?? glData_.je_batch_id  ?? glData_.batchId  ?? glData_.batch_id  ?? null;
+            const glHeaderId_  = glData_.jeHeaderId ?? glData_.je_header_id ?? glData_.headerId ?? glData_.header_id ?? null;
+            const glBatchName_ = glData_.batchName  ?? glData_.batch_name   ?? batchName_;
 
             if (glBatchId_ || glHeaderId_) {
               await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`, {
@@ -1838,8 +1838,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         throw new Error(`GL journal creation failed: HTTP ${glRes.status} – ${glData?.message || ''}`);
       }
 
-      const glBatchId   = glData.batchId   || glData.batch_id   || null;
-      const glHeaderId  = glData.headerId  || glData.header_id  || null;
+      const glBatchId   = glData.jeBatchId  ?? glData.je_batch_id  ?? glData.batchId  ?? glData.batch_id  ?? null;
+      const glHeaderId  = glData.jeHeaderId ?? glData.je_header_id ?? glData.headerId ?? glData.header_id ?? null;
       const glBatchName = glData.batchName || glData.batch_name || batchName;
 
       // Step 2 — POST to GL via RR_POST_JOURNAL (validates period format, period open, balance, accounts)
