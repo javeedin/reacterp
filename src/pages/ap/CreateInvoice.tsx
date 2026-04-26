@@ -468,6 +468,7 @@ export interface InvoiceInitialData {
   documentCategory?: string;
   documentSequence?: number | string;
   voucherNumber?: string;
+  accountingStatus?: string;
   // Synced invoice (from Oracle Fusion) — read-only except Pay in Full
   isSynced?: boolean;
 }
@@ -565,7 +566,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   // SLA – Subledger Accounting state
   const [slaHeaderId, setSlaHeaderId]         = useState<number | null>(null);
-  const [slaStatus, setSlaStatus]             = useState<string | null>(null); // DRAFT | FINAL | POSTED | ERROR
+  // Seed from initialData so locks are instant (fetchSlaHeader will confirm/override)
+  const [slaStatus, setSlaStatus]             = useState<string | null>(initialData?.accountingStatus ?? null);
   const [slaPostingStatus, setSlaPostingStatus] = useState<string | null>(null);
   const [slaLines, setSlaLines]               = useState<any[]>([]);
   const [slaModalVisible, setSlaModalVisible] = useState(false);
@@ -1495,6 +1497,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       setSlaGlBatchName(glBatchName);
       setSlaGlHeaderId(glHeaderId);
       setSlaLines(fetchedLines);
+      setIsEditing(false);   // lock the form — posted accounting cannot be changed
       message.success('Posted to General Ledger successfully. Accounting is now locked.');
 
       // ── Auto-post any applied prepayment SLAs that are in DRAFT ──

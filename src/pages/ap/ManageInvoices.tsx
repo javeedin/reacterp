@@ -943,6 +943,7 @@ const ManageInvoices: React.FC = () => {
       documentCategory:            record.documentCategory,
       documentSequence:            record.documentSequence,
       voucherNumber:               record.voucherNumber,
+      accountingStatus:            record.accountingStatus,
     };
 
     const newTab: InvoiceTab = {
