@@ -1351,8 +1351,15 @@ const ManageInvoices: React.FC = () => {
       title: 'Validation Status',
       dataIndex: 'validationStatus',
       key: 'validationStatus',
-      width: 130,
-      render: (status: string) => getValidationStatusTag(status),
+      width: 180,
+      render: (status: string, record: InvoiceRecord) => (
+        <Space size={4} wrap>
+          {getValidationStatusTag(status)}
+          {record.holdPaidStatus === 'Cancelled' && (
+            <Tag style={{ background: REDWOOD.error, color: '#fff', border: 'none', fontSize: 11 }}>Cancelled</Tag>
+          )}
+        </Space>
+      ),
       filters: [
         { text: 'Validated', value: 'Validated' },
         { text: 'Needs revalidation', value: 'Needs revalidation' },
@@ -1388,11 +1395,13 @@ const ManageInvoices: React.FC = () => {
       key: 'holdPaidStatus',
       width: 120,
       render: (status: string) => {
+        if (status === 'Cancelled')
+          return <Tag color="red" style={{ fontSize: 11 }}>Cancelled</Tag>;
         if (status === 'Fully Paid')
           return <Tag color="success" style={{ fontSize: 11 }}>Fully Paid</Tag>;
         if (status === 'Partially Paid')
           return <Tag color="warning" style={{ fontSize: 11 }}>Partially Paid</Tag>;
-        return <Tag color="error" style={{ fontSize: 11 }}>Unpaid</Tag>;
+        return <Tag color="default" style={{ fontSize: 11 }}>Unpaid</Tag>;
       },
     },
     {
