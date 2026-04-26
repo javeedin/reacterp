@@ -1950,6 +1950,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       if (initialData.conversionDate) formValues.conversionDate = dayjs(initialData.conversionDate, ['YYYY-MM-DD', 'DD-MMM-YYYY', 'DD MMM YYYY']);
       if (initialData.conversionRate) formValues.conversionRate = initialData.conversionRate;
       if (initialData.paymentCurrency) formValues.paymentCurrency = initialData.paymentCurrency;
+      if (initialData.documentCategory) formValues.documentCategory = initialData.documentCategory;
+      if (initialData.documentSequence) formValues.documentSequence = initialData.documentSequence;
+      if (initialData.voucherNumber) formValues.voucherNumber = initialData.voucherNumber;
       form.setFieldsValue(formValues);
       setHeaderValues((prev) => ({ ...prev, ...formValues }));
       if (initialData.businessUnit) setBuSelected(true);
@@ -3540,6 +3543,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       ConversionDate: values.conversionDate?.format?.('YYYY-MM-DD') || null,
       ConversionRate: values.conversionRate || null,
       DocumentCategory: values.documentCategory || null,
+      DocumentSequence: values.documentSequence || null,
       VoucherNumber: values.voucherNumber || null,
       FirstPartyTaxRegistrationNumber: values.firstPartyTaxRegistrationNumber || null,
       SupplierTaxRegistrationNumber: values.supplierTaxRegistrationNumber || null,
@@ -5286,6 +5290,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                             <Option value="Credit Memos">Credit Memos</Option>
                             <Option value="Prepayments">Prepayments</Option>
                           </Select>
+                        </Form.Item>
+                        <Form.Item
+                          label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Document Sequence</Text>}
+                          name="documentSequence"
+                          style={{ marginBottom: 4 }}
+                        >
+                          <Input placeholder="Document sequence" />
                         </Form.Item>
                         <Form.Item
                           label={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Voucher Number</Text>}
