@@ -4684,7 +4684,15 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           ) : isEditMode && !isEditing ? (
             <Button
               icon={<EditOutlined />}
-              onClick={() => setIsEditing(true)}
+              onClick={() => {
+                setIsEditing(true);
+                const invoiceId = savedInvoiceId ?? initialData?.invoiceId ?? null;
+                if (invoiceId) {
+                  setIsValidated(false);
+                  setLiveValidationStatus('Needs Revalidation');
+                  saveValidationStatus(invoiceId, 'Needs Revalidation');
+                }
+              }}
             >
               Edit
             </Button>
