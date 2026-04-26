@@ -15,7 +15,8 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import { fetchLedgerByBusinessUnit, getAccounting } from '../../services/sla.service';
-import { postSlaToGL, GlPostingLine, eventTypeToRef5 } from '../../services/glPosting.service';
+import { postSlaToGL, eventTypeToRef5 } from '../../services/glPosting.service';
+import type { GlPostingLine } from '../../services/glPosting.service';
 
 const { Text, Title } = Typography;
 const { RangePicker } = DatePicker;

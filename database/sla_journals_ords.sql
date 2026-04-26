@@ -237,7 +237,7 @@ CREATE OR REPLACE PACKAGE BODY RR_SLA_JOURNALS_PKG AS
             '       h.source_number, h.source_table,' ||
             '       TO_CHAR(h.accounting_date,''YYYY-MM-DD'') accounting_date,' ||
             '       h.accounting_status, h.business_unit, h.legal_entity,' ||
-            '       h.module_name, l.party_type' ||
+            '       h.module_name, NULL party_type' ||
             '  FROM RR_SLA_ACCOUNTING_LINES l' ||
             '  JOIN RR_SLA_ACCOUNTING_HEADERS h ON l.header_id = h.header_id' ||
             ' WHERE 1=1';
