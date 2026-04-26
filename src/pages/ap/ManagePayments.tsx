@@ -405,6 +405,7 @@ const mapApexToPaymentRecord = (item: any, index: number): PaymentRecord => ({
 const ManagePayments: React.FC = () => {
   const [form] = Form.useForm();
   const [createPaymentForm] = Form.useForm();
+  const watchedConversionRate = Form.useWatch('conversionRate', createPaymentForm);
   const [voidForm] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
@@ -2523,6 +2524,22 @@ const ManagePayments: React.FC = () => {
                             >
                               <InputNumber style={{ width: '100%' }} placeholder="0.000000" precision={6} min={0} disabled={!selectedBuLegalEntityName} />
                             </Form.Item>
+                            {createPaymentCurrency !== 'AED' && (
+                              <Form.Item label="Functional Amount (AED)">
+                                {(() => {
+                                  const rate = Number(watchedConversionRate) || 0;
+                                  const functionalAmt = rate > 0 ? totalAppliedAmount * rate : null;
+                                  return functionalAmt != null ? (
+                                    <Text strong style={{ color: REDWOOD.info, fontSize: 14 }}>
+                                      {functionalAmt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      <Text type="secondary" style={{ fontSize: 12, marginLeft: 6 }}>AED</Text>
+                                    </Text>
+                                  ) : (
+                                    <Text type="secondary">Enter conversion rate to calculate</Text>
+                                  );
+                                })()}
+                              </Form.Item>
+                            )}
                             <Form.Item label="Maturity Date" name="maturityDate">
                               <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" disabled={!selectedBuLegalEntityName} />
                             </Form.Item>
