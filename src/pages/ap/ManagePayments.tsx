@@ -1088,25 +1088,102 @@ const ManagePayments: React.FC = () => {
   const PAGE_APIS = {
     apex: [
       {
-        name: 'Search Payments (List)',
+        name: '1. Search Payments (List)',
         method: 'GET',
         url: APEX_PAYMENTS_URL,
         params: 'payment_number=&payment_status=&payee=&supplier_number=&business_unit=&date_from=&date_to=&limit=100&offset=0',
         description: 'Fetches paginated payments from ORDS/APEX database with optional filters. Returns JSON with count, limit, offset, items[].',
       },
       {
-        name: 'Get Payment by Check ID',
+        name: '2. Get Payment by Check ID',
         method: 'GET',
         url: `${APEX_PAYMENTS_URL}/{check_id}`,
         params: '',
         description: 'Fetches a single payment by Check ID. Example: /ap/payments/300000085294470',
       },
       {
-        name: 'Save Payments (Bulk)',
+        name: '3. Save Payments (Bulk)',
         method: 'POST',
         url: APEX_PAYMENTS_URL,
         params: 'Body: { "items": [...] }',
         description: 'Saves payments to APEX database. Accepts single object, array, or { items: [...] } format.',
+      },
+      {
+        name: '4. Get Related Invoices',
+        method: 'GET',
+        url: `${APEX_DB_CONFIG.baseUrl}/ap/payments/{check_id}/related-invoices`,
+        params: '',
+        description: 'Fetches invoices related to a payment (used for void accounting reversal and SLA line building).',
+      },
+      {
+        name: '5. Check Void Eligibility (Void Step 1)',
+        method: 'GET',
+        url: `${APEX_DB_CONFIG.baseUrl}/ap/payments/{check_id}/void-eligibility`,
+        params: '',
+        description: 'Checks whether a payment can be voided. Returns { eligible, reason }.',
+      },
+      {
+        name: '6. Void Payment (Void Step 2)',
+        method: 'PUT',
+        url: `${APEX_DB_CONFIG.baseUrl}/ap/payments/void`,
+        params: 'Body: { "checkId": 123, "voidDate": "YYYY-MM-DD", "voidReason": "..." }',
+        description: 'Voids a payment in the system. Returns paperDocumentNumber and voidDate used in subsequent SLA/GL steps.',
+      },
+      {
+        name: '7. Create SLA Reversal Accounting (Void Step 3)',
+        method: 'POST',
+        url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/create`,
+        params: 'Body: { header: { sourceTable, eventTypeCode, ... }, lines: [...] }',
+        description: 'Creates subledger accounting reversal entries for the voided payment (DR Cash Clearing / CR AP Liability).',
+      },
+      {
+        name: '8. Get SLA Accounting Lines',
+        method: 'GET',
+        url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting`,
+        params: 'sourceTable=AP_PAYMENTS&sourceId={check_id}',
+        description: 'Fetches existing SLA accounting entries for a payment. Used in View Accounting modal.',
+      },
+      {
+        name: '9. GL Duplicate Check',
+        method: 'GET',
+        url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/check`,
+        params: 'reference1={sourceNumber}&reference2={sourceId}&reference5={ref5}',
+        description: 'Checks whether a GL journal already exists for a given source number/reference. Prevents duplicate posting.',
+      },
+      {
+        name: '10. Create GL Journal (Void Step 4)',
+        method: 'POST',
+        url: `${APEX_DB_CONFIG.baseUrl}/journals/create`,
+        params: 'Body: { batch: {...}, header: {...}, lines: [...] }',
+        description: 'Creates a new GL journal batch + header + lines for the void reversal accounting entries.',
+      },
+      {
+        name: '11. Post GL Journal (Void Step 5)',
+        method: 'PUT',
+        url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/{batch_id}/post`,
+        params: 'Body: {}',
+        description: 'Posts (validates period + finalizes) a GL journal batch. Called after journal creation to complete GL posting.',
+      },
+      {
+        name: '12. Stamp SLA as Posted (Void Step 6)',
+        method: 'POST',
+        url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`,
+        params: 'Body: { headerId, glBatchId, glBatchName, glHeaderId, postedBy }',
+        description: 'Updates the SLA header status to POSTED and links it to the GL batch/header IDs.',
+      },
+      {
+        name: '13. Bank Accounts',
+        method: 'GET',
+        url: APEX_BANK_ACCOUNTS_URL,
+        params: 'bank_account_id=&bank_account_num=',
+        description: 'Fetches bank accounts including cashClearingAccountCombination used for SLA/GL cash clearing lines.',
+      },
+      {
+        name: '14. Ledger by Business Unit',
+        method: 'GET',
+        url: `${APEX_DB_CONFIG.baseUrl}/ledgers`,
+        params: 'businessUnit={bu_name}',
+        description: 'Fetches ledger details (ledgerId, ledgerName, currency) for a business unit. Used to populate GL journal metadata.',
       },
     ],
     fusion: [
@@ -3855,23 +3932,25 @@ const ManagePayments: React.FC = () => {
           destroyOnClose
           styles={{ body: { maxHeight: '80vh', overflowY: 'auto' } }}
         >
-          {/* Payment header info + form fields */}
-          <Form form={voidForm} layout="vertical" size="small">
-            <Row gutter={16}>
-              <Col span={6}><Form.Item label="Payment #"><Input value={voidTargetPayment?.paymentNumber?.toString()} readOnly style={{ background: '#f5f5f5' }} /></Form.Item></Col>
-              <Col span={6}><Form.Item label="Amount"><Input value={voidTargetPayment ? `${formatAmount(voidTargetPayment.paymentAmount)} ${voidTargetPayment.paymentCurrency}` : ''} readOnly style={{ background: '#f5f5f5', fontWeight: 500 }} /></Form.Item></Col>
-              <Col span={6}>
-                <Form.Item label="Void Date" name="voidDate" rules={[{ required: true, message: 'Required' }]}>
-                  <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" />
-                </Form.Item>
-              </Col>
-              <Col span={6}><Form.Item label="Void Reason" name="voidReason"><Input placeholder="Optional" /></Form.Item></Col>
-            </Row>
+          {/* Payment header info + form fields — compact single row */}
+          <Form form={voidForm} layout="inline" size="small" style={{ marginBottom: 10, flexWrap: 'nowrap', gap: 8 }}>
+            <Form.Item label="Payment #" style={{ marginBottom: 0, flex: '0 0 auto' }}>
+              <Input value={voidTargetPayment?.paymentNumber?.toString()} readOnly style={{ background: '#f5f5f5', width: 140 }} />
+            </Form.Item>
+            <Form.Item label="Amount" style={{ marginBottom: 0, flex: '0 0 auto' }}>
+              <Input value={voidTargetPayment ? `${formatAmount(voidTargetPayment.paymentAmount)} ${voidTargetPayment.paymentCurrency}` : ''} readOnly style={{ background: '#f5f5f5', width: 150, fontWeight: 500 }} />
+            </Form.Item>
+            <Form.Item label="Void Date" name="voidDate" rules={[{ required: true, message: 'Required' }]} style={{ marginBottom: 0, flex: '0 0 auto' }}>
+              <DatePicker style={{ width: 140 }} format="DD-MMM-YYYY" />
+            </Form.Item>
+            <Form.Item label="Void Reason" name="voidReason" style={{ marginBottom: 0, flex: 1 }}>
+              <Input placeholder="Optional" />
+            </Form.Item>
           </Form>
 
           {/* Related invoices (compact) */}
           <Table size="small" loading={voidRelatedLoading} dataSource={voidRelatedInvoices} rowKey="key"
-            pagination={false} scroll={{ y: 100 }} style={{ marginBottom: 14 }}
+            pagination={false} scroll={{ y: 70 }} style={{ marginBottom: 12 }}
             locale={{ emptyText: 'No related invoices' }}
             columns={[
               { title: 'Invoice #', dataIndex: 'invoiceNumber', key: 'invoiceNumber', ellipsis: true },
@@ -3917,9 +3996,9 @@ const ManagePayments: React.FC = () => {
                 st.status === 'success' ? <CheckCircleOutlined style={{ color: '#52c41a' }} /> :
                 st.status === 'error'   ? <CloseCircleOutlined style={{ color: '#ff4d4f' }} /> : null;
               return (
-                <Card key={card.key} size="small" style={{ marginBottom: 10, borderColor }}
+                <Card key={card.key} size="small" style={{ marginBottom: 6, borderColor }}
                   title={
-                    <Space>
+                    <Space size={4}>
                       <Tag color={card.methodColor} style={{ minWidth: 44, textAlign: 'center', margin: 0 }}>{card.method}</Tag>
                       <Text strong style={{ fontSize: 12 }}>Step {card.step}: {card.label}</Text>
                       {statusIcon}
@@ -3934,11 +4013,10 @@ const ManagePayments: React.FC = () => {
                     </Button>
                   }
                 >
-                  <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 6 }}>{card.description}</Text>
-                  <code style={{ fontSize: 10, background: '#f0f0f0', padding: '2px 6px', borderRadius: 3, display: 'block', wordBreak: 'break-all', marginBottom: st.response || st.error ? 8 : 0 }}>{card.url}</code>
-                  {st.error && <Alert type="error" message={st.error} style={{ marginTop: 6, fontSize: 11 }} showIcon />}
+                  <code style={{ fontSize: 10, background: '#f0f0f0', padding: '2px 6px', borderRadius: 3, display: 'block', wordBreak: 'break-all', marginBottom: st.response || st.error ? 4 : 0 }}>{card.url}</code>
+                  {st.error && <Alert type="error" message={st.error} style={{ marginTop: 4, fontSize: 11 }} showIcon />}
                   {st.response && (
-                    <pre style={{ fontSize: 10, background: '#1e1e1e', color: st.status === 'error' ? '#f48771' : '#b5cea8', padding: 8, borderRadius: 4, margin: '6px 0 0', maxHeight: 120, overflowY: 'auto' }}>
+                    <pre style={{ fontSize: 10, background: '#1e1e1e', color: st.status === 'error' ? '#f48771' : '#b5cea8', padding: 6, borderRadius: 4, margin: '4px 0 0', maxHeight: 80, overflowY: 'auto' }}>
                       {JSON.stringify(st.response, null, 2)}
                     </pre>
                   )}
