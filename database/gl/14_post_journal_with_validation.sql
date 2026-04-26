@@ -4,11 +4,12 @@
 -- 1. Creates procedure RR_POST_JOURNAL
 --    Validates before posting:
 --      a) Batch exists and is not already posted
---      b) Accounting period is Open  (RR_ACCOUNTING_PERIODS_STATUS.CLOSING_STATUS = 'O')
---      c) At least one line exists
---      d) Total Debit = Total Credit (within 0.01)
---      e) All lines have an account code
---      f) No lines with zero Debit AND zero Credit
+--      b) Period format is Mon-YY  (e.g. Apr-26) — REGEXP check
+--      c) Accounting period is Open  (RR_ACCOUNTING_PERIODS_STATUS.CLOSING_STATUS = 'O')
+--      d) At least one line exists
+--      e) Total Debit = Total Credit (within 0.01)
+--      f) All lines have an account code
+--      g) No lines with zero Debit AND zero Credit
 --    On success: UPDATE RR_GL_JOURNAL_BATCHES SET STATUS = 'P' / 'Posted'
 --
 -- 2. Redefines the ORDS handler:
@@ -72,7 +73,7 @@ BEGIN
     BEGIN
         SELECT PERIOD_NAME
         INTO   v_period_name
-        FROM   RR_GL_HEADERS
+        FROM   RR_GL_JE_HEADERS
         WHERE  BATCH_ID = p_je_batch_id
         AND    ROWNUM   = 1;
     EXCEPTION
@@ -90,8 +91,20 @@ BEGIN
         add_error('Journal batch is already posted.');
     END IF;
 
-    -- ── 4. Period is Open? ────────────────────────────────────────────────────
-    IF v_period_name IS NOT NULL THEN
+    -- ── 4a. Period format: must be Mon-YY (e.g. Apr-26) ──────────────────────
+    IF v_period_name IS NULL THEN
+        add_error('Accounting period is missing. Cannot post without a valid period.');
+    ELSIF NOT REGEXP_LIKE(v_period_name, '^[A-Z][a-z]{2}-[0-9]{2}$') THEN
+        add_error(
+            'Accounting period "' || v_period_name ||
+            '" is in the wrong format. Expected Mon-YY (e.g. Apr-26).'
+        );
+    END IF;
+
+    -- ── 4b. Period is Open? ───────────────────────────────────────────────────
+    IF v_period_name IS NOT NULL
+       AND REGEXP_LIKE(v_period_name, '^[A-Z][a-z]{2}-[0-9]{2}$')
+    THEN
         BEGIN
             SELECT CLOSING_STATUS
             INTO   v_closing_status
@@ -140,9 +153,9 @@ BEGIN
            v_total_cr,
            v_no_account_lines,
            v_zero_amount_lines
-    FROM   RR_GL_LINES_ALL
+    FROM   RR_GL_JE_LINES_ALL
     WHERE  JE_HEADER_ID IN (
-               SELECT JE_HEADER_ID FROM RR_GL_HEADERS WHERE BATCH_ID = p_je_batch_id
+               SELECT JE_HEADER_ID FROM RR_GL_JE_HEADERS WHERE BATCH_ID = p_je_batch_id
            );
 
     IF v_line_count = 0 THEN

@@ -1511,7 +1511,31 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       const glHeaderId  = glData.headerId  || glData.header_id  || null;
       const glBatchName = glData.batchName || glData.batch_name || batchName;
 
-      // Step 2 — stamp GL IDs back on the SLA header (same as ManageSLAJournals)
+      // Step 2 — POST to GL via RR_POST_JOURNAL (validates period format, period open, balance, accounts)
+      if (glBatchId) {
+        const postGlUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/${glBatchId}/post`;
+        const postGlRes = await fetch(postGlUrl, {
+          method:  'PUT',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        });
+        const postGlData = await postGlRes.json().catch(() => ({}));
+
+        if (!postGlRes.ok || postGlData?.success === false) {
+          // Extract first error from errors array if present
+          const firstError = Array.isArray(postGlData?.errors) && postGlData.errors.length > 0
+            ? postGlData.errors[0]
+            : postGlData?.error || `HTTP ${postGlRes.status}`;
+          await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/error`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ headerId: slaHeaderId, errorMessage: firstError, postedBy: 'user' }),
+          });
+          setSlaStatus('ERROR');
+          throw new Error(`GL posting failed: ${firstError}`);
+        }
+      }
+
+      // Step 3 — stamp GL IDs back on the SLA header (same as ManageSLAJournals)
       if (glBatchId || glHeaderId) {
         const postRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`, {
           method:  'POST',
@@ -1786,7 +1810,29 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       const glHeaderId  = glData.headerId  || glData.header_id  || null;
       const glBatchName = glData.batchName || glData.batch_name || batchName;
 
-      // Step 2 — stamp GL IDs back on the SLA header
+      // Step 2 — POST to GL via RR_POST_JOURNAL (validates period format, period open, balance, accounts)
+      if (glBatchId) {
+        const postGlRes  = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/${glBatchId}/post`, {
+          method:  'PUT',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        });
+        const postGlData = await postGlRes.json().catch(() => ({}));
+
+        if (!postGlRes.ok || postGlData?.success === false) {
+          const firstError = Array.isArray(postGlData?.errors) && postGlData.errors.length > 0
+            ? postGlData.errors[0]
+            : postGlData?.error || `HTTP ${postGlRes.status}`;
+          await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/error`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ headerId: appSlaInfo.headerId, errorMessage: firstError, postedBy: 'user' }),
+          });
+          setAppSlaMap(prev => ({ ...prev, [applicationId]: { ...prev[applicationId], status: 'ERROR' } }));
+          throw new Error(`GL posting failed: ${firstError}`);
+        }
+      }
+
+      // Step 3 — stamp GL IDs back on the SLA header
       if (glBatchId || glHeaderId) {
         const postRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`, {
           method:  'POST',
