@@ -70,11 +70,10 @@ BEGIN
     END;
 
     -- ── 2. Get period name from the journal header ────────────────────────────
-    -- RR_GL_HEADERS holds locally-created journals (from journals/create endpoint)
     BEGIN
         SELECT PERIOD_NAME
         INTO   v_period_name
-        FROM   RR_GL_HEADERS
+        FROM   RR_GL_JE_HEADERS
         WHERE  BATCH_ID = p_je_batch_id
         AND    ROWNUM   = 1;
     EXCEPTION
@@ -154,9 +153,9 @@ BEGIN
            v_total_cr,
            v_no_account_lines,
            v_zero_amount_lines
-    FROM   RR_GL_LINES_ALL
+    FROM   RR_GL_JE_LINES_ALL
     WHERE  JE_HEADER_ID IN (
-               SELECT JE_HEADER_ID FROM RR_GL_HEADERS WHERE BATCH_ID = p_je_batch_id
+               SELECT JE_HEADER_ID FROM RR_GL_JE_HEADERS WHERE BATCH_ID = p_je_batch_id
            );
 
     IF v_line_count = 0 THEN
