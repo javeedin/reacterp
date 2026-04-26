@@ -1479,7 +1479,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           reference1:               invoiceNumber,
           reference2:               String(savedInvoiceId || initialData?.invoiceId || ''),
           reference3:               l.accountingClass || null,
-          reference4:               l.legalEntity || bu || null,
+          reference4:               bu || null,
           reference5:               'AP-INVOICE-CREATION',
           createdBy:                'user',
         })),
@@ -2886,6 +2886,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 currency,
                 accountingDate: acctDate,
                 legalEntity,
+                businessUnit:   form.getFieldValue('businessUnit') || '',
                 lines:          glLines,
                 createdBy:      'user',
               });
@@ -10316,7 +10317,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             { title: '#', dataIndex: 'lineNumber', width: 45, render: (v: number) => <Text style={{ fontSize: 11 }}>{v}</Text> },
             { title: 'Type', dataIndex: 'lineType', width: 55, render: (v: string) => <Tag color={v === 'DR' ? 'blue' : 'red'} style={{ fontSize: 11, fontWeight: 700 }}>{v}</Tag> },
             { title: 'Class', dataIndex: 'accountingClass', width: 110, render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
-            { title: 'Account Combination', dataIndex: 'accountCombination', ellipsis: true, render: (v: string) => <Text code style={{ fontSize: 11 }}>{v || '—'}</Text> },
+            { title: 'Account Combination', dataIndex: 'accountCombination', ellipsis: true, render: (v: string, r: any) => (
+              <div>
+                <Text code style={{ fontSize: 11 }}>{v || '—'}</Text>
+                {r.accountDescription && <div style={{ fontSize: 10, color: '#888', marginTop: 1 }}>{r.accountDescription}</div>}
+              </div>
+            ) },
             { title: 'Debit', dataIndex: 'enteredDr', width: 120, align: 'right' as const, render: (v: number, r: any) => r.lineType === 'DR' ? <Text strong style={{ fontSize: 12, color: REDWOOD.info }}>{formatAmount(v)}</Text> : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text> },
             { title: 'Credit', dataIndex: 'enteredCr', width: 120, align: 'right' as const, render: (v: number, r: any) => r.lineType === 'CR' ? <Text strong style={{ fontSize: 12, color: REDWOOD.error }}>{formatAmount(v)}</Text> : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text> },
             { title: 'Description', dataIndex: 'description', ellipsis: true, render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },

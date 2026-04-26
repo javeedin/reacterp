@@ -227,7 +227,7 @@ CREATE OR REPLACE PACKAGE BODY RR_SLA_JOURNALS_PKG AS
         v_src_table   VARCHAR2(60);  v_acct_date   VARCHAR2(20);
         v_acct_status VARCHAR2(20);  v_bu          VARCHAR2(100);
         v_le          VARCHAR2(100); v_module      VARCHAR2(60);
-        v_party_type  VARCHAR2(30);
+        v_party_type  VARCHAR2(30);  v_acct_desc   VARCHAR2(200);
 
     BEGIN
         v_sql :=
@@ -237,9 +237,13 @@ CREATE OR REPLACE PACKAGE BODY RR_SLA_JOURNALS_PKG AS
             '       h.source_number, h.source_table,' ||
             '       TO_CHAR(h.accounting_date,''YYYY-MM-DD'') accounting_date,' ||
             '       h.accounting_status, h.business_unit, h.legal_entity,' ||
-            '       h.module_name, NULL party_type' ||
+            '       h.module_name, NULL party_type,' ||
+            '       vsv.description account_description' ||
             '  FROM RR_SLA_ACCOUNTING_LINES l' ||
             '  JOIN RR_SLA_ACCOUNTING_HEADERS h ON l.header_id = h.header_id' ||
+            '  LEFT JOIN RR_VALUE_SET_VALUES vsv' ||
+            '    ON  vsv.value_set_code = ''BUIMERC_FIN_GLB_COA_ACCOUNT''' ||
+            '    AND vsv.value = TRIM(REGEXP_SUBSTR(l.account_combination, ''[^-]+'', 1, 4))' ||
             ' WHERE 1=1';
 
         IF p_header_id IS NOT NULL THEN
@@ -279,7 +283,7 @@ CREATE OR REPLACE PACKAGE BODY RR_SLA_JOURNALS_PKG AS
                 v_line_id, v_header_id, v_line_num, v_line_type, v_acct_class,
                 v_account, v_ent_dr, v_ent_cr, v_acc_dr, v_acc_cr,
                 v_currency, v_desc, v_src_number, v_src_table,
-                v_acct_date, v_acct_status, v_bu, v_le, v_module, v_party_type;
+                v_acct_date, v_acct_status, v_bu, v_le, v_module, v_party_type, v_acct_desc;
             EXIT WHEN v_cur%NOTFOUND;
 
             v_result := v_result || v_sep ||
@@ -301,8 +305,9 @@ CREATE OR REPLACE PACKAGE BODY RR_SLA_JOURNALS_PKG AS
                 ',"accountingStatus":' || jstr(v_acct_status)||
                 ',"businessUnit":'     || jstr(v_bu)         ||
                 ',"legalEntity":'      || jstr(v_le)         ||
-                ',"moduleName":'       || jstr(v_module)     ||
-                ',"partyType":'        || jstr(v_party_type) ||
+                ',"moduleName":'          || jstr(v_module)     ||
+                ',"partyType":'           || jstr(v_party_type) ||
+                ',"accountDescription":'  || jstr(v_acct_desc)  ||
                 '}';
             v_sep := ',';
         END LOOP;

@@ -53,6 +53,7 @@ export interface GlPostingOptions {
   currency:       string;
   accountingDate: string;          // YYYY-MM-DD
   legalEntity:    string;
+  businessUnit:   string;
   // Lines
   lines:          GlPostingLine[];
   createdBy?:     string;
@@ -71,7 +72,7 @@ export async function postSlaToGL(opts: GlPostingOptions): Promise<GlPostingResu
   const {
     slaHeaderId, sourceNumber, sourceId, eventTypeCode,
     periodName, ledgerName, ledgerId, currency, accountingDate,
-    legalEntity, lines, createdBy = 'user',
+    legalEntity, businessUnit, lines, createdBy = 'user',
   } = opts;
 
   const ref5      = eventTypeToRef5(eventTypeCode);
@@ -142,7 +143,7 @@ export async function postSlaToGL(opts: GlPostingOptions): Promise<GlPostingResu
       reference1:               sourceNumber,
       reference2:               String(sourceId),
       reference3:               l.accountingClass || null,
-      reference4:               l.legalEntity || legalEntity || null,
+      reference4:               businessUnit || null,
       reference5:               ref5,
       createdBy,
     })),

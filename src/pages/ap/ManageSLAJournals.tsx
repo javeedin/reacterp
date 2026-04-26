@@ -485,6 +485,7 @@ const ManageSLAJournals: React.FC = () => {
         currency:       postGLRecord.currencyCode,
         accountingDate: postGLRecord.accountingDate,
         legalEntity,
+        businessUnit:   postGLRecord.businessUnit || '',
         lines:          glLines,
         createdBy:      postGLRecord.createdBy || 'SYSTEM',
       });
