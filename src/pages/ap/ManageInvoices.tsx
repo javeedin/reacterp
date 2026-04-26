@@ -1790,7 +1790,16 @@ const ManageInvoices: React.FC = () => {
         <CreateInvoice
           onClose={() => closeInvoiceTab(tab.key)}
           initialData={tab.initialData}
-          onSave={() => {
+          onSave={(savedValues) => {
+            // Update tab label to invoice number after first save
+            if (savedValues?.invoiceNumber) {
+              const invNo = savedValues.invoiceNumber as string;
+              const supplierShort = ((savedValues.supplier || '') as string).substring(0, 4).toUpperCase();
+              const newLabel = supplierShort ? `${invNo} - ${supplierShort}` : invNo;
+              setOpenTabs((prev) =>
+                prev.map((t) => t.key === tab.key ? { ...t, label: newLabel } : t)
+              );
+            }
             // Refresh invoice list after save if search was previously executed
             if (invoices.length > 0) {
               form.submit();
