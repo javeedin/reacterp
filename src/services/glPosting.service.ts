@@ -57,6 +57,7 @@ export interface GlPostingOptions {
   legalEntity:     string;
   businessUnit:    string;
   conversionRate?: number;          // 1 for functional currency, actual rate otherwise
+  jeCategory?:     string;          // defaults to 'Purchase Invoices' if omitted
   // Lines
   lines:          GlPostingLine[];
   createdBy?:     string;
@@ -76,7 +77,7 @@ export async function postSlaToGL(opts: GlPostingOptions): Promise<GlPostingResu
     slaHeaderId, sourceNumber, sourceId, eventTypeCode,
     periodName, ledgerName, ledgerId, currency, accountingDate,
     legalEntity, businessUnit, lines, createdBy = 'user',
-    conversionRate = 1,
+    conversionRate = 1, jeCategory = 'Purchase Invoices',
   } = opts;
 
   const rate = (conversionRate && conversionRate > 0) ? conversionRate : 1;
@@ -117,7 +118,7 @@ export async function postSlaToGL(opts: GlPostingOptions): Promise<GlPostingResu
     },
     header: {
       ledgerId, ledgerName,
-      jeCategory:             'Purchase Invoices',
+      jeCategory:             jeCategory,
       jeSource:               'Payables',
       periodName,
       journalName:            `${ref5}-${sourceNumber}`,

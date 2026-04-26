@@ -8782,6 +8782,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                       sourceNumber:   paymentNum,
                       sourceId:       capturedCheckId!,
                       eventTypeCode:  'AP_PAYMENT_CREATED',
+                      jeCategory:     'AP_PAYMENT_CREATED',
                       periodName:     period,
                       ledgerName:     ledgerInfo2?.ledgerName || 'BCL DIFC',
                       ledgerId:       ledgerInfo2?.ledgerId   || 300000003259529,
