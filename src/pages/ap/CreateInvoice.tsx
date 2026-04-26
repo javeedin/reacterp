@@ -82,8 +82,8 @@ dayjs.extend(customParseFormat);
 import * as XLSX from 'xlsx';
 import type { ColumnsType } from 'antd/es/table';
 import { APEX_DB_CONFIG } from '../../config/api.config';
-import { fetchLedgerByBusinessUnit, checkAccountingExists, getAccounting, getLinesByHeaderId, checkGLJournalExists } from '../../services/sla.service';
-import { postSlaToGL } from '../../services/glPosting.service';
+import { fetchLedgerByBusinessUnit, checkAccountingExists, getAccounting, getLinesByHeaderId, checkGLJournalExists, createAccounting, buildApPaymentSlaPayloads, derivePeriodName } from '../../services/sla.service';
+import { postSlaToGL, eventTypeToRef5 } from '../../services/glPosting.service';
 import type { GlPostingLine } from '../../services/glPosting.service';
 import { searchCombinations, type DistCombination } from '../../services/distCombinations.service';
 import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
@@ -621,7 +621,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // Pay in Full modal state
   const [payInFullOpen, setPayInFullOpen] = useState(false);
   const [payInFullApiDrawerOpen, setPayInFullApiDrawerOpen] = useState(false);
-  const [payInFullBankAccounts, setPayInFullBankAccounts] = useState<{ bankAccountName: string; bankAccountNumber: string; currencyCode: string; legalEntityName: string }[]>([]);
+  const [payInFullBankAccounts, setPayInFullBankAccounts] = useState<{ bankAccountName: string; bankAccountNumber: string; currencyCode: string; legalEntityName: string; cashClearingAccountCombination: string }[]>([]);
   const [payInFullBankLoading, setPayInFullBankLoading] = useState(false);
   const [payInFullSubmitting, setPayInFullSubmitting] = useState(false);
   const [step1CheckId, setStep1CheckId] = useState<number | null>(null);
@@ -3729,10 +3729,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       const all = (data.items || []).map((item: any) => ({
-        bankAccountName:   item.bank_account_name   || '',
-        bankAccountNumber: item.bank_account_num    || item.bank_account_number || '',
-        currencyCode:      item.currency_code       || '',
-        legalEntityName:   item.legal_entity_name   || '',
+        bankAccountName:                 item.bank_account_name   || '',
+        bankAccountNumber:               item.bank_account_num    || item.bank_account_number || '',
+        currencyCode:                    item.currency_code       || '',
+        legalEntityName:                 item.legal_entity_name   || '',
+        cashClearingAccountCombination:  item.cash_clearing_account_combination || '',
       }));
       const filtered = legalEntityName
         ? all.filter((a: any) => a.legalEntityName === legalEntityName)
@@ -8538,11 +8539,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             const hasInstallments = pendingInst.length > 0;
 
             // Build initial step list
+            const relatedStep = hasInstallments ? 3 : 2;
+            const acctStep    = hasInstallments ? 4 : 3;
+            const glStep      = hasInstallments ? 5 : 4;
             const initSteps = [
               { step: 0, label: 'Check invoice balance',         status: 'idle' as const, detail: undefined },
               { step: 1, label: 'Create payment record',         status: 'idle' as const, detail: undefined },
               ...(hasInstallments ? [{ step: 2, label: `Update installments (${pendingInst.length})`, status: 'idle' as const, detail: undefined }] : []),
-              { step: hasInstallments ? 3 : 2, label: 'Link payment to invoice', status: 'idle' as const, detail: undefined },
+              { step: relatedStep, label: 'Link payment to invoice', status: 'idle' as const, detail: undefined },
+              { step: acctStep,    label: 'Create accounting',       status: 'idle' as const, detail: undefined },
+              { step: glStep,      label: 'Post to GL',              status: 'idle' as const, detail: undefined },
             ];
             setPayInFullStepStatus(initSteps);
             setPayInFullSubmitting(true);
@@ -8615,6 +8621,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 CreatedBy: loginUser, LastUpdatedBy: loginUser, LastUpdateLogin: loginUser,
               };
               let capturedCheckId: number | null = null;
+              let generatedPaymentNumber: string | null = null;
               try {
                 const res1 = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/payments`, {
                   method: 'POST',
@@ -8630,7 +8637,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 }
                 capturedCheckId = data1?.checkId ?? null;
                 setStep1CheckId(capturedCheckId);
-                const generatedPaymentNumber = data1?.paymentNumber ?? null;
+                generatedPaymentNumber = data1?.paymentNumber ?? null;
                 setStep(1, 'success', `Payment No: ${generatedPaymentNumber ?? capturedCheckId}`);
               } catch (e: any) {
                 setStep(1, 'error', e?.message ?? 'Network error');
@@ -8663,8 +8670,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 }
               }
 
-              // ── Step 3: POST /ap/payments/related-invoices ─────────────────
-              const relatedStep = hasInstallments ? 3 : 2;
+              // ── Step link: POST /ap/payments/related-invoices ─────────────
               setStep(relatedStep, 'running');
               const step3Body = {
                 InvoicePaymentId: null,
@@ -8695,18 +8701,115 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 const data3 = (() => { try { return JSON.parse(text3); } catch { return { raw: text3 }; } })();
                 if (data3?.status === 'error' || !res3.ok) {
                   setStep(relatedStep, 'error', data3?.message || `HTTP ${res3.status}`);
-                  message.error('Step 3 failed — invoice link not created');
+                  message.error('Link failed — invoice link not created');
                   return;
                 }
                 setStep(relatedStep, 'success', 'Payment linked to invoice');
               } catch (e: any) {
                 setStep(relatedStep, 'error', e?.message ?? 'Network error');
-                message.error('Step 3 failed — network error');
+                message.error('Link step failed — network error');
                 return;
               }
 
-              // ── All done ───────────────────────────────────────────────────
-              message.success('Payment submitted successfully!');
+              // ── Create accounting + Post to GL ─────────────────────────────
+              setStep(acctStep, 'running');
+              try {
+                const cashClearingAccount = selBankAcct?.cashClearingAccountCombination || '';
+                if (!cashClearingAccount) {
+                  setStep(acctStep, 'error', 'Bank account has no cash clearing account — skipped');
+                  setStep(glStep, 'error', 'Skipped');
+                  message.warning('Payment created but accounting skipped — bank account missing cash clearing account');
+                } else {
+                  const [relRes2, ledgerInfo2] = await Promise.all([
+                    fetch(`${APEX_DB_CONFIG.baseUrl}/ap/payments/${capturedCheckId}/related-invoices`, { headers: { Accept: 'application/json' } }),
+                    fetchLedgerByBusinessUnit(buName),
+                  ]);
+                  const relData2    = await relRes2.json();
+                  const relInvoices2: any[] = relData2.items || [];
+                  const paymentCcy  = values.paymentCurrency || currency;
+                  const exRate      = (paymentCcy !== 'AED' && (values.conversionRate || headerValues.conversionRate))
+                    ? Number(values.conversionRate || headerValues.conversionRate) : 1;
+                  const paymentNum  = generatedPaymentNumber || String(capturedCheckId);
+                  const payDate2    = payDate || dayjs().format('YYYY-MM-DD');
+
+                  const payloads = buildApPaymentSlaPayloads({
+                    checkId:             capturedCheckId!,
+                    paymentNumber:       paymentNum,
+                    paymentDate:         payDate2,
+                    currencyCode:        paymentCcy,
+                    exchangeRate:        exRate,
+                    businessUnit:        buName || undefined,
+                    legalEntity:         legalEntityName || undefined,
+                    ledgerId:            ledgerInfo2?.ledgerId,
+                    ledgerName:          ledgerInfo2?.ledgerName,
+                    cashClearingAccount,
+                    appliedInvoices:     relInvoices2.map((inv: any) => ({
+                      invoiceNumber:          inv.InvoiceNumber || '',
+                      invoiceId:              inv.InvoiceId || 0,
+                      amountPaid:             inv.AmountPaidInvoiceCurrency || inv.InvoicePaymentAmount || 0,
+                      liabilityDistribution:  inv.LiabilityDistribution || '',
+                    })),
+                  });
+
+                  const acctHeaderIds: { headerId: number; payload: typeof payloads[0] }[] = [];
+                  for (const payload of payloads) {
+                    const result = await createAccounting(payload);
+                    acctHeaderIds.push({ headerId: result.headerId, payload });
+                  }
+                  setStep(acctStep, 'success', `${acctHeaderIds.length} SLA header(s) created`);
+
+                  // ── Post to GL ──────────────────────────────────────────────
+                  setStep(glStep, 'running');
+                  const period   = derivePeriodName(new Date(payDate2));
+                  let glSuccess  = 0;
+                  const glErrors: string[] = [];
+                  for (const { headerId, payload } of acctHeaderIds) {
+                    const glLines: GlPostingLine[] = payload.lines.map(l => ({
+                      lineType:           l.lineType as 'DR' | 'CR',
+                      enteredDr:          l.lineType === 'DR' ? (l.enteredDr  || null) : null,
+                      enteredCr:          l.lineType === 'CR' ? (l.enteredCr  || null) : null,
+                      accountedDr:        l.lineType === 'DR' ? (l.accountedDr || null) : null,
+                      accountedCr:        l.lineType === 'CR' ? (l.accountedCr || null) : null,
+                      description:        l.description || '',
+                      currencyCode:       l.currencyCode || paymentCcy,
+                      accountingDate:     payDate2,
+                      accountCombination: l.accountCombination || '',
+                      accountingClass:    l.accountingClass || null,
+                      legalEntity:        legalEntityName || null,
+                    }));
+                    const glResult = await postSlaToGL({
+                      slaHeaderId:    headerId,
+                      sourceNumber:   paymentNum,
+                      sourceId:       capturedCheckId!,
+                      eventTypeCode:  'AP_PAYMENT_CREATED',
+                      periodName:     period,
+                      ledgerName:     ledgerInfo2?.ledgerName || 'BCL DIFC',
+                      ledgerId:       ledgerInfo2?.ledgerId   || 300000003259529,
+                      currency:       paymentCcy,
+                      accountingDate: payDate2,
+                      legalEntity:    legalEntityName || '',
+                      businessUnit:   buName || '',
+                      conversionRate: exRate,
+                      lines:          glLines,
+                      createdBy:      loginUser || 'SYSTEM',
+                    });
+                    if (glResult.success) glSuccess++;
+                    else glErrors.push(glResult.error || 'Unknown GL error');
+                  }
+                  if (glErrors.length > 0) {
+                    setStep(glStep, 'error', `${glErrors.length} GL error(s): ${glErrors[0]}`);
+                    message.warning('Payment created but GL posting had errors');
+                  } else {
+                    setStep(glStep, 'success', `${glSuccess} GL journal(s) posted`);
+                    message.success('Payment created, accounting done, and posted to GL!');
+                  }
+                }
+              } catch (acctErr: any) {
+                setStep(acctStep, 'error', acctErr.message ?? 'Accounting failed');
+                setStep(glStep, 'error', 'Skipped due to accounting error');
+                message.warning('Payment created but accounting failed: ' + (acctErr.message ?? 'Unknown error'));
+              }
+
               handleRefreshStatus();
 
             } finally {
