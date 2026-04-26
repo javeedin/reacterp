@@ -110,18 +110,22 @@ CREATE OR REPLACE PACKAGE BODY RR_MANAGE_JOURNALS_PKG AS
 
         CURSOR c_lines(p_je_header_id NUMBER) IS
             SELECT
-                LINE_ID,
-                JE_LINE_NUMBER  AS LINE_NUM,
-                ACCOUNT_COMBINATION AS ACCOUNT,
-                DESCRIPTION,
-                ENTERED_DR,
-                ENTERED_CR,
-                ACCOUNTED_DR,
-                ACCOUNTED_CR,
-                CURRENCY_CODE   AS CURRENCY
-            FROM RR_GL_JE_LINES_ALL
-            WHERE JE_HEADER_ID = p_je_header_id
-            ORDER BY JE_LINE_NUMBER;
+                l.LINE_ID,
+                l.JE_LINE_NUMBER       AS LINE_NUM,
+                l.ACCOUNT_COMBINATION  AS ACCOUNT,
+                l.DESCRIPTION,
+                l.ENTERED_DR,
+                l.ENTERED_CR,
+                l.ACCOUNTED_DR,
+                l.ACCOUNTED_CR,
+                l.CURRENCY_CODE        AS CURRENCY,
+                vsv.DESCRIPTION        AS ACCOUNT_DESCRIPTION
+            FROM RR_GL_JE_LINES_ALL l
+            LEFT JOIN RR_VALUE_SET_VALUES vsv
+                ON  vsv.VALUE_SET_CODE = 'BUIMERC_FIN_GLB_COA_ACCOUNT'
+                AND vsv.VALUE = TRIM(REGEXP_SUBSTR(l.ACCOUNT_COMBINATION, '[^-]+', 1, 4))
+            WHERE l.JE_HEADER_ID = p_je_header_id
+            ORDER BY l.JE_LINE_NUMBER;
 
     BEGIN
         v_count := get_journal_count(
@@ -174,15 +178,16 @@ CREATE OR REPLACE PACKAGE BODY RR_MANAGE_JOURNALS_PKG AS
 
             FOR r_line IN c_lines(r_header.JE_HEADER_ID) LOOP
                 APEX_JSON.OPEN_OBJECT;
-                APEX_JSON.WRITE('lineId',      r_line.LINE_ID);
-                APEX_JSON.WRITE('lineNum',     r_line.LINE_NUM);
-                APEX_JSON.WRITE('account',     r_line.ACCOUNT);
-                APEX_JSON.WRITE('description', r_line.DESCRIPTION);
-                APEX_JSON.WRITE('enteredDr',   r_line.ENTERED_DR);
-                APEX_JSON.WRITE('enteredCr',   r_line.ENTERED_CR);
-                APEX_JSON.WRITE('accountedDr', r_line.ACCOUNTED_DR);
-                APEX_JSON.WRITE('accountedCr', r_line.ACCOUNTED_CR);
-                APEX_JSON.WRITE('currency',    r_line.CURRENCY);
+                APEX_JSON.WRITE('lineId',             r_line.LINE_ID);
+                APEX_JSON.WRITE('lineNum',            r_line.LINE_NUM);
+                APEX_JSON.WRITE('account',            r_line.ACCOUNT);
+                APEX_JSON.WRITE('description',        r_line.DESCRIPTION);
+                APEX_JSON.WRITE('enteredDr',          r_line.ENTERED_DR);
+                APEX_JSON.WRITE('enteredCr',          r_line.ENTERED_CR);
+                APEX_JSON.WRITE('accountedDr',        r_line.ACCOUNTED_DR);
+                APEX_JSON.WRITE('accountedCr',        r_line.ACCOUNTED_CR);
+                APEX_JSON.WRITE('currency',           r_line.CURRENCY);
+                APEX_JSON.WRITE('accountDescription', r_line.ACCOUNT_DESCRIPTION);
                 APEX_JSON.CLOSE_OBJECT;
             END LOOP;
 
