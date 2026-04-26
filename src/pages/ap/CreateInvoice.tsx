@@ -2980,6 +2980,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       ]
     : [
         {
+          key: 'validate',
+          icon: <CheckSquareOutlined />,
+          label: isValidated ? 'Revalidate' : 'Validate',
+        },
+        { type: 'divider' as const },
+        {
           key: 'manageInstallments',
           icon: <ScheduleOutlined />,
           label: 'Manage Installments',
@@ -4552,7 +4558,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               Invoice Actions <DownOutlined style={{ fontSize: 10 }} />
             </Button>
           </Dropdown>
-          {!isReadOnly && !hasAnyPayment && !isPostedToGL && (
+          {!hasAnyPayment && !isPostedToGL && (
             <Button
               icon={<CheckSquareOutlined />}
               onClick={runValidation}
