@@ -1934,7 +1934,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       if (initialData.supplierId) formValues.supplierId = initialData.supplierId;
       if (initialData.invoiceNumber) formValues.invoiceNumber = initialData.invoiceNumber;
       if (initialData.invoiceAmount) formValues.invoiceAmount = initialData.invoiceAmount;
-      if (initialData.invoiceDate) formValues.invoiceDate = initialData.invoiceDate;
+      if (initialData.invoiceDate) {
+        formValues.invoiceDate = dayjs.isDayjs(initialData.invoiceDate)
+          ? initialData.invoiceDate
+          : dayjs(initialData.invoiceDate as string, ['YYYY-MM-DD', 'DD-MMM-YYYY', 'DD MMM YYYY']);
+      } else if (!initialData.invoiceId) {
+        formValues.invoiceDate = dayjs();
+      }
       if (initialData.description) formValues.description = initialData.description;
       if (initialData.invoiceCurrency) formValues.invoiceCurrency = initialData.invoiceCurrency;
       if (initialData.businessUnit) formValues.businessUnit = initialData.businessUnit;

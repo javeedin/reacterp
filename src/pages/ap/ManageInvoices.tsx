@@ -1464,6 +1464,7 @@ const ManageInvoices: React.FC = () => {
                       labelCol={{ span: 8 }}
                       wrapperCol={{ span: 16 }}
                       labelAlign="right"
+                      initialValues={{ invoiceDate: dayjs() }}
                     >
                       <Row gutter={32}>
                         <Col span={12}>
