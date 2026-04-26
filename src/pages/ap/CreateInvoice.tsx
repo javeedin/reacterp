@@ -3076,14 +3076,22 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   // Persist validation status to RR_AP_INVOICES_ALL.VALIDATION_STATUS
   const saveValidationStatus = async (invoiceId: number, status: string) => {
+    const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/${invoiceId}/validation-status`;
+    console.log(`[ValidationStatus] PUT ${url}`, { VALIDATION_STATUS: status });
     try {
-      await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/invoices/${invoiceId}/validation-status`, {
+      const res = await fetch(url, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ VALIDATION_STATUS: status }),
       });
+      const text = await res.text();
+      console.log(`[ValidationStatus] Response ${res.status}:`, text);
+      if (!res.ok) {
+        console.warn(`[ValidationStatus] PUT failed (${res.status}): ${text}`);
+        message.warning(`Validation status not saved to DB (HTTP ${res.status}) — check APEX handler`);
+      }
     } catch (e) {
-      console.warn('saveValidationStatus failed:', e);
+      console.warn('[ValidationStatus] PUT error:', e);
     }
   };
 
