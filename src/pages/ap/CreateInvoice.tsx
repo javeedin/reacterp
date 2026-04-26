@@ -3842,11 +3842,6 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       await form.validateFields(coreFields);
       const values = { ...headerValues, ...form.getFieldsValue(true) };
       if (!validateTally()) return false;
-      // In edit mode: show preview modal so user can inspect full URL + JSON before sending
-      if (savedInvoiceId) {
-        handleApiPreview(values);
-        return false;
-      }
       const result = await saveInvoiceWithInstallments(values);
       if (result) message.success('Invoice saved successfully');
       return Boolean(result);
