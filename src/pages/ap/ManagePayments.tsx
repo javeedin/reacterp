@@ -476,6 +476,10 @@ const ManagePayments: React.FC = () => {
   const [businessUnitsListLoading, setBusinessUnitsListLoading] = useState(false);
   const [selectedBuLegalEntityName, setSelectedBuLegalEntityName] = useState<string>('');
 
+  // Payment date filter state
+  const [paymentDateMode, setPaymentDateMode]   = useState<string>('');
+  const [paymentDateRange, setPaymentDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
+
   const fetchBusinessUnits = async () => {
     setBusinessUnitsListLoading(true);
     try {
@@ -1144,6 +1148,24 @@ const ManagePayments: React.FC = () => {
     }
   };
 
+  // Resolve payment date mode → { dateFrom, dateTo } as 'YYYY-MM-DD' strings
+  const resolvePaymentDateRange = (): { dateFrom: string | null; dateTo: string | null } => {
+    const today = dayjs().format('YYYY-MM-DD');
+    const pastDays = (n: number) => dayjs().subtract(n, 'day').format('YYYY-MM-DD');
+    switch (paymentDateMode) {
+      case 'today':  return { dateFrom: today, dateTo: today };
+      case 'past7':  return { dateFrom: pastDays(7),  dateTo: today };
+      case 'past10': return { dateFrom: pastDays(10), dateTo: today };
+      case 'past15': return { dateFrom: pastDays(15), dateTo: today };
+      case 'past30': return { dateFrom: pastDays(30), dateTo: today };
+      case 'past60': return { dateFrom: pastDays(60), dateTo: today };
+      case 'custom': return paymentDateRange
+        ? { dateFrom: paymentDateRange[0].format('YYYY-MM-DD'), dateTo: paymentDateRange[1].format('YYYY-MM-DD') }
+        : { dateFrom: null, dateTo: null };
+      default: return { dateFrom: null, dateTo: null };
+    }
+  };
+
   // Search payments from API
   const handleSearch = async (values: any = {}) => {
     setLoading(true);
@@ -1151,6 +1173,8 @@ const ManagePayments: React.FC = () => {
     debugLog('INFO', `══════════════════════════════════════════════════`);
     debugLog('INFO', `Starting payment search [Source: ${source}]`);
     debugLog('INFO', `Search filters: ${JSON.stringify(values, null, 2)}`);
+
+    const { dateFrom, dateTo } = resolvePaymentDateRange();
 
     try {
       let apiUrl: string;
@@ -1164,6 +1188,8 @@ const ManagePayments: React.FC = () => {
         if (values.paymentStatus) params.append('payment_status', values.paymentStatus);
         if (values.businessUnit) params.append('business_unit', values.businessUnit);
         if (values.supplierNumber) params.append('supplier_number', values.supplierNumber);
+        if (dateFrom) params.append('payment_date_from', dateFrom);
+        if (dateTo)   params.append('payment_date_to',   dateTo);
 
         const queryString = params.toString();
         apiUrl = queryString ? `${APEX_PAYMENTS_URL}?${queryString}` : APEX_PAYMENTS_URL;
@@ -1235,7 +1261,16 @@ const ManagePayments: React.FC = () => {
         debugLog('RESPONSE', `Sample record: CheckId=${firstItem.CheckId}, PaymentNumber=${firstItem.PaymentNumber}, Payee=${firstItem.Payee}, Amount=${firstItem.PaymentAmount}, Status=${firstItem.PaymentStatus}`);
 
         const mapper = useApex ? mapApexToPaymentRecord : mapFusionToPaymentRecord;
-        const mappedPayments = items.map(mapper);
+        let mappedPayments = items.map(mapper);
+        // Client-side date filtering (guards against APEX endpoints that don't support date params yet)
+        if (dateFrom || dateTo) {
+          mappedPayments = mappedPayments.filter(p => {
+            const d = toApiDate(p.paymentDate || '');
+            if (dateFrom && d < dateFrom) return false;
+            if (dateTo   && d > dateTo)   return false;
+            return true;
+          });
+        }
         setPayments(mappedPayments);
         debugLog('MAPPED', `Mapped ${mappedPayments.length} payment records to UI model`);
         setLastApiResponse(`Success: ${mappedPayments.length} of ${totalCount} payments returned`);
@@ -1263,6 +1298,8 @@ const ManagePayments: React.FC = () => {
   // Reset search form
   const handleReset = () => {
     form.resetFields();
+    setPaymentDateMode('');
+    setPaymentDateRange(null);
   };
 
   // Get payment status tag
@@ -2012,7 +2049,21 @@ const ManagePayments: React.FC = () => {
                       size="small"
                     >
                       <Row gutter={24}>
+                        {/* ── Column 1 ─────────────────────────────────── */}
                         <Col span={8}>
+                          <Form.Item label="Business Unit" name="businessUnit">
+                            <Select
+                              placeholder="Select Business Unit"
+                              allowClear
+                              showSearch
+                              optionFilterProp="children"
+                              loading={businessUnitsListLoading}
+                            >
+                              {businessUnitsList.map(bu => (
+                                <Option key={bu.id} value={bu.name}>{bu.name}</Option>
+                              ))}
+                            </Select>
+                          </Form.Item>
                           <Form.Item
                             label={<><span style={{ color: REDWOOD.primary }}>**</span> Supplier or Party</>}
                             name="supplierOrParty"
@@ -2033,11 +2084,32 @@ const ManagePayments: React.FC = () => {
                           <Form.Item name="supplierNumber" hidden>
                             <Input />
                           </Form.Item>
-                          <Form.Item
-                            label={<><span style={{ color: REDWOOD.primary }}>**</span> Payment Date</>}
-                            name="paymentDate"
-                          >
-                            <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
+                          {/* Smart Payment Date filter */}
+                          <Form.Item label={<><span style={{ color: REDWOOD.primary }}>**</span> Payment Date</>}>
+                            <Select
+                              placeholder="Select date range"
+                              allowClear
+                              value={paymentDateMode || undefined}
+                              onChange={(v) => { setPaymentDateMode(v ?? ''); setPaymentDateRange(null); }}
+                              style={{ width: '100%' }}
+                              options={[
+                                { value: 'today',  label: 'Today' },
+                                { value: 'past7',  label: 'Past 7 days' },
+                                { value: 'past10', label: 'Past 10 days' },
+                                { value: 'past15', label: 'Past 15 days' },
+                                { value: 'past30', label: 'Past 30 days' },
+                                { value: 'past60', label: 'Past 60 days' },
+                                { value: 'custom', label: 'Custom range…' },
+                              ]}
+                            />
+                            {paymentDateMode === 'custom' && (
+                              <DatePicker.RangePicker
+                                style={{ width: '100%', marginTop: 4 }}
+                                format="DD-MMM-YYYY"
+                                value={paymentDateRange}
+                                onChange={(v) => setPaymentDateRange(v as [dayjs.Dayjs, dayjs.Dayjs] | null)}
+                              />
+                            )}
                           </Form.Item>
                           <Form.Item
                             label={<><span style={{ color: REDWOOD.primary }}>**</span> Payment Number</>}
@@ -2045,13 +2117,8 @@ const ManagePayments: React.FC = () => {
                           >
                             <Input placeholder="Enter payment number" />
                           </Form.Item>
-                          <Form.Item
-                            label={<><span style={{ color: REDWOOD.primary }}>**</span> Disbursement Bank Account</>}
-                            name="disbursementBankAccount"
-                          >
-                            <Select placeholder="Select Bank Account" allowClear />
-                          </Form.Item>
                         </Col>
+                        {/* ── Column 2 ─────────────────────────────────── */}
                         <Col span={8}>
                           <Form.Item
                             label={<><span style={{ color: REDWOOD.primary }}>**</span> Payment Type</>}
@@ -2076,20 +2143,14 @@ const ManagePayments: React.FC = () => {
                               <Option value="Stopped">Stopped</Option>
                             </Select>
                           </Form.Item>
-                          <Form.Item label="Business Unit" name="businessUnit">
-                            <Select
-                              placeholder="Select Business Unit"
-                              allowClear
-                              showSearch
-                              optionFilterProp="children"
-                              loading={businessUnitsListLoading}
-                            >
-                              {businessUnitsList.map(bu => (
-                                <Option key={bu.id} value={bu.name}>{bu.name}</Option>
-                              ))}
-                            </Select>
+                          <Form.Item
+                            label={<><span style={{ color: REDWOOD.primary }}>**</span> Disbursement Bank Account</>}
+                            name="disbursementBankAccount"
+                          >
+                            <Select placeholder="Select Bank Account" allowClear />
                           </Form.Item>
                         </Col>
+                        {/* ── Column 3 ─────────────────────────────────── */}
                         <Col span={8}>
                           <Text type="secondary" style={{ fontSize: 11 }}>
                             ** At least one is required
