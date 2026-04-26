@@ -245,25 +245,29 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CANCEL_INVOICE_PKG AS
         v_liability_dist  VARCHAR2(200);
 
         -- SLA reversal variables
-        v_sla_header_id   NUMBER;
-        v_sla_period      VARCHAR2(20);
-        v_sla_body        CLOB;
-        v_sla_status      NUMBER;
-        v_sla_response    CLOB;
-        v_sla_created     BOOLEAN := FALSE;
-        v_line_cursor     SYS_REFCURSOR;
-        v_line_num        NUMBER := 0;
-        v_line_type       VARCHAR2(2);
-        v_acct_class      VARCHAR2(50);
-        v_acct_combo      VARCHAR2(200);
-        v_entered_dr      NUMBER;
-        v_entered_cr      NUMBER;
-        v_accted_dr       NUMBER;
-        v_accted_cr       NUMBER;
-        v_line_desc       VARCHAR2(200);
-        v_line_ccy        VARCHAR2(10);
-        v_lines_json      CLOB := '';
-        v_comma           VARCHAR2(1) := '';
+        v_sla_header_id      NUMBER;
+        v_sla_ledger_id      NUMBER;
+        v_sla_ledger_name    VARCHAR2(200);
+        v_sla_ledger_ccy     VARCHAR2(15);
+        v_cancel_header_id   NUMBER;
+        v_sla_period         VARCHAR2(20);
+        v_sla_body           CLOB;
+        v_sla_status         NUMBER;
+        v_sla_response       CLOB;
+        v_sla_created        BOOLEAN := FALSE;
+        v_line_cursor        SYS_REFCURSOR;
+        v_line_num           NUMBER := 0;
+        v_line_type          VARCHAR2(2);
+        v_acct_class         VARCHAR2(50);
+        v_acct_combo         VARCHAR2(200);
+        v_entered_dr         NUMBER;
+        v_entered_cr         NUMBER;
+        v_accted_dr          NUMBER;
+        v_accted_cr          NUMBER;
+        v_line_desc          VARCHAR2(200);
+        v_line_ccy           VARCHAR2(10);
+        v_lines_json         CLOB := '';
+        v_comma              VARCHAR2(1) := '';
     BEGIN
         -- 1. Re-check eligibility
         v_elig := check_eligibility(p_invoice_id);
@@ -285,9 +289,12 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CANCEL_INVOICE_PKG AS
         FROM   RR_AP_INVOICES_ALL
         WHERE  invoice_id = p_invoice_id;
 
-        -- 3. Check if a POSTED SLA header exists for this invoice
+        -- 3. Check if a POSTED SLA header exists — also get ledger from it
         BEGIN
-            SELECT header_id INTO v_sla_header_id
+            SELECT header_id, ledger_id, ledger_name,
+                   NVL(currency_code, 'AED')
+            INTO   v_sla_header_id, v_sla_ledger_id, v_sla_ledger_name,
+                   v_sla_ledger_ccy
             FROM   RR_SLA_ACCOUNTING_HEADERS
             WHERE  source_id    = p_invoice_id
               AND  source_table = 'AP_INVOICES'
@@ -300,8 +307,8 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CANCEL_INVOICE_PKG AS
         -- 4. If POSTED SLA exists, build reversal payload and call create_accounting
         IF v_sla_header_id IS NOT NULL THEN
 
-            -- Derive period from accounting date
-            v_sla_period := TO_CHAR(v_acct_date, 'Mon-RRRR');
+            -- Period based on cancellation date (SYSDATE), format Mon-YY (e.g. Apr-26)
+            v_sla_period := TO_CHAR(SYSDATE, 'Mon-RR');
 
             -- Collect original lines, swap DR/CR
             OPEN v_line_cursor FOR
@@ -348,18 +355,18 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CANCEL_INVOICE_PKG AS
                     || '"sourceNumber":"' || REPLACE(v_invoice_number,'"','\"') || '",'
                     || '"sourceType":"'   || REPLACE(v_invoice_type,  '"','\"') || '",'
                     || '"eventTypeCode":"INVOICE_CANCELLED",'
-                    || '"eventDate":"'    || TO_CHAR(SYSDATE, 'YYYY-MM-DD')     || '",'
-                    || '"accountingDate":"' || TO_CHAR(SYSDATE, 'YYYY-MM-DD')  || '",'
-                    || '"periodName":"'   || v_sla_period  || '",'
-                    || '"ledgerId":300000003259529,'
-                    || '"ledgerName":"BCL DIFC",'
-                    || '"currencyCode":"' || v_currency    || '",'
-                    || '"ledgerCurrency":"AED",'
+                    || '"eventDate":"'      || TO_CHAR(SYSDATE, 'YYYY-MM-DD')      || '",'
+                    || '"accountingDate":"' || TO_CHAR(SYSDATE, 'YYYY-MM-DD')      || '",'
+                    || '"periodName":"'     || v_sla_period                         || '",'
+                    || '"ledgerId":'        || NVL(TO_CHAR(v_sla_ledger_id), 'null') || ','
+                    || '"ledgerName":"'     || REPLACE(NVL(v_sla_ledger_name,''), '"','\"') || '",'
+                    || '"currencyCode":"'   || v_currency                           || '",'
+                    || '"ledgerCurrency":"' || v_sla_ledger_ccy                     || '",'
                     || '"exchangeRate":1,'
                     || '"exchangeRateType":"Corporate",'
-                    || '"businessUnit":"' || REPLACE(v_business_unit,'"','\"') || '",'
+                    || '"businessUnit":"'   || REPLACE(v_business_unit,'"','\"')    || '",'
                     || '"description":"Invoice Cancellation - ' || REPLACE(v_invoice_number,'"','\"') || '",'
-                    || '"createdBy":"'    || REPLACE(p_cancelled_by,'"','\"')  || '"'
+                    || '"createdBy":"'      || REPLACE(p_cancelled_by,'"','\"')     || '"'
                     || '},"lines":[' || v_lines_json || ']}';
 
                 RR_SLA_PKG.create_accounting(
@@ -368,6 +375,24 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CANCEL_INVOICE_PKG AS
                     p_response  => v_sla_response
                 );
                 v_sla_created := (v_sla_status IN (200, 201));
+
+                -- Auto-post the cancellation reversal immediately
+                IF v_sla_created THEN
+                    BEGIN
+                        v_cancel_header_id := TO_NUMBER(JSON_VALUE(v_sla_response, '$.headerId'));
+                        IF v_cancel_header_id IS NOT NULL THEN
+                            UPDATE RR_SLA_ACCOUNTING_HEADERS
+                            SET    accounting_status = 'POSTED',
+                                   posting_status    = 'POSTED',
+                                   posted_date       = SYSDATE,
+                                   posted_by         = p_cancelled_by,
+                                   gl_batch_name     = 'CANCEL-' || p_invoice_id
+                                                       || '-' || TO_CHAR(SYSDATE,'YYYYMMDD')
+                            WHERE  header_id = v_cancel_header_id;
+                        END IF;
+                    EXCEPTION WHEN OTHERS THEN NULL;  -- non-critical; reversal still created
+                    END;
+                END IF;
             END IF;
 
         ELSE

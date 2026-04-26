@@ -82,7 +82,7 @@ dayjs.extend(customParseFormat);
 import * as XLSX from 'xlsx';
 import type { ColumnsType } from 'antd/es/table';
 import { APEX_DB_CONFIG } from '../../config/api.config';
-import { fetchLedgerByBusinessUnit, checkAccountingExists, getAccounting } from '../../services/sla.service';
+import { fetchLedgerByBusinessUnit, checkAccountingExists, getAccounting, getLinesByHeaderId } from '../../services/sla.service';
 import { searchCombinations, type DistCombination } from '../../services/distCombinations.service';
 import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
 import { useAuth } from '../../context/AuthContext';
@@ -568,6 +568,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [slaHeaderId, setSlaHeaderId]         = useState<number | null>(null);
   // Seed from initialData so locks are instant (fetchSlaHeader will confirm/override)
   const [slaStatus, setSlaStatus]             = useState<string | null>(initialData?.accountingStatus ?? null);
+  // Cancellation reversal accounting
+  const [cancelSlaHeaderId, setCancelSlaHeaderId] = useState<number | null>(null);
+  const [cancelSlaLines,     setCancelSlaLines]    = useState<any[]>([]);
+  const [cancelSlaStatus,    setCancelSlaStatus]   = useState<string | null>(null);
   const [slaPostingStatus, setSlaPostingStatus] = useState<string | null>(null);
   const [slaLines, setSlaLines]               = useState<any[]>([]);
   const [slaModalVisible, setSlaModalVisible] = useState(false);
@@ -986,24 +990,27 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const fetchSlaHeader = useCallback(async (invoiceId: number) => {
     setSlaFetching(true);
     try {
-      // Use the /exists endpoint for reliable status check on open/re-open
+      // ── 1. Invoice creation accounting ──────────────────────────────────
       const existsResult = await checkAccountingExists('AP_INVOICES', invoiceId, 'AP_INVOICE_CREATION');
-      if (existsResult.exists) {
+      if (existsResult.exists && existsResult.headerId) {
         setSlaHeaderId(existsResult.headerId);
         setSlaStatus(existsResult.accountingStatus);
         setSlaPostingStatus(existsResult.postingStatus);
-        // Also fetch full header (lines, GL batch IDs) from the accounting endpoint
+        // Fetch lines for the creation header specifically (not the most-recent catch-all)
+        try {
+          const linesData = await getLinesByHeaderId(existsResult.headerId);
+          setSlaLines(linesData.items || []);
+        } catch { /* non-critical */ }
+        // Fetch GL batch IDs (only meaningful before cancellation; getAccounting returns most-recent)
         try {
           const fullData = await getAccounting('AP_INVOICES', invoiceId);
-          if (fullData.found) {
-            setSlaLines(fullData.lines || []);
+          if (fullData.found && fullData.headerId === existsResult.headerId) {
             setSlaGlBatchId(fullData.glBatchId ?? null);
             setSlaGlBatchName(fullData.glBatchName ?? null);
             setSlaGlHeaderId(fullData.glHeaderId ?? null);
           }
         } catch { /* non-critical */ }
       } else {
-        // Reset SLA state if no accounting found (e.g. re-opened a different invoice)
         setSlaHeaderId(null);
         setSlaStatus(null);
         setSlaPostingStatus(null);
@@ -1012,6 +1019,22 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         setSlaGlBatchName(null);
         setSlaGlHeaderId(null);
       }
+
+      // ── 2. Cancellation reversal accounting (if any) ──────────────────
+      try {
+        const cancelResult = await checkAccountingExists('AP_INVOICES', invoiceId, 'INVOICE_CANCELLED');
+        if (cancelResult.exists && cancelResult.headerId) {
+          setCancelSlaHeaderId(cancelResult.headerId);
+          setCancelSlaStatus(cancelResult.accountingStatus);
+          const cancelLines = await getLinesByHeaderId(cancelResult.headerId);
+          setCancelSlaLines(cancelLines.items || []);
+        } else {
+          setCancelSlaHeaderId(null);
+          setCancelSlaStatus(null);
+          setCancelSlaLines([]);
+        }
+      } catch { /* non-critical — cancellation accounting is optional */ }
+
     } catch { /* silent */ }
     finally {
       setSlaFetching(false);
@@ -9894,26 +9917,54 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   ),
                   children: (
                     <>
-                      {/* Header info */}
-                      <Descriptions size="small" column={3} bordered style={{ marginBottom: 16 }}>
-                        <Descriptions.Item label="Header ID">{slaHeaderId}</Descriptions.Item>
-                        <Descriptions.Item label="Status">
-                          <Tag color={slaStatus === 'POSTED' ? 'green' : slaStatus === 'ERROR' ? 'red' : 'orange'}>{slaStatus}</Tag>
-                        </Descriptions.Item>
-                        <Descriptions.Item label="Posting Status">
-                          <Tag color={slaPostingStatus === 'POSTED' ? 'green' : 'default'}>{slaPostingStatus}</Tag>
-                        </Descriptions.Item>
-                        {slaGlBatchId && <Descriptions.Item label="GL Batch ID">{slaGlBatchId}</Descriptions.Item>}
-                        {slaGlBatchName && <Descriptions.Item label="GL Batch Name" span={2}>{slaGlBatchName}</Descriptions.Item>}
-                        {slaGlHeaderId && <Descriptions.Item label="GL Header ID">{slaGlHeaderId}</Descriptions.Item>}
-                      </Descriptions>
+                      {/* ── Original Invoice Accounting ── */}
+                      <div style={{ marginBottom: cancelSlaLines.length > 0 ? 24 : 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                          <Text strong style={{ fontSize: 13 }}>Invoice Accounting</Text>
+                          <Tag color={slaStatus === 'POSTED' ? 'green' : slaStatus === 'ERROR' ? 'red' : 'orange'} style={{ fontSize: 11 }}>
+                            {slaStatus === 'POSTED' ? 'POSTED' : slaStatus === 'DRAFT' ? 'DRAFT' : slaStatus ?? 'Unknown'}
+                          </Tag>
+                          <Text type="secondary" style={{ fontSize: 11 }}>Header ID: {slaHeaderId}</Text>
+                          {slaGlBatchName && <Text type="secondary" style={{ fontSize: 11 }}>· Batch: {slaGlBatchName}</Text>}
+                        </div>
+                        <Descriptions size="small" column={3} bordered style={{ marginBottom: 10 }}>
+                          <Descriptions.Item label="Status">
+                            <Tag color={slaStatus === 'POSTED' ? 'green' : slaStatus === 'ERROR' ? 'red' : 'orange'}>{slaStatus}</Tag>
+                          </Descriptions.Item>
+                          <Descriptions.Item label="Posting Status">
+                            <Tag color={slaPostingStatus === 'POSTED' ? 'green' : 'default'}>{slaPostingStatus}</Tag>
+                          </Descriptions.Item>
+                          {slaGlBatchId && <Descriptions.Item label="GL Batch ID">{slaGlBatchId}</Descriptions.Item>}
+                          {slaGlBatchName && <Descriptions.Item label="GL Batch Name" span={2}>{slaGlBatchName}</Descriptions.Item>}
+                          {slaGlHeaderId && <Descriptions.Item label="GL Header ID">{slaGlHeaderId}</Descriptions.Item>}
+                        </Descriptions>
+                        {renderLinesTable(slaLines)}
+                        {slaStatus === 'POSTED' && cancelSlaLines.length === 0 && (
+                          <div style={{ marginTop: 10, padding: '8px 12px', background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 6, fontSize: 12, color: '#52c41a' }}>
+                            <CheckCircleOutlined style={{ marginRight: 6 }} />
+                            Posted to GL on {slaGlBatchName || `Batch ID ${slaGlBatchId}`}. No further changes allowed.
+                          </div>
+                        )}
+                      </div>
 
-                      {renderLinesTable(slaLines)}
-
-                      {slaStatus === 'POSTED' && (
-                        <div style={{ marginTop: 12, padding: '8px 12px', background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 6, fontSize: 12, color: '#52c41a' }}>
-                          <CheckCircleOutlined style={{ marginRight: 6 }} />
-                          This accounting is <strong>locked</strong> — posted to GL on {slaGlBatchName || `Batch ID ${slaGlBatchId}`}. No further changes are allowed.
+                      {/* ── Cancellation Reversal Accounting ── */}
+                      {cancelSlaLines.length > 0 && (
+                        <div>
+                          <div style={{ height: 1, background: '#f0f0f0', marginBottom: 16 }} />
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                            <Text strong style={{ fontSize: 13, color: REDWOOD.error }}>Cancellation Reversal</Text>
+                            <Tag color={cancelSlaStatus === 'POSTED' ? 'green' : cancelSlaStatus === 'ERROR' ? 'red' : 'orange'} style={{ fontSize: 11 }}>
+                              {cancelSlaStatus ?? 'Unknown'}
+                            </Tag>
+                            <Text type="secondary" style={{ fontSize: 11 }}>Header ID: {cancelSlaHeaderId}</Text>
+                          </div>
+                          {renderLinesTable(cancelSlaLines)}
+                          {cancelSlaStatus === 'POSTED' && (
+                            <div style={{ marginTop: 10, padding: '8px 12px', background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 6, fontSize: 12, color: REDWOOD.error }}>
+                              <StopOutlined style={{ marginRight: 6 }} />
+                              Invoice cancelled — reversal posted to GL and locked.
+                            </div>
+                          )}
                         </div>
                       )}
                     </>

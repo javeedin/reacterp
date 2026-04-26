@@ -200,6 +200,15 @@ export async function getAccounting(
   return apexGet<SlaGetResult>(url);
 }
 
+/**
+ * Fetch SLA lines for a specific header ID via sla/journals/lines.
+ * Returns { items: SlaLine[] }.
+ */
+export async function getLinesByHeaderId(headerId: number): Promise<{ items: SlaLine[] }> {
+  const url = `${BASE}/sla/journals/lines?headerId=${headerId}&limit=500`;
+  return apexGet<{ items: SlaLine[] }>(url);
+}
+
 // ── Ledger lookup ──────────────────────────────────────────────────────────
 
 export interface LedgerInfo {
