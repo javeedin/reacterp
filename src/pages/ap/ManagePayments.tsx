@@ -75,13 +75,15 @@ import { ORACLE_FUSION_CONFIG, APEX_DB_CONFIG } from '../../config/api.config';
 import {
   checkAccountingExists,
   createAccounting,
+  postToLedger,
   fetchLedgerByBusinessUnit,
   buildApPaymentSlaPayloads,
   getAccounting,
   getLinesByHeaderId,
   checkGLJournalExists,
+  derivePeriodName,
 } from '../../services/sla.service';
-import type { SlaGetResult } from '../../services/sla.service';
+import type { SlaGetResult, SlaCreatePayload } from '../../services/sla.service';
 import { eventTypeToRef5 } from '../../services/glPosting.service';
 
 const { Content } = Layout;
@@ -691,7 +693,7 @@ const ManagePayments: React.FC = () => {
   // ── Save payment ────────────────────────────────────────────────────────────
   const [savePaymentLoading, setSavePaymentLoading] = useState(false);
 
-  const handleSavePayment = async (mode: 'close' | 'another') => {
+  const handleSavePayment = async (mode: 'close' | 'another' | 'stay') => {
     try {
       await createPaymentForm.validateFields();
     } catch {
@@ -833,7 +835,7 @@ const ManagePayments: React.FC = () => {
         setInvoicesToPay([]);
         setSelectedBuLegalEntityName('');
         setCreatePaymentCurrency('AED');
-      } else {
+      } else if (mode === 'another') {
         createPaymentForm.resetFields();
         setInvoicesToPay([]);
         setSelectedBuLegalEntityName('');
@@ -841,6 +843,7 @@ const ManagePayments: React.FC = () => {
         setCreatePaymentActiveTab('paymentDetails');
         message.info('Form cleared — ready to create another payment');
       }
+      // mode === 'stay': keep form as-is, already showed success message above
     } catch (err: any) {
       message.error(`Failed to save payment: ${err?.message ?? 'Unknown error'}`);
     } finally {
@@ -1713,6 +1716,8 @@ const ManagePayments: React.FC = () => {
     const steps = [
       { step: 0, label: 'Re-check eligibility',    status: 'idle' as const },
       { step: 1, label: 'Void payment',             status: 'idle' as const },
+      { step: 2, label: 'Reverse accounting',       status: 'idle' as const },
+      { step: 3, label: 'Post reversal to GL',      status: 'idle' as const },
     ];
     setVoidStepStatus(steps);
     setVoidSubmitting(true);
@@ -1737,9 +1742,10 @@ const ManagePayments: React.FC = () => {
 
       // Step 1: void the payment
       setStep(1, 'running');
+      const voidDate = values.voidDate ? values.voidDate.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD');
       const voidBody = {
         CheckId:       voidTargetPayment.checkId,
-        VoidDate:      values.voidDate ? values.voidDate.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD'),
+        VoidDate:      voidDate,
         VoidedBy:      null,
         StopReason:    values.voidReason || 'Payment Voided',
         StopReference: voidTargetPayment.paymentNumber?.toString() ?? null,
@@ -1758,15 +1764,184 @@ const ManagePayments: React.FC = () => {
       setStep(1, 'success',
         `Voided — New balance: ${voidData.newBalance != null ? Number(voidData.newBalance).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—'}`
       );
-      message.success('Payment voided successfully');
+
+      // Step 2: Reverse accounting
+      setStep(2, 'running');
+      let reversalHeaderId: number | null = null;
+      try {
+        const acctData = await getAccounting('AP_PAYMENTS', voidTargetPayment.checkId);
+        if (!acctData.found || !acctData.headerId || !acctData.lines?.length) {
+          setStep(2, 'success', 'No accounting found — skipped');
+          setStep(3, 'success', 'Skipped');
+          message.success('Payment voided successfully');
+        } else if (acctData.accountingStatus !== 'POSTED' && acctData.accountingStatus !== 'FINAL') {
+          setStep(2, 'success', `Accounting status is ${acctData.accountingStatus} — skipped`);
+          setStep(3, 'success', 'Skipped');
+          message.success('Payment voided successfully');
+        } else {
+          // Build reversal SLA payload (swap DR ↔ CR on every line)
+          const buName   = voidTargetPayment.businessUnit || '';
+          const ledger   = await fetchLedgerByBusinessUnit(buName);
+          const exRate   = (voidTargetPayment.conversionRate && voidTargetPayment.conversionRate > 0) ? voidTargetPayment.conversionRate : 1;
+          const ccy      = voidTargetPayment.paymentCurrency || 'AED';
+          const voidPeriod = derivePeriodName(new Date(voidDate));
+
+          const reversePayload: SlaCreatePayload = {
+            header: {
+              moduleName:       'AP',
+              sourceTable:      'AP_PAYMENTS',
+              sourceId:         voidTargetPayment.checkId,
+              sourceNumber:     String(voidTargetPayment.paymentNumber || voidTargetPayment.checkId),
+              sourceType:       'PAYMENT',
+              eventTypeCode:    'AP_PAYMENT_VOID',
+              eventDate:        voidDate,
+              accountingDate:   voidDate,
+              periodName:       voidPeriod,
+              ledgerId:         ledger?.ledgerId   ?? 300000003259529,
+              ledgerName:       ledger?.ledgerName ?? 'BCL DIFC',
+              currencyCode:     ccy,
+              ledgerCurrency:   'AED',
+              exchangeRate:     exRate,
+              exchangeRateType: 'Corporate',
+              businessUnit:     buName || undefined,
+              description:      `AP Payment Void — ${voidTargetPayment.paymentNumber}`,
+              createdBy:        'SYSTEM',
+            },
+            lines: acctData.lines.map((l, idx) => ({
+              lineNumber:         idx + 1,
+              lineType:           l.lineType === 'DR' ? 'CR' : 'DR',
+              accountingClass:    l.accountingClass,
+              accountCombination: l.accountCombination,
+              enteredDr:          l.lineType === 'DR' ? 0 : (l.enteredCr || 0),
+              enteredCr:          l.lineType === 'DR' ? (l.enteredDr || 0) : 0,
+              accountedDr:        l.lineType === 'DR' ? 0 : Math.round((l.accountedCr || 0) * 100) / 100,
+              accountedCr:        l.lineType === 'DR' ? Math.round((l.accountedDr || 0) * 100) / 100 : 0,
+              currencyCode:       l.currencyCode || ccy,
+              exchangeRate:       exRate,
+              description:        `Void — ${l.description || ''}`,
+            })),
+          };
+
+          const reversalResult = await createAccounting(reversePayload);
+          reversalHeaderId = reversalResult.headerId;
+          setStep(2, 'success', `Reversal created — Header #${reversalResult.headerId}, ${reversalResult.lineCount} line(s)`);
+
+          // Step 3: Post reversal to GL
+          setStep(3, 'running');
+          const ref5 = eventTypeToRef5('AP_PAYMENT_VOID');
+          const glExists = await checkGLJournalExists(
+            String(voidTargetPayment.paymentNumber || ''),
+            String(voidTargetPayment.checkId),
+            ref5,
+          );
+
+          let retBatchId: number | null  = glExists.batchId;
+          let retHeaderId: number | null = glExists.headerId;
+          const batchName = `${ref5}-${voidTargetPayment.paymentNumber}-${voidDate.replace(/-/g, '')}-${Date.now().toString().slice(-6)}`;
+
+          if (glExists.exists && glExists.status === 'P') {
+            setStep(3, 'success', 'GL reversal already posted');
+          } else if (glExists.exists && glExists.batchId) {
+            const putRes  = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/${glExists.batchId}/post`, {
+              method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: '{}',
+            });
+            if (!putRes.ok) throw new Error(`GL post HTTP ${putRes.status}`);
+            setStep(3, 'success', `GL reversal batch #${glExists.batchId} posted`);
+          } else {
+            const rate = exRate;
+            const totalDr = reversePayload.lines.reduce((s, l) => s + (l.enteredDr || 0), 0);
+            const totalCr = reversePayload.lines.reduce((s, l) => s + (l.enteredCr || 0), 0);
+            const glPayload = {
+              batch: {
+                batchName,
+                batchDescription:  `AP-PAYMENT-VOID – ${voidTargetPayment.paymentNumber}`,
+                ledgerName:         ledger?.ledgerName ?? 'BCL DIFC',
+                ledgerId:           ledger?.ledgerId   ?? 300000003259529,
+                status:             'NEW',
+                accountingPeriod:   voidPeriod,
+                controlTotal:       totalDr,
+                runningTotalDr:     totalDr,
+                runningTotalCr:     totalCr,
+                createdBy:          'SYSTEM',
+              },
+              headers: [{
+                headerName:             batchName,
+                description:            `AP Payment Void — ${voidTargetPayment.paymentNumber}`,
+                ledgerName:             ledger?.ledgerName ?? 'BCL DIFC',
+                ledgerId:               ledger?.ledgerId   ?? 300000003259529,
+                currency:               ccy,
+                periodName:             voidPeriod,
+                effectiveDate:          voidDate,
+                conversionType:         'Corporate',
+                currencyConversionRate: rate,
+                defaultEffectiveDate:   voidDate,
+                status:                 'NEW',
+                runningTotalDr:         totalDr,
+                runningTotalCr:         totalCr,
+                createdBy:              'SYSTEM',
+                lines: reversePayload.lines.map(l => ({
+                  enteredDr:                  l.enteredDr || null,
+                  enteredCr:                  l.enteredCr || null,
+                  accountedDr:                l.accountedDr || null,
+                  accountedCr:                l.accountedCr || null,
+                  statAmount:                 null,
+                  description:                l.description || '',
+                  currencyCode:               l.currencyCode || ccy,
+                  currencyConversionDate:     voidDate,
+                  currencyConversionRate:     rate,
+                  userCurrencyConversionType: 'User',
+                  accountCombination:         l.accountCombination || '',
+                  chartOfAccountsName:        'Chart of Accounts',
+                  reference1:                 String(voidTargetPayment.paymentNumber || ''),
+                  reference2:                 String(voidTargetPayment.checkId || ''),
+                  reference3:                 l.accountingClass || null,
+                  reference4:                 buName || null,
+                  reference5:                 ref5,
+                  createdBy:                  'SYSTEM',
+                })),
+              }],
+            };
+
+            const glRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/journals/create`, {
+              method:  'POST',
+              headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+              body:    JSON.stringify(glPayload),
+            });
+            const glData = await glRes.json();
+            if (!glRes.ok) throw new Error(glData?.message || `GL create HTTP ${glRes.status}`);
+
+            retBatchId  = glData.jeBatchId  ?? glData.batchId  ?? null;
+            retHeaderId = glData.jeHeaderId ?? glData.headerId ?? null;
+
+            if (retBatchId) {
+              const putRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/${retBatchId}/post`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: '{}',
+              });
+              if (!putRes.ok) throw new Error(`GL post HTTP ${putRes.status}`);
+            }
+            setStep(3, 'success', `GL reversal posted — Batch #${retBatchId}`);
+          }
+
+          // Stamp the reversal SLA header
+          if (reversalHeaderId) {
+            await postToLedger(reversalHeaderId, retBatchId ?? 0, batchName, retHeaderId ?? 0, 'SYSTEM');
+          }
+
+          message.success('Payment voided and accounting reversed successfully');
+        }
+      } catch (acctErr: any) {
+        setStep(2, 'error', acctErr.message ?? 'Accounting reversal failed');
+        setStep(3, 'error', 'Skipped due to reversal error');
+        message.warning('Payment voided but accounting reversal failed: ' + acctErr.message);
+      }
 
       // Refresh the payments list after a short delay
       setTimeout(() => {
         setVoidModalOpen(false);
         voidForm.resetFields();
         setVoidStepStatus([]);
-        handleSearch(); // re-run the search to refresh the grid
-      }, 1800);
+        handleSearch();
+      }, 2200);
 
     } finally {
       setVoidSubmitting(false);
@@ -2361,19 +2536,32 @@ const ManagePayments: React.FC = () => {
                     </Tooltip>
                     <Button
                       size="small"
+                      onClick={() => {
+                        setCreatePaymentTabOpen(false);
+                        setActiveTab('search');
+                        createPaymentForm.resetFields();
+                        setInvoicesToPay([]);
+                        setSelectedBuLegalEntityName('');
+                        setCreatePaymentCurrency('AED');
+                      }}
+                    >
+                      Close
+                    </Button>
+                    <Button
+                      size="small"
                       loading={savePaymentLoading}
                       onClick={() => handleSavePayment('another')}
                     >
-                      Save and Create Another
+                      Save and Create
                     </Button>
                     <Button
                       size="small"
                       type="primary"
                       loading={savePaymentLoading}
                       style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
-                      onClick={() => handleSavePayment('close')}
+                      onClick={() => handleSavePayment('stay')}
                     >
-                      Save and Close
+                      Save
                     </Button>
                   </Space>
                 }
@@ -2909,7 +3097,7 @@ const ManagePayments: React.FC = () => {
               locale={{ emptyText: 'Select a supplier and click Add Invoices to add unpaid invoices' }}
               summary={() => invoicesToPay.length === 0 ? null : (
                 <Table.Summary.Row style={{ background: '#f0f2f5', fontWeight: 600 }}>
-                  <Table.Summary.Cell index={0} colSpan={4} align="right">
+                  <Table.Summary.Cell index={0} colSpan={6} align="right">
                     <span style={{ fontSize: 12, color: '#555' }}>Totals</span>
                   </Table.Summary.Cell>
                   <Table.Summary.Cell index={1} align="right">
@@ -2944,6 +3132,25 @@ const ManagePayments: React.FC = () => {
                   dataIndex: 'invoiceDate',
                   key: 'invoiceDate',
                   width: 110,
+                },
+                {
+                  title: 'Currency',
+                  dataIndex: 'currency',
+                  key: 'currency',
+                  width: 75,
+                  render: (v: string) => <Tag style={{ fontSize: 11, padding: '0 4px' }}>{v || 'AED'}</Tag>,
+                },
+                {
+                  title: 'Conv. Rate',
+                  key: 'convRate',
+                  width: 90,
+                  align: 'right' as const,
+                  render: (_: any, record: PaymentInvoice) => {
+                    const ccy = record.currency || 'AED';
+                    if (ccy === 'AED') return <span style={{ color: '#bbb' }}>—</span>;
+                    const rate = watchedConversionRate;
+                    return rate ? <span style={{ fontSize: 11 }}>{Number(rate).toFixed(4)}</span> : <span style={{ color: '#bbb' }}>—</span>;
+                  },
                 },
                 {
                   title: 'Description',
