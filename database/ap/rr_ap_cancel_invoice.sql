@@ -18,9 +18,9 @@ DECLARE
     EXCEPTION WHEN OTHERS THEN NULL;   -- ORA-01430: column already exists
     END;
 BEGIN
-    add_col('canceled_flag',     'VARCHAR2(1)  DEFAULT ''N''');
-    add_col('cancellation_date', 'DATE');
-    add_col('cancelled_by',      'VARCHAR2(100)');
+    add_col('canceled_flag',  'VARCHAR2(1)  DEFAULT ''N''');
+    add_col('canceled_date', 'DATE');
+    add_col('canceled_by',   'VARCHAR2(100)');
 END;
 /
 
@@ -360,10 +360,10 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_CANCEL_INVOICE_PKG AS
 
         -- 5. Cancel the invoice
         UPDATE RR_AP_INVOICES_ALL
-        SET    canceled_flag     = 'Y',
-               paid_status       = 'Cancelled',
-               cancellation_date = SYSDATE,
-               cancelled_by      = p_cancelled_by
+        SET    canceled_flag = 'Y',
+               paid_status   = 'Cancelled',
+               canceled_date = SYSDATE,
+               canceled_by   = p_cancelled_by
         WHERE  invoice_id = p_invoice_id;
 
         COMMIT;
