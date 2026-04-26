@@ -578,6 +578,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [slaCreating, setSlaCreating]               = useState(false);
   const [slaPosting, setSlaPosting]                 = useState(false);
   const [cancelSlaPosting, setCancelSlaPosting]     = useState(false);
+  const [cancelPostError,  setCancelPostError]      = useState<string | null>(null);
   const [slaFetching, setSlaFetching]               = useState(false);
   const [slaGlBatchId, setSlaGlBatchId]       = useState<number | null>(null);
   const [slaGlBatchName, setSlaGlBatchName]   = useState<string | null>(null);
@@ -1794,6 +1795,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     if (cancelSlaStatus === 'POSTED') { message.warning('Cancellation journal already posted.'); return; }
 
     setCancelSlaPosting(true);
+    setCancelPostError(null);
     try {
       const invoiceNumber = form.getFieldValue('invoiceNumber');
       const invoiceId     = savedInvoiceId || initialData?.invoiceId;
@@ -1830,6 +1832,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             body: JSON.stringify({ headerId: cancelSlaHeaderId, postedBy: 'user', glBatchId: glExists.batchId, glBatchName: batchName, glHeaderId: glExists.headerId }),
           });
           setCancelSlaStatus('POSTED');
+          setCancelPostError(null);
           message.success('Cancellation journal already posted. SLA updated.');
           return;
         }
@@ -1847,6 +1850,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           body: JSON.stringify({ headerId: cancelSlaHeaderId, postedBy: 'user', glBatchId: glExists.batchId, glBatchName: batchName, glHeaderId: glExists.headerId }),
         });
         setCancelSlaStatus('POSTED');
+        setCancelPostError(null);
         message.success('Cancellation journal posted to GL successfully.');
         return;
       }
@@ -1921,9 +1925,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       });
 
       setCancelSlaStatus('POSTED');
+      setCancelPostError(null);
       message.success('Cancellation journal posted to GL successfully.');
     } catch (err: any) {
-      message.error(`Post Cancellation failed: ${err.message}`);
+      const msg = err.message || 'Unknown error during cancellation posting';
+      setCancelPostError(msg);
+      message.error(`Post Cancellation failed: ${msg}`);
     } finally {
       setCancelSlaPosting(false);
     }
@@ -10273,6 +10280,15 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                             <Text type="secondary" style={{ fontSize: 11 }}>Header ID: {cancelSlaHeaderId}</Text>
                           </div>
                           {renderLinesTable(cancelSlaLines)}
+                          {cancelPostError && (
+                            <Alert
+                              type="error"
+                              showIcon
+                              style={{ marginTop: 10 }}
+                              message="Post Cancellation to GL Failed"
+                              description={cancelPostError}
+                            />
+                          )}
                           {cancelSlaStatus === 'POSTED' && (
                             <div style={{ marginTop: 10, padding: '8px 12px', background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 6, fontSize: 12, color: REDWOOD.error }}>
                               <StopOutlined style={{ marginRight: 6 }} />
