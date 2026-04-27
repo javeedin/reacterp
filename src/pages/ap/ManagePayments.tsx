@@ -607,6 +607,7 @@ const ManagePayments: React.FC = () => {
   const [apiTestLoading, setApiTestLoading] = useState<Record<number, boolean>>({});
   const [apiTestResults, setApiTestResults] = useState<Record<number, { status: 'success' | 'error'; data: any }>>({});
   const [apiStep1CheckId, setApiStep1CheckId] = useState<number | null>(null);
+  const [apiStep2InstMap, setApiStep2InstMap] = useState<Record<number, number>>({});  // invoiceId → installmentId
 
   // Convert form date value (dayjs | string | null) → 'YYYY-MM-DD'
   const formDateStr = (val: any): string => {
@@ -4649,6 +4650,8 @@ const ManagePayments: React.FC = () => {
                         });
                         const d = await putRes.json().catch(() => ({}));
                         results.push({ instId, amountApplied, newUnpaid, newStatus, status: putRes.ok ? 'ok' : 'error', data: d });
+                        // Capture first successful installment ID for Step 3
+                        if (putRes.ok) setApiStep2InstMap(prev => ({ ...prev, [inv.invoiceId]: Number(instId) }));
                       }
                       setApiTestResults(prev => ({ ...prev, [stepKey]: { status: results.every(r => r.status === 'ok') ? 'success' : 'error', data: results } }));
                     } catch (e: any) {
@@ -4703,7 +4706,7 @@ const ManagePayments: React.FC = () => {
             InvoiceId:                 inv.invoiceId,
             InvoiceBusinessUnit:       fv.businessUnit || null,
             InvoiceNumber:             inv.invoiceNumber,
-            InstallmentNumber:         null,
+            InstallmentNumber:         apiStep2InstMap[inv.invoiceId] ?? null,
             AmountPaidPaymentCurrency: inv.applyAmount,
             AmountPaidInvoiceCurrency: inv.applyAmount,
             InvoicePaymentAmount:      inv.applyAmount,
