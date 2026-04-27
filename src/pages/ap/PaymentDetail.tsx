@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import dayjs from 'dayjs';
 import {
   Card,
@@ -127,6 +127,7 @@ interface RelatedInvoice {
   discountTaken: number;
   invoiceCurrency: string;
   invoicePaymentStatus: string;
+  liabilityDistribution: string;
 }
 
 interface PaymentDetailProps {
@@ -169,14 +170,16 @@ import { ORACLE_FUSION_CONFIG, APEX_DB_CONFIG } from '../../config/api.config';
 import {
   checkAccountingExists,
   createAccounting,
+  postToLedger,
   fetchLedgerByBusinessUnit,
   buildApPaymentSlaPayloads,
   getAccounting,
   getLinesByHeaderId,
   getAccountingLinesBySourceNumber,
   checkGLJournalExists,
+  derivePeriodName,
 } from '../../services/sla.service';
-import type { SlaExistsResult, SlaGetResult } from '../../services/sla.service';
+import type { SlaExistsResult, SlaGetResult, SlaCreatePayload } from '../../services/sla.service';
 import { eventTypeToRef5 } from '../../services/glPosting.service';
 
 // Fusion API config - direct URL
@@ -195,18 +198,34 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
 
   // ── Void Payment state ────────────────────────────────────────────────────
   const [voidForm] = Form.useForm();
-  const [voidModalOpen, setVoidModalOpen]           = useState(false);
-  const [showApiSection, setShowApiSection]         = useState(false);
-  const [voidEligibility, setVoidEligibility]       = useState<{ eligible: boolean; errors: string[] } | null>(null);
-  const [voidEligLoading, setVoidEligLoading]       = useState(false);
-  const [voidEligApiRunning, setVoidEligApiRunning] = useState(false);
-  const [voidEligApiResult, setVoidEligApiResult]   = useState<any>(null);
-  const [voidPutApiRunning, setVoidPutApiRunning]   = useState(false);
-  const [voidPutResult, setVoidPutResult]           = useState<any>(null);
-  const [voidSubmitting, setVoidSubmitting]         = useState(false);
-  const [voidStepStatus, setVoidStepStatus]       = useState<
-    { step: number; label: string; status: 'idle' | 'running' | 'success' | 'error'; detail?: string }[]
-  >([]);
+  const [voidModalOpen, setVoidModalOpen] = useState(false);
+
+  type VoidStepStatus = 'idle' | 'running' | 'success' | 'error';
+  interface VoidStepState { status: VoidStepStatus; response?: any; error?: string }
+  const VOID_STEP_KEYS = ['eligibility', 'void', 'sla', 'gl_create', 'gl_post', 'sla_stamp'] as const;
+  type VoidStepKey = typeof VOID_STEP_KEYS[number];
+  const initVoidSteps = (): Record<VoidStepKey, VoidStepState> => ({
+    eligibility: { status: 'idle' }, void: { status: 'idle' }, sla: { status: 'idle' },
+    gl_create: { status: 'idle' }, gl_post: { status: 'idle' }, sla_stamp: { status: 'idle' },
+  });
+  const [voidStepMap, setVoidStepMap] = useState<Record<VoidStepKey, VoidStepState>>(initVoidSteps());
+  const [voidRunning, setVoidRunning] = useState(false);
+  const [voidDone, setVoidDone] = useState(false);
+
+  interface VoidCtx {
+    voidDate: string; paymentNum: string; buName: string; ccy: string;
+    exRate: number; voidPeriod: string; ledgerId: number; ledgerName: string;
+    reverseLines: any[]; slaHeaderId: number | null;
+    glBatchId: number | null; glHeaderId: number | null; batchName: string;
+  }
+  const voidCtxRef = useRef<VoidCtx>({
+    voidDate: '', paymentNum: '', buName: '', ccy: 'AED', exRate: 1,
+    voidPeriod: '', ledgerId: 300000003259529, ledgerName: 'BCL DIFC',
+    reverseLines: [], slaHeaderId: null, glBatchId: null, glHeaderId: null, batchName: '',
+  });
+
+  const setVoidStep = (key: VoidStepKey, upd: Partial<VoidStepState>) =>
+    setVoidStepMap(prev => ({ ...prev, [key]: { ...prev[key], ...upd } }));
   // ─────────────────────────────────────────────────────────────────────────
 
   // ── Create Accounting state ───────────────────────────────────────────────
@@ -294,6 +313,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
         discountTaken: item.DiscountTaken || 0,
         invoiceCurrency: item.InvoiceCurrency || '',
         invoicePaymentStatus: item.InvoicePaymentStatus || '',
+        liabilityDistribution: item.LiabilityDistribution || '',
       })));
     } catch (error) {
       console.error('Error fetching related invoices:', error);
@@ -303,152 +323,176 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
     }
   };
 
-  // Open void modal — auto-runs eligibility check
-  const openVoidModal = async () => {
-    setVoidEligibility(null);
-    setVoidEligApiResult(null);
-    setVoidPutResult(null);
-    setShowApiSection(false);
-    setVoidStepStatus([]);
+  const openVoidModal = () => {
+    setVoidStepMap(initVoidSteps());
+    setVoidDone(false);
+    voidCtxRef.current = {
+      voidDate: '', paymentNum: '', buName: '', ccy: 'AED', exRate: 1,
+      voidPeriod: '', ledgerId: 300000003259529, ledgerName: 'BCL DIFC',
+      reverseLines: [], slaHeaderId: null, glBatchId: null, glHeaderId: null, batchName: '',
+    };
     voidForm.setFieldsValue({ voidDate: dayjs(), voidReason: '' });
     setVoidModalOpen(true);
-    setVoidEligLoading(true);
-    try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/${payment.checkId}/void-eligibility`;
-      const res = await fetch(url, { headers: { Accept: 'application/json' } });
-      if (!res.ok) {
-        const err = { eligible: false, errors: [`API returned HTTP ${res.status}`] };
-        setVoidEligibility(err);
-        setVoidEligApiResult(err);
-      } else {
-        const data = await res.json();
-        setVoidEligibility({ ...data, errors: Array.isArray(data.errors) ? data.errors : [] });
-        setVoidEligApiResult(data);
-      }
-    } catch (e: any) {
-      setVoidEligibility({ eligible: false, errors: [e?.message ?? 'Network error'] });
-    } finally {
-      setVoidEligLoading(false);
-    }
   };
 
-  const runVoidPutApi = async () => {
-    setVoidPutApiRunning(true);
-    setVoidPutResult(null);
-    try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/void`;
-      const body = {
-        CheckId:       payment.checkId,
-        VoidDate:      dayjs().format('YYYY-MM-DD'),
-        VoidedBy:      null,
-        StopReason:    'Payment Voided',
-        StopReference: payment.paymentNumber?.toString() ?? null,
-      };
-      const res = await fetch(url, {
-        method:  'PUT',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body:    JSON.stringify(body),
-      });
-      const text = await res.text();
+  // ── Auto void: runs all 6 steps in sequence ──────────────────────────────
+  const handleVoidAuto = async (values: any) => {
+    setVoidRunning(true);
+    setVoidDone(false);
+    setVoidStepMap(initVoidSteps());
+
+    const ok = async (key: VoidStepKey, fn: () => Promise<boolean>): Promise<boolean> => {
+      setVoidStep(key, { status: 'running', response: undefined, error: undefined });
       try {
-        const data = JSON.parse(text);
-        setVoidPutResult(data);
-      } catch {
-        setVoidPutResult({ error: `HTTP ${res.status} — non-JSON response`, raw: text.slice(0, 500) });
+        const success = await fn();
+        return success;
+      } catch (e: any) {
+        setVoidStep(key, { status: 'error', error: e.message });
+        return false;
       }
-    } catch (e: any) {
-      const msg: string = e?.message ?? 'Network error';
-      if (msg === 'Failed to fetch' || msg.includes('NetworkError') || msg.includes('CORS')) {
-        setVoidPutResult({
-          error: 'Failed to fetch',
-          hint: 'CORS or network error. Likely causes: (1) ORDS handler missing OWA_UTIL.MIME_HEADER call — re-run ap_void_payment_ords_rest.sql on the DB, (2) CORS not enabled for this ORDS module, (3) VPN/network connectivity.',
-          url: `${APEX_DB_CONFIG.baseUrl}/ap/payments/void`,
-        });
-      } else {
-        setVoidPutResult({ error: msg });
-      }
-    } finally {
-      setVoidPutApiRunning(false);
-    }
-  };
+    };
 
-  const runVoidEligibilityApi = async () => {
-    setVoidEligApiRunning(true);
-    try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/${payment.checkId}/void-eligibility`;
-      const res = await fetch(url, { headers: { Accept: 'application/json' } });
-      if (!res.ok) {
-        const err = { error: `HTTP ${res.status}`, eligible: false, errors: [`API returned HTTP ${res.status}`] };
-        setVoidEligApiResult(err);
-        setVoidEligibility({ eligible: false, errors: err.errors });
-      } else {
-        const data = await res.json();
-        setVoidEligApiResult(data);
-        setVoidEligibility({ ...data, errors: Array.isArray(data.errors) ? data.errors : [] });
-      }
-    } catch (e: any) {
-      setVoidEligApiResult({ error: e?.message ?? 'Network error' });
-    } finally {
-      setVoidEligApiRunning(false);
-    }
-  };
+    // Step 1 — Eligibility
+    const s1 = await ok('eligibility', async () => {
+      const res  = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/payments/${payment.checkId}/void-eligibility`, { headers: { Accept: 'application/json' } });
+      const data = await res.json();
+      if (!data.eligible) { setVoidStep('eligibility', { status: 'error', response: data, error: data.errors?.[0] ?? 'Not eligible' }); return false; }
+      setVoidStep('eligibility', { status: 'success', response: data });
+      return true;
+    });
+    if (!s1) { setVoidRunning(false); return; }
 
-  const handleVoidSubmit = async (values: any) => {
-    const steps = [
-      { step: 0, label: 'Re-check eligibility', status: 'idle' as const },
-      { step: 1, label: 'Void payment',          status: 'idle' as const },
-    ];
-    setVoidStepStatus(steps);
-    setVoidSubmitting(true);
-    const setStep = (step: number, status: 'running' | 'success' | 'error', detail?: string) =>
-      setVoidStepStatus(prev => prev.map(s => s.step === step ? { ...s, status, detail } : s));
-    try {
-      setStep(0, 'running');
-      const eligRes = await fetch(
-        `${APEX_DB_CONFIG.baseUrl}/ap/payments/${payment.checkId}/void-eligibility`,
-        { headers: { Accept: 'application/json' } }
-      );
-      const eligData = eligRes.ok ? await eligRes.json() : { eligible: false, errors: [`HTTP ${eligRes.status}`] };
-      if (!eligData.eligible) {
-        setStep(0, 'error', (eligData.errors ?? [])[0] ?? 'Not eligible');
-        message.error('Payment is not eligible for void');
-        return;
-      }
-      setStep(0, 'success', 'Eligible for void');
+    // Step 2 — Void Payment
+    const s2 = await ok('void', async () => {
+      const voidDate   = values.voidDate ? values.voidDate.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD');
+      const paymentNum = String(payment.paymentNumber || payment.checkId);
+      const buName     = payment.businessUnit || '';
+      const ccy        = payment.paymentCurrency || 'AED';
+      const exRate     = (payment.conversionRate && payment.conversionRate > 0) ? payment.conversionRate : 1;
+      const voidPeriod = derivePeriodName(new Date(voidDate));
+      const ledger     = await fetchLedgerByBusinessUnit(buName);
+      voidCtxRef.current = { ...voidCtxRef.current, voidDate, paymentNum, buName, ccy, exRate, voidPeriod,
+        ledgerId: ledger?.ledgerId ?? 300000003259529, ledgerName: ledger?.ledgerName ?? 'BCL DIFC' };
+      const body = { CheckId: payment.checkId, VoidDate: voidDate, VoidedBy: null,
+        StopReason: values.voidReason || 'Payment Voided', StopReference: paymentNum };
+      const res  = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/payments/void`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body) });
+      const data = await res.json();
+      if (data.status === 'error' || !res.ok) { setVoidStep('void', { status: 'error', response: data, error: data.message ?? `HTTP ${res.status}` }); return false; }
+      setVoidStep('void', { status: 'success', response: data });
+      return true;
+    });
+    if (!s2) { setVoidRunning(false); return; }
 
-      setStep(1, 'running');
-      const voidBody = {
-        CheckId:       payment.checkId,
-        VoidDate:      values.voidDate ? values.voidDate.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD'),
-        VoidedBy:      null,
-        StopReason:    values.voidReason || 'Payment Voided',
-        StopReference: payment.paymentNumber?.toString() ?? null,
-      };
-      const voidRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/payments/void`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify(voidBody),
+    // Step 3 — Create SLA Reversal
+    const s3 = await ok('sla', async () => {
+      const ctx  = voidCtxRef.current;
+      const bank = bankAccounts.find(b => b.bankAccountName === payment.disbursementBankAccount);
+      const cashClearingAcct = bank?.cashClearingAccountCombination || '';
+      if (!cashClearingAcct) throw new Error(`No cash clearing account for bank: ${payment.disbursementBankAccount || '(none)'}`);
+      if (!relatedInvoices.length) throw new Error('No related invoices found');
+      const reverseLines: any[] = [];
+      relatedInvoices.forEach((inv, idx) => {
+        const amt = Number(inv.amountPaidPaymentCurrency) || 0;
+        reverseLines.push({ lineNumber: idx*2+1, lineType: 'DR', accountingClass: 'CASH_CLEARING',
+          accountCombination: cashClearingAcct, enteredDr: amt, enteredCr: 0,
+          accountedDr: Math.round(amt*ctx.exRate*100)/100, accountedCr: 0,
+          currencyCode: ctx.ccy, exchangeRate: ctx.exRate, sourceLineNumber: idx*2+1,
+          description: `Void Cash Clearing – Payment ${ctx.paymentNum} / Invoice ${inv.invoiceNumber}` });
+        reverseLines.push({ lineNumber: idx*2+2, lineType: 'CR', accountingClass: 'LIABILITY',
+          accountCombination: inv.liabilityDistribution || '', enteredDr: 0, enteredCr: amt,
+          accountedDr: 0, accountedCr: Math.round(amt*ctx.exRate*100)/100,
+          currencyCode: ctx.ccy, exchangeRate: ctx.exRate, sourceLineNumber: idx*2+2,
+          description: `Void AP Liability – Payment ${ctx.paymentNum} / Invoice ${inv.invoiceNumber}` });
       });
-      const voidData = await voidRes.json();
-      setVoidPutResult(voidData);
-      if (voidData.status === 'error' || !voidRes.ok) {
-        setStep(1, 'error', voidData.message ?? `HTTP ${voidRes.status}`);
-        message.error('Void failed: ' + (voidData.message ?? 'Unknown error'));
-        return;
+      voidCtxRef.current.reverseLines = reverseLines;
+      const payload: SlaCreatePayload = {
+        header: { moduleName: 'AP', sourceTable: 'AP_PAYMENTS', sourceId: payment.checkId,
+          sourceNumber: ctx.paymentNum, sourceType: 'PAYMENT', eventTypeCode: 'AP_PAYMENT_VOID',
+          eventDate: ctx.voidDate, accountingDate: ctx.voidDate, periodName: ctx.voidPeriod,
+          ledgerId: ctx.ledgerId, ledgerName: ctx.ledgerName, currencyCode: ctx.ccy,
+          ledgerCurrency: 'AED', exchangeRate: ctx.exRate, exchangeRateType: 'Corporate',
+          businessUnit: ctx.buName || undefined, description: `AP Payment Void — ${ctx.paymentNum}`, createdBy: 'SYSTEM' },
+        lines: reverseLines,
+      };
+      const result = await createAccounting(payload);
+      if ((result as any).status === 'error' || !(result.headerId > 0)) {
+        setVoidStep('sla', { status: 'error', response: result, error: (result as any).message ?? 'headerId missing' }); return false;
       }
-      setStep(1, 'success',
-        `Voided — New balance: ${voidData.newBalance != null ? Number(voidData.newBalance).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—'}`
-      );
-      message.success('Payment voided successfully');
-      setTimeout(() => {
-        setVoidModalOpen(false);
-        voidForm.resetFields();
-        setVoidStepStatus([]);
-        onClose(); // close the detail view so user sees refreshed list
-      }, 1800);
-    } finally {
-      setVoidSubmitting(false);
-    }
+      voidCtxRef.current.slaHeaderId = result.headerId;
+      setVoidStep('sla', { status: 'success', response: result });
+      return true;
+    });
+    if (!s3) { setVoidRunning(false); return; }
+
+    // Step 4 — Create GL Journal
+    const s4 = await ok('gl_create', async () => {
+      const ctx = voidCtxRef.current;
+      const ref5 = eventTypeToRef5('AP_PAYMENT_VOID');
+      const batchName = `${ref5}-${ctx.paymentNum}-${ctx.voidDate.replace(/-/g,'')}-${Date.now().toString().slice(-6)}`;
+      voidCtxRef.current.batchName = batchName;
+      const totalDr = ctx.reverseLines.reduce((s, l) => s + (l.enteredDr||0), 0);
+      const totalCr = ctx.reverseLines.reduce((s, l) => s + (l.enteredCr||0), 0);
+      const payload = {
+        batch: { batchName, batchDescription: `AP-PAYMENT-VOID – ${ctx.paymentNum}`,
+          ledgerName: ctx.ledgerName, ledgerId: ctx.ledgerId, status: 'NEW',
+          accountingPeriod: ctx.voidPeriod, controlTotal: totalDr,
+          runningTotalDr: totalDr, runningTotalCr: totalCr, batchSource: 'Payables', createdBy: 'SYSTEM' },
+        header: { ledgerId: ctx.ledgerId, ledgerName: ctx.ledgerName,
+          jeCategory: 'AP_PAYMENT_VOID', jeSource: 'Payables', periodName: ctx.voidPeriod,
+          journalName: batchName, description: `AP Payment Void — ${ctx.paymentNum}`,
+          currencyCode: ctx.ccy, currencyConversionType: 'User',
+          currencyConversionDate: ctx.voidDate, currencyConversionRate: ctx.exRate,
+          defaultEffectiveDate: ctx.voidDate, status: 'NEW',
+          runningTotalDr: totalDr, runningTotalCr: totalCr, createdBy: 'SYSTEM' },
+        lines: ctx.reverseLines.map(l => ({
+          enteredDr: l.enteredDr||null, enteredCr: l.enteredCr||null,
+          accountedDr: l.accountedDr||null, accountedCr: l.accountedCr||null,
+          statAmount: null, description: l.description||'', currencyCode: l.currencyCode||ctx.ccy,
+          currencyConversionDate: ctx.voidDate, currencyConversionRate: ctx.exRate,
+          userCurrencyConversionType: 'User', accountCombination: l.accountCombination||'',
+          chartOfAccountsName: 'Chart of Accounts',
+          reference1: ctx.paymentNum, reference2: String(payment.checkId),
+          reference3: l.accountingClass||null, reference4: ctx.buName||null,
+          reference5: ref5, createdBy: 'SYSTEM',
+        })),
+      };
+      const res  = await fetch(`${APEX_DB_CONFIG.baseUrl}/journals/create`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(payload) });
+      const data = await res.json();
+      if (!res.ok) { setVoidStep('gl_create', { status: 'error', response: data, error: data.message ?? `HTTP ${res.status}` }); return false; }
+      voidCtxRef.current.glBatchId  = data.jeBatchId  ?? data.batchId  ?? null;
+      voidCtxRef.current.glHeaderId = data.jeHeaderId ?? data.headerId ?? null;
+      setVoidStep('gl_create', { status: 'success', response: data });
+      return true;
+    });
+    if (!s4) { setVoidRunning(false); return; }
+
+    // Step 5 — Post GL Journal
+    const s5 = await ok('gl_post', async () => {
+      const ctx = voidCtxRef.current;
+      if (!ctx.glBatchId) throw new Error('GL Batch ID missing');
+      const res  = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/${ctx.glBatchId}/post`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: '{}' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.success === false) { setVoidStep('gl_post', { status: 'error', response: data, error: data.error ?? `HTTP ${res.status}` }); return false; }
+      setVoidStep('gl_post', { status: 'success', response: data });
+      return true;
+    });
+    if (!s5) { setVoidRunning(false); return; }
+
+    // Step 6 — Stamp SLA
+    await ok('sla_stamp', async () => {
+      const ctx = voidCtxRef.current;
+      if (!ctx.slaHeaderId) throw new Error('SLA Header ID missing');
+      const result = await postToLedger(ctx.slaHeaderId, ctx.glBatchId ?? 0, ctx.batchName, ctx.glHeaderId ?? 0, 'SYSTEM');
+      setVoidStep('sla_stamp', { status: 'success', response: result });
+      return true;
+    });
+
+    setVoidRunning(false);
+    setVoidDone(true);
+    fetchSlaStatus();
   };
 
   useEffect(() => {
@@ -1519,243 +1563,107 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
             <StopOutlined style={{ color: REDWOOD.error }} />
             <span>Void Payment</span>
             <Tag color="red" style={{ marginLeft: 4 }}>{payment.paymentNumber}</Tag>
-            <Tooltip title={showApiSection ? 'Hide APIs' : 'Show APIs'}>
-              <Button
-                size="small"
-                type={showApiSection ? 'primary' : 'text'}
-                icon={<ApiOutlined style={{ color: showApiSection ? '#fff' : REDWOOD.info }} />}
-                onClick={() => setShowApiSection(v => !v)}
-                style={{ marginLeft: 4 }}
-              />
-            </Tooltip>
           </Space>
         }
         open={voidModalOpen}
-        onCancel={() => { setVoidModalOpen(false); voidForm.resetFields(); setVoidStepStatus([]); setShowApiSection(false); }}
+        onCancel={() => { if (!voidRunning) { setVoidModalOpen(false); voidForm.resetFields(); } }}
         footer={null}
-        width={showApiSection ? 900 : 700}
+        width={760}
         destroyOnClose
+        styles={{ body: { maxHeight: '85vh', overflowY: 'auto' } }}
       >
-        <Spin spinning={voidEligLoading} tip="Checking eligibility...">
-          {/* Eligibility Banner */}
-          {voidEligibility && !voidEligLoading && (
-            <Alert
-              type={voidEligibility.eligible ? 'success' : 'error'}
-              showIcon
-              message={voidEligibility.eligible ? 'Payment is eligible for void' : 'Payment cannot be voided'}
-              description={
-                !voidEligibility.eligible && (voidEligibility.errors?.length ?? 0) > 0 ? (
-                  <ul style={{ margin: 0, paddingLeft: 16 }}>
-                    {voidEligibility.errors.map((e, i) => <li key={i}>{e}</li>)}
-                  </ul>
-                ) : null
-              }
-              style={{ marginBottom: 16 }}
+        <Form form={voidForm} layout="vertical" onFinish={handleVoidAuto} size="small">
+          <Row gutter={16}>
+            <Col span={8}>
+              <Form.Item label="Payment Number">
+                <Input value={payment.paymentNumber?.toString() ?? ''} readOnly style={{ background: '#f5f5f5' }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item label="Amount">
+                <Input value={`${payment.paymentAmount.toLocaleString('en-AE', { minimumFractionDigits: 2 })} ${payment.paymentCurrency}`} readOnly style={{ background: '#f5f5f5', fontWeight: 500 }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item label={<><span style={{ color: REDWOOD.primary }}>*</span> Void Date</>} name="voidDate" rules={[{ required: true, message: 'Required' }]}>
+                <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" disabled={voidRunning} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item label="Void Reason" name="voidReason" style={{ marginBottom: 12 }}>
+            <Input placeholder="Optional" disabled={voidRunning} />
+          </Form.Item>
+
+          {/* Related Invoices */}
+          <Table size="small" loading={loadingInvoices} dataSource={relatedInvoices} rowKey="key"
+            pagination={false} scroll={{ y: 100 }} style={{ marginBottom: 14 }}
+            locale={{ emptyText: 'No related invoices' }}
+            columns={[
+              { title: 'Invoice #', dataIndex: 'invoiceNumber', key: 'invoiceNumber', ellipsis: true },
+              { title: 'Amt Paid', dataIndex: 'amountPaidPaymentCurrency', key: 'amountPaidPaymentCurrency', align: 'right' as const, render: (v: number) => v?.toLocaleString('en-AE', { minimumFractionDigits: 2 }) ?? '—' },
+              { title: 'Liability Account', dataIndex: 'liabilityDistribution', key: 'liabilityDistribution', ellipsis: true },
+            ]}
+          />
+
+          {/* ── 6 Step Progress Cards (auto-run) ─────────────────────────── */}
+          {(() => {
+            const STEPS: { key: VoidStepKey; step: number; method: string; methodColor: string; label: string; url: string }[] = [
+              { key: 'eligibility', step: 1, method: 'GET',  methodColor: 'blue',   label: 'Check Void Eligibility',       url: `${APEX_DB_CONFIG.baseUrl}/ap/payments/${payment.checkId}/void-eligibility` },
+              { key: 'void',        step: 2, method: 'PUT',  methodColor: 'orange', label: 'Void Payment',                 url: `${APEX_DB_CONFIG.baseUrl}/ap/payments/void` },
+              { key: 'sla',         step: 3, method: 'POST', methodColor: 'green',  label: 'Create SLA Reversal Accounting', url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/create` },
+              { key: 'gl_create',   step: 4, method: 'POST', methodColor: 'green',  label: 'Create GL Journal',             url: `${APEX_DB_CONFIG.baseUrl}/journals/create` },
+              { key: 'gl_post',     step: 5, method: 'PUT',  methodColor: 'orange', label: 'Post GL Journal',               url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/:batchId/post` },
+              { key: 'sla_stamp',   step: 6, method: 'POST', methodColor: 'green',  label: 'Stamp SLA as POSTED',           url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/post` },
+            ];
+            return STEPS.map(s => {
+              const st = voidStepMap[s.key];
+              const borderColor = st.status === 'success' ? '#52c41a' : st.status === 'error' ? '#ff4d4f' : st.status === 'running' ? '#1677ff' : undefined;
+              const statusIcon = st.status === 'running' ? <LoadingOutlined style={{ color: '#1677ff' }} spin />
+                : st.status === 'success' ? <CheckCircleOutlined style={{ color: '#52c41a' }} />
+                : st.status === 'error'   ? <CloseCircleOutlined style={{ color: '#ff4d4f' }} /> : null;
+              return (
+                <Card key={s.key} size="small" style={{ marginBottom: 6, borderColor }}
+                  title={
+                    <Space size={4}>
+                      <Tag color={s.methodColor} style={{ minWidth: 44, textAlign: 'center', margin: 0 }}>{s.method}</Tag>
+                      <Text strong style={{ fontSize: 12 }}>Step {s.step}: {s.label}</Text>
+                      {statusIcon}
+                    </Space>
+                  }
+                >
+                  <code style={{ fontSize: 10, background: '#f0f0f0', padding: '2px 6px', borderRadius: 3, display: 'block', wordBreak: 'break-all', marginBottom: st.response || st.error ? 6 : 0 }}>{s.url}</code>
+                  {st.error && <Alert type="error" message={st.error} style={{ marginTop: 6, fontSize: 11 }} showIcon />}
+                  {st.response && (
+                    <pre style={{ fontSize: 10, background: '#1e1e1e', color: st.status === 'error' ? '#f48771' : '#b5cea8', padding: 6, borderRadius: 4, margin: '4px 0 0', maxHeight: 80, overflowY: 'auto' }}>
+                      {JSON.stringify(st.response, null, 2)}
+                    </pre>
+                  )}
+                </Card>
+              );
+            });
+          })()}
+
+          {/* Done confirmation */}
+          {voidDone && (
+            <Alert type="success" showIcon icon={<CheckCircleOutlined />}
+              message="Void Complete"
+              description="Payment voided — SLA reversal accounting created and posted to GL successfully."
+              style={{ marginTop: 8 }}
             />
           )}
 
-          <Form form={voidForm} layout="vertical" onFinish={handleVoidSubmit} size="small">
-            {/* Row 1: Payment Number | Void Date */}
-            <Row gutter={16}>
-              <Col span={12}>
-                <Form.Item label="Payment Number">
-                  <Input value={payment.paymentNumber?.toString() ?? ''} readOnly style={{ background: '#f5f5f5', color: '#555' }} />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item
-                  label={<><span style={{ color: REDWOOD.primary }}>*</span> Void Date</>}
-                  name="voidDate"
-                  rules={[{ required: true, message: 'Required' }]}
-                >
-                  <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
-                </Form.Item>
-              </Col>
-            </Row>
-
-            {/* Row 2: Payment Date | Accounting Date */}
-            <Row gutter={16}>
-              <Col span={12}>
-                <Form.Item label="Payment Date">
-                  <Input value={payment.paymentDate ?? ''} readOnly style={{ background: '#f5f5f5', color: '#555' }} />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item label="Accounting Date">
-                  <Input value={payment.accountingDate ?? ''} readOnly style={{ background: '#f5f5f5', color: '#555' }} />
-                </Form.Item>
-              </Col>
-            </Row>
-
-            {/* Row 3: Payment Amount | Void Reason */}
-            <Row gutter={16}>
-              <Col span={12}>
-                <Form.Item label="Payment Amount">
-                  <Input
-                    value={`${payment.paymentAmount.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${payment.paymentCurrency}`}
-                    readOnly
-                    style={{ background: '#f5f5f5', color: '#555', fontWeight: 500 }}
-                  />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item label="Void Reason" name="voidReason">
-                  <Input placeholder="Enter void reason (optional)" />
-                </Form.Item>
-              </Col>
-            </Row>
-
-            {/* Related Invoices */}
-            <Divider style={{ fontSize: 12, margin: '4px 0 10px' }}>
-              Related Invoices
-            </Divider>
-            <Table
-              size="small"
-              loading={loadingInvoices}
-              dataSource={relatedInvoices}
-              rowKey="key"
-              pagination={false}
-              scroll={{ y: 140 }}
-              style={{ marginBottom: 16 }}
-              locale={{ emptyText: loadingInvoices ? 'Loading...' : 'No related invoices found' }}
-              columns={[
-                { title: 'Invoice #', dataIndex: 'invoiceNumber', key: 'invoiceNumber', width: 140, ellipsis: true },
-                {
-                  title: 'Invoice Amount', dataIndex: 'invoiceAmount', key: 'invoiceAmount', width: 130, align: 'right' as const,
-                  render: (v: number) => v != null ? v.toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—',
-                },
-                {
-                  title: 'Amt Paid', dataIndex: 'amountPaidInvoiceCurrency', key: 'amountPaidInvoiceCurrency', width: 120, align: 'right' as const,
-                  render: (v: number) => v != null ? v.toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—',
-                },
-                { title: 'Currency', dataIndex: 'invoiceCurrency', key: 'invoiceCurrency', width: 80 },
-                {
-                  title: 'Status', dataIndex: 'invoicePaymentStatus', key: 'invoicePaymentStatus', width: 100,
-                  render: (s: string) => s ? <Tag color={s === 'Voided' ? 'red' : 'blue'}>{s}</Tag> : null,
-                },
-              ]}
-            />
-
-            {/* Step Status Panel */}
-            {voidStepStatus.length > 0 && (
-              <div style={{ marginBottom: 16, background: '#fafafa', border: '1px solid #e8e8e8', borderRadius: 6, padding: '10px 14px' }}>
-                {voidStepStatus.map(s => {
-                  const icon =
-                    s.status === 'running' ? <LoadingOutlined style={{ color: REDWOOD.info }} spin /> :
-                    s.status === 'success' ? <CheckCircleOutlined style={{ color: REDWOOD.success }} /> :
-                    s.status === 'error'   ? <CloseCircleOutlined style={{ color: REDWOOD.error }} /> :
-                    <span style={{ display: 'inline-block', width: 14, height: 14, borderRadius: '50%', background: '#d9d9d9', verticalAlign: 'middle' }} />;
-                  const textColor =
-                    s.status === 'success' ? REDWOOD.success :
-                    s.status === 'error'   ? REDWOOD.error   :
-                    s.status === 'running' ? REDWOOD.info    : '#6B6B6B';
-                  return (
-                    <div key={s.step} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 4 }}>
-                      <span style={{ marginTop: 2 }}>{icon}</span>
-                      <div>
-                        <Text style={{ fontSize: 12, color: textColor }}>
-                          <strong>Step {s.step}:</strong> {s.label}
-                        </Text>
-                        {s.detail && <div><Text type="secondary" style={{ fontSize: 11 }}>{s.detail}</Text></div>}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* ── Inline API Reference Panel ─────────────────────────────── */}
-            {showApiSection && (
-              <div style={{ marginBottom: 16 }}>
-                <Divider style={{ fontSize: 12, margin: '8px 0 10px' }}>
-                  API Reference
-                </Divider>
-
-                {/* GET eligibility */}
-                <div style={{ border: '1px solid #d9d9d9', borderRadius: 6, padding: '10px 12px', marginBottom: 10, background: '#fafafa' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <Space size={6}>
-                      <Tag color="blue" style={{ margin: 0 }}>GET</Tag>
-                      <Text strong style={{ fontSize: 12 }}>Check Void Eligibility</Text>
-                    </Space>
-                    <Button
-                      size="small"
-                      type="primary"
-                      icon={voidEligApiRunning ? <LoadingOutlined spin /> : <PlayCircleOutlined />}
-                      loading={voidEligApiRunning}
-                      onClick={runVoidEligibilityApi}
-                    >
-                      Run
-                    </Button>
-                  </div>
-                  <code style={{ fontSize: 11, background: '#e8f5e9', padding: '3px 8px', borderRadius: 4, display: 'block', wordBreak: 'break-all', marginBottom: 8 }}>
-                    {APEX_DB_CONFIG.baseUrl}/ap/payments/{payment.checkId}/void-eligibility
-                  </code>
-                  {voidEligApiResult && (
-                    <pre style={{ fontSize: 10, background: '#1e1e1e', color: '#d4d4d4', padding: 8, borderRadius: 4, maxHeight: 140, overflowY: 'auto', margin: 0 }}>
-                      {JSON.stringify(voidEligApiResult, null, 2)}
-                    </pre>
-                  )}
-                </div>
-
-                {/* PUT void */}
-                <div style={{ border: '1px solid #d9d9d9', borderRadius: 6, padding: '10px 12px', background: '#fafafa' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <Space size={6}>
-                      <Tag color="orange" style={{ margin: 0 }}>PUT</Tag>
-                      <Text strong style={{ fontSize: 12 }}>Execute Void</Text>
-                    </Space>
-                    <Button
-                      size="small"
-                      type="primary"
-                      danger
-                      icon={voidPutApiRunning ? <LoadingOutlined spin /> : <PlayCircleOutlined />}
-                      loading={voidPutApiRunning}
-                      onClick={runVoidPutApi}
-                    >
-                      Run
-                    </Button>
-                  </div>
-                  <code style={{ fontSize: 11, background: '#fff3e0', padding: '3px 8px', borderRadius: 4, display: 'block', wordBreak: 'break-all', marginBottom: 8 }}>
-                    {APEX_DB_CONFIG.baseUrl}/ap/payments/void
-                  </code>
-                  <Text type="secondary" style={{ fontSize: 11 }}>Request body:</Text>
-                  <pre style={{ fontSize: 10, background: '#1e1e1e', color: '#d4d4d4', padding: 8, borderRadius: 4, margin: '4px 0', maxHeight: 100, overflowY: 'auto' }}>
-                    {JSON.stringify({ CheckId: payment.checkId, VoidDate: dayjs().format('YYYY-MM-DD'), VoidedBy: null, StopReason: 'Payment Voided', StopReference: payment.paymentNumber?.toString() ?? null }, null, 2)}
-                  </pre>
-                  {voidPutResult && (
-                    <>
-                      <Text type="secondary" style={{ fontSize: 11 }}>Response:</Text>
-                      <pre style={{ fontSize: 10, background: '#1e1e1e', color: '#d4d4d4', padding: 8, borderRadius: 4, margin: '4px 0 0', maxHeight: 100, overflowY: 'auto' }}>
-                        {JSON.stringify(voidPutResult, null, 2)}
-                      </pre>
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
-            {/* ─────────────────────────────────────────────────────────── */}
-
-            {/* Buttons */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
-              <Button onClick={() => { setVoidModalOpen(false); voidForm.resetFields(); setVoidStepStatus([]); setShowApiSection(false); }}>
-                Cancel
-              </Button>
-              <Tooltip title={isVoided ? 'Already voided' : isCleared ? 'Cleared — cannot void' : ''}>
-                <Button
-                  type="primary"
-                  danger
-                  htmlType="submit"
-                  loading={voidSubmitting}
-                  disabled={!voidEligibility?.eligible || voidEligLoading}
-                  icon={<StopOutlined />}
-                >
-                  Void Payment
-                </Button>
-              </Tooltip>
-            </div>
-          </Form>
-        </Spin>
+          {/* Footer buttons */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+            <Button disabled={voidRunning} onClick={() => { setVoidModalOpen(false); voidForm.resetFields(); }}>
+              Close
+            </Button>
+            <Button type="primary" danger htmlType="submit" loading={voidRunning}
+              icon={<StopOutlined />} disabled={isVoided || isCleared || voidDone}
+            >
+              {voidRunning ? 'Processing…' : voidDone ? 'Voided ✓' : 'Void Payment'}
+            </Button>
+          </div>
+        </Form>
       </Modal>
       {/* ─────────────────────────────────────────────────────────────────── */}
 
