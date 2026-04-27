@@ -101,7 +101,7 @@ BEGIN
                 REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,4)                AS seg4_account,
                 hdr.LEDGER_NAME                                                    AS ledger_name,
                 hdr.PERIOD_NAME                                                    AS period_name,
-                NVL(lin.CURRENCY_CODE, hdr.CURRENCY_CODE)                          AS currency,
+                NVL(lin.CURRENCY_CODE, hdr.LEDGER_CURRENCY_CODE)                  AS currency,
                 SUM(NVL(lin.ACCOUNTED_DR,0))                                       AS total_dr,
                 SUM(NVL(lin.ACCOUNTED_CR,0))                                       AS total_cr,
                 SUM(NVL(lin.ACCOUNTED_DR,0)) - SUM(NVL(lin.ACCOUNTED_CR,0))       AS net_amount,
@@ -116,7 +116,7 @@ BEGIN
                 REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,4),
                 hdr.LEDGER_NAME,
                 hdr.PERIOD_NAME,
-                NVL(lin.CURRENCY_CODE, hdr.CURRENCY_CODE)
+                NVL(lin.CURRENCY_CODE, hdr.LEDGER_CURRENCY_CODE)
         )
         ORDER BY seg1_company, seg4_account, currency
     ) LOOP
