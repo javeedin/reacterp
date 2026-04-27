@@ -22,6 +22,20 @@ EXCEPTION
 END;
 /
 
+-- Dedicated sequence for PAYMENT_NUMBER (PAY-YYYYMMDD-NNNNNN)
+-- Separate from CHECK_ID sequence so numbers are compact and predictable.
+BEGIN
+    EXECUTE IMMEDIATE 'CREATE SEQUENCE RR_AP_PAY_NUM_SEQ
+        START WITH 1
+        INCREMENT BY 1
+        NOCACHE
+        NOCYCLE';
+EXCEPTION
+    WHEN OTHERS THEN
+        IF SQLCODE != -955 THEN RAISE; END IF;
+END;
+/
+
 CREATE OR REPLACE PACKAGE XXAP_PAYMENTS_PKG AS
 
     -- Save single payment from JSON
@@ -298,10 +312,10 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
         -- Parse reconciled flag
         v_reconciled_flag := CASE WHEN UPPER(v_reconciled_raw) IN ('TRUE', 'Y', '1') THEN 'Y' ELSE 'N' END;
 
-        -- Auto-generate PaymentNumber if not supplied
-        -- Format: PAY-YYYYMMDD-<abs(check_id) zero-padded to 6>
+        -- Auto-generate PaymentNumber if not supplied using a dedicated sequence.
+        -- Format: PAY-YYYYMMDD-NNNNNN
         IF v_payment_number IS NULL THEN
-            v_payment_number := 'PAY-' || TO_CHAR(SYSDATE, 'YYYYMMDD') || '-' || LPAD(TO_CHAR(ABS(v_check_id)), 6, '0');
+            v_payment_number := 'PAY-' || TO_CHAR(SYSDATE, 'YYYYMMDD') || '-' || LPAD(TO_CHAR(RR_AP_PAY_NUM_SEQ.NEXTVAL), 6, '0');
         END IF;
         IF v_paper_document_number IS NULL THEN
             v_paper_document_number := v_payment_number;
