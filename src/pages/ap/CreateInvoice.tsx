@@ -8646,6 +8646,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               }
 
               // ── Step 2 (optional): PUT installments ────────────────────────
+              // Capture installment IDs so Step 3 can store them in the related-invoices record
+              const installmentIdMap: Record<string, string> = {};
               if (hasInstallments) {
                 setStep(2, 'running');
                 let instErrors = 0;
@@ -8660,7 +8662,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                       }),
                     });
                     const d2 = await res2.json().catch(() => ({}));
-                    if (d2?.status === 'error' || !res2.ok) instErrors++;
+                    if (d2?.status === 'error' || !res2.ok) {
+                      instErrors++;
+                    } else {
+                      installmentIdMap[String(invoiceId)] = inst.key; // track primary installment
+                    }
                   } catch { instErrors++; }
                 }
                 if (instErrors > 0) {
@@ -8678,7 +8684,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 InvoiceId: invoiceId,
                 InvoiceBusinessUnit: buName || null,
                 InvoiceNumber: invoiceNumber,
-                InstallmentNumber: null,
+                InstallmentNumber: installmentIdMap[String(invoiceId)] ? Number(installmentIdMap[String(invoiceId)]) : (pendingInst[0]?.key ? Number(pendingInst[0].key) : null),
                 AmountPaidPaymentCurrency: payBalance,
                 AmountPaidInvoiceCurrency: payBalance,
                 InvoicePaymentAmount: payBalance,
@@ -9308,7 +9314,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 InvoiceId:                   invoiceId,
                 InvoiceBusinessUnit:         buName || null,
                 InvoiceNumber:               form.getFieldValue('invoiceNumber') || null,
-                InstallmentNumber:           null,
+                InstallmentNumber:           invoiceInstallments.filter(i => i.unpaidAmount > 0)[0]?.key ? Number(invoiceInstallments.filter(i => i.unpaidAmount > 0)[0].key) : null,
                 AmountPaidPaymentCurrency:   balance,
                 AmountPaidInvoiceCurrency:   balance,
                 InvoicePaymentAmount:        balance,
