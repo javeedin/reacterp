@@ -540,40 +540,32 @@ SELECT
     inst.INSTALLMENT_NUMBER,
     TO_CHAR(inst.DUE_DATE, 'DD-MON-YYYY')                          AS DUE_DATE,
     inst.GROSS_AMOUNT,
-    -- UNPAID_AMOUNT: derived from active (non-voided) payments only
+    -- UNPAID_AMOUNT: derived from actual payments (replaces stale stored column)
     GREATEST(0,
         NVL(inst.GROSS_AMOUNT, 0) -
         NVL((SELECT SUM(NVL(rel.AMOUNT_PAID_PAYMENT_CURRENCY, 0))
              FROM   RR_AP_PAYMENTS_RELATED_INVOICES rel
-             JOIN   RR_AP_PAYMENTS_ALL pmt ON pmt.CHECK_ID = rel.CHECK_ID
-             WHERE  rel.INVOICE_ID = inst.INVOICE_ID
-               AND  NVL(pmt.PAYMENT_STATUS, 'Active') NOT IN ('Voided', 'Void')), 0)
+             WHERE  rel.INVOICE_ID = inst.INVOICE_ID), 0)
     )                                                               AS UNPAID_AMOUNT,
     -- AMOUNT_REMAINING: same value, kept for newer UI mapping compatibility
     GREATEST(0,
         NVL(inst.GROSS_AMOUNT, 0) -
         NVL((SELECT SUM(NVL(rel.AMOUNT_PAID_PAYMENT_CURRENCY, 0))
              FROM   RR_AP_PAYMENTS_RELATED_INVOICES rel
-             JOIN   RR_AP_PAYMENTS_ALL pmt ON pmt.CHECK_ID = rel.CHECK_ID
-             WHERE  rel.INVOICE_ID = inst.INVOICE_ID
-               AND  NVL(pmt.PAYMENT_STATUS, 'Active') NOT IN ('Voided', 'Void')), 0)
+             WHERE  rel.INVOICE_ID = inst.INVOICE_ID), 0)
     )                                                               AS AMOUNT_REMAINING,
-    -- PAYMENT_STATUS: derived live, excluding voided payments
+    -- PAYMENT_STATUS: derived live from payments vs gross amount
     CASE
         WHEN GREATEST(0,
                  NVL(inst.GROSS_AMOUNT, 0) -
                  NVL((SELECT SUM(NVL(rel.AMOUNT_PAID_PAYMENT_CURRENCY, 0))
                       FROM   RR_AP_PAYMENTS_RELATED_INVOICES rel
-                      JOIN   RR_AP_PAYMENTS_ALL pmt ON pmt.CHECK_ID = rel.CHECK_ID
-                      WHERE  rel.INVOICE_ID = inst.INVOICE_ID
-                        AND  NVL(pmt.PAYMENT_STATUS, 'Active') NOT IN ('Voided', 'Void')), 0)
+                      WHERE  rel.INVOICE_ID = inst.INVOICE_ID), 0)
              ) <= 0
             THEN 'Fully Paid'
         WHEN NVL((SELECT SUM(NVL(rel.AMOUNT_PAID_PAYMENT_CURRENCY, 0))
                   FROM   RR_AP_PAYMENTS_RELATED_INVOICES rel
-                  JOIN   RR_AP_PAYMENTS_ALL pmt ON pmt.CHECK_ID = rel.CHECK_ID
-                  WHERE  rel.INVOICE_ID = inst.INVOICE_ID
-                    AND  NVL(pmt.PAYMENT_STATUS, 'Active') NOT IN ('Voided', 'Void')), 0) > 0
+                  WHERE  rel.INVOICE_ID = inst.INVOICE_ID), 0) > 0
             THEN 'Partially Paid'
         ELSE 'Unpaid'
     END                                                             AS PAYMENT_STATUS,
