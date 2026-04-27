@@ -4062,6 +4062,7 @@ const ManagePayments: React.FC = () => {
             locale={{ emptyText: 'No related invoices' }}
             columns={[
               { title: 'Invoice #', dataIndex: 'invoiceNumber', key: 'invoiceNumber', ellipsis: true },
+              { title: 'Installment', dataIndex: 'installmentNumber', key: 'installmentNumber', width: 90, align: 'center' as const, render: (v: any) => v ?? '—' },
               { title: 'Amt Paid', dataIndex: 'amountPaid', key: 'amountPaid', align: 'right' as const, render: (v: number) => formatAmount(v) },
               { title: 'Liability Account', dataIndex: 'liabilityDistribution', key: 'liabilityDistribution', ellipsis: true },
             ]}

@@ -1600,6 +1600,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
             locale={{ emptyText: 'No related invoices' }}
             columns={[
               { title: 'Invoice #', dataIndex: 'invoiceNumber', key: 'invoiceNumber', ellipsis: true },
+              { title: 'Installment', dataIndex: 'installmentNumber', key: 'installmentNumber', width: 90, align: 'center' as const, render: (v: any) => v || '—' },
               { title: 'Amt Paid', dataIndex: 'amountPaidPaymentCurrency', key: 'amountPaidPaymentCurrency', align: 'right' as const, render: (v: number) => v?.toLocaleString('en-AE', { minimumFractionDigits: 2 }) ?? '—' },
               { title: 'Liability Account', dataIndex: 'liabilityDistribution', key: 'liabilityDistribution', ellipsis: true },
             ]}
