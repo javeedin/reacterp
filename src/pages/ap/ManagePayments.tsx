@@ -888,7 +888,7 @@ const ManagePayments: React.FC = () => {
                 accountedCr:        0,
                 currencyCode:       ccy,
                 exchangeRate:       exRate,
-                description:        `AP Liability – ${paperDocNum} / ${inv.invoiceNumber}`,
+                description:        `AP Liability – ${paperDocNum} / ${inv.invoiceNumber} / ${v2.payee || ''}`,
                 sourceLineNumber:   idx + 1,
               })),
               {
@@ -902,7 +902,7 @@ const ManagePayments: React.FC = () => {
                 accountedCr:        Math.round(totalAmount * exRate * 100) / 100,
                 currencyCode:       ccy,
                 exchangeRate:       exRate,
-                description:        `Cash Clearing – Payment ${paperDocNum}`,
+                description:        `Cash Clearing – Payment ${paperDocNum} / Invoices: ${appliedInvoices.map(i => i.invoiceNumber).join(', ')}`,
                 sourceLineNumber:   appliedInvoices.length + 1,
               },
             ],
@@ -1899,6 +1899,30 @@ const ManagePayments: React.FC = () => {
       if (data.status === 'error' || !res.ok) {
         setVoidStep('void', { status: 'error', response: data, error: data.message ?? `HTTP ${res.status}` });
         return false;
+      }
+      // Restore invoice installments so voided invoices become available again
+      const instBaseUrl = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments`;
+      for (const inv of voidRelatedInvoices) {
+        try {
+          const getRes = await fetch(`${instBaseUrl}?P_INVOICE_ID=${inv.invoiceId}`, { headers: { Accept: 'application/json' } });
+          if (!getRes.ok) continue;
+          const instData = await getRes.json();
+          const allInst: any[] = instData.items || instData.installments || (Array.isArray(instData) ? instData : []);
+          for (const inst of allInst) {
+            const instStatus = inst.payment_status || inst.PaymentStatus || inst.PAYMENT_STATUS || '';
+            if (instStatus === 'Fully Paid' || instStatus === 'Partially Paid') {
+              const instId   = inst.installment_id?.toString() || inst.key;
+              const curAmt   = Number(inst.amount_remaining ?? inst.unpaid_amount ?? inst.UNPAID_AMOUNT ?? 0);
+              const restored = curAmt + Number(inv.amountPaid);
+              const instAmt  = Number(inst.installment_amount ?? inst.gross_amount ?? inst.GROSS_AMOUNT ?? inv.invoiceAmount ?? 0);
+              const newStatus = instAmt > 0 && restored >= instAmt ? 'Never Paid' : 'Partially Paid';
+              await fetch(instBaseUrl, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                body: JSON.stringify({ InvoiceId: inv.invoiceId, InstallmentId: instId, PaymentStatus: newStatus, AmountRemaining: restored }),
+              });
+            }
+          }
+        } catch { /* non-critical — void itself succeeded */ }
       }
       setVoidStep('void', { status: 'success', response: data });
       return true;
