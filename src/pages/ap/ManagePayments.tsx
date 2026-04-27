@@ -85,7 +85,7 @@ import {
   derivePeriodName,
 } from '../../services/sla.service';
 import type { SlaGetResult, SlaCreatePayload } from '../../services/sla.service';
-import { eventTypeToRef5 } from '../../services/glPosting.service';
+import { eventTypeToRef5, postSlaToGL } from '../../services/glPosting.service';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -215,6 +215,7 @@ interface PaymentInvoice {
   dueDate: string;
   currency: string;
   supplierSite: string;
+  liabilityDistribution?: string;
 }
 
 // Supplier record from API
@@ -702,23 +703,45 @@ const ManagePayments: React.FC = () => {
     }
   };
 
-  // ── Save payment ────────────────────────────────────────────────────────────
-  const [savePaymentLoading, setSavePaymentLoading] = useState(false);
+  // ── Confirm Payment state ──────────────────────────────────────────────────
+  const [confirmPaymentOpen, setConfirmPaymentOpen]         = useState(false);
+  const [createAccountingChecked, setCreateAccountingChecked] = useState(true);
+  const [paymentConfirmed, setPaymentConfirmed]             = useState(false);
+  const [confirmedPaymentNumber, setConfirmedPaymentNumber] = useState<string>('');
+  const [savePaymentLoading, setSavePaymentLoading]         = useState(false);
 
-  const handleSavePayment = async (mode: 'close' | 'another' | 'stay') => {
-    try {
-      await createPaymentForm.validateFields();
-    } catch {
-      message.warning('Please fill in all required fields');
-      return;
-    }
+  type ConfirmStepKey = 'payment' | 'installments' | 'link' | 'sla' | 'gl';
+  interface ConfirmStep { label: string; status: 'idle' | 'running' | 'success' | 'error'; detail?: string }
+  const [confirmSteps, setConfirmSteps] = useState<Record<ConfirmStepKey, ConfirmStep>>({
+    payment:      { label: 'Create Payment',               status: 'idle' },
+    installments: { label: 'Update Invoice Installments',  status: 'idle' },
+    link:         { label: 'Link Invoices to Payment',     status: 'idle' },
+    sla:          { label: 'Create SLA Accounting',        status: 'idle' },
+    gl:           { label: 'Post to GL',                   status: 'idle' },
+  });
+  const setConfStep = (key: ConfirmStepKey, upd: Partial<ConfirmStep>) =>
+    setConfirmSteps(prev => ({ ...prev, [key]: { ...prev[key], ...upd } }));
 
+  const handleConfirmPaymentClick = async () => {
+    try { await createPaymentForm.validateFields(); } catch { message.warning('Please fill in all required fields'); return; }
+    setConfirmSteps({
+      payment:      { label: 'Create Payment',              status: 'idle' },
+      installments: { label: 'Update Invoice Installments', status: 'idle' },
+      link:         { label: 'Link Invoices to Payment',    status: 'idle' },
+      sla:          { label: 'Create SLA Accounting',       status: 'idle' },
+      gl:           { label: 'Post to GL',                  status: 'idle' },
+    });
+    setConfirmPaymentOpen(true);
+  };
+
+  const handleConfirmPaymentSubmit = async () => {
     setSavePaymentLoading(true);
     const v = createPaymentForm.getFieldsValue();
     const buName = v.businessUnit || '';
 
     try {
       // ── Step 1: POST /ap/payments — create payment header ──────────────────
+      setConfStep('payment', { status: 'running' });
       const step1Payload = livePaymentPayload;
       const res1 = await fetch(APEX_PAYMENTS_URL, {
         method: 'POST',
@@ -729,33 +752,28 @@ const ManagePayments: React.FC = () => {
       const data1 = (() => { try { return JSON.parse(text1); } catch { return { raw: text1 }; } })();
 
       if (data1?.status === 'error' || !res1.ok) {
+        setConfStep('payment', { status: 'error', detail: data1?.message || `HTTP ${res1.status}` });
         throw new Error(data1?.message || data1?.error || `Step 1 HTTP ${res1.status}`);
       }
 
       const checkId: number | null = data1?.checkId ?? null;
       const paymentNumber: string = data1?.paymentNumber ?? (checkId ? String(checkId) : 'Unknown');
+      setConfStep('payment', { status: 'success', detail: `Payment #${paymentNumber} created` });
 
-      // ── Step 2: PUT /ap/createinvoice/installments — reduce UNPAID_AMOUNT by applyAmount ──
+      // ── Step 2: PUT /ap/createinvoice/installments — reduce UNPAID_AMOUNT ──
+      setConfStep('installments', { status: 'running' });
       const instBaseUrl = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments`;
       const instErrors: string[] = [];
       let totalInstUpdated = 0;
 
       for (const inv of invoicesToPay) {
         try {
-          // Fetch installments for this invoice
-          const getRes = await fetch(`${instBaseUrl}?P_INVOICE_ID=${inv.invoiceId}`, {
-            headers: { Accept: 'application/json' },
-          });
+          const getRes = await fetch(`${instBaseUrl}?P_INVOICE_ID=${inv.invoiceId}`, { headers: { Accept: 'application/json' } });
           if (!getRes.ok) throw new Error(`HTTP ${getRes.status}`);
           const instData = await getRes.json();
           const allInst: any[] = instData.items || instData.installments || (Array.isArray(instData) ? instData : []);
-
-          // Only update installments that still have an outstanding balance
           const pending = allInst.filter(i => (i.amount_remaining ?? i.unpaid_amount ?? 1) > 0);
-
-          // Distribute applyAmount across installments in due-date order (earliest first)
           let remainingApply = inv.applyAmount;
-
           for (const inst of pending) {
             if (remainingApply <= 0) break;
             const instId = inst.installment_id?.toString() || inst.key;
@@ -764,100 +782,135 @@ const ManagePayments: React.FC = () => {
             const newUnpaid = Math.max(0, instUnpaid - amountApplied);
             const newStatus = newUnpaid <= 0 ? 'Fully Paid' : 'Partially Paid';
             remainingApply -= amountApplied;
-
             const putRes = await fetch(instBaseUrl, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-              body: JSON.stringify({
-                InvoiceId:       inv.invoiceId,
-                InstallmentId:   instId,
-                PaymentStatus:   newStatus,
-                AmountRemaining: newUnpaid,
-              }),
+              method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+              body: JSON.stringify({ InvoiceId: inv.invoiceId, InstallmentId: instId, PaymentStatus: newStatus, AmountRemaining: newUnpaid }),
             });
             const d2 = await putRes.json().catch(() => ({}));
-            if (d2?.status === 'error' || !putRes.ok) {
-              instErrors.push(`${inv.invoiceNumber} inst ${instId}: ${d2?.message || `HTTP ${putRes.status}`}`);
-            } else {
-              totalInstUpdated++;
-            }
+            if (d2?.status === 'error' || !putRes.ok) instErrors.push(`${inv.invoiceNumber} inst ${instId}: ${d2?.message || `HTTP ${putRes.status}`}`);
+            else totalInstUpdated++;
           }
-        } catch (e: any) {
-          instErrors.push(`${inv.invoiceNumber}: ${e?.message ?? 'Network error'}`);
-        }
+        } catch (e: any) { instErrors.push(`${inv.invoiceNumber}: ${e?.message ?? 'Network error'}`); }
       }
+      setConfStep('installments', { status: instErrors.length > 0 ? 'error' : 'success', detail: instErrors.length > 0 ? instErrors[0] : `${totalInstUpdated} installment(s) updated` });
 
-      if (instErrors.length > 0) {
-        message.warning(`Payment #${paymentNumber} created, ${instErrors.length} installment update(s) failed: ${instErrors.join('; ')}`);
-      }
-
-      // ── Step 3: POST /ap/payments/related-invoices — link payment to each invoice ──
+      // ── Step 3: POST /ap/payments/related-invoices — link invoices ──────────
+      setConfStep('link', { status: 'running' });
       const relatedUrl = `${APEX_DB_CONFIG.baseUrl}/ap/payments/related-invoices`;
       const relatedErrors: string[] = [];
-      const v = createPaymentForm.getFieldsValue();
-
+      const v2 = createPaymentForm.getFieldsValue();
       for (const inv of invoicesToPay) {
         const body3 = {
-          InvoicePaymentId:          null,
-          CheckId:                   checkId,
-          InvoiceId:                 inv.invoiceId,
-          InvoiceBusinessUnit:       buName,
-          InvoiceNumber:             inv.invoiceNumber,
-          InstallmentNumber:         null,
-          AmountPaidPaymentCurrency: inv.applyAmount,
-          AmountPaidInvoiceCurrency: inv.applyAmount,
-          InvoicePaymentAmount:      inv.applyAmount,
-          InvoiceAmount:             inv.invoiceAmount,
-          InvoiceBaseAmount:         inv.invoiceAmount,
-          PaymentBaseAmount:         inv.applyAmount,
-          DiscountLost:              null,
-          DiscountTaken:             inv.discountAmount || null,
-          InvoiceCurrency:           inv.currency || v.paymentCurrency || 'AED',
-          CrossCurrencyRate:         v.conversionRate || null,
-          InvoicePaymentStatus:      'Negotiable',
-          CreatedBy:                 null,
-          LastUpdatedBy:             null,
-          LastUpdateLogin:           null,
+          InvoicePaymentId: null, CheckId: checkId, InvoiceId: inv.invoiceId,
+          InvoiceBusinessUnit: buName, InvoiceNumber: inv.invoiceNumber, InstallmentNumber: null,
+          AmountPaidPaymentCurrency: inv.applyAmount, AmountPaidInvoiceCurrency: inv.applyAmount,
+          InvoicePaymentAmount: inv.applyAmount, InvoiceAmount: inv.invoiceAmount,
+          InvoiceBaseAmount: inv.invoiceAmount, PaymentBaseAmount: inv.applyAmount,
+          DiscountLost: null, DiscountTaken: inv.discountAmount || null,
+          InvoiceCurrency: inv.currency || v2.paymentCurrency || 'AED',
+          CrossCurrencyRate: v2.conversionRate || null, InvoicePaymentStatus: 'Negotiable',
+          CreatedBy: null, LastUpdatedBy: null, LastUpdateLogin: null,
         };
         try {
-          const res3 = await fetch(relatedUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify(body3),
-          });
+          const res3 = await fetch(relatedUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body3) });
           const d3 = await res3.json().catch(() => ({}));
-          if (d3?.status === 'error' || !res3.ok) {
-            relatedErrors.push(`${inv.invoiceNumber}: ${d3?.message || `HTTP ${res3.status}`}`);
+          if (d3?.status === 'error' || !res3.ok) relatedErrors.push(`${inv.invoiceNumber}: ${d3?.message || `HTTP ${res3.status}`}`);
+        } catch (e: any) { relatedErrors.push(`${inv.invoiceNumber}: ${e?.message ?? 'Network error'}`); }
+      }
+      setConfStep('link', { status: relatedErrors.length > 0 ? 'error' : 'success', detail: relatedErrors.length > 0 ? relatedErrors[0] : `${invoicesToPay.length} invoice(s) linked` });
+
+      // Lock the form once payment is saved
+      setPaymentConfirmed(true);
+      setConfirmedPaymentNumber(paymentNumber);
+
+      // ── Step 4 & 5: Create Accounting + Post to GL ───────────────────────────
+      if (createAccountingChecked && checkId) {
+        try {
+          setConfStep('sla', { status: 'running' });
+          // Fetch related invoices to get liabilityDistribution
+          const relRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/payments/${checkId}/related-invoices`, { headers: { Accept: 'application/json' } });
+          const relData = relRes.ok ? await relRes.json() : { items: [] };
+          const relItems: any[] = relData.items || [];
+
+          const bank = bankAccounts.find(b => b.bankAccountName === v2.disbursementBankAccount || b.bankAccountName === v2.paymentDocument);
+          const cashClearingAcct = bank?.cashClearingAccountCombination || '';
+          const ledger = await fetchLedgerByBusinessUnit(buName);
+          const ccy    = v2.paymentCurrency || 'AED';
+          const exRate = (v2.conversionRate && v2.conversionRate > 0) ? Number(v2.conversionRate) : 1;
+          const payDate = v2.paymentDate ? (v2.paymentDate.format ? v2.paymentDate.format('YYYY-MM-DD') : String(v2.paymentDate).substring(0, 10)) : new Date().toISOString().substring(0, 10);
+          const paperDocNum = v2.paperDocumentNumber || paymentNumber;
+
+          const appliedInvoices = invoicesToPay.map(inv => {
+            const rel = relItems.find((r: any) => r.InvoiceId === inv.invoiceId || r.InvoiceNumber === inv.invoiceNumber);
+            return {
+              invoiceNumber: inv.invoiceNumber,
+              invoiceId: inv.invoiceId,
+              amountPaid: inv.applyAmount,
+              liabilityDistribution: rel?.LiabilityDistribution || inv.liabilityDistribution || '',
+            };
+          });
+
+          const payloads = buildApPaymentSlaPayloads({
+            checkId, paymentNumber, paperDocumentNumber: paperDocNum,
+            paymentDate: payDate, currencyCode: ccy,
+            businessUnit: buName, legalEntity: ledger?.legalEntity,
+            ledgerId: ledger?.ledgerId, ledgerName: ledger?.ledgerName,
+            ledgerCurrency: 'AED', exchangeRate: exRate,
+            cashClearingAccount: cashClearingAcct,
+            appliedInvoices,
+          });
+
+          if (!payloads.length) throw new Error('No invoices to account for');
+          setConfStep('sla', { status: 'running', detail: `Creating ${payloads.length} SLA entries…` });
+
+          let lastSlaHeaderId: number | null = null;
+          for (const payload of payloads) {
+            const result = await createAccounting(payload);
+            if ((result as any).status === 'error' || !(result.headerId > 0)) throw new Error((result as any).message ?? 'headerId missing');
+            lastSlaHeaderId = result.headerId;
           }
-        } catch (e: any) {
-          relatedErrors.push(`${inv.invoiceNumber}: ${e?.message ?? 'Network error'}`);
+          setConfStep('sla', { status: 'success', detail: `${payloads.length} SLA header(s) created` });
+
+          // Post to GL
+          setConfStep('gl', { status: 'running' });
+          const glResult = await postSlaToGL({
+            slaHeaderId:    lastSlaHeaderId!,
+            sourceNumber:   paperDocNum,
+            sourceId:       checkId,
+            eventTypeCode:  'AP_PAYMENT_CREATED',
+            periodName:     derivePeriodName(new Date(payDate)),
+            ledgerName:     ledger?.ledgerName ?? 'BCL DIFC',
+            ledgerId:       ledger?.ledgerId   ?? 300000003259529,
+            currency:       ccy,
+            accountingDate: payDate,
+            legalEntity:    ledger?.legalEntity ?? buName,
+            businessUnit:   buName,
+            conversionRate: exRate,
+            jeCategory:     'AP_PAYMENT_CREATED',
+            lines: payloads.flatMap(p => p.lines.map(l => ({
+              lineType:           (l.enteredDr ?? 0) > 0 ? 'DR' as const : 'CR' as const,
+              enteredDr:          l.enteredDr ?? null,
+              enteredCr:          l.enteredCr ?? null,
+              accountedDr:        l.accountedDr ?? null,
+              accountedCr:        l.accountedCr ?? null,
+              description:        l.description ?? '',
+              currencyCode:       l.currencyCode ?? ccy,
+              accountingDate:     payDate,
+              accountCombination: l.accountCombination ?? '',
+              accountingClass:    l.accountingClass ?? null,
+              legalEntity:        ledger?.legalEntity ?? null,
+            }))),
+          });
+          setConfStep('gl', { status: glResult.success ? 'success' : 'error', detail: glResult.success ? `GL Batch: ${glResult.batchName}` : glResult.error });
+        } catch (accErr: any) {
+          setConfStep('sla', prev => prev.sla.status === 'running' ? { ...prev.sla, status: 'error', detail: accErr.message } : prev.sla);
+          setConfStep('gl',  prev => prev.gl.status  === 'idle'    ? { ...prev.gl,  status: 'error', detail: 'Skipped due to SLA error' } : prev.gl);
         }
       }
 
-      if (relatedErrors.length > 0) {
-        message.warning(`Payment #${paymentNumber} created but ${relatedErrors.length} invoice link(s) failed: ${relatedErrors.join('; ')}`);
-      } else {
-        message.success(`Payment #${paymentNumber} created — ${totalInstUpdated} installment(s) updated, ${invoicesToPay.length} invoice(s) linked`);
-      }
-
-      if (mode === 'close') {
-        setCreatePaymentTabOpen(false);
-        setActiveTab('search');
-        createPaymentForm.resetFields();
-        setInvoicesToPay([]);
-        setSelectedBuLegalEntityName('');
-        setCreatePaymentCurrency('AED');
-      } else if (mode === 'another') {
-        createPaymentForm.resetFields();
-        setInvoicesToPay([]);
-        setSelectedBuLegalEntityName('');
-        setCreatePaymentCurrency('AED');
-        setCreatePaymentActiveTab('paymentDetails');
-        message.info('Form cleared — ready to create another payment');
-      }
-      // mode === 'stay': keep form as-is, already showed success message above
+      message.success(`Payment #${paymentNumber} confirmed successfully`);
     } catch (err: any) {
-      message.error(`Failed to save payment: ${err?.message ?? 'Unknown error'}`);
+      message.error(`Failed to confirm payment: ${err?.message ?? 'Unknown error'}`);
     } finally {
       setSavePaymentLoading(false);
     }
@@ -2544,6 +2597,7 @@ const ManagePayments: React.FC = () => {
               wrapperCol={{ span: 17 }}
               labelAlign="right"
               size="small"
+              disabled={paymentConfirmed}
             >
               <Tabs
                 activeKey={createPaymentActiveTab}
@@ -2578,6 +2632,11 @@ const ManagePayments: React.FC = () => {
                         API
                       </Button>
                     </Tooltip>
+                    {paymentConfirmed && (
+                      <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: 12 }}>
+                        Payment #{confirmedPaymentNumber} Confirmed
+                      </Tag>
+                    )}
                     <Button
                       size="small"
                       onClick={() => {
@@ -2587,26 +2646,23 @@ const ManagePayments: React.FC = () => {
                         setInvoicesToPay([]);
                         setSelectedBuLegalEntityName('');
                         setCreatePaymentCurrency('AED');
+                        setPaymentConfirmed(false);
+                        setConfirmedPaymentNumber('');
                       }}
                     >
-                      Close
+                      {paymentConfirmed ? 'Close' : 'Cancel'}
                     </Button>
-                    <Button
-                      size="small"
-                      loading={savePaymentLoading}
-                      onClick={() => handleSavePayment('another')}
-                    >
-                      Save and Create
-                    </Button>
-                    <Button
-                      size="small"
-                      type="primary"
-                      loading={savePaymentLoading}
-                      style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
-                      onClick={() => handleSavePayment('stay')}
-                    >
-                      Save
-                    </Button>
+                    {!paymentConfirmed && (
+                      <Button
+                        size="small"
+                        type="primary"
+                        icon={<CheckCircleOutlined />}
+                        style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+                        onClick={handleConfirmPaymentClick}
+                      >
+                        Confirm Payment
+                      </Button>
+                    )}
                   </Space>
                 }
                 items={[
@@ -3335,6 +3391,8 @@ const ManagePayments: React.FC = () => {
                 setCreatePaymentActiveTab('paymentDetails');
                 createPaymentForm.resetFields();
                 setActiveTab('create-payment');
+                setPaymentConfirmed(false);
+                setConfirmedPaymentNumber('');
               }}
             >
               Create Payment
@@ -4034,6 +4092,108 @@ const ManagePayments: React.FC = () => {
         </Drawer>
 
       </Content>
+
+      {/* ── Confirm Payment Modal ────────────────────────────────────────── */}
+      <Modal
+        title={
+          <Space>
+            <CheckCircleOutlined style={{ color: REDWOOD.primary }} />
+            <span>Confirm Payment</span>
+          </Space>
+        }
+        open={confirmPaymentOpen}
+        onCancel={() => { if (!savePaymentLoading) setConfirmPaymentOpen(false); }}
+        footer={null}
+        width={580}
+        destroyOnClose={false}
+      >
+        {/* Payment summary */}
+        {(() => {
+          const fv = createPaymentForm.getFieldsValue();
+          return (
+            <div style={{ background: '#fafafa', border: '1px solid #e8e8e8', borderRadius: 6, padding: '12px 16px', marginBottom: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 16px' }}>
+                {[
+                  ['Payee', fv.payee || '—'],
+                  ['Payment Date', fv.paymentDate ? (fv.paymentDate.format ? fv.paymentDate.format('DD-MMM-YYYY') : fv.paymentDate) : '—'],
+                  ['Amount', `${totalAppliedAmount.toLocaleString('en-AE', { minimumFractionDigits: 2 })} ${fv.paymentCurrency || 'AED'}`],
+                  ['Business Unit', fv.businessUnit || '—'],
+                  ['Bank Account', fv.disbursementBankAccount || '—'],
+                  ['Invoices', `${invoicesToPay.length} invoice(s)`],
+                ].map(([label, value]) => (
+                  <div key={label}>
+                    <Text type="secondary" style={{ fontSize: 11 }}>{label}</Text>
+                    <div><Text strong style={{ fontSize: 12 }}>{value}</Text></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Create Accounting checkbox */}
+        <div style={{ background: '#e6f4ff', border: '1px solid #91caff', borderRadius: 6, padding: '10px 14px', marginBottom: 16 }}>
+          <Checkbox
+            checked={createAccountingChecked}
+            onChange={e => setCreateAccountingChecked(e.target.checked)}
+            disabled={savePaymentLoading}
+          >
+            <Text strong style={{ fontSize: 13 }}>Create Accounting</Text>
+          </Checkbox>
+          <div><Text type="secondary" style={{ fontSize: 11 }}>Automatically create SLA subledger entries and post to GL after payment is confirmed.</Text></div>
+        </div>
+
+        {/* Step progress (shown while/after running) */}
+        {Object.values(confirmSteps).some(s => s.status !== 'idle') && (
+          <div style={{ marginBottom: 16 }}>
+            {(Object.entries(confirmSteps) as [ConfirmStepKey, ConfirmStep][])
+              .filter(([key]) => key !== 'sla' && key !== 'gl' ? true : createAccountingChecked)
+              .map(([key, s]) => {
+                const icon = s.status === 'running' ? <LoadingOutlined style={{ color: '#1677ff' }} spin />
+                  : s.status === 'success' ? <CheckCircleOutlined style={{ color: '#52c41a' }} />
+                  : s.status === 'error'   ? <CloseCircleOutlined style={{ color: '#ff4d4f' }} />
+                  : <span style={{ display: 'inline-block', width: 14, height: 14, borderRadius: '50%', background: '#d9d9d9' }} />;
+                return (
+                  <div key={key} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 4 }}>
+                    <span style={{ marginTop: 2 }}>{icon}</span>
+                    <div>
+                      <Text style={{ fontSize: 12, color: s.status === 'success' ? '#52c41a' : s.status === 'error' ? '#ff4d4f' : s.status === 'running' ? '#1677ff' : '#6B6B6B' }}>{s.label}</Text>
+                      {s.detail && <div><Text type="secondary" style={{ fontSize: 11 }}>{s.detail}</Text></div>}
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+        )}
+
+        {/* Done confirmation */}
+        {paymentConfirmed && !savePaymentLoading && (
+          <Alert type="success" showIcon
+            message={`Payment #${confirmedPaymentNumber} Confirmed`}
+            description={createAccountingChecked ? 'Payment created and accounting posted to GL.' : 'Payment created successfully.'}
+            style={{ marginBottom: 16 }}
+          />
+        )}
+
+        {/* Buttons */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <Button disabled={savePaymentLoading} onClick={() => setConfirmPaymentOpen(false)}>
+            {paymentConfirmed ? 'Close' : 'Cancel'}
+          </Button>
+          {!paymentConfirmed && (
+            <Button
+              type="primary"
+              danger
+              loading={savePaymentLoading}
+              icon={<CheckCircleOutlined />}
+              style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+              onClick={handleConfirmPaymentSubmit}
+            >
+              {savePaymentLoading ? 'Processing…' : 'Confirm Payment'}
+            </Button>
+          )}
+        </div>
+      </Modal>
 
       {/* ── Payment Accounting Results Modal ─────────────────────────────── */}
       <Modal
