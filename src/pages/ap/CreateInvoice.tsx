@@ -589,6 +589,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [slaGlBatchName, setSlaGlBatchName]   = useState<string | null>(null);
   const [slaGlHeaderId, setSlaGlHeaderId]     = useState<number | null>(null);
 
+  const [autoPostPending, setAutoPostPending] = useState(false);
+
   // SLA Debug Modal state
   const [slaDebugVisible, setSlaDebugVisible]       = useState(false);
   const [slaDebugPayload, setSlaDebugPayload]       = useState<any>(null);
@@ -1202,14 +1204,76 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       lines: slaLines_,
     };
 
-    // Open debug modal to preview & execute
+    // Execute directly — no debug modal
     setSlaDebugPayload(payload);
     setSlaDebugSourceId(invoiceId);
-    setSlaDebugGetResult(null);
-    setSlaDebugPostResult(null);
-    setSlaDebugTab('post');
-    setSlaDebugVisible(true);
-  }, [savedInvoiceId, initialData, form, headerValues, lines, buildSlaLines, slaStatus]);
+    setSlaCreating(true);
+    try {
+      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) { message.error(`Create accounting failed: HTTP ${res.status}`); return; }
+      const headerId = data.headerId || data.header_id || null;
+      setSlaHeaderId(headerId);
+      setSlaStatus('DRAFT');
+      setSlaPostingStatus('UNPOSTED');
+      setSlaLines(payload.lines || []);
+
+      // Auto-create SLA for any applied prepayments that don't have accounting yet
+      const pending = appliedPrepaymentsList.filter(r => !appSlaMap[r.applicationId]?.status);
+      if (pending.length > 0) {
+        const liabilityDist = form.getFieldValue('liabilityDistribution') || '';
+        const firstSeg      = liabilityDist.split('-')[0] || '';
+        const prepaymentDist = firstSeg ? `${firstSeg}-00-00-1223108-0000-000-00-000-000` : '';
+        const currency_     = headerValues.invoiceCurrency || form.getFieldValue('invoiceCurrency') || 'AED';
+        const supplierId    = Number(form.getFieldValue('supplierId')) || null;
+        const ledgerInfo    = await fetchLedgerByBusinessUnit(bu);
+        let created = 0;
+        await Promise.all(pending.map(async (record) => {
+          try {
+            const acctDate_   = record.applicationAccountingDate ? dayjs(record.applicationAccountingDate).format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD');
+            const d_          = record.applicationAccountingDate ? dayjs(record.applicationAccountingDate).toDate() : new Date();
+            const months_     = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            const periodName_ = `${months_[d_.getMonth()]}-${String(d_.getFullYear()).slice(-2)}`;
+            const slaPayload_ = {
+              header: { moduleName: 'AP', sourceTable: 'RR_AP_APPLIED_PREPAYMENTS', sourceId: record.applicationId,
+                sourceNumber: record.prepaymentNumber, sourceType: 'APPLIED', eventTypeCode: 'PREPAYMENT_APPLIED',
+                eventDate: acctDate_, accountingDate: acctDate_, periodName: periodName_,
+                ledgerId: ledgerInfo?.ledgerId ?? 300000003259529, ledgerName: ledgerInfo?.ledgerName ?? 'BCL DIFC',
+                currencyCode: record.currency || currency_, ledgerCurrency: 'AED', exchangeRate: 1, exchangeRateType: 'Corporate',
+                businessUnit: bu, description: `Prepayment Applied – ${record.prepaymentNumber} on ${invoiceNumber}`, createdBy: 'user',
+                supplierId },
+              lines: [
+                { lineNumber: 1, lineType: 'DR', accountingClass: 'LIABILITY', accountCombination: liabilityDist,
+                  enteredDr: record.appliedAmount, enteredCr: 0, accountedDr: record.appliedAmount, accountedCr: 0,
+                  currencyCode: record.currency || currency_, description: `Prepayment Apply – ${record.prepaymentNumber}` },
+                { lineNumber: 2, lineType: 'CR', accountingClass: 'PREPAYMENT', accountCombination: prepaymentDist,
+                  enteredDr: 0, enteredCr: record.appliedAmount, accountedDr: 0, accountedCr: record.appliedAmount,
+                  currencyCode: record.currency || currency_, description: `Prepayment Apply – ${record.prepaymentNumber}` },
+              ],
+            };
+            const r_ = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/create`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(slaPayload_) });
+            const d_ = await r_.json();
+            if (r_.ok && d_.headerId) {
+              setAppSlaMap(prev => ({ ...prev, [record.applicationId]: { headerId: d_.headerId, status: 'DRAFT' } }));
+              created++;
+            }
+          } catch { /* non-fatal */ }
+        }));
+        if (created > 0) message.info(`Also created SLA journals for ${created} prepayment application(s).`);
+      }
+
+      // Trigger GL posting on next render (after slaHeaderId state is applied)
+      setAutoPostPending(true);
+    } catch (err: any) {
+      message.error(`Failed to create accounting: ${err.message}`);
+    } finally {
+      setSlaCreating(false);
+    }
+  }, [savedInvoiceId, initialData, form, headerValues, lines, buildSlaLines, slaStatus, appliedPrepaymentsList, appSlaMap, setAppSlaMap, fetchLedgerByBusinessUnit]);
 
   // ── SLA Debug: Execute POST ───────────────────────────────────────────────
   const handleDebugPost = useCallback(async () => {
@@ -2217,6 +2281,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     { name: 'BUIMERC CORP FZE',         company: '' },
     { name: 'BUIMERC CORP DIFC',        company: '' },
   ];
+  // Auto-post to GL immediately after accounting is created (triggered by handleCreateAccounting)
+  useEffect(() => {
+    if (autoPostPending && slaHeaderId) {
+      setAutoPostPending(false);
+      handlePostToLedger();
+    }
+  }, [autoPostPending, slaHeaderId, handlePostToLedger]);
+
   useEffect(() => {
     fetch(APEX_BUSINESS_UNITS_URL, { headers: { Accept: 'application/json' } })
       .then(r => r.json())
@@ -10431,14 +10503,6 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 onClick={handlePostCancellationToLedger}
               >
                 Post Cancellation to GL
-              </Button>
-            )}
-            {glPayloadDebug && (
-              <Button
-                icon={<ApiOutlined />}
-                onClick={() => setGlPayloadModalVisible(true)}
-              >
-                View Payload
               </Button>
             )}
             <Button onClick={() => setSlaModalVisible(false)}>Close</Button>

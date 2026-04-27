@@ -4087,14 +4087,8 @@ const ManagePayments: React.FC = () => {
           />
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
-            <Button onClick={() => { setVoidModalOpen(false); voidForm.resetFields(); setVoidStepMap(initVoidSteps()); }}>
+            <Button onClick={() => { setVoidModalOpen(false); voidForm.resetFields(); setVoidStepMap(initVoidSteps()); setVoidApiDrawerOpen(false); }}>
               Cancel
-            </Button>
-            <Button
-              icon={<ApiOutlined />}
-              onClick={() => setVoidApiDrawerOpen(true)}
-            >
-              Check Void Payment API
             </Button>
             <Button
               type="primary"
@@ -4109,82 +4103,83 @@ const ManagePayments: React.FC = () => {
               Void Payment
             </Button>
           </div>
-        </Modal>
 
-        {/* ── Void Payment API Drawer ──────────────────────────────────────── */}
-        <Drawer
-          title={
-            <Space>
-              <ApiOutlined style={{ color: REDWOOD.info }} />
-              <span>Void Payment APIs</span>
-              {voidTargetPayment && <Tag color="red">{voidTargetPayment.paymentNumber}</Tag>}
-            </Space>
-          }
-          open={voidApiDrawerOpen}
-          onClose={() => setVoidApiDrawerOpen(false)}
-          width={540}
-          placement="right"
-          zIndex={1200}
-        >
-          {(() => {
-            const stepCards = [
-              { key: 'eligibility' as VoidStepKey, step: 1, method: 'GET',  methodColor: 'blue',   label: 'Check Void Eligibility',
-                url: `${APEX_DB_CONFIG.baseUrl}/ap/payments/${voidTargetPayment?.checkId ?? ':id'}/void-eligibility`,
-                handler: runVoidStep_eligibility },
-              { key: 'void'        as VoidStepKey, step: 2, method: 'PUT',  methodColor: 'orange', label: 'Void Payment',
-                url: `${APEX_DB_CONFIG.baseUrl}/ap/payments/void`,
-                handler: runVoidStep_void, enabledAfter: 'eligibility' as VoidStepKey },
-              { key: 'sla'         as VoidStepKey, step: 3, method: 'POST', methodColor: 'green',  label: 'Create SLA Reversal Accounting',
-                url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/create`,
-                handler: runVoidStep_sla, enabledAfter: 'void' as VoidStepKey },
-              { key: 'gl_create'   as VoidStepKey, step: 4, method: 'POST', methodColor: 'green',  label: 'Create GL Journal',
-                url: `${APEX_DB_CONFIG.baseUrl}/journals/create`,
-                handler: runVoidStep_glCreate, enabledAfter: 'sla' as VoidStepKey },
-              { key: 'gl_post'     as VoidStepKey, step: 5, method: 'PUT',  methodColor: 'orange', label: 'Post GL Journal',
-                url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/:batchId/post`,
-                handler: runVoidStep_glPost, enabledAfter: 'gl_create' as VoidStepKey },
-              { key: 'sla_stamp'   as VoidStepKey, step: 6, method: 'POST', methodColor: 'green',  label: 'Stamp SLA as POSTED',
-                url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`,
-                handler: runVoidStep_stamp, enabledAfter: 'gl_post' as VoidStepKey },
-            ];
-            return stepCards.map(card => {
-              const st = voidStepMap[card.key];
-              const isRunning = st.status === 'running';
-              const enabled = !isRunning && (!card.enabledAfter || voidStepMap[card.enabledAfter]?.status === 'success');
-              const borderColor = st.status === 'success' ? '#52c41a' : st.status === 'error' ? '#ff4d4f' : st.status === 'running' ? '#1677ff' : undefined;
-              const statusIcon = st.status === 'running' ? <LoadingOutlined style={{ color: '#1677ff' }} spin />
-                : st.status === 'success' ? <CheckCircleOutlined style={{ color: '#52c41a' }} />
-                : st.status === 'error'   ? <CloseCircleOutlined style={{ color: '#ff4d4f' }} /> : null;
-              return (
-                <Card key={card.key} size="small" style={{ marginBottom: 10, borderColor }}
-                  title={
-                    <Space size={4}>
-                      <Tag color={card.methodColor} style={{ minWidth: 44, textAlign: 'center', margin: 0 }}>{card.method}</Tag>
-                      <Text strong style={{ fontSize: 12 }}>Step {card.step}: {card.label}</Text>
-                      {statusIcon}
-                    </Space>
-                  }
-                  extra={
-                    <Button size="small" type="primary" danger={card.key === 'void'}
-                      icon={isRunning ? <LoadingOutlined /> : <PlayCircleOutlined />}
-                      loading={isRunning} disabled={!enabled} onClick={card.handler}
+          <Collapse
+            activeKey={voidApiDrawerOpen ? ['steps'] : []}
+            onChange={keys => setVoidApiDrawerOpen(Array.isArray(keys) ? keys.includes('steps') : keys === 'steps')}
+            style={{ marginTop: 12 }}
+            items={[{
+              key: 'steps',
+              label: (
+                <Space size={4}>
+                  <ApiOutlined style={{ color: REDWOOD.info }} />
+                  <span style={{ fontWeight: 600 }}>API Steps</span>
+                  {VOID_STEP_KEYS.map(k => voidStepMap[k].status).some(s => s === 'running') && <LoadingOutlined style={{ color: '#1677ff' }} spin />}
+                  {VOID_STEP_KEYS.every(k => voidStepMap[k].status === 'success') && <CheckCircleOutlined style={{ color: '#52c41a' }} />}
+                  {VOID_STEP_KEYS.some(k => voidStepMap[k].status === 'error') && <CloseCircleOutlined style={{ color: '#ff4d4f' }} />}
+                </Space>
+              ),
+              children: (() => {
+                const stepCards = [
+                  { key: 'eligibility' as VoidStepKey, step: 1, method: 'GET',  methodColor: 'blue',   label: 'Check Void Eligibility',
+                    url: `${APEX_DB_CONFIG.baseUrl}/ap/payments/${voidTargetPayment?.checkId ?? ':id'}/void-eligibility`,
+                    handler: runVoidStep_eligibility },
+                  { key: 'void'        as VoidStepKey, step: 2, method: 'PUT',  methodColor: 'orange', label: 'Void Payment',
+                    url: `${APEX_DB_CONFIG.baseUrl}/ap/payments/void`,
+                    handler: runVoidStep_void, enabledAfter: 'eligibility' as VoidStepKey },
+                  { key: 'sla'         as VoidStepKey, step: 3, method: 'POST', methodColor: 'green',  label: 'Create SLA Reversal Accounting',
+                    url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/create`,
+                    handler: runVoidStep_sla, enabledAfter: 'void' as VoidStepKey },
+                  { key: 'gl_create'   as VoidStepKey, step: 4, method: 'POST', methodColor: 'green',  label: 'Create GL Journal',
+                    url: `${APEX_DB_CONFIG.baseUrl}/journals/create`,
+                    handler: runVoidStep_glCreate, enabledAfter: 'sla' as VoidStepKey },
+                  { key: 'gl_post'     as VoidStepKey, step: 5, method: 'PUT',  methodColor: 'orange', label: 'Post GL Journal',
+                    url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/:batchId/post`,
+                    handler: runVoidStep_glPost, enabledAfter: 'gl_create' as VoidStepKey },
+                  { key: 'sla_stamp'   as VoidStepKey, step: 6, method: 'POST', methodColor: 'green',  label: 'Stamp SLA as POSTED',
+                    url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`,
+                    handler: runVoidStep_stamp, enabledAfter: 'gl_post' as VoidStepKey },
+                ];
+                return stepCards.map(card => {
+                  const st = voidStepMap[card.key];
+                  const isRunning = st.status === 'running';
+                  const enabled = !isRunning && (!card.enabledAfter || voidStepMap[card.enabledAfter]?.status === 'success');
+                  const borderColor = st.status === 'success' ? '#52c41a' : st.status === 'error' ? '#ff4d4f' : st.status === 'running' ? '#1677ff' : undefined;
+                  const statusIcon = st.status === 'running' ? <LoadingOutlined style={{ color: '#1677ff' }} spin />
+                    : st.status === 'success' ? <CheckCircleOutlined style={{ color: '#52c41a' }} />
+                    : st.status === 'error'   ? <CloseCircleOutlined style={{ color: '#ff4d4f' }} /> : null;
+                  return (
+                    <Card key={card.key} size="small" style={{ marginBottom: 10, borderColor }}
+                      title={
+                        <Space size={4}>
+                          <Tag color={card.methodColor} style={{ minWidth: 44, textAlign: 'center', margin: 0 }}>{card.method}</Tag>
+                          <Text strong style={{ fontSize: 12 }}>Step {card.step}: {card.label}</Text>
+                          {statusIcon}
+                        </Space>
+                      }
+                      extra={
+                        <Button size="small" type="primary" danger={card.key === 'void'}
+                          icon={isRunning ? <LoadingOutlined /> : <PlayCircleOutlined />}
+                          loading={isRunning} disabled={!enabled} onClick={card.handler}
+                        >
+                          Run
+                        </Button>
+                      }
                     >
-                      Run
-                    </Button>
-                  }
-                >
-                  <code style={{ fontSize: 10, background: '#f0f0f0', padding: '2px 6px', borderRadius: 3, display: 'block', wordBreak: 'break-all', marginBottom: st.response || st.error ? 6 : 0 }}>{card.url}</code>
-                  {st.error && <Alert type="error" message={st.error} style={{ marginTop: 6, fontSize: 11 }} showIcon />}
-                  {st.response && (
-                    <pre style={{ fontSize: 10, background: '#1e1e1e', color: st.status === 'error' ? '#f48771' : '#b5cea8', padding: 8, borderRadius: 4, margin: '6px 0 0', maxHeight: 120, overflowY: 'auto' }}>
-                      {JSON.stringify(st.response, null, 2)}
-                    </pre>
-                  )}
-                </Card>
-              );
-            });
-          })()}
-        </Drawer>
+                      <code style={{ fontSize: 10, background: '#f0f0f0', padding: '2px 6px', borderRadius: 3, display: 'block', wordBreak: 'break-all', marginBottom: st.response || st.error ? 6 : 0 }}>{card.url}</code>
+                      {st.error && <Alert type="error" message={st.error} style={{ marginTop: 6, fontSize: 11 }} showIcon />}
+                      {st.response && (
+                        <pre style={{ fontSize: 10, background: '#1e1e1e', color: st.status === 'error' ? '#f48771' : '#b5cea8', padding: 8, borderRadius: 4, margin: '6px 0 0', maxHeight: 120, overflowY: 'auto' }}>
+                          {JSON.stringify(st.response, null, 2)}
+                        </pre>
+                      )}
+                    </Card>
+                  );
+                });
+              })(),
+            }]}
+          />
+        </Modal>
 
       </Content>
 
