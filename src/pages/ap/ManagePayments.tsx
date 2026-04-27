@@ -850,26 +850,68 @@ const ManagePayments: React.FC = () => {
             };
           });
 
-          const payloads = buildApPaymentSlaPayloads({
-            checkId, paymentNumber, paperDocumentNumber: paperDocNum,
-            paymentDate: payDate, currencyCode: ccy,
-            businessUnit: buName, legalEntity: ledger?.legalEntity,
-            ledgerId: ledger?.ledgerId, ledgerName: ledger?.ledgerName,
-            ledgerCurrency: 'AED', exchangeRate: exRate,
-            cashClearingAccount: cashClearingAcct,
-            appliedInvoices,
-          });
+          if (!appliedInvoices.length) throw new Error('No invoices to account for');
+          setConfStep('sla', { status: 'running', detail: `Creating SLA entry (${appliedInvoices.length} DR + 1 CR)…` });
 
-          if (!payloads.length) throw new Error('No invoices to account for');
-          setConfStep('sla', { status: 'running', detail: `Creating ${payloads.length} SLA entries…` });
+          const totalAmount = appliedInvoices.reduce((s, inv) => s + inv.amountPaid, 0);
+          const singlePayload: SlaCreatePayload = {
+            header: {
+              moduleName:       'AP',
+              sourceTable:      'AP_PAYMENTS',
+              sourceId:         checkId,
+              sourceNumber:     paperDocNum,
+              sourceType:       'PAYMENT',
+              eventTypeCode:    'AP_PAYMENT_CREATED',
+              eventDate:        payDate,
+              accountingDate:   payDate,
+              periodName:       derivePeriodName(new Date(payDate)),
+              ledgerId:         ledger?.ledgerId   ?? 300000003259529,
+              ledgerName:       ledger?.ledgerName ?? 'BCL DIFC',
+              currencyCode:     ccy,
+              ledgerCurrency:   'AED',
+              exchangeRate:     exRate,
+              exchangeRateType: 'Corporate',
+              businessUnit:     buName,
+              legalEntity:      ledger?.legalEntity,
+              description:      `AP Payment ${paperDocNum}`,
+              createdBy:        'SYSTEM',
+            },
+            lines: [
+              ...appliedInvoices.map((inv, idx) => ({
+                lineNumber:         idx + 1,
+                lineType:           'DR' as const,
+                accountingClass:    'LIABILITY',
+                accountCombination: inv.liabilityDistribution,
+                enteredDr:          inv.amountPaid,
+                enteredCr:          0,
+                accountedDr:        Math.round(inv.amountPaid * exRate * 100) / 100,
+                accountedCr:        0,
+                currencyCode:       ccy,
+                exchangeRate:       exRate,
+                description:        `AP Liability – ${paperDocNum} / ${inv.invoiceNumber}`,
+                sourceLineNumber:   idx + 1,
+              })),
+              {
+                lineNumber:         appliedInvoices.length + 1,
+                lineType:           'CR' as const,
+                accountingClass:    'CASH_CLEARING',
+                accountCombination: cashClearingAcct,
+                enteredDr:          0,
+                enteredCr:          totalAmount,
+                accountedDr:        0,
+                accountedCr:        Math.round(totalAmount * exRate * 100) / 100,
+                currencyCode:       ccy,
+                exchangeRate:       exRate,
+                description:        `Cash Clearing – Payment ${paperDocNum}`,
+                sourceLineNumber:   appliedInvoices.length + 1,
+              },
+            ],
+          };
 
-          let lastSlaHeaderId: number | null = null;
-          for (const payload of payloads) {
-            const result = await createAccounting(payload);
-            if ((result as any).status === 'error' || !(result.headerId > 0)) throw new Error((result as any).message ?? 'headerId missing');
-            lastSlaHeaderId = result.headerId;
-          }
-          setConfStep('sla', { status: 'success', detail: `${payloads.length} SLA header(s) created` });
+          const slaResult = await createAccounting(singlePayload);
+          if ((slaResult as any).status === 'error' || !(slaResult.headerId > 0)) throw new Error((slaResult as any).message ?? 'headerId missing');
+          const lastSlaHeaderId = slaResult.headerId;
+          setConfStep('sla', { status: 'success', detail: `SLA header #${lastSlaHeaderId} created (${appliedInvoices.length} DR + 1 CR)` });
 
           // Post to GL
           setConfStep('gl', { status: 'running' });
@@ -887,7 +929,7 @@ const ManagePayments: React.FC = () => {
             businessUnit:   buName,
             conversionRate: exRate,
             jeCategory:     'AP_PAYMENT_CREATED',
-            lines: payloads.flatMap(p => p.lines.map(l => ({
+            lines: singlePayload.lines.map(l => ({
               lineType:           (l.enteredDr ?? 0) > 0 ? 'DR' as const : 'CR' as const,
               enteredDr:          l.enteredDr ?? null,
               enteredCr:          l.enteredCr ?? null,
@@ -899,12 +941,12 @@ const ManagePayments: React.FC = () => {
               accountCombination: l.accountCombination ?? '',
               accountingClass:    l.accountingClass ?? null,
               legalEntity:        ledger?.legalEntity ?? null,
-            }))),
+            })),
           });
           setConfStep('gl', { status: glResult.success ? 'success' : 'error', detail: glResult.success ? `GL Batch: ${glResult.batchName}` : glResult.error });
         } catch (accErr: any) {
-          setConfStep('sla', prev => prev.sla.status === 'running' ? { ...prev.sla, status: 'error', detail: accErr.message } : prev.sla);
-          setConfStep('gl',  prev => prev.gl.status  === 'idle'    ? { ...prev.gl,  status: 'error', detail: 'Skipped due to SLA error' } : prev.gl);
+          setConfStep('sla', { status: 'error', detail: accErr.message });
+          setConfStep('gl',  { status: 'error', detail: 'Skipped due to SLA error' });
         }
       }
 
@@ -2026,6 +2068,10 @@ const ManagePayments: React.FC = () => {
           ? getAccountingLinesBySourceNumber(String(record.paymentNumber), 'AP').catch(() => ({ items: [] }))
           : Promise.resolve({ items: [] }),
       ]);
+      // Filter to only lines belonging to this payment's checkId
+      allLinesData.items = (allLinesData.items || []).filter(
+        (l: any) => !l.sourceId || Number(l.sourceId) === Number(record.checkId)
+      );
       // Enrich main result lines with account descriptions
       if (result.headerId) {
         try {
@@ -2217,8 +2263,11 @@ const ManagePayments: React.FC = () => {
       if (viewAcctRecord.paymentNumber) {
         try {
           const allData = await getAccountingLinesBySourceNumber(String(viewAcctRecord.paymentNumber), 'AP');
+          const filteredItems = (allData.items || []).filter(
+            (l: any) => !l.sourceId || Number(l.sourceId) === Number(viewAcctRecord.checkId)
+          );
           const eventsMap = new Map<number, any>();
-          for (const line of (allData.items || [])) {
+          for (const line of filteredItems) {
             const hid = line.headerId as number;
             if (!eventsMap.has(hid)) eventsMap.set(hid, { headerId: hid, eventTypeCode: (line as any).eventTypeCode || '', accountingStatus: (line as any).accountingStatus || '', accountingDate: (line as any).accountingDate || '', lines: [] });
             eventsMap.get(hid)!.lines.push(line);
@@ -2895,7 +2944,7 @@ const ManagePayments: React.FC = () => {
                               <Select placeholder="Select Payment Document" allowClear disabled={!selectedBuLegalEntityName} />
                             </Form.Item>
                             <Form.Item label="Paper Document Number" name="paperDocumentNumber">
-                              <Input disabled={!selectedBuLegalEntityName} style={{ background: '#f5f5f5' }} />
+                              <Input disabled={!selectedBuLegalEntityName} placeholder="Leave blank to auto-generate" />
                             </Form.Item>
                             <Form.Item label="Attachments">
                               <Space size={4}>
