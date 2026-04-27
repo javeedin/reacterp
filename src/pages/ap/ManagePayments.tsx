@@ -216,6 +216,7 @@ interface PaymentInvoice {
   currency: string;
   supplierSite: string;
   liabilityDistribution?: string;
+  installmentNumber?: number | null;
 }
 
 // Supplier record from API
@@ -607,7 +608,6 @@ const ManagePayments: React.FC = () => {
   const [apiTestLoading, setApiTestLoading] = useState<Record<number, boolean>>({});
   const [apiTestResults, setApiTestResults] = useState<Record<number, { status: 'success' | 'error'; data: any }>>({});
   const [apiStep1CheckId, setApiStep1CheckId] = useState<number | null>(null);
-  const [apiStep2InstMap, setApiStep2InstMap] = useState<Record<number, number>>({});  // invoiceId → installmentId
 
   // Convert form date value (dayjs | string | null) → 'YYYY-MM-DD'
   const formDateStr = (val: any): string => {
@@ -766,34 +766,44 @@ const ManagePayments: React.FC = () => {
       const instBaseUrl = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/installments`;
       const instErrors: string[] = [];
       let totalInstUpdated = 0;
-      // Track which installment was applied for each invoice so Step 3 can store it
-      const invoiceInstallmentMap: Record<number, string> = {};
 
       for (const inv of invoicesToPay) {
         try {
-          const getRes = await fetch(`${instBaseUrl}?P_INVOICE_ID=${inv.invoiceId}`, { headers: { Accept: 'application/json' } });
-          if (!getRes.ok) throw new Error(`HTTP ${getRes.status}`);
-          const instData = await getRes.json();
-          const allInst: any[] = instData.items || instData.installments || (Array.isArray(instData) ? instData : []);
-          const pending = allInst.filter(i => (i.amount_remaining ?? i.unpaid_amount ?? 1) > 0);
-          let remainingApply = inv.applyAmount;
-          for (const inst of pending) {
-            if (remainingApply <= 0) break;
-            const instId = inst.installment_id?.toString() || inst.key;
-            const instUnpaid = Number(inst.amount_remaining ?? inst.unpaid_amount ?? inst.UNPAID_AMOUNT ?? 0);
-            const amountApplied = Math.min(remainingApply, instUnpaid);
-            const newUnpaid = Math.max(0, instUnpaid - amountApplied);
+          if (inv.installmentNumber) {
+            // Installment ID is known (from available-installments endpoint) — PUT directly
+            const newUnpaid = Math.max(0, inv.amountDue - inv.applyAmount);
             const newStatus = newUnpaid <= 0 ? 'Fully Paid' : 'Partially Paid';
-            remainingApply -= amountApplied;
-            // Track the primary installment used for this invoice
-            if (!invoiceInstallmentMap[inv.invoiceId]) invoiceInstallmentMap[inv.invoiceId] = instId;
             const putRes = await fetch(instBaseUrl, {
               method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-              body: JSON.stringify({ InvoiceId: inv.invoiceId, InstallmentId: instId, PaymentStatus: newStatus, AmountRemaining: newUnpaid }),
+              body: JSON.stringify({ InvoiceId: inv.invoiceId, InstallmentId: inv.installmentNumber, PaymentStatus: newStatus, AmountRemaining: newUnpaid }),
             });
             const d2 = await putRes.json().catch(() => ({}));
-            if (d2?.status === 'error' || !putRes.ok) instErrors.push(`${inv.invoiceNumber} inst ${instId}: ${d2?.message || `HTTP ${putRes.status}`}`);
+            if (d2?.status === 'error' || !putRes.ok) instErrors.push(`${inv.invoiceNumber} inst ${inv.installmentNumber}: ${d2?.message || `HTTP ${putRes.status}`}`);
             else totalInstUpdated++;
+          } else {
+            // Fallback: fetch installments and apply in order
+            const getRes = await fetch(`${instBaseUrl}?P_INVOICE_ID=${inv.invoiceId}`, { headers: { Accept: 'application/json' } });
+            if (!getRes.ok) throw new Error(`HTTP ${getRes.status}`);
+            const instData = await getRes.json();
+            const allInst: any[] = instData.items || instData.installments || (Array.isArray(instData) ? instData : []);
+            const pending = allInst.filter(i => (i.amount_remaining ?? i.unpaid_amount ?? 1) > 0);
+            let remainingApply = inv.applyAmount;
+            for (const inst of pending) {
+              if (remainingApply <= 0) break;
+              const instId = inst.installment_id?.toString() || inst.key;
+              const instUnpaid = Number(inst.amount_remaining ?? inst.unpaid_amount ?? inst.UNPAID_AMOUNT ?? 0);
+              const amountApplied = Math.min(remainingApply, instUnpaid);
+              const newUnpaid = Math.max(0, instUnpaid - amountApplied);
+              const newStatus = newUnpaid <= 0 ? 'Fully Paid' : 'Partially Paid';
+              remainingApply -= amountApplied;
+              const putRes = await fetch(instBaseUrl, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                body: JSON.stringify({ InvoiceId: inv.invoiceId, InstallmentId: instId, PaymentStatus: newStatus, AmountRemaining: newUnpaid }),
+              });
+              const d2 = await putRes.json().catch(() => ({}));
+              if (d2?.status === 'error' || !putRes.ok) instErrors.push(`${inv.invoiceNumber} inst ${instId}: ${d2?.message || `HTTP ${putRes.status}`}`);
+              else totalInstUpdated++;
+            }
           }
         } catch (e: any) { instErrors.push(`${inv.invoiceNumber}: ${e?.message ?? 'Network error'}`); }
       }
@@ -807,7 +817,7 @@ const ManagePayments: React.FC = () => {
       for (const inv of invoicesToPay) {
         const body3 = {
           InvoicePaymentId: null, CheckId: checkId, InvoiceId: inv.invoiceId,
-          InvoiceBusinessUnit: buName, InvoiceNumber: inv.invoiceNumber, InstallmentNumber: invoiceInstallmentMap[inv.invoiceId] ? Number(invoiceInstallmentMap[inv.invoiceId]) : null,
+          InvoiceBusinessUnit: buName, InvoiceNumber: inv.invoiceNumber, InstallmentNumber: inv.installmentNumber ?? null,
           AmountPaidPaymentCurrency: inv.applyAmount, AmountPaidInvoiceCurrency: inv.applyAmount,
           InvoicePaymentAmount: inv.applyAmount, InvoiceAmount: inv.invoiceAmount,
           InvoiceBaseAmount: inv.invoiceAmount, PaymentBaseAmount: inv.applyAmount,
@@ -966,7 +976,7 @@ const ManagePayments: React.FC = () => {
   const fetchAvailableInvoices = async (supplierNumber: string) => {
     setAvailableInvoicesLoading(true);
     try {
-      const url = `${APEX_INVOICE_URL}?supplier_number=${encodeURIComponent(supplierNumber)}`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/available-installments?supplier_number=${encodeURIComponent(supplierNumber)}`;
       setAddInvoicesApiUrl(url);
       const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -974,23 +984,22 @@ const ManagePayments: React.FC = () => {
       const already = new Set(invoicesToPay.map(i => i.key));
       const items = (data.items || [])
         .map((item: any, index: number) => {
-          // unpaid_amount is derived from RR_AP_PAYMENTS_RELATED_INVOICES in the API — use it as source of truth
-          const unpaid = item.unpaid_amount !== undefined && item.unpaid_amount !== null
-            ? Number(item.unpaid_amount)
-            : (item.invoice_amount || 0) - (item.amount_paid || 0);
+          const unpaid = Number(item.unpaid_amount ?? 0);
           return {
-            key: item.invoice_id?.toString() || item.invoice_number || index.toString(),
+            key: item.installment_id?.toString() || index.toString(),
             invoiceId: item.invoice_id || 0,
             invoiceNumber: item.invoice_number || '',
             invoiceDate: item.invoice_date ? item.invoice_date.substring(0, 10) : '',
             description: item.description || '',
-            invoiceAmount: item.invoice_amount || 0,
+            invoiceAmount: Number(item.installment_amount ?? item.invoice_amount ?? 0),
             amountDue: unpaid,
             applyAmount: unpaid,
             discountAmount: 0,
             dueDate: item.due_date ? item.due_date.substring(0, 10) : '',
             currency: item.invoice_currency || 'AED',
             supplierSite: item.supplier_site || '',
+            liabilityDistribution: item.liability_distribution || '',
+            installmentNumber: item.installment_id != null ? Number(item.installment_id) : null,
           };
         })
         .filter((inv: PaymentInvoice) => inv.amountDue > 0 && !already.has(inv.key));
@@ -4651,8 +4660,6 @@ const ManagePayments: React.FC = () => {
                         });
                         const d = await putRes.json().catch(() => ({}));
                         results.push({ instId, amountApplied, newUnpaid, newStatus, status: putRes.ok ? 'ok' : 'error', data: d });
-                        // Capture first successful installment ID for Step 3
-                        if (putRes.ok) setApiStep2InstMap(prev => ({ ...prev, [inv.invoiceId]: Number(instId) }));
                       }
                       setApiTestResults(prev => ({ ...prev, [stepKey]: { status: results.every(r => r.status === 'ok') ? 'success' : 'error', data: results } }));
                     } catch (e: any) {
@@ -4707,7 +4714,7 @@ const ManagePayments: React.FC = () => {
             InvoiceId:                 inv.invoiceId,
             InvoiceBusinessUnit:       fv.businessUnit || null,
             InvoiceNumber:             inv.invoiceNumber,
-            InstallmentNumber:         apiStep2InstMap[inv.invoiceId] ?? null,
+            InstallmentNumber:         inv.installmentNumber ?? null,
             AmountPaidPaymentCurrency: inv.applyAmount,
             AmountPaidInvoiceCurrency: inv.applyAmount,
             InvoicePaymentAmount:      inv.applyAmount,
