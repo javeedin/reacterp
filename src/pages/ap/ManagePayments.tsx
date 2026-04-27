@@ -725,6 +725,7 @@ const ManagePayments: React.FC = () => {
 
   const handleConfirmPaymentClick = async () => {
     try { await createPaymentForm.validateFields(); } catch { message.warning('Please fill in all required fields'); return; }
+    if (invoicesToPay.length === 0) { message.warning('Please add at least one invoice before confirming the payment'); return; }
     setConfirmSteps({
       payment:      { label: 'Create Payment',              status: 'idle' },
       installments: { label: 'Update Invoice Installments', status: 'idle' },
