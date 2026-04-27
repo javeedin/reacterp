@@ -95,12 +95,14 @@ SELECT
     NVL(prep.total_prep, 0)                       AS applied_prepayments,
     i.liability_distribution
 FROM  RR_AP_INVOICES_ALL i
--- Cash payments rolled up per invoice
+-- Cash payments rolled up per invoice, excluding voided payments
 LEFT JOIN (
-    SELECT INVOICE_ID,
-           SUM(NVL(AMOUNT_PAID_PAYMENT_CURRENCY, 0)) AS total_paid
-    FROM   RR_AP_PAYMENTS_RELATED_INVOICES
-    GROUP BY INVOICE_ID
+    SELECT rel.INVOICE_ID,
+           SUM(NVL(rel.AMOUNT_PAID_PAYMENT_CURRENCY, 0)) AS total_paid
+    FROM   RR_AP_PAYMENTS_RELATED_INVOICES rel
+    JOIN   RR_AP_PAYMENTS_ALL pmt ON pmt.CHECK_ID = rel.CHECK_ID
+    WHERE  NVL(pmt.PAYMENT_STATUS, 'Active') NOT IN ('Voided', 'Void')
+    GROUP BY rel.INVOICE_ID
 ) pay  ON pay.INVOICE_ID  = i.invoice_id
 -- Prepayment applications rolled up per invoice
 LEFT JOIN (
