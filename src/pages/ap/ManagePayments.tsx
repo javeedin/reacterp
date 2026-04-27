@@ -1955,20 +1955,28 @@ const ManagePayments: React.FC = () => {
       const cashClearingAcct = bank?.cashClearingAccountCombination || '';
       if (!cashClearingAcct) throw new Error(`No cash clearing account for bank: ${voidTargetPayment.disbursementBankAccount || '(none)'}`);
       if (!voidRelatedInvoices.length) throw new Error('No related invoices — payment may not have linked invoices');
-      const reverseLines: any[] = [];
-      voidRelatedInvoices.forEach((inv, idx) => {
-        const amt = Number(inv.amountPaid) || 0;
-        reverseLines.push({ lineNumber: idx*2+1, lineType: 'DR', accountingClass: 'CASH_CLEARING',
-          accountCombination: cashClearingAcct, enteredDr: amt, enteredCr: 0,
-          accountedDr: Math.round(amt*ctx.exRate*100)/100, accountedCr: 0,
-          currencyCode: ctx.ccy, exchangeRate: ctx.exRate, sourceLineNumber: idx*2+1,
-          description: `Void Cash Clearing – Payment ${ctx.paymentNum} / Invoice ${inv.invoiceNumber}` });
-        reverseLines.push({ lineNumber: idx*2+2, lineType: 'CR', accountingClass: 'LIABILITY',
-          accountCombination: inv.liabilityDistribution || '', enteredDr: 0, enteredCr: amt,
-          accountedDr: 0, accountedCr: Math.round(amt*ctx.exRate*100)/100,
-          currencyCode: ctx.ccy, exchangeRate: ctx.exRate, sourceLineNumber: idx*2+2,
-          description: `Void AP Liability – Payment ${ctx.paymentNum} / Invoice ${inv.invoiceNumber}` });
-      });
+      const totalAmt = voidRelatedInvoices.reduce((s, inv) => s + (Number(inv.amountPaid) || 0), 0);
+      const reverseLines: any[] = [
+        // Single DR: Cash Clearing for the full payment amount
+        {
+          lineNumber: 1, lineType: 'DR', accountingClass: 'CASH_CLEARING',
+          accountCombination: cashClearingAcct, enteredDr: totalAmt, enteredCr: 0,
+          accountedDr: Math.round(totalAmt * ctx.exRate * 100) / 100, accountedCr: 0,
+          currencyCode: ctx.ccy, exchangeRate: ctx.exRate, sourceLineNumber: 1,
+          description: `Void Cash Clearing – Payment ${ctx.paymentNum} / Invoices: ${voidRelatedInvoices.map(i => i.invoiceNumber).join(', ')}`,
+        },
+        // One CR per invoice: AP Liability
+        ...voidRelatedInvoices.map((inv, idx) => {
+          const amt = Number(inv.amountPaid) || 0;
+          return {
+            lineNumber: idx + 2, lineType: 'CR', accountingClass: 'LIABILITY',
+            accountCombination: inv.liabilityDistribution || '', enteredDr: 0, enteredCr: amt,
+            accountedDr: 0, accountedCr: Math.round(amt * ctx.exRate * 100) / 100,
+            currencyCode: ctx.ccy, exchangeRate: ctx.exRate, sourceLineNumber: idx + 2,
+            description: `Void AP Liability – ${ctx.paymentNum} / ${inv.invoiceNumber}`,
+          };
+        }),
+      ];
       voidCtxRef.current.reverseLines = reverseLines;
       const payload: SlaCreatePayload = {
         header: { moduleName: 'AP', sourceTable: 'AP_PAYMENTS', sourceId: voidTargetPayment.checkId,
