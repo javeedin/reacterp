@@ -94,6 +94,13 @@ interface BankAcctOption {
   value: string;
   bankAccountNumber?: string;
   currencyCode?: string;
+  legalEntityName?: string;
+}
+
+interface BUOption {
+  label: string;
+  value: string;
+  legalEntityName?: string;
 }
 
 interface BankStatement {
@@ -158,6 +165,7 @@ const sumSelected = (items: StmtLine[] | SysTxn[], keys: React.Key[]): number =>
 // ── Search Panel ──────────────────────────────────────────────────────────────
 interface SearchPanelProps {
   bankAccounts: BankAcctOption[];
+  businessUnits: BUOption[];
   loadingAccounts: boolean;
   onSearch: (params: SearchParams) => void;
   onReset: () => void;
@@ -165,11 +173,20 @@ interface SearchPanelProps {
 
 const SearchPanel: React.FC<SearchPanelProps> = ({
   bankAccounts,
+  businessUnits,
   loadingAccounts,
   onSearch,
   onReset,
 }) => {
   const [form] = Form.useForm<SearchParams>();
+  const [selectedBu, setSelectedBu] = useState<string | undefined>();
+
+  const filteredAccounts = selectedBu
+    ? (() => {
+        const le = businessUnits.find(b => b.value === selectedBu)?.legalEntityName ?? '';
+        return le ? bankAccounts.filter(a => a.legalEntityName === le) : bankAccounts;
+      })()
+    : bankAccounts;
 
   const handleSearch = () => {
     const vals = form.getFieldsValue();
@@ -197,6 +214,22 @@ const SearchPanel: React.FC<SearchPanelProps> = ({
           children: (
             <Form form={form} layout="vertical" size="small">
               <Row gutter={[12, 0]}>
+                <Col xs={24} sm={12} lg={5}>
+                  <Form.Item name="businessUnit" label={<Text style={{ fontWeight: 600 }}>Business Unit</Text>}>
+                    <Select
+                      showSearch allowClear
+                      placeholder="Select BU"
+                      options={businessUnits}
+                      filterOption={(input, option) =>
+                        (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                      }
+                      onChange={(v: string | undefined) => {
+                        setSelectedBu(v ?? undefined);
+                        form.setFieldValue('bankAccount', undefined);
+                      }}
+                    />
+                  </Form.Item>
+                </Col>
                 <Col xs={24} sm={12} lg={7}>
                   <Form.Item
                     name="bankAccount"
@@ -207,11 +240,11 @@ const SearchPanel: React.FC<SearchPanelProps> = ({
                       showSearch
                       allowClear
                       loading={loadingAccounts}
-                      placeholder="Select bank account"
+                      placeholder={selectedBu ? 'Select bank account' : 'Select BU first or pick account'}
                       filterOption={(input, option) =>
                         (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
                       }
-                      options={bankAccounts}
+                      options={filteredAccounts}
                     />
                   </Form.Item>
                 </Col>
@@ -375,10 +408,11 @@ const StatementSelector: React.FC<StatementSelectorProps> = ({
 // ── Unreconciled Tab ──────────────────────────────────────────────────────────
 interface UnreconciledTabProps {
   bankAccounts: BankAcctOption[];
+  businessUnits: BUOption[];
   loadingAccounts: boolean;
 }
 
-const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, loadingAccounts }) => {
+const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, businessUnits, loadingAccounts }) => {
   const [statements, setStatements]             = useState<BankStatement[]>([]);
   const [loadingStmts, setLoadingStmts]         = useState(false);
   const [selectedStatement, setSelectedStatement] = useState<BankStatement | null>(null);
@@ -911,6 +945,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, loading
       {contextHolder}
       <SearchPanel
         bankAccounts={bankAccounts}
+        businessUnits={businessUnits}
         loadingAccounts={loadingAccounts}
         onSearch={handleSearch}
         onReset={handleReset}
@@ -1304,10 +1339,11 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, loading
 // ── Reconciled Tab ────────────────────────────────────────────────────────────
 interface ReconciledTabProps {
   bankAccounts: BankAcctOption[];
+  businessUnits: BUOption[];
   loadingAccounts: boolean;
 }
 
-const ReconciledTab: React.FC<ReconciledTabProps> = ({ bankAccounts, loadingAccounts }) => {
+const ReconciledTab: React.FC<ReconciledTabProps> = ({ bankAccounts, businessUnits, loadingAccounts }) => {
   const [reconLines, setReconLines]   = useState<StmtLine[]>([]);
   const [loading, setLoading]         = useState(false);
   const [msgApi, contextHolder]       = message.useMessage();
@@ -1486,6 +1522,7 @@ const ReconciledTab: React.FC<ReconciledTabProps> = ({ bankAccounts, loadingAcco
       {contextHolder}
       <SearchPanel
         bankAccounts={bankAccounts}
+        businessUnits={businessUnits}
         loadingAccounts={loadingAccounts}
         onSearch={handleSearch}
         onReset={handleReset}
@@ -1526,35 +1563,45 @@ const ReconciledTab: React.FC<ReconciledTabProps> = ({ bankAccounts, loadingAcco
 // ── Main Page ─────────────────────────────────────────────────────────────────
 const BankReconciliation: React.FC = () => {
   const [bankAccounts, setBankAccounts]         = useState<BankAcctOption[]>([]);
+  const [businessUnits, setBusinessUnits]       = useState<BUOption[]>([]);
   const [loadingAccounts, setLoadingAccounts]   = useState(false);
   const [activeTab, setActiveTab]               = useState<string>('unreconciled');
 
-  // Load bank account LOV
+  // Load bank accounts from banks/bankaccounts and BUs from gl/businessunits
   useEffect(() => {
     const load = async () => {
       setLoadingAccounts(true);
       try {
-        const res  = await fetch(`${APEX_BASE}/cash/externaltransactions?row_limit=1000`);
-        const data = await parseApexJson(res);
-        if (data.status === 'success' && Array.isArray(data.items)) {
-          const seen = new Set<string>();
-          const opts: BankAcctOption[] = [];
-          for (const item of data.items as Array<{ bankAccountName?: string; bankAccountNumber?: string; currencyCode?: string }>) {
-            const name = item.bankAccountName ?? '';
-            if (name && !seen.has(name)) {
-              seen.add(name);
-              opts.push({
-                label:             name,
-                value:             name,
-                bankAccountNumber: item.bankAccountNumber,
-                currencyCode:      item.currencyCode,
-              });
-            }
-          }
-          setBankAccounts(opts);
-        }
+        const [acctRes, buRes] = await Promise.all([
+          fetch(`${APEX_BASE}/banks/bankaccounts`),
+          fetch(`${APEX_BASE}/gl/businessunits`),
+        ]);
+        const acctData = await acctRes.json();
+        const buData   = await buRes.json();
+
+        const opts: BankAcctOption[] = (acctData?.items ?? [])
+          .filter((i: any) => i.bankAccountName || i.bank_account_name)
+          .map((i: any) => ({
+            label:             i.bankAccountName   || i.bank_account_name   || '',
+            value:             i.bankAccountName   || i.bank_account_name   || '',
+            bankAccountNumber: i.bankAccountNumber || i.bank_account_number || '',
+            currencyCode:      i.currencyCode      || i.currency_code       || '',
+            legalEntityName:   i.legalEntityName   || i.legal_entity_name   || '',
+          }))
+          .sort((a: BankAcctOption, b: BankAcctOption) => a.label.localeCompare(b.label));
+        setBankAccounts(opts);
+
+        const buOpts: BUOption[] = (buData?.items ?? [])
+          .map((i: any) => ({
+            label:           i.business_unit_name || '',
+            value:           i.business_unit_name || '',
+            legalEntityName: i.legal_entity_name  || '',
+          }))
+          .filter((o: BUOption) => o.value)
+          .sort((a: BUOption, b: BUOption) => a.label.localeCompare(b.label));
+        setBusinessUnits(buOpts);
       } catch (err) {
-        console.error('Failed to load bank accounts', err);
+        console.error('Failed to load bank accounts / BUs', err);
       } finally {
         setLoadingAccounts(false);
       }
@@ -1574,6 +1621,7 @@ const BankReconciliation: React.FC = () => {
       children: (
         <UnreconciledTab
           bankAccounts={bankAccounts}
+          businessUnits={businessUnits}
           loadingAccounts={loadingAccounts}
         />
       ),
@@ -1589,6 +1637,7 @@ const BankReconciliation: React.FC = () => {
       children: (
         <ReconciledTab
           bankAccounts={bankAccounts}
+          businessUnits={businessUnits}
           loadingAccounts={loadingAccounts}
         />
       ),
