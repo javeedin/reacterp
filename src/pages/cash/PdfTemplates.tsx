@@ -135,6 +135,7 @@ const PdfTemplates: React.FC = () => {
   const [detectedCols, setDetectedCols] = useState<{ text: string; x: number; field: string }[]>([]);
   const [saving, setSaving] = useState(false);
   const [manualHeaders, setManualHeaders] = useState('');
+  const [savedInfo, setSavedInfo] = useState<Record<string, any>>({});
   const [inspectModal, setInspectModal] = useState(false);
   const [inspectPayload, setInspectPayload] = useState('');
   const [inspectPosting, setInspectPosting] = useState(false);
@@ -291,7 +292,8 @@ const PdfTemplates: React.FC = () => {
     setDetectedCols(prev => prev.map((c, i) => i === idx ? { ...c, field } : c));
 
   const buildPostPayload = () => {
-    const info = infoForm.getFieldsValue();
+    // Use savedInfo (captured when leaving Step 0) — form is unmounted on steps 1/2/3
+    const info = step === 0 ? infoForm.getFieldsValue() : savedInfo;
     const mappings = computeXRanges(detectedCols);
     const payload: Record<string, unknown> = {
       template_name:      info.templateName || null,
@@ -308,9 +310,9 @@ const PdfTemplates: React.FC = () => {
   };
 
   const openInspect = () => {
-    const info = infoForm.getFieldsValue();
+    const info = step === 0 ? infoForm.getFieldsValue() : savedInfo;
     if (!info.templateName) {
-      message.error('Template Name is required — fill in Step 1 first');
+      message.error('Fill in Template Name on Step 1 first');
       setStep(0);
       return;
     }
@@ -339,7 +341,11 @@ const PdfTemplates: React.FC = () => {
 
   const goNext = async () => {
     if (step === 0) {
-      try { await infoForm.validateFields(); setStep(1); } catch { /* form errors shown */ }
+      try {
+        const values = await infoForm.validateFields();
+        setSavedInfo(values); // persist values before form unmounts
+        setStep(1);
+      } catch { /* form errors shown */ }
     } else {
       setStep(s => s + 1);
     }
