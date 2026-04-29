@@ -72,18 +72,20 @@ const TransactionCodes: React.FC = () => {
   // Load Business Units
   useEffect(() => {
     fetch(`${APEX_BASE}/gl/businessunits`)
-      .then(parseApexJson)
+      .then(res => res.json())
       .then((data) => {
-        const items: { businessUnitName?: string; name?: string }[] =
-          data.items ?? data ?? [];
+        const items: any[] = data.items ?? [];
         setBuOptions(
-          items.map((b) => {
-            const name = b.businessUnitName ?? b.name ?? '';
-            return { label: name, value: name };
-          })
+          items
+            .map((b) => {
+              const name = b.business_unit_name || '';
+              return { label: name, value: name };
+            })
+            .filter(o => o.value)
+            .sort((a, b) => a.label.localeCompare(b.label))
         );
       })
-      .catch(() => {/* silently ignore — BU list is optional */});
+      .catch(() => {});
   }, []);
 
   // Load transaction codes
@@ -94,13 +96,13 @@ const TransactionCodes: React.FC = () => {
       if (filterBu) params.set('business_unit', filterBu);
       const res = await fetch(`${APEX_BASE}/cash/transaction-codes?${params}`);
       const data = await parseApexJson(res);
-      const items: TransactionCode[] = (data.items ?? []).map((r: Record<string, unknown>) => ({
-        tcId:                    r['tcId']                    as number,
-        businessUnitName:        r['businessUnitName']        as string,
-        transactionCode:         r['transactionCode']         as string,
-        description:             r['description']             as string | undefined,
-        defaultAccountCombination: r['defaultAccountCombination'] as string | undefined,
-        endTransaction:          r['endTransaction']          as string | undefined,
+      const items: TransactionCode[] = (data.items ?? []).map((r: any) => ({
+        tcId:                      r.tc_id,
+        businessUnitName:          r.business_unit_name        ?? '',
+        transactionCode:           r.transaction_code          ?? '',
+        description:               r.description,
+        defaultAccountCombination: r.default_account_combination,
+        endTransaction:            r.end_transaction,
       }));
       setRecords(items);
     } catch (err) {
