@@ -52,7 +52,8 @@ interface StatementLine {
   transactionDate:    string;
   valueDate?:         string;
   amount:             number | null;
-  transactionCode:    string;
+  transactionCode:    string;   // CR or DR
+  categoryCode?:      string;   // from RR_TRANSACTION_CODES
   description?:       string;
   reference?:         string;
   bankTxnReference?:  string;
@@ -69,6 +70,7 @@ interface StatementLine {
 
 interface BankAcctOption { label: string; value: string; bankAccountNumber?: string; currencyCode?: string; legalEntityName?: string; cashAccountCombination?: string; }
 interface BUOption       { label: string; value: string; legalEntityName?: string; }
+interface TxnCodeOption  { value: string; label: string; endTransaction?: string; defaultAccountCombination?: string; }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const parseApexJson = async (res: Response) => {
@@ -303,6 +305,8 @@ const StatementForm: React.FC<{
   const [pdfErrors, setPdfErrors]       = useState<string[]>([]);
   const [pdfFileName, setPdfFileName]   = useState('');
   const [selectedBu, setSelectedBu] = useState<string | undefined>(initialHeader?.businessUnitName);
+  const [txnCodes, setTxnCodes]         = useState<TxnCodeOption[]>([]);
+  const [balanceTick, setBalanceTick]   = useState(0);
   const [apiModal, setApiModal]       = useState(false);
   const [apiPayload, setApiPayload]   = useState('');
   const [apiPosting, setApiPosting]   = useState(false);
@@ -333,6 +337,7 @@ const StatementForm: React.FC<{
       valueDate:           l.valueDate || null,
       amount:              l.amount,
       transactionCode:     l.transactionCode,
+      categoryCode:        l.categoryCode ?? '',
       description:         l.description ?? '',
       reference:           l.reference ?? '',
       bankTxnReference:    l.bankTxnReference ?? '',
@@ -400,9 +405,28 @@ const StatementForm: React.FC<{
     if (initialLines) setLines(initialLines);
   }, [initialLines]);
 
+  // Load transaction codes whenever BU changes
+  useEffect(() => {
+    if (!selectedBu) { setTxnCodes([]); return; }
+    const ctrl = new AbortController();
+    (async () => {
+      try {
+        const res = await fetch(`${APEX_BASE}/cash/transaction-codes?business_unit=${encodeURIComponent(selectedBu)}`, { signal: ctrl.signal });
+        const data = await parseApexJson(res);
+        setTxnCodes((data.items || []).map((i: any) => ({
+          value: i.transaction_code,
+          label: `${i.transaction_code}${i.description ? ' — ' + i.description : ''}`,
+          endTransaction: i.end_transaction,
+          defaultAccountCombination: i.default_account_combination,
+        })));
+      } catch { /* ignore abort */ }
+    })();
+    return () => ctrl.abort();
+  }, [selectedBu]);
+
   const addLine = () => setLines(prev => [...prev, {
     _key: newKey(), transactionDate: dayjs().format('YYYY-MM-DD'),
-    amount: null, transactionCode: 'CR', reconStatus: 'UNRECONCILED',
+    amount: null, transactionCode: '', reconStatus: 'UNRECONCILED',
   }]);
 
   const updateLine = (key: string, field: keyof StatementLine, value: any) =>
@@ -539,13 +563,27 @@ const StatementForm: React.FC<{
       ),
     },
     {
-      title: 'Type', width: 80,
+      title: 'Type', width: 70,
       render: (_, r) => (
         <Select size="small" style={{ width: '100%' }} value={r.transactionCode}
           onChange={v => updateLine(r._key, 'transactionCode', v)}>
           <Option value="CR">CR</Option>
           <Option value="DR">DR</Option>
         </Select>
+      ),
+    },
+    {
+      title: 'Txn Code', width: 160,
+      render: (_, r) => (
+        <Select
+          size="small" style={{ width: '100%' }}
+          value={r.categoryCode || undefined}
+          placeholder={txnCodes.length ? 'Select' : selectedBu ? 'No codes' : 'Select BU'}
+          showSearch optionFilterProp="label"
+          options={txnCodes}
+          onChange={v => updateLine(r._key, 'categoryCode', v)}
+          allowClear
+        />
       ),
     },
     {
@@ -597,9 +635,14 @@ const StatementForm: React.FC<{
   const wc = { span: 16 };
   const fs = { marginBottom: 12 };
 
-  // Summary row
+  // Balance check — CR lines add to balance, DR lines reduce it (balanceTick forces re-render on field change)
+  void balanceTick;
   const totalCr = lines.filter(l => l.transactionCode === 'CR').reduce((s, l) => s + (l.amount ?? 0), 0);
   const totalDr = lines.filter(l => l.transactionCode === 'DR').reduce((s, l) => s + (l.amount ?? 0), 0);
+  const openingBal: number = form.getFieldValue('openingBalance') ?? 0;
+  const closingBal: number = form.getFieldValue('closingBalance') ?? 0;
+  const calcClosing = openingBal + totalCr - totalDr;
+  const difference  = closingBal - calcClosing;
 
   return (
     <div style={{ padding: '12px 24px' }}>
@@ -612,7 +655,10 @@ const StatementForm: React.FC<{
         Statement Details
       </Text>
 
-      <Form form={form} layout="horizontal" labelCol={lc} wrapperCol={wc}>
+      <Form form={form} layout="horizontal" labelCol={lc} wrapperCol={wc}
+        onValuesChange={(changed) => {
+          if ('openingBalance' in changed || 'closingBalance' in changed) setBalanceTick(t => t + 1);
+        }}>
         <Row gutter={40}>
           <Col xs={24} lg={12}>
             <Form.Item label="Business Unit" name="businessUnitName"
@@ -661,18 +707,68 @@ const StatementForm: React.FC<{
                 ))}
               </Select>
             </Form.Item>
-            <Form.Item label="Opening Balance" name="openingBalance" style={fs}>
-              <InputNumber style={{ width: '100%' }} precision={2} placeholder="0.00" />
-            </Form.Item>
-            <Form.Item label="Closing Balance" name="closingBalance" style={fs}>
-              <InputNumber style={{ width: '100%' }} precision={2} placeholder="0.00" />
-            </Form.Item>
+            <Row gutter={8}>
+              <Col span={12}>
+                <Form.Item label="Opening Bal" name="openingBalance" labelCol={{ span: 14 }} wrapperCol={{ span: 10 }} style={fs}>
+                  <InputNumber style={{ width: '100%' }} precision={2} placeholder="0.00" />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item label="Closing Bal" name="closingBalance" labelCol={{ span: 14 }} wrapperCol={{ span: 10 }} style={fs}>
+                  <InputNumber style={{ width: '100%' }} precision={2} placeholder="0.00" />
+                </Form.Item>
+              </Col>
+            </Row>
             <Form.Item label="Description" name="description" style={fs}>
-              <Input.TextArea rows={3} placeholder="Optional description" />
+              <Input.TextArea rows={2} placeholder="Optional description" />
             </Form.Item>
           </Col>
         </Row>
       </Form>
+
+      {/* ── Balance Check ── */}
+      {lines.length > 0 && (
+        <div style={{
+          background: difference === 0 ? '#f6ffed' : '#fffbe6',
+          border: `1px solid ${difference === 0 ? '#b7eb8f' : '#ffe58f'}`,
+          borderRadius: 6, padding: '8px 16px', marginBottom: 8,
+        }}>
+          <Row gutter={16} align="middle">
+            <Col>
+              <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Opening</Text>
+              <Text strong style={{ fontSize: 12, display: 'block' }}>{fmtAmount(openingBal)}</Text>
+            </Col>
+            <Col><Text style={{ color: REDWOOD.neutral300 }}>+</Text></Col>
+            <Col>
+              <Text style={{ fontSize: 12, color: REDWOOD.success }}>Credits (CR)</Text>
+              <Text strong style={{ fontSize: 12, display: 'block', color: REDWOOD.success }}>{fmtAmount(totalCr)}</Text>
+            </Col>
+            <Col><Text style={{ color: REDWOOD.neutral300 }}>−</Text></Col>
+            <Col>
+              <Text style={{ fontSize: 12, color: REDWOOD.error }}>Debits (DR)</Text>
+              <Text strong style={{ fontSize: 12, display: 'block', color: REDWOOD.error }}>{fmtAmount(totalDr)}</Text>
+            </Col>
+            <Col><Text style={{ color: REDWOOD.neutral300 }}>=</Text></Col>
+            <Col>
+              <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Calc Closing</Text>
+              <Text strong style={{ fontSize: 12, display: 'block' }}>{fmtAmount(calcClosing)}</Text>
+            </Col>
+            <Col flex="auto" style={{ textAlign: 'right' }}>
+              <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Actual Closing</Text>
+              <Text strong style={{ fontSize: 12, display: 'block' }}>{fmtAmount(closingBal)}</Text>
+            </Col>
+            <Col>
+              <Text style={{ fontSize: 12 }}>Difference</Text>
+              <Text strong style={{
+                fontSize: 13, display: 'block',
+                color: difference === 0 ? REDWOOD.success : REDWOOD.error,
+              }}>
+                {fmtAmount(difference)}
+              </Text>
+            </Col>
+          </Row>
+        </div>
+      )}
 
       {/* ── Lines ── */}
       <Divider style={{ margin: '8px 0 12px' }} />

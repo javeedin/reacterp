@@ -33,6 +33,7 @@ const transferItems: MenuItemType[] = [
 const reconItems: MenuItemType[] = [
   { key: 'bank-statements',  icon: <FileTextOutlined />,       label: 'Manage Bank Statements',     description: 'Import, create and review bank statements',  color: REDWOOD.info,    path: '/cash/bank-statements' },
   { key: 'reconciliation',   icon: <ReconciliationOutlined />, label: 'Bank Reconciliation',        description: 'Reconcile bank statements with system',       color: REDWOOD.primary, path: '/cash/bank-reconciliation' },
+  { key: 'transaction-codes', icon: <SettingOutlined />,        label: 'Transaction Codes',          description: 'Maintain bank statement transaction codes',   color: REDWOOD.warning, path: '/cash/transaction-codes' },
 ];
 
 const reportItems: MenuItemType[] = [

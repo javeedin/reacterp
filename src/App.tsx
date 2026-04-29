@@ -79,6 +79,7 @@ const ManageBankTransfers     = lazy(() => import('./pages/cash/ManageBankTransf
 const ManageExternalTransactions = lazy(() => import('./pages/cash/ManageExternalTransactions'));
 const ManageBankStatements    = lazy(() => import('./pages/cash/ManageBankStatements'));
 const BankReconciliation      = lazy(() => import('./pages/cash/BankReconciliation'));
+const TransactionCodes        = lazy(() => import('./pages/cash/TransactionCodes'));
 const SupportModule           = lazy(() => import('./pages/support/SupportModule'));
 const ManageTickets           = lazy(() => import('./pages/support/ManageTickets'));
 const MyTickets               = lazy(() => import('./pages/support/MyTickets'));
@@ -225,6 +226,7 @@ function App() {
               <Route path="cash/bank-statements" element={<ManageBankStatements module="cash" />} />
               {/* Bank Reconciliation */}
               <Route path="cash/bank-reconciliation" element={<BankReconciliation />} />
+              <Route path="cash/transaction-codes" element={<TransactionCodes />} />
               <Route path="ap/external-transactions"   element={<ManageExternalTransactions module="ap" />} />
               <Route path="sync/*" element={<SyncData />} />
               {/* Support / Ticketing */}
