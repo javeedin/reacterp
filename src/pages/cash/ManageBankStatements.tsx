@@ -452,6 +452,9 @@ const StatementForm: React.FC<{
   const [apiPayload, setApiPayload]   = useState('');
   const [apiPosting, setApiPosting]   = useState(false);
   const [apiResponse, setApiResponse] = useState<{ status: number; body: string } | null>(null);
+  const [getApiModal, setGetApiModal] = useState(false);
+  const [getApiRunning, setGetApiRunning] = useState(false);
+  const [getApiResponse, setGetApiResponse] = useState<{ status: number; body: string } | null>(null);
   const fileRef    = useRef<HTMLInputElement>(null);
   const pdfFileRef = useRef<HTMLInputElement>(null);
   const isEdit  = !!initialHeader?.statementId;
@@ -747,12 +750,23 @@ const StatementForm: React.FC<{
     setPdfImporting(false);
 
     if (!anyError) {
-      // Reload lines from DB
+      // Reload lines from DB so the table reflects what was actually saved
       if (initialHeader?.statementId) {
-        const r2  = await fetch(`${APEX_BASE}/cash/bankstatements/${initialHeader.statementId}`);
-        const d2  = await parseApexJson(r2);
-        const fresh: StatementLine[] = (d2.lines ?? []).map((l: any) => ({ ...l, _key: newKey() }));
-        setLines(fresh);
+        try {
+          const r2  = await fetch(`${APEX_BASE}/cash/bankstatements/${initialHeader.statementId}`);
+          const text = await r2.text();
+          let d2: any = {};
+          try { d2 = JSON.parse(text); } catch {
+            message.warning(`Lines saved to DB but reload failed — raw response: ${text.slice(0, 200)}`, 10);
+          }
+          const fresh: StatementLine[] = (d2.lines ?? []).map((l: any) => ({ ...l, _key: newKey() }));
+          setLines(fresh);
+          if (fresh.length === 0 && totalSaved > 0) {
+            message.warning(`${totalSaved} lines POSTed but GET returned 0 lines — click the API icon (ⓘ) next to "Statement Lines" to inspect the raw response.`, 10);
+          }
+        } catch (e: any) {
+          message.error(`Lines saved but failed to reload: ${e.message}`, 8);
+        }
       }
       setPdfModal(false);
       setPdfPreview([]);
@@ -1060,10 +1074,18 @@ const StatementForm: React.FC<{
       {/* ── Lines ── */}
       <Divider style={{ margin: '8px 0 12px' }} />
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-        <Text strong style={{ fontSize: 13 }}>
-          Statement Lines
-          {lines.length > 0 && <Tag color="blue" style={{ marginLeft: 8 }}>{lines.length}</Tag>}
-        </Text>
+        <Space align="center">
+          <Text strong style={{ fontSize: 13 }}>
+            Statement Lines
+            {lines.length > 0 && <Tag color="blue" style={{ marginLeft: 8 }}>{lines.length}</Tag>}
+          </Text>
+          {initialHeader?.statementId && (
+            <Tooltip title={`GET ${APEX_BASE}/cash/bankstatements/${initialHeader.statementId}`}>
+              <Button size="small" type="text" icon={<ApiOutlined style={{ color: REDWOOD.info }} />}
+                onClick={() => { setGetApiResponse(null); setGetApiModal(true); }} />
+            </Tooltip>
+          )}
+        </Space>
         <Space>
           <Button size="small" icon={<UploadOutlined />} onClick={() => setCsvModal(true)}>
             Import CSV
@@ -1173,6 +1195,63 @@ const StatementForm: React.FC<{
             }}>
               {apiResponse.body}
             </pre>
+          </>
+        )}
+      </Modal>
+
+      {/* ── GET Lines API Inspector Modal ── */}
+      <Modal
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>GET /cash/bankstatements/{initialHeader?.statementId} — Lines Inspector</span></Space>}
+        open={getApiModal}
+        onCancel={() => setGetApiModal(false)}
+        width={820}
+        footer={null}
+        styles={{ body: { padding: '16px 24px' } }}
+      >
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          Endpoint:{' '}
+          <Text code copyable style={{ fontSize: 12 }}>
+            {APEX_BASE}/cash/bankstatements/{initialHeader?.statementId ?? '<statementId>'}
+          </Text>
+        </Text>
+        <div style={{ marginTop: 12 }}>
+          <Button type="primary" loading={getApiRunning}
+            icon={<ApiOutlined />}
+            style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+            onClick={async () => {
+              if (!initialHeader?.statementId) { return; }
+              setGetApiRunning(true);
+              setGetApiResponse(null);
+              try {
+                const res  = await fetch(`${APEX_BASE}/cash/bankstatements/${initialHeader.statementId}`);
+                const text = await res.text();
+                setGetApiResponse({
+                  status: res.status,
+                  body: (() => { try { return JSON.stringify(JSON.parse(text), null, 2); } catch { return text; } })(),
+                });
+              } catch (e: any) {
+                setGetApiResponse({ status: 0, body: 'Network error: ' + e.message });
+              } finally { setGetApiRunning(false); }
+            }}>
+            Run GET Request
+          </Button>
+        </div>
+        {getApiResponse && (
+          <>
+            <Divider style={{ margin: '12px 0 8px' }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <Tag color={getApiResponse.status >= 200 && getApiResponse.status < 300 ? 'success' : 'error'}>
+                HTTP {getApiResponse.status || 'Error'}
+              </Tag>
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                Raw response — check "lines" array and "linesProcessed" values
+              </Text>
+            </div>
+            <Input.TextArea
+              readOnly value={getApiResponse.body}
+              rows={18}
+              style={{ fontFamily: 'monospace', fontSize: 11 }}
+            />
           </>
         )}
       </Modal>
