@@ -416,6 +416,7 @@ END;
 --    account_type  optional  A / L / O / R / E
 --    company       optional  segment 1 value
 --    currency_code optional  e.g. 'AED'
+--    account       optional  e.g. '1240100'
 -- ─────────────────────────────────────────────────────────────
 BEGIN
     ORDS.DEFINE_HANDLER(
@@ -448,6 +449,7 @@ WHERE ledger_name          = :ledger_name
   AND (:account_type  IS NULL OR account_type         = :account_type)
   AND (:company       IS NULL OR company              = :company)
   AND (:currency_code IS NULL OR currency_code        = :currency_code)
+  AND (:account       IS NULL OR account              = :account)
 ORDER BY
     fiscal_year,
     fiscal_period,
