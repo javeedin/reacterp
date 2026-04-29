@@ -710,20 +710,24 @@ const AccountAnalysis: React.FC = () => {
       const resp = await fetch(url);
       if (!resp.ok) return null;
       const data = await resp.json();
-      const items: any[] = data.items || [];
+      const allItems: any[] = data.items || [];
+      // Filter client-side by account in case the DB handler hasn't been updated with :account bind yet
+      const items = allItems.filter((i: any) => String(i.account) === String(account));
       if (items.length === 0) return null;
-      const rec = items[0];
 
-      const accountType: string = rec.account_type || '';
-      const opening: number = rec.opening || 0;
+      const accountType: string = items[0].account_type || '';
       const isRetainedEarnings = accountType === 'O';
 
+      // Sum opening/closing across all matching account combinations
+      const opening: number = items.reduce((s: number, i: any) => s + (i.opening || 0), 0);
+      const closingSum: number = items.reduce((s: number, i: any) => s + (i.closing || 0), 0);
+
       // For R/E use closing (YTD net); otherwise use opening
-      const balanceAmt: number = isRetainedEarnings ? (rec.closing || 0) : opening;
+      const balanceAmt: number = isRetainedEarnings ? closingSum : opening;
       if (balanceAmt === 0) return null;
 
-      // Positive closing = debit side for Asset/Expense; credit side for Liability/Equity/Revenue
-      const isDebitNormal = accountType === 'A' || accountType === 'E'; // E=Expense in Oracle
+      // Positive balance = debit side for Asset/Expense; credit side for Liability/Equity/Revenue
+      const isDebitNormal = accountType === 'A' || accountType === 'E';
       const finalDr = isDebitNormal && balanceAmt > 0 ? balanceAmt : (!isDebitNormal && balanceAmt < 0 ? Math.abs(balanceAmt) : 0);
       const finalCr = !isDebitNormal && balanceAmt > 0 ? balanceAmt : (isDebitNormal && balanceAmt < 0 ? Math.abs(balanceAmt) : 0);
 
@@ -736,8 +740,8 @@ const AccountAnalysis: React.FC = () => {
         batchId: 0,
         jeHeaderId: 0,
         jeLineNumber: 0,
-        currencyCode: rec.currency_code || 'AED',
-        company: rec.company || company,
+        currencyCode: items[0].currency_code || 'AED',
+        company: items[0].company || company,
         lob: '',
         department: '',
         account,
