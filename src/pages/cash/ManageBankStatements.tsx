@@ -68,7 +68,7 @@ interface StatementLine {
 }
 
 interface BankAcctOption { label: string; value: string; bankAccountNumber?: string; currencyCode?: string; legalEntityName?: string; cashAccountCombination?: string; }
-interface BUOption       { label: string; value: string; }
+interface BUOption       { label: string; value: string; legalEntityName?: string; }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const parseApexJson = async (res: Response) => {
@@ -149,11 +149,10 @@ const StatementForm: React.FC<{
   initialLines?:   StatementLine[];
   bankAccounts:    BankAcctOption[];
   businessUnits:   BUOption[];
-  buAccountsMap:   Record<string, string[]>;
   onSave:          () => void;
   onCreated:       (statementId: number) => void;
   onCancel:        () => void;
-}> = ({ initialHeader, initialLines, bankAccounts, businessUnits, buAccountsMap, onSave, onCreated, onCancel }) => {
+}> = ({ initialHeader, initialLines, bankAccounts, businessUnits, onSave, onCreated, onCancel }) => {
   const [form]    = Form.useForm();
   const [lines, setLines]       = useState<StatementLine[]>(initialLines ?? []);
   const [saving, setSaving]     = useState(false);
@@ -224,13 +223,14 @@ const StatementForm: React.FC<{
     } finally { setApiPosting(false); }
   };
 
-  // Bank accounts filtered to selected BU
+  // Bank accounts filtered by the legal entity of the selected BU
+  const selectedBuLegalEntity = selectedBu
+    ? (businessUnits.find(b => b.value === selectedBu)?.legalEntityName ?? '')
+    : '';
   const filteredBankAccounts = selectedBu
-    ? (() => {
-        const names = buAccountsMap[selectedBu];
-        if (names && names.length > 0) return names.map(n => ({ label: n, value: n }));
-        return bankAccounts; // fall back to all if no BU→account mapping found
-      })()
+    ? (selectedBuLegalEntity
+        ? bankAccounts.filter(a => a.legalEntityName === selectedBuLegalEntity)
+        : bankAccounts)
     : [];
 
   useEffect(() => {
@@ -696,39 +696,52 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
   }[]>([]);
   const [searchForm] = Form.useForm();
   const modulePrefix = module === 'ap' ? '/ap' : '/cash';
+  const [searchSelectedBu, setSearchSelectedBu] = useState<string | undefined>();
 
-  // BU name → bank account names map (for filtering bank accounts by BU)
-  const [buAccountsMap, setBuAccountsMap] = useState<Record<string, string[]>>({});
+  // Search screen bank accounts filtered by legal entity of selected BU
+  const searchBuLegalEntity = searchSelectedBu
+    ? (businessUnits.find(b => b.value === searchSelectedBu)?.legalEntityName ?? '')
+    : '';
+  const searchFilteredAccounts = searchSelectedBu
+    ? (searchBuLegalEntity
+        ? bankAccounts.filter(a => a.legalEntityName === searchBuLegalEntity)
+        : bankAccounts)
+    : bankAccounts;
 
   // Load LOVs
   const loadLovs = useCallback(async () => {
     try {
-      // BUs from dedicated endpoint
+      // BUs — include legal_entity_name for bank account filtering
       const buRes  = await fetch(`${APEX_BASE}/gl/businessunits`);
       const buData = await buRes.json();
-      const buItems: string[] = (buData?.items ?? []).map((i: any) => i.business_unit_name).filter(Boolean);
-      setBusinessUnits(buItems.sort().map(n => ({ label: n, value: n })));
+      const buOptions: BUOption[] = (buData?.items ?? [])
+        .map((i: any) => ({
+          label:           i.business_unit_name || '',
+          value:           i.business_unit_name || '',
+          legalEntityName: i.legal_entity_name  || '',
+        }))
+        .filter((o: BUOption) => o.value)
+        .sort((a: BUOption, b: BUOption) => a.label.localeCompare(b.label));
+      setBusinessUnits(buOptions);
     } catch { /* silent */ }
 
     try {
-      // Bank accounts from external transactions — same source that works in other screens
-      const res  = await fetch(`${APEX_BASE}/cash/externaltransactions?row_limit=1000`);
-      const data = await parseApexJson(res);
-      if (data.status === 'success' && data.items) {
-        const acctSet = new Set<string>();
-        const buMap: Record<string, Set<string>> = {};
-        data.items.forEach((i: any) => {
-          if (i.bankAccountName) acctSet.add(i.bankAccountName);
-          if (i.businessUnitName && i.bankAccountName) {
-            if (!buMap[i.businessUnitName]) buMap[i.businessUnitName] = new Set();
-            buMap[i.businessUnitName].add(i.bankAccountName);
-          }
-        });
-        setBankAccounts([...acctSet].sort().map(n => ({ label: n, value: n })));
-        const flatMap: Record<string, string[]> = {};
-        Object.entries(buMap).forEach(([bu, set]) => { flatMap[bu] = [...set].sort(); });
-        setBuAccountsMap(flatMap);
-      }
+      // Bank accounts from dedicated endpoint — has legalEntityName for filtering
+      const res  = await fetch(`${APEX_BASE}/banks/bankaccounts`);
+      const data = await res.json();
+      const items: any[] = data?.items ?? [];
+      const accts: BankAcctOption[] = items
+        .filter((i: any) => i.bankAccountName || i.bank_account_name)
+        .map((i: any) => ({
+          label:                  i.bankAccountName   || i.bank_account_name   || '',
+          value:                  i.bankAccountName   || i.bank_account_name   || '',
+          bankAccountNumber:      i.bankAccountNumber || i.bank_account_number || '',
+          currencyCode:           i.currencyCode      || i.currency_code       || '',
+          legalEntityName:        i.legalEntityName   || i.legal_entity_name   || '',
+          cashAccountCombination: i.cashAccountCombination || i.cash_account_combination || '',
+        }))
+        .sort((a: BankAcctOption, b: BankAcctOption) => a.label.localeCompare(b.label));
+      setBankAccounts(accts);
     } catch { /* silent */ }
   }, []);
 
@@ -758,7 +771,7 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
     finally { setLoading(false); }
   }, [searchForm]);
 
-  const handleReset = () => { searchForm.resetFields(); setStatements([]); setHasSearched(false); };
+  const handleReset = () => { searchForm.resetFields(); setStatements([]); setHasSearched(false); setSearchSelectedBu(undefined); };
 
   // Open edit tab — load full statement with lines
   const openEditTab = async (record: StatementHeader) => {
@@ -861,7 +874,11 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
                 <Col xs={24} md={12}>
                   <Form.Item label="Business Unit" name="businessUnit" style={{ marginBottom: 10 }}>
                     <Select showSearch placeholder="Select BU" optionFilterProp="label"
-                      options={businessUnits} allowClear style={{ width: '100%' }} />
+                      options={businessUnits} allowClear style={{ width: '100%' }}
+                      onChange={(v: string | undefined) => {
+                        setSearchSelectedBu(v ?? undefined);
+                        searchForm.setFieldValue('bankAccount', undefined);
+                      }} />
                   </Form.Item>
                 </Col>
                 <Col xs={24} md={12}>
@@ -871,8 +888,10 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
                 </Col>
                 <Col xs={24} md={12}>
                   <Form.Item label="Bank Account" name="bankAccount" style={{ marginBottom: 10 }}>
-                    <Select showSearch placeholder="Select account" optionFilterProp="label"
-                      options={bankAccounts} allowClear style={{ width: '100%' }} />
+                    <Select showSearch
+                      placeholder={searchSelectedBu ? 'Select bank account' : 'Select account'}
+                      optionFilterProp="label"
+                      options={searchFilteredAccounts} allowClear style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
                 <Col xs={24} md={12}>
@@ -940,7 +959,6 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
           initialLines={t.lines}
           bankAccounts={bankAccounts}
           businessUnits={businessUnits}
-          buAccountsMap={buAccountsMap}
           onSave={() => reloadTabAsEdit(t.key, t.header!.statementId!)}
           onCreated={(stmtId) => reloadTabAsEdit(t.key, stmtId)}
           onCancel={() => closeTab(t.key)}
