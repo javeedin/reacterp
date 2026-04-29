@@ -1,6 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef, Component } from 'react';
 import dayjs, { type Dayjs } from 'dayjs';
-import * as pdfjsLib from 'pdfjs-dist';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input, Select,
   DatePicker, InputNumber, Row, Col, Space, Tag, Tooltip, Tabs, Collapse,
@@ -26,12 +25,6 @@ const REDWOOD = {
 };
 
 const APEX_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp';
-
-// Configure pdf.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
-  import.meta.url,
-).toString();
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface StatementHeader {
@@ -156,6 +149,20 @@ function csvRowToLine(row: Record<string, string>): StatementLine {
 async function parseBankStatementPdf(file: File): Promise<{ lines: StatementLine[]; errors: string[] }> {
   const errors: string[] = [];
   const lines: StatementLine[] = [];
+
+  // Dynamic import so the page loads even when pdfjs-dist is not yet installed.
+  // Run `npm install pdfjs-dist` if you see a "module not found" error here.
+  let pdfjsLib: any;
+  try {
+    pdfjsLib = await import('pdfjs-dist');
+    pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+      'pdfjs-dist/build/pdf.worker.min.mjs',
+      import.meta.url,
+    ).toString();
+  } catch {
+    errors.push('pdfjs-dist is not installed. Run: npm install pdfjs-dist');
+    return { lines, errors };
+  }
 
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
