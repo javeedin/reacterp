@@ -135,6 +135,10 @@ const PdfTemplates: React.FC = () => {
   const [detectedCols, setDetectedCols] = useState<{ text: string; x: number; field: string }[]>([]);
   const [saving, setSaving] = useState(false);
   const [manualHeaders, setManualHeaders] = useState('');
+  const [inspectModal, setInspectModal] = useState(false);
+  const [inspectPayload, setInspectPayload] = useState('');
+  const [inspectPosting, setInspectPosting] = useState(false);
+  const [inspectResponse, setInspectResponse] = useState<{ status: number; body: string } | null>(null);
 
   // Load BUs
   useEffect(() => {
@@ -286,6 +290,47 @@ const PdfTemplates: React.FC = () => {
   const updateColField = (idx: number, field: string) =>
     setDetectedCols(prev => prev.map((c, i) => i === idx ? { ...c, field } : c));
 
+  const buildPostPayload = () => {
+    const info = infoForm.getFieldsValue();
+    const mappings = computeXRanges(detectedCols);
+    const payload: Record<string, unknown> = {
+      template_name:      info.templateName || '',
+      description:        info.description || null,
+      business_unit_name: info.businessUnitName || null,
+      date_format:        info.dateFormat || 'DD/MM/YYYY',
+      column_mappings:    JSON.stringify(mappings),
+      header_row_text:    detectedCols.map(c => c.text).join(' '),
+      last_updated_by:    'APP_USER',
+    };
+    if (editTemplate?.templateId) payload.template_id = editTemplate.templateId;
+    else payload.created_by = 'APP_USER';
+    return payload;
+  };
+
+  const openInspect = () => {
+    setInspectPayload(JSON.stringify(buildPostPayload(), null, 2));
+    setInspectResponse(null);
+    setInspectModal(true);
+  };
+
+  const handleInspectPost = async () => {
+    setInspectPosting(true);
+    setInspectResponse(null);
+    try {
+      const res = await fetch(`${APEX_BASE}/cash/pdf-templates`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: inspectPayload,
+      });
+      const text = await res.text();
+      setInspectResponse({
+        status: res.status,
+        body: (() => { try { return JSON.stringify(JSON.parse(text), null, 2); } catch { return text; } })(),
+      });
+    } catch (e: any) {
+      setInspectResponse({ status: 0, body: 'Network error: ' + e.message });
+    } finally { setInspectPosting(false); }
+  };
+
   const goNext = async () => {
     if (step === 0) {
       try { await infoForm.validateFields(); setStep(1); } catch { /* form errors shown */ }
@@ -404,6 +449,12 @@ const PdfTemplates: React.FC = () => {
 
   const designerFooter = [
     <Button key="cancel" onClick={closeDesigner}>Cancel</Button>,
+    step === 2 ? (
+      <Button key="api" icon={<ApiOutlined />} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
+        onClick={openInspect}>
+        API
+      </Button>
+    ) : null,
     step > 0 ? <Button key="prev" icon={<ArrowLeftOutlined />} onClick={() => setStep(s => s - 1)}>Back</Button> : null,
     step < 2 ? (
       <Button key="next" type="primary" icon={<ArrowRightOutlined />}
@@ -678,6 +729,56 @@ amount      — Combined amount column (use with "type" field)
 type        — DR/CR indicator column (used when "amount" is mapped)
 balance     — Running balance column
 skip        — Ignore this column`}</pre>
+        </Modal>
+
+        {/* ── Designer API Inspector Modal ── */}
+        <Modal
+          title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>API Inspector — POST /cash/pdf-templates</span></Space>}
+          open={inspectModal} onCancel={() => setInspectModal(false)}
+          width={800} footer={null}
+          styles={{ body: { padding: '16px 24px' } }}
+        >
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            Endpoint: <Text code copyable style={{ fontSize: 12 }}>{APEX_BASE}/cash/pdf-templates</Text>
+          </Text>
+          <Divider style={{ margin: '10px 0 8px' }} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <Text strong style={{ fontSize: 13 }}>Request Body (JSON)</Text>
+            <Text type="secondary" style={{ fontSize: 11 }}>Edit the JSON below before sending</Text>
+          </div>
+          <Input.TextArea
+            rows={14}
+            value={inspectPayload}
+            onChange={e => setInspectPayload(e.target.value)}
+            style={{ fontFamily: 'monospace', fontSize: 12, background: '#1e1e2e', color: '#cdd6f4', borderColor: '#444' }}
+          />
+          <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
+            <Button type="primary" icon={<ApiOutlined />} loading={inspectPosting}
+              style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+              onClick={handleInspectPost}>
+              POST Request
+            </Button>
+          </div>
+          {inspectResponse && (
+            <>
+              <Divider style={{ margin: '14px 0 10px' }} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                <Text strong>Response</Text>
+                <Tag color={inspectResponse.status >= 200 && inspectResponse.status < 300 ? 'success' : 'error'}>
+                  HTTP {inspectResponse.status || 'Error'}
+                </Tag>
+              </div>
+              <pre style={{
+                background: inspectResponse.status >= 200 && inspectResponse.status < 300 ? '#f6ffed' : '#fff2f0',
+                border: `1px solid ${inspectResponse.status >= 200 && inspectResponse.status < 300 ? '#b7eb8f' : '#ffccc7'}`,
+                color: REDWOOD.neutral900, padding: 14, borderRadius: 6,
+                fontSize: 12, overflowX: 'auto', maxHeight: 200,
+                whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0,
+              }}>
+                {inspectResponse.body}
+              </pre>
+            </>
+          )}
         </Modal>
       </Content>
     </Layout>
