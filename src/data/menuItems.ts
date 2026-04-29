@@ -61,6 +61,7 @@ export const ALL_MENU_ITEMS: MenuSearchItem[] = [
   { key: 'cash-ext-transactions', label: 'External Transactions',       module: 'CASH', moduleLabel: 'Cash Management',         path: '/cash/external-transactions',     description: 'Import and manage external bank transactions' },
   { key: 'cash-bank-statements',  label: 'Bank Statements',             module: 'CASH', moduleLabel: 'Cash Management',         path: '/cash/bank-statements',           description: 'View bank statements', keywords: 'statement bank' },
   { key: 'cash-bank-recon',       label: 'Bank Reconciliation',         module: 'CASH', moduleLabel: 'Cash Management',         path: '/cash/bank-reconciliation',       description: 'Reconcile bank statements', keywords: 'reconcile bank recon' },
+  { key: 'cash-txn-codes',        label: 'Transaction Codes',           module: 'CASH', moduleLabel: 'Cash Management',         path: '/cash/transaction-codes',         description: 'Maintain bank statement transaction codes', keywords: 'transaction code bank charge neft rtgs' },
 
   // ── Petty Cash ──────────────────────────────────────────────────────────────
   { key: 'pc-registers',          label: 'Petty Cash Registers',        module: 'PC',   moduleLabel: 'Petty Cash',              path: '/pc/registers',                   description: 'Manage petty cash registers and transactions', keywords: 'petty cash pc register custodian' },
