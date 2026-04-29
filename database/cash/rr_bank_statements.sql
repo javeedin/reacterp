@@ -736,11 +736,15 @@ BEGIN
         p_source         => q'[
 DECLARE
     v_clob   CLOB;
-    v_buf    VARCHAR2(32767);
-    v_hdr    VARCHAR2(32767);
+    -- Split v_buf into two halves to avoid VARCHAR2(32767) overflow when
+    -- description + reconNotes are both long (each up to 1000 chars).
+    v_buf1   VARCHAR2(16000);
+    v_buf2   VARCHAR2(16000);
+    v_hdr    VARCHAR2(16000);
     v_first  BOOLEAN := TRUE;
 
-    -- Header cursor
+    -- Header cursor — all numerics pre-formatted as VARCHAR2 to avoid implicit
+    -- TO_CHAR surprises, all NULLs defaulted so JSON is always valid.
     CURSOR c_hdr IS
         SELECT
             h.STATEMENT_ID,
@@ -797,11 +801,12 @@ DECLARE
 BEGIN
     DBMS_LOB.CREATETEMPORARY(v_clob, TRUE);
 
-    -- Build header section
+    -- Build header section — keep v_hdr small (16 KB) then append via TO_CLOB
+    -- to avoid the '{"status":...{' || v_hdr || '}' expression overflowing 32767.
     FOR r IN c_hdr LOOP
         v_hdr :=
             '"statementId":'          || r.STATEMENT_ID                                       ||
-            ',"statementNumber":'     || APEX_JSON.STRINGIFY(r.STATEMENT_NUMBER)              ||
+            ',"statementNumber":'     || APEX_JSON.STRINGIFY(NVL(r.STATEMENT_NUMBER,''))      ||
             ',"bankAccountNumber":'   || APEX_JSON.STRINGIFY(NVL(r.BANK_ACCOUNT_NUMBER,''))   ||
             ',"bankAccountName":'     || APEX_JSON.STRINGIFY(NVL(r.BANK_ACCOUNT_NAME,''))     ||
             ',"statementDate":'       || APEX_JSON.STRINGIFY(NVL(r.STATEMENT_DATE,''))        ||
@@ -819,16 +824,22 @@ BEGIN
             ',"lastUpdateDate":'      || APEX_JSON.STRINGIFY(NVL(r.LAST_UPDATE_DATE,''));
     END LOOP;
 
-    DBMS_LOB.APPEND(v_clob, '{"status":"success","header":{' || v_hdr || '},"lines":[');
+    -- Use separate DBMS_LOB.APPEND calls with TO_CLOB() so concatenation
+    -- happens in CLOB space — avoids ORA-06502 on the inline || expression.
+    DBMS_LOB.APPEND(v_clob, TO_CLOB('{"status":"success","header":{'));
+    DBMS_LOB.APPEND(v_clob, TO_CLOB(v_hdr));
+    DBMS_LOB.APPEND(v_clob, TO_CLOB('},"lines":['));
 
-    -- Build lines section
+    -- Build lines section — split each line into two VARCHAR2(16000) chunks
+    -- so description (1000 chars) + reconNotes (1000 chars) never overflow.
     FOR r IN c_lines LOOP
         IF NOT v_first THEN
-            DBMS_LOB.APPEND(v_clob, ',');
+            DBMS_LOB.APPEND(v_clob, TO_CLOB(','));
         END IF;
         v_first := FALSE;
 
-        v_buf :=
+        -- First half: IDs, dates, amounts, core text fields
+        v_buf1 :=
             '{"lineId":'               || r.LINE_ID                                            ||
             ',"statementId":'          || r.STATEMENT_ID                                       ||
             ',"lineNumber":'           || NVL(TO_CHAR(r.LINE_NUMBER), 'null')                  ||
@@ -840,7 +851,10 @@ BEGIN
             ',"reference":'            || APEX_JSON.STRINGIFY(NVL(r.REFERENCE,''))             ||
             ',"bankTxnReference":'     || APEX_JSON.STRINGIFY(NVL(r.BANK_TXN_REFERENCE,''))    ||
             ',"counterpartyName":'     || APEX_JSON.STRINGIFY(NVL(r.COUNTERPARTY_NAME,''))     ||
-            ',"counterpartyAccount":'  || APEX_JSON.STRINGIFY(NVL(r.COUNTERPARTY_ACCOUNT,''))  ||
+            ',"counterpartyAccount":'  || APEX_JSON.STRINGIFY(NVL(r.COUNTERPARTY_ACCOUNT,''))  ;
+
+        -- Second half: reconciliation fields and audit columns
+        v_buf2 :=
             ',"reconStatus":'          || APEX_JSON.STRINGIFY(NVL(r.RECON_STATUS,'UNRECONCILED'))||
             ',"reconAmount":'          || r.RECON_AMOUNT                                       ||
             ',"reconDate":'            || APEX_JSON.STRINGIFY(NVL(r.RECON_DATE,''))            ||
@@ -855,10 +869,12 @@ BEGIN
             ',"lastUpdatedBy":'        || APEX_JSON.STRINGIFY(NVL(r.LAST_UPDATED_BY,''))       ||
             ',"lastUpdateDate":'       || APEX_JSON.STRINGIFY(NVL(r.LAST_UPDATE_DATE,''))      ||
             '}';
-        DBMS_LOB.APPEND(v_clob, v_buf);
+
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(v_buf1));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(v_buf2));
     END LOOP;
 
-    DBMS_LOB.APPEND(v_clob, ']}');
+    DBMS_LOB.APPEND(v_clob, TO_CLOB(']}'));
     HTP.P(v_clob);
     DBMS_LOB.FREETEMPORARY(v_clob);
 EXCEPTION
