@@ -439,6 +439,7 @@ const StatementForm: React.FC<{
   const [pdfApiPayload, setPdfApiPayload] = useState('');
   const [pdfApiResponse, setPdfApiResponse] = useState<{ status: number; body: string } | null>(null);
   const [pdfApiPosting, setPdfApiPosting] = useState(false);
+  const [pdfImporting, setPdfImporting]   = useState(false);
   const [selectedBu, setSelectedBu] = useState<string | undefined>(initialHeader?.businessUnitName);
   const [txnCodes, setTxnCodes]         = useState<TxnCodeOption[]>([]);
   const [balanceTick, setBalanceTick]   = useState(0);
@@ -698,17 +699,48 @@ const StatementForm: React.FC<{
     } finally { setPdfApiPosting(false); }
   };
 
-  const confirmPdfImport = () => {
+  const confirmPdfImport = async () => {
     const toAdd = getPdfSelected();
-    setLines(prev => [...prev, ...toAdd]);
-    setPdfModal(false);
-    setPdfPreview([]);
-    setPdfErrors([]);
-    setPdfFileName('');
-    setPdfSelKeys([]);
-    setPdfApiOpen(false);
-    setPdfApiResponse(null);
-    message.success(`${toAdd.length} line${toAdd.length !== 1 ? 's' : ''} imported from PDF.`);
+    if (toAdd.length === 0) { message.warning('No lines selected.'); return; }
+
+    const payload = buildPdfLinesPayload(toAdd);
+    setPdfImporting(true);
+    try {
+      const res  = await fetch(`${APEX_BASE}/cash/bankstatements`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await parseApexJson(res);
+      if (data.status === 'success') {
+        const saved = data.linesProcessed ?? toAdd.length;
+        message.success(
+          `${saved} line${saved !== 1 ? 's' : ''} saved to DB (statementId: ${data.statementId ?? initialHeader?.statementId}).`,
+          5,
+        );
+        // Reload lines from DB so the table reflects what was actually saved
+        if (initialHeader?.statementId) {
+          const r2   = await fetch(`${APEX_BASE}/cash/bankstatements/${initialHeader.statementId}`);
+          const d2   = await parseApexJson(r2);
+          const fresh: StatementLine[] = (d2.lines ?? []).map((l: any) => ({ ...l, _key: newKey() }));
+          setLines(fresh);
+        } else {
+          setLines(prev => [...prev, ...toAdd]);
+        }
+        setPdfModal(false);
+        setPdfPreview([]);
+        setPdfErrors([]);
+        setPdfFileName('');
+        setPdfSelKeys([]);
+        setPdfApiOpen(false);
+        setPdfApiResponse(null);
+      } else {
+        message.error(`Save failed: ${data.message || JSON.stringify(data)}`, 8);
+      }
+    } catch (e: any) {
+      message.error(`Network error: ${e.message}`, 8);
+    } finally {
+      setPdfImporting(false);
+    }
   };
 
   const handleSave = async () => {
@@ -1236,9 +1268,10 @@ const StatementForm: React.FC<{
           ),
           <Button key="import" type="primary"
             disabled={pdfPreview.length === 0}
+            loading={pdfImporting}
             style={{ background: '#d46b08', borderColor: '#d46b08' }}
             onClick={confirmPdfImport}>
-            Add {pdfSelKeys.length > 0 ? pdfSelKeys.length : pdfPreview.length} Lines to Statement
+            Save {pdfSelKeys.length > 0 ? pdfSelKeys.length : pdfPreview.length} Lines to DB
           </Button>,
         ]}
       >
