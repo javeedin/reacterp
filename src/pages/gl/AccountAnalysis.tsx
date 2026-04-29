@@ -669,7 +669,7 @@ const AccountAnalysis: React.FC = () => {
       obParams.append('account', accountFilter);
       obParams.append('period_name', sortedPeriods[0]);
       if (selectedCompany) obParams.append('company', selectedCompany);
-      openingBalUrl = `${API_BASE_URL}/balances?${obParams.toString()}`;
+      openingBalUrl = `${API_BASE_URL}/rr-trialbalance?ledger_name=${encodeURIComponent(selectedLedger)}&period_name=${encodeURIComponent(sortedPeriods[0])}${selectedCompany ? '&company=' + selectedCompany : ''}`;
     }
 
     Modal.info({
@@ -694,7 +694,7 @@ const AccountAnalysis: React.FC = () => {
     });
   };
 
-  // Fetch opening balance from gl/balances for an account and period
+  // Fetch opening balance from gl/rr-trialbalance for an account and period
   const fetchOpeningBalance = async (
     account: string,
     company: string,
@@ -702,31 +702,28 @@ const AccountAnalysis: React.FC = () => {
   ): Promise<JournalLineSegment | null> => {
     try {
       const params = new URLSearchParams();
-      params.append('account', account);
+      params.append('ledger_name', selectedLedger);
       params.append('period_name', period);
       if (company) params.append('company', company);
-      const url = `${API_BASE_URL}/balances?${params.toString()}`;
+      const url = `${API_BASE_URL}/rr-trialbalance?${params.toString()}`;
       const resp = await fetch(url);
       if (!resp.ok) return null;
       const data = await resp.json();
       const items: any[] = data.items || [];
-      if (items.length === 0) return null;
+      // Filter by account on client side (endpoint has no account param)
+      const rec = items.find((i: any) => i.account === account) || items[0];
+      if (!rec) return null;
 
-      const rec = items[0];
       const accountType: string = rec.account_type || '';
-      const openingBal: number = rec.opening_balance || 0;
-      const isRetainedEarnings = accountType === 'E';
-      // For R/E use closing_balance (current year cumulative); otherwise opening_balance
-      const balanceAmt: number = isRetainedEarnings
-        ? (rec.closing_balance || 0)
-        : openingBal;
+      const openingDr: number = rec.opening_dr || 0;
+      const openingCr: number = rec.opening_cr || 0;
+      const isRetainedEarnings = accountType === 'O'; // Oracle uses O for Owners Equity/R/E
 
-      if (balanceAmt === 0) return null;
+      // For R/E use closing balance (ytd); otherwise use opening_dr / opening_cr
+      const finalDr = isRetainedEarnings ? (rec.closing_dr || 0) : openingDr;
+      const finalCr = isRetainedEarnings ? (rec.closing_cr || 0) : openingCr;
 
-      // Asset/Expense: normally debit balance; Liability/Equity/Revenue: normally credit balance
-      const isDebitNormal = accountType === 'A' || accountType === 'X';
-      const openingDr = isDebitNormal ? Math.abs(balanceAmt) : 0;
-      const openingCr = !isDebitNormal ? Math.abs(balanceAmt) : 0;
+      if (finalDr === 0 && finalCr === 0) return null;
 
       const label = isRetainedEarnings ? 'Current Year Balance' : 'Opening Balance';
 
@@ -735,7 +732,7 @@ const AccountAnalysis: React.FC = () => {
         batchId: 0,
         jeHeaderId: 0,
         jeLineNumber: 0,
-        currencyCode: rec.currency_code || rec.currency || 'AED',
+        currencyCode: rec.currency_code || 'AED',
         company: rec.company || company,
         lob: '',
         department: rec.department || '',
@@ -745,10 +742,10 @@ const AccountAnalysis: React.FC = () => {
         intercompany: '',
         future1: '',
         future2: '',
-        enteredDr: openingDr,
-        enteredCr: openingCr,
-        accountedDr: openingDr,
-        accountedCr: openingCr,
+        enteredDr: finalDr,
+        enteredCr: finalCr,
+        accountedDr: finalDr,
+        accountedCr: finalCr,
         chartOfAccountsName: '',
         accountingDate: '',
         defaultPeriodName: period,
