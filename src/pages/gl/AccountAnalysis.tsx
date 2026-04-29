@@ -767,7 +767,7 @@ const AccountAnalysis: React.FC = () => {
         userJeCategoryName: '',
         jeLineDescription: label,
         concatenatedSegments: account,
-        accountDescription: rec.account_desc || '',
+        accountDescription: items[0].account_desc || '',
         isOpeningBalance: true,
         accountType,
       };
