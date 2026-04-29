@@ -88,6 +88,8 @@ interface JournalLineSegment {
   analysis: string;
   intercompany: string;
   future1: string;
+  isOpeningBalance?: boolean;
+  accountType?: string;
   future2: string;
   enteredDr: number;
   enteredCr: number;
@@ -655,6 +657,83 @@ const AccountAnalysis: React.FC = () => {
     });
   };
 
+  // Fetch opening balance from gl/balances for an account and period
+  const fetchOpeningBalance = async (
+    account: string,
+    company: string,
+    period: string
+  ): Promise<JournalLineSegment | null> => {
+    try {
+      const params = new URLSearchParams();
+      params.append('account', account);
+      params.append('period_name', period);
+      if (company) params.append('company', company);
+      const url = `${API_BASE_URL}/balances?${params.toString()}`;
+      const resp = await fetch(url);
+      if (!resp.ok) return null;
+      const data = await resp.json();
+      const items: any[] = data.items || [];
+      if (items.length === 0) return null;
+
+      const rec = items[0];
+      const accountType: string = rec.account_type || '';
+      const openingBal: number = rec.opening_balance || 0;
+      const isRetainedEarnings = accountType === 'E';
+      // For R/E use closing_balance (current year cumulative); otherwise opening_balance
+      const balanceAmt: number = isRetainedEarnings
+        ? (rec.closing_balance || 0)
+        : openingBal;
+
+      if (balanceAmt === 0) return null;
+
+      // Asset/Expense: normally debit balance; Liability/Equity/Revenue: normally credit balance
+      const isDebitNormal = accountType === 'A' || accountType === 'X';
+      const openingDr = isDebitNormal ? Math.abs(balanceAmt) : 0;
+      const openingCr = !isDebitNormal ? Math.abs(balanceAmt) : 0;
+
+      const label = isRetainedEarnings ? 'Current Year Balance' : 'Opening Balance';
+
+      return {
+        key: 'opening-balance',
+        batchId: 0,
+        jeHeaderId: 0,
+        jeLineNumber: 0,
+        currencyCode: rec.currency_code || rec.currency || 'AED',
+        company: rec.company || company,
+        lob: '',
+        department: rec.department || '',
+        account,
+        subAccount: rec.sub_account || '',
+        analysis: '',
+        intercompany: '',
+        future1: '',
+        future2: '',
+        enteredDr: openingDr,
+        enteredCr: openingCr,
+        accountedDr: openingDr,
+        accountedCr: openingCr,
+        chartOfAccountsName: '',
+        accountingDate: '',
+        defaultPeriodName: period,
+        batchName: '',
+        actualFlagMeaning: '',
+        approvalStatusMeaning: '',
+        userPeriodSetName: '',
+        userJeSourceName: '',
+        ledgerName: selectedLedger,
+        legalEntityName: '',
+        userJeCategoryName: '',
+        jeLineDescription: label,
+        concatenatedSegments: account,
+        accountDescription: rec.account_desc || '',
+        isOpeningBalance: true,
+        accountType,
+      };
+    } catch {
+      return null;
+    }
+  };
+
   // Fetch account data for drill-down
   const fetchAccountData = async (account: string, company: string): Promise<JournalLineSegment[]> => {
     try {
@@ -714,6 +793,18 @@ const AccountAnalysis: React.FC = () => {
         }));
 
         allItems.push(...items);
+      }
+
+      // Prepend opening balance row using the earliest selected period
+      const sortedPeriods = [...selectedPeriods].sort(
+        (a, b) => parsePeriodToDate(a).getTime() - parsePeriodToDate(b).getTime()
+      );
+      const earliestPeriod = sortedPeriods[0];
+      if (earliestPeriod) {
+        const openingRow = await fetchOpeningBalance(account, company, earliestPeriod);
+        if (openingRow) {
+          allItems.unshift(openingRow);
+        }
       }
 
       console.log('Fetched total items:', allItems.length);
@@ -846,9 +937,9 @@ const AccountAnalysis: React.FC = () => {
     });
   };
 
-  // Calculate totals
+  // Calculate totals (excludes opening balance row to avoid double-counting)
   const calculateTotals = (data: JournalLineSegment[]) => {
-    return data.reduce(
+    return data.filter(row => !row.isOpeningBalance).reduce(
       (acc, row) => ({
         enteredDr: acc.enteredDr + (row.enteredDr || 0),
         enteredCr: acc.enteredCr + (row.enteredCr || 0),
@@ -1425,7 +1516,17 @@ const AccountAnalysis: React.FC = () => {
 
   // Journal detail modal columns with filters
   const journalDetailColumns: ColumnsType<JournalLineSegment> = [
-    createFilterableColumn('Line', 'jeLineNumber', 70),
+    {
+      title: 'Line',
+      dataIndex: 'jeLineNumber',
+      key: 'jeLineNumber',
+      width: 70,
+      render: (v: number, record: JournalLineSegment) =>
+        record.isOpeningBalance ? (
+          <Text strong style={{ color: REDWOOD.warning, fontSize: 11 }}>★</Text>
+        ) : v,
+    },
+    createFilterableColumn('Description', 'jeLineDescription', 180, { ellipsis: true }),
     createFilterableColumn('Period', 'defaultPeriodName', 90),
     createFilterableColumn('Batch Name', 'batchName', 180, { ellipsis: true }),
     createFilterableColumn('Source', 'userJeSourceName', 100),
@@ -2857,36 +2958,39 @@ const AccountAnalysis: React.FC = () => {
             scroll={{ x: 1700 }}
             size="small"
             className="compact-table"
+            rowClassName={(record: JournalLineSegment) =>
+              record.isOpeningBalance ? 'opening-balance-row' : ''
+            }
             summary={() => {
               const filteredData = getFilteredModalData();
               const totals = calculateTotals(filteredData);
               return (
                 <Table.Summary fixed>
                   <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
-                    <Table.Summary.Cell index={0} colSpan={8}>
+                    <Table.Summary.Cell index={0} colSpan={9}>
                       <Text strong style={{ fontSize: 11 }}>Total (filtered)</Text>
                     </Table.Summary.Cell>
-                    <Table.Summary.Cell index={8} align="right">
+                    <Table.Summary.Cell index={9} align="right">
                       <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>
                         {formatNumber(totals.enteredDr)}
                       </Text>
                     </Table.Summary.Cell>
-                    <Table.Summary.Cell index={9} align="right">
+                    <Table.Summary.Cell index={10} align="right">
                       <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>
                         {formatNumber(totals.enteredCr)}
                       </Text>
                     </Table.Summary.Cell>
-                    <Table.Summary.Cell index={10} align="right">
+                    <Table.Summary.Cell index={11} align="right">
                       <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>
                         {formatNumber(totals.accountedDr)}
                       </Text>
                     </Table.Summary.Cell>
-                    <Table.Summary.Cell index={11} align="right">
+                    <Table.Summary.Cell index={12} align="right">
                       <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>
                         {formatNumber(totals.accountedCr)}
                       </Text>
                     </Table.Summary.Cell>
-                    <Table.Summary.Cell index={12} colSpan={2} />
+                    <Table.Summary.Cell index={13} colSpan={2} />
                   </Table.Summary.Row>
                 </Table.Summary>
               );
@@ -3411,6 +3515,12 @@ const AccountAnalysis: React.FC = () => {
         @keyframes fadeInItem {
           from { opacity: 0; transform: translateX(20px); }
           to { opacity: 1; transform: translateX(0); }
+        }
+        .opening-balance-row td {
+          background: #FFF8E1 !important;
+          font-weight: 600 !important;
+          border-top: 2px solid #D4A800 !important;
+          border-bottom: 2px solid #D4A800 !important;
         }
       `}</style>
     </Layout>
