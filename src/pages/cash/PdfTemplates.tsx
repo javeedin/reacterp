@@ -352,8 +352,9 @@ const PdfTemplates: React.FC = () => {
   };
 
   const handleSave = async () => {
-    let info: any;
-    try { info = await infoForm.validateFields(); } catch { setStep(0); return; }
+    // Form is unmounted on steps 1/2 — use savedInfo captured when leaving Step 0
+    const info = step === 0 ? infoForm.getFieldsValue() : savedInfo;
+    if (!info.templateName) { message.error('Template Name is required'); setStep(0); return; }
 
     const hasDate = detectedCols.some(c => c.field === 'date');
     if (!hasDate) {
