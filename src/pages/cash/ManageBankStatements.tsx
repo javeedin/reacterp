@@ -413,11 +413,12 @@ const StatementForm: React.FC<{
       try {
         const res = await fetch(`${APEX_BASE}/cash/transaction-codes?business_unit=${encodeURIComponent(selectedBu)}`, { signal: ctrl.signal });
         const data = await parseApexJson(res);
+        // ORDS lowercases all JSON keys regardless of SQL aliases
         setTxnCodes((data.items || []).map((i: any) => ({
-          value: i.transaction_code,
-          label: `${i.transaction_code}${i.description ? ' — ' + i.description : ''}`,
-          endTransaction: i.end_transaction,
-          defaultAccountCombination: i.default_account_combination,
+          value: i.transactioncode,
+          label: `${i.transactioncode}${i.description ? ' — ' + i.description : ''}`,
+          endTransaction: i.endtransaction,
+          defaultAccountCombination: i.defaultaccountcombination,
         })));
       } catch { /* ignore abort */ }
     })();
@@ -581,7 +582,14 @@ const StatementForm: React.FC<{
           placeholder={txnCodes.length ? 'Select' : selectedBu ? 'No codes' : 'Select BU'}
           showSearch optionFilterProp="label"
           options={txnCodes}
-          onChange={v => updateLine(r._key, 'categoryCode', v)}
+          onChange={v => {
+            const code = txnCodes.find(c => c.value === v);
+            setLines(prev => prev.map(l => l._key === r._key ? {
+              ...l,
+              categoryCode: v,
+              description: l.description || (code?.label?.split(' — ')[1] ?? ''),
+            } : l));
+          }}
           allowClear
         />
       ),
