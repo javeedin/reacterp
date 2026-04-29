@@ -726,6 +726,8 @@ END;
 
 -- ---------------------------------------------------------------------------
 -- 3. GET cash/bankstatements/{stmt_id}  — Get single statement with lines
+--    Uses APEX_JSON output API — zero manual string concatenation,
+--    so VARCHAR2 size limits cannot cause ORA-06502.
 -- ---------------------------------------------------------------------------
 BEGIN
     ORDS.DEFINE_HANDLER(
@@ -736,55 +738,47 @@ BEGIN
         p_source         => q'[
 DECLARE
     v_clob   CLOB;
-    -- Split v_buf into two halves to avoid VARCHAR2(32767) overflow when
-    -- description + reconNotes are both long (each up to 1000 chars).
-    v_buf1   VARCHAR2(16000);
-    v_buf2   VARCHAR2(16000);
-    v_hdr    VARCHAR2(16000);
-    v_first  BOOLEAN := TRUE;
+    v_exists NUMBER := 0;
 
-    -- Header cursor — all numerics pre-formatted as VARCHAR2 to avoid implicit
-    -- TO_CHAR surprises, all NULLs defaulted so JSON is always valid.
     CURSOR c_hdr IS
         SELECT
             h.STATEMENT_ID,
             h.STATEMENT_NUMBER,
             h.BANK_ACCOUNT_NUMBER,
             h.BANK_ACCOUNT_NAME,
-            TO_CHAR(h.STATEMENT_DATE, 'YYYY-MM-DD')          AS STATEMENT_DATE,
+            TO_CHAR(h.STATEMENT_DATE, 'YYYY-MM-DD')                     AS STATEMENT_DATE,
             h.CURRENCY_CODE,
-            REGEXP_REPLACE(TO_CHAR(NVL(h.OPENING_BALANCE,0),'FM99999999999999990.9999999999'),'\.$','')  AS OPENING_BALANCE,
-            REGEXP_REPLACE(TO_CHAR(NVL(h.CLOSING_BALANCE,0),'FM99999999999999990.9999999999'),'\.$','')  AS CLOSING_BALANCE,
-            REGEXP_REPLACE(TO_CHAR(NVL(h.TOTAL_CREDITS,0),  'FM99999999999999990.9999999999'),'\.$','')  AS TOTAL_CREDITS,
-            REGEXP_REPLACE(TO_CHAR(NVL(h.TOTAL_DEBITS,0),   'FM99999999999999990.9999999999'),'\.$','')  AS TOTAL_DEBITS,
+            NVL(h.OPENING_BALANCE, 0)                                    AS OPENING_BALANCE,
+            NVL(h.CLOSING_BALANCE, 0)                                    AS CLOSING_BALANCE,
+            NVL(h.TOTAL_CREDITS,   0)                                    AS TOTAL_CREDITS,
+            NVL(h.TOTAL_DEBITS,    0)                                    AS TOTAL_DEBITS,
             h.STATUS,
             h.BUSINESS_UNIT_NAME,
             h.DESCRIPTION,
             h.CREATED_BY,
-            TO_CHAR(h.CREATION_DATE,    'YYYY-MM-DD"T"HH24:MI:SS') AS CREATION_DATE,
+            TO_CHAR(h.CREATION_DATE,    'YYYY-MM-DD"T"HH24:MI:SS')      AS CREATION_DATE,
             h.LAST_UPDATED_BY,
-            TO_CHAR(h.LAST_UPDATE_DATE, 'YYYY-MM-DD"T"HH24:MI:SS') AS LAST_UPDATE_DATE
+            TO_CHAR(h.LAST_UPDATE_DATE, 'YYYY-MM-DD"T"HH24:MI:SS')      AS LAST_UPDATE_DATE
         FROM   RR_BANK_STATEMENT_HEADER h
         WHERE  h.STATEMENT_ID = :stmt_id;
 
-    -- Lines cursor
     CURSOR c_lines IS
         SELECT
             l.LINE_ID,
             l.STATEMENT_ID,
             l.LINE_NUMBER,
-            TO_CHAR(l.TRANSACTION_DATE, 'YYYY-MM-DD')           AS TRANSACTION_DATE,
-            TO_CHAR(l.VALUE_DATE,       'YYYY-MM-DD')           AS VALUE_DATE,
-            REGEXP_REPLACE(TO_CHAR(NVL(l.AMOUNT,0),'FM99999999999999990.9999999999'),'\.$','') AS AMOUNT,
+            TO_CHAR(l.TRANSACTION_DATE, 'YYYY-MM-DD')                   AS TRANSACTION_DATE,
+            TO_CHAR(l.VALUE_DATE,       'YYYY-MM-DD')                   AS VALUE_DATE,
+            NVL(l.AMOUNT, 0)                                             AS AMOUNT,
             l.TRANSACTION_CODE,
             l.DESCRIPTION,
             l.REFERENCE,
             l.BANK_TXN_REFERENCE,
             l.COUNTERPARTY_NAME,
             l.COUNTERPARTY_ACCOUNT,
-            l.RECON_STATUS,
-            REGEXP_REPLACE(TO_CHAR(NVL(l.RECON_AMOUNT,0),'FM99999999999999990.9999999999'),'\.$','') AS RECON_AMOUNT,
-            TO_CHAR(l.RECON_DATE,       'YYYY-MM-DD"T"HH24:MI:SS') AS RECON_DATE,
+            NVL(l.RECON_STATUS, 'UNRECONCILED')                          AS RECON_STATUS,
+            l.RECON_AMOUNT,
+            TO_CHAR(l.RECON_DATE,       'YYYY-MM-DD"T"HH24:MI:SS')      AS RECON_DATE,
             l.RECON_BY,
             l.RECON_TXN_TYPE,
             l.RECON_TXN_ID,
@@ -792,93 +786,93 @@ DECLARE
             l.RECON_REFERENCE,
             l.RECON_NOTES,
             l.CREATED_BY,
-            TO_CHAR(l.CREATION_DATE,    'YYYY-MM-DD"T"HH24:MI:SS') AS CREATION_DATE,
+            TO_CHAR(l.CREATION_DATE,    'YYYY-MM-DD"T"HH24:MI:SS')      AS CREATION_DATE,
             l.LAST_UPDATED_BY,
-            TO_CHAR(l.LAST_UPDATE_DATE, 'YYYY-MM-DD"T"HH24:MI:SS') AS LAST_UPDATE_DATE
+            TO_CHAR(l.LAST_UPDATE_DATE, 'YYYY-MM-DD"T"HH24:MI:SS')      AS LAST_UPDATE_DATE
         FROM   RR_BANK_STATEMENT_LINES l
         WHERE  l.STATEMENT_ID = :stmt_id
         ORDER  BY l.LINE_NUMBER, l.LINE_ID;
 BEGIN
-    DBMS_LOB.CREATETEMPORARY(v_clob, TRUE);
+    SELECT COUNT(1) INTO v_exists
+    FROM   RR_BANK_STATEMENT_HEADER
+    WHERE  STATEMENT_ID = :stmt_id;
 
-    -- Build header section — keep v_hdr small (16 KB) then append via TO_CLOB
-    -- to avoid the '{"status":...{' || v_hdr || '}' expression overflowing 32767.
+    IF v_exists = 0 THEN
+        HTP.P('{"status":"error","message":"Statement ' || :stmt_id || ' not found"}');
+        RETURN;
+    END IF;
+
+    -- Use APEX_JSON output API — all JSON building is done internally by Oracle
+    -- using CLOBs, so no VARCHAR2 buffers can overflow.
+    APEX_JSON.INITIALIZE_CLOB_OUTPUT;
+
+    APEX_JSON.OPEN_OBJECT;                             -- {
+    APEX_JSON.WRITE('status', 'success');
+
+    -- ---- header ----
+    APEX_JSON.OPEN_OBJECT('header');                   --   "header":{
     FOR r IN c_hdr LOOP
-        v_hdr :=
-            '"statementId":'          || r.STATEMENT_ID                                       ||
-            ',"statementNumber":'     || APEX_JSON.STRINGIFY(NVL(r.STATEMENT_NUMBER,''))      ||
-            ',"bankAccountNumber":'   || APEX_JSON.STRINGIFY(NVL(r.BANK_ACCOUNT_NUMBER,''))   ||
-            ',"bankAccountName":'     || APEX_JSON.STRINGIFY(NVL(r.BANK_ACCOUNT_NAME,''))     ||
-            ',"statementDate":'       || APEX_JSON.STRINGIFY(NVL(r.STATEMENT_DATE,''))        ||
-            ',"currencyCode":'        || APEX_JSON.STRINGIFY(NVL(r.CURRENCY_CODE,''))         ||
-            ',"openingBalance":'      || r.OPENING_BALANCE                                    ||
-            ',"closingBalance":'      || r.CLOSING_BALANCE                                    ||
-            ',"totalCredits":'        || r.TOTAL_CREDITS                                      ||
-            ',"totalDebits":'         || r.TOTAL_DEBITS                                       ||
-            ',"status":'              || APEX_JSON.STRINGIFY(NVL(r.STATUS,''))                ||
-            ',"businessUnitName":'    || APEX_JSON.STRINGIFY(NVL(r.BUSINESS_UNIT_NAME,''))    ||
-            ',"description":'         || APEX_JSON.STRINGIFY(NVL(r.DESCRIPTION,''))           ||
-            ',"createdBy":'           || APEX_JSON.STRINGIFY(NVL(r.CREATED_BY,''))            ||
-            ',"creationDate":'        || APEX_JSON.STRINGIFY(NVL(r.CREATION_DATE,''))         ||
-            ',"lastUpdatedBy":'       || APEX_JSON.STRINGIFY(NVL(r.LAST_UPDATED_BY,''))       ||
-            ',"lastUpdateDate":'      || APEX_JSON.STRINGIFY(NVL(r.LAST_UPDATE_DATE,''));
+        APEX_JSON.WRITE('statementId',       r.STATEMENT_ID);
+        APEX_JSON.WRITE('statementNumber',   r.STATEMENT_NUMBER);
+        APEX_JSON.WRITE('bankAccountNumber', r.BANK_ACCOUNT_NUMBER);
+        APEX_JSON.WRITE('bankAccountName',   r.BANK_ACCOUNT_NAME);
+        APEX_JSON.WRITE('statementDate',     r.STATEMENT_DATE);
+        APEX_JSON.WRITE('currencyCode',      r.CURRENCY_CODE);
+        APEX_JSON.WRITE('openingBalance',    r.OPENING_BALANCE);
+        APEX_JSON.WRITE('closingBalance',    r.CLOSING_BALANCE);
+        APEX_JSON.WRITE('totalCredits',      r.TOTAL_CREDITS);
+        APEX_JSON.WRITE('totalDebits',       r.TOTAL_DEBITS);
+        APEX_JSON.WRITE('status',            r.STATUS);
+        APEX_JSON.WRITE('businessUnitName',  r.BUSINESS_UNIT_NAME);
+        APEX_JSON.WRITE('description',       r.DESCRIPTION);
+        APEX_JSON.WRITE('createdBy',         r.CREATED_BY);
+        APEX_JSON.WRITE('creationDate',      r.CREATION_DATE);
+        APEX_JSON.WRITE('lastUpdatedBy',     r.LAST_UPDATED_BY);
+        APEX_JSON.WRITE('lastUpdateDate',    r.LAST_UPDATE_DATE);
     END LOOP;
+    APEX_JSON.CLOSE_OBJECT;                            --   }
 
-    -- Use separate DBMS_LOB.APPEND calls with TO_CLOB() so concatenation
-    -- happens in CLOB space — avoids ORA-06502 on the inline || expression.
-    DBMS_LOB.APPEND(v_clob, TO_CLOB('{"status":"success","header":{'));
-    DBMS_LOB.APPEND(v_clob, TO_CLOB(v_hdr));
-    DBMS_LOB.APPEND(v_clob, TO_CLOB('},"lines":['));
-
-    -- Build lines section — split each line into two VARCHAR2(16000) chunks
-    -- so description (1000 chars) + reconNotes (1000 chars) never overflow.
+    -- ---- lines ----
+    APEX_JSON.OPEN_ARRAY('lines');                     --   "lines":[
     FOR r IN c_lines LOOP
-        IF NOT v_first THEN
-            DBMS_LOB.APPEND(v_clob, TO_CLOB(','));
-        END IF;
-        v_first := FALSE;
-
-        -- First half: IDs, dates, amounts, core text fields
-        v_buf1 :=
-            '{"lineId":'               || r.LINE_ID                                            ||
-            ',"statementId":'          || r.STATEMENT_ID                                       ||
-            ',"lineNumber":'           || NVL(TO_CHAR(r.LINE_NUMBER), 'null')                  ||
-            ',"transactionDate":'      || APEX_JSON.STRINGIFY(NVL(r.TRANSACTION_DATE,''))      ||
-            ',"valueDate":'            || APEX_JSON.STRINGIFY(NVL(r.VALUE_DATE,''))            ||
-            ',"amount":'               || r.AMOUNT                                             ||
-            ',"transactionCode":'      || APEX_JSON.STRINGIFY(NVL(r.TRANSACTION_CODE,''))      ||
-            ',"description":'          || APEX_JSON.STRINGIFY(NVL(r.DESCRIPTION,''))           ||
-            ',"reference":'            || APEX_JSON.STRINGIFY(NVL(r.REFERENCE,''))             ||
-            ',"bankTxnReference":'     || APEX_JSON.STRINGIFY(NVL(r.BANK_TXN_REFERENCE,''))    ||
-            ',"counterpartyName":'     || APEX_JSON.STRINGIFY(NVL(r.COUNTERPARTY_NAME,''))     ||
-            ',"counterpartyAccount":'  || APEX_JSON.STRINGIFY(NVL(r.COUNTERPARTY_ACCOUNT,''))  ;
-
-        -- Second half: reconciliation fields and audit columns
-        v_buf2 :=
-            ',"reconStatus":'          || APEX_JSON.STRINGIFY(NVL(r.RECON_STATUS,'UNRECONCILED'))||
-            ',"reconAmount":'          || r.RECON_AMOUNT                                       ||
-            ',"reconDate":'            || APEX_JSON.STRINGIFY(NVL(r.RECON_DATE,''))            ||
-            ',"reconBy":'              || APEX_JSON.STRINGIFY(NVL(r.RECON_BY,''))              ||
-            ',"reconTxnType":'         || APEX_JSON.STRINGIFY(NVL(r.RECON_TXN_TYPE,''))        ||
-            ',"reconTxnId":'           || NVL(TO_CHAR(r.RECON_TXN_ID),'null')                 ||
-            ',"reconTxnNumber":'       || APEX_JSON.STRINGIFY(NVL(r.RECON_TXN_NUMBER,''))      ||
-            ',"reconReference":'       || APEX_JSON.STRINGIFY(NVL(r.RECON_REFERENCE,''))       ||
-            ',"reconNotes":'           || APEX_JSON.STRINGIFY(NVL(r.RECON_NOTES,''))           ||
-            ',"createdBy":'            || APEX_JSON.STRINGIFY(NVL(r.CREATED_BY,''))            ||
-            ',"creationDate":'         || APEX_JSON.STRINGIFY(NVL(r.CREATION_DATE,''))         ||
-            ',"lastUpdatedBy":'        || APEX_JSON.STRINGIFY(NVL(r.LAST_UPDATED_BY,''))       ||
-            ',"lastUpdateDate":'       || APEX_JSON.STRINGIFY(NVL(r.LAST_UPDATE_DATE,''))      ||
-            '}';
-
-        DBMS_LOB.APPEND(v_clob, TO_CLOB(v_buf1));
-        DBMS_LOB.APPEND(v_clob, TO_CLOB(v_buf2));
+        APEX_JSON.OPEN_OBJECT;                         --     {
+        APEX_JSON.WRITE('lineId',              r.LINE_ID);
+        APEX_JSON.WRITE('statementId',         r.STATEMENT_ID);
+        APEX_JSON.WRITE('lineNumber',          r.LINE_NUMBER);
+        APEX_JSON.WRITE('transactionDate',     r.TRANSACTION_DATE);
+        APEX_JSON.WRITE('valueDate',           r.VALUE_DATE);
+        APEX_JSON.WRITE('amount',              r.AMOUNT);
+        APEX_JSON.WRITE('transactionCode',     r.TRANSACTION_CODE);
+        APEX_JSON.WRITE('description',         r.DESCRIPTION);
+        APEX_JSON.WRITE('reference',           r.REFERENCE);
+        APEX_JSON.WRITE('bankTxnReference',    r.BANK_TXN_REFERENCE);
+        APEX_JSON.WRITE('counterpartyName',    r.COUNTERPARTY_NAME);
+        APEX_JSON.WRITE('counterpartyAccount', r.COUNTERPARTY_ACCOUNT);
+        APEX_JSON.WRITE('reconStatus',         r.RECON_STATUS);
+        APEX_JSON.WRITE('reconAmount',         r.RECON_AMOUNT);
+        APEX_JSON.WRITE('reconDate',           r.RECON_DATE);
+        APEX_JSON.WRITE('reconBy',             r.RECON_BY);
+        APEX_JSON.WRITE('reconTxnType',        r.RECON_TXN_TYPE);
+        APEX_JSON.WRITE('reconTxnId',          r.RECON_TXN_ID);
+        APEX_JSON.WRITE('reconTxnNumber',      r.RECON_TXN_NUMBER);
+        APEX_JSON.WRITE('reconReference',      r.RECON_REFERENCE);
+        APEX_JSON.WRITE('reconNotes',          r.RECON_NOTES);
+        APEX_JSON.WRITE('createdBy',           r.CREATED_BY);
+        APEX_JSON.WRITE('creationDate',        r.CREATION_DATE);
+        APEX_JSON.WRITE('lastUpdatedBy',       r.LAST_UPDATED_BY);
+        APEX_JSON.WRITE('lastUpdateDate',      r.LAST_UPDATE_DATE);
+        APEX_JSON.CLOSE_OBJECT;                        --     }
     END LOOP;
+    APEX_JSON.CLOSE_ARRAY;                             --   ]
 
-    DBMS_LOB.APPEND(v_clob, TO_CLOB(']}'));
+    APEX_JSON.CLOSE_OBJECT;                            -- }
+
+    v_clob := APEX_JSON.GET_CLOB_OUTPUT;
+    APEX_JSON.FREE_OUTPUT;
     HTP.P(v_clob);
-    DBMS_LOB.FREETEMPORARY(v_clob);
 EXCEPTION
     WHEN OTHERS THEN
+        APEX_JSON.FREE_OUTPUT;
         HTP.P('{"status":"error","message":' || APEX_JSON.STRINGIFY(SQLERRM) || '}');
 END;
 ]',
