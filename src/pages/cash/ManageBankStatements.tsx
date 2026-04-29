@@ -71,6 +71,8 @@ interface StatementLine {
 interface BankAcctOption { label: string; value: string; bankAccountNumber?: string; currencyCode?: string; legalEntityName?: string; cashAccountCombination?: string; }
 interface BUOption       { label: string; value: string; legalEntityName?: string; }
 interface TxnCodeOption  { value: string; label: string; endTransaction?: string; defaultAccountCombination?: string; }
+interface PdfColMapping  { text: string; x: number; xMin: number; xMax: number; field: string; }
+interface PdfTplOption   { templateId: number; templateName: string; dateFormat: string; columns: PdfColMapping[]; }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const parseApexJson = async (res: Response) => {
@@ -281,6 +283,134 @@ async function parseBankStatementPdf(file: File): Promise<{ lines: StatementLine
   return { lines, errors };
 }
 
+// ── Template-based PDF parser ─────────────────────────────────────────────────
+function parseDateStr(str: string, fmt: string): dayjs.Dayjs | null {
+  const s = str.trim();
+  if (fmt === 'DD/MM/YYYY' || fmt === 'DD-MM-YYYY') {
+    const sep = fmt.includes('/') ? '/' : '-';
+    const re = new RegExp(`^(\\d{1,2})\\${sep}(\\d{1,2})\\${sep}(\\d{4})$`);
+    const m = s.match(re);
+    if (m) return dayjs(`${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`);
+  } else if (fmt === 'MM/DD/YYYY') {
+    const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) return dayjs(`${m[3]}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`);
+  } else if (fmt === 'D-MMM-YYYY' || fmt === 'DD-MMM-YYYY') {
+    const months: Record<string,string> = {jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
+    const m = s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/);
+    if (m) { const mo = months[m[2].toLowerCase()]; if (mo) return dayjs(`${m[3]}-${mo}-${m[1].padStart(2,'0')}`); }
+  } else if (fmt === 'YYYY-MM-DD') {
+    const d = dayjs(s); if (d.isValid()) return d;
+  }
+  const d = dayjs(s); return d.isValid() ? d : null;
+}
+
+async function parseBankStatementPdfWithTemplate(
+  file: File,
+  template: PdfTplOption | null,
+): Promise<{ lines: StatementLine[]; errors: string[] }> {
+  if (!template) return parseBankStatementPdf(file);
+
+  const errors: string[] = [];
+  const lines:  StatementLine[] = [];
+
+  let pdfjsLib: any;
+  try {
+    pdfjsLib = await import('pdfjs-dist');
+    const ver: string = pdfjsLib.version;
+    const ext = ver.startsWith('3.') || ver.startsWith('2.') ? 'min.js' : 'min.mjs';
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${ver}/build/pdf.worker.${ext}`;
+  } catch {
+    errors.push('pdfjs-dist is not installed. Run: npm install pdfjs-dist');
+    return { lines, errors };
+  }
+
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, useSystemFonts: true }).promise;
+
+  type TItem = { str: string; x: number; y: number };
+  const allItems: TItem[] = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    for (const item of content.items) {
+      if ('str' in item && item.str.trim()) {
+        const tx = item.transform;
+        allItems.push({ str: item.str.trim(), x: tx[4], y: tx[5] });
+      }
+    }
+  }
+
+  const rowMap = new Map<number, TItem[]>();
+  for (const item of allItems) {
+    const key = Math.round(item.y / 3) * 3;
+    if (!rowMap.has(key)) rowMap.set(key, []);
+    rowMap.get(key)!.push(item);
+  }
+
+  const sortedRows = [...rowMap.entries()]
+    .sort((a, b) => b[0] - a[0])
+    .map(([, items]) => items.sort((a, b) => a.x - b.x));
+
+  const dateCol  = template.columns.find(c => c.field === 'date');
+  const amtRe    = /^[\d,]+(\.\d{1,2})?$/;
+
+  for (const row of sortedRows) {
+    // Find date value in the date-column X range
+    const dateItem = dateCol
+      ? row.find(it => it.x >= dateCol.xMin && it.x <= dateCol.xMax)
+      : row[0];
+    if (!dateItem) continue;
+    const txDate = parseDateStr(dateItem.str, template.dateFormat);
+    if (!txDate || !txDate.isValid()) continue;
+
+    // Bucket items into their column fields
+    const bucket: Record<string, string> = {};
+    for (const item of row) {
+      const col = template.columns.find(c => item.x >= c.xMin && item.x <= c.xMax);
+      if (col && col.field !== 'skip') {
+        bucket[col.field] = bucket[col.field] ? bucket[col.field] + ' ' + item.str : item.str;
+      }
+    }
+
+    // Resolve amount and CR/DR direction
+    let amount: number | null = null;
+    let txCode = 'CR';
+    const wdStr  = (bucket['withdrawal'] ?? '').replace(/,/g, '');
+    const depStr = (bucket['deposit']    ?? '').replace(/,/g, '');
+    const amtStr = (bucket['amount']     ?? '').replace(/,/g, '');
+    const typStr = (bucket['type']       ?? '').trim().toUpperCase();
+
+    if (wdStr && amtRe.test(wdStr) && parseFloat(wdStr) > 0) {
+      amount = parseFloat(wdStr); txCode = 'DR';
+    } else if (depStr && amtRe.test(depStr) && parseFloat(depStr) > 0) {
+      amount = parseFloat(depStr); txCode = 'CR';
+    } else if (amtStr && amtRe.test(amtStr)) {
+      amount = parseFloat(amtStr);
+      txCode = typStr.startsWith('D') ? 'DR' : 'CR';
+    }
+    if (!amount) continue;
+
+    lines.push({
+      _key:            newKey(),
+      transactionDate: txDate.format('YYYY-MM-DD'),
+      valueDate:       bucket['valueDate'] ? (parseDateStr(bucket['valueDate'], template.dateFormat)?.format('YYYY-MM-DD') ?? '') : '',
+      amount,
+      transactionCode: txCode,
+      description:     bucket['narration'] ?? '',
+      reference:       bucket['reference'] ?? '',
+      bankTxnReference: '',
+      counterpartyName: '',
+      counterpartyAccount: '',
+      reconStatus:     'UNRECONCILED',
+    });
+  }
+
+  if (lines.length === 0 && errors.length === 0)
+    errors.push('No transaction rows found using this template. Check that the column mappings match the PDF.');
+
+  return { lines, errors };
+}
+
 // ── StatementForm ─────────────────────────────────────────────────────────────
 const StatementForm: React.FC<{
   initialHeader?:  Partial<StatementHeader>;
@@ -307,6 +437,9 @@ const StatementForm: React.FC<{
   const [selectedBu, setSelectedBu] = useState<string | undefined>(initialHeader?.businessUnitName);
   const [txnCodes, setTxnCodes]         = useState<TxnCodeOption[]>([]);
   const [balanceTick, setBalanceTick]   = useState(0);
+  const [pdfTemplates, setPdfTemplates] = useState<PdfTplOption[]>([]);
+  const [pdfTplModal, setPdfTplModal]   = useState(false);
+  const [selectedTplId, setSelectedTplId] = useState<number | null>(null);
   const [apiModal, setApiModal]       = useState(false);
   const [apiPayload, setApiPayload]   = useState('');
   const [apiPosting, setApiPosting]   = useState(false);
@@ -425,6 +558,25 @@ const StatementForm: React.FC<{
     return () => ctrl.abort();
   }, [selectedBu]);
 
+  // Load PDF templates whenever BU changes
+  useEffect(() => {
+    if (!selectedBu) { setPdfTemplates([]); return; }
+    const ctrl = new AbortController();
+    (async () => {
+      try {
+        const res = await fetch(`${APEX_BASE}/cash/pdf-templates?business_unit=${encodeURIComponent(selectedBu)}`, { signal: ctrl.signal });
+        const data = await parseApexJson(res);
+        setPdfTemplates((data.items || []).map((i: any) => ({
+          templateId:   i.templateid,
+          templateName: i.templatename ?? '',
+          dateFormat:   i.dateformat || 'DD/MM/YYYY',
+          columns:      (() => { try { return JSON.parse(i.columnmappings || '[]'); } catch { return []; } })(),
+        })));
+      } catch { /* ignore abort */ }
+    })();
+    return () => ctrl.abort();
+  }, [selectedBu]);
+
   const addLine = () => setLines(prev => [...prev, {
     _key: newKey(), transactionDate: dayjs().format('YYYY-MM-DD'),
     amount: null, transactionCode: '', reconStatus: 'UNRECONCILED',
@@ -484,7 +636,8 @@ const StatementForm: React.FC<{
     setPdfParsing(true);
     setPdfModal(true);
     try {
-      const { lines: parsed, errors } = await parseBankStatementPdf(file);
+      const tpl = selectedTplId ? (pdfTemplates.find(t => t.templateId === selectedTplId) ?? null) : null;
+      const { lines: parsed, errors } = await parseBankStatementPdfWithTemplate(file, tpl);
       setPdfPreview(parsed);
       setPdfErrors(errors);
     } catch (err: any) {
@@ -791,7 +944,10 @@ const StatementForm: React.FC<{
           </Button>
           <Button size="small" icon={<UploadOutlined />}
             style={{ borderColor: '#d46b08', color: '#d46b08' }}
-            onClick={() => pdfFileRef.current?.click()}>
+            onClick={() => {
+              if (pdfTemplates.length > 0) { setSelectedTplId(null); setPdfTplModal(true); }
+              else pdfFileRef.current?.click();
+            }}>
             Import PDF
           </Button>
           <input ref={pdfFileRef} type="file" accept=".pdf" style={{ display: 'none' }}
@@ -959,6 +1115,37 @@ const StatementForm: React.FC<{
             />
           )}
         </Space>
+      </Modal>
+
+      {/* Template Selection Modal */}
+      <Modal
+        title={<Space><UploadOutlined style={{ color: '#d46b08' }} /><span>Select PDF Import Template</span></Space>}
+        open={pdfTplModal} onCancel={() => setPdfTplModal(false)} width={480}
+        footer={[
+          <Button key="cancel" onClick={() => setPdfTplModal(false)}>Cancel</Button>,
+          <Button key="manage" type="text" style={{ color: REDWOOD.info }}
+            onClick={() => { setPdfTplModal(false); window.location.hash = '#/cash/pdf-templates'; }}>
+            Manage Templates
+          </Button>,
+          <Button key="go" type="primary"
+            style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+            onClick={() => { setPdfTplModal(false); pdfFileRef.current?.click(); }}>
+            Continue
+          </Button>,
+        ]}
+      >
+        <Text style={{ fontSize: 12, display: 'block', marginBottom: 14, color: REDWOOD.neutral600 }}>
+          Choose a template that matches your bank PDF format, or use auto-detect (generic parser).
+        </Text>
+        <Select
+          style={{ width: '100%' }}
+          value={selectedTplId ?? 'none'}
+          onChange={(v: any) => setSelectedTplId(v === 'none' ? null : Number(v))}
+          options={[
+            { value: 'none', label: 'None — auto-detect (generic parser)' },
+            ...pdfTemplates.map(t => ({ value: t.templateId, label: t.templateName })),
+          ]}
+        />
       </Modal>
 
       {/* PDF Import Modal */}
