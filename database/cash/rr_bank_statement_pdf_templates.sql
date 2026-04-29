@@ -114,6 +114,12 @@ BEGIN
     l_created  := APEX_JSON.GET_VARCHAR2(p_path => 'created_by');
     l_updated  := APEX_JSON.GET_VARCHAR2(p_path => 'last_updated_by');
 
+    IF l_name IS NULL AND l_id IS NULL THEN
+        :status_code := 400;
+        HTP.PRN('{"status":"error","message":"template_name is required"}');
+        RETURN;
+    END IF;
+
     IF l_id IS NOT NULL THEN
         UPDATE RR_BANK_STATEMENT_PDF_TEMPLATES
         SET    TEMPLATE_NAME      = NVL(l_name,     TEMPLATE_NAME),

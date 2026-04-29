@@ -294,7 +294,7 @@ const PdfTemplates: React.FC = () => {
     const info = infoForm.getFieldsValue();
     const mappings = computeXRanges(detectedCols);
     const payload: Record<string, unknown> = {
-      template_name:      info.templateName || '',
+      template_name:      info.templateName || null,
       description:        info.description || null,
       business_unit_name: info.businessUnitName || null,
       date_format:        info.dateFormat || 'DD/MM/YYYY',
@@ -308,6 +308,12 @@ const PdfTemplates: React.FC = () => {
   };
 
   const openInspect = () => {
+    const info = infoForm.getFieldsValue();
+    if (!info.templateName) {
+      message.error('Template Name is required — fill in Step 1 first');
+      setStep(0);
+      return;
+    }
     setInspectPayload(JSON.stringify(buildPostPayload(), null, 2));
     setInspectResponse(null);
     setInspectModal(true);
