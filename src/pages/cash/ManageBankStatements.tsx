@@ -659,23 +659,38 @@ const StatementForm: React.FC<{
 
   const handleSave = async () => {
     let hdrValues: any;
-    try { hdrValues = await form.validateFields(); } catch { return; }
+    try {
+      hdrValues = await form.validateFields();
+    } catch {
+      message.error('Please fill in all required fields before saving.');
+      return;
+    }
 
     setSaving(true);
     try {
       const payload = buildPayload(hdrValues);
+      console.log('[handleSave] payload lines count:', payload.lines.length, payload);
 
       const res  = await fetch(`${APEX_BASE}/cash/bankstatements`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
+      const data = await parseApexJson(res);
+      console.log('[handleSave] response:', data);
+
       if (data.status === 'success') {
+        const saved  = data.linesProcessed ?? 0;
+        const sent   = payload.lines.length;
+        if (sent > 0 && saved === 0) {
+          message.warning(`Statement saved but 0 of ${sent} lines were stored — check date/amount formats.`);
+        } else {
+          message.success(isEdit
+            ? `Statement updated (${saved} line${saved !== 1 ? 's' : ''} saved).`
+            : `Statement created with ${saved} line${saved !== 1 ? 's' : ''}.`);
+        }
         if (isEdit) {
-          message.success('Statement updated.');
           onSave();
         } else {
-          message.success('Statement created. You can now add lines.');
           onCreated(data.statementId);
         }
       } else {
@@ -1358,12 +1373,15 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
       const res  = await fetch(`${APEX_BASE}/cash/bankstatements/${statementId}`);
       const data = await parseApexJson(res);
       const header: StatementHeader = data.header ?? data;
-      const lines: StatementLine[]  = (data.lines ?? []).map((l: any) => ({ ...l, _key: newKey() }));
-      setTabs(prev => prev.map(t =>
-        t.key === tabKey
-          ? { ...t, label: header.statementNumber ?? `Stmt #${statementId}`, header, lines }
-          : t
-      ));
+      const dbLines: StatementLine[] = (data.lines ?? []).map((l: any) => ({ ...l, _key: newKey() }));
+      console.log('[reloadTabAsEdit] DB returned lines:', dbLines.length);
+      setTabs(prev => prev.map(t => {
+        if (t.key !== tabKey) return t;
+        // If DB returned lines, use them; if DB returned empty but we had local lines, keep local lines
+        // (guards against rare case where DB commit isn't visible yet)
+        const lines = dbLines.length > 0 ? dbLines : (t.lines && t.lines.length > 0 ? t.lines : dbLines);
+        return { ...t, label: header.statementNumber ?? `Stmt #${statementId}`, header, lines };
+      }));
       if (hasSearched) handleSearch();
     } catch { message.warning('Statement saved. Refresh the page to continue editing.'); }
   };
