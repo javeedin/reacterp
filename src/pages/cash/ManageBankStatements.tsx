@@ -434,6 +434,11 @@ const StatementForm: React.FC<{
   const [pdfPreview, setPdfPreview]     = useState<StatementLine[]>([]);
   const [pdfErrors, setPdfErrors]       = useState<string[]>([]);
   const [pdfFileName, setPdfFileName]   = useState('');
+  const [pdfSelKeys, setPdfSelKeys]     = useState<string[]>([]);
+  const [pdfApiOpen, setPdfApiOpen]     = useState(false);
+  const [pdfApiPayload, setPdfApiPayload] = useState('');
+  const [pdfApiResponse, setPdfApiResponse] = useState<{ status: number; body: string } | null>(null);
+  const [pdfApiPosting, setPdfApiPosting] = useState(false);
   const [selectedBu, setSelectedBu] = useState<string | undefined>(initialHeader?.businessUnitName);
   const [txnCodes, setTxnCodes]         = useState<TxnCodeOption[]>([]);
   const [balanceTick, setBalanceTick]   = useState(0);
@@ -640,6 +645,9 @@ const StatementForm: React.FC<{
       const { lines: parsed, errors } = await parseBankStatementPdfWithTemplate(file, tpl);
       setPdfPreview(parsed);
       setPdfErrors(errors);
+      setPdfSelKeys(parsed.map(l => l._key)); // select all by default
+      setPdfApiOpen(false);
+      setPdfApiResponse(null);
     } catch (err: any) {
       setPdfErrors([`Failed to read PDF: ${err.message}`]);
     } finally {
@@ -648,13 +656,59 @@ const StatementForm: React.FC<{
     }
   };
 
+  const getPdfSelected = () =>
+    pdfSelKeys.length > 0 ? pdfPreview.filter(l => pdfSelKeys.includes(l._key)) : pdfPreview;
+
+  const buildPdfLinesPayload = (selectedLines: StatementLine[]) => ({
+    header: { statementId: initialHeader?.statementId, lastUpdatedBy: 'ERP_USER' },
+    lines: selectedLines.map(l => ({
+      transactionDate:     l.transactionDate,
+      valueDate:           l.valueDate || null,
+      amount:              l.amount,
+      transactionCode:     l.transactionCode,
+      description:         l.description ?? '',
+      reference:           l.reference ?? '',
+      bankTxnReference:    l.bankTxnReference ?? '',
+      counterpartyName:    l.counterpartyName ?? '',
+      counterpartyAccount: l.counterpartyAccount ?? '',
+      createdBy:           'ERP_USER',
+      lastUpdatedBy:       'ERP_USER',
+    })),
+  });
+
+  const openPdfApi = () => {
+    const sel = getPdfSelected();
+    setPdfApiPayload(JSON.stringify(buildPdfLinesPayload(sel), null, 2));
+    setPdfApiResponse(null);
+    setPdfApiOpen(true);
+  };
+
+  const postPdfLines = async () => {
+    setPdfApiPosting(true);
+    setPdfApiResponse(null);
+    try {
+      const res = await fetch(`${APEX_BASE}/cash/bankstatements`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: pdfApiPayload,
+      });
+      const text = await res.text();
+      setPdfApiResponse({ status: res.status, body: (() => { try { return JSON.stringify(JSON.parse(text), null, 2); } catch { return text; } })() });
+    } catch (e: any) {
+      setPdfApiResponse({ status: 0, body: 'Network error: ' + e.message });
+    } finally { setPdfApiPosting(false); }
+  };
+
   const confirmPdfImport = () => {
-    setLines(prev => [...prev, ...pdfPreview]);
+    const toAdd = getPdfSelected();
+    setLines(prev => [...prev, ...toAdd]);
     setPdfModal(false);
     setPdfPreview([]);
     setPdfErrors([]);
     setPdfFileName('');
-    message.success(`${pdfPreview.length} lines imported from PDF.`);
+    setPdfSelKeys([]);
+    setPdfApiOpen(false);
+    setPdfApiResponse(null);
+    message.success(`${toAdd.length} line${toAdd.length !== 1 ? 's' : ''} imported from PDF.`);
   };
 
   const handleSave = async () => {
@@ -1167,23 +1221,35 @@ const StatementForm: React.FC<{
       <Modal
         title={<Space><UploadOutlined style={{ color: '#d46b08' }} /><span>Import Lines from PDF</span></Space>}
         open={pdfModal}
-        onCancel={() => { setPdfModal(false); setPdfPreview([]); setPdfErrors([]); setPdfFileName(''); }}
-        width={900}
+        onCancel={() => { setPdfModal(false); setPdfPreview([]); setPdfErrors([]); setPdfFileName(''); setPdfSelKeys([]); setPdfApiOpen(false); setPdfApiResponse(null); }}
+        width={980}
         footer={[
-          <Button key="cancel" onClick={() => { setPdfModal(false); setPdfPreview([]); setPdfErrors([]); setPdfFileName(''); }}>
+          <Button key="cancel" onClick={() => { setPdfModal(false); setPdfPreview([]); setPdfErrors([]); setPdfFileName(''); setPdfSelKeys([]); setPdfApiOpen(false); setPdfApiResponse(null); }}>
             Cancel
           </Button>,
+          pdfPreview.length > 0 && (
+            <Button key="api" icon={<ApiOutlined />}
+              style={{ borderColor: REDWOOD.info, color: REDWOOD.info }}
+              onClick={openPdfApi}>
+              API Inspector ({pdfSelKeys.length > 0 ? pdfSelKeys.length : pdfPreview.length} selected)
+            </Button>
+          ),
           <Button key="import" type="primary"
             disabled={pdfPreview.length === 0}
             style={{ background: '#d46b08', borderColor: '#d46b08' }}
             onClick={confirmPdfImport}>
-            Add {pdfPreview.length} Lines to Statement
+            Add {pdfSelKeys.length > 0 ? pdfSelKeys.length : pdfPreview.length} Lines to Statement
           </Button>,
         ]}
       >
         {pdfFileName && (
           <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
             File: <strong>{pdfFileName}</strong>
+            {initialHeader?.statementId && (
+              <Text type="secondary" style={{ marginLeft: 12 }}>
+                Statement ID: <strong>{initialHeader.statementId}</strong>
+              </Text>
+            )}
           </Text>
         )}
         {pdfParsing && (
@@ -1202,10 +1268,18 @@ const StatementForm: React.FC<{
         {!pdfParsing && pdfPreview.length > 0 && (
           <>
             <Alert type="success" showIcon style={{ marginBottom: 8 }}
-              message={`${pdfPreview.length} transactions found — review below then click Add to import`} />
+              message={`${pdfPreview.length} transactions found — select rows to import, then click Add`} />
             <Table
               dataSource={pdfPreview} rowKey="_key" size="small" pagination={false}
-              scroll={{ y: 400, x: 800 }}
+              scroll={{ y: 320, x: 800 }}
+              rowSelection={{
+                selectedRowKeys: pdfSelKeys,
+                onChange: (keys) => {
+                  setPdfSelKeys(keys as string[]);
+                  setPdfApiOpen(false);
+                  setPdfApiResponse(null);
+                },
+              }}
               columns={[
                 { title: 'Date', dataIndex: 'transactionDate', width: 110,
                   render: (v: string) => <Text style={{ fontSize: 11 }}>{v ? dayjs(v).format('D-MMM-YYYY') : '—'}</Text> },
@@ -1223,16 +1297,18 @@ const StatementForm: React.FC<{
                   )},
               ]}
               summary={() => {
-                const cr = pdfPreview.filter(r => r.transactionCode === 'CR').reduce((s, r) => s + (r.amount ?? 0), 0);
-                const dr = pdfPreview.filter(r => r.transactionCode === 'DR').reduce((s, r) => s + (r.amount ?? 0), 0);
+                const sel = getPdfSelected();
+                const cr = sel.filter(r => r.transactionCode === 'CR').reduce((s, r) => s + (r.amount ?? 0), 0);
+                const dr = sel.filter(r => r.transactionCode === 'DR').reduce((s, r) => s + (r.amount ?? 0), 0);
                 return (
                   <Table.Summary fixed>
                     <Table.Summary.Row style={{ background: '#fafafa' }}>
-                      <Table.Summary.Cell index={0} colSpan={2}>
-                        <Text strong style={{ fontSize: 11 }}>Total</Text>
+                      <Table.Summary.Cell index={0} colSpan={3}>
+                        <Text strong style={{ fontSize: 11 }}>
+                          Selected: {pdfSelKeys.length > 0 ? pdfSelKeys.length : pdfPreview.length} / {pdfPreview.length}
+                        </Text>
                       </Table.Summary.Cell>
-                      <Table.Summary.Cell index={2} colSpan={2} />
-                      <Table.Summary.Cell index={4} align="right">
+                      <Table.Summary.Cell index={3} colSpan={2} align="right">
                         <Text strong style={{ fontSize: 11 }}>
                           CR: {cr.toLocaleString('en-AE', { minimumFractionDigits: 2 })} |{' '}
                           DR: {dr.toLocaleString('en-AE', { minimumFractionDigits: 2 })}
@@ -1244,6 +1320,46 @@ const StatementForm: React.FC<{
               }}
             />
           </>
+        )}
+
+        {/* API Inspector */}
+        {pdfApiOpen && (
+          <div style={{ marginTop: 12, border: `1px solid ${REDWOOD.info}40`, borderRadius: 6, padding: 12, background: '#f0f7ff' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <ApiOutlined style={{ color: REDWOOD.info }} />
+              <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>API Inspector — POST {APEX_BASE}/cash/bankstatements</Text>
+              <Button size="small" type="text" style={{ marginLeft: 'auto', fontSize: 11 }}
+                onClick={() => { setPdfApiOpen(false); setPdfApiResponse(null); }}>✕</Button>
+            </div>
+            <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>
+              Edit the payload below, then click POST to send directly to the API:
+            </Text>
+            <Input.TextArea
+              value={pdfApiPayload}
+              onChange={e => setPdfApiPayload(e.target.value)}
+              rows={10}
+              style={{ fontFamily: 'monospace', fontSize: 11 }}
+            />
+            <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
+              <Button type="primary" size="small" loading={pdfApiPosting}
+                icon={<ApiOutlined />}
+                style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+                onClick={postPdfLines}>
+                POST Request
+              </Button>
+              {pdfApiResponse && (
+                <Tag color={pdfApiResponse.status >= 200 && pdfApiResponse.status < 300 ? 'green' : 'red'}>
+                  HTTP {pdfApiResponse.status || 'Error'}
+                </Tag>
+              )}
+            </div>
+            {pdfApiResponse && (
+              <Input.TextArea
+                readOnly value={pdfApiResponse.body}
+                rows={5} style={{ marginTop: 8, fontFamily: 'monospace', fontSize: 11 }}
+              />
+            )}
+          </div>
         )}
       </Modal>
     </div>
