@@ -6,9 +6,10 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, BankOutlined, PlusOutlined, EditOutlined, DeleteOutlined,
-  SearchOutlined, ReloadOutlined, ApiOutlined,
+  SearchOutlined, ReloadOutlined, ApiOutlined, TableOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
+import AccountSelector from '../../components/AccountSelector';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -58,8 +59,10 @@ const TransactionCodes: React.FC = () => {
   const [loading, setLoading]       = useState(false);
   const [modalOpen, setModalOpen]   = useState(false);
   const [editRecord, setEditRecord] = useState<TransactionCode | null>(null);
-  const [saving, setSaving]         = useState(false);
-  const [apiModal, setApiModal]     = useState(false);
+  const [saving, setSaving]           = useState(false);
+  const [apiModal, setApiModal]       = useState(false);
+  const [acctSelector, setAcctSelector] = useState(false);
+  const [acctDesc, setAcctDesc]       = useState('');
   const [form] = Form.useForm();
 
   // Load Business Units (gl/businessunits returns snake_case)
@@ -107,7 +110,7 @@ const TransactionCodes: React.FC = () => {
 
   // Populate form whenever modal opens (handles destroyOnHide / remount)
   useEffect(() => {
-    if (!modalOpen) return;
+    if (!modalOpen) { setAcctDesc(''); return; }
     if (editRecord) {
       form.setFieldsValue({
         businessUnitName:          editRecord.businessUnitName,
@@ -116,8 +119,10 @@ const TransactionCodes: React.FC = () => {
         defaultAccountCombination: editRecord.defaultAccountCombination ?? '',
         endTransaction:            editRecord.endTransaction,
       });
+      setAcctDesc(editRecord.defaultAccountCombination ? '' : '');
     } else {
       form.resetFields();
+      setAcctDesc('');
     }
   }, [modalOpen, editRecord, form]);
 
@@ -303,8 +308,23 @@ const TransactionCodes: React.FC = () => {
               <Input.TextArea rows={2} placeholder="Short description" maxLength={500} />
             </Form.Item>
             <Form.Item name="defaultAccountCombination" label="Default Account Combination">
-              <Input placeholder="e.g. 100-0000-1130100-000" maxLength={360} />
+              <Input
+                placeholder="e.g. 100-0000-1130100-000"
+                maxLength={360}
+                addonAfter={
+                  <Button
+                    type="link" size="small" icon={<TableOutlined />}
+                    style={{ padding: 0, height: 'auto', color: REDWOOD.info }}
+                    onClick={() => setAcctSelector(true)}
+                  />
+                }
+              />
             </Form.Item>
+            {acctDesc && (
+              <div style={{ marginTop: -10, marginBottom: 12, paddingLeft: 2 }}>
+                <Text style={{ fontSize: 11, color: REDWOOD.success }}>{acctDesc}</Text>
+              </div>
+            )}
             <Form.Item name="endTransaction" label="End Transaction">
               <Select allowClear placeholder="Select type">
                 {END_TXN_OPTIONS.map(opt => <Option key={opt} value={opt}>{opt}</Option>)}
@@ -312,6 +332,22 @@ const TransactionCodes: React.FC = () => {
             </Form.Item>
           </Form>
         </Modal>
+
+        {/* ── Account Selector ── */}
+        <AccountSelector
+          visible={acctSelector}
+          onCancel={() => setAcctSelector(false)}
+          initialValue={form.getFieldValue('defaultAccountCombination') || undefined}
+          onSelect={(accountCode, segments) => {
+            form.setFieldValue('defaultAccountCombination', accountCode);
+            const acctSeg = Object.entries(segments).find(([key, seg]) =>
+              key.toUpperCase().includes('ACCOUNT') ||
+              ((seg as any).name ?? '').toUpperCase().includes('ACCOUNT')
+            );
+            setAcctDesc(acctSeg ? `${acctSeg[1].value} — ${acctSeg[1].description}` : accountCode);
+            setAcctSelector(false);
+          }}
+        />
 
         {/* ── API Info Modal ── */}
         <Modal
