@@ -108,7 +108,7 @@ BEGIN
     l_name     := APEX_JSON.GET_VARCHAR2(p_path => 'template_name');
     l_desc     := APEX_JSON.GET_VARCHAR2(p_path => 'description');
     l_bu       := APEX_JSON.GET_VARCHAR2(p_path => 'business_unit_name');
-    l_mappings := APEX_JSON.GET_CLOB_OUTPUT(p_path => 'column_mappings');
+    l_mappings := TO_CLOB(APEX_JSON.GET_VARCHAR2(p_path => 'column_mappings'));
     l_hdr      := APEX_JSON.GET_VARCHAR2(p_path => 'header_row_text');
     l_fmt      := NVL(APEX_JSON.GET_VARCHAR2(p_path => 'date_format'), 'DD/MM/YYYY');
     l_created  := APEX_JSON.GET_VARCHAR2(p_path => 'created_by');
