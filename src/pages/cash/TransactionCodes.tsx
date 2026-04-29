@@ -88,12 +88,12 @@ const TransactionCodes: React.FC = () => {
       const data = await parseApexJson(res);
       setRecords(
         (data.items ?? []).map((r: any) => ({
-          tcId:                      r.tcId,
-          businessUnitName:          r.businessUnitName          ?? '',
-          transactionCode:           r.transactionCode           ?? '',
+          tcId:                      r.tcid,
+          businessUnitName:          r.businessunitname          ?? '',
+          transactionCode:           r.transactioncode           ?? '',
           description:               r.description,
-          defaultAccountCombination: r.defaultAccountCombination,
-          endTransaction:            r.endTransaction,
+          defaultAccountCombination: r.defaultaccountcombination,
+          endTransaction:            r.endtransaction,
         }))
       );
     } catch {
