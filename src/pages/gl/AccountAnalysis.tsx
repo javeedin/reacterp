@@ -658,12 +658,37 @@ const AccountAnalysis: React.FC = () => {
     if (jeSourceFilter)    params.append('je_source',    jeSourceFilter);
     if (jeCategoryFilter)  params.append('je_category',  jeCategoryFilter);
     const url = `${API_BASE_URL}/accountanalysis?${params.toString()}`;
+
+    // Opening balance API URL
+    let openingBalUrl = '';
+    if (accountFilter && selectedPeriods.length > 0) {
+      const sortedPeriods = [...selectedPeriods].sort(
+        (a, b) => parsePeriodToDate(a).getTime() - parsePeriodToDate(b).getTime()
+      );
+      const obParams = new URLSearchParams();
+      obParams.append('account', accountFilter);
+      obParams.append('period_name', sortedPeriods[0]);
+      if (selectedCompany) obParams.append('company', selectedCompany);
+      openingBalUrl = `${API_BASE_URL}/balances?${obParams.toString()}`;
+    }
+
     Modal.info({
-      title: 'Search API Endpoint',
-      width: 700,
+      title: 'API Endpoints',
+      width: 800,
       content: (
-        <div style={{ wordBreak: 'break-all', fontFamily: 'monospace', fontSize: 12, padding: '8px 0' }}>
-          {url}
+        <div style={{ fontFamily: 'monospace', fontSize: 12, padding: '8px 0' }}>
+          <div style={{ marginBottom: 8, fontWeight: 'bold', color: '#555' }}>Journal Lines:</div>
+          <div style={{ wordBreak: 'break-all', background: '#f5f5f5', padding: 8, borderRadius: 4, marginBottom: 16 }}>
+            {url}
+          </div>
+          {openingBalUrl && (
+            <>
+              <div style={{ marginBottom: 8, fontWeight: 'bold', color: '#555' }}>Opening Balance:</div>
+              <div style={{ wordBreak: 'break-all', background: '#fff8e1', padding: 8, borderRadius: 4 }}>
+                {openingBalUrl}
+              </div>
+            </>
+          )}
         </div>
       ),
     });
