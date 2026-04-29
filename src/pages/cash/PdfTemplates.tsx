@@ -7,6 +7,7 @@ import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, BankOutlined, PlusOutlined, EditOutlined, DeleteOutlined,
   UploadOutlined, FileTextOutlined, CheckOutlined, ArrowRightOutlined, ArrowLeftOutlined,
+  ApiOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -120,6 +121,7 @@ const PdfTemplates: React.FC = () => {
   const [templates, setTemplates] = useState<PdfTemplate[]>([]);
   const [buOptions, setBuOptions] = useState<{ label: string; value: string }[]>([]);
   const [loading, setLoading] = useState(false);
+  const [apiModal, setApiModal] = useState(false);
 
   // Designer modal state
   const [designerOpen, setDesignerOpen] = useState(false);
@@ -432,11 +434,17 @@ const PdfTemplates: React.FC = () => {
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
             <Title level={4} style={{ margin: 0, color: REDWOOD.neutral900 }}>PDF Statement Templates</Title>
-            <Button type="primary" icon={<PlusOutlined />}
-              style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
-              onClick={() => openDesigner()}>
-              New Template
-            </Button>
+            <Space>
+              <Button icon={<ApiOutlined />} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
+                onClick={() => setApiModal(true)}>
+                API
+              </Button>
+              <Button type="primary" icon={<PlusOutlined />}
+                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+                onClick={() => openDesigner()}>
+                New Template
+              </Button>
+            </Space>
           </div>
 
           <Alert type="info" showIcon style={{ marginBottom: 14 }}
@@ -612,6 +620,64 @@ const PdfTemplates: React.FC = () => {
               )}
             </div>
           )}
+        </Modal>
+
+        {/* ── API Reference Modal ── */}
+        <Modal
+          title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>API Reference — PDF Statement Templates</span></Space>}
+          open={apiModal} onCancel={() => setApiModal(false)} footer={null} width={720}
+          styles={{ body: { padding: '16px 24px' } }}
+        >
+          {[
+            { method: 'GET',    color: REDWOOD.success, url: `${APEX_BASE}/cash/pdf-templates`,      note: 'List all templates; optional ?business_unit= filter (also returns global templates)' },
+            { method: 'POST',   color: REDWOOD.info,    url: `${APEX_BASE}/cash/pdf-templates`,      note: 'Create (no template_id) or Update (with template_id)' },
+            { method: 'DELETE', color: REDWOOD.error,   url: `${APEX_BASE}/cash/pdf-templates/{id}`, note: 'Delete by TEMPLATE_ID' },
+          ].map(({ method, color, url, note }) => (
+            <div key={method} style={{ marginBottom: 14 }}>
+              <Space align="start">
+                <Tag style={{ background: color, color: '#fff', border: 'none', fontWeight: 600, minWidth: 60, textAlign: 'center' }}>
+                  {method}
+                </Tag>
+                <div>
+                  <Text code copyable style={{ fontSize: 11 }}>{url}</Text>
+                  <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 2 }}>{note}</Text>
+                </div>
+              </Space>
+            </div>
+          ))}
+
+          <Divider style={{ margin: '12px 0 10px' }} />
+          <Text strong style={{ fontSize: 12 }}>POST body fields</Text>
+          <pre style={{
+            background: '#1e1e2e', color: '#cdd6f4', padding: 14, borderRadius: 6,
+            fontSize: 11, marginTop: 8, overflowX: 'auto',
+          }}>{JSON.stringify({
+            template_id:        '(number — omit for create, include for update)',
+            template_name:      'string (required)',
+            description:        'string | null',
+            business_unit_name: 'string | null  (null = applies to all BUs)',
+            date_format:        'DD/MM/YYYY | MM/DD/YYYY | DD-MMM-YYYY | YYYY-MM-DD',
+            column_mappings:    '[{"text":"DATE","x":35,"xMin":0,"xMax":62,"field":"date"}, ...]',
+            header_row_text:    'space-joined column header texts (for auto-detection)',
+            created_by:         'APP_USER',
+            last_updated_by:    'APP_USER',
+          }, null, 2)}</pre>
+
+          <Divider style={{ margin: '12px 0 10px' }} />
+          <Text strong style={{ fontSize: 12 }}>column_mappings — field values</Text>
+          <pre style={{
+            background: '#1e1e2e', color: '#cdd6f4', padding: 14, borderRadius: 6,
+            fontSize: 11, marginTop: 8, overflowX: 'auto',
+          }}>{`date        — Transaction date column
+valueDate   — Value / posting date column
+narration   — Description / narration column
+reference   — Reference / cheque number column
+withdrawal  — Withdrawal / debit amount column
+deposit     — Deposit / credit amount column
+amount      — Combined amount column (use with "type" field)
+type        — DR/CR indicator column (used when "amount" is mapped)
+balance     — Running balance column
+skip        — Ignore this column`}</pre>
         </Modal>
       </Content>
     </Layout>
