@@ -155,17 +155,21 @@ async function parseBankStatementPdf(file: File): Promise<{ lines: StatementLine
   let pdfjsLib: any;
   try {
     pdfjsLib = await import('pdfjs-dist');
-    pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-      'pdfjs-dist/build/pdf.worker.min.mjs',
-      import.meta.url,
-    ).toString();
+    // Use CDN worker matching the installed version — avoids Vite/worker path issues
+    const ver: string = pdfjsLib.version;
+    const ext = ver.startsWith('3.') || ver.startsWith('2.') ? 'min.js' : 'min.mjs';
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      `https://unpkg.com/pdfjs-dist@${ver}/build/pdf.worker.${ext}`;
   } catch {
     errors.push('pdfjs-dist is not installed. Run: npm install pdfjs-dist');
     return { lines, errors };
   }
 
   const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const pdf = await pdfjsLib.getDocument({
+    data: arrayBuffer,
+    useSystemFonts: true,
+  }).promise;
 
   // Extract all text items with their x/y positions from all pages
   type TextItem = { str: string; x: number; y: number };
