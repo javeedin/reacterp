@@ -267,6 +267,7 @@ export async function checkGLJournalExists(
 export interface LedgerInfo {
   ledgerId: number;
   ledgerName: string;
+  legalEntity?: string;
 }
 
 /**

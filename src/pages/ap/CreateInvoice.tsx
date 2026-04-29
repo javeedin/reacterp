@@ -1256,9 +1256,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               ],
             };
             const r_ = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/create`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(slaPayload_) });
-            const d_ = await r_.json();
-            if (r_.ok && d_.headerId) {
-              setAppSlaMap(prev => ({ ...prev, [record.applicationId]: { headerId: d_.headerId, status: 'DRAFT' } }));
+            const slaResp_ = await r_.json();
+            if (r_.ok && slaResp_.headerId) {
+              setAppSlaMap(prev => ({ ...prev, [record.applicationId]: { headerId: slaResp_.headerId, status: 'DRAFT' } }));
               created++;
             }
           } catch { /* non-fatal */ }
@@ -6605,7 +6605,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                       <div style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.neutral700, marginBottom: 8 }}>Document</div>
                       <Row gutter={[24, 14]} style={{ marginBottom: 16 }}>
                         {field('Document Category', initialData?.documentCategory)}
-                        {field('Document Sequence', initialData?.documentSequence)}
+                        {field('Document Sequence', initialData?.documentSequence != null ? String(initialData.documentSequence) : null)}
                         {field('Voucher Number',    initialData?.voucherNumber)}
                         {field('Delivery Channel',  initialData?.deliveryChannel || initialData?.deliveryChannelCode)}
                       </Row>
@@ -7859,6 +7859,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 key: keyIdx++,
                 period: `Line ${line.lineNumber} — ${lineDesc} | ${line.startDate} → ${line.endDate} | ${totalDays} days | ${formatAmount(totalAmt)}`,
                 line: '', account: '', description: '', lineClass: '', debit: 0, credit: 0,
+                accountedDebit: 0, accountedCredit: 0,
                 isGroupHeader: true,
               });
 
@@ -7876,6 +7877,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 description: `Dr Accrual — Defer expense ${lineDesc}`,
                 lineClass: 'Prepaid / Accrual',
                 debit: totalAmt, credit: 0,
+                accountedDebit: totalAmt, accountedCredit: 0,
               });
               allEntries.push({
                 key: keyIdx++, period: invoicePeriod,
@@ -7884,6 +7886,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 description: `Cr Expense — Defer expense ${lineDesc}`,
                 lineClass: 'Item expense',
                 debit: 0, credit: totalAmt,
+                accountedDebit: 0, accountedCredit: totalAmt,
               });
 
               // ── Entry 2: Monthly recognition — DR Expense / CR Accrual ──
@@ -7896,6 +7899,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   description: `Dr Expense — ${lineDesc} (${days}d)`,
                   lineClass: 'Item expense',
                   debit: amount, credit: 0,
+                  accountedDebit: amount, accountedCredit: 0,
                 });
                 allEntries.push({
                   key: keyIdx++, period,
@@ -7904,6 +7908,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   description: `Cr Accrual — ${lineDesc} (${days}d)`,
                   lineClass: 'Prepaid / Accrual',
                   debit: 0, credit: amount,
+                  accountedDebit: 0, accountedCredit: amount,
                 });
                 lineTotalDebit  += amount;
                 lineTotalCredit += amount;
@@ -7914,6 +7919,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 key: keyIdx++, period: `Line ${line.lineNumber}`,
                 line: '', account: '', description: '', lineClass: '',
                 debit: 0, credit: 0,
+                accountedDebit: 0, accountedCredit: 0,
                 isPeriodSubtotal: true,
                 subtotalDebit: lineTotalDebit, subtotalCredit: lineTotalCredit,
               });
