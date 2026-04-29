@@ -438,8 +438,10 @@ const StatementForm: React.FC<{
   const [pdfApiOpen, setPdfApiOpen]     = useState(false);
   const [pdfApiPayload, setPdfApiPayload] = useState('');
   const [pdfApiResponse, setPdfApiResponse] = useState<{ status: number; body: string } | null>(null);
-  const [pdfApiPosting, setPdfApiPosting] = useState(false);
-  const [pdfImporting, setPdfImporting]   = useState(false);
+  const [pdfApiPosting, setPdfApiPosting]   = useState(false);
+  const [pdfImporting, setPdfImporting]     = useState(false);
+  const [pdfBatchLog, setPdfBatchLog]       = useState<{ batch: number; total: number; saved: number; raw: string; ok: boolean }[]>([]);
+  const [pdfBatchProgress, setPdfBatchProgress] = useState(0);
   const [selectedBu, setSelectedBu] = useState<string | undefined>(initialHeader?.businessUnitName);
   const [txnCodes, setTxnCodes]         = useState<TxnCodeOption[]>([]);
   const [balanceTick, setBalanceTick]   = useState(0);
@@ -703,44 +705,67 @@ const StatementForm: React.FC<{
     const toAdd = getPdfSelected();
     if (toAdd.length === 0) { message.warning('No lines selected.'); return; }
 
-    const payload = buildPdfLinesPayload(toAdd);
+    const BATCH = 5;
+    const batches: StatementLine[][] = [];
+    for (let i = 0; i < toAdd.length; i += BATCH) batches.push(toAdd.slice(i, i + BATCH));
+
     setPdfImporting(true);
-    try {
-      const res  = await fetch(`${APEX_BASE}/cash/bankstatements`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await parseApexJson(res);
-      if (data.status === 'success') {
-        const saved = data.linesProcessed ?? toAdd.length;
-        message.success(
-          `${saved} line${saved !== 1 ? 's' : ''} saved to DB (statementId: ${data.statementId ?? initialHeader?.statementId}).`,
-          5,
-        );
-        // Reload lines from DB so the table reflects what was actually saved
-        if (initialHeader?.statementId) {
-          const r2   = await fetch(`${APEX_BASE}/cash/bankstatements/${initialHeader.statementId}`);
-          const d2   = await parseApexJson(r2);
-          const fresh: StatementLine[] = (d2.lines ?? []).map((l: any) => ({ ...l, _key: newKey() }));
-          setLines(fresh);
-        } else {
-          setLines(prev => [...prev, ...toAdd]);
-        }
-        setPdfModal(false);
-        setPdfPreview([]);
-        setPdfErrors([]);
-        setPdfFileName('');
-        setPdfSelKeys([]);
-        setPdfApiOpen(false);
-        setPdfApiResponse(null);
-      } else {
-        message.error(`Save failed: ${data.message || JSON.stringify(data)}`, 8);
+    setPdfBatchLog([]);
+    setPdfBatchProgress(0);
+
+    let totalSaved = 0;
+    let anyError   = false;
+
+    for (let bi = 0; bi < batches.length; bi++) {
+      const batch   = batches[bi];
+      const payload = buildPdfLinesPayload(batch);
+      let raw = '';
+      let ok  = false;
+      let saved = 0;
+      try {
+        const res  = await fetch(`${APEX_BASE}/cash/bankstatements`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        raw = await res.text();
+        let data: any = {};
+        try { data = JSON.parse(raw); } catch { /* raw shown as-is */ }
+        ok    = data.status === 'success';
+        saved = ok ? (data.linesProcessed ?? batch.length) : 0;
+        if (!ok) anyError = true;
+      } catch (e: any) {
+        raw = `Network error: ${e.message}`;
+        anyError = true;
       }
-    } catch (e: any) {
-      message.error(`Network error: ${e.message}`, 8);
-    } finally {
-      setPdfImporting(false);
+      totalSaved += saved;
+      setPdfBatchLog(prev => [...prev, {
+        batch: bi + 1, total: batches.length, saved, raw, ok,
+      }]);
+      setPdfBatchProgress(Math.round(((bi + 1) / batches.length) * 100));
     }
+
+    setPdfImporting(false);
+
+    if (!anyError) {
+      // Reload lines from DB
+      if (initialHeader?.statementId) {
+        const r2  = await fetch(`${APEX_BASE}/cash/bankstatements/${initialHeader.statementId}`);
+        const d2  = await parseApexJson(r2);
+        const fresh: StatementLine[] = (d2.lines ?? []).map((l: any) => ({ ...l, _key: newKey() }));
+        setLines(fresh);
+      }
+      setPdfModal(false);
+      setPdfPreview([]);
+      setPdfErrors([]);
+      setPdfFileName('');
+      setPdfSelKeys([]);
+      setPdfApiOpen(false);
+      setPdfApiResponse(null);
+      setPdfBatchLog([]);
+      setPdfBatchProgress(0);
+      message.success(`${totalSaved} line${totalSaved !== 1 ? 's' : ''} saved to DB.`, 5);
+    }
+    // If errors → leave modal open so user can see the batch log
   };
 
   const handleSave = async () => {
@@ -1253,10 +1278,10 @@ const StatementForm: React.FC<{
       <Modal
         title={<Space><UploadOutlined style={{ color: '#d46b08' }} /><span>Import Lines from PDF</span></Space>}
         open={pdfModal}
-        onCancel={() => { setPdfModal(false); setPdfPreview([]); setPdfErrors([]); setPdfFileName(''); setPdfSelKeys([]); setPdfApiOpen(false); setPdfApiResponse(null); }}
+        onCancel={() => { setPdfModal(false); setPdfPreview([]); setPdfErrors([]); setPdfFileName(''); setPdfSelKeys([]); setPdfApiOpen(false); setPdfApiResponse(null); setPdfBatchLog([]); setPdfBatchProgress(0); }}
         width={980}
         footer={[
-          <Button key="cancel" onClick={() => { setPdfModal(false); setPdfPreview([]); setPdfErrors([]); setPdfFileName(''); setPdfSelKeys([]); setPdfApiOpen(false); setPdfApiResponse(null); }}>
+          <Button key="cancel" onClick={() => { setPdfModal(false); setPdfPreview([]); setPdfErrors([]); setPdfFileName(''); setPdfSelKeys([]); setPdfApiOpen(false); setPdfApiResponse(null); setPdfBatchLog([]); setPdfBatchProgress(0); }}>
             Cancel
           </Button>,
           pdfPreview.length > 0 && (
@@ -1392,6 +1417,48 @@ const StatementForm: React.FC<{
                 rows={5} style={{ marginTop: 8, fontFamily: 'monospace', fontSize: 11 }}
               />
             )}
+          </div>
+        )}
+
+        {/* Batch import progress */}
+        {(pdfImporting || pdfBatchLog.length > 0) && (
+          <div style={{ marginTop: 12, border: '1px solid #d9d9d9', borderRadius: 6, padding: 12, background: '#fafafa' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <Text strong style={{ fontSize: 12 }}>Batch POST Progress</Text>
+              {!pdfImporting && pdfBatchLog.length > 0 && (
+                <Button size="small" type="text" style={{ marginLeft: 'auto', fontSize: 11 }}
+                  onClick={() => { setPdfBatchLog([]); setPdfBatchProgress(0); }}>Clear</Button>
+              )}
+            </div>
+            {pdfImporting && (
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <Text style={{ fontSize: 11 }}>
+                    Posting batch {pdfBatchLog.length + 1} of {Math.ceil((pdfSelKeys.length > 0 ? pdfSelKeys.length : pdfPreview.length) / 5)}…
+                  </Text>
+                  <Text style={{ fontSize: 11 }}>{pdfBatchProgress}%</Text>
+                </div>
+                <div style={{ height: 6, background: '#e6e6e6', borderRadius: 3 }}>
+                  <div style={{ height: 6, background: REDWOOD.info, borderRadius: 3, width: `${pdfBatchProgress}%`, transition: 'width 0.3s' }} />
+                </div>
+              </div>
+            )}
+            {pdfBatchLog.map(entry => (
+              <div key={entry.batch} style={{ marginBottom: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                  <Tag color={entry.ok ? 'green' : 'red'} style={{ fontSize: 10, margin: 0 }}>
+                    Batch {entry.batch}/{entry.total}
+                  </Tag>
+                  <Text style={{ fontSize: 11 }}>
+                    {entry.ok ? `✓ ${entry.saved} line${entry.saved !== 1 ? 's' : ''} saved` : '✗ Failed'}
+                  </Text>
+                </div>
+                <Input.TextArea
+                  readOnly value={entry.raw}
+                  rows={2} style={{ fontFamily: 'monospace', fontSize: 10 }}
+                />
+              </div>
+            ))}
           </div>
         )}
       </Modal>
