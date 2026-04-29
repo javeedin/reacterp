@@ -442,6 +442,8 @@ const StatementForm: React.FC<{
   const [pdfImporting, setPdfImporting]     = useState(false);
   const [pdfBatchLog, setPdfBatchLog]       = useState<{ batch: number; total: number; saved: number; raw: string; ok: boolean }[]>([]);
   const [pdfBatchProgress, setPdfBatchProgress] = useState(0);
+  const [pdfGetRunning, setPdfGetRunning]   = useState(false);
+  const [pdfGetResponse, setPdfGetResponse] = useState<string | null>(null);
   const [selectedBu, setSelectedBu] = useState<string | undefined>(initialHeader?.businessUnitName);
   const [txnCodes, setTxnCodes]         = useState<TxnCodeOption[]>([]);
   const [balanceTick, setBalanceTick]   = useState(0);
@@ -1357,10 +1359,10 @@ const StatementForm: React.FC<{
       <Modal
         title={<Space><UploadOutlined style={{ color: '#d46b08' }} /><span>Import Lines from PDF</span></Space>}
         open={pdfModal}
-        onCancel={() => { setPdfModal(false); setPdfPreview([]); setPdfErrors([]); setPdfFileName(''); setPdfSelKeys([]); setPdfApiOpen(false); setPdfApiResponse(null); setPdfBatchLog([]); setPdfBatchProgress(0); }}
+        onCancel={() => { setPdfModal(false); setPdfPreview([]); setPdfErrors([]); setPdfFileName(''); setPdfSelKeys([]); setPdfApiOpen(false); setPdfApiResponse(null); setPdfBatchLog([]); setPdfBatchProgress(0); setPdfGetResponse(null); }}
         width={980}
         footer={[
-          <Button key="cancel" onClick={() => { setPdfModal(false); setPdfPreview([]); setPdfErrors([]); setPdfFileName(''); setPdfSelKeys([]); setPdfApiOpen(false); setPdfApiResponse(null); setPdfBatchLog([]); setPdfBatchProgress(0); }}>
+          <Button key="cancel" onClick={() => { setPdfModal(false); setPdfPreview([]); setPdfErrors([]); setPdfFileName(''); setPdfSelKeys([]); setPdfApiOpen(false); setPdfApiResponse(null); setPdfBatchLog([]); setPdfBatchProgress(0); setPdfGetResponse(null); }}>
             Cancel
           </Button>,
           pdfPreview.length > 0 && (
@@ -1506,7 +1508,7 @@ const StatementForm: React.FC<{
               <Text strong style={{ fontSize: 12 }}>Batch POST Progress</Text>
               {!pdfImporting && pdfBatchLog.length > 0 && (
                 <Button size="small" type="text" style={{ marginLeft: 'auto', fontSize: 11 }}
-                  onClick={() => { setPdfBatchLog([]); setPdfBatchProgress(0); }}>Clear</Button>
+                  onClick={() => { setPdfBatchLog([]); setPdfBatchProgress(0); setPdfGetResponse(null); }}>Clear</Button>
               )}
             </div>
             {pdfImporting && (
@@ -1538,6 +1540,43 @@ const StatementForm: React.FC<{
                 />
               </div>
             ))}
+
+            {/* GET lines check */}
+            {!pdfImporting && pdfBatchLog.length > 0 && initialHeader?.statementId && (
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #e8e8e8' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <ApiOutlined style={{ color: '#389e0d' }} />
+                  <Text strong style={{ fontSize: 11, color: '#389e0d' }}>
+                    GET {APEX_BASE}/cash/bankstatements/{initialHeader.statementId}
+                  </Text>
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+                  <Button size="small" loading={pdfGetRunning}
+                    icon={<ApiOutlined />}
+                    style={{ borderColor: '#389e0d', color: '#389e0d' }}
+                    onClick={async () => {
+                      setPdfGetRunning(true);
+                      setPdfGetResponse(null);
+                      try {
+                        const res  = await fetch(`${APEX_BASE}/cash/bankstatements/${initialHeader!.statementId}`);
+                        const text = await res.text();
+                        setPdfGetResponse(text);
+                      } catch (e: any) {
+                        setPdfGetResponse('Network error: ' + e.message);
+                      } finally { setPdfGetRunning(false); }
+                    }}>
+                    Run GET — check saved lines
+                  </Button>
+                  <Text type="secondary" style={{ fontSize: 10 }}>Returns header + all lines for this statement</Text>
+                </div>
+                {pdfGetResponse !== null && (
+                  <Input.TextArea
+                    readOnly value={pdfGetResponse}
+                    rows={8} style={{ fontFamily: 'monospace', fontSize: 10 }}
+                  />
+                )}
+              </div>
+            )}
           </div>
         )}
       </Modal>
