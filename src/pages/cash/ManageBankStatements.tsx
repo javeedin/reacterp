@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef, Component } from 'react';
 import dayjs, { type Dayjs } from 'dayjs';
+import * as pdfjsLib from 'pdfjs-dist';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input, Select,
   DatePicker, InputNumber, Row, Col, Space, Tag, Tooltip, Tabs, Collapse,
@@ -25,6 +26,12 @@ const REDWOOD = {
 };
 
 const APEX_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp';
+
+// Configure pdf.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url,
+).toString();
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface StatementHeader {
@@ -143,6 +150,124 @@ function csvRowToLine(row: Record<string, string>): StatementLine {
   };
 }
 
+// ── PDF Parser ────────────────────────────────────────────────────────────────
+// Extracts text from all pages, then finds transaction rows by detecting
+// the date pattern dd/mm/yyyy at the start of a line.
+async function parseBankStatementPdf(file: File): Promise<{ lines: StatementLine[]; errors: string[] }> {
+  const errors: string[] = [];
+  const lines: StatementLine[] = [];
+
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+  // Extract all text items with their x/y positions from all pages
+  type TextItem = { str: string; x: number; y: number };
+  const allItems: TextItem[] = [];
+
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    for (const item of content.items) {
+      if ('str' in item && item.str.trim()) {
+        const tx = item.transform;
+        allItems.push({ str: item.str.trim(), x: tx[4], y: tx[5] });
+      }
+    }
+  }
+
+  // Group items into rows by similar Y coordinate (within 3px)
+  const rowMap = new Map<number, TextItem[]>();
+  for (const item of allItems) {
+    const key = Math.round(item.y / 3) * 3;
+    if (!rowMap.has(key)) rowMap.set(key, []);
+    rowMap.get(key)!.push(item);
+  }
+
+  // Sort rows top-to-bottom (highest Y first in PDF coords)
+  const sortedRows = [...rowMap.entries()]
+    .sort((a, b) => b[0] - a[0])
+    .map(([, items]) => items.sort((a, b) => a.x - b.x).map(i => i.str));
+
+  // Date pattern: dd/mm/yyyy
+  const dateRe = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
+  const amountRe = /^[\d,]+(\.\d{1,2})?$/;
+
+  for (const row of sortedRows) {
+    const first = row[0] ?? '';
+    const dm = first.match(dateRe);
+    if (!dm) continue; // not a transaction row
+
+    // Parse date
+    const txDate = dayjs(`${dm[3]}-${dm[2].padStart(2, '0')}-${dm[1].padStart(2, '0')}`);
+    if (!txDate.isValid()) continue;
+
+    // Collect remaining tokens
+    const rest = row.slice(1);
+
+    // Identify amount tokens (digits/commas/dots) — last is balance, before that CR or DR
+    const amountIdxs = rest
+      .map((v, i) => ({ v, i }))
+      .filter(({ v }) => amountRe.test(v.replace(/,/g, '')));
+
+    if (amountIdxs.length < 2) {
+      errors.push(`Row ${txDate.format('DD/MM/YYYY')}: could not identify amounts`);
+      continue;
+    }
+
+    // Last amount = balance, second-last = transaction amount
+    // Determine DR vs CR: if there's a "Dr"/"CR" token or column position
+    // We look at which second-to-last amount column it falls into
+    const txAmtIdx = amountIdxs[amountIdxs.length - 2].i;
+    const txAmt    = parseFloat(amountIdxs[amountIdxs.length - 2].v.replace(/,/g, ''));
+
+    // Determine if withdrawal (DR) or deposit (CR) based on column position among amounts
+    // Typical layout: narration ... [CHQ] [DR_amt | —] [CR_amt | —] [balance]
+    // If there are 3 amount groups: [DR, CR, BAL]; if 2: one of DR/CR is missing
+    let txCode = 'CR';
+    if (amountIdxs.length >= 3) {
+      // Second-to-last of all amounts
+      const drIdx = amountIdxs[amountIdxs.length - 3].i;
+      // If txAmtIdx is same as drIdx → it's a withdrawal (DR)
+      txCode = (txAmtIdx === drIdx) ? 'DR' : 'CR';
+    } else {
+      // Only 2 amounts (txAmt + balance) — look for "Dr" suffix or check narration
+      const rowText = rest.join(' ').toUpperCase();
+      if (rowText.includes('WITHDRAWAL') || rowText.includes('DEBIT') || rowText.endsWith('DR')) {
+        txCode = 'DR';
+      }
+    }
+
+    // Description = everything between date and first amount token
+    const descTokens = rest.slice(0, amountIdxs.length >= 3
+      ? amountIdxs[amountIdxs.length - 3].i
+      : amountIdxs[0].i);
+    const description = descTokens.join(' ');
+
+    // Reference — look for CHQ.NO. style tokens (numeric, short)
+    const ref = rest.find(t => /^\d{1,8}$/.test(t) && t !== dm[1]) ?? '';
+
+    lines.push({
+      _key:            newKey(),
+      transactionDate: txDate.format('YYYY-MM-DD'),
+      valueDate:       '',
+      amount:          isNaN(txAmt) ? null : txAmt,
+      transactionCode: txCode,
+      description:     description || first,
+      reference:       ref,
+      bankTxnReference: '',
+      counterpartyName: '',
+      counterpartyAccount: '',
+      reconStatus:     'UNRECONCILED',
+    });
+  }
+
+  if (lines.length === 0 && errors.length === 0) {
+    errors.push('No transaction rows found. The PDF layout may not match the expected format.');
+  }
+
+  return { lines, errors };
+}
+
 // ── StatementForm ─────────────────────────────────────────────────────────────
 const StatementForm: React.FC<{
   initialHeader?:  Partial<StatementHeader>;
@@ -160,12 +285,19 @@ const StatementForm: React.FC<{
   const [csvText, setCsvText]   = useState('');
   const [csvPreview, setCsvPreview] = useState<StatementLine[]>([]);
   const [csvErrors, setCsvErrors]   = useState<string[]>([]);
+  // PDF import state
+  const [pdfModal, setPdfModal]         = useState(false);
+  const [pdfParsing, setPdfParsing]     = useState(false);
+  const [pdfPreview, setPdfPreview]     = useState<StatementLine[]>([]);
+  const [pdfErrors, setPdfErrors]       = useState<string[]>([]);
+  const [pdfFileName, setPdfFileName]   = useState('');
   const [selectedBu, setSelectedBu] = useState<string | undefined>(initialHeader?.businessUnitName);
   const [apiModal, setApiModal]       = useState(false);
   const [apiPayload, setApiPayload]   = useState('');
   const [apiPosting, setApiPosting]   = useState(false);
   const [apiResponse, setApiResponse] = useState<{ status: number; body: string } | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const fileRef    = useRef<HTMLInputElement>(null);
+  const pdfFileRef = useRef<HTMLInputElement>(null);
   const isEdit  = !!initialHeader?.statementId;
 
   const buildPayload = (hdrValues: any) => ({
@@ -305,6 +437,35 @@ const StatementForm: React.FC<{
     setCsvText('');
     setCsvErrors([]);
     message.success(`${csvPreview.length} lines imported from CSV.`);
+  };
+
+  const handlePdfFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPdfFileName(file.name);
+    setPdfPreview([]);
+    setPdfErrors([]);
+    setPdfParsing(true);
+    setPdfModal(true);
+    try {
+      const { lines: parsed, errors } = await parseBankStatementPdf(file);
+      setPdfPreview(parsed);
+      setPdfErrors(errors);
+    } catch (err: any) {
+      setPdfErrors([`Failed to read PDF: ${err.message}`]);
+    } finally {
+      setPdfParsing(false);
+      if (pdfFileRef.current) pdfFileRef.current.value = '';
+    }
+  };
+
+  const confirmPdfImport = () => {
+    setLines(prev => [...prev, ...pdfPreview]);
+    setPdfModal(false);
+    setPdfPreview([]);
+    setPdfErrors([]);
+    setPdfFileName('');
+    message.success(`${pdfPreview.length} lines imported from PDF.`);
   };
 
   const handleSave = async () => {
@@ -513,6 +674,13 @@ const StatementForm: React.FC<{
           <Button size="small" icon={<UploadOutlined />} onClick={() => setCsvModal(true)}>
             Import CSV
           </Button>
+          <Button size="small" icon={<UploadOutlined />}
+            style={{ borderColor: '#d46b08', color: '#d46b08' }}
+            onClick={() => pdfFileRef.current?.click()}>
+            Import PDF
+          </Button>
+          <input ref={pdfFileRef} type="file" accept=".pdf" style={{ display: 'none' }}
+            onChange={handlePdfFile} />
           <Button size="small" icon={<PlusOutlined />} type="primary"
             style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
             onClick={addLine}>
@@ -676,6 +844,90 @@ const StatementForm: React.FC<{
             />
           )}
         </Space>
+      </Modal>
+
+      {/* PDF Import Modal */}
+      <Modal
+        title={<Space><UploadOutlined style={{ color: '#d46b08' }} /><span>Import Lines from PDF</span></Space>}
+        open={pdfModal}
+        onCancel={() => { setPdfModal(false); setPdfPreview([]); setPdfErrors([]); setPdfFileName(''); }}
+        width={900}
+        footer={[
+          <Button key="cancel" onClick={() => { setPdfModal(false); setPdfPreview([]); setPdfErrors([]); setPdfFileName(''); }}>
+            Cancel
+          </Button>,
+          <Button key="import" type="primary"
+            disabled={pdfPreview.length === 0}
+            style={{ background: '#d46b08', borderColor: '#d46b08' }}
+            onClick={confirmPdfImport}>
+            Add {pdfPreview.length} Lines to Statement
+          </Button>,
+        ]}
+      >
+        {pdfFileName && (
+          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+            File: <strong>{pdfFileName}</strong>
+          </Text>
+        )}
+        {pdfParsing && (
+          <div style={{ textAlign: 'center', padding: 32 }}>
+            <Text type="secondary">Reading PDF...</Text>
+          </div>
+        )}
+        {!pdfParsing && pdfErrors.length > 0 && (
+          <Alert type="warning" showIcon style={{ marginBottom: 8 }}
+            message={`${pdfErrors.length} warning(s)`}
+            description={pdfErrors.slice(0, 5).join(' | ')} />
+        )}
+        {!pdfParsing && pdfPreview.length === 0 && pdfErrors.length > 0 && (
+          <Empty description="No transactions could be parsed from this PDF." />
+        )}
+        {!pdfParsing && pdfPreview.length > 0 && (
+          <>
+            <Alert type="success" showIcon style={{ marginBottom: 8 }}
+              message={`${pdfPreview.length} transactions found — review below then click Add to import`} />
+            <Table
+              dataSource={pdfPreview} rowKey="_key" size="small" pagination={false}
+              scroll={{ y: 400, x: 800 }}
+              columns={[
+                { title: 'Date', dataIndex: 'transactionDate', width: 110,
+                  render: (v: string) => <Text style={{ fontSize: 11 }}>{v ? dayjs(v).format('D-MMM-YYYY') : '—'}</Text> },
+                { title: 'Description', dataIndex: 'description', ellipsis: true,
+                  render: (v: string) => <Tooltip title={v}><Text style={{ fontSize: 11 }}>{v || '—'}</Text></Tooltip> },
+                { title: 'Ref', dataIndex: 'reference', width: 80,
+                  render: (v: string) => <Text style={{ fontSize: 11 }}>{v || '—'}</Text> },
+                { title: 'Type', dataIndex: 'transactionCode', width: 60,
+                  render: (v: string) => <Tag color={v === 'CR' ? 'green' : 'red'} style={{ fontSize: 10 }}>{v}</Tag> },
+                { title: 'Amount', dataIndex: 'amount', width: 120, align: 'right',
+                  render: (v: number, r: StatementLine) => (
+                    <Text style={{ fontSize: 11, color: r.transactionCode === 'CR' ? '#1D7B4D' : '#C74634' }}>
+                      {v != null ? v.toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—'}
+                    </Text>
+                  )},
+              ]}
+              summary={() => {
+                const cr = pdfPreview.filter(r => r.transactionCode === 'CR').reduce((s, r) => s + (r.amount ?? 0), 0);
+                const dr = pdfPreview.filter(r => r.transactionCode === 'DR').reduce((s, r) => s + (r.amount ?? 0), 0);
+                return (
+                  <Table.Summary fixed>
+                    <Table.Summary.Row style={{ background: '#fafafa' }}>
+                      <Table.Summary.Cell index={0} colSpan={2}>
+                        <Text strong style={{ fontSize: 11 }}>Total</Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={2} colSpan={2} />
+                      <Table.Summary.Cell index={4} align="right">
+                        <Text strong style={{ fontSize: 11 }}>
+                          CR: {cr.toLocaleString('en-AE', { minimumFractionDigits: 2 })} |{' '}
+                          DR: {dr.toLocaleString('en-AE', { minimumFractionDigits: 2 })}
+                        </Text>
+                      </Table.Summary.Cell>
+                    </Table.Summary.Row>
+                  </Table.Summary>
+                );
+              }}
+            />
+          </>
+        )}
       </Modal>
     </div>
   );
