@@ -616,7 +616,19 @@ const AccountAnalysis: React.FC = () => {
         }];
       });
 
-      setSearchData(items);
+      // If searching a single account, prepend opening balance as the first row
+      const finalItems: JournalLineSegment[] = [...items];
+      if (accountFilter && selectedPeriods.length > 0) {
+        const sortedPeriods = [...selectedPeriods].sort(
+          (a, b) => parsePeriodToDate(a).getTime() - parsePeriodToDate(b).getTime()
+        );
+        const openingRow = await fetchOpeningBalance(accountFilter, selectedCompany, sortedPeriods[0]);
+        if (openingRow) {
+          finalItems.unshift(openingRow);
+        }
+      }
+
+      setSearchData(finalItems);
       setTotalCount(data.totalCount || items.length);
       message.success(`Found ${items.length} records`);
     } catch (error) {
@@ -1251,14 +1263,19 @@ const AccountAnalysis: React.FC = () => {
       key: 'concatenatedSegments',
       width: 240,
       fixed: 'left',
-      render: (text: string, record: JournalLineSegment) => (
-        <a
-          onClick={() => openAccountTab(record)}
-          style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 11 }}
-        >
-          {text || `${record.company}-${record.lob}-${record.department}-${record.account}-${record.subAccount}-${record.analysis}-${record.intercompany}`}
-        </a>
-      ),
+      render: (text: string, record: JournalLineSegment) =>
+        record.isOpeningBalance ? (
+          <Text strong style={{ fontSize: 11, color: REDWOOD.warning }}>
+            {record.jeLineDescription}
+          </Text>
+        ) : (
+          <a
+            onClick={() => openAccountTab(record)}
+            style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 11 }}
+          >
+            {text || `${record.company}-${record.lob}-${record.department}-${record.account}-${record.subAccount}-${record.analysis}-${record.intercompany}`}
+          </a>
+        ),
     },
     {
       title: 'Description',
@@ -1278,9 +1295,11 @@ const AccountAnalysis: React.FC = () => {
       key: 'jeLineDescription',
       width: 200,
       ellipsis: true,
-      render: (text: string) => (
+      render: (text: string, record: JournalLineSegment) => (
         <Tooltip title={text}>
-          <span style={{ fontSize: 11 }}>{text || '-'}</span>
+          <span style={{ fontSize: 11, fontWeight: record.isOpeningBalance ? 600 : undefined }}>
+            {text || '-'}
+          </span>
         </Tooltip>
       ),
     },
@@ -1985,6 +2004,9 @@ const AccountAnalysis: React.FC = () => {
               scroll={{ x: 1400 }}
               size="small"
               className="compact-table"
+              rowClassName={(record: JournalLineSegment) =>
+                record.isOpeningBalance ? 'opening-balance-row' : ''
+              }
               locale={{ emptyText: <Empty description="Click Search to load data" /> }}
               summary={() =>
                 searchData.length > 0 ? (
