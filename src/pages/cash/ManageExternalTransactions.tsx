@@ -347,40 +347,6 @@ const ExternalTxnForm: React.FC<{
   return (
     <div style={{ maxWidth: 980, margin: '0 auto', padding: '0 0 80px' }}>
 
-      {/* ── Page header ── */}
-      <div style={{
-        background: isEdit
-          ? `linear-gradient(135deg, ${REDWOOD.neutral900} 0%, #2d2d3a 100%)`
-          : `linear-gradient(135deg, ${REDWOOD.primary} 0%, #a33b2c 100%)`,
-        borderRadius: '0 0 12px 12px',
-        padding: '20px 28px 18px',
-        marginBottom: 20,
-        color: '#fff',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-      }}>
-        <div>
-          <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 4, letterSpacing: '-0.3px' }}>
-            {isEdit ? `Transaction #${initialValues?.transactionId ?? '—'}` : 'Create External Transaction'}
-          </div>
-          <div style={{ fontSize: 12, opacity: 0.8, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-            <span>Origin: Manual</span>
-            {isEdit && initialValues?.businessUnitName && <span>BU: {initialValues.businessUnitName}</span>}
-            {isEdit && initialValues?.bankAccountName && <span>Bank: {initialValues.bankAccountName}</span>}
-          </div>
-        </div>
-        {isEdit && (
-          <Tag color="gold" style={{ margin: 0, fontSize: 11, fontWeight: 600, padding: '2px 10px' }}>
-            Read-only
-          </Tag>
-        )}
-        {!isEdit && (
-          <Tag color="blue" style={{ margin: 0, fontSize: 11, fontWeight: 600, padding: '2px 10px', background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff' }}>
-            New
-          </Tag>
-        )}
-      </div>
 
       <Form form={form} layout="vertical" size="middle">
 
