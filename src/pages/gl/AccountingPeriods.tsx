@@ -43,7 +43,7 @@ import {
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs from 'dayjs';
-import { PROXY_CONFIG } from '../../config/api.config';
+import { PROXY_CONFIG, APEX_DB_CONFIG } from '../../config/api.config';
 import Autopilot from '../../components/Autopilot';
 
 const { Content } = Layout;
@@ -235,7 +235,7 @@ const AccountingPeriods: React.FC = () => {
   // Fetch applications from APEX REST
   const fetchApplications = useCallback(async () => {
     try {
-      const url = `${PROXY_CONFIG.baseUrl}/apex/applications/getall`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/applications/getall`;
       console.log('=== FETCHING APPLICATIONS ===');
       console.log('URL:', url);
 
@@ -265,7 +265,7 @@ const AccountingPeriods: React.FC = () => {
   // Fetch ledgers from APEX REST
   const fetchLedgers = useCallback(async () => {
     try {
-      const url = `${PROXY_CONFIG.baseUrl}/apex/ledgers`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/ledgers`;
       console.log('=== FETCHING LEDGERS ===');
       console.log('URL:', url);
 
@@ -304,7 +304,7 @@ const AccountingPeriods: React.FC = () => {
     setCurrentPeriodStatuses([]);
 
     try {
-      const url = `${PROXY_CONFIG.baseUrl}/apex/currentperiodstatus`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/currentperiodstatus`;
       console.log('=== FETCHING CURRENT PERIOD STATUSES ===');
       console.log('URL:', url);
 
@@ -342,7 +342,7 @@ const AccountingPeriods: React.FC = () => {
         P_APPLICATION_NAME: item.application_name,
         P_LEDGER_NAME: item.ledger_name,
       });
-      const url = `${PROXY_CONFIG.baseUrl}/apex/periodsstatus/create?${params.toString()}`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/periodsstatus/create?${params.toString()}`;
       console.log('=== FETCHING PERIOD STATUS DETAILS ===');
       console.log('URL:', url);
 
@@ -637,7 +637,7 @@ const AccountingPeriods: React.FC = () => {
       const key = `${period.period_name_id}-${action}`;
       setPeriodActionLoading(key);
       try {
-        const res = await fetch(`${PROXY_CONFIG.baseUrl}/apex/gl/periodstatus`, {
+        const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/periodstatus`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
