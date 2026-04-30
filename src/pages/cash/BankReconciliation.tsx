@@ -426,9 +426,12 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const [selectedSysKeys, setSelectedSysKeys]   = useState<React.Key[]>([]);
   const [lastParams, setLastParams]           = useState<SearchParams | null>(null);
   const [msgApi, contextHolder]               = message.useMessage();
+  const [lastStatementsUrl, setLastStatementsUrl] = useState<string | null>(null);
   const [lastStmtLinesUrl, setLastStmtLinesUrl] = useState<string | null>(null);
-  const [stmtApiModalVisible, setStmtApiModalVisible] = useState(false);
-  const [stmtApiExecResult, setStmtApiExecResult] = useState<{ loading: boolean; response: string | null }>({ loading: false, response: null });
+  const [apiModalUrl, setApiModalUrl] = useState<string | null>(null);
+  const [apiModalTitle, setApiModalTitle] = useState('');
+  const [apiModalVisible, setApiModalVisible] = useState(false);
+  const [apiExecResult, setApiExecResult] = useState<{ loading: boolean; response: string | null }>({ loading: false, response: null });
 
   const fetchStatements = useCallback(async (params: SearchParams) => {
     const q = new URLSearchParams();
@@ -437,9 +440,11 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     if (params.dateTo)      q.set('date_to',      params.dateTo.format('YYYY-MM-DD'));
     q.set('row_limit', '200');
 
+    const statementsUrl = `${APEX_BASE}/cash/bankstatements?${q.toString()}`;
+    setLastStatementsUrl(statementsUrl);
     setLoadingStmts(true);
     try {
-      const res  = await fetch(`${APEX_BASE}/cash/bankstatements?${q.toString()}`);
+      const res  = await fetch(statementsUrl);
       const data = await parseApexJson(res);
       if (data.status === 'success') {
         setStatements((data.items ?? []) as BankStatement[]);
@@ -956,12 +961,26 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
         onReset={handleReset}
       />
 
-      <StatementSelector
-        statements={statements}
-        loading={loadingStmts}
-        selectedId={selectedStatement?.statementId ?? null}
-        onSelect={handleSelectStatement}
-      />
+      <div style={{ position: 'relative' }}>
+        <StatementSelector
+          statements={statements}
+          loading={loadingStmts}
+          selectedId={selectedStatement?.statementId ?? null}
+          onSelect={handleSelectStatement}
+        />
+        {lastStatementsUrl && (
+          <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 1 }}>
+            <Tooltip title="View Bank Statements API">
+              <Button
+                size="small"
+                icon={<ApiOutlined />}
+                style={{ color: REDWOOD.info, borderColor: REDWOOD.info, fontSize: 11 }}
+                onClick={() => { setApiExecResult({ loading: false, response: null }); setApiModalTitle('Bank Statements API'); setApiModalUrl(lastStatementsUrl); setApiModalVisible(true); }}
+              />
+            </Tooltip>
+          </div>
+        )}
+      </div>
 
       {selectedStatement && (
         <div
@@ -1029,12 +1048,12 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                   <Badge count={stmtLines.length} style={{ backgroundColor: REDWOOD.info }} showZero />
                 </Space>
                 {lastStmtLinesUrl && (
-                  <Tooltip title="View API details">
+                  <Tooltip title="View Statement Lines API">
                     <Button
                       size="small"
                       icon={<ApiOutlined />}
                       style={{ color: REDWOOD.info, borderColor: REDWOOD.info, fontSize: 11 }}
-                      onClick={() => { setStmtApiExecResult({ loading: false, response: null }); setStmtApiModalVisible(true); }}
+                      onClick={() => { setApiExecResult({ loading: false, response: null }); setApiModalTitle('Statement Lines API'); setApiModalUrl(lastStmtLinesUrl); setApiModalVisible(true); }}
                     />
                   </Tooltip>
                 )}
@@ -1350,60 +1369,54 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
         </div>
       </Modal>
 
-      {/* Statement Lines API Modal */}
+      {/* Shared API Debug Modal */}
       <Modal
-        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>Statement Lines API</span></Space>}
-        open={stmtApiModalVisible}
-        onCancel={() => setStmtApiModalVisible(false)}
-        footer={<Button onClick={() => setStmtApiModalVisible(false)}>Close</Button>}
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>{apiModalTitle}</span></Space>}
+        open={apiModalVisible}
+        onCancel={() => setApiModalVisible(false)}
+        footer={<Button onClick={() => setApiModalVisible(false)}>Close</Button>}
         width={680}
         destroyOnClose
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div>
-            <Space style={{ marginBottom: 6 }}>
-              <Tag color="blue" style={{ margin: 0 }}>GET</Tag>
-              <Text strong style={{ fontSize: 12 }}>Fetch Statement Lines</Text>
-            </Space>
-            <div style={{ background: '#1e1e1e', borderRadius: 4, padding: '8px 12px', marginBottom: 8 }}>
-              <code style={{ fontSize: 11, color: '#9cdcfe', wordBreak: 'break-all' }}>{lastStmtLinesUrl}</code>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <Text type="secondary" style={{ fontSize: 11 }}>
-                Returns statement lines for the selected bank statement. Error ORA-06502 indicates a PL/SQL type mismatch in the ORDS handler.
-              </Text>
-              <Button
-                size="small"
-                style={{ marginLeft: 12, flexShrink: 0 }}
-                loading={stmtApiExecResult.loading}
-                onClick={async () => {
-                  if (!lastStmtLinesUrl) return;
-                  setStmtApiExecResult({ loading: true, response: null });
-                  try {
-                    const res = await fetch(lastStmtLinesUrl, { headers: { Accept: 'application/json' } });
-                    const text = await res.text();
-                    let formatted = text;
-                    try { formatted = JSON.stringify(JSON.parse(text), null, 2); } catch { /* keep raw */ }
-                    setStmtApiExecResult({ loading: false, response: `HTTP ${res.status}\n\n${formatted}` });
-                  } catch (e: any) {
-                    setStmtApiExecResult({ loading: false, response: `Error: ${e.message}` });
-                  }
-                }}
-              >
-                Test
-              </Button>
-            </div>
-            {stmtApiExecResult.response && (
-              <div style={{ background: '#1e1e1e', borderRadius: 4, padding: '8px 12px', maxHeight: 300, overflow: 'auto' }}>
-                <pre style={{
-                  margin: 0, fontSize: 10, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-                  color: stmtApiExecResult.response.startsWith('HTTP 2') ? '#4ec9b0' : '#f48771',
-                }}>
-                  {stmtApiExecResult.response}
-                </pre>
-              </div>
-            )}
+          <Space style={{ marginBottom: 4 }}>
+            <Tag color="blue" style={{ margin: 0 }}>GET</Tag>
+            <Text strong style={{ fontSize: 12 }}>URL</Text>
+          </Space>
+          <div style={{ background: '#1e1e1e', borderRadius: 4, padding: '8px 12px', marginBottom: 4 }}>
+            <code style={{ fontSize: 11, color: '#9cdcfe', wordBreak: 'break-all' }}>{apiModalUrl}</code>
           </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button
+              size="small"
+              loading={apiExecResult.loading}
+              onClick={async () => {
+                if (!apiModalUrl) return;
+                setApiExecResult({ loading: true, response: null });
+                try {
+                  const res = await fetch(apiModalUrl, { headers: { Accept: 'application/json' } });
+                  const text = await res.text();
+                  let formatted = text;
+                  try { formatted = JSON.stringify(JSON.parse(text), null, 2); } catch { /* keep raw */ }
+                  setApiExecResult({ loading: false, response: `HTTP ${res.status}\n\n${formatted}` });
+                } catch (e: any) {
+                  setApiExecResult({ loading: false, response: `Error: ${e.message}` });
+                }
+              }}
+            >
+              Test
+            </Button>
+          </div>
+          {apiExecResult.response && (
+            <div style={{ background: '#1e1e1e', borderRadius: 4, padding: '8px 12px', maxHeight: 320, overflow: 'auto' }}>
+              <pre style={{
+                margin: 0, fontSize: 10, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                color: apiExecResult.response.startsWith('HTTP 2') ? '#4ec9b0' : '#f48771',
+              }}>
+                {apiExecResult.response}
+              </pre>
+            </div>
+          )}
         </div>
       </Modal>
     </>
