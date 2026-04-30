@@ -2392,13 +2392,17 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item label="Transaction Direction" name="transactionDirection" initialValue="DR" style={{ marginBottom: 8 }}>
+              <Form.Item label="Transaction Direction" style={{ marginBottom: 8 }}>
                 <Segmented size="small"
+                  value={extTxnDirection}
                   options={[
                     { label: '▲ Money In',  value: 'DR' },
                     { label: '▼ Money Out', value: 'CR' },
                   ]}
-                  onChange={(v) => setExtTxnDirection(v as 'DR' | 'CR')}
+                  onChange={(v) => {
+                    setExtTxnDirection(v as 'DR' | 'CR');
+                    extTxnForm.setFieldValue('transactionDirection', v);
+                  }}
                 />
               </Form.Item>
             </Col>
