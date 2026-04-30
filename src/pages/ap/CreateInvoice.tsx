@@ -7925,7 +7925,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               const periodLineTax = periodLines.reduce((sum, l) => sum + Math.round((l.amount || 0) * ((taxRateMapRef.current[l.taxClassification] ?? getTaxRateForClassification(l.taxClassification)) / 100) * 100) / 100, 0);
               if (periodLineTax > 0) {
                 const acctTax = Math.round(periodLineTax * effectiveRate * 100) / 100;
-                allEntries.push({ key: keyIdx++, period, line: 'Tax', account: 'Tax Recoverable', description: 'Input VAT', lineClass: 'Tax Recoverable', debit: periodLineTax, credit: 0, accountedDebit: acctTax, accountedCredit: 0 });
+                const firstTaxedLine = periodLines.find(l => l.taxClassification);
+                const taxAcct = firstTaxedLine?.taxAccountCombination
+                  || (firstTaxedLine ? taxAccountMapRef.current[firstTaxedLine.taxClassification] : '')
+                  || 'Tax Recoverable';
+                allEntries.push({ key: keyIdx++, period, line: 'Tax', account: taxAcct, description: 'Input VAT', lineClass: 'Tax Recoverable', debit: periodLineTax, credit: 0, accountedDebit: acctTax, accountedCredit: 0 });
                 periodDebit += periodLineTax;
                 periodAccountedDebit += acctTax;
               }
