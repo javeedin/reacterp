@@ -845,34 +845,30 @@ const StatementForm: React.FC<{
     } finally { setSaving(false); }
   };
 
-  // Line columns — inline editing
-  const lineColumns: ColumnsType<StatementLine> = [
+  // Running balance — computed from opening balance per row
+  const linesWithBal = (() => {
+    let bal = Number(form.getFieldValue('openingBalance') ?? initialHeader?.openingBalance ?? 0);
+    return lines.map(l => {
+      const amt = l.amount ?? 0;
+      if (l.transactionCode === 'CR') bal += amt;
+      else if (l.transactionCode === 'DR') bal -= amt;
+      return { ...l, _bal: bal };
+    });
+  })();
+  const fmtN = (v: number) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  // Line columns — inline editing with Withdrawal / Deposit / Balance presentation
+  const lineColumns: ColumnsType<StatementLine & { _bal: number }> = [
     {
-      title: '#', width: 50,
-      render: (_, __, idx) => <Text style={{ fontSize: 12 }}>{idx + 1}</Text>,
+      title: '#', width: 44,
+      render: (_, __, idx) => <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{idx + 1}</Text>,
     },
     {
-      title: 'Txn Date', width: 130,
+      title: 'Date', width: 120,
       render: (_, r) => (
         <DatePicker size="small" format="D-MMM-YYYY" style={{ width: '100%' }}
           value={r.transactionDate ? dayjs(r.transactionDate) : undefined}
           onChange={d => updateLine(r._key, 'transactionDate', d?.format('YYYY-MM-DD') ?? '')} />
-      ),
-    },
-    {
-      title: 'Value Date', width: 130,
-      render: (_, r) => (
-        <DatePicker size="small" format="D-MMM-YYYY" style={{ width: '100%' }}
-          value={r.valueDate ? dayjs(r.valueDate) : undefined}
-          onChange={d => updateLine(r._key, 'valueDate', d?.format('YYYY-MM-DD') ?? '')} />
-      ),
-    },
-    {
-      title: 'Amount', width: 130,
-      render: (_, r) => (
-        <InputNumber size="small" style={{ width: '100%' }} precision={2}
-          value={r.amount ?? undefined}
-          onChange={v => updateLine(r._key, 'amount', v)} />
       ),
     },
     {
@@ -883,6 +879,30 @@ const StatementForm: React.FC<{
           <Option value="CR">CR</Option>
           <Option value="DR">DR</Option>
         </Select>
+      ),
+    },
+    {
+      title: 'Withdrawal (DR)', width: 130, align: 'right' as const,
+      render: (_, r) => r.transactionCode === 'DR' ? (
+        <InputNumber size="small" style={{ width: '100%' }} precision={2}
+          value={r.amount ?? undefined}
+          onChange={v => updateLine(r._key, 'amount', v)} />
+      ) : <Text style={{ fontSize: 11, color: REDWOOD.neutral300 }}>—</Text>,
+    },
+    {
+      title: 'Deposit (CR)', width: 130, align: 'right' as const,
+      render: (_, r) => r.transactionCode === 'CR' ? (
+        <InputNumber size="small" style={{ width: '100%' }} precision={2}
+          value={r.amount ?? undefined}
+          onChange={v => updateLine(r._key, 'amount', v)} />
+      ) : <Text style={{ fontSize: 11, color: REDWOOD.neutral300 }}>—</Text>,
+    },
+    {
+      title: 'Balance', width: 120, align: 'right' as const,
+      render: (_, r: any) => (
+        <Text style={{ fontSize: 12, fontWeight: 500, color: r._bal >= 0 ? REDWOOD.neutral900 : REDWOOD.error }}>
+          {fmtN(r._bal)}
+        </Text>
       ),
     },
     {
@@ -1160,7 +1180,7 @@ const StatementForm: React.FC<{
       </div>
 
       <Table
-        dataSource={lines} columns={lineColumns} rowKey="_key"
+        dataSource={linesWithBal} columns={lineColumns as any} rowKey="_key"
         size="small" pagination={false}
         scroll={{ x: 1100 }}
         locale={{ emptyText: <Empty description="No lines — add manually or import CSV" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
