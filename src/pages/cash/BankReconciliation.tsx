@@ -429,9 +429,13 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const [loadingSys, setLoadingSys]           = useState(false);
   const [reconciling, setReconciling]         = useState(false);
   const [txnSourceFilter, setTxnSourceFilter] = useState<string>('ALL');
+  const [stmtReconFilter, setStmtReconFilter] = useState<'ALL' | 'UNRECONCILED' | 'RECONCILED'>('UNRECONCILED');
   const [selectedStmtKeys, setSelectedStmtKeys] = useState<React.Key[]>([]);
   const [selectedSysKeys, setSelectedSysKeys]   = useState<React.Key[]>([]);
   const [lastParams, setLastParams]           = useState<SearchParams | null>(null);
+  const [leftPct, setLeftPct]                 = useState(50);
+  const isDragging                            = React.useRef(false);
+  const splitContainerRef                     = React.useRef<HTMLDivElement>(null);
   const [msgApi, contextHolder]               = message.useMessage();
   const [lastStatementsUrl, setLastStatementsUrl] = useState<string | null>(null);
   const [lastStmtLinesUrl, setLastStmtLinesUrl] = useState<string | null>(null);
@@ -439,6 +443,20 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const [apiModalTitle, setApiModalTitle] = useState('');
   const [apiModalVisible, setApiModalVisible] = useState(false);
   const [apiExecResult, setApiExecResult] = useState<{ loading: boolean; response: string | null }>({ loading: false, response: null });
+
+  // Resize drag handlers
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!isDragging.current || !splitContainerRef.current) return;
+      const rect = splitContainerRef.current.getBoundingClientRect();
+      const pct  = Math.min(Math.max(((e.clientX - rect.left) / rect.width) * 100, 25), 75);
+      setLeftPct(pct);
+    };
+    const onUp = () => { isDragging.current = false; document.body.style.cursor = ''; document.body.style.userSelect = ''; };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+  }, []);
 
   // ── Create External Transaction modal ──────────────────────────────────────
   const [extTxnOpen, setExtTxnOpen]         = useState(false);
@@ -773,10 +791,10 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     }
   }, [msgApi]);
 
-  const fetchStmtLines = useCallback(async (params: SearchParams) => {
+  const fetchStmtLines = useCallback(async (params: SearchParams, reconFilter = 'UNRECONCILED') => {
     const q = new URLSearchParams();
     if (params.bankAccount) q.set('bank_account', params.bankAccount);
-    q.set('recon_status', 'UNRECONCILED');
+    if (reconFilter !== 'ALL') q.set('recon_status', reconFilter);
     if (params.dateFrom)   q.set('date_from',    params.dateFrom.format('YYYY-MM-DD'));
     if (params.dateTo)     q.set('date_to',      params.dateTo.format('YYYY-MM-DD'));
     if (params.amountMin != null) q.set('amount_min', String(params.amountMin));
@@ -927,9 +945,9 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       dateFrom: lastParams?.dateFrom ?? null,
       dateTo:   lastParams?.dateTo   ?? null,
     };
-    fetchStmtLines(lineParams);
+    fetchStmtLines(lineParams, stmtReconFilter);
     fetchSysTxns(txnParams, txnSourceFilter);
-  }, [lastParams, fetchStmtLines, fetchSysTxns, txnSourceFilter]);
+  }, [lastParams, fetchStmtLines, fetchSysTxns, txnSourceFilter, stmtReconFilter]);
 
   const handleReset = useCallback(() => {
     setStatements([]);
@@ -1009,7 +1027,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     if (selectedStatement) {
       handleSelectStatement(selectedStatement);
     } else if (lastParams) {
-      fetchStmtLines(lastParams);
+      fetchStmtLines(lastParams, stmtReconFilter);
       fetchSysTxns(lastParams);
     }
   }, [selectedStmtKeys, selectedSysKeys, stmtLines, sysTxns, txnSourceFilter, lastParams, selectedStatement, handleSelectStatement, fetchStmtLines, fetchSysTxns, msgApi]);
@@ -1407,19 +1425,40 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
         </div>
       )}
 
-      <Row gutter={[16, 16]}>
+      {/* ── Resizable split layout ── */}
+      <div ref={splitContainerRef} style={{ display: 'flex', alignItems: 'stretch', gap: 0, minHeight: 500 }}>
         {/* ── LEFT: Bank Statement Lines ─────────────────────────────── */}
-        <Col xs={24} lg={12}>
+        <div style={{ width: `${leftPct}%`, minWidth: 240, flexShrink: 0, overflow: 'hidden' }}>
           <Card
             size="small"
             title={
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
                 <Space>
                   <BankOutlined style={{ color: REDWOOD.primary }} />
                   <span style={{ fontWeight: 600 }}>Bank Statement Lines</span>
                   <Badge count={stmtLines.length} style={{ backgroundColor: REDWOOD.info }} showZero />
                 </Space>
                 <Space size={4}>
+                  <Segmented
+                    size="small"
+                    value={stmtReconFilter}
+                    onChange={(v) => {
+                      const val = v as 'ALL' | 'UNRECONCILED' | 'RECONCILED';
+                      setStmtReconFilter(val);
+                      setSelectedStmtKeys([]);
+                      if (selectedStatement) {
+                        const p = { ...(lastParams ?? {}), statementId: String(selectedStatement.statementId) };
+                        fetchStmtLines(p, val);
+                      } else if (lastParams) {
+                        fetchStmtLines(lastParams, val);
+                      }
+                    }}
+                    options={[
+                      { label: 'All',    value: 'ALL' },
+                      { label: 'Unrecon', value: 'UNRECONCILED' },
+                      { label: 'Recon',  value: 'RECONCILED' },
+                    ]}
+                  />
                   {(() => {
                     const selectedLines = stmtLines.filter(l => selectedStmtKeys.includes(l.lineId));
                     const alreadyLinked = selectedLines.some(l => l.externalTxnId);
@@ -1471,7 +1510,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                 emptyText: (
                   <Empty
                     image={Empty.PRESENTED_IMAGE_SIMPLE}
-                    description="No unreconciled statement lines"
+                    description={stmtReconFilter === 'RECONCILED' ? 'No reconciled statement lines' : stmtReconFilter === 'ALL' ? 'No statement lines found' : 'No unreconciled statement lines'}
                   />
                 ),
               }}
@@ -1497,10 +1536,21 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
               </Text>
             </div>
           </Card>
-        </Col>
+        </div>
+
+        {/* ── Drag handle ─────────────────────────────────────────────── */}
+        <div
+          onMouseDown={() => { isDragging.current = true; document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none'; }}
+          style={{ width: 10, cursor: 'col-resize', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1 }}
+        >
+          <div style={{ width: 3, height: '100%', background: REDWOOD.neutral200, borderRadius: 2, transition: 'background 0.15s' }}
+            onMouseEnter={e => (e.currentTarget.style.background = REDWOOD.info)}
+            onMouseLeave={e => (e.currentTarget.style.background = REDWOOD.neutral200)}
+          />
+        </div>
 
         {/* ── RIGHT: System Transactions ────────────────────────────── */}
-        <Col xs={24} lg={12}>
+        <div style={{ flex: 1, minWidth: 240, overflow: 'hidden' }}>
           <Card
             size="small"
             title={
@@ -1593,8 +1643,8 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
               </Text>
             </div>
           </Card>
-        </Col>
-      </Row>
+        </div>
+      </div>
 
       {/* ── Reconcile Button ───────────────────────────────────────── */}
       <Row justify="end" style={{ marginTop: 16 }}>
