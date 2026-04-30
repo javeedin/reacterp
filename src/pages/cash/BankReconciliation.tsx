@@ -494,6 +494,9 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   // ── Create External Transaction modal ──────────────────────────────────────
   const [extTxnOpen, setExtTxnOpen]         = useState(false);
   const [extTxnForm]                        = Form.useForm();
+  const extTxnDirection   = Form.useWatch('transactionDirection',    extTxnForm) ?? 'DR';
+  const extTxnAssetAcct   = Form.useWatch('assetAccountCombination', extTxnForm) ?? '';
+  const extTxnOffsetAcct  = Form.useWatch('offsetAccountCombination', extTxnForm) ?? '';
   const [extTxnSaving, setExtTxnSaving]         = useState(false);
   const [extTxnPayload, setExtTxnPayload]       = useState<any>(null);
   const [extTxnResponse, setExtTxnResponse]     = useState<any>(null);
@@ -2395,33 +2398,28 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
             </Col>
           </Row>
 
-          {/* Accounting entry preview */}
-          <Form.Item noStyle shouldUpdate={(p, c) =>
-            p.transactionDirection !== c.transactionDirection ||
-            p.assetAccountCombination !== c.assetAccountCombination ||
-            p.offsetAccountCombination !== c.offsetAccountCombination
-          }>
-            {({ getFieldValue }) => {
-              const dir    = getFieldValue('transactionDirection') ?? 'DR';
-              const asset  = getFieldValue('assetAccountCombination')  || 'Cash / Asset Account';
-              const offset = getFieldValue('offsetAccountCombination') || 'Offset Account';
-              const drAcct = dir === 'DR' ? asset  : offset;
-              const crAcct = dir === 'DR' ? offset : asset;
-              return (
-                <div style={{ marginBottom: 10, padding: '8px 12px', borderRadius: 6, background: '#0d1117', border: '1px solid #30363d', fontSize: 11 }}>
-                  <div style={{ color: '#6e7681', marginBottom: 6, fontSize: 10, letterSpacing: '0.05em' }}>JOURNAL ENTRY PREVIEW</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                    <span style={{ background: '#1f6feb33', border: '1px solid #1f6feb', color: '#79c0ff', borderRadius: 4, padding: '1px 7px', fontWeight: 700, fontSize: 11, minWidth: 28, textAlign: 'center' }}>DR</span>
-                    <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#c9d1d9' }}>{drAcct}</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 20 }}>
-                    <span style={{ background: '#2ea04326', border: '1px solid #2ea043', color: '#56d364', borderRadius: 4, padding: '1px 7px', fontWeight: 700, fontSize: 11, minWidth: 28, textAlign: 'center' }}>CR</span>
-                    <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#c9d1d9' }}>{crAcct}</span>
-                  </div>
+          {/* Accounting entry preview — reactive via Form.useWatch */}
+          {(() => {
+            const drAcct = extTxnDirection === 'DR'
+              ? (extTxnAssetAcct  || 'Cash / Asset Account')
+              : (extTxnOffsetAcct || 'Offset Account');
+            const crAcct = extTxnDirection === 'DR'
+              ? (extTxnOffsetAcct || 'Offset Account')
+              : (extTxnAssetAcct  || 'Cash / Asset Account');
+            return (
+              <div style={{ marginBottom: 10, padding: '8px 12px', borderRadius: 6, background: '#0d1117', border: '1px solid #30363d' }}>
+                <div style={{ color: '#6e7681', marginBottom: 6, fontSize: 10, letterSpacing: '0.05em' }}>JOURNAL ENTRY PREVIEW</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <span style={{ background: '#1f6feb33', border: '1px solid #1f6feb', color: '#79c0ff', borderRadius: 4, padding: '1px 7px', fontWeight: 700, fontSize: 11, minWidth: 28, textAlign: 'center' }}>DR</span>
+                  <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#c9d1d9' }}>{drAcct}</span>
                 </div>
-              );
-            }}
-          </Form.Item>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 20 }}>
+                  <span style={{ background: '#2ea04326', border: '1px solid #2ea043', color: '#56d364', borderRadius: 4, padding: '1px 7px', fontWeight: 700, fontSize: 11, minWidth: 28, textAlign: 'center' }}>CR</span>
+                  <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#c9d1d9' }}>{crAcct}</span>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Cash Account (always in header) */}
           <Form.Item label="Cash / Asset Account" style={{ marginBottom: 8 }}>
