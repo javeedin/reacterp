@@ -432,9 +432,11 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
     const fetchPeriods = async () => {
       setLoadingPeriods(true);
       try {
-        const encodedLedgerName = encodeURIComponent(selectedLedger.ledger_name);
+        const params = new URLSearchParams();
+        params.append('P_APPLICATION_NAME', 'General Ledger');
+        params.append('P_LEDGER_NAME', selectedLedger.ledger_name);
         const response = await fetch(
-          `${APEX_DB_CONFIG.baseUrl}/gl/fiscalperiods?ledger_name=${encodedLedgerName}&application=GL`
+          `${APEX_DB_CONFIG.baseUrl}/periodsstatus/create?${params.toString()}`
         );
         const data = await response.json();
         if (data.items && data.items.length > 0) {
