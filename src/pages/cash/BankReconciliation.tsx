@@ -1349,6 +1349,63 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
           })}
         </div>
       </Modal>
+
+      {/* Statement Lines API Modal */}
+      <Modal
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>Statement Lines API</span></Space>}
+        open={stmtApiModalVisible}
+        onCancel={() => setStmtApiModalVisible(false)}
+        footer={<Button onClick={() => setStmtApiModalVisible(false)}>Close</Button>}
+        width={680}
+        destroyOnClose
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div>
+            <Space style={{ marginBottom: 6 }}>
+              <Tag color="blue" style={{ margin: 0 }}>GET</Tag>
+              <Text strong style={{ fontSize: 12 }}>Fetch Statement Lines</Text>
+            </Space>
+            <div style={{ background: '#1e1e1e', borderRadius: 4, padding: '8px 12px', marginBottom: 8 }}>
+              <code style={{ fontSize: 11, color: '#9cdcfe', wordBreak: 'break-all' }}>{lastStmtLinesUrl}</code>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                Returns statement lines for the selected bank statement. Error ORA-06502 indicates a PL/SQL type mismatch in the ORDS handler.
+              </Text>
+              <Button
+                size="small"
+                style={{ marginLeft: 12, flexShrink: 0 }}
+                loading={stmtApiExecResult.loading}
+                onClick={async () => {
+                  if (!lastStmtLinesUrl) return;
+                  setStmtApiExecResult({ loading: true, response: null });
+                  try {
+                    const res = await fetch(lastStmtLinesUrl, { headers: { Accept: 'application/json' } });
+                    const text = await res.text();
+                    let formatted = text;
+                    try { formatted = JSON.stringify(JSON.parse(text), null, 2); } catch { /* keep raw */ }
+                    setStmtApiExecResult({ loading: false, response: `HTTP ${res.status}\n\n${formatted}` });
+                  } catch (e: any) {
+                    setStmtApiExecResult({ loading: false, response: `Error: ${e.message}` });
+                  }
+                }}
+              >
+                Test
+              </Button>
+            </div>
+            {stmtApiExecResult.response && (
+              <div style={{ background: '#1e1e1e', borderRadius: 4, padding: '8px 12px', maxHeight: 300, overflow: 'auto' }}>
+                <pre style={{
+                  margin: 0, fontSize: 10, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                  color: stmtApiExecResult.response.startsWith('HTTP 2') ? '#4ec9b0' : '#f48771',
+                }}>
+                  {stmtApiExecResult.response}
+                </pre>
+              </div>
+            )}
+          </div>
+        </div>
+      </Modal>
     </>
   );
 };
@@ -1733,63 +1790,6 @@ const BankReconciliation: React.FC = () => {
           />
         </Card>
       </Content>
-
-      {/* Statement Lines API Modal */}
-      <Modal
-        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>Statement Lines API</span></Space>}
-        open={stmtApiModalVisible}
-        onCancel={() => setStmtApiModalVisible(false)}
-        footer={<Button onClick={() => setStmtApiModalVisible(false)}>Close</Button>}
-        width={680}
-        destroyOnClose
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div>
-            <Space style={{ marginBottom: 6 }}>
-              <Tag color="blue" style={{ margin: 0 }}>GET</Tag>
-              <Text strong style={{ fontSize: 12 }}>Fetch Statement Lines</Text>
-            </Space>
-            <div style={{ background: '#1e1e1e', borderRadius: 4, padding: '8px 12px', marginBottom: 8 }}>
-              <code style={{ fontSize: 11, color: '#9cdcfe', wordBreak: 'break-all' }}>{lastStmtLinesUrl}</code>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <Text type="secondary" style={{ fontSize: 11 }}>
-                Returns statement lines for the selected bank statement. Error ORA-06502 indicates a PL/SQL type mismatch in the ORDS handler.
-              </Text>
-              <Button
-                size="small"
-                style={{ marginLeft: 12, flexShrink: 0 }}
-                loading={stmtApiExecResult.loading}
-                onClick={async () => {
-                  if (!lastStmtLinesUrl) return;
-                  setStmtApiExecResult({ loading: true, response: null });
-                  try {
-                    const res = await fetch(lastStmtLinesUrl, { headers: { Accept: 'application/json' } });
-                    const text = await res.text();
-                    let formatted = text;
-                    try { formatted = JSON.stringify(JSON.parse(text), null, 2); } catch { /* keep raw */ }
-                    setStmtApiExecResult({ loading: false, response: `HTTP ${res.status}\n\n${formatted}` });
-                  } catch (e: any) {
-                    setStmtApiExecResult({ loading: false, response: `Error: ${e.message}` });
-                  }
-                }}
-              >
-                Test
-              </Button>
-            </div>
-            {stmtApiExecResult.response && (
-              <div style={{ background: '#1e1e1e', borderRadius: 4, padding: '8px 12px', maxHeight: 300, overflow: 'auto' }}>
-                <pre style={{
-                  margin: 0, fontSize: 10, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-                  color: stmtApiExecResult.response.startsWith('HTTP 2') ? '#4ec9b0' : '#f48771',
-                }}>
-                  {stmtApiExecResult.response}
-                </pre>
-              </div>
-            )}
-          </div>
-        </div>
-      </Modal>
     </Layout>
   );
 };
