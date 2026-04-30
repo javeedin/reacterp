@@ -582,17 +582,13 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     setExtTxnAssetAcct('');
     setExtTxnOffsetAcct('');
 
-    // Auto-fill reference from selected statement lines
-    const selectedLines2 = stmtLines.filter(l => selectedStmtKeys.includes(l.lineId));
-    if (selectedStatement) {
-      const stmtNum = selectedStatement.statementNumber || `S${selectedStatement.statementId}`;
-      const ref = selectedLines2.length === 1
-        ? `${stmtNum}-L${selectedLines2[0].lineId}`
-        : selectedLines2.length > 1
-          ? `${stmtNum}-${selectedLines2.length}L`
-          : stmtNum;
-      extTxnForm.setFieldValue('referenceText', ref);
-    }
+    // Build statement-based reference
+    const stmtNum = selectedStatement?.statementNumber || `S${selectedStatement?.statementId || ''}`;
+    const autoRef = selectedLines.length === 1
+      ? `${stmtNum}-L${selectedLines[0].lineId}`
+      : selectedLines.length > 1
+        ? `${stmtNum}-L${selectedLines.map(l => l.lineId).join(',')}`
+        : stmtNum;
     setExtBankAccounts([]);
     setExtTxnMode(selectedLines.length > 1 ? 'multiple' : 'single');
     setExtTxnLines(
@@ -666,7 +662,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       amount:                   selectedLines.length > 0 ? totalAmount : undefined,
       transactionDate:          firstLine?.transactionDate ? dayjs(firstLine.transactionDate) : dayjs(),
       currencyCode:             selectedStatement?.currencyCode || 'AED',
-      referenceText:            firstLine?.reference || firstLine?.bankTxnReference || '',
+      referenceText:            autoRef,
       description:              firstLine?.description || '',
       transactionType:          'MISC',
       assetAccountCombination:  cashAccountCombination,
