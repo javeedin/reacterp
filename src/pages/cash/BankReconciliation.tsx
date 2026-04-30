@@ -91,6 +91,11 @@ interface SysTxn {
   accountDescription?: string;
   journalCategory?: string;
   lineDescription?: string;
+  // External Transaction (CM)
+  assetAccountCombination?: string;
+  offsetAccountCombination?: string;
+  createdBy?: string;
+  creationDate?: string;
 }
 
 interface BankAcctOption {
@@ -830,6 +835,44 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const fetchSysTxns = useCallback(async (params: SearchParams, txnType?: string) => {
     setLoadingSys(true);
 
+    // CM fetches from the external transactions endpoint (different schema)
+    if (txnType === 'CM') {
+      const q = new URLSearchParams();
+      if (params.bankAccount) q.set('bank_account', params.bankAccount);
+      if (params.dateFrom)    q.set('date_from',    params.dateFrom.format('YYYY-MM-DD'));
+      if (params.dateTo)      q.set('date_to',      params.dateTo.format('YYYY-MM-DD'));
+      if (params.reference)   q.set('reference',    params.reference);
+      q.set('row_limit', '500');
+      try {
+        const res  = await fetch(`${EXT_TXN_URL}?${q.toString()}`);
+        const data = await parseApexJson(res);
+        const items = Array.isArray(data) ? data : (data.items ?? []);
+        setSysTxns(items.map((i: any) => ({
+          txnId:        i.externalTransactionId ?? 0,
+          txnNumber:    String(i.externalTransactionId ?? ''),
+          txnDate:      i.transactionDate ?? '',
+          amount:       i.amount          ?? 0,
+          currencyCode: i.currencyCode    ?? '',
+          businessUnit: i.businessUnitName ?? '',
+          bankAccountName: i.bankAccountName ?? '',
+          source:       i.source          ?? 'ORA_MAN',
+          txnStatus:    i.status          ?? '',
+          payee:        i.description     ?? '',
+          reference:    i.description     ?? '',
+          assetAccountCombination:  i.assetAccountCombination  ?? '',
+          offsetAccountCombination: i.offsetAccountCombination ?? '',
+          createdBy:    i.createdBy       ?? '',
+          creationDate: i.creationDate    ?? '',
+        })) as SysTxn[]);
+      } catch (err) {
+        msgApi.error('Network error loading external transactions');
+        console.error(err);
+      } finally {
+        setLoadingSys(false);
+      }
+      return;
+    }
+
     const q = new URLSearchParams();
     if (params.bankAccount) q.set('bank_account', params.bankAccount);
     if (params.dateFrom)   q.set('date_from',    params.dateFrom.format('YYYY-MM-DD'));
@@ -1304,12 +1347,14 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   ];
 
   const sysColumnsCM: ColumnsType<SysTxn> = [
-    { title: 'Date',      dataIndex: 'txnDate',   key: 'date',   width: 90,  render: fmtDate },
-    { title: 'Ref',       dataIndex: 'txnNumber', key: 'ref',    width: 130, render: (v: string) => <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{v}</Text> },
-    { title: 'Amount',    dataIndex: 'amount',    key: 'amt',    width: 100, align: 'right' as const, render: (v: number, r: SysTxn) => <Text style={{ fontSize: 11, color: REDWOOD.info }}>{fmtAmount(v, r.currencyCode)}</Text> },
-    { title: 'BU',        dataIndex: 'businessUnit', key: 'bu', width: 120, render: (v: string) => <Text style={{ fontSize: 10 }}>{v || '—'}</Text> },
-    { title: 'Desc',      dataIndex: 'payee',     key: 'desc',   width: 160, render: (v: string) => <Tooltip title={v}><Text style={{ fontSize: 11 }} ellipsis>{v || '—'}</Text></Tooltip> },
-    { title: 'Status',    dataIndex: 'txnStatus', key: 'status', width: 70,  render: (v: string) => <Tag color={v === 'UNR' ? 'blue' : 'green'} style={{ fontSize: 10 }}>{v || '—'}</Tag> },
+    { title: 'Date',        dataIndex: 'txnDate',   key: 'date',   width: 90,  render: fmtDate },
+    { title: 'Ext Txn ID',  dataIndex: 'txnNumber', key: 'ref',    width: 100, render: (v: string) => <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{v}</Text> },
+    { title: 'Amount',      dataIndex: 'amount',    key: 'amt',    width: 100, align: 'right' as const, render: (v: number, r: SysTxn) => <Text style={{ fontSize: 11, color: REDWOOD.info }}>{fmtAmount(v, r.currencyCode)}</Text> },
+    { title: 'BU',          dataIndex: 'businessUnit', key: 'bu',  width: 130, render: (v: string) => <Text style={{ fontSize: 10 }}>{v || '—'}</Text> },
+    { title: 'Description', dataIndex: 'payee',     key: 'desc',   width: 160, render: (v: string) => <Tooltip title={v}><Text style={{ fontSize: 11 }} ellipsis>{v || '—'}</Text></Tooltip> },
+    { title: 'Asset Acct',  dataIndex: 'assetAccountCombination',  key: 'asset',  width: 160, render: (v: string) => <Tooltip title={v}><Text style={{ fontSize: 10, fontFamily: 'monospace' }} ellipsis>{v || '—'}</Text></Tooltip> },
+    { title: 'Offset Acct', dataIndex: 'offsetAccountCombination', key: 'offset', width: 160, render: (v: string) => <Tooltip title={v}><Text style={{ fontSize: 10, fontFamily: 'monospace' }} ellipsis>{v || '—'}</Text></Tooltip> },
+    { title: 'Status',      dataIndex: 'txnStatus', key: 'status', width: 70,  render: (v: string) => <Tag color={v === 'UNR' ? 'blue' : 'green'} style={{ fontSize: 10 }}>{v || '—'}</Tag> },
   ];
 
   const sysColumns =
