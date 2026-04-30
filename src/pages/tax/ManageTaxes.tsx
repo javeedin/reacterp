@@ -382,7 +382,7 @@ const ManageTaxes: React.FC = () => {
   // ── Fetch BUs ──
   const fetchBUs = useCallback(async () => {
     try {
-      const res  = await fetch(`${APEX_BASE}/hr/businessunits`);
+      const res  = await fetch(`${APEX_BASE}/gl/businessunits`);
       const data = await res.json();
       const items: any[] = data?.items ?? data ?? [];
       setBusinessUnits(

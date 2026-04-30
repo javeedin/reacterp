@@ -66,6 +66,7 @@ export const ALL_MENU_ITEMS: MenuSearchItem[] = [
 
   // ── Tax Setup ────────────────────────────────────────────────────────────────
   { key: 'setup-taxes',           label: 'Tax Setup',                   module: 'SETUP', moduleLabel: 'Setup',                   path: '/setup/taxes',                    description: 'Define input/output taxes and assign to business units with GL accounts', keywords: 'tax vat gst input output rate code business unit assignment gl account' },
+  { key: 'ap-taxes',              label: 'Tax Setup',                   module: 'AP',    moduleLabel: 'Accounts Payable',        path: '/setup/taxes',                    description: 'Define input/output taxes and assign to business units with GL accounts', keywords: 'tax vat gst input output rate code business unit assignment gl account' },
 
   // ── Petty Cash ──────────────────────────────────────────────────────────────
   { key: 'pc-registers',          label: 'Petty Cash Registers',        module: 'PC',   moduleLabel: 'Petty Cash',              path: '/pc/registers',                   description: 'Manage petty cash registers and transactions', keywords: 'petty cash pc register custodian' },
