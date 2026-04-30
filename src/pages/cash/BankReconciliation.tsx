@@ -450,6 +450,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const [reconciling, setReconciling]         = useState(false);
   const [txnSourceFilter, setTxnSourceFilter] = useState<string>('ALL');
   const [stmtReconFilter, setStmtReconFilter] = useState<'ALL' | 'UNRECONCILED' | 'RECONCILED'>('UNRECONCILED');
+  const [cmReconFilter,  setCmReconFilter]   = useState<'ALL' | 'UNRECONCILED' | 'RECONCILED'>('UNRECONCILED');
   const [selectedStmtKeys, setSelectedStmtKeys] = useState<React.Key[]>([]);
   const [selectedSysKeys, setSelectedSysKeys]   = useState<React.Key[]>([]);
   const [lastParams, setLastParams]           = useState<SearchParams | null>(null);
@@ -858,7 +859,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     }
   }, [msgApi]);
 
-  const fetchSysTxns = useCallback(async (params: SearchParams, txnType?: string) => {
+  const fetchSysTxns = useCallback(async (params: SearchParams, txnType?: string, cmFilter?: string) => {
     setLoadingSys(true);
 
     // CM fetches from the external transactions endpoint (different schema)
@@ -868,27 +869,30 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       if (params.dateFrom)    q.set('date_from',    params.dateFrom.format('YYYY-MM-DD'));
       if (params.dateTo)      q.set('date_to',      params.dateTo.format('YYYY-MM-DD'));
       if (params.reference)   q.set('reference',    params.reference);
+      const rf = cmFilter ?? 'UNRECONCILED';
+      if (rf !== 'ALL') q.set('recon_status', rf);
       q.set('row_limit', '500');
       try {
         const res  = await fetch(`${EXT_TXN_URL}?${q.toString()}`);
         const data = await parseApexJson(res);
         const items = Array.isArray(data) ? data : (data.items ?? []);
         setSysTxns(items.map((i: any) => ({
-          txnId:        i.externalTransactionId ?? 0,
-          txnNumber:    String(i.externalTransactionId ?? ''),
-          txnDate:      i.transactionDate ?? '',
-          amount:       i.amount          ?? 0,
-          currencyCode: i.currencyCode    ?? '',
-          businessUnit: i.businessUnitName ?? '',
+          txnId:          i.externalTransactionId ?? 0,
+          txnNumber:      String(i.externalTransactionId ?? ''),
+          txnDate:        i.transactionDate ?? '',
+          amount:         i.amount          ?? 0,
+          currencyCode:   i.currencyCode    ?? '',
+          businessUnit:   i.businessUnitName ?? '',
           bankAccountName: i.bankAccountName ?? '',
-          source:       i.source          ?? 'ORA_MAN',
-          txnStatus:    i.status          ?? '',
-          payee:        i.description     ?? '',
-          reference:    i.description     ?? '',
+          source:         i.source          ?? 'ORA_MAN',
+          txnStatus:      i.status          ?? '',
+          reconciledFlag: i.reconciledFlag  ?? i.RECONCILED_FLAG ?? 'N',
+          payee:          i.description     ?? '',
+          reference:      i.description     ?? '',
           assetAccountCombination:  i.assetAccountCombination  ?? '',
           offsetAccountCombination: i.offsetAccountCombination ?? '',
-          createdBy:    i.createdBy       ?? '',
-          creationDate: i.creationDate    ?? '',
+          createdBy:    i.createdBy    ?? '',
+          creationDate: i.creationDate ?? '',
         })) as SysTxn[]);
       } catch (err) {
         msgApi.error('Network error loading external transactions');
@@ -1016,8 +1020,8 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       dateTo:   lastParams?.dateTo   ?? null,
     };
     fetchStmtLines(lineParams, stmtReconFilter);
-    fetchSysTxns(txnParams, txnSourceFilter);
-  }, [lastParams, fetchStmtLines, fetchSysTxns, txnSourceFilter, stmtReconFilter]);
+    fetchSysTxns(txnParams, txnSourceFilter, cmReconFilter);
+  }, [lastParams, fetchStmtLines, fetchSysTxns, txnSourceFilter, stmtReconFilter, cmReconFilter]);
 
   const handleReset = useCallback(() => {
     setStatements([]);
@@ -1098,7 +1102,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       handleSelectStatement(selectedStatement);
     } else if (lastParams) {
       fetchStmtLines(lastParams, stmtReconFilter);
-      fetchSysTxns(lastParams);
+      fetchSysTxns(lastParams, txnSourceFilter, cmReconFilter);
     }
   }, [selectedStmtKeys, selectedSysKeys, stmtLines, sysTxns, txnSourceFilter, lastParams, selectedStatement, handleSelectStatement, fetchStmtLines, fetchSysTxns, msgApi]);
 
@@ -1215,7 +1219,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     if (allDone) {
       setSelectedStmtKeys([]); setSelectedSysKeys([]);
       if (selectedStatement) handleSelectStatement(selectedStatement);
-      else if (lastParams) { fetchStmtLines(lastParams, stmtReconFilter); fetchSysTxns(lastParams); }
+      else if (lastParams) { fetchStmtLines(lastParams, stmtReconFilter); fetchSysTxns(lastParams, txnSourceFilter, cmReconFilter); }
     }
   }, [reconCalls, executeReconCall, selectedStatement, lastParams, handleSelectStatement, fetchStmtLines, fetchSysTxns, stmtReconFilter]);
 
@@ -1497,7 +1501,8 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     { title: 'Description', dataIndex: 'payee',     key: 'desc',   width: 160, render: (v: string) => <Tooltip title={v}><Text style={{ fontSize: 11 }} ellipsis>{v || '—'}</Text></Tooltip> },
     { title: 'Asset Acct',  dataIndex: 'assetAccountCombination',  key: 'asset',  width: 160, render: (v: string) => <Tooltip title={v}><Text style={{ fontSize: 10, fontFamily: 'monospace' }} ellipsis>{v || '—'}</Text></Tooltip> },
     { title: 'Offset Acct', dataIndex: 'offsetAccountCombination', key: 'offset', width: 160, render: (v: string) => <Tooltip title={v}><Text style={{ fontSize: 10, fontFamily: 'monospace' }} ellipsis>{v || '—'}</Text></Tooltip> },
-    { title: 'Status',      dataIndex: 'txnStatus', key: 'status', width: 70,  render: (v: string) => <Tag color={v === 'UNR' ? 'blue' : 'green'} style={{ fontSize: 10 }}>{v || '—'}</Tag> },
+    { title: 'Recon',       dataIndex: 'reconciledFlag', key: 'recon', width: 70,
+      render: (v: string) => <Tag color={v === 'Y' ? 'green' : 'default'} style={{ fontSize: 10 }}>{v === 'Y' ? 'Recon' : 'Unrecon'}</Tag> },
   ];
 
   const sysColumns =
@@ -1751,6 +1756,25 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
             }
             extra={
               <Space size={8}>
+                {/* CM recon status toggle — only visible when CM tab active */}
+                {txnSourceFilter === 'CM' && (
+                  <Segmented
+                    size="small"
+                    value={cmReconFilter}
+                    onChange={(v) => {
+                      const rf = v as 'ALL' | 'UNRECONCILED' | 'RECONCILED';
+                      setCmReconFilter(rf);
+                      setSysTxns([]);
+                      setSelectedSysKeys([]);
+                      if (lastParams) fetchSysTxns(lastParams, 'CM', rf);
+                    }}
+                    options={[
+                      { label: 'All',     value: 'ALL' },
+                      { label: 'Unrecon', value: 'UNRECONCILED' },
+                      { label: 'Recon',   value: 'RECONCILED' },
+                    ]}
+                  />
+                )}
                 <Segmented
                   size="small"
                   value={txnSourceFilter}
@@ -1759,7 +1783,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                     setTxnSourceFilter(filter);
                     setSysTxns([]);
                     setSelectedSysKeys([]);
-                    if (lastParams) fetchSysTxns(lastParams, filter);
+                    if (lastParams) fetchSysTxns(lastParams, filter, cmReconFilter);
                   }}
                   options={[
                     { label: 'All', value: 'ALL' },
@@ -1787,7 +1811,13 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
               loading={loadingSys}
               columns={sysColumns}
               dataSource={filteredSysTxns}
-              rowSelection={sysRowSelection}
+              rowSelection={{
+                ...sysRowSelection,
+                // For CM: only allow selecting unreconciled rows
+                getCheckboxProps: (r: SysTxn) => ({
+                  disabled: txnSourceFilter === 'CM' && r.reconciledFlag === 'Y',
+                }),
+              }}
               pagination={false}
               scroll={{ x: 560, y: 420 }}
               locale={{
