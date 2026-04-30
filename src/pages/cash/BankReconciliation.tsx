@@ -845,7 +845,32 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       const res  = await fetch(`${APEX_BASE}/cash/reconciliation/systxns?${q.toString()}`);
       const data = await parseApexJson(res);
       if (data.status === 'success') {
-        setSysTxns((data.items ?? []) as SysTxn[]);
+        setSysTxns((data.items ?? []).map((i: any) => ({
+          ...i,
+          txnId:              i.txnId              ?? i.txn_id              ?? i.TXN_ID              ?? 0,
+          txnNumber:          i.txnNumber          ?? i.txn_number          ?? i.TXN_NUMBER          ?? '',
+          txnDate:            i.txnDate            ?? i.txn_date            ?? i.TXN_DATE            ?? '',
+          amount:             i.amount             ?? i.AMOUNT              ?? 0,
+          currencyCode:       i.currencyCode       ?? i.currency_code       ?? i.CURRENCY_CODE       ?? '',
+          businessUnit:       i.businessUnit       ?? i.business_unit       ?? i.BUSINESS_UNIT       ?? '',
+          source:             i.source             ?? i.SOURCE              ?? '',
+          txnStatus:          i.txnStatus          ?? i.txn_status          ?? i.TXN_STATUS          ?? '',
+          reference:          i.reference          ?? i.REFERENCE           ?? '',
+          payee:              i.payee              ?? i.PAYEE               ?? '',
+          supplierNumber:     i.supplierNumber     ?? i.supplier_number     ?? i.SUPPLIER_NUMBER     ?? '',
+          paymentMethod:      i.paymentMethod      ?? i.payment_method      ?? i.PAYMENT_METHOD      ?? '',
+          paymentType:        i.paymentType        ?? i.payment_type        ?? i.PAYMENT_TYPE        ?? '',
+          clearingDate:       i.clearingDate       ?? i.clearing_date       ?? i.CLEARING_DATE       ?? '',
+          customerName:       i.customerName       ?? i.customer_name       ?? i.CUSTOMER_NAME       ?? '',
+          customerNumber:     i.customerNumber     ?? i.customer_number     ?? i.CUSTOMER_NUMBER     ?? '',
+          receiptMethod:      i.receiptMethod      ?? i.receipt_method      ?? i.RECEIPT_METHOD      ?? '',
+          accountCode:        i.accountCode        ?? i.account_code        ?? i.ACCOUNT_CODE        ?? '',
+          accountDescription: i.accountDescription ?? i.account_description ?? i.ACCOUNT_DESCRIPTION ?? '',
+          journalCategory:    i.journalCategory    ?? i.journal_category    ?? i.JOURNAL_CATEGORY    ?? '',
+          lineDescription:    i.lineDescription    ?? i.line_description    ?? i.LINE_DESCRIPTION    ?? '',
+          reconciledFlag:     i.reconciledFlag     ?? i.reconciled_flag     ?? i.RECONCILED_FLAG     ?? '',
+          bankAccountName:    i.bankAccountName    ?? i.bank_account_name   ?? i.BANK_ACCOUNT_NAME   ?? '',
+        })) as SysTxn[]);
       } else {
         msgApi.error(data.message ?? 'Failed to load system transactions');
       }
