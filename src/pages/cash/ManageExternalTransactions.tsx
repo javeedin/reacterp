@@ -220,6 +220,8 @@ const ExternalTxnForm: React.FC<{
     if (extTxnMode === 'multiple') {
       const invalid = extTxnLines.filter(l => !l.amount);
       if (invalid.length > 0) { message.error('All lines must have an amount'); return; }
+      const missingOffset = extTxnLines.filter(l => !l.offsetAccount);
+      if (missingOffset.length > 0) { message.error('All lines must have an offset account'); return; }
       setSaving(true);
       const baseRef = values.referenceText?.trim() || '';
       const baseHeader = {
@@ -508,7 +510,9 @@ const ExternalTxnForm: React.FC<{
                   style={{ marginBottom: 0 }}
                 >
                   <div style={{ display: 'flex', gap: 0, alignItems: 'center' }}>
-                    <Form.Item name="offsetAccountCombination" noStyle>
+                    <Form.Item name="offsetAccountCombination" noStyle
+                      rules={[{ required: !isEdit, message: 'Offset account is required' }]}
+                    >
                       <Input
                         readOnly disabled={isEdit}
                         placeholder={isEdit ? '—' : 'Select offset account'}
