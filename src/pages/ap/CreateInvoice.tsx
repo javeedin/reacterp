@@ -2311,7 +2311,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const fetchTaxCodes = useCallback(async (businessUnit: string) => {
     if (!businessUnit) { setTaxCodes([]); return; }
     try {
-      const params = new URLSearchParams({ business_unit: businessUnit, applicability: 'PURCHASES' });
+      const params = new URLSearchParams({ business_unit: businessUnit });
       const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/tax/taxes/bybu?${params}`);
       const data = await res.json();
       const items: any[] = data?.items ?? [];
@@ -4869,10 +4869,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               onChange={(v) => updateLine(record.key, 'taxClassification', v)}
               style={{ width: '100%' }}
               variant="borderless"
-              placeholder={taxCodes.length === 0 ? 'Select BU first' : ''}
+              placeholder={!buSelected ? 'Select BU first' : ''}
               allowClear
-              disabled={isReadOnly || taxCodes.length === 0}
-              notFoundContent={taxCodes.length === 0 ? 'Select a business unit to load taxes' : 'No taxes found'}
+              disabled={isReadOnly || !buSelected}
+              notFoundContent={!buSelected ? 'Select a business unit to load taxes' : 'No taxes configured for this BU'}
             >
               {taxCodes.map(t => (
                 <Option key={t.taxCode} value={t.taxCode}>
