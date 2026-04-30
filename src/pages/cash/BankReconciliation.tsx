@@ -60,6 +60,8 @@ interface StmtLine {
   reconDate?: string;
   bankAccountName: string;
   currencyCode?: string;
+  externalTxnId?: number;
+  externalTxnRef?: string;
 }
 
 interface SysTxn {
@@ -601,8 +603,27 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       setExtTxnResponse(data);
       setExtTxnRawError(res.ok ? '' : `HTTP ${res.status} — ${text}`);
       if (data.status === 'success') {
-        msgApi.success('External transaction created successfully');
+        const extTxnId: number | null = data.externalTransactionId ?? data.items?.[0]?.ExternalTransactionId ?? null;
+        // Update each selected statement line with the ext txn id
+        if (extTxnId && selectedStatement) {
+          const lineIds = stmtLines.filter(l => selectedStmtKeys.includes(l.lineId)).map(l => l.lineId);
+          await Promise.allSettled(lineIds.map(lineId =>
+            fetch(`${APEX_BASE}/cash/reconciliation/stmtlines/${lineId}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ExternalTxnId: extTxnId, ExternalTxnRef: values.referenceText }),
+            })
+          ));
+          // Update local state so lines show the ext txn ref and button is disabled
+          setStmtLines(prev => prev.map(l =>
+            selectedStmtKeys.includes(l.lineId)
+              ? { ...l, externalTxnId: extTxnId, externalTxnRef: values.referenceText }
+              : l
+          ));
+        }
+        msgApi.success(`External transaction ${extTxnId ? `#${extTxnId} ` : ''}created successfully`);
         setExtTxnOpen(false);
+        setSelectedStmtKeys([]);
       } else {
         msgApi.error(data.message || 'Failed to create external transaction');
       }
@@ -672,6 +693,42 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   }, [msgApi]);
 
   const fetchSysTxns = useCallback(async (params: SearchParams, txnType?: string) => {
+    setLoadingSys(true);
+
+    // CM = external/manual transactions from cash/externaltransactions
+    if (txnType === 'CM') {
+      try {
+        const q = new URLSearchParams();
+        if (params.bankAccount) q.set('bank_account', params.bankAccount);
+        if (params.dateFrom)    q.set('date_from',    params.dateFrom.format('YYYY-MM-DD'));
+        if (params.dateTo)      q.set('date_to',      params.dateTo.format('YYYY-MM-DD'));
+        q.set('status', 'UNR');
+        q.set('row_limit', '500');
+        const res  = await fetch(`${EXT_TXN_URL}?${q.toString()}`);
+        const data = await res.json();
+        const items = (data.items ?? []) as any[];
+        setSysTxns(items.map((i: any) => ({
+          txnId:           i.ExternalTransactionId ?? i.external_transaction_id ?? 0,
+          txnNumber:       i.ReferenceText         ?? i.reference_text          ?? '',
+          reference:       i.ReferenceText         ?? '',
+          txnDate:         i.TransactionDate       ?? i.transaction_date        ?? '',
+          amount:          i.Amount                ?? i.amount                  ?? 0,
+          currencyCode:    i.CurrencyCode          ?? i.currency_code           ?? '',
+          businessUnit:    i.BusinessUnitName      ?? i.business_unit_name      ?? '',
+          bankAccountName: i.BankAccountName       ?? i.bank_account_name       ?? '',
+          txnStatus:       i.Status                ?? i.status                  ?? '',
+          source:          'CM',
+          payee:           i.Description           ?? '',
+        })));
+      } catch (err) {
+        msgApi.error('Failed to load CM transactions');
+        console.error(err);
+      } finally {
+        setLoadingSys(false);
+      }
+      return;
+    }
+
     const q = new URLSearchParams();
     if (params.bankAccount) q.set('bank_account', params.bankAccount);
     if (params.dateFrom)   q.set('date_from',    params.dateFrom.format('YYYY-MM-DD'));
@@ -683,7 +740,6 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     q.set('reconciled', 'N');
     q.set('row_limit', '500');
 
-    setLoadingSys(true);
     try {
       const res  = await fetch(`${APEX_BASE}/cash/reconciliation/systxns?${q.toString()}`);
       const data = await parseApexJson(res);
@@ -908,6 +964,14 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
         </Tooltip>
       ),
     },
+    {
+      title: 'Ext Txn',
+      key: 'extTxn',
+      width: 90,
+      render: (_: any, r: StmtLine) => r.externalTxnId
+        ? <Tooltip title={`Ref: ${r.externalTxnRef || ''}`}><Tag color="purple" style={{ fontSize: 10, margin: 0 }}>#{r.externalTxnId}</Tag></Tooltip>
+        : null,
+    },
   ];
 
   const SOURCE_COLORS: Record<string, string> = {
@@ -1103,10 +1167,20 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     colBU,
   ];
 
+  const sysColumnsCM: ColumnsType<SysTxn> = [
+    { title: 'Date',      dataIndex: 'txnDate',   key: 'date',   width: 90,  render: fmtDate },
+    { title: 'Ref',       dataIndex: 'txnNumber', key: 'ref',    width: 130, render: (v: string) => <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{v}</Text> },
+    { title: 'Amount',    dataIndex: 'amount',    key: 'amt',    width: 100, align: 'right' as const, render: (v: number, r: SysTxn) => <Text style={{ fontSize: 11, color: REDWOOD.info }}>{fmtAmount(v, r.currencyCode)}</Text> },
+    { title: 'BU',        dataIndex: 'businessUnit', key: 'bu', width: 120, render: (v: string) => <Text style={{ fontSize: 10 }}>{v || '—'}</Text> },
+    { title: 'Desc',      dataIndex: 'payee',     key: 'desc',   width: 160, render: (v: string) => <Tooltip title={v}><Text style={{ fontSize: 11 }} ellipsis>{v || '—'}</Text></Tooltip> },
+    { title: 'Status',    dataIndex: 'txnStatus', key: 'status', width: 70,  render: (v: string) => <Tag color={v === 'UNR' ? 'blue' : 'green'} style={{ fontSize: 10 }}>{v || '—'}</Tag> },
+  ];
+
   const sysColumns =
     txnSourceFilter === 'AP_PAYMENT' ? sysColumnsAP :
     txnSourceFilter === 'AR_RECEIPT' ? sysColumnsAR :
     txnSourceFilter === 'GL_JOURNAL' ? sysColumnsGL :
+    txnSourceFilter === 'CM'         ? sysColumnsCM :
     sysColumnsAll;
 
   const filteredSysTxns = txnSourceFilter === 'ALL'
@@ -1229,16 +1303,29 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                   <Badge count={stmtLines.length} style={{ backgroundColor: REDWOOD.info }} showZero />
                 </Space>
                 <Space size={4}>
-                  <Tooltip title={selectedStmtKeys.length > 0 ? `Create external transaction for ${selectedStmtKeys.length} selected line(s)` : 'Select lines to create external transaction'}>
-                    <Button
-                      size="small"
-                      icon={<PlusOutlined />}
-                      style={{ fontSize: 11, background: REDWOOD.primary, borderColor: REDWOOD.primary, color: '#fff' }}
-                      onClick={openExtTxnModal}
-                    >
-                      Create Ext Txn
-                    </Button>
-                  </Tooltip>
+                  {(() => {
+                    const selectedLines = stmtLines.filter(l => selectedStmtKeys.includes(l.lineId));
+                    const alreadyLinked = selectedLines.some(l => l.externalTxnId);
+                    const noSelection  = selectedLines.length === 0;
+                    const tip = alreadyLinked
+                      ? 'One or more selected lines already have an external transaction'
+                      : noSelection
+                      ? 'Select statement lines to create external transaction'
+                      : `Create external transaction for ${selectedLines.length} line(s)`;
+                    return (
+                      <Tooltip title={tip}>
+                        <Button
+                          size="small"
+                          icon={<PlusOutlined />}
+                          disabled={noSelection || alreadyLinked}
+                          style={{ fontSize: 11, background: noSelection || alreadyLinked ? undefined : REDWOOD.primary, borderColor: noSelection || alreadyLinked ? undefined : REDWOOD.primary, color: noSelection || alreadyLinked ? undefined : '#fff' }}
+                          onClick={openExtTxnModal}
+                        >
+                          Create Ext Txn
+                        </Button>
+                      </Tooltip>
+                    );
+                  })()}
                   {lastStmtLinesUrl && (
                     <Tooltip title="View Statement Lines API">
                       <Button
@@ -1311,12 +1398,19 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                 <Segmented
                   size="small"
                   value={txnSourceFilter}
-                  onChange={(v) => setTxnSourceFilter(v as string)}
+                  onChange={(v) => {
+                    const filter = v as string;
+                    setTxnSourceFilter(filter);
+                    setSysTxns([]);
+                    setSelectedSysKeys([]);
+                    if (lastParams) fetchSysTxns(lastParams, filter);
+                  }}
                   options={[
                     { label: 'All', value: 'ALL' },
                     { label: 'AP', value: 'AP_PAYMENT' },
                     { label: 'AR', value: 'AR_RECEIPT' },
                     { label: 'GL', value: 'GL_JOURNAL' },
+                    { label: 'CM', value: 'CM' },
                   ]}
                 />
                 <Tooltip title="API Inspector — view endpoint & parameters">
