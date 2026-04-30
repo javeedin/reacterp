@@ -135,12 +135,27 @@ interface SearchParams {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-const parseApexJson = async (res: Response): Promise<{ status: string; items?: unknown[]; message?: string }> => {
+const parseApexJson = async (res: Response): Promise<{ status: string; items?: unknown[]; message?: string; httpStatus?: number }> => {
   const text = await res.text();
-  const fixed = text
-    .replace(/:(-?)\.(\d)/g, ':$10.$2')
-    .replace(/(\d)\.([,}\]])/g, '$1$2');
-  return JSON.parse(fixed);
+  if (!text.trim().startsWith('{') && !text.trim().startsWith('[')) {
+    return {
+      status:     res.ok ? 'success' : 'error',
+      message:    `HTTP ${res.status} ${res.statusText} — server returned non-JSON response. Check that the ORDS handler exists.\n\n${text.slice(0, 300)}`,
+      httpStatus: res.status,
+    };
+  }
+  try {
+    const fixed = text
+      .replace(/:(-?)\.(\d)/g, ':$10.$2')
+      .replace(/(\d)\.([,}\]])/g, '$1$2');
+    return JSON.parse(fixed);
+  } catch {
+    return {
+      status:     'error',
+      message:    `JSON parse error. Response was:\n${text.slice(0, 300)}`,
+      httpStatus: res.status,
+    };
+  }
 };
 
 const fmtAmount = (v?: number | null, ccy?: string): string => {
