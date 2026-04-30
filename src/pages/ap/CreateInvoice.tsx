@@ -518,12 +518,15 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   });
   const [taxRate, setTaxRate] = useState<number>(0);
   const [taxCodes, setTaxCodes] = useState<{ taxCode: string; taxName: string; taxRate: number; taxAccount: string }[]>([]);
-  const taxRateMapRef = useRef<Record<string, number>>({});
+  const taxRateMapRef    = useRef<Record<string, number>>({});
+  const taxAccountMapRef = useRef<Record<string, string>>({});
   const taxRateMap = useMemo(() => {
-    const map: Record<string, number> = {};
-    taxCodes.forEach(t => { map[t.taxCode] = t.taxRate; });
-    taxRateMapRef.current = map;
-    return map;
+    const rateMap: Record<string, number> = {};
+    const acctMap: Record<string, string> = {};
+    taxCodes.forEach(t => { rateMap[t.taxCode] = t.taxRate; acctMap[t.taxCode] = t.taxAccount; });
+    taxRateMapRef.current    = rateMap;
+    taxAccountMapRef.current = acctMap;
+    return rateMap;
   }, [taxCodes]);
 
   // Check if all required header fields are filled
@@ -1126,11 +1129,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       const taxRate = taxRateMapRef.current[l.taxClassification] ?? getTaxRateForClassification(l.taxClassification);
       if (taxRate > 0) {
         const taxAmt = Math.round(amt * taxRate / 100 * 100) / 100;
+        const taxAcct = l.taxAccountCombination || taxAccountMapRef.current[l.taxClassification] || 'Tax Recoverable';
         result.push({
           lineNumber: lineNum++,
           lineType: isCreditMemo ? 'CR' : 'DR',
           accountingClass: 'TAX',
-          accountCombination: 'Tax Recoverable',
+          accountCombination: taxAcct,
           enteredDr:   isCreditMemo ? 0       : taxAmt,
           enteredCr:   isCreditMemo ? taxAmt  : 0,
           accountedDr: isCreditMemo ? 0       : taxAmt,
@@ -3412,6 +3416,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           const lineRate = taxRateMapRef.current[updated.taxClassification] ?? getTaxRateForClassification(updated.taxClassification);
           updated.taxAmount = Math.round(lineAmount * (lineRate / 100) * 100) / 100;
         }
+        if (field === 'taxClassification') {
+          updated.taxAccountCombination = taxAccountMapRef.current[updated.taxClassification] || '';
+        }
         // Auto-derive multiperiod dates when accounting date changes
         if (field === 'accountingDate' && value) {
           updated.startDate = value;
@@ -3793,6 +3800,22 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       subItems: linesWithAmountNoTax.map((l) => ({
         label: `Line ${l.lineNumber}`,
         detail: `${l.description || 'Item'} — ${formatAmount(l.amount)}`,
+      })),
+    });
+
+    // 6b. Tax account must be set for every taxed line
+    const linesWithTaxNoAccount = lines.filter(
+      (l) => l.taxClassification && !l.taxAccountCombination && !taxAccountMapRef.current[l.taxClassification]
+    );
+    results.push({
+      label: 'Tax GL account on taxed lines',
+      passed: linesWithTaxNoAccount.length === 0,
+      detail: linesWithTaxNoAccount.length > 0
+        ? `${linesWithTaxNoAccount.length} line(s) have a tax code with no GL account assigned in Tax Setup`
+        : undefined,
+      subItems: linesWithTaxNoAccount.map((l) => ({
+        label: `Line ${l.lineNumber}`,
+        detail: `Tax code "${l.taxClassification}" has no account — assign one in Tax Setup → BU Assignments`,
       })),
     });
 
@@ -4833,34 +4856,43 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       title: 'Tax Classification',
       dataIndex: 'taxClassification',
       key: 'taxClassification',
-      width: 160,
-      render: (val: string, record: InvoiceLine) => (
-        <Select
-          size="small"
-          value={val || undefined}
-          onChange={(v) => updateLine(record.key, 'taxClassification', v)}
-          style={{ width: '100%' }}
-          variant="borderless"
-          placeholder=""
-          allowClear
-          disabled={isReadOnly}
-        >
-          {taxCodes.length > 0
-            ? taxCodes.map(t => (
+      width: 180,
+      render: (val: string, record: InvoiceLine) => {
+        const taxEntry   = taxCodes.find(t => t.taxCode === val);
+        const taxAcct    = record.taxAccountCombination || taxEntry?.taxAccount || '';
+        const missingAcct = val && !taxAcct;
+        return (
+          <div>
+            <Select
+              size="small"
+              value={val || undefined}
+              onChange={(v) => updateLine(record.key, 'taxClassification', v)}
+              style={{ width: '100%' }}
+              variant="borderless"
+              placeholder={taxCodes.length === 0 ? 'Select BU first' : ''}
+              allowClear
+              disabled={isReadOnly || taxCodes.length === 0}
+              notFoundContent={taxCodes.length === 0 ? 'Select a business unit to load taxes' : 'No taxes found'}
+            >
+              {taxCodes.map(t => (
                 <Option key={t.taxCode} value={t.taxCode}>
                   {t.taxCode}{t.taxRate > 0 ? ` (${t.taxRate}%)` : ''}
                 </Option>
-              ))
-            : [
-                <Option key="VAT 5%" value="VAT 5%">VAT 5%</Option>,
-                <Option key="Zero Rated" value="Zero Rated">Zero Rated</Option>,
-                <Option key="Exempt" value="Exempt">Exempt</Option>,
-                <Option key="Reverse Charge" value="Reverse Charge">Reverse Charge</Option>,
-                <Option key="Out of Scope" value="Out of Scope">Out of Scope</Option>,
-              ]
-          }
-        </Select>
-      ),
+              ))}
+            </Select>
+            {taxAcct && (
+              <Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 1, lineHeight: 1.3 }}>
+                {taxAcct}
+              </Text>
+            )}
+            {missingAcct && (
+              <Text style={{ fontSize: 10, display: 'block', marginTop: 1, color: '#faad14' }}>
+                ⚠ No tax account assigned
+              </Text>
+            )}
+          </div>
+        );
+      },
     },
     {
       title: 'Tax Amount',
