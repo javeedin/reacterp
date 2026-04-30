@@ -517,7 +517,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     setExtAssetDesc('');
     setExtOffsetDesc('');
     setExtBankAccounts([]);
-    setExtTxnMode('single');
+    setExtTxnMode(selectedLines.length > 1 ? 'multiple' : 'single');
     setExtTxnLines(
       selectedLines.length > 0
         ? selectedLines.map((l, i) => ({
@@ -792,7 +792,12 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       const res  = await fetch(stmtLinesUrl);
       const data = await parseApexJson(res);
       if (data.status === 'success') {
-        setStmtLines((data.items ?? []) as StmtLine[]);
+        setStmtLines((data.items ?? []).map((i: any) => ({
+          ...i,
+          // Oracle may return snake_case or UPPERCASE — normalise to camelCase
+          externalTxnId:  i.externalTxnId  ?? i.external_txn_id  ?? i.EXTERNAL_TXN_ID  ?? undefined,
+          externalTxnRef: i.externalTxnRef ?? i.external_txn_ref ?? i.EXTERNAL_TXN_REF ?? undefined,
+        })) as StmtLine[]);
       } else {
         msgApi.error(data.message ?? 'Failed to load statement lines');
       }
