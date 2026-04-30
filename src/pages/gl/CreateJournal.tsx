@@ -52,7 +52,7 @@ import type { Dayjs } from 'dayjs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
-import { APEX_DB_CONFIG } from '../../config/apexConfig';
+import { APEX_DB_CONFIG } from '../../config/api.config';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
