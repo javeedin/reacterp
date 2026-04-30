@@ -403,7 +403,7 @@ const ManageJournals: React.FC = () => {
       try {
         const encodedLedgerName = encodeURIComponent(selectedLedger.ledger_name);
         const response = await fetch(
-          `https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/periodsstatus/create?P_LEDGER_NAME=${encodedLedgerName}&P_APPLICATION_NAME=General Ledger`
+          `${APEX_DB_CONFIG.baseUrl}/gl/fiscalperiods?ledger_name=${encodedLedgerName}&application=GL`
         );
         const data = await response.json();
         if (data.items && data.items.length > 0) {
