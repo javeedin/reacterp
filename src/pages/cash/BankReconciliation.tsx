@@ -492,11 +492,11 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   }, []);
 
   // ── Create External Transaction modal ──────────────────────────────────────
-  const [extTxnOpen, setExtTxnOpen]         = useState(false);
-  const [extTxnForm]                        = Form.useForm();
-  const extTxnDirection   = Form.useWatch('transactionDirection',    extTxnForm) ?? 'DR';
-  const extTxnAssetAcct   = Form.useWatch('assetAccountCombination', extTxnForm) ?? '';
-  const extTxnOffsetAcct  = Form.useWatch('offsetAccountCombination', extTxnForm) ?? '';
+  const [extTxnOpen, setExtTxnOpen]               = useState(false);
+  const [extTxnForm]                              = Form.useForm();
+  const [extTxnDirection,  setExtTxnDirection]    = useState<'DR' | 'CR'>('DR');
+  const [extTxnAssetAcct,  setExtTxnAssetAcct]    = useState('');
+  const [extTxnOffsetAcct, setExtTxnOffsetAcct]   = useState('');
   const [extTxnSaving, setExtTxnSaving]         = useState(false);
   const [extTxnPayload, setExtTxnPayload]       = useState<any>(null);
   const [extTxnResponse, setExtTxnResponse]     = useState<any>(null);
@@ -553,6 +553,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     extTxnForm.setFieldValue('currencyCode', match.currency || 'AED');
     if (match.cashAccount) {
       extTxnForm.setFieldValue('assetAccountCombination', match.cashAccount);
+      setExtTxnAssetAcct(match.cashAccount);
       try {
         const r    = await validateAccountCode(match.cashAccount);
         const seg4 = Object.values(r.segmentDetails)[3];
@@ -576,6 +577,9 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     setExtTxnCreatedId(null);
     setExtAcctRunning(false);
     setExtAcctResult(null);
+    setExtTxnDirection('DR');
+    setExtTxnAssetAcct('');
+    setExtTxnOffsetAcct('');
 
     // Auto-fill reference from selected statement lines
     const selectedLines2 = stmtLines.filter(l => selectedStmtKeys.includes(l.lineId));
@@ -666,6 +670,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       transactionType:          'MISC',
       assetAccountCombination:  cashAccountCombination,
     });
+    if (cashAccountCombination) setExtTxnAssetAcct(cashAccountCombination);
 
     setExtTxnOpen(true);
   }, [stmtLines, selectedStmtKeys, selectedStatement, bankAccounts, businessUnits, extTxnForm]);
@@ -2393,6 +2398,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                     { label: '▲ Money In',  value: 'DR' },
                     { label: '▼ Money Out', value: 'CR' },
                   ]}
+                  onChange={(v) => setExtTxnDirection(v as 'DR' | 'CR')}
                 />
               </Form.Item>
             </Col>
@@ -2658,6 +2664,8 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
               extCoaTarget === 'asset' ? 'assetAccountCombination' : 'offsetAccountCombination',
               code
             );
+            if (extCoaTarget === 'asset') setExtTxnAssetAcct(code);
+            else setExtTxnOffsetAcct(code);
             validateAccountCode(code).then(r => {
               const seg4 = Object.values(r.segmentDetails)[3];
               const desc = (seg4 as any)?.description || '';
