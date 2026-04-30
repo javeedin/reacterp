@@ -577,7 +577,8 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     setExtTxnCreatedId(null);
     setExtAcctRunning(false);
     setExtAcctResult(null);
-    setExtTxnDirection('DR');
+    const autoDir = (firstLine?.transactionCode === 'CR' ? 'CR' : 'DR') as 'DR' | 'CR';
+    setExtTxnDirection(autoDir);
     setExtTxnAssetAcct('');
     setExtTxnOffsetAcct('');
 
@@ -669,6 +670,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       description:              firstLine?.description || '',
       transactionType:          'MISC',
       assetAccountCombination:  cashAccountCombination,
+      transactionDirection:     autoDir,
     });
     if (cashAccountCombination) setExtTxnAssetAcct(cashAccountCombination);
 
@@ -2392,18 +2394,10 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item label="Transaction Direction" style={{ marginBottom: 8 }}>
-                <Segmented size="small"
-                  value={extTxnDirection}
-                  options={[
-                    { label: '▲ Money In',  value: 'DR' },
-                    { label: '▼ Money Out', value: 'CR' },
-                  ]}
-                  onChange={(v) => {
-                    setExtTxnDirection(v as 'DR' | 'CR');
-                    extTxnForm.setFieldValue('transactionDirection', v);
-                  }}
-                />
+              <Form.Item label="Direction (auto)" style={{ marginBottom: 8 }}>
+                <Tag color={extTxnDirection === 'DR' ? 'blue' : 'volcano'} style={{ fontSize: 13, padding: '2px 12px' }}>
+                  {extTxnDirection === 'DR' ? '▲ Money In (DR)' : '▼ Money Out (CR)'}
+                </Tag>
               </Form.Item>
             </Col>
           </Row>
