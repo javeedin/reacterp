@@ -1261,6 +1261,148 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     setSelectedRowKeys([]);
   };
 
+  // ── Single-row Create Accounting ──────────────────────────────────────────
+  const openSingleAcctModal = (txn: ExternalTxnRecord) => {
+    if (!txn.assetAccountCombination || !txn.offsetAccountCombination) {
+      message.warning('Missing cash/offset account — cannot create accounting.');
+      return;
+    }
+    const date = txn.transactionDate || txn.valueDate || dayjs().format('YYYY-MM-DD');
+    const absAmount = Math.abs(txn.amount ?? 0);
+    const direction = txn.transactionDirection ?? ((txn.amount ?? 0) >= 0 ? 'DR' : 'CR');
+    const drAccount = direction === 'DR' ? txn.assetAccountCombination : txn.offsetAccountCombination;
+    const crAccount = direction === 'DR' ? txn.offsetAccountCombination : txn.assetAccountCombination;
+    const row: BankAcctProgressRow = {
+      extTxnId:   txn.externalTransactionId,
+      txnDate:    date,
+      periodName: derivePeriodName(new Date(date)),
+      amount:     absAmount,
+      currency:   txn.currencyCode || 'AED',
+      drAccount,
+      crAccount,
+      bu:         txn.businessUnitName || '',
+      status:     'pending',
+    };
+    setSingleAcctProgress([row]);
+    setSingleAcctDone(false);
+    setSingleAcctModalOpen(true);
+  };
+
+  const runSingleAccounting = async () => {
+    setSingleAcctRunning(true);
+    const updateRow = (extTxnId: number, partial: Partial<BankAcctProgressRow>) =>
+      setSingleAcctProgress(prev => prev.map(r => r.extTxnId === extTxnId ? { ...r, ...partial } : r));
+
+    for (const row of singleAcctProgress) {
+      if (row.status === 'skipped' || row.status === 'error') continue;
+      updateRow(row.extTxnId, { status: 'running' });
+      const txn = transactions.find(t => t.externalTransactionId === row.extTxnId);
+      if (!txn) { updateRow(row.extTxnId, { status: 'error', message: 'Transaction not found' }); continue; }
+      try {
+        const ledger = await fetchLedgerByBusinessUnit(txn.businessUnitName);
+        if (!ledger) { updateRow(row.extTxnId, { status: 'error', message: 'Could not resolve ledger for BU' }); continue; }
+        const direction = txn.transactionDirection ?? ((txn.amount ?? 0) >= 0 ? 'DR' : 'CR');
+        const absAmount = Math.abs(txn.amount ?? 0);
+        const drAccount = direction === 'DR' ? txn.assetAccountCombination : txn.offsetAccountCombination;
+        const crAccount = direction === 'DR' ? txn.offsetAccountCombination : txn.assetAccountCombination;
+        const slaPayload = buildPcBankTxnSlaPayload({
+          externalTransactionId:   txn.externalTransactionId,
+          referenceText:           txn.referenceText || String(txn.externalTransactionId),
+          transactionDate:         row.txnDate,
+          accountingDate:          row.txnDate,
+          periodName:              row.periodName,
+          currency:                txn.currencyCode || 'AED',
+          amount:                  absAmount,
+          assetAccountCombination: crAccount,
+          offsetAccountCombination: drAccount,
+          businessUnit:            txn.businessUnitName || undefined,
+          legalEntity:             txn.legalEntityName  || undefined,
+          ledgerId:                ledger.ledgerId,
+          ledgerName:              ledger.ledgerName,
+          createdBy:               currentUser,
+        });
+        const slaResult = await createAccounting(slaPayload);
+        const batchName = `BANK-${txn.externalTransactionId}-${Date.now()}`;
+        const glPayload = {
+          batch: {
+            batchName, batchDescription: `Bank External Txn ${txn.externalTransactionId}`,
+            ledgerName: ledger.ledgerName, ledgerId: ledger.ledgerId, status: 'NEW',
+            accountingPeriod: row.periodName, controlTotal: absAmount,
+            runningTotalDr: absAmount, runningTotalCr: absAmount,
+            batchSource: 'Cash Management', createdBy: currentUser,
+          },
+          header: {
+            ledgerId: ledger.ledgerId, ledgerName: ledger.ledgerName,
+            jeCategory: 'Cash Management', jeSource: 'Cash Management',
+            periodName: row.periodName,
+            journalName: `BANK-EXT-${txn.externalTransactionId}`,
+            description: `${txn.transactionType || 'Bank Txn'} – ${txn.referenceText || txn.externalTransactionId}`,
+            currencyCode: txn.currencyCode || 'AED',
+            currencyConversionType: 'User', currencyConversionDate: row.txnDate,
+            currencyConversionRate: txn.bankConversionRate || 1,
+            defaultEffectiveDate: row.txnDate,
+            status: 'NEW', runningTotalDr: absAmount, runningTotalCr: absAmount,
+            createdBy: currentUser,
+          },
+          lines: slaPayload.lines.map(l => ({
+            enteredDr: l.lineType === 'DR' ? l.enteredDr : null,
+            enteredCr: l.lineType === 'CR' ? l.enteredCr : null,
+            accountedDr: l.accountedDr || null, accountedCr: l.accountedCr || null,
+            statAmount: null, description: l.description,
+            currencyCode: l.currencyCode || txn.currencyCode || 'AED',
+            currencyConversionDate: row.txnDate,
+            currencyConversionRate: txn.bankConversionRate || 1,
+            userCurrencyConversionType: 'User',
+            accountCombination: l.accountCombination,
+            chartOfAccountsName: 'Chart of Accounts',
+            reference1: String(txn.externalTransactionId),
+            reference2: txn.referenceText || '',
+            reference3: l.accountingClass || null,
+            reference4: txn.businessUnitName || null,
+            reference5: null, createdBy: currentUser,
+          })),
+        };
+        const glRes = await fetch(`${APEX_BASE}/journals/create`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify(glPayload),
+        });
+        let glMsg = '';
+        if (glRes.ok) {
+          const glData = await glRes.json();
+          await fetch(`${APEX_BASE}/sla/accounting/post`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({
+              headerId: slaResult.headerId,
+              glBatchId: glData.batchId || 0,
+              glBatchName: batchName,
+              glHeaderId: glData.headerId || 0,
+              postedBy: currentUser,
+            }),
+          });
+          const flagUrl = `${APEX_BASE}/cash/externaltransactions/${txn.externalTransactionId}/acctflag?updated_by=${encodeURIComponent(currentUser)}`;
+          const flagRes = await fetch(flagUrl, { method: 'PUT', headers: { Accept: 'application/json' } });
+          const flagData = await flagRes.json().catch(() => ({})) as { success?: boolean; message?: string };
+          if (!flagRes.ok || !flagData.success) {
+            throw new Error(flagData.message || `Accounting flag update failed (HTTP ${flagRes.status})`);
+          }
+          setTransactions(prev => prev.map(t =>
+            t.externalTransactionId === txn.externalTransactionId ? { ...t, accountingFlag: 'Y' } : t
+          ));
+          glMsg = `GL: ${batchName}`;
+        } else {
+          glMsg = 'GL journal failed — SLA is Draft';
+        }
+        updateRow(row.extTxnId, { status: 'success', message: `SLA ${slaResult.headerId} — ${glMsg}` });
+      } catch (e: any) {
+        updateRow(row.extTxnId, { status: 'error', message: e?.message || 'Unexpected error' });
+      }
+    }
+    setSingleAcctRunning(false);
+    setSingleAcctDone(true);
+  };
+
   // ── Tab management ────────────────────────────────────────────────────────
   const openCreateTab = () => {
     const key   = newTabKey();
@@ -1333,9 +1475,25 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
         : <Tag color="default" style={{ fontSize: 11, margin: 0 }}>No</Tag>,
     },
     {
-      title: 'Actions', key: 'actions', width: 70, align: 'center',
+      title: 'Actions', key: 'actions', width: 130, align: 'center',
       render: (_, r) => (
-        <Button type="text" size="small" icon={<EditOutlined />} onClick={() => openEditTab(r)} />
+        <Space size={2}>
+          <Tooltip title="Edit"><Button type="text" size="small" icon={<EditOutlined />} onClick={() => openEditTab(r)} /></Tooltip>
+          {r.accountingFlag !== 'Y' && (
+            <Tooltip title="Create Accounting">
+              <Button type="text" size="small" icon={<AccountBookOutlined />}
+                style={{ color: REDWOOD.info }}
+                onClick={() => openSingleAcctModal(r)} />
+            </Tooltip>
+          )}
+          {r.accountingFlag === 'Y' && (
+            <Tooltip title="View Accounting">
+              <Button type="text" size="small" icon={<EyeOutlined />}
+                style={{ color: REDWOOD.success }}
+                onClick={() => { setViewAcctTxn(r); setViewAcctOpen(true); }} />
+            </Tooltip>
+          )}
+        </Space>
       ),
     },
   ];
@@ -1675,6 +1833,165 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
               style={{ marginTop: 12 }}
             />
           )}
+        </Modal>
+
+        {/* ── Single-Row Create Accounting Modal ──────────────────── */}
+        <Modal
+          title={<Space><AccountBookOutlined style={{ color: REDWOOD.info }} />Create Accounting</Space>}
+          open={singleAcctModalOpen}
+          onCancel={() => { if (!singleAcctRunning) setSingleAcctModalOpen(false); }}
+          footer={
+            singleAcctDone
+              ? <Button onClick={() => setSingleAcctModalOpen(false)}>Close</Button>
+              : [
+                  <Button key="cancel" onClick={() => setSingleAcctModalOpen(false)} disabled={singleAcctRunning}>Cancel</Button>,
+                  <Button key="run" type="primary" loading={singleAcctRunning}
+                    disabled={singleAcctProgress.every(r => r.status === 'skipped' || r.status === 'error')}
+                    style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+                    onClick={runSingleAccounting}>
+                    {singleAcctRunning ? 'Processing…' : 'Run Create Accounting'}
+                  </Button>,
+                ]
+          }
+          width={800}
+          destroyOnClose
+        >
+          <Table<BankAcctProgressRow>
+            dataSource={singleAcctProgress}
+            rowKey="extTxnId"
+            size="small"
+            pagination={false}
+            columns={[
+              { title: 'Ext Txn ID', dataIndex: 'extTxnId', width: 90,
+                render: v => <Text style={{ fontSize: 12 }}>{v}</Text> },
+              { title: 'Date', dataIndex: 'txnDate', width: 95,
+                render: v => <Text style={{ fontSize: 11 }}>{v}</Text> },
+              { title: 'Amount', dataIndex: 'amount', width: 110, align: 'right' as const,
+                render: (v, r) => <Text style={{ fontSize: 12, fontWeight: 600 }}>{fmtAmount(v, r.currency)}</Text> },
+              { title: 'DR Account', dataIndex: 'drAccount',
+                render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.info }}>{v || '—'}</Text> },
+              { title: 'CR Account', dataIndex: 'crAccount',
+                render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.success }}>{v || '—'}</Text> },
+              { title: 'Status', dataIndex: 'status', width: 140,
+                render: (v, r) => {
+                  if (v === 'pending') return <Tag color="default" style={{ fontSize: 11 }}>Pending</Tag>;
+                  if (v === 'running') return <Tag icon={<SyncOutlined spin />} color="processing" style={{ fontSize: 11 }}>Running</Tag>;
+                  if (v === 'success') return <><Tag color="success" style={{ fontSize: 11 }}>Done</Tag>
+                    {r.message && <div style={{ fontSize: 10, color: '#1d7b4d', marginTop: 2 }}>{r.message}</div>}</>;
+                  if (v === 'error')   return <><Tag color="error" style={{ fontSize: 11 }}>Error</Tag>
+                    {r.message && <div style={{ fontSize: 10, color: '#c74634', marginTop: 2 }}>{r.message}</div>}</>;
+                  if (v === 'skipped') return <Tag color="warning" style={{ fontSize: 11 }}>Already Posted</Tag>;
+                  return null;
+                }},
+            ]}
+          />
+          {singleAcctDone && (
+            <Alert
+              type={singleAcctProgress.some(r => r.status === 'error') ? 'warning' : 'success'}
+              showIcon
+              message={singleAcctProgress.some(r => r.status === 'error')
+                ? 'Accounting completed with some errors'
+                : 'Accounting created and posted successfully'}
+              style={{ marginTop: 12 }}
+            />
+          )}
+        </Modal>
+
+        {/* ── View Accounting Modal ────────────────────────────────── */}
+        <Modal
+          title={<Space><EyeOutlined style={{ color: REDWOOD.success }} />View Accounting</Space>}
+          open={viewAcctOpen}
+          onCancel={() => setViewAcctOpen(false)}
+          footer={<Button onClick={() => setViewAcctOpen(false)}>Close</Button>}
+          width={700}
+          destroyOnClose
+        >
+          {viewAcctTxn && (() => {
+            const txn = viewAcctTxn;
+            const direction = txn.transactionDirection ?? ((txn.amount ?? 0) >= 0 ? 'DR' : 'CR');
+            const absAmount = Math.abs(txn.amount ?? 0);
+            const drLabel = direction === 'DR' ? 'Bank / Asset Account' : 'Offset Account';
+            const crLabel = direction === 'DR' ? 'Offset Account' : 'Bank / Asset Account';
+            const drAcct  = direction === 'DR' ? txn.assetAccountCombination : txn.offsetAccountCombination;
+            const crAcct  = direction === 'DR' ? txn.offsetAccountCombination : txn.assetAccountCombination;
+            return (
+              <>
+                {/* Transaction Info Header */}
+                <div style={{ background: REDWOOD.neutral100, borderRadius: 6, padding: '12px 16px', marginBottom: 16 }}>
+                  <Row gutter={16}>
+                    <Col xs={12} md={6}>
+                      <Text type="secondary" style={{ fontSize: 11 }}>Transaction ID</Text>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{txn.transactionId || txn.externalTransactionId}</div>
+                    </Col>
+                    <Col xs={12} md={6}>
+                      <Text type="secondary" style={{ fontSize: 11 }}>Date</Text>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{fmtDate(txn.transactionDate)}</div>
+                    </Col>
+                    <Col xs={12} md={6}>
+                      <Text type="secondary" style={{ fontSize: 11 }}>Amount</Text>
+                      <div style={{ fontWeight: 600, fontSize: 13, color: absAmount >= 0 ? REDWOOD.success : REDWOOD.error }}>
+                        {fmtAmount(absAmount, txn.currencyCode)}
+                      </div>
+                    </Col>
+                    <Col xs={12} md={6}>
+                      <Text type="secondary" style={{ fontSize: 11 }}>Business Unit</Text>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{txn.businessUnitName || '—'}</div>
+                    </Col>
+                  </Row>
+                  <Row gutter={16} style={{ marginTop: 8 }}>
+                    <Col xs={24} md={12}>
+                      <Text type="secondary" style={{ fontSize: 11 }}>Direction</Text>
+                      <div>
+                        <Tag color={direction === 'DR' ? 'blue' : 'green'} style={{ fontSize: 12, fontWeight: 600 }}>
+                          {direction === 'DR' ? '▲ DR — Money In' : '▼ CR — Money Out'}
+                        </Tag>
+                      </div>
+                    </Col>
+                    <Col xs={24} md={12}>
+                      <Text type="secondary" style={{ fontSize: 11 }}>Reference</Text>
+                      <div style={{ fontSize: 13 }}>{txn.referenceText || '—'}</div>
+                    </Col>
+                  </Row>
+                </div>
+
+                {/* Journal Lines */}
+                <div style={{ fontWeight: 600, fontSize: 12, color: REDWOOD.neutral600, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Journal Entry
+                </div>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'monospace', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: REDWOOD.neutral100 }}>
+                      <th style={{ textAlign: 'left', padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}`, width: 50 }}>Dr/Cr</th>
+                      <th style={{ textAlign: 'left', padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}` }}>Account</th>
+                      <th style={{ textAlign: 'left', padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}`, width: 120 }}>Label</th>
+                      <th style={{ textAlign: 'right', padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}`, width: 110 }}>DR Amount</th>
+                      <th style={{ textAlign: 'right', padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}`, width: 110 }}>CR Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td style={{ padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}`, color: REDWOOD.info, fontWeight: 700 }}>DR</td>
+                      <td style={{ padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}` }}>{drAcct || '—'}</td>
+                      <td style={{ padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}`, fontSize: 11, color: REDWOOD.neutral600 }}>{drLabel}</td>
+                      <td style={{ padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}`, textAlign: 'right', color: REDWOOD.info, fontWeight: 600 }}>{fmtAmount(absAmount)}</td>
+                      <td style={{ padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}`, textAlign: 'right' }}>—</td>
+                    </tr>
+                    <tr style={{ background: REDWOOD.neutral100 }}>
+                      <td style={{ padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}`, color: REDWOOD.success, fontWeight: 700 }}>CR</td>
+                      <td style={{ padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}` }}>{crAcct || '—'}</td>
+                      <td style={{ padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}`, fontSize: 11, color: REDWOOD.neutral600 }}>{crLabel}</td>
+                      <td style={{ padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}`, textAlign: 'right' }}>—</td>
+                      <td style={{ padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}`, textAlign: 'right', color: REDWOOD.success, fontWeight: 600 }}>{fmtAmount(absAmount)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end', gap: 16, padding: '6px 12px', background: REDWOOD.neutral100, borderRadius: '0 0 4px 4px', border: `1px solid ${REDWOOD.neutral200}`, borderTop: 'none' }}>
+                  <Text style={{ fontSize: 12 }}>Total DR: <Text strong style={{ color: REDWOOD.info }}>{fmtAmount(absAmount, txn.currencyCode)}</Text></Text>
+                  <Text style={{ fontSize: 12 }}>Total CR: <Text strong style={{ color: REDWOOD.success }}>{fmtAmount(absAmount, txn.currencyCode)}</Text></Text>
+                </div>
+              </>
+            );
+          })()}
         </Modal>
 
         {/* API Info Modal */}
