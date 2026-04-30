@@ -45,7 +45,7 @@ let valuesCache: Map<string, SegmentValue[]> = new Map();
 // Clear all caches
 const clearCache = () => { segmentsCache = []; valuesCache = new Map(); };
 
-// Apply default segment values: Account = blank, Sub-Account = '0000', rest = first value
+// Apply default segment values: Account = blank, Sub-Account = '0000', rest = '00'/'0000' if present, else first value
 const applyDefaults = (
   segs: Segment[],
   valMap: Record<string, SegmentValue[]>,
@@ -62,7 +62,9 @@ const applyDefaults = (
     } else if (isSubAccount) {
       out[seg.segment_code] = vals.find(v => v.Value === '0000')?.Value ?? (vals[0]?.Value || '');
     } else if (vals.length > 0) {
-      out[seg.segment_code] = vals[0].Value;
+      // Prefer '00' or '0000' (the "none/default" sentinel) if it exists
+      const zero = vals.find(v => v.Value === '00') ?? vals.find(v => v.Value === '0000');
+      out[seg.segment_code] = zero ? zero.Value : vals[0].Value;
     }
     if (index === 0 && locked) out[seg.segment_code] = locked;
   });
