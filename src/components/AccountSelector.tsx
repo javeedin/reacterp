@@ -242,7 +242,9 @@ const AccountSelector: React.FC<AccountSelectorProps> = ({
   // Fetch values for a segment
   const fetchValues = useCallback(async (segmentCode: string): Promise<SegmentValue[]> => {
     if (valuesCache.has(segmentCode)) {
-      return valuesCache.get(segmentCode) || [];
+      const cached = valuesCache.get(segmentCode) || [];
+      setSegmentValues(prev => prev[segmentCode] ? prev : { ...prev, [segmentCode]: cached });
+      return cached;
     }
 
     setValuesLoading(prev => ({ ...prev, [segmentCode]: true }));

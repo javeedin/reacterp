@@ -3,7 +3,7 @@ import dayjs, { type Dayjs } from 'dayjs';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input, Select,
   DatePicker, InputNumber, Row, Col, Space, Tag, Tooltip, Tabs, Collapse,
-  message, Empty, Divider, Badge, Modal, Alert, Spin,
+  message, Empty, Divider, Badge, Modal, Alert, Spin, Segmented,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -14,7 +14,7 @@ import {
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
-import AccountSelector from '../../components/AccountSelector';
+import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
 import { useAuth } from '../../context/AuthContext';
 import {
   buildPcBankTxnSlaPayload, fetchLedgerByBusinessUnit, derivePeriodName, createAccounting,
@@ -126,14 +126,18 @@ const newTabKey = () => `tab_${++tabCounter}`;
 // ────────────────────────────────────────────────────────────────────────────
 // Create / Edit Form
 // ────────────────────────────────────────────────────────────────────────────
+interface ExtTxnLine { key: number; amount?: number; description: string; offsetAccount: string; offsetDesc: string; }
+
 const ExternalTxnForm: React.FC<{
   initialValues?: Partial<ExternalTxnRecord>;
   bankAccounts: BankAccountOption[];
   businessUnits: BUOption[];
-  bankAccountMap: Record<string, string>;   // bankAccountName → assetAccountCombination
+  bankAccountMap: Record<string, string>;
+  bankAccountCurrencyMap: Record<string, string>;
+  buBankMap: Record<string, string[]>;
   onSave: () => void;
   onCancel: () => void;
-}> = ({ initialValues, bankAccounts, businessUnits, bankAccountMap, onSave, onCancel }) => {
+}> = ({ initialValues, bankAccounts, businessUnits, bankAccountMap, bankAccountCurrencyMap, buBankMap, onSave, onCancel }) => {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const [selectedBu, setSelectedBu] = useState<string | undefined>(initialValues?.businessUnitName);
@@ -143,8 +147,22 @@ const ExternalTxnForm: React.FC<{
   const [apiResponse, setApiResponse]     = useState<{ status: number; body: string } | null>(null);
   const [cashAcctOpen, setCashAcctOpen]   = useState(false);
   const [offsetAcctOpen, setOffsetAcctOpen] = useState(false);
+  const [extTxnMode, setExtTxnMode]       = useState<'single' | 'multiple'>('single');
+  const [extTxnLines, setExtTxnLines]     = useState<ExtTxnLine[]>([
+    { key: 0, amount: undefined, description: '', offsetAccount: '', offsetDesc: '' },
+  ]);
+  const [lineCoaOpen, setLineCoaOpen]     = useState(false);
+  const [lineCoaIdx, setLineCoaIdx]       = useState(0);
+  const [lineCoaInitial, setLineCoaInitial] = useState('');
   const isEdit = !!initialValues?.externalTransactionId;
   const buSelected = !!selectedBu;
+
+  const filteredBankAccounts = selectedBu && buBankMap[selectedBu]?.length
+    ? buBankMap[selectedBu].sort().map(n => ({ label: n, value: n }))
+    : bankAccounts;
+
+  const updateExtLine = (idx: number, field: string, value: any) =>
+    setExtTxnLines(prev => prev.map((l, i) => i === idx ? { ...l, [field]: value } : l));
 
   useEffect(() => { setSelectedBu(initialValues?.businessUnitName); }, [initialValues]);
 
@@ -198,6 +216,61 @@ const ExternalTxnForm: React.FC<{
   const handleSubmit = async () => {
     let values: any;
     try { values = await form.validateFields(); } catch { return; }
+
+    if (extTxnMode === 'multiple') {
+      const invalid = extTxnLines.filter(l => !l.amount);
+      if (invalid.length > 0) { message.error('All lines must have an amount'); return; }
+      setSaving(true);
+      const baseRef = values.referenceText?.trim() || '';
+      const baseHeader = {
+        BankAccountName:         values.bankAccountName,
+        BusinessUnitName:        values.businessUnitName ?? '',
+        TransactionDate:         values.transactionDate?.format('YYYY-MM-DD'),
+        ValueDate:               values.valueDate?.format('YYYY-MM-DD') ?? null,
+        CurrencyCode:            values.currencyCode ?? '',
+        TransactionType:         values.transactionType ?? '',
+        AssetAccountCombination: values.assetAccountCombination ?? '',
+        Source: 'ORA_MAN', Status: 'UNR', AccountingFlag: false,
+        CreatedBy: 'ERP_USER', CreationDate: new Date().toISOString(),
+        LastUpdatedBy: 'ERP_USER', LastUpdateDate: new Date().toISOString(), LastUpdateLogin: '',
+      };
+      let successCount = 0;
+      for (let i = 0; i < extTxnLines.length; i++) {
+        const line = extTxnLines[i];
+        const payload = {
+          items: [{
+            ...baseHeader,
+            Amount:                   line.amount,
+            ReferenceText:            extTxnLines.length > 1 ? `${baseRef}-${i + 1}` : baseRef,
+            Description:              line.description ?? '',
+            OffsetAccountCombination: line.offsetAccount ?? '',
+          }],
+        };
+        try {
+          const res = await fetch(`${APEX_BASE}/cash/externaltransactions`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json();
+          if (data.status === 'success') {
+            successCount++;
+          } else {
+            message.error(`Line ${i + 1}: ${data.message || 'Save failed.'}`);
+            setSaving(false);
+            return;
+          }
+        } catch (e: any) {
+          message.error(`Line ${i + 1}: Network error: ${e.message}`);
+          setSaving(false);
+          return;
+        }
+      }
+      setSaving(false);
+      message.success(`${successCount} transaction(s) created.`);
+      onSave();
+      return;
+    }
+
     setSaving(true);
     try {
       const res = await fetch(`${APEX_BASE}/cash/externaltransactions`, {
@@ -265,36 +338,43 @@ const ExternalTxnForm: React.FC<{
       </Text>
 
       <Form form={form} layout="horizontal" labelCol={lc} wrapperCol={wc}>
-        {/* Bank Account first — drives Business Unit auto-fill */}
+        {/* BU first → drives bank account filter */}
         <Row gutter={40}>
-          <Col xs={24} lg={12}>
-            <Form.Item label="Bank Account" name="bankAccountName" rules={[{ required: !isEdit, message: 'Bank Account is required' }]} style={fs}>
-              <Select showSearch placeholder="Select bank account" optionFilterProp="label" options={bankAccounts}
-                style={{ width: '100%' }} notFoundContent={<Text type="secondary">No accounts loaded</Text>}
-                disabled={isEdit}
-                onChange={v => {
-                  if (!isEdit) {
-                    form.setFieldValue('assetAccountCombination', bankAccountMap[v] ?? '');
-                  }
-                }} />
-            </Form.Item>
-          </Col>
           <Col xs={24} lg={12}>
             <Form.Item label="Business Unit" name="businessUnitName" rules={[{ required: !isEdit, message: 'Business Unit is required' }]} style={fs}>
               <Select showSearch placeholder="Select business unit" optionFilterProp="label" options={businessUnits}
-                style={{ width: '100%' }} onChange={v => setSelectedBu(v)} allowClear onClear={() => setSelectedBu(undefined)}
-                disabled={isEdit} />
+                style={{ width: '100%' }} disabled={isEdit}
+                onChange={v => {
+                  setSelectedBu(v);
+                  if (!isEdit) {
+                    const banks = buBankMap[v] || [];
+                    const cur = form.getFieldValue('bankAccountName');
+                    if (cur && banks.length > 0 && !banks.includes(cur)) {
+                      form.setFieldsValue({ bankAccountName: undefined, currencyCode: undefined, assetAccountCombination: '' });
+                    }
+                  }
+                }}
+                allowClear onClear={() => setSelectedBu(undefined)} />
+            </Form.Item>
+          </Col>
+          <Col xs={24} lg={12}>
+            <Form.Item label="Bank Account" name="bankAccountName" rules={[{ required: !isEdit, message: 'Bank Account is required' }]} style={fs}>
+              <Select showSearch placeholder="Select bank account" optionFilterProp="label"
+                options={filteredBankAccounts}
+                style={{ width: '100%' }} notFoundContent={<Text type="secondary">No accounts loaded</Text>}
+                disabled={isEdit || !buSelected}
+                onChange={v => {
+                  if (!isEdit) {
+                    form.setFieldValue('assetAccountCombination', bankAccountMap[v] ?? '');
+                    form.setFieldValue('currencyCode', bankAccountCurrencyMap[v] ?? '');
+                  }
+                }} />
             </Form.Item>
           </Col>
         </Row>
 
         <Row gutter={40}>
           <Col xs={24} lg={12}>
-            <Form.Item label="Amount" name="amount" rules={[{ required: !isEdit, message: 'Amount is required' }]} style={fs}>
-              <InputNumber style={{ width: '100%' }} precision={2} disabled={isEdit || !buSelected}
-                placeholder="Enter amount (negative for debit)" />
-            </Form.Item>
-
             <Form.Item label="Date" name="transactionDate" rules={[{ required: !isEdit, message: 'Date is required' }]} style={fs}>
               <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={isEdit || !buSelected} />
             </Form.Item>
@@ -311,10 +391,6 @@ const ExternalTxnForm: React.FC<{
                 <Option value="MISC">MISC</Option>
               </Select>
             </Form.Item>
-
-            <Form.Item label="Description" name="description" style={fs}>
-              <Input.TextArea rows={3} placeholder="Enter description" disabled={isEdit || !buSelected} />
-            </Form.Item>
           </Col>
 
           <Col xs={24} lg={12}>
@@ -323,16 +399,11 @@ const ExternalTxnForm: React.FC<{
             </Form.Item>
 
             <Form.Item label="Currency" name="currencyCode" style={fs}>
-              <Select placeholder="Select currency" allowClear disabled={isEdit || !buSelected}>
+              <Select placeholder="Auto-filled from bank account" allowClear disabled={isEdit || !buSelected}>
                 {['AED', 'USD', 'EUR', 'GBP', 'SAR', 'QAR', 'KWD', 'BHD', 'OMR'].map(c => (
                   <Option key={c} value={c}>{c}</Option>
                 ))}
               </Select>
-            </Form.Item>
-
-            <Form.Item label="Attachments" style={fs}>
-              <Text type="secondary">None</Text>
-              <Button size="small" icon={<PlusOutlined />} style={{ marginLeft: 8 }} disabled>Add</Button>
             </Form.Item>
           </Col>
         </Row>
@@ -355,39 +426,157 @@ const ExternalTxnForm: React.FC<{
                   />
                 </Form.Item>
                 {!isEdit && (
-                  <Button
-                    icon={<SearchOutlined />}
-                    disabled={!buSelected}
-                    onClick={() => setCashAcctOpen(true)}
-                    title="Select account"
-                  />
+                  <Button icon={<SearchOutlined />} disabled={!buSelected}
+                    onClick={() => setCashAcctOpen(true)} title="Select account" />
                 )}
               </Input.Group>
             </Form.Item>
           </Col>
-          <Col xs={24} lg={12}>
-            <Form.Item label="Offset Account" name="offsetAccountCombination" style={fs}>
-              <Input.Group compact style={{ display: 'flex' }}>
-                <Form.Item name="offsetAccountCombination" noStyle>
-                  <Input
-                    readOnly
-                    disabled={isEdit}
-                    placeholder={isEdit ? '—' : 'Select offset account'}
-                    style={{ flex: 1, fontFamily: 'monospace', fontSize: 12 }}
-                  />
-                </Form.Item>
-                {!isEdit && (
-                  <Button
-                    icon={<SearchOutlined />}
-                    disabled={!buSelected}
-                    onClick={() => setOffsetAcctOpen(true)}
-                    title="Select account"
-                  />
-                )}
-              </Input.Group>
-            </Form.Item>
-          </Col>
+          {extTxnMode === 'single' && (
+            <Col xs={24} lg={12}>
+              <Form.Item label="Offset Account" name="offsetAccountCombination" style={fs}>
+                <Input.Group compact style={{ display: 'flex' }}>
+                  <Form.Item name="offsetAccountCombination" noStyle>
+                    <Input
+                      readOnly
+                      disabled={isEdit}
+                      placeholder={isEdit ? '—' : 'Select offset account'}
+                      style={{ flex: 1, fontFamily: 'monospace', fontSize: 12 }}
+                    />
+                  </Form.Item>
+                  {!isEdit && (
+                    <Button icon={<SearchOutlined />} disabled={!buSelected}
+                      onClick={() => setOffsetAcctOpen(true)} title="Select account" />
+                  )}
+                </Input.Group>
+              </Form.Item>
+            </Col>
+          )}
         </Row>
+
+        {/* ── Mode toggle + Transaction Lines ── */}
+        {!isEdit && (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '8px 0' }}>
+              <Text strong style={{ fontSize: 13, color: REDWOOD.neutral900 }}>Transaction Line(s)</Text>
+              <Segmented
+                size="small"
+                value={extTxnMode}
+                onChange={(v) => setExtTxnMode(v as 'single' | 'multiple')}
+                options={[{ label: 'Single', value: 'single' }, { label: 'Multiple', value: 'multiple' }]}
+              />
+            </div>
+
+            {extTxnMode === 'single' ? (
+              <Row gutter={40}>
+                <Col xs={24} lg={12}>
+                  <Form.Item label="Amount" name="amount" rules={[{ required: true, message: 'Amount is required' }]} style={fs}>
+                    <InputNumber style={{ width: '100%' }} precision={2} disabled={!buSelected}
+                      placeholder="Enter amount (negative for debit)" />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} lg={12}>
+                  <Form.Item label="Description" name="description" style={fs}>
+                    <Input.TextArea rows={2} placeholder="Enter description" disabled={!buSelected} />
+                  </Form.Item>
+                </Col>
+              </Row>
+            ) : (
+              <>
+                <Table
+                  size="small"
+                  dataSource={extTxnLines}
+                  rowKey="key"
+                  pagination={false}
+                  scroll={{ y: 200 }}
+                  style={{ marginBottom: 6 }}
+                  columns={[
+                    {
+                      title: '#', width: 36,
+                      render: (_: any, _r: any, idx: number) => <Text style={{ fontSize: 12 }}>{idx + 1}</Text>,
+                    },
+                    {
+                      title: 'Amount', width: 130,
+                      render: (_: any, record: ExtTxnLine, idx: number) => (
+                        <InputNumber size="small" style={{ width: '100%' }} precision={2}
+                          value={record.amount} placeholder="0.00"
+                          onChange={(v) => updateExtLine(idx, 'amount', v)}
+                        />
+                      ),
+                    },
+                    {
+                      title: 'Description',
+                      render: (_: any, record: ExtTxnLine, idx: number) => (
+                        <Input size="small" value={record.description}
+                          placeholder="Optional"
+                          onChange={(e) => updateExtLine(idx, 'description', e.target.value)}
+                        />
+                      ),
+                    },
+                    {
+                      title: 'Offset Account', width: 220,
+                      render: (_: any, record: ExtTxnLine, idx: number) => (
+                        <>
+                          <Space.Compact style={{ width: '100%' }}>
+                            <Input size="small" readOnly value={record.offsetAccount}
+                              style={{ fontFamily: 'monospace', fontSize: 11 }} placeholder="Select..." />
+                            <Button size="small" icon={<SearchOutlined />} onClick={() => {
+                              setLineCoaIdx(idx);
+                              setLineCoaInitial(record.offsetAccount || '');
+                              setLineCoaOpen(true);
+                            }} />
+                          </Space.Compact>
+                          {record.offsetDesc && (
+                            <div style={{ fontSize: 10, color: REDWOOD.info, marginTop: 1 }}>{record.offsetDesc}</div>
+                          )}
+                        </>
+                      ),
+                    },
+                    {
+                      title: '', width: 36,
+                      render: (_: any, _r: any, idx: number) => (
+                        <Button size="small" type="text" danger icon={<CloseOutlined />}
+                          onClick={() => setExtTxnLines(prev => prev.filter((_, i) => i !== idx))} />
+                      ),
+                    },
+                  ]}
+                  footer={() => (
+                    <div style={{ textAlign: 'right', paddingRight: 40 }}>
+                      <Text style={{ fontSize: 12 }}>Total: </Text>
+                      <Text strong style={{ fontSize: 12 }}>
+                        {fmtAmount(extTxnLines.reduce((s, l) => s + (l.amount ?? 0), 0),
+                          form.getFieldValue('currencyCode'))}
+                      </Text>
+                    </div>
+                  )}
+                />
+                <Button size="small" icon={<PlusOutlined />}
+                  onClick={() => setExtTxnLines(prev => [
+                    ...prev,
+                    { key: Date.now(), amount: undefined, description: '', offsetAccount: '', offsetDesc: '' },
+                  ])}
+                >
+                  Add Line
+                </Button>
+              </>
+            )}
+          </>
+        )}
+
+        {isEdit && (
+          <Row gutter={40}>
+            <Col xs={24} lg={12}>
+              <Form.Item label="Amount" style={fs}>
+                <InputNumber style={{ width: '100%' }} precision={2} disabled value={initialValues?.amount} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} lg={12}>
+              <Form.Item label="Description" name="description" style={fs}>
+                <Input.TextArea rows={2} disabled />
+              </Form.Item>
+            </Col>
+          </Row>
+        )}
 
         <Divider />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -402,7 +591,7 @@ const ExternalTxnForm: React.FC<{
             {!isEdit && (
               <Button type="primary" loading={saving} onClick={handleSubmit}
                 style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
-                Create Transaction
+                {extTxnMode === 'multiple' ? `Create ${extTxnLines.length} Transaction(s)` : 'Create Transaction'}
               </Button>
             )}
           </Space>
@@ -413,12 +602,27 @@ const ExternalTxnForm: React.FC<{
       <AccountSelector
         visible={cashAcctOpen}
         onCancel={() => setCashAcctOpen(false)}
+        initialValue={form.getFieldValue('assetAccountCombination') || ''}
         onSelect={(code: string) => { form.setFieldValue('assetAccountCombination', code); setCashAcctOpen(false); }}
       />
       <AccountSelector
         visible={offsetAcctOpen}
         onCancel={() => setOffsetAcctOpen(false)}
+        initialValue={form.getFieldValue('offsetAccountCombination') || ''}
         onSelect={(code: string) => { form.setFieldValue('offsetAccountCombination', code); setOffsetAcctOpen(false); }}
+      />
+      <AccountSelector
+        visible={lineCoaOpen}
+        onCancel={() => setLineCoaOpen(false)}
+        initialValue={lineCoaInitial}
+        onSelect={(code: string) => {
+          updateExtLine(lineCoaIdx, 'offsetAccount', code);
+          validateAccountCode(code).then(r => {
+            const seg4 = Object.values(r.segmentDetails)[3];
+            updateExtLine(lineCoaIdx, 'offsetDesc', (seg4 as any)?.description || '');
+          }).catch(() => {});
+          setLineCoaOpen(false);
+        }}
       />
 
       {/* ── API Inspector Modal ── */}
@@ -477,6 +681,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   const [allBankAccounts, setAllBankAccounts] = useState<BankAccountOption[]>([]);
   const [businessUnits, setBusinessUnits] = useState<BUOption[]>([]);
   const [bankAccountMap, setBankAccountMap] = useState<Record<string, string>>({});
+  const [bankAccountCurrencyMap, setBankAccountCurrencyMap] = useState<Record<string, string>>({});
   const [buLeMap, setBuLeMap]             = useState<Record<string, string>>({});   // bu → legalEntity
   const [buBankMap, setBuBankMap]         = useState<Record<string, string[]>>({});  // bu → bankNames[]
   const [selectedBU, setSelectedBU]       = useState<string>('');
@@ -558,6 +763,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
         const items: ExternalTxnRecord[] = data.items;
         const acctSet  = new Set<string>();
         const acctMap: Record<string, string>    = {};
+        const ccyMap:  Record<string, string>    = {};
         const buBanks: Record<string, Set<string>> = {};
 
         items.forEach(i => {
@@ -571,6 +777,8 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
           }
           if (i.bankAccountName && i.assetAccountCombination)
             acctMap[i.bankAccountName] = i.assetAccountCombination;
+          if (i.bankAccountName && i.currencyCode)
+            ccyMap[i.bankAccountName] = i.currencyCode;
           // Fill LE from transactions if not already from gl/businessunits
           if (i.businessUnitName && i.legalEntityName && !buLeMapping[i.businessUnitName])
             buLeMapping[i.businessUnitName] = i.legalEntityName;
@@ -578,6 +786,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
 
         setAllBankAccounts([...acctSet].sort().map(n => ({ label: n, value: n })));
         setBankAccountMap(acctMap);
+        setBankAccountCurrencyMap(ccyMap);
         setBuLeMap({ ...buLeMapping });
         setBuBankMap(Object.fromEntries(
           Object.entries(buBanks).map(([bu, set]) => [bu, [...set]])
@@ -1107,6 +1316,8 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
           bankAccounts={allBankAccounts}
           businessUnits={businessUnits}
           bankAccountMap={bankAccountMap}
+          bankAccountCurrencyMap={bankAccountCurrencyMap}
+          buBankMap={buBankMap}
           onSave={() => { closeTab(t.key); handleSearch(); loadLovs(); }}
           onCancel={() => closeTab(t.key)}
         />

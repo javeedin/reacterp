@@ -451,8 +451,11 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const [extAssetDesc, setExtAssetDesc]     = useState('');
   const [extOffsetDesc, setExtOffsetDesc]   = useState('');
   const [extCoaOpen, setExtCoaOpen]         = useState(false);
-  const [extCoaTarget, setExtCoaTarget]     = useState<'asset' | 'offset'>('asset');
+  const [extCoaTarget, setExtCoaTarget]     = useState<'asset' | 'offset' | 'line-offset'>('asset');
   const [extCoaInitial, setExtCoaInitial]   = useState('');
+  const [extTxnMode, setExtTxnMode]         = useState<'single' | 'multiple'>('single');
+  const [extTxnLines, setExtTxnLines]       = useState<Array<{key: number; amount?: number; description: string; offsetAccount: string; offsetDesc: string}>>([]);
+  const [extLineCoaIdx, setExtLineCoaIdx]   = useState(0);
 
   // Load bank accounts for the ext txn modal (filter by legal entity)
   const loadExtBankAccounts = useCallback((legalEntity: string) => {
@@ -476,6 +479,31 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       .catch(() => {});
   }, []);
 
+  const updateExtLine = (idx: number, field: string, value: any) => {
+    setExtTxnLines(prev => prev.map((l, i) => i === idx ? { ...l, [field]: value } : l));
+  };
+
+  const handleBuChange = useCallback((buValue: string) => {
+    const bu = businessUnits.find(b => b.value === buValue);
+    loadExtBankAccounts(bu?.legalEntityName || '');
+    extTxnForm.setFieldsValue({ bankAccountName: undefined, currencyCode: 'AED' });
+    setExtAssetDesc('');
+  }, [businessUnits, loadExtBankAccounts, extTxnForm]);
+
+  const handleBankAccountChange = useCallback(async (bankName: string) => {
+    const match = extBankAccounts.find(b => b.name === bankName);
+    if (!match) return;
+    extTxnForm.setFieldValue('currencyCode', match.currency || 'AED');
+    if (match.cashAccount) {
+      extTxnForm.setFieldValue('assetAccountCombination', match.cashAccount);
+      try {
+        const r    = await validateAccountCode(match.cashAccount);
+        const seg4 = Object.values(r.segmentDetails)[3];
+        setExtAssetDesc((seg4 as any)?.description || '');
+      } catch { /* ignore */ }
+    }
+  }, [extBankAccounts, extTxnForm]);
+
   // Open the ext txn modal, pre-filling from selected lines + statement
   const openExtTxnModal = useCallback(async () => {
     const selectedLines = stmtLines.filter(l => selectedStmtKeys.includes(l.lineId));
@@ -489,6 +517,18 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     setExtAssetDesc('');
     setExtOffsetDesc('');
     setExtBankAccounts([]);
+    setExtTxnMode('single');
+    setExtTxnLines(
+      selectedLines.length > 0
+        ? selectedLines.map((l, i) => ({
+            key: i,
+            amount: Math.abs(l.amount ?? 0),
+            description: l.description || '',
+            offsetAccount: '',
+            offsetDesc: '',
+          }))
+        : [{ key: 0, amount: undefined, description: '', offsetAccount: '', offsetDesc: '' }]
+    );
 
     // Step 1: find the matching BankAcctOption to get its legal entity
     const matchedAcct = bankAccounts.find(a =>
@@ -560,6 +600,78 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
 
   // Submit external transaction
   const handleExtTxnSubmit = async (values: any) => {
+    if (extTxnMode === 'multiple') {
+      const invalid = extTxnLines.filter(l => !l.amount);
+      if (invalid.length > 0) { msgApi.error('All lines must have an amount'); return; }
+      setExtTxnSaving(true);
+      const baseRef = values.referenceText?.trim() || `STMT-${selectedStatement?.statementId}-${Date.now()}`;
+      const commonHeader = {
+        BankAccountName:         values.bankAccountName,
+        BusinessUnitName:        values.businessUnitName,
+        TransactionDate:         values.transactionDate?.format('YYYY-MM-DD'),
+        CurrencyCode:            values.currencyCode ?? 'AED',
+        TransactionType:         values.transactionType ?? 'MISC',
+        AssetAccountCombination: values.assetAccountCombination ?? '',
+        StatementId:             selectedStatement?.statementId ?? null,
+        StatementLineIds:        null,
+        Source: 'ORA_MAN', Status: 'UNR', AccountingFlag: false,
+        CreatedBy: 'SYSTEM', CreationDate: new Date().toISOString(),
+        LastUpdatedBy: 'SYSTEM', LastUpdateDate: new Date().toISOString(), LastUpdateLogin: '',
+      };
+      const payloads = extTxnLines.map((line, i) => ({
+        items: [{
+          ...commonHeader,
+          Amount:                   line.amount,
+          ReferenceText:            extTxnLines.length > 1 ? `${baseRef}-${i + 1}` : baseRef,
+          Description:              line.description ?? '',
+          OffsetAccountCombination: line.offsetAccount ?? '',
+        }],
+      }));
+      setExtTxnPayload(payloads);
+      setExtTxnResponse(null);
+      setExtTxnRawError('');
+      try {
+        const results: any[] = [];
+        for (const p of payloads) {
+          const res  = await fetch(EXT_TXN_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(p) });
+          const text = await res.text();
+          let d: any = {};
+          try { d = JSON.parse(text); } catch { d = { status: 'error', message: text }; }
+          results.push(d);
+          if (d.status !== 'success') {
+            setExtTxnResponse(results);
+            setExtTxnRawError(`HTTP ${res.status} — ${text}`);
+            msgApi.error(d.message || 'Failed to create transaction');
+            setExtTxnSaving(false);
+            return;
+          }
+        }
+        setExtTxnResponse(results);
+        const firstId: number | null = results[0]?.externalTransactionId ?? results[0]?.items?.[0]?.ExternalTransactionId ?? null;
+        if (firstId && selectedStmtKeys.length > 0) {
+          const lids = stmtLines.filter(l => selectedStmtKeys.includes(l.lineId)).map(l => l.lineId);
+          await Promise.allSettled(lids.map(lid =>
+            fetch(`${APEX_BASE}/cash/reconciliation/stmtlines/${lid}`, {
+              method: 'PUT', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ExternalTxnId: firstId, ExternalTxnRef: baseRef }),
+            })
+          ));
+          setStmtLines(prev => prev.map(l =>
+            selectedStmtKeys.includes(l.lineId) ? { ...l, externalTxnId: firstId, externalTxnRef: baseRef } : l
+          ));
+        }
+        msgApi.success(`${results.length} external transaction(s) created successfully`);
+        setExtTxnOpen(false);
+        setSelectedStmtKeys([]);
+      } catch (e: any) {
+        setExtTxnRawError(`Error: ${e.message}`);
+        msgApi.error('Network error creating external transactions');
+      } finally {
+        setExtTxnSaving(false);
+      }
+      return;
+    }
+
     const selectedLines = stmtLines.filter(l => selectedStmtKeys.includes(l.lineId));
     const lineIds = selectedLines.map(l => l.lineId).join(',');
     const uniqueRef = values.referenceText?.trim() || `STMT-${selectedStatement?.statementId}-${Date.now()}`;
@@ -1662,32 +1774,33 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
         open={extTxnOpen}
         onCancel={() => setExtTxnOpen(false)}
         footer={null}
-        width={640}
+        width={700}
         destroyOnClose
       >
         <Form form={extTxnForm} layout="vertical" size="small" onFinish={handleExtTxnSubmit}>
+          {/* Row 1: BU + Bank Account */}
           <Row gutter={12}>
             <Col span={12}>
               <Form.Item label="Business Unit" name="businessUnitName" rules={[{ required: true, message: 'Required' }]}>
-                <Input placeholder="Auto-filled from bank account" readOnly />
+                <Select showSearch optionFilterProp="label"
+                  options={businessUnits.map(b => ({ value: b.value, label: b.label }))}
+                  placeholder="Select business unit"
+                  onChange={handleBuChange}
+                />
               </Form.Item>
             </Col>
             <Col span={12}>
               <Form.Item label="Bank Account" name="bankAccountName" rules={[{ required: true, message: 'Required' }]}>
-                <Select
-                  disabled
+                <Select showSearch
                   options={extBankAccounts.map(b => ({ value: b.name, label: b.name }))}
-                  placeholder="Auto-filled from statement"
+                  placeholder="Select bank account"
+                  onChange={handleBankAccountChange}
                 />
               </Form.Item>
             </Col>
           </Row>
+          {/* Row 2: Date + Currency + Type */}
           <Row gutter={12}>
-            <Col span={8}>
-              <Form.Item label="Amount" name="amount" rules={[{ required: true, message: 'Required' }]}>
-                <InputNumber style={{ width: '100%' }} precision={2} placeholder="0.00" />
-              </Form.Item>
-            </Col>
             <Col span={8}>
               <Form.Item label="Transaction Date" name="transactionDate" rules={[{ required: true, message: 'Required' }]}>
                 <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" />
@@ -1701,23 +1814,35 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                 </Select>
               </Form.Item>
             </Col>
-          </Row>
-          <Row gutter={12}>
-            <Col span={12}>
+            <Col span={8}>
               <Form.Item label="Transaction Type" name="transactionType">
                 <Select placeholder="Select type" allowClear>
                   {['EFT','WIRE','CHECK','MISC'].map(t => <Option key={t} value={t}>{t}</Option>)}
                 </Select>
               </Form.Item>
             </Col>
-            <Col span={12}>
-              <Form.Item label="Reference" name="referenceText">
-                <Input placeholder="e.g. STMT-REF-001" />
-              </Form.Item>
-            </Col>
           </Row>
+          <Form.Item label="Reference" name="referenceText" style={{ marginBottom: 8 }}>
+            <Input placeholder="e.g. STMT-REF-001" />
+          </Form.Item>
+
+          {/* Cash Account (always in header) */}
+          <Form.Item label="Cash / Asset Account" style={{ marginBottom: 8 }}>
+            <Space.Compact style={{ width: '100%' }}>
+              <Form.Item name="assetAccountCombination" noStyle>
+                <Input readOnly placeholder="Select account" style={{ fontFamily: 'monospace', fontSize: 11 }} />
+              </Form.Item>
+              <Button icon={<SearchOutlined />} onClick={() => {
+                setExtCoaInitial(extTxnForm.getFieldValue('assetAccountCombination') || '');
+                setExtCoaTarget('asset');
+                setExtCoaOpen(true);
+              }} />
+            </Space.Compact>
+            {extAssetDesc && <div style={{ fontSize: 11, color: REDWOOD.info, marginTop: 2 }}>{extAssetDesc}</div>}
+          </Form.Item>
+
           {selectedStatement && (
-            <div style={{ background: REDWOOD.info + '12', border: `1px solid ${REDWOOD.info}40`, borderRadius: 4, padding: '6px 10px', marginBottom: 12, fontSize: 11 }}>
+            <div style={{ background: REDWOOD.info + '12', border: `1px solid ${REDWOOD.info}40`, borderRadius: 4, padding: '6px 10px', marginBottom: 8, fontSize: 11 }}>
               <Space wrap>
                 <Text type="secondary" style={{ fontSize: 11 }}>Statement:</Text>
                 <Text strong style={{ fontSize: 11 }}>{selectedStatement.statementNumber}</Text>
@@ -1726,24 +1851,32 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
               </Space>
             </div>
           )}
-          <Divider style={{ margin: '8px 0', fontSize: 11 }}>Account Coding</Divider>
-          <Row gutter={12}>
-            <Col span={12}>
-              <Form.Item label="Cash / Asset Account">
-                <Space.Compact style={{ width: '100%' }}>
-                  <Form.Item name="assetAccountCombination" noStyle>
-                    <Input readOnly placeholder="Select account" style={{ fontFamily: 'monospace', fontSize: 11 }} />
+
+          {/* Mode toggle */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <Text strong style={{ fontSize: 12 }}>Transaction Line(s)</Text>
+            <Segmented
+              size="small"
+              value={extTxnMode}
+              onChange={(v) => setExtTxnMode(v as 'single' | 'multiple')}
+              options={[{ label: 'Single', value: 'single' }, { label: 'Multiple', value: 'multiple' }]}
+            />
+          </div>
+
+          {extTxnMode === 'single' ? (
+            <>
+              <Row gutter={12}>
+                <Col span={12}>
+                  <Form.Item label="Amount" name="amount" rules={[{ required: true, message: 'Required' }]}>
+                    <InputNumber style={{ width: '100%' }} precision={2} placeholder="0.00" />
                   </Form.Item>
-                  <Button icon={<SearchOutlined />} onClick={() => {
-                    setExtCoaInitial(extTxnForm.getFieldValue('assetAccountCombination') || '');
-                    setExtCoaTarget('asset');
-                    setExtCoaOpen(true);
-                  }} />
-                </Space.Compact>
-                {extAssetDesc && <div style={{ fontSize: 11, color: REDWOOD.info, marginTop: 2 }}>{extAssetDesc}</div>}
-              </Form.Item>
-            </Col>
-            <Col span={12}>
+                </Col>
+                <Col span={12}>
+                  <Form.Item label="Description" name="description">
+                    <Input placeholder="Optional" />
+                  </Form.Item>
+                </Col>
+              </Row>
               <Form.Item label="Offset Account">
                 <Space.Compact style={{ width: '100%' }}>
                   <Form.Item name="offsetAccountCombination" noStyle>
@@ -1757,14 +1890,87 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                 </Space.Compact>
                 {extOffsetDesc && <div style={{ fontSize: 11, color: REDWOOD.info, marginTop: 2 }}>{extOffsetDesc}</div>}
               </Form.Item>
-            </Col>
-          </Row>
-          <Form.Item label="Description" name="description">
-            <Input.TextArea rows={2} placeholder="Optional" />
-          </Form.Item>
+            </>
+          ) : (
+            <>
+              <Table
+                size="small"
+                dataSource={extTxnLines}
+                rowKey="key"
+                pagination={false}
+                scroll={{ y: 180 }}
+                style={{ marginBottom: 4 }}
+                columns={[
+                  {
+                    title: '#', width: 32,
+                    render: (_: any, _r: any, idx: number) => <Text style={{ fontSize: 11 }}>{idx + 1}</Text>,
+                  },
+                  {
+                    title: 'Amount', width: 110,
+                    render: (_: any, record: any, idx: number) => (
+                      <InputNumber size="small" style={{ width: '100%' }} precision={2}
+                        value={record.amount}
+                        onChange={(v) => updateExtLine(idx, 'amount', v)}
+                      />
+                    ),
+                  },
+                  {
+                    title: 'Description',
+                    render: (_: any, record: any, idx: number) => (
+                      <Input size="small" value={record.description}
+                        onChange={(e) => updateExtLine(idx, 'description', e.target.value)}
+                      />
+                    ),
+                  },
+                  {
+                    title: 'Offset Account', width: 200,
+                    render: (_: any, record: any, idx: number) => (
+                      <>
+                        <Space.Compact style={{ width: '100%' }}>
+                          <Input size="small" readOnly value={record.offsetAccount}
+                            style={{ fontFamily: 'monospace', fontSize: 10 }} placeholder="Select..." />
+                          <Button size="small" icon={<SearchOutlined />} onClick={() => {
+                            setExtLineCoaIdx(idx);
+                            setExtCoaTarget('line-offset');
+                            setExtCoaInitial(record.offsetAccount || '');
+                            setExtCoaOpen(true);
+                          }} />
+                        </Space.Compact>
+                        {record.offsetDesc && <div style={{ fontSize: 10, color: REDWOOD.info }}>{record.offsetDesc}</div>}
+                      </>
+                    ),
+                  },
+                  {
+                    title: '', width: 32,
+                    render: (_: any, _r: any, idx: number) => (
+                      <Button size="small" type="text" danger icon={<CloseOutlined />}
+                        onClick={() => setExtTxnLines(prev => prev.filter((_, i) => i !== idx))}
+                      />
+                    ),
+                  },
+                ]}
+                footer={() => (
+                  <div style={{ textAlign: 'right', paddingRight: 36 }}>
+                    <Text style={{ fontSize: 11 }}>Total: </Text>
+                    <Text strong style={{ fontSize: 11 }}>
+                      {fmtAmount(extTxnLines.reduce((s, l) => s + (l.amount ?? 0), 0), extTxnForm.getFieldValue('currencyCode'))}
+                    </Text>
+                  </div>
+                )}
+              />
+              <Button size="small" icon={<PlusOutlined />}
+                onClick={() => setExtTxnLines(prev => [
+                  ...prev,
+                  { key: Date.now(), amount: undefined, description: '', offsetAccount: '', offsetDesc: '' },
+                ])}
+              >
+                Add Line
+              </Button>
+            </>
+          )}
 
           {/* API Inspector */}
-          <Collapse size="small" style={{ marginBottom: 8 }}>
+          <Collapse size="small" style={{ marginTop: 8, marginBottom: 8 }}>
             <Collapse.Panel
               header={
                 <Space size={4}>
@@ -1772,7 +1978,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                   <Text style={{ fontSize: 11 }}>API Inspector</Text>
                   <Text style={{ fontSize: 10, color: REDWOOD.neutral600 }}>POST {EXT_TXN_URL}</Text>
                   {extTxnRawError && <Tag color="error" style={{ fontSize: 10 }}>Error</Tag>}
-                  {extTxnResponse?.status === 'success' && <Tag color="success" style={{ fontSize: 10 }}>Success</Tag>}
+                  {(Array.isArray(extTxnResponse) ? extTxnResponse.every(r => r?.status === 'success') : extTxnResponse?.status === 'success') && <Tag color="success" style={{ fontSize: 10 }}>Success</Tag>}
                 </Space>
               }
               key="api"
@@ -1785,7 +1991,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                 </Collapse.Panel>
                 {extTxnResponse && (
                   <Collapse.Panel header={<Text style={{ fontSize: 11 }}>Response</Text>} key="response">
-                    <pre style={{ fontSize: 10, maxHeight: 160, overflow: 'auto', background: extTxnResponse?.status === 'success' ? '#f6ffed' : '#fff2f0', padding: 8, borderRadius: 4, margin: 0, border: `1px solid ${extTxnResponse?.status === 'success' ? '#b7eb8f' : '#ffccc7'}` }}>
+                    <pre style={{ fontSize: 10, maxHeight: 160, overflow: 'auto', background: '#f6ffed', padding: 8, borderRadius: 4, margin: 0, border: '1px solid #b7eb8f' }}>
                       {JSON.stringify(extTxnResponse, null, 2)}
                     </pre>
                   </Collapse.Panel>
@@ -1805,7 +2011,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
             <Button onClick={() => setExtTxnOpen(false)}>Cancel</Button>
             <Button type="primary" htmlType="submit" loading={extTxnSaving}
               style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
-              Create Transaction
+              {extTxnMode === 'multiple' ? `Create ${extTxnLines.length} Transaction(s)` : 'Create Transaction'}
             </Button>
           </div>
         </Form>
@@ -1817,16 +2023,24 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
         onCancel={() => setExtCoaOpen(false)}
         initialValue={extCoaInitial}
         onSelect={(code, _segments) => {
-          extTxnForm.setFieldValue(
-            extCoaTarget === 'asset' ? 'assetAccountCombination' : 'offsetAccountCombination',
-            code
-          );
-          validateAccountCode(code).then(r => {
-            const seg4 = Object.values(r.segmentDetails)[3];
-            const desc = (seg4 as any)?.description || '';
-            if (extCoaTarget === 'asset') setExtAssetDesc(desc);
-            else setExtOffsetDesc(desc);
-          }).catch(() => {});
+          if (extCoaTarget === 'line-offset') {
+            updateExtLine(extLineCoaIdx, 'offsetAccount', code);
+            validateAccountCode(code).then(r => {
+              const seg4 = Object.values(r.segmentDetails)[3];
+              updateExtLine(extLineCoaIdx, 'offsetDesc', (seg4 as any)?.description || '');
+            }).catch(() => {});
+          } else {
+            extTxnForm.setFieldValue(
+              extCoaTarget === 'asset' ? 'assetAccountCombination' : 'offsetAccountCombination',
+              code
+            );
+            validateAccountCode(code).then(r => {
+              const seg4 = Object.values(r.segmentDetails)[3];
+              const desc = (seg4 as any)?.description || '';
+              if (extCoaTarget === 'asset') setExtAssetDesc(desc);
+              else setExtOffsetDesc(desc);
+            }).catch(() => {});
+          }
           setExtCoaOpen(false);
         }}
       />
