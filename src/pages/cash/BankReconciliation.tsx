@@ -2640,23 +2640,40 @@ const ReconciledTab: React.FC<ReconciledTabProps> = ({ bankAccounts, businessUni
   }, []);
 
   const handleUnreconcile = useCallback(async (line: StmtLine) => {
-    // Placeholder — calls unreconcile endpoint if it exists
     try {
-      const res = await fetch(
+      // Step 1: unreconcile the statement line
+      const res  = await fetch(
         `${APEX_BASE}/cash/bankstatements/${line.statementId}/unreconcile`,
-        {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ lineId: line.lineId }),
-        }
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lineId: line.lineId }) }
       );
       const data = await parseApexJson(res);
-      if (data.status === 'success') {
-        msgApi.success(`Line ${line.lineId} unreconciled`);
-        setReconLines((prev) => prev.filter((l) => l.lineId !== line.lineId));
-      } else {
-        msgApi.error(data.message ?? 'Failed to unreconcile');
+      if (data.status !== 'success') {
+        msgApi.error(data.message ?? 'Failed to unreconcile statement line');
+        return;
       }
+
+      // Step 2: if linked to a CM external transaction, reverse its reconciliation
+      if (line.externalTxnId) {
+        try {
+          await fetch(`${EXT_TXN_URL}/${line.externalTxnId}`, {
+            method:  'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({
+              status:          'UNR',
+              reconciledFlag:  'N',
+              reconciledDate:  null,
+              statementId:     null,
+              stmtLineId:      null,
+            }),
+          });
+        } catch {
+          // Non-fatal — stmt line is already unreconciled; log silently
+          console.warn('Could not reverse external transaction reconciliation for ID', line.externalTxnId);
+        }
+      }
+
+      msgApi.success('Line unreconciled successfully');
+      setReconLines((prev) => prev.filter((l) => l.lineId !== line.lineId));
     } catch (err) {
       msgApi.error('Network error during unreconcile');
       console.error(err);
