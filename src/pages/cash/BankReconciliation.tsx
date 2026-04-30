@@ -15,6 +15,7 @@ import {
 import { Link } from 'react-router-dom';
 import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
 import { APEX_DB_CONFIG } from '../../config/api.config';
+import { buildPcBankTxnSlaPayload, fetchLedgerByBusinessUnit, derivePeriodName, createAccounting } from '../../services/sla.service';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -493,10 +494,13 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   // ── Create External Transaction modal ──────────────────────────────────────
   const [extTxnOpen, setExtTxnOpen]         = useState(false);
   const [extTxnForm]                        = Form.useForm();
-  const [extTxnSaving, setExtTxnSaving]     = useState(false);
-  const [extTxnPayload, setExtTxnPayload]   = useState<any>(null);
-  const [extTxnResponse, setExtTxnResponse] = useState<any>(null);
-  const [extTxnRawError, setExtTxnRawError] = useState('');
+  const [extTxnSaving, setExtTxnSaving]         = useState(false);
+  const [extTxnPayload, setExtTxnPayload]       = useState<any>(null);
+  const [extTxnResponse, setExtTxnResponse]     = useState<any>(null);
+  const [extTxnRawError, setExtTxnRawError]     = useState('');
+  const [extTxnCreatedId, setExtTxnCreatedId]   = useState<number | null>(null);
+  const [extAcctRunning, setExtAcctRunning]     = useState(false);
+  const [extAcctResult, setExtAcctResult]       = useState<{ ok: boolean; msg: string } | null>(null);
   const [extBankAccounts, setExtBankAccounts] = useState<{ name: string; cashAccount: string; currency: string }[]>([]);
   const [extAssetDesc, setExtAssetDesc]     = useState('');
   const [extOffsetDesc, setExtOffsetDesc]   = useState('');
@@ -566,6 +570,21 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     setExtTxnRawError('');
     setExtAssetDesc('');
     setExtOffsetDesc('');
+    setExtTxnCreatedId(null);
+    setExtAcctRunning(false);
+    setExtAcctResult(null);
+
+    // Auto-fill reference from selected statement lines
+    const selectedLines2 = stmtLines.filter(l => selectedStmtKeys.includes(l.lineId));
+    if (selectedStatement) {
+      const stmtNum = selectedStatement.statementNumber || `S${selectedStatement.statementId}`;
+      const ref = selectedLines2.length === 1
+        ? `${stmtNum}-L${selectedLines2[0].lineId}`
+        : selectedLines2.length > 1
+          ? `${stmtNum}-${selectedLines2.length}L`
+          : stmtNum;
+      extTxnForm.setFieldValue('referenceText', ref);
+    }
     setExtBankAccounts([]);
     setExtTxnMode(selectedLines.length > 1 ? 'multiple' : 'single');
     setExtTxnLines(
@@ -711,7 +730,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
           ));
         }
         msgApi.success(`${results.length} external transaction(s) created successfully`);
-        setExtTxnOpen(false);
+        setExtTxnCreatedId(firstId);
         setSelectedStmtKeys([]);
       } catch (e: any) {
         setExtTxnRawError(`Error: ${e.message}`);
@@ -784,7 +803,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
           ));
         }
         msgApi.success(`External transaction ${extTxnId ? `#${extTxnId} ` : ''}created successfully`);
-        setExtTxnOpen(false);
+        setExtTxnCreatedId(extTxnId);
         setSelectedStmtKeys([]);
       } else {
         msgApi.error(data.message || 'Failed to create external transaction');
@@ -1228,6 +1247,55 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       else if (lastParams) { fetchStmtLines(lastParams, stmtReconFilter); fetchSysTxns(lastParams, txnSourceFilter, cmReconFilter); }
     }
   }, [reconCalls, executeReconCall, selectedStatement, lastParams, handleSelectStatement, fetchStmtLines, fetchSysTxns, stmtReconFilter]);
+
+  // ── Create Accounting for ext txn from bank recon modal ──────────────────
+  const createExtTxnAccounting = useCallback(async () => {
+    if (!extTxnCreatedId) return;
+    const values = extTxnForm.getFieldsValue();
+    setExtAcctRunning(true);
+    setExtAcctResult(null);
+    try {
+      const ledger = await fetchLedgerByBusinessUnit(values.businessUnitName);
+      if (!ledger) { setExtAcctResult({ ok: false, msg: 'Could not resolve ledger for BU' }); setExtAcctRunning(false); return; }
+
+      const absAmount  = Math.abs(values.amount ?? 0);
+      const direction  = values.transactionDirection ?? 'DR';
+      const txnDate    = values.transactionDate?.format('YYYY-MM-DD') ?? new Date().toISOString().slice(0, 10);
+      const periodName = derivePeriodName(txnDate);
+
+      // DR = money in: DR bank asset / CR offset. CR = money out: DR offset / CR bank asset
+      const drAcct = direction === 'DR' ? values.assetAccountCombination : values.offsetAccountCombination;
+      const crAcct = direction === 'DR' ? values.offsetAccountCombination : values.assetAccountCombination;
+
+      const slaPayload = buildPcBankTxnSlaPayload({
+        externalTransactionId:    extTxnCreatedId,
+        referenceText:            values.referenceText || String(extTxnCreatedId),
+        transactionDate:          txnDate,
+        accountingDate:           txnDate,
+        periodName,
+        currency:                 values.currencyCode || 'AED',
+        amount:                   absAmount,
+        assetAccountCombination:  crAcct,   // buildPcBankTxnSlaPayload: assetAccount = CR line
+        offsetAccountCombination: drAcct,   // offsetAccount = DR line
+        businessUnit:             values.businessUnitName,
+        ledgerId:                 ledger.ledgerId,
+        ledgerName:               ledger.ledgerName,
+        createdBy:                'SYSTEM',
+      });
+
+      const slaResult = await createAccounting(slaPayload);
+      if (!slaResult?.headerId) { setExtAcctResult({ ok: false, msg: 'SLA creation failed' }); setExtAcctRunning(false); return; }
+
+      // Mark accounting flag on the external transaction
+      await fetch(`${EXT_TXN_URL}/${extTxnCreatedId}/acctflag?updated_by=SYSTEM`, { method: 'PUT', headers: { Accept: 'application/json' } }).catch(() => {});
+
+      setExtAcctResult({ ok: true, msg: `Accounting created — SLA Header ${slaResult.headerId}` });
+    } catch (err: any) {
+      setExtAcctResult({ ok: false, msg: err?.message || 'Accounting failed' });
+    } finally {
+      setExtAcctRunning(false);
+    }
+  }, [extTxnCreatedId, extTxnForm]);
 
   // ── Column definitions ────────────────────────────────────────────────────
   const stmtColumns: ColumnsType<StmtLine> = [
@@ -2309,9 +2377,23 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
               </Form.Item>
             </Col>
           </Row>
-          <Form.Item label="Reference" name="referenceText" style={{ marginBottom: 8 }}>
-            <Input placeholder="e.g. STMT-REF-001" />
-          </Form.Item>
+          <Row gutter={12}>
+            <Col span={16}>
+              <Form.Item label="Reference" name="referenceText" style={{ marginBottom: 8 }}>
+                <Input placeholder="e.g. STMT-REF-001" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item label="Direction" name="transactionDirection" initialValue="DR" style={{ marginBottom: 8 }}>
+                <Segmented size="small"
+                  options={[
+                    { label: '▲ DR — In',  value: 'DR' },
+                    { label: '▼ CR — Out', value: 'CR' },
+                  ]}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
 
           {/* Cash Account (always in header) */}
           <Form.Item label="Cash / Asset Account" style={{ marginBottom: 8 }}>
@@ -2494,12 +2576,41 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
             </Collapse.Panel>
           </Collapse>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-            <Button onClick={() => setExtTxnOpen(false)}>Cancel</Button>
-            <Button type="primary" htmlType="submit" loading={extTxnSaving}
-              style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
-              {extTxnMode === 'multiple' ? `Create ${extTxnLines.length} Transaction(s)` : 'Create Transaction'}
-            </Button>
+          {/* Accounting result banner */}
+          {extAcctResult && (
+            <div style={{ marginBottom: 10, padding: '6px 12px', borderRadius: 6, fontSize: 12,
+              background: extAcctResult.ok ? '#f6ffed' : '#fff2f0',
+              border: `1px solid ${extAcctResult.ok ? '#b7eb8f' : '#ffccc7'}`,
+              color: extAcctResult.ok ? REDWOOD.success : REDWOOD.error }}>
+              {extAcctResult.ok ? '✓ ' : '✗ '}{extAcctResult.msg}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <div>
+              {extTxnCreatedId && (
+                <Button
+                  icon={<FileTextOutlined />}
+                  loading={extAcctRunning}
+                  disabled={!!extAcctResult?.ok}
+                  onClick={createExtTxnAccounting}
+                  style={{ color: REDWOOD.info, borderColor: REDWOOD.info, fontSize: 12 }}
+                >
+                  {extAcctResult?.ok ? 'Accounted' : 'Create Accounting'}
+                </Button>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button onClick={() => { setExtTxnOpen(false); setExtTxnCreatedId(null); setExtAcctResult(null); }}>
+                {extTxnCreatedId ? 'Close' : 'Cancel'}
+              </Button>
+              {!extTxnCreatedId && (
+                <Button type="primary" htmlType="submit" loading={extTxnSaving}
+                  style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
+                  {extTxnMode === 'multiple' ? `Create ${extTxnLines.length} Transaction(s)` : 'Create Transaction'}
+                </Button>
+              )}
+            </div>
           </div>
         </Form>
       </Modal>
