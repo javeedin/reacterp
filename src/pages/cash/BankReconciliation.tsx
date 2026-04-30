@@ -2404,24 +2404,33 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
             </Col>
           </Row>
 
-          {/* Accounting entry preview — reactive via Form.useWatch */}
+          {/* Accounting entry preview */}
           {(() => {
-            const drAcct = extTxnDirection === 'DR'
-              ? (extTxnAssetAcct  || 'Cash / Asset Account')
-              : (extTxnOffsetAcct || 'Offset Account');
-            const crAcct = extTxnDirection === 'DR'
-              ? (extTxnOffsetAcct || 'Offset Account')
-              : (extTxnAssetAcct  || 'Cash / Asset Account');
+            const isMoneyIn = extTxnDirection === 'DR';
+            const assetCode  = extTxnAssetAcct  || '';
+            const offsetCode = extTxnOffsetAcct || '';
+            const assetLabel  = extAssetDesc  || assetCode  || 'Cash / Asset Account';
+            const offsetLabel = extOffsetDesc || offsetCode || 'Offset Account';
+            const drLabel = isMoneyIn ? assetLabel  : offsetLabel;
+            const crLabel = isMoneyIn ? offsetLabel : assetLabel;
+            const drCode  = isMoneyIn ? assetCode   : offsetCode;
+            const crCode  = isMoneyIn ? offsetCode  : assetCode;
             return (
               <div style={{ marginBottom: 10, padding: '8px 12px', borderRadius: 6, background: '#0d1117', border: '1px solid #30363d' }}>
                 <div style={{ color: '#6e7681', marginBottom: 6, fontSize: 10, letterSpacing: '0.05em' }}>JOURNAL ENTRY PREVIEW</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                  <span style={{ background: '#1f6feb33', border: '1px solid #1f6feb', color: '#79c0ff', borderRadius: 4, padding: '1px 7px', fontWeight: 700, fontSize: 11, minWidth: 28, textAlign: 'center' }}>DR</span>
-                  <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#c9d1d9' }}>{drAcct}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <span style={{ background: '#1f6feb33', border: '1px solid #1f6feb', color: '#79c0ff', borderRadius: 4, padding: '1px 7px', fontWeight: 700, fontSize: 11, minWidth: 28, textAlign: 'center', flexShrink: 0 }}>DR</span>
+                  <div>
+                    <div style={{ fontSize: 12, color: '#e6edf3', fontWeight: 500 }}>{drLabel}</div>
+                    {drCode && <div style={{ fontFamily: 'monospace', fontSize: 10, color: '#8b949e', marginTop: 1 }}>{drCode}</div>}
+                  </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 20 }}>
-                  <span style={{ background: '#2ea04326', border: '1px solid #2ea043', color: '#56d364', borderRadius: 4, padding: '1px 7px', fontWeight: 700, fontSize: 11, minWidth: 28, textAlign: 'center' }}>CR</span>
-                  <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#c9d1d9' }}>{crAcct}</span>
+                  <span style={{ background: '#2ea04326', border: '1px solid #2ea043', color: '#56d364', borderRadius: 4, padding: '1px 7px', fontWeight: 700, fontSize: 11, minWidth: 28, textAlign: 'center', flexShrink: 0 }}>CR</span>
+                  <div>
+                    <div style={{ fontSize: 12, color: '#e6edf3', fontWeight: 500 }}>{crLabel}</div>
+                    {crCode && <div style={{ fontFamily: 'monospace', fontSize: 10, color: '#8b949e', marginTop: 1 }}>{crCode}</div>}
+                  </div>
                 </div>
               </div>
             );
