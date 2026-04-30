@@ -311,292 +311,463 @@ const ExternalTxnForm: React.FC<{
     } finally { setApiPosting(false); }
   };
 
-  const fs = { marginBottom: 14 };
-  const lc = { span: 8 };
-  const wc = { span: 16 };
+  // ── Styles ──────────────────────────────────────────────────────────────────
+  const sectionCard = (accent: string) => ({
+    borderRadius: 8,
+    border: `1px solid ${REDWOOD.neutral200}`,
+    borderLeft: `3px solid ${accent}`,
+    marginBottom: 16,
+    background: REDWOOD.surface,
+    boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+  });
+  const sectionHeader = (color: string) => ({
+    fontSize: 12,
+    fontWeight: 600,
+    color,
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.5px',
+    marginBottom: 16,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+  });
+  const acctFieldStyle = {
+    background: '#f8f9fc',
+    border: `1px solid ${REDWOOD.neutral300}`,
+    borderRadius: 6,
+    padding: '8px 12px',
+    fontFamily: 'monospace',
+    fontSize: 12,
+    flex: 1,
+    cursor: 'default',
+    color: REDWOOD.neutral900,
+    minWidth: 0,
+  };
 
   return (
-    <div style={{ maxWidth: 900, margin: '0 auto', padding: '12px 24px' }}>
-      <Text style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 14 }}>
-        {isEdit ? 'View External Transaction' : 'Create External Transaction'}
-      </Text>
+    <div style={{ maxWidth: 980, margin: '0 auto', padding: '0 0 80px' }}>
 
-      {isEdit && (
-        <div style={{ marginBottom: 12, padding: '6px 12px', background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 4 }}>
-          <Text style={{ fontSize: 12, color: '#ad6800' }}>This record is read-only. Synced records cannot be edited.</Text>
+      {/* ── Page header ── */}
+      <div style={{
+        background: isEdit
+          ? `linear-gradient(135deg, ${REDWOOD.neutral900} 0%, #2d2d3a 100%)`
+          : `linear-gradient(135deg, ${REDWOOD.primary} 0%, #a33b2c 100%)`,
+        borderRadius: '0 0 12px 12px',
+        padding: '20px 28px 18px',
+        marginBottom: 20,
+        color: '#fff',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+      }}>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 4, letterSpacing: '-0.3px' }}>
+            {isEdit ? `Transaction #${initialValues?.transactionId ?? '—'}` : 'Create External Transaction'}
+          </div>
+          <div style={{ fontSize: 12, opacity: 0.8, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            <span>Origin: Manual</span>
+            {isEdit && initialValues?.businessUnitName && <span>BU: {initialValues.businessUnitName}</span>}
+            {isEdit && initialValues?.bankAccountName && <span>Bank: {initialValues.bankAccountName}</span>}
+          </div>
         </div>
-      )}
-
-      <div style={{ marginBottom: 10, padding: '6px 12px', background: REDWOOD.neutral100, borderRadius: 4, display: 'flex', gap: 24 }}>
-        {isEdit && <><Text style={{ fontSize: 12 }}>Transaction #: <Text strong>{initialValues?.transactionId ?? '—'}</Text></Text>
-        <Text style={{ fontSize: 12 }}>Origin: <Text strong>Manual</Text></Text></>}
-        {!isEdit && <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Origin: <Text strong>Manual</Text></Text>}
+        {isEdit && (
+          <Tag color="gold" style={{ margin: 0, fontSize: 11, fontWeight: 600, padding: '2px 10px' }}>
+            Read-only
+          </Tag>
+        )}
+        {!isEdit && (
+          <Tag color="blue" style={{ margin: 0, fontSize: 11, fontWeight: 600, padding: '2px 10px', background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff' }}>
+            New
+          </Tag>
+        )}
       </div>
 
-      <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 12, color: REDWOOD.neutral900 }}>
-        Transaction Details
-      </Text>
+      <Form form={form} layout="vertical" size="middle">
 
-      <Form form={form} layout="horizontal" labelCol={lc} wrapperCol={wc}>
-        {/* BU first → drives bank account filter */}
-        <Row gutter={40}>
-          <Col xs={24} lg={12}>
-            <Form.Item label="Business Unit" name="businessUnitName" rules={[{ required: !isEdit, message: 'Business Unit is required' }]} style={fs}>
-              <Select showSearch placeholder="Select business unit" optionFilterProp="label" options={businessUnits}
-                style={{ width: '100%' }} disabled={isEdit}
-                onChange={v => {
-                  setSelectedBu(v);
-                  if (!isEdit) {
-                    const banks = buBankMap[v] || [];
-                    const cur = form.getFieldValue('bankAccountName');
-                    if (cur && banks.length > 0 && !banks.includes(cur)) {
-                      form.setFieldsValue({ bankAccountName: undefined, currencyCode: undefined, assetAccountCombination: '' });
+        {/* ── Section 1: Organisation ── */}
+        <Card styles={{ body: { padding: '18px 20px' } }} style={sectionCard(REDWOOD.info)}>
+          <div style={sectionHeader(REDWOOD.info)}>
+            <BankOutlined /> Organisation
+          </div>
+          <Row gutter={16}>
+            <Col xs={24} md={12}>
+              <Form.Item
+                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Business Unit</span>}
+                name="businessUnitName"
+                rules={[{ required: !isEdit, message: 'Required' }]}
+                style={{ marginBottom: 0 }}
+              >
+                <Select
+                  showSearch optionFilterProp="label" options={businessUnits}
+                  placeholder="Select business unit"
+                  disabled={isEdit}
+                  style={{ width: '100%' }}
+                  onChange={v => {
+                    setSelectedBu(v);
+                    if (!isEdit) {
+                      const banks = buBankMap[v] || [];
+                      const cur = form.getFieldValue('bankAccountName');
+                      if (cur && banks.length > 0 && !banks.includes(cur)) {
+                        form.setFieldsValue({ bankAccountName: undefined, currencyCode: undefined, assetAccountCombination: '' });
+                      }
                     }
-                  }
-                }}
-                allowClear onClear={() => setSelectedBu(undefined)} />
-            </Form.Item>
-          </Col>
-          <Col xs={24} lg={12}>
-            <Form.Item label="Bank Account" name="bankAccountName" rules={[{ required: !isEdit, message: 'Bank Account is required' }]} style={fs}>
-              <Select showSearch placeholder="Select bank account" optionFilterProp="label"
-                options={filteredBankAccounts}
-                style={{ width: '100%' }} notFoundContent={<Text type="secondary">No accounts loaded</Text>}
-                disabled={isEdit || !buSelected}
-                onChange={v => {
-                  if (!isEdit) {
-                    form.setFieldValue('assetAccountCombination', bankAccountMap[v] ?? '');
-                    form.setFieldValue('currencyCode', bankAccountCurrencyMap[v] ?? '');
-                  }
-                }} />
-            </Form.Item>
-          </Col>
-        </Row>
-
-        <Row gutter={40}>
-          <Col xs={24} lg={12}>
-            <Form.Item label="Date" name="transactionDate" rules={[{ required: !isEdit, message: 'Date is required' }]} style={fs}>
-              <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={isEdit || !buSelected} />
-            </Form.Item>
-
-            <Form.Item label="Reference" name="referenceText" style={fs}>
-              <Input placeholder="Reference text" disabled={isEdit || !buSelected} />
-            </Form.Item>
-
-            <Form.Item label="Transaction Type" name="transactionType" style={fs}>
-              <Select placeholder="Select type" allowClear disabled={isEdit || !buSelected}>
-                <Option value="EFT">EFT</Option>
-                <Option value="WIRE">WIRE</Option>
-                <Option value="CHECK">CHECK</Option>
-                <Option value="MISC">MISC</Option>
-              </Select>
-            </Form.Item>
-          </Col>
-
-          <Col xs={24} lg={12}>
-            <Form.Item label="Value Date" name="valueDate" style={fs}>
-              <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={isEdit || !buSelected} />
-            </Form.Item>
-
-            <Form.Item label="Currency" name="currencyCode" style={fs}>
-              <Select placeholder="Auto-filled from bank account" allowClear disabled={isEdit || !buSelected}>
-                {['AED', 'USD', 'EUR', 'GBP', 'SAR', 'QAR', 'KWD', 'BHD', 'OMR'].map(c => (
-                  <Option key={c} value={c}>{c}</Option>
-                ))}
-              </Select>
-            </Form.Item>
-          </Col>
-        </Row>
-
-        {/* ── Account Combinations ── */}
-        <Divider style={{ fontSize: 12, color: REDWOOD.neutral600, margin: '8px 0 14px' }}>
-          Account Coding
-        </Divider>
-
-        <Row gutter={40}>
-          <Col xs={24} lg={12}>
-            <Form.Item label="Cash Account" name="assetAccountCombination" style={fs}>
-              <Input.Group compact style={{ display: 'flex' }}>
-                <Form.Item name="assetAccountCombination" noStyle>
-                  <Input
-                    readOnly
-                    disabled={isEdit}
-                    placeholder={isEdit ? '—' : 'Auto-populated from bank account'}
-                    style={{ flex: 1, fontFamily: 'monospace', fontSize: 12 }}
-                  />
-                </Form.Item>
-                {!isEdit && (
-                  <Button icon={<SearchOutlined />} disabled={!buSelected}
-                    onClick={() => setCashAcctOpen(true)} title="Select account" />
-                )}
-              </Input.Group>
-            </Form.Item>
-          </Col>
-          {extTxnMode === 'single' && (
-            <Col xs={24} lg={12}>
-              <Form.Item label="Offset Account" name="offsetAccountCombination" style={fs}>
-                <Input.Group compact style={{ display: 'flex' }}>
-                  <Form.Item name="offsetAccountCombination" noStyle>
-                    <Input
-                      readOnly
-                      disabled={isEdit}
-                      placeholder={isEdit ? '—' : 'Select offset account'}
-                      style={{ flex: 1, fontFamily: 'monospace', fontSize: 12 }}
-                    />
-                  </Form.Item>
-                  {!isEdit && (
-                    <Button icon={<SearchOutlined />} disabled={!buSelected}
-                      onClick={() => setOffsetAcctOpen(true)} title="Select account" />
-                  )}
-                </Input.Group>
-              </Form.Item>
-            </Col>
-          )}
-        </Row>
-
-        {/* ── Mode toggle + Transaction Lines ── */}
-        {!isEdit && (
-          <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '8px 0' }}>
-              <Text strong style={{ fontSize: 13, color: REDWOOD.neutral900 }}>Transaction Line(s)</Text>
-              <Segmented
-                size="small"
-                value={extTxnMode}
-                onChange={(v) => setExtTxnMode(v as 'single' | 'multiple')}
-                options={[{ label: 'Single', value: 'single' }, { label: 'Multiple', value: 'multiple' }]}
-              />
-            </div>
-
-            {extTxnMode === 'single' ? (
-              <Row gutter={40}>
-                <Col xs={24} lg={12}>
-                  <Form.Item label="Amount" name="amount" rules={[{ required: true, message: 'Amount is required' }]} style={fs}>
-                    <InputNumber style={{ width: '100%' }} precision={2} disabled={!buSelected}
-                      placeholder="Enter amount (negative for debit)" />
-                  </Form.Item>
-                </Col>
-                <Col xs={24} lg={12}>
-                  <Form.Item label="Description" name="description" style={fs}>
-                    <Input.TextArea rows={2} placeholder="Enter description" disabled={!buSelected} />
-                  </Form.Item>
-                </Col>
-              </Row>
-            ) : (
-              <>
-                <Table
-                  size="small"
-                  dataSource={extTxnLines}
-                  rowKey="key"
-                  pagination={false}
-                  scroll={{ y: 200 }}
-                  style={{ marginBottom: 6 }}
-                  columns={[
-                    {
-                      title: '#', width: 36,
-                      render: (_: any, _r: any, idx: number) => <Text style={{ fontSize: 12 }}>{idx + 1}</Text>,
-                    },
-                    {
-                      title: 'Amount', width: 130,
-                      render: (_: any, record: ExtTxnLine, idx: number) => (
-                        <InputNumber size="small" style={{ width: '100%' }} precision={2}
-                          value={record.amount} placeholder="0.00"
-                          onChange={(v) => updateExtLine(idx, 'amount', v)}
-                        />
-                      ),
-                    },
-                    {
-                      title: 'Description',
-                      render: (_: any, record: ExtTxnLine, idx: number) => (
-                        <Input size="small" value={record.description}
-                          placeholder="Optional"
-                          onChange={(e) => updateExtLine(idx, 'description', e.target.value)}
-                        />
-                      ),
-                    },
-                    {
-                      title: 'Offset Account', width: 220,
-                      render: (_: any, record: ExtTxnLine, idx: number) => (
-                        <>
-                          <Space.Compact style={{ width: '100%' }}>
-                            <Input size="small" readOnly value={record.offsetAccount}
-                              style={{ fontFamily: 'monospace', fontSize: 11 }} placeholder="Select..." />
-                            <Button size="small" icon={<SearchOutlined />} onClick={() => {
-                              setLineCoaIdx(idx);
-                              setLineCoaInitial(record.offsetAccount || '');
-                              setLineCoaOpen(true);
-                            }} />
-                          </Space.Compact>
-                          {record.offsetDesc && (
-                            <div style={{ fontSize: 10, color: REDWOOD.info, marginTop: 1 }}>{record.offsetDesc}</div>
-                          )}
-                        </>
-                      ),
-                    },
-                    {
-                      title: '', width: 36,
-                      render: (_: any, _r: any, idx: number) => (
-                        <Button size="small" type="text" danger icon={<CloseOutlined />}
-                          onClick={() => setExtTxnLines(prev => prev.filter((_, i) => i !== idx))} />
-                      ),
-                    },
-                  ]}
-                  footer={() => (
-                    <div style={{ textAlign: 'right', paddingRight: 40 }}>
-                      <Text style={{ fontSize: 12 }}>Total: </Text>
-                      <Text strong style={{ fontSize: 12 }}>
-                        {fmtAmount(extTxnLines.reduce((s, l) => s + (l.amount ?? 0), 0),
-                          form.getFieldValue('currencyCode'))}
-                      </Text>
-                    </div>
-                  )}
+                  }}
+                  allowClear onClear={() => setSelectedBu(undefined)}
                 />
-                <Button size="small" icon={<PlusOutlined />}
-                  onClick={() => setExtTxnLines(prev => [
-                    ...prev,
-                    { key: Date.now(), amount: undefined, description: '', offsetAccount: '', offsetDesc: '' },
-                  ])}
-                >
-                  Add Line
-                </Button>
-              </>
-            )}
-          </>
-        )}
-
-        {isEdit && (
-          <Row gutter={40}>
-            <Col xs={24} lg={12}>
-              <Form.Item label="Amount" style={fs}>
-                <InputNumber style={{ width: '100%' }} precision={2} disabled value={initialValues?.amount} />
               </Form.Item>
             </Col>
-            <Col xs={24} lg={12}>
-              <Form.Item label="Description" name="description" style={fs}>
-                <Input.TextArea rows={2} disabled />
+            <Col xs={24} md={12}>
+              <Form.Item
+                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Bank Account</span>}
+                name="bankAccountName"
+                rules={[{ required: !isEdit, message: 'Required' }]}
+                style={{ marginBottom: 0 }}
+              >
+                <Select
+                  showSearch optionFilterProp="label"
+                  options={filteredBankAccounts}
+                  placeholder={buSelected ? 'Select bank account' : 'Select Business Unit first'}
+                  disabled={isEdit || !buSelected}
+                  style={{ width: '100%' }}
+                  notFoundContent={<Text type="secondary">No accounts for this BU</Text>}
+                  onChange={v => {
+                    if (!isEdit) {
+                      form.setFieldValue('assetAccountCombination', bankAccountMap[v] ?? '');
+                      form.setFieldValue('currencyCode', bankAccountCurrencyMap[v] ?? '');
+                    }
+                  }}
+                />
               </Form.Item>
             </Col>
           </Row>
-        )}
+        </Card>
 
-        <Divider />
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        {/* ── Section 2: Transaction Details ── */}
+        <Card styles={{ body: { padding: '18px 20px' } }} style={sectionCard(REDWOOD.primary)}>
+          <div style={sectionHeader(REDWOOD.primary)}>
+            <DollarOutlined /> Transaction Details
+          </div>
+          <Row gutter={16}>
+            <Col xs={12} md={6}>
+              <Form.Item
+                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Transaction Date</span>}
+                name="transactionDate"
+                rules={[{ required: !isEdit, message: 'Required' }]}
+                style={{ marginBottom: 14 }}
+              >
+                <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={isEdit || !buSelected} />
+              </Form.Item>
+            </Col>
+            <Col xs={12} md={6}>
+              <Form.Item
+                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Value Date</span>}
+                name="valueDate"
+                style={{ marginBottom: 14 }}
+              >
+                <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={isEdit || !buSelected} />
+              </Form.Item>
+            </Col>
+            <Col xs={12} md={6}>
+              <Form.Item
+                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Currency</span>}
+                name="currencyCode"
+                style={{ marginBottom: 14 }}
+              >
+                <Select placeholder="Auto-filled" allowClear disabled={isEdit || !buSelected}>
+                  {['AED', 'USD', 'EUR', 'GBP', 'SAR', 'QAR', 'KWD', 'BHD', 'OMR'].map(c => (
+                    <Option key={c} value={c}>{c}</Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col xs={12} md={6}>
+              <Form.Item
+                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Transaction Type</span>}
+                name="transactionType"
+                style={{ marginBottom: 14 }}
+              >
+                <Select placeholder="Select type" allowClear disabled={isEdit || !buSelected}>
+                  {['EFT', 'WIRE', 'CHECK', 'MISC'].map(t => <Option key={t} value={t}>{t}</Option>)}
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={16}>
+            <Col xs={24} md={12}>
+              <Form.Item
+                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Reference</span>}
+                name="referenceText"
+                style={{ marginBottom: 0 }}
+              >
+                <Input placeholder="e.g. STMT-REF-001" disabled={isEdit || !buSelected} />
+              </Form.Item>
+            </Col>
+          </Row>
+        </Card>
+
+        {/* ── Section 3: Account Coding ── */}
+        <Card styles={{ body: { padding: '18px 20px' } }} style={sectionCard(REDWOOD.success)}>
+          <div style={sectionHeader(REDWOOD.success)}>
+            <FileTextOutlined /> Account Coding
+          </div>
+          <Row gutter={16}>
+            <Col xs={24} md={extTxnMode === 'single' ? 12 : 24}>
+              <Form.Item
+                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Cash / Asset Account</span>}
+                style={{ marginBottom: 0 }}
+              >
+                <div style={{ display: 'flex', gap: 0, alignItems: 'center' }}>
+                  <Form.Item name="assetAccountCombination" noStyle>
+                    <Input
+                      readOnly disabled={isEdit}
+                      placeholder={isEdit ? '—' : 'Auto-populated from bank account'}
+                      style={{ ...acctFieldStyle, borderRadius: isEdit ? 6 : '6px 0 0 6px' }}
+                    />
+                  </Form.Item>
+                  {!isEdit && (
+                    <Button
+                      icon={<SearchOutlined />}
+                      disabled={!buSelected}
+                      onClick={() => setCashAcctOpen(true)}
+                      style={{ borderRadius: '0 6px 6px 0', height: 36, borderLeft: 0 }}
+                    />
+                  )}
+                </div>
+              </Form.Item>
+            </Col>
+            {extTxnMode === 'single' && (
+              <Col xs={24} md={12}>
+                <Form.Item
+                  label={<span style={{ fontWeight: 600, fontSize: 13 }}>Offset Account</span>}
+                  style={{ marginBottom: 0 }}
+                >
+                  <div style={{ display: 'flex', gap: 0, alignItems: 'center' }}>
+                    <Form.Item name="offsetAccountCombination" noStyle>
+                      <Input
+                        readOnly disabled={isEdit}
+                        placeholder={isEdit ? '—' : 'Select offset account'}
+                        style={{ ...acctFieldStyle, borderRadius: isEdit ? 6 : '6px 0 0 6px' }}
+                      />
+                    </Form.Item>
+                    {!isEdit && (
+                      <Button
+                        icon={<SearchOutlined />}
+                        disabled={!buSelected}
+                        onClick={() => setOffsetAcctOpen(true)}
+                        style={{ borderRadius: '0 6px 6px 0', height: 36, borderLeft: 0 }}
+                      />
+                    )}
+                  </div>
+                </Form.Item>
+              </Col>
+            )}
+          </Row>
+        </Card>
+
+        {/* ── Section 4: Transaction Lines ── */}
+        <Card
+          styles={{ body: { padding: '18px 20px' } }}
+          style={{ ...sectionCard(REDWOOD.warning), marginBottom: 0 }}
+          title={
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
+              <span style={{ ...sectionHeader(REDWOOD.warning), marginBottom: 0 }}>
+                <SwapOutlined /> Transaction Line{extTxnMode === 'multiple' ? 's' : ''}
+              </span>
+              {!isEdit && (
+                <Segmented
+                  size="small"
+                  value={extTxnMode}
+                  onChange={(v) => setExtTxnMode(v as 'single' | 'multiple')}
+                  options={[
+                    { label: 'Single', value: 'single' },
+                    { label: 'Multiple', value: 'multiple' },
+                  ]}
+                />
+              )}
+            </div>
+          }
+        >
+          {(isEdit || extTxnMode === 'single') && (
+            <Row gutter={16}>
+              <Col xs={24} md={8}>
+                <Form.Item
+                  label={<span style={{ fontWeight: 600, fontSize: 13 }}>Amount</span>}
+                  name="amount"
+                  rules={[{ required: !isEdit, message: 'Required' }]}
+                  style={{ marginBottom: 0 }}
+                >
+                  <InputNumber
+                    style={{ width: '100%' }}
+                    precision={2}
+                    disabled={isEdit || !buSelected}
+                    placeholder="0.00 (negative for debit)"
+                    formatter={v => v ? String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''}
+                  />
+                </Form.Item>
+              </Col>
+              <Col xs={24} md={16}>
+                <Form.Item
+                  label={<span style={{ fontWeight: 600, fontSize: 13 }}>Description</span>}
+                  name="description"
+                  style={{ marginBottom: 0 }}
+                >
+                  <Input.TextArea
+                    rows={1}
+                    autoSize={{ minRows: 1, maxRows: 3 }}
+                    placeholder="Enter description"
+                    disabled={isEdit || !buSelected}
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+          )}
+
+          {!isEdit && extTxnMode === 'multiple' && (
+            <>
+              <Table
+                size="small"
+                dataSource={extTxnLines}
+                rowKey="key"
+                pagination={false}
+                scroll={{ y: 220 }}
+                style={{ marginBottom: 10, borderRadius: 6, overflow: 'hidden' }}
+                rowClassName={(_, idx) => idx % 2 === 1 ? 'alt-row' : ''}
+                columns={[
+                  {
+                    title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>#</span>,
+                    width: 36,
+                    render: (_: any, _r: any, idx: number) => (
+                      <span style={{ fontSize: 12, color: REDWOOD.neutral600, fontWeight: 600 }}>{idx + 1}</span>
+                    ),
+                  },
+                  {
+                    title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Amount</span>,
+                    width: 140,
+                    render: (_: any, record: ExtTxnLine, idx: number) => (
+                      <InputNumber
+                        size="small" style={{ width: '100%' }} precision={2}
+                        value={record.amount} placeholder="0.00"
+                        onChange={(v) => updateExtLine(idx, 'amount', v)}
+                      />
+                    ),
+                  },
+                  {
+                    title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Description</span>,
+                    render: (_: any, record: ExtTxnLine, idx: number) => (
+                      <Input
+                        size="small" value={record.description}
+                        placeholder="Optional"
+                        onChange={(e) => updateExtLine(idx, 'description', e.target.value)}
+                      />
+                    ),
+                  },
+                  {
+                    title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Offset Account</span>,
+                    width: 230,
+                    render: (_: any, record: ExtTxnLine, idx: number) => (
+                      <>
+                        <Space.Compact style={{ width: '100%' }}>
+                          <Input
+                            size="small" readOnly value={record.offsetAccount}
+                            style={{ fontFamily: 'monospace', fontSize: 11, background: record.offsetAccount ? '#f0f7ff' : undefined }}
+                            placeholder="Select account…"
+                          />
+                          <Button size="small" icon={<SearchOutlined />} onClick={() => {
+                            setLineCoaIdx(idx);
+                            setLineCoaInitial(record.offsetAccount || '');
+                            setLineCoaOpen(true);
+                          }} />
+                        </Space.Compact>
+                        {record.offsetDesc && (
+                          <div style={{ fontSize: 10, color: REDWOOD.info, marginTop: 2, paddingLeft: 2 }}>{record.offsetDesc}</div>
+                        )}
+                      </>
+                    ),
+                  },
+                  {
+                    title: '',
+                    width: 36,
+                    render: (_: any, _r: any, idx: number) => (
+                      <Tooltip title="Remove line">
+                        <Button size="small" type="text" danger icon={<CloseOutlined />}
+                          onClick={() => setExtTxnLines(prev => prev.filter((_, i) => i !== idx))} />
+                      </Tooltip>
+                    ),
+                  },
+                ]}
+                footer={() => (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
+                    <Button
+                      size="small" type="dashed" icon={<PlusOutlined />}
+                      onClick={() => setExtTxnLines(prev => [
+                        ...prev,
+                        { key: Date.now(), amount: undefined, description: '', offsetAccount: '', offsetDesc: '' },
+                      ])}
+                    >
+                      Add Line
+                    </Button>
+                    <Space>
+                      <Text type="secondary" style={{ fontSize: 12 }}>{extTxnLines.length} line(s)</Text>
+                      <Divider type="vertical" />
+                      <Text style={{ fontSize: 12 }}>Total:</Text>
+                      <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>
+                        {fmtAmount(extTxnLines.reduce((s, l) => s + (l.amount ?? 0), 0), form.getFieldValue('currencyCode'))}
+                      </Text>
+                    </Space>
+                  </div>
+                )}
+              />
+            </>
+          )}
+        </Card>
+      </Form>
+
+      {/* ── Sticky footer ── */}
+      <div style={{
+        position: 'fixed',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        background: REDWOOD.surface,
+        borderTop: `1px solid ${REDWOOD.neutral200}`,
+        padding: '12px 28px',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        zIndex: 100,
+        boxShadow: '0 -2px 8px rgba(0,0,0,0.08)',
+      }}>
+        <div>
           {!isEdit && (
-            <Button icon={<ApiOutlined />} onClick={handleApiOpen} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>
-              API
+            <Button
+              icon={<ApiOutlined />}
+              onClick={handleApiOpen}
+              style={{ color: REDWOOD.neutral600, borderColor: REDWOOD.neutral300 }}
+            >
+              API Inspector
             </Button>
           )}
-          {isEdit && <span />}
-          <Space>
-            <Button onClick={onCancel}>{isEdit ? 'Close' : 'Cancel'}</Button>
-            {!isEdit && (
-              <Button type="primary" loading={saving} onClick={handleSubmit}
-                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
-                {extTxnMode === 'multiple' ? `Create ${extTxnLines.length} Transaction(s)` : 'Create Transaction'}
-              </Button>
-            )}
-          </Space>
         </div>
-      </Form>
+        <Space size={8}>
+          <Button size="large" onClick={onCancel} style={{ minWidth: 100 }}>
+            {isEdit ? 'Close' : 'Cancel'}
+          </Button>
+          {!isEdit && (
+            <Button
+              size="large"
+              type="primary"
+              loading={saving}
+              onClick={handleSubmit}
+              icon={<PlusOutlined />}
+              style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary, minWidth: 180 }}
+            >
+              {extTxnMode === 'multiple'
+                ? `Create ${extTxnLines.length} Transaction${extTxnLines.length !== 1 ? 's' : ''}`
+                : 'Create Transaction'}
+            </Button>
+          )}
+        </Space>
+      </div>
 
       {/* ── Account Selector Modals ── */}
       <AccountSelector
