@@ -6050,6 +6050,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             </div>
           )}
 
+          {(() => {
+            const _mpaActiveCount = lines.filter((l) =>
+              l.startDate && l.endDate && l.accrualAccount && l.amount !== 0 &&
+              dayjs(l.startDate, ['DD-MMM-YYYY', 'YYYY-MM-DD']).format('YYYY-MM') !==
+              dayjs(l.endDate,   ['DD-MMM-YYYY', 'YYYY-MM-DD']).format('YYYY-MM')
+            ).length;
+            return (
           <div data-sat-id="invoice-lines-table" style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text strong style={{ fontSize: 14, color: REDWOOD.neutral900 }}>
               Invoice Lines
@@ -6057,6 +6064,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               {isHeaderComplete && (
                 <Tag color="green" style={{ marginLeft: 8, fontSize: 10 }}>
                   <CheckCircleOutlined /> Header Complete
+                </Tag>
+              )}
+              {_mpaActiveCount > 0 && (
+                <Tag color="purple" style={{ marginLeft: 8, fontSize: 11, fontWeight: 600 }}>
+                  <CalendarOutlined style={{ marginRight: 3 }} />
+                  Multiperiod Active — {_mpaActiveCount} line{_mpaActiveCount > 1 ? 's' : ''}
                 </Tag>
               )}
             </Text>
@@ -6074,6 +6087,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               )}
             </Space>
           </div>
+            );
+          })()}
 
           <Tabs
             activeKey={activeTabKey}
@@ -6116,12 +6131,24 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               },
               {
                 key: 'multiperiod',
-                label: (
-                  <Space size={4}>
-                    <CalendarOutlined />
-                    <span>Multiperiod Accounting</span>
-                  </Space>
-                ),
+                label: (() => {
+                  const _cnt = lines.filter((l) =>
+                    l.startDate && l.endDate && l.accrualAccount && l.amount !== 0 &&
+                    dayjs(l.startDate, ['DD-MMM-YYYY', 'YYYY-MM-DD']).format('YYYY-MM') !==
+                    dayjs(l.endDate,   ['DD-MMM-YYYY', 'YYYY-MM-DD']).format('YYYY-MM')
+                  ).length;
+                  return (
+                    <Space size={4}>
+                      <CalendarOutlined />
+                      <span>Multiperiod Accounting</span>
+                      {_cnt > 0 && (
+                        <Tag color="purple" style={{ marginLeft: 2, fontSize: 10, lineHeight: '16px', padding: '0 5px' }}>
+                          {_cnt}
+                        </Tag>
+                      )}
+                    </Space>
+                  );
+                })(),
                 children: (
                   <Table
                     columns={multiperiodColumns}
