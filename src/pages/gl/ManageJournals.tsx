@@ -303,6 +303,8 @@ const ManageJournals: React.FC = () => {
   const [lastSearchUrl, setLastSearchUrl] = useState<string | null>(null);
   const [lastSearchStatus, setLastSearchStatus] = useState<number | null>(null);
   const [apiUrlCopied, setApiUrlCopied] = useState(false);
+  const [pageApiModalVisible, setPageApiModalVisible] = useState(false);
+  const [pageApiExecResults, setPageApiExecResults] = useState<Record<number, { loading: boolean; response: string | null }>>({});
 
   // Journal panel expanded/collapsed state per tab (for Show More/Show Less)
   const [journalExpandedState, setJournalExpandedState] = useState<Record<string, boolean>>({});
@@ -619,6 +621,54 @@ const ManageJournals: React.FC = () => {
   const openCreateJournalTab = () => {
     setCreateJournalTabOpen(true);
     setActiveTabKey('create-journal');
+  };
+
+  // Page APIs definition
+  const selectedLedgerName = selectedLedger?.ledger_name || '';
+  const PAGE_APIS = [
+    {
+      name: 'Fetch Ledgers',
+      method: 'GET',
+      url: `${APEX_DB_CONFIG.baseUrl}/ledgers`,
+      description: 'Populates the Ledger dropdown on page load',
+    },
+    {
+      name: 'Fetch Periods',
+      method: 'GET',
+      url: `${APEX_DB_CONFIG.baseUrl}/periodsstatus/create?P_APPLICATION_NAME=General+Ledger&P_LEDGER_NAME=${encodeURIComponent(selectedLedgerName || '{select a ledger}')}`,
+      description: 'Populates the Accounting Period LOV when a ledger is selected',
+    },
+    {
+      name: 'Search Journals',
+      method: 'GET',
+      url: lastSearchUrl || `${APEX_DB_CONFIG.baseUrl}/gl/journals/headers?ledger_name=${encodeURIComponent(selectedLedgerName || '{ledger}')}&period_name={period}&...`,
+      description: 'Fetches journal headers matching the search filters',
+    },
+    {
+      name: 'Post Journal',
+      method: 'PUT',
+      url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/{batchId}/post`,
+      description: 'Posts a journal batch',
+    },
+    {
+      name: 'Update Journal Lines',
+      method: 'PUT',
+      url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/{headerId}`,
+      description: 'Saves edits to journal lines',
+    },
+  ];
+
+  const executePageApi = async (index: number, url: string) => {
+    setPageApiExecResults(prev => ({ ...prev, [index]: { loading: true, response: null } }));
+    try {
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      const text = await res.text();
+      let formatted = text;
+      try { formatted = JSON.stringify(JSON.parse(text), null, 2); } catch { /* keep raw */ }
+      setPageApiExecResults(prev => ({ ...prev, [index]: { loading: false, response: `HTTP ${res.status}\n\n${formatted}` } }));
+    } catch (e: any) {
+      setPageApiExecResults(prev => ({ ...prev, [index]: { loading: false, response: `Error: ${e.message}` } }));
+    }
   };
 
   // Add debug log helper
@@ -2842,6 +2892,14 @@ const ManageJournals: React.FC = () => {
                 <Button size="small" disabled={selectedRowKeys.length === 0} style={{ fontSize: 11 }}>
                   Reverse Batch
                 </Button>
+                <Tooltip title="View Page APIs">
+                  <Button
+                    size="small"
+                    icon={<ApiOutlined />}
+                    style={{ color: REDWOOD.info, borderColor: REDWOOD.info, fontSize: 11 }}
+                    onClick={() => setPageApiModalVisible(true)}
+                  />
+                </Tooltip>
                 {lastSearchUrl && (
                   <Tooltip
                     title={
@@ -3777,6 +3835,50 @@ const ManageJournals: React.FC = () => {
             </div>
           )
         ) : null}
+      </Modal>
+
+      {/* Page APIs Modal */}
+      <Modal
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>Page APIs - Manage Journals</span></Space>}
+        open={pageApiModalVisible}
+        onCancel={() => { setPageApiModalVisible(false); setPageApiExecResults({}); }}
+        footer={<Button onClick={() => { setPageApiModalVisible(false); setPageApiExecResults({}); }}>Close</Button>}
+        width={700}
+        destroyOnClose
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {PAGE_APIS.map((api, index) => (
+            <div key={index} style={{ border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, padding: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <Tag color={api.method === 'GET' ? 'blue' : api.method === 'PUT' ? 'orange' : 'green'} style={{ fontSize: 10, margin: 0 }}>{api.method}</Tag>
+                <Text strong style={{ fontSize: 12 }}>{api.name}</Text>
+              </div>
+              <div style={{ background: '#1e1e1e', borderRadius: 4, padding: '6px 10px', marginBottom: 6 }}>
+                <code style={{ fontSize: 10, color: '#9cdcfe', wordBreak: 'break-all' }}>{api.url}</code>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text type="secondary" style={{ fontSize: 11 }}>{api.description}</Text>
+                {api.method === 'GET' && (
+                  <Button
+                    size="small"
+                    style={{ fontSize: 11, marginLeft: 8, flexShrink: 0 }}
+                    loading={pageApiExecResults[index]?.loading}
+                    onClick={() => executePageApi(index, api.url)}
+                  >
+                    Execute
+                  </Button>
+                )}
+              </div>
+              {pageApiExecResults[index]?.response && (
+                <div style={{ marginTop: 8, background: '#1e1e1e', borderRadius: 4, padding: '8px 10px', maxHeight: 200, overflow: 'auto' }}>
+                  <pre style={{ margin: 0, fontSize: 10, color: pageApiExecResults[index].response!.startsWith('HTTP 2') ? '#4ec9b0' : '#f48771', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                    {pageApiExecResults[index].response}
+                  </pre>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       </Modal>
     </Layout>
   );
