@@ -341,6 +341,7 @@ const ManageInvoices: React.FC = () => {
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [lastCalledUrl, setLastCalledUrl] = useState<string | null>(null);
   const [lastApiResponse, setLastApiResponse] = useState<string | null>(null);
+  const [apiExecResults, setApiExecResults] = useState<Record<number, { loading: boolean; response: string | null }>>({});
 
   // Invoice date operator state
   const [invoiceDateOp, setInvoiceDateOp] = useState<string>('=');
@@ -856,6 +857,7 @@ const ManageInvoices: React.FC = () => {
   };
 
   // API Configuration for this page
+  const selectedBuForApi = form.getFieldValue('businessUnit') || '';
   const PAGE_APIS = {
     apex: [
       {
@@ -874,6 +876,14 @@ const ManageInvoices: React.FC = () => {
         params: '',
         description: 'Creates a new invoice in APEX database',
       },
+      {
+        name: 'Tax Codes by Business Unit',
+        method: 'GET',
+        proxyUrl: `${APEX_DB_CONFIG.baseUrl}/tax/taxes/bybu`,
+        actualUrl: `${APEX_DB_CONFIG.baseUrl}/tax/taxes/bybu${selectedBuForApi ? `?business_unit=${encodeURIComponent(selectedBuForApi)}` : '?business_unit=<select a BU filter above>'}`,
+        params: selectedBuForApi ? `business_unit=${encodeURIComponent(selectedBuForApi)}` : 'business_unit=<BU name>',
+        description: 'Returns active tax codes assigned to a business unit — used to populate the Tax Classification dropdown on invoice lines. Select a Business Unit filter above to test with a real BU.',
+      },
     ],
   };
 
@@ -883,6 +893,20 @@ const ManageInvoices: React.FC = () => {
     setCopiedUrl(url);
     message.success('URL copied to clipboard');
     setTimeout(() => setCopiedUrl(null), 2000);
+  };
+
+  // Execute a GET API and store the formatted response
+  const executeApi = async (index: number, url: string) => {
+    setApiExecResults(prev => ({ ...prev, [index]: { loading: true, response: null } }));
+    try {
+      const res  = await fetch(url, { headers: { Accept: 'application/json' } });
+      const text = await res.text();
+      let formatted = text;
+      try { formatted = JSON.stringify(JSON.parse(text), null, 2); } catch { /* keep raw */ }
+      setApiExecResults(prev => ({ ...prev, [index]: { loading: false, response: `HTTP ${res.status}\n\n${formatted}` } }));
+    } catch (e: any) {
+      setApiExecResults(prev => ({ ...prev, [index]: { loading: false, response: `Error: ${e.message}` } }));
+    }
   };
 
   // Open invoice in new tab
@@ -2088,75 +2112,78 @@ const ManageInvoices: React.FC = () => {
               </Space>
             }
           >
-            {PAGE_APIS.apex.map((api, index) => (
-              <div
-                key={index}
-                style={{
-                  padding: '12px',
-                  background: REDWOOD.neutral100,
-                  borderRadius: 6,
-                  marginBottom: index < PAGE_APIS.apex.length - 1 ? 12 : 0,
-                }}
-              >
-                <Row justify="space-between" align="middle" style={{ marginBottom: 8 }}>
-                  <Col>
-                    <Space>
-                      <Tag color={api.method === 'GET' ? 'blue' : 'orange'}>{api.method}</Tag>
-                      <Text strong>{api.name}</Text>
-                    </Space>
-                  </Col>
-                </Row>
-                <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
-                  {api.description}
-                </Text>
-                <div style={{ marginBottom: 8 }}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>Proxy URL:</Text>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <code
-                      style={{
-                        background: '#f5f5f5',
-                        padding: '4px 8px',
-                        borderRadius: 4,
-                        fontSize: 12,
-                        flex: 1,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                      }}
-                    >
-                      {api.proxyUrl}{api.params ? `?${api.params}` : ''}
-                    </code>
-                    <Button
-                      size="small"
-                      icon={copiedUrl === api.proxyUrl ? <CheckOutlined /> : <CopyOutlined />}
-                      onClick={() => copyToClipboard(api.proxyUrl)}
-                    />
+            {PAGE_APIS.apex.map((api, index) => {
+              const exec = apiExecResults[index];
+              const isSuccess = exec?.response && !exec.response.startsWith('Error') && (exec.response.includes('"status":"success"') || exec.response.includes('"items"') || exec.response.startsWith('HTTP 200'));
+              return (
+                <div
+                  key={index}
+                  style={{
+                    padding: '12px',
+                    background: REDWOOD.neutral100,
+                    borderRadius: 6,
+                    marginBottom: index < PAGE_APIS.apex.length - 1 ? 12 : 0,
+                  }}
+                >
+                  <Row justify="space-between" align="middle" style={{ marginBottom: 8 }}>
+                    <Col>
+                      <Space>
+                        <Tag color={api.method === 'GET' ? 'blue' : 'orange'}>{api.method}</Tag>
+                        <Text strong>{api.name}</Text>
+                      </Space>
+                    </Col>
+                    {api.method === 'GET' && (
+                      <Col>
+                        <Button
+                          size="small"
+                          type="primary"
+                          loading={exec?.loading}
+                          onClick={() => executeApi(index, api.actualUrl)}
+                          style={{ background: REDWOOD.success, borderColor: REDWOOD.success, fontSize: 12 }}
+                        >
+                          Execute
+                        </Button>
+                      </Col>
+                    )}
+                  </Row>
+                  <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
+                    {api.description}
+                  </Text>
+                  <div style={{ marginBottom: 8 }}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>Proxy URL:</Text>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <code style={{ background: '#f5f5f5', padding: '4px 8px', borderRadius: 4, fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {api.proxyUrl}{api.params ? `?${api.params}` : ''}
+                      </code>
+                      <Button size="small" icon={copiedUrl === api.proxyUrl ? <CheckOutlined /> : <CopyOutlined />} onClick={() => copyToClipboard(api.proxyUrl)} />
+                    </div>
                   </div>
-                </div>
-                <div>
-                  <Text type="secondary" style={{ fontSize: 12 }}>Actual URL:</Text>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <code
-                      style={{
-                        background: '#e8f5e9',
-                        padding: '4px 8px',
-                        borderRadius: 4,
-                        fontSize: 12,
-                        flex: 1,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                      }}
-                    >
-                      {api.actualUrl}
-                    </code>
-                    <Button
-                      size="small"
-                      icon={copiedUrl === api.actualUrl ? <CheckOutlined /> : <CopyOutlined />}
-                      onClick={() => copyToClipboard(api.actualUrl)}
-                    />
+                  <div>
+                    <Text type="secondary" style={{ fontSize: 12 }}>Actual URL:</Text>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <code style={{ background: '#e8f5e9', padding: '4px 8px', borderRadius: 4, fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {api.actualUrl}
+                      </code>
+                      <Button size="small" icon={copiedUrl === api.actualUrl ? <CheckOutlined /> : <CopyOutlined />} onClick={() => copyToClipboard(api.actualUrl)} />
+                    </div>
                   </div>
+                  {exec && !exec.loading && exec.response !== null && (
+                    <div style={{ marginTop: 10 }}>
+                      <Text type="secondary" style={{ fontSize: 12 }}>Response:</Text>
+                      <pre style={{
+                        background: '#0d1117', borderRadius: 6, padding: '8px 10px',
+                        fontSize: 11, fontFamily: 'monospace', maxHeight: 220,
+                        overflowY: 'auto', overflowX: 'auto', margin: '4px 0 0',
+                        color: isSuccess ? '#3fb950' : '#f85149',
+                        border: `1px solid ${isSuccess ? '#238636' : '#da3633'}`,
+                      }}>
+                        {exec.response}
+                      </pre>
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </Card>
         </Modal>
 
