@@ -4125,9 +4125,21 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       ReceiptNumber: line.receiptNumber || null,
       ReceiptLineNumber: line.receiptLine || null,
       ShipToLocation: line.shipToLocation || null,
-      MultiperiodStartDate: toISODate(line.startDate) || null,
-      MultiperiodEndDate: toISODate(line.endDate) || null,
-      MultiperiodAccrualAccount: line.accrualAccount || null,
+      // Only send multiperiod fields when start and end span different months —
+      // same-month lines must not generate schedule rows in the multiperiod table.
+      ...(line.startDate && line.endDate && line.accrualAccount &&
+          dayjs(line.startDate, ['DD-MMM-YYYY', 'YYYY-MM-DD']).format('YYYY-MM') !==
+          dayjs(line.endDate,   ['DD-MMM-YYYY', 'YYYY-MM-DD']).format('YYYY-MM')
+        ? {
+            MultiperiodStartDate:    toISODate(line.startDate),
+            MultiperiodEndDate:      toISODate(line.endDate),
+            MultiperiodAccrualAccount: line.accrualAccount,
+          }
+        : {
+            MultiperiodStartDate:    null,
+            MultiperiodEndDate:      null,
+            MultiperiodAccrualAccount: null,
+          }),
     }));
 
     console.log('Invoice payload lines:', lines.length, 'total,', validLines.length, 'valid, payload:', JSON.stringify(payload).length, 'chars');
