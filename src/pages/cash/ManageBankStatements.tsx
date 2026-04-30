@@ -68,7 +68,7 @@ interface StatementLine {
   reconBy?:           string;
 }
 
-interface BankAcctOption { label: string; value: string; bankAccountNumber?: string; currencyCode?: string; legalEntityName?: string; cashAccountCombination?: string; }
+interface BankAcctOption { label: string; value: string; bankAccountNumber?: string; currencyCode?: string; legalEntityName?: string; cashAccountCombination?: string; clearingAccountCombination?: string; }
 interface BUOption       { label: string; value: string; legalEntityName?: string; }
 interface TxnCodeOption  { value: string; label: string; endTransaction?: string; defaultAccountCombination?: string; }
 interface PdfColMapping  { text: string; x: number; xMin: number; xMax: number; field: string; }
@@ -461,6 +461,15 @@ const StatementForm: React.FC<{
   const pdfFileRef = useRef<HTMLInputElement>(null);
   const isEdit  = !!initialHeader?.statementId;
 
+  // GL accounts for the currently selected bank account (resolved on mount for edit, or on selection)
+  const [selBankGl, setSelBankGl] = useState<{ cash: string; clearing: string }>(() => {
+    if (initialHeader?.bankAccountName) {
+      const a = bankAccounts.find(x => x.value === initialHeader.bankAccountName);
+      return { cash: a?.cashAccountCombination ?? '', clearing: a?.clearingAccountCombination ?? '' };
+    }
+    return { cash: '', clearing: '' };
+  });
+
   const buildPayload = (hdrValues: any) => ({
     header: {
       statementId:      initialHeader?.statementId,
@@ -546,6 +555,14 @@ const StatementForm: React.FC<{
       form.setFieldsValue({ statementDate: dayjs(), status: 'DRAFT' });
     }
   }, [initialHeader, form]);
+
+  // Sync GL accounts when bankAccounts list loads (async) or when editing
+  useEffect(() => {
+    if (initialHeader?.bankAccountName && bankAccounts.length > 0) {
+      const a = bankAccounts.find(x => x.value === initialHeader.bankAccountName);
+      if (a) setSelBankGl({ cash: a.cashAccountCombination ?? '', clearing: a.clearingAccountCombination ?? '' });
+    }
+  }, [bankAccounts, initialHeader?.bankAccountName]);
 
   useEffect(() => {
     if (initialLines) setLines(initialLines);
@@ -984,6 +1001,7 @@ const StatementForm: React.FC<{
                   const acct = bankAccounts.find(a => a.value === v);
                   if (acct?.currencyCode)    form.setFieldValue('currencyCode',      acct.currencyCode);
                   if (acct?.bankAccountNumber) form.setFieldValue('bankAccountNumber', acct.bankAccountNumber);
+                  setSelBankGl({ cash: acct?.cashAccountCombination ?? '', clearing: acct?.clearingAccountCombination ?? '' });
                 }} />
             </Form.Item>
             <Form.Item label="Statement Number" name="statementNumber"
@@ -1010,6 +1028,37 @@ const StatementForm: React.FC<{
                 ))}
               </Select>
             </Form.Item>
+            {/* GL accounts for the selected bank account — read-only, informational */}
+            {(selBankGl.cash || selBankGl.clearing) && (
+              <div style={{
+                background: '#f0f5ff', border: '1px solid #adc6ff',
+                borderRadius: 6, padding: '8px 12px', marginBottom: 12,
+              }}>
+                <Text style={{ fontSize: 11, color: '#1d39c4', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                  Bank GL Accounts
+                </Text>
+                {selBankGl.cash && (
+                  <Row align="middle" style={{ marginBottom: 3 }}>
+                    <Col style={{ width: 110 }}><Text style={{ fontSize: 11, color: '#595959' }}>Cash Account:</Text></Col>
+                    <Col flex="auto">
+                      <Text style={{ fontSize: 11, fontFamily: 'monospace', color: '#262626', fontWeight: 500 }}>
+                        {selBankGl.cash}
+                      </Text>
+                    </Col>
+                  </Row>
+                )}
+                {selBankGl.clearing && (
+                  <Row align="middle">
+                    <Col style={{ width: 110 }}><Text style={{ fontSize: 11, color: '#595959' }}>Clearing Account:</Text></Col>
+                    <Col flex="auto">
+                      <Text style={{ fontSize: 11, fontFamily: 'monospace', color: '#262626', fontWeight: 500 }}>
+                        {selBankGl.clearing}
+                      </Text>
+                    </Col>
+                  </Row>
+                )}
+              </div>
+            )}
             <Row gutter={8}>
               <Col span={12}>
                 <Form.Item label="Opening Bal" name="openingBalance" labelCol={{ span: 14 }} wrapperCol={{ span: 10 }} style={fs}>
@@ -1641,7 +1690,8 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
           bankAccountNumber:      i.bankAccountNumber || i.bank_account_number || '',
           currencyCode:           i.currencyCode      || i.currency_code       || '',
           legalEntityName:        i.legalEntityName   || i.legal_entity_name   || '',
-          cashAccountCombination: i.cashAccountCombination || i.cash_account_combination || '',
+          cashAccountCombination:     i.cashAccountCombination     || i.cash_account_combination     || '',
+          clearingAccountCombination: i.clearingAccountCombination || i.cash_clearing_account_combination || '',
         }))
         .sort((a: BankAcctOption, b: BankAcctOption) => a.label.localeCompare(b.label));
       setBankAccounts(accts);
