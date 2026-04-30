@@ -452,8 +452,8 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const [extCoaTarget, setExtCoaTarget]     = useState<'asset' | 'offset'>('asset');
   const [extCoaInitial, setExtCoaInitial]   = useState('');
 
-  // Load bank accounts for the ext txn modal (filter by BU legal entity)
-  const loadExtBankAccounts = useCallback((bu: string) => {
+  // Load bank accounts for the ext txn modal (filter by legal entity)
+  const loadExtBankAccounts = useCallback((legalEntity: string) => {
     setExtBankAccounts([]);
     fetch(BANK_ACCOUNTS_URL, { headers: { Accept: 'application/json' } })
       .then(r => r.json())
@@ -462,7 +462,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
         const seen = new Set<string>();
         setExtBankAccounts(
           all
-            .filter(i => !bu || (i.legal_entity_name || '').toLowerCase().includes(bu.toLowerCase()) || !i.legal_entity_name)
+            .filter(i => !legalEntity || (i.legal_entity_name || '').toLowerCase() === legalEntity.toLowerCase())
             .map((i: any) => ({
               name:        i.bank_account_name  || i.bankAccountName  || '',
               cashAccount: i.cash_account_combination || '',
@@ -475,12 +475,10 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   }, []);
 
   // Open the ext txn modal, pre-filling from selected lines + statement
-  const openExtTxnModal = useCallback(() => {
+  const openExtTxnModal = useCallback(async () => {
     const selectedLines = stmtLines.filter(l => selectedStmtKeys.includes(l.lineId));
     const firstLine     = selectedLines[0];
     const totalAmount   = selectedLines.reduce((s, l) => s + Math.abs(l.amount ?? 0), 0);
-    const bu            = lastParams?.bankAccount ? '' : '';  // BU from businessUnits search
-    const buName        = (businessUnits.find(b => b.value === lastParams?.bankAccount) || businessUnits[0])?.value || '';
 
     extTxnForm.resetFields();
     setExtTxnPayload(null);
@@ -488,21 +486,75 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     setExtTxnRawError('');
     setExtAssetDesc('');
     setExtOffsetDesc('');
+    setExtBankAccounts([]);
+
+    // Step 1: find the matching BankAcctOption to get its legal entity
+    const matchedAcct = bankAccounts.find(a =>
+      a.label === selectedStatement?.bankAccountName ||
+      a.bankAccountNumber === selectedStatement?.bankAccountName ||
+      a.value  === selectedStatement?.bankAccountName
+    );
+    const legalEntity = matchedAcct?.legalEntityName || '';
+
+    // Step 2: find matching BU from businessUnits by legal entity
+    const matchedBU = businessUnits.find(b =>
+      b.legalEntityName && legalEntity &&
+      b.legalEntityName.toLowerCase() === legalEntity.toLowerCase()
+    );
+
+    // Step 3: fetch bank accounts filtered by legal entity to get cash_account_combination
+    let cashAccountCombination = '';
+    let matchedBankName = selectedStatement?.bankAccountName || '';
+    try {
+      const res  = await fetch(BANK_ACCOUNTS_URL, { headers: { Accept: 'application/json' } });
+      const data = await res.json();
+      const all  = (data.items || []) as any[];
+      const filtered = all.filter(i =>
+        !legalEntity || (i.legal_entity_name || '').toLowerCase() === legalEntity.toLowerCase()
+      );
+      const seen = new Set<string>();
+      const opts = filtered
+        .map((i: any) => ({
+          name:        i.bank_account_name  || i.bankAccountName  || '',
+          cashAccount: i.cash_account_combination || '',
+          currency:    i.currency_code || '',
+        }))
+        .filter(a => a.name && !seen.has(a.name) && seen.add(a.name));
+      setExtBankAccounts(opts);
+
+      // Find the account matching the statement's bank account name
+      const match = opts.find(o =>
+        o.name === selectedStatement?.bankAccountName ||
+        selectedStatement?.bankAccountName?.includes(o.name) ||
+        o.name?.includes(selectedStatement?.bankAccountName || '')
+      );
+      if (match) {
+        matchedBankName        = match.name;
+        cashAccountCombination = match.cashAccount;
+        if (cashAccountCombination) {
+          try {
+            const r    = await validateAccountCode(cashAccountCombination);
+            const seg4 = Object.values(r.segmentDetails)[3];
+            setExtAssetDesc((seg4 as any)?.description || '');
+          } catch { /* ignore */ }
+        }
+      }
+    } catch { /* ignore */ }
 
     extTxnForm.setFieldsValue({
-      bankAccountName:  selectedStatement?.bankAccountName || '',
-      businessUnitName: buName,
-      amount:           selectedLines.length > 0 ? totalAmount : undefined,
-      transactionDate:  firstLine?.transactionDate ? dayjs(firstLine.transactionDate) : dayjs(),
-      currencyCode:     selectedStatement?.currencyCode || 'AED',
-      referenceText:    firstLine?.reference || firstLine?.bankTxnReference || '',
-      description:      firstLine?.description || '',
-      transactionType:  'MISC',
+      bankAccountName:          matchedBankName,
+      businessUnitName:         matchedBU?.value || matchedBU?.label || '',
+      amount:                   selectedLines.length > 0 ? totalAmount : undefined,
+      transactionDate:          firstLine?.transactionDate ? dayjs(firstLine.transactionDate) : dayjs(),
+      currencyCode:             selectedStatement?.currencyCode || 'AED',
+      referenceText:            firstLine?.reference || firstLine?.bankTxnReference || '',
+      description:              firstLine?.description || '',
+      transactionType:          'MISC',
+      assetAccountCombination:  cashAccountCombination,
     });
 
-    if (buName) loadExtBankAccounts(buName);
     setExtTxnOpen(true);
-  }, [stmtLines, selectedStmtKeys, selectedStatement, lastParams, businessUnits, extTxnForm, loadExtBankAccounts]);
+  }, [stmtLines, selectedStmtKeys, selectedStatement, bankAccounts, businessUnits, extTxnForm]);
 
   // Submit external transaction
   const handleExtTxnSubmit = async (values: any) => {
@@ -1523,27 +1575,15 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
           <Row gutter={12}>
             <Col span={12}>
               <Form.Item label="Business Unit" name="businessUnitName" rules={[{ required: true, message: 'Required' }]}>
-                <Input
-                  placeholder="Enter business unit"
-                  onBlur={e => { if (e.target.value.trim()) loadExtBankAccounts(e.target.value.trim()); }}
-                />
+                <Input placeholder="Auto-filled from bank account" readOnly />
               </Form.Item>
             </Col>
             <Col span={12}>
               <Form.Item label="Bank Account" name="bankAccountName" rules={[{ required: true, message: 'Required' }]}>
-                <Select showSearch allowClear placeholder="Select bank account"
+                <Select
+                  disabled
                   options={extBankAccounts.map(b => ({ value: b.name, label: b.name }))}
-                  notFoundContent={<Text type="secondary" style={{ fontSize: 12 }}>Type BU name above to load accounts</Text>}
-                  onChange={val => {
-                    const acct = extBankAccounts.find(b => b.name === val);
-                    if (acct?.cashAccount) {
-                      extTxnForm.setFieldValue('assetAccountCombination', acct.cashAccount);
-                      validateAccountCode(acct.cashAccount).then(r => {
-                        const seg4 = Object.values(r.segmentDetails)[3];
-                        setExtAssetDesc((seg4 as any)?.description || '');
-                      }).catch(() => {});
-                    }
-                  }}
+                  placeholder="Auto-filled from statement"
                 />
               </Form.Item>
             </Col>
