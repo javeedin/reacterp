@@ -245,6 +245,7 @@ interface InvoiceLine {
   endDate: string;
   accrualAccount: string;
   taxAmount: number;
+  taxAccountCombination?: string;  // GL account for this line's tax, from BU tax assignment
   accountDescription?: string;
 }
 
