@@ -3675,7 +3675,27 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       detail: !liabilityDist ? 'Liability distribution is required' : undefined,
     });
 
-    // 3. Line distributions — check every line that has data
+    // 3. Liability account ≠ Accrual account on multiperiod lines
+    const mpaLinesConflict = lines.filter((l) => {
+      const isMpa = !!(l.accrualAccount && l.startDate && l.endDate &&
+        dayjs(l.startDate, ['DD-MMM-YYYY', 'YYYY-MM-DD']).format('YYYY-MM') !==
+        dayjs(l.endDate,   ['DD-MMM-YYYY', 'YYYY-MM-DD']).format('YYYY-MM'));
+      return isMpa && liabilityDist && l.accrualAccount &&
+        l.accrualAccount.trim() === liabilityDist.trim();
+    });
+    results.push({
+      label: 'Liability ≠ Accrual account (multiperiod lines)',
+      passed: mpaLinesConflict.length === 0,
+      detail: mpaLinesConflict.length > 0
+        ? `Line(s) ${mpaLinesConflict.map(l => l.lineNumber).join(', ')}: accrual account is the same as the liability account (${liabilityDist}). They must be different accounts.`
+        : undefined,
+      subItems: mpaLinesConflict.map((l) => ({
+        label: `Line ${l.lineNumber}`,
+        detail: `${l.description || 'Item'} — accrual account "${l.accrualAccount}" matches liability distribution`,
+      })),
+    });
+
+    // 4. Line distributions — check every line that has data
     const activeLines = lines.filter((l) => l.amount !== 0 || l.description);
     const linesWithoutDist = activeLines.filter(
       (l) => !l.distributionCombination && !l.distributionSet
