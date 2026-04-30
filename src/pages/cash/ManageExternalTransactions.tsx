@@ -10,6 +10,7 @@ import {
   HomeOutlined, BankOutlined, PlusOutlined, SearchOutlined, ReloadOutlined,
   EditOutlined, CloseOutlined, DollarOutlined, ApiOutlined, FileTextOutlined,
   SwapOutlined, DownloadOutlined, CheckCircleOutlined, SyncOutlined,
+  AccountBookOutlined, EyeOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -62,6 +63,7 @@ interface ExternalTxnRecord {
   creationDate: string;
   lastUpdateDate: string;
   syncDate: string;
+  transactionDirection?: string;
 }
 
 interface BankAccountOption { label: string; value: string; }
@@ -140,6 +142,7 @@ const ExternalTxnForm: React.FC<{
 }> = ({ initialValues, bankAccounts, businessUnits, bankAccountMap, bankAccountCurrencyMap, buBankMap, onSave, onCancel }) => {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
+  const [txnDirection, setTxnDirection] = useState<'DR' | 'CR'>('DR');
   const [selectedBu, setSelectedBu] = useState<string | undefined>(initialValues?.businessUnitName);
   const [apiModal, setApiModal]           = useState(false);
   const [apiPayload, setApiPayload]       = useState('');
@@ -157,6 +160,10 @@ const ExternalTxnForm: React.FC<{
   const isEdit = !!initialValues?.externalTransactionId;
   const buSelected = !!selectedBu;
 
+  const watchedAsset  = Form.useWatch('assetAccountCombination', form);
+  const watchedOffset = Form.useWatch('offsetAccountCombination', form);
+  const watchedAmount = Form.useWatch('amount', form);
+
   const filteredBankAccounts = selectedBu && buBankMap[selectedBu]?.length
     ? buBankMap[selectedBu].sort().map(n => ({ label: n, value: n }))
     : bankAccounts;
@@ -168,6 +175,8 @@ const ExternalTxnForm: React.FC<{
 
   useEffect(() => {
     if (initialValues) {
+      const dir = (initialValues.transactionDirection as 'DR' | 'CR') || 'DR';
+      setTxnDirection(dir);
       form.setFieldsValue({
         bankAccountName:           initialValues.bankAccountName,
         businessUnitName:          initialValues.businessUnitName,
@@ -180,10 +189,12 @@ const ExternalTxnForm: React.FC<{
         currencyCode:              initialValues.currencyCode,
         assetAccountCombination:   initialValues.assetAccountCombination,
         offsetAccountCombination:  initialValues.offsetAccountCombination,
+        transactionDirection:      dir,
       });
     } else {
       form.resetFields();
-      form.setFieldsValue({ transactionDate: dayjs() });
+      form.setFieldsValue({ transactionDate: dayjs(), transactionDirection: 'DR' });
+      setTxnDirection('DR');
     }
   }, [initialValues, form]);
 
@@ -210,6 +221,7 @@ const ExternalTxnForm: React.FC<{
       LastUpdateLogin:       '',
       AssetAccountCombination:  values.assetAccountCombination ?? '',
       OffsetAccountCombination: values.offsetAccountCombination ?? '',
+      TransactionDirection:  values.transactionDirection ?? txnDirection,
     }],
   });
 
@@ -232,6 +244,7 @@ const ExternalTxnForm: React.FC<{
         CurrencyCode:            values.currencyCode ?? '',
         TransactionType:         values.transactionType ?? '',
         AssetAccountCombination: values.assetAccountCombination ?? '',
+        TransactionDirection:    values.transactionDirection ?? txnDirection,
         Source: 'ORA_MAN', Status: 'UNR', AccountingFlag: false,
         CreatedBy: 'ERP_USER', CreationDate: new Date().toISOString(),
         LastUpdatedBy: 'ERP_USER', LastUpdateDate: new Date().toISOString(), LastUpdateLogin: '',
@@ -470,6 +483,23 @@ const ExternalTxnForm: React.FC<{
                 <Input placeholder="e.g. STMT-REF-001" disabled={isEdit || !buSelected} />
               </Form.Item>
             </Col>
+            <Col xs={24} md={12}>
+              <Form.Item
+                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Direction</span>}
+                name="transactionDirection"
+                initialValue="DR"
+                style={{ marginBottom: 0 }}
+              >
+                <Segmented
+                  options={[
+                    { label: '▲ DR — Money In',  value: 'DR' },
+                    { label: '▼ CR — Money Out', value: 'CR' },
+                  ]}
+                  onChange={(v) => setTxnDirection(v as 'DR' | 'CR')}
+                  disabled={isEdit || !buSelected}
+                />
+              </Form.Item>
+            </Col>
           </Row>
         </Card>
 
@@ -532,6 +562,60 @@ const ExternalTxnForm: React.FC<{
               </Col>
             )}
           </Row>
+
+          {/* ── Journal Entry Preview ── */}
+          {extTxnMode === 'single' && watchedAsset && watchedOffset && (
+            <div style={{
+              marginTop: 16,
+              background: '#1e1e2e',
+              borderRadius: 6,
+              padding: '12px 16px',
+              fontFamily: 'monospace',
+              fontSize: 12,
+            }}>
+              <div style={{ color: '#89b4fa', fontWeight: 600, marginBottom: 8, fontSize: 11, letterSpacing: '0.5px', textTransform: 'uppercase' }}>
+                Journal Entry Preview
+              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    <th style={{ color: '#6c7086', fontSize: 10, textAlign: 'left', paddingBottom: 4, width: 36 }}>Dr/Cr</th>
+                    <th style={{ color: '#6c7086', fontSize: 10, textAlign: 'left', paddingBottom: 4 }}>Account</th>
+                    <th style={{ color: '#6c7086', fontSize: 10, textAlign: 'right', paddingBottom: 4, width: 100 }}>Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {txnDirection === 'DR' ? (
+                    <>
+                      <tr>
+                        <td style={{ color: '#89b4fa', fontWeight: 700, paddingTop: 2 }}>DR</td>
+                        <td style={{ color: '#cdd6f4', paddingTop: 2 }}>{watchedAsset}</td>
+                        <td style={{ color: '#89b4fa', textAlign: 'right', paddingTop: 2 }}>{fmtAmount(Math.abs(watchedAmount ?? 0))}</td>
+                      </tr>
+                      <tr>
+                        <td style={{ color: '#a6e3a1', fontWeight: 700, paddingTop: 2 }}>CR</td>
+                        <td style={{ color: '#cdd6f4', paddingTop: 2 }}>{watchedOffset}</td>
+                        <td style={{ color: '#a6e3a1', textAlign: 'right', paddingTop: 2 }}>{fmtAmount(Math.abs(watchedAmount ?? 0))}</td>
+                      </tr>
+                    </>
+                  ) : (
+                    <>
+                      <tr>
+                        <td style={{ color: '#89b4fa', fontWeight: 700, paddingTop: 2 }}>DR</td>
+                        <td style={{ color: '#cdd6f4', paddingTop: 2 }}>{watchedOffset}</td>
+                        <td style={{ color: '#89b4fa', textAlign: 'right', paddingTop: 2 }}>{fmtAmount(Math.abs(watchedAmount ?? 0))}</td>
+                      </tr>
+                      <tr>
+                        <td style={{ color: '#a6e3a1', fontWeight: 700, paddingTop: 2 }}>CR</td>
+                        <td style={{ color: '#cdd6f4', paddingTop: 2 }}>{watchedAsset}</td>
+                        <td style={{ color: '#a6e3a1', textAlign: 'right', paddingTop: 2 }}>{fmtAmount(Math.abs(watchedAmount ?? 0))}</td>
+                      </tr>
+                    </>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
         </Card>
 
         {/* ── Section 4: Transaction Lines ── */}
@@ -845,6 +929,16 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   const [acctRunning, setAcctRunning]           = useState(false);
   const [acctDone, setAcctDone]                 = useState(false);
 
+  // ── Single-row Create Accounting state ───────────────────────────────────
+  const [singleAcctModalOpen, setSingleAcctModalOpen] = useState(false);
+  const [singleAcctProgress, setSingleAcctProgress]   = useState<BankAcctProgressRow[]>([]);
+  const [singleAcctRunning, setSingleAcctRunning]     = useState(false);
+  const [singleAcctDone, setSingleAcctDone]           = useState(false);
+
+  // ── View Accounting modal state ───────────────────────────────────────────
+  const [viewAcctOpen, setViewAcctOpen]   = useState(false);
+  const [viewAcctTxn, setViewAcctTxn]     = useState<ExternalTxnRecord | null>(null);
+
   const modulePrefix = module === 'ap' ? '/ap' : '/cash';
 
   const exportToExcel = () => {
@@ -1008,15 +1102,19 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       const alreadyAccounted = t.accountingFlag === 'Y';
       const date = t.transactionDate || t.valueDate || dayjs().format('YYYY-MM-DD');
       const absAmount = Math.abs(t.amount ?? 0);
-      const isReceipt = (t.amount ?? 0) >= 0;
+      const direction = t.transactionDirection ?? ((t.amount ?? 0) >= 0 ? 'DR' : 'CR');
+      // DR = money in: DR bank/asset, CR offset
+      // CR = money out: DR offset, CR bank/asset
+      const drAccount = direction === 'DR' ? t.assetAccountCombination : t.offsetAccountCombination;
+      const crAccount = direction === 'DR' ? t.offsetAccountCombination : t.assetAccountCombination;
       return {
         extTxnId:   t.externalTransactionId,
         txnDate:    date,
         periodName: derivePeriodName(new Date(date)),
         amount:     absAmount,
         currency:   t.currencyCode || 'AED',
-        drAccount:  isReceipt ? t.offsetAccountCombination : t.assetAccountCombination,
-        crAccount:  isReceipt ? t.assetAccountCombination  : t.offsetAccountCombination,
+        drAccount,
+        crAccount,
         bu:         t.businessUnitName || '',
         status:     alreadyAccounted ? 'skipped' : missingAccounts ? 'error' : 'pending',
         message:    alreadyAccounted ? 'Already accounted — skipped' : missingAccounts ? 'Missing asset/offset account' : undefined,
@@ -1045,9 +1143,15 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
         const ledger = await fetchLedgerByBusinessUnit(txn.businessUnitName);
         if (!ledger) { updateRow(row.extTxnId, { status: 'error', message: 'Could not resolve ledger for BU' }); continue; }
 
-        const isReceipt = (txn.amount ?? 0) >= 0;
+        const direction = txn.transactionDirection ?? ((txn.amount ?? 0) >= 0 ? 'DR' : 'CR');
         const absAmount = Math.abs(txn.amount ?? 0);
 
+        // DR = money in: DR bank/asset, CR offset
+        // CR = money out: DR offset, CR bank/asset
+        const drAccount = direction === 'DR' ? txn.assetAccountCombination : txn.offsetAccountCombination;
+        const crAccount = direction === 'DR' ? txn.offsetAccountCombination : txn.assetAccountCombination;
+
+        // buildPcBankTxnSlaPayload always makes offsetAccount the DR line and assetAccount the CR line
         const slaPayload = buildPcBankTxnSlaPayload({
           externalTransactionId:   txn.externalTransactionId,
           referenceText:           txn.referenceText || String(txn.externalTransactionId),
@@ -1056,8 +1160,8 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
           periodName:              row.periodName,
           currency:                txn.currencyCode || 'AED',
           amount:                  absAmount,
-          assetAccountCombination: isReceipt ? txn.assetAccountCombination  : txn.offsetAccountCombination,
-          offsetAccountCombination:isReceipt ? txn.offsetAccountCombination : txn.assetAccountCombination,
+          assetAccountCombination: crAccount,   // CR side goes to assetAccountCombination param
+          offsetAccountCombination: drAccount,  // DR side goes to offsetAccountCombination param
           businessUnit:            txn.businessUnitName || undefined,
           legalEntity:             txn.legalEntityName  || undefined,
           ledgerId:                ledger.ledgerId,
