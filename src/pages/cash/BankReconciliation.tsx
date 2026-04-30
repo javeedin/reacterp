@@ -900,6 +900,16 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     return `${APEX_BASE}/cash/reconciliation/systxns?${q.toString()}`;
   }, [lastParams]);
 
+  const buildExtTxnUrl = useCallback(() => {
+    const q = new URLSearchParams();
+    if (lastParams?.bankAccount) q.set('bank_account', lastParams.bankAccount);
+    if (lastParams?.dateFrom)    q.set('date_from',    lastParams.dateFrom.format('YYYY-MM-DD'));
+    if (lastParams?.dateTo)      q.set('date_to',      lastParams.dateTo.format('YYYY-MM-DD'));
+    if (lastParams?.reference)   q.set('reference',    lastParams.reference);
+    q.set('row_limit', '500');
+    return `${EXT_TXN_URL}?${q.toString()}`;
+  }, [lastParams]);
+
   const handleCopyUrl = useCallback((url: string) => {
     navigator.clipboard.writeText(url).then(() => {
       setApiCopied(true);
@@ -1775,15 +1785,14 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
           <Text style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 6 }}>
             Source-specific URLs
           </Text>
-          {(['AP_PAYMENT', 'AR_RECEIPT', 'GL_JOURNAL'] as const).map((src) => {
+          {(['AP_PAYMENT', 'AR_RECEIPT', 'GL_JOURNAL', 'CM'] as const).map((src) => {
             const url = buildSysTxnsUrl(src);
-            const colors: Record<string, string> = { AP_PAYMENT: 'geekblue', AR_RECEIPT: 'green', GL_JOURNAL: 'purple' };
+            const colors: Record<string, string> = { AP_PAYMENT: 'geekblue', AR_RECEIPT: 'green', GL_JOURNAL: 'purple', CM: 'orange' };
+            const labels: Record<string, string> = { AP_PAYMENT: 'AP Payments', AR_RECEIPT: 'AR Receipts', GL_JOURNAL: 'GL Journals', CM: 'Cash Management' };
             return (
               <div key={src} style={{ marginBottom: 8 }}>
                 <Space style={{ marginBottom: 3 }}>
-                  <Tag color={colors[src]} style={{ fontSize: 11, margin: 0 }}>
-                    {src === 'AP_PAYMENT' ? 'AP Payments' : src === 'AR_RECEIPT' ? 'AR Receipts' : 'GL Journals'}
-                  </Tag>
+                  <Tag color={colors[src]} style={{ fontSize: 11, margin: 0 }}>{labels[src]}</Tag>
                   <Button
                     size="small"
                     type="link"
@@ -1811,6 +1820,97 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
               </div>
             );
           })}
+        </div>
+
+        {/* ── External Transactions endpoint ── */}
+        <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${REDWOOD.neutral200}` }}>
+          <Space style={{ marginBottom: 8 }}>
+            <Tag color="cyan" style={{ fontSize: 11, margin: 0 }}>External Transactions (GET)</Tag>
+            <Text style={{ fontSize: 11, color: REDWOOD.neutral500 }}>{EXT_TXN_URL}</Text>
+          </Space>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 10 }}>
+            <thead>
+              <tr style={{ background: REDWOOD.neutral200 }}>
+                {['Parameter', 'Current Value', 'Description'].map((h) => (
+                  <th key={h} style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600, borderBottom: `1px solid ${REDWOOD.neutral300}` }}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {[
+                { param: 'bank_account', val: lastParams?.bankAccount ?? '—', desc: 'Bank account name filter', required: true },
+                { param: 'date_from',    val: lastParams?.dateFrom?.format('YYYY-MM-DD') ?? '—', desc: 'Transaction date from' },
+                { param: 'date_to',      val: lastParams?.dateTo?.format('YYYY-MM-DD')   ?? '—', desc: 'Transaction date to' },
+                { param: 'reference',    val: lastParams?.reference ?? '—',               desc: 'Reference / description filter' },
+                { param: 'row_limit',    val: '500',                                       desc: 'Maximum rows returned' },
+              ].map((row, i) => (
+                <tr key={row.param} style={{ background: i % 2 === 0 ? REDWOOD.surface : REDWOOD.neutral100 }}>
+                  <td style={{ padding: '5px 10px', borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
+                    <code style={{ color: REDWOOD.info, fontSize: 11 }}>{row.param}</code>
+                    {row.required && <Tag color="red" style={{ marginLeft: 4, fontSize: 10, padding: '0 4px' }}>required</Tag>}
+                  </td>
+                  <td style={{ padding: '5px 10px', borderBottom: `1px solid ${REDWOOD.neutral200}`, fontFamily: 'monospace', color: row.val === '—' ? REDWOOD.neutral300 : REDWOOD.neutral900 }}>
+                    {row.val}
+                  </td>
+                  <td style={{ padding: '5px 10px', borderBottom: `1px solid ${REDWOOD.neutral200}`, color: REDWOOD.neutral600 }}>
+                    {row.desc}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div
+            style={{
+              background:   '#0d1117',
+              borderRadius: 6,
+              padding:      '10px 12px',
+              fontFamily:   'monospace',
+              fontSize:     11,
+              wordBreak:    'break-all',
+              color:        '#79c0ff',
+              position:     'relative',
+            }}
+          >
+            {buildExtTxnUrl()}
+            <Button
+              size="small"
+              icon={<CopyOutlined />}
+              onClick={() => handleCopyUrl(buildExtTxnUrl())}
+              style={{
+                position:        'absolute',
+                top:             6,
+                right:           6,
+                backgroundColor: '#30363d',
+                borderColor:     '#484f58',
+                color:           '#fff',
+                fontSize:        11,
+              }}
+            >
+              Copy
+            </Button>
+          </div>
+          <div style={{ marginTop: 8 }}>
+            <Space style={{ marginBottom: 3 }}>
+              <Tag color="orange" style={{ fontSize: 11, margin: 0 }}>POST</Tag>
+              <Text style={{ fontSize: 11, color: REDWOOD.neutral500 }}>Create new external transaction</Text>
+            </Space>
+            <div
+              style={{
+                background:   REDWOOD.neutral100,
+                border:       `1px solid ${REDWOOD.neutral200}`,
+                borderRadius: 4,
+                padding:      '5px 10px',
+                fontFamily:   'monospace',
+                fontSize:     10,
+                wordBreak:    'break-all',
+                color:        REDWOOD.neutral600,
+              }}
+            >
+              {EXT_TXN_URL}
+            </div>
+          </div>
         </div>
       </Modal>
 
