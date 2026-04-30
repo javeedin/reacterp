@@ -1668,13 +1668,17 @@ const BankReconciliation: React.FC = () => {
 
         const opts: BankAcctOption[] = (acctData?.items ?? [])
           .filter((i: any) => i.bankAccountName || i.bank_account_name)
-          .map((i: any) => ({
-            label:             i.bankAccountName   || i.bank_account_name   || '',
-            value:             i.bankAccountName   || i.bank_account_name   || '',
-            bankAccountNumber: i.bankAccountNumber || i.bank_account_number || '',
-            currencyCode:      i.currencyCode      || i.currency_code       || '',
-            legalEntityName:   i.legalEntityName   || i.legal_entity_name   || '',
-          }))
+          .map((i: any) => {
+            const acctNum  = i.bankAccountNumber || i.bank_account_number || '';
+            const acctName = i.bankAccountName   || i.bank_account_name   || '';
+            return {
+              label:             acctName,
+              value:             acctNum || acctName,
+              bankAccountNumber: acctNum,
+              currencyCode:      i.currencyCode    || i.currency_code     || '',
+              legalEntityName:   i.legalEntityName || i.legal_entity_name || '',
+            };
+          })
           .sort((a: BankAcctOption, b: BankAcctOption) => a.label.localeCompare(b.label));
         setBankAccounts(opts);
 
