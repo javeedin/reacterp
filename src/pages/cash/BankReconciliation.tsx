@@ -10,9 +10,11 @@ import type { TableRowSelection } from 'antd/es/table/interface';
 import {
   HomeOutlined, BankOutlined, SearchOutlined, ReloadOutlined,
   CheckOutlined, CloseOutlined, ReconciliationOutlined, FileTextOutlined,
-  ApiOutlined, CopyOutlined,
+  ApiOutlined, CopyOutlined, PlusOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
+import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
+import { APEX_DB_CONFIG } from '../../config/api.config';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -412,6 +414,9 @@ interface UnreconciledTabProps {
   loadingAccounts: boolean;
 }
 
+const EXT_TXN_URL       = `${APEX_DB_CONFIG.baseUrl}/cash/externaltransactions`;
+const BANK_ACCOUNTS_URL = `${APEX_DB_CONFIG.baseUrl}/banks/bankaccounts`;
+
 const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, businessUnits, loadingAccounts }) => {
   const [statements, setStatements]             = useState<BankStatement[]>([]);
   const [loadingStmts, setLoadingStmts]         = useState(false);
@@ -432,6 +437,130 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const [apiModalTitle, setApiModalTitle] = useState('');
   const [apiModalVisible, setApiModalVisible] = useState(false);
   const [apiExecResult, setApiExecResult] = useState<{ loading: boolean; response: string | null }>({ loading: false, response: null });
+
+  // ── Create External Transaction modal ──────────────────────────────────────
+  const [extTxnOpen, setExtTxnOpen]         = useState(false);
+  const [extTxnForm]                        = Form.useForm();
+  const [extTxnSaving, setExtTxnSaving]     = useState(false);
+  const [extTxnPayload, setExtTxnPayload]   = useState<any>(null);
+  const [extTxnResponse, setExtTxnResponse] = useState<any>(null);
+  const [extTxnRawError, setExtTxnRawError] = useState('');
+  const [extBankAccounts, setExtBankAccounts] = useState<{ name: string; cashAccount: string; currency: string }[]>([]);
+  const [extAssetDesc, setExtAssetDesc]     = useState('');
+  const [extOffsetDesc, setExtOffsetDesc]   = useState('');
+  const [extCoaOpen, setExtCoaOpen]         = useState(false);
+  const [extCoaTarget, setExtCoaTarget]     = useState<'asset' | 'offset'>('asset');
+  const [extCoaInitial, setExtCoaInitial]   = useState('');
+
+  // Load bank accounts for the ext txn modal (filter by BU legal entity)
+  const loadExtBankAccounts = useCallback((bu: string) => {
+    setExtBankAccounts([]);
+    fetch(BANK_ACCOUNTS_URL, { headers: { Accept: 'application/json' } })
+      .then(r => r.json())
+      .then(data => {
+        const all = (data.items || []) as any[];
+        const seen = new Set<string>();
+        setExtBankAccounts(
+          all
+            .filter(i => !bu || (i.legal_entity_name || '').toLowerCase().includes(bu.toLowerCase()) || !i.legal_entity_name)
+            .map((i: any) => ({
+              name:        i.bank_account_name  || i.bankAccountName  || '',
+              cashAccount: i.cash_account_combination || '',
+              currency:    i.currency_code || '',
+            }))
+            .filter(a => a.name && !seen.has(a.name) && seen.add(a.name))
+        );
+      })
+      .catch(() => {});
+  }, []);
+
+  // Open the ext txn modal, pre-filling from selected lines + statement
+  const openExtTxnModal = useCallback(() => {
+    const selectedLines = stmtLines.filter(l => selectedStmtKeys.includes(l.lineId));
+    const firstLine     = selectedLines[0];
+    const totalAmount   = selectedLines.reduce((s, l) => s + Math.abs(l.amount ?? 0), 0);
+    const bu            = lastParams?.bankAccount ? '' : '';  // BU from businessUnits search
+    const buName        = (businessUnits.find(b => b.value === lastParams?.bankAccount) || businessUnits[0])?.value || '';
+
+    extTxnForm.resetFields();
+    setExtTxnPayload(null);
+    setExtTxnResponse(null);
+    setExtTxnRawError('');
+    setExtAssetDesc('');
+    setExtOffsetDesc('');
+
+    extTxnForm.setFieldsValue({
+      bankAccountName:  selectedStatement?.bankAccountName || '',
+      businessUnitName: buName,
+      amount:           selectedLines.length > 0 ? totalAmount : undefined,
+      transactionDate:  firstLine?.transactionDate ? dayjs(firstLine.transactionDate) : dayjs(),
+      currencyCode:     selectedStatement?.currencyCode || 'AED',
+      referenceText:    firstLine?.reference || firstLine?.bankTxnReference || '',
+      description:      firstLine?.description || '',
+      transactionType:  'MISC',
+    });
+
+    if (buName) loadExtBankAccounts(buName);
+    setExtTxnOpen(true);
+  }, [stmtLines, selectedStmtKeys, selectedStatement, lastParams, businessUnits, extTxnForm, loadExtBankAccounts]);
+
+  // Submit external transaction
+  const handleExtTxnSubmit = async (values: any) => {
+    const selectedLines = stmtLines.filter(l => selectedStmtKeys.includes(l.lineId));
+    const lineIds = selectedLines.map(l => l.lineId).join(',');
+    const uniqueRef = values.referenceText?.trim() || `STMT-${selectedStatement?.statementId}-${Date.now()}`;
+    const payload = {
+      items: [{
+        BankAccountName:          values.bankAccountName,
+        BusinessUnitName:         values.businessUnitName,
+        Amount:                   values.amount,
+        TransactionDate:          values.transactionDate?.format('YYYY-MM-DD'),
+        CurrencyCode:             values.currencyCode ?? 'AED',
+        ReferenceText:            uniqueRef,
+        TransactionType:          values.transactionType ?? 'MISC',
+        Description:              values.description ?? '',
+        Source:                   'ORA_MAN',
+        Status:                   'UNR',
+        AccountingFlag:           false,
+        CreatedBy:                'SYSTEM',
+        CreationDate:             new Date().toISOString(),
+        LastUpdatedBy:            'SYSTEM',
+        LastUpdateDate:           new Date().toISOString(),
+        LastUpdateLogin:          '',
+        AssetAccountCombination:  values.assetAccountCombination ?? '',
+        OffsetAccountCombination: values.offsetAccountCombination ?? '',
+        StatementId:              selectedStatement?.statementId ?? null,
+        StatementLineIds:         lineIds || null,
+      }],
+    };
+    setExtTxnPayload(payload);
+    setExtTxnResponse(null);
+    setExtTxnRawError('');
+    setExtTxnSaving(true);
+    try {
+      const res  = await fetch(EXT_TXN_URL, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body:    JSON.stringify(payload),
+      });
+      const text = await res.text();
+      let data: any = {};
+      try { data = JSON.parse(text); } catch { data = { status: 'error', message: text }; }
+      setExtTxnResponse(data);
+      setExtTxnRawError(res.ok ? '' : `HTTP ${res.status} — ${text}`);
+      if (data.status === 'success') {
+        msgApi.success('External transaction created successfully');
+        setExtTxnOpen(false);
+      } else {
+        msgApi.error(data.message || 'Failed to create external transaction');
+      }
+    } catch (e: any) {
+      setExtTxnRawError(`Error: ${e.message}`);
+      msgApi.error('Network error creating external transaction');
+    } finally {
+      setExtTxnSaving(false);
+    }
+  };
 
   const fetchStatements = useCallback(async (params: SearchParams) => {
     const q = new URLSearchParams();
@@ -1047,16 +1176,28 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                   <span style={{ fontWeight: 600 }}>Bank Statement Lines</span>
                   <Badge count={stmtLines.length} style={{ backgroundColor: REDWOOD.info }} showZero />
                 </Space>
-                {lastStmtLinesUrl && (
-                  <Tooltip title="View Statement Lines API">
+                <Space size={4}>
+                  <Tooltip title={selectedStmtKeys.length > 0 ? `Create external transaction for ${selectedStmtKeys.length} selected line(s)` : 'Select lines to create external transaction'}>
                     <Button
                       size="small"
-                      icon={<ApiOutlined />}
-                      style={{ color: REDWOOD.info, borderColor: REDWOOD.info, fontSize: 11 }}
-                      onClick={() => { setApiExecResult({ loading: false, response: null }); setApiModalTitle('Statement Lines API'); setApiModalUrl(lastStmtLinesUrl); setApiModalVisible(true); }}
-                    />
+                      icon={<PlusOutlined />}
+                      style={{ fontSize: 11, background: REDWOOD.primary, borderColor: REDWOOD.primary, color: '#fff' }}
+                      onClick={openExtTxnModal}
+                    >
+                      Create Ext Txn
+                    </Button>
                   </Tooltip>
-                )}
+                  {lastStmtLinesUrl && (
+                    <Tooltip title="View Statement Lines API">
+                      <Button
+                        size="small"
+                        icon={<ApiOutlined />}
+                        style={{ color: REDWOOD.info, borderColor: REDWOOD.info, fontSize: 11 }}
+                        onClick={() => { setApiExecResult({ loading: false, response: null }); setApiModalTitle('Statement Lines API'); setApiModalUrl(lastStmtLinesUrl); setApiModalVisible(true); }}
+                      />
+                    </Tooltip>
+                  )}
+                </Space>
               </div>
             }
             styles={{ body: { padding: 0 } }}
@@ -1368,6 +1509,193 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
           })}
         </div>
       </Modal>
+
+      {/* ── Create External Transaction Modal ───────────────────── */}
+      <Modal
+        title={<Space><BankOutlined style={{ color: REDWOOD.info }} /><span>Create External Transaction</span></Space>}
+        open={extTxnOpen}
+        onCancel={() => setExtTxnOpen(false)}
+        footer={null}
+        width={640}
+        destroyOnClose
+      >
+        <Form form={extTxnForm} layout="vertical" size="small" onFinish={handleExtTxnSubmit}>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item label="Business Unit" name="businessUnitName" rules={[{ required: true, message: 'Required' }]}>
+                <Input
+                  placeholder="Enter business unit"
+                  onBlur={e => { if (e.target.value.trim()) loadExtBankAccounts(e.target.value.trim()); }}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Bank Account" name="bankAccountName" rules={[{ required: true, message: 'Required' }]}>
+                <Select showSearch allowClear placeholder="Select bank account"
+                  options={extBankAccounts.map(b => ({ value: b.name, label: b.name }))}
+                  notFoundContent={<Text type="secondary" style={{ fontSize: 12 }}>Type BU name above to load accounts</Text>}
+                  onChange={val => {
+                    const acct = extBankAccounts.find(b => b.name === val);
+                    if (acct?.cashAccount) {
+                      extTxnForm.setFieldValue('assetAccountCombination', acct.cashAccount);
+                      validateAccountCode(acct.cashAccount).then(r => {
+                        const seg4 = Object.values(r.segmentDetails)[3];
+                        setExtAssetDesc((seg4 as any)?.description || '');
+                      }).catch(() => {});
+                    }
+                  }}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={8}>
+              <Form.Item label="Amount" name="amount" rules={[{ required: true, message: 'Required' }]}>
+                <InputNumber style={{ width: '100%' }} precision={2} placeholder="0.00" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item label="Transaction Date" name="transactionDate" rules={[{ required: true, message: 'Required' }]}>
+                <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item label="Currency" name="currencyCode">
+                <Select>
+                  {['AED','USD','EUR','GBP','SAR','KWD','QAR','OMR','BHD','EGP','INR'].map(c =>
+                    <Option key={c} value={c}>{c}</Option>)}
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item label="Transaction Type" name="transactionType">
+                <Select placeholder="Select type" allowClear>
+                  {['EFT','WIRE','CHECK','MISC'].map(t => <Option key={t} value={t}>{t}</Option>)}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Reference" name="referenceText">
+                <Input placeholder="e.g. STMT-REF-001" />
+              </Form.Item>
+            </Col>
+          </Row>
+          {selectedStatement && (
+            <div style={{ background: REDWOOD.info + '12', border: `1px solid ${REDWOOD.info}40`, borderRadius: 4, padding: '6px 10px', marginBottom: 12, fontSize: 11 }}>
+              <Space wrap>
+                <Text type="secondary" style={{ fontSize: 11 }}>Statement:</Text>
+                <Text strong style={{ fontSize: 11 }}>{selectedStatement.statementNumber}</Text>
+                <Tag color="blue" style={{ fontSize: 10 }}>ID: {selectedStatement.statementId}</Tag>
+                {selectedStmtKeys.length > 0 && <Tag color="green" style={{ fontSize: 10 }}>{selectedStmtKeys.length} line(s) selected</Tag>}
+              </Space>
+            </div>
+          )}
+          <Divider style={{ margin: '8px 0', fontSize: 11 }}>Account Coding</Divider>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item label="Cash / Asset Account">
+                <Space.Compact style={{ width: '100%' }}>
+                  <Form.Item name="assetAccountCombination" noStyle>
+                    <Input readOnly placeholder="Select account" style={{ fontFamily: 'monospace', fontSize: 11 }} />
+                  </Form.Item>
+                  <Button icon={<SearchOutlined />} onClick={() => {
+                    setExtCoaInitial(extTxnForm.getFieldValue('assetAccountCombination') || '');
+                    setExtCoaTarget('asset');
+                    setExtCoaOpen(true);
+                  }} />
+                </Space.Compact>
+                {extAssetDesc && <div style={{ fontSize: 11, color: REDWOOD.info, marginTop: 2 }}>{extAssetDesc}</div>}
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Offset Account">
+                <Space.Compact style={{ width: '100%' }}>
+                  <Form.Item name="offsetAccountCombination" noStyle>
+                    <Input readOnly placeholder="Select account" style={{ fontFamily: 'monospace', fontSize: 11 }} />
+                  </Form.Item>
+                  <Button icon={<SearchOutlined />} onClick={() => {
+                    setExtCoaInitial(extTxnForm.getFieldValue('offsetAccountCombination') || '');
+                    setExtCoaTarget('offset');
+                    setExtCoaOpen(true);
+                  }} />
+                </Space.Compact>
+                {extOffsetDesc && <div style={{ fontSize: 11, color: REDWOOD.info, marginTop: 2 }}>{extOffsetDesc}</div>}
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item label="Description" name="description">
+            <Input.TextArea rows={2} placeholder="Optional" />
+          </Form.Item>
+
+          {/* API Inspector */}
+          <Collapse size="small" style={{ marginBottom: 8 }}>
+            <Collapse.Panel
+              header={
+                <Space size={4}>
+                  <ApiOutlined style={{ color: REDWOOD.info }} />
+                  <Text style={{ fontSize: 11 }}>API Inspector</Text>
+                  <Text style={{ fontSize: 10, color: REDWOOD.neutral600 }}>POST {EXT_TXN_URL}</Text>
+                  {extTxnRawError && <Tag color="error" style={{ fontSize: 10 }}>Error</Tag>}
+                  {extTxnResponse?.status === 'success' && <Tag color="success" style={{ fontSize: 10 }}>Success</Tag>}
+                </Space>
+              }
+              key="api"
+            >
+              <Collapse size="small" ghost defaultActiveKey={['payload']}>
+                <Collapse.Panel header={<Text style={{ fontSize: 11 }}>Request Payload</Text>} key="payload">
+                  <pre style={{ fontSize: 10, maxHeight: 200, overflow: 'auto', background: '#f0f5ff', padding: 8, borderRadius: 4, margin: 0, border: '1px solid #adc6ff' }}>
+                    {extTxnPayload ? JSON.stringify(extTxnPayload, null, 2) : '— submit form to see payload —'}
+                  </pre>
+                </Collapse.Panel>
+                {extTxnResponse && (
+                  <Collapse.Panel header={<Text style={{ fontSize: 11 }}>Response</Text>} key="response">
+                    <pre style={{ fontSize: 10, maxHeight: 160, overflow: 'auto', background: extTxnResponse?.status === 'success' ? '#f6ffed' : '#fff2f0', padding: 8, borderRadius: 4, margin: 0, border: `1px solid ${extTxnResponse?.status === 'success' ? '#b7eb8f' : '#ffccc7'}` }}>
+                      {JSON.stringify(extTxnResponse, null, 2)}
+                    </pre>
+                  </Collapse.Panel>
+                )}
+                {extTxnRawError && (
+                  <Collapse.Panel header={<Text style={{ fontSize: 11, color: REDWOOD.error }}>Raw Error</Text>} key="err">
+                    <pre style={{ fontSize: 10, maxHeight: 120, overflow: 'auto', background: '#fff2f0', padding: 8, borderRadius: 4, margin: 0, border: '1px solid #ffccc7', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                      {extTxnRawError}
+                    </pre>
+                  </Collapse.Panel>
+                )}
+              </Collapse>
+            </Collapse.Panel>
+          </Collapse>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Button onClick={() => setExtTxnOpen(false)}>Cancel</Button>
+            <Button type="primary" htmlType="submit" loading={extTxnSaving}
+              style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
+              Create Transaction
+            </Button>
+          </div>
+        </Form>
+      </Modal>
+
+      {/* Account Selector for ext txn */}
+      <AccountSelector
+        visible={extCoaOpen}
+        onCancel={() => setExtCoaOpen(false)}
+        initialValue={extCoaInitial}
+        onSelect={(code, _segments) => {
+          extTxnForm.setFieldValue(
+            extCoaTarget === 'asset' ? 'assetAccountCombination' : 'offsetAccountCombination',
+            code
+          );
+          validateAccountCode(code).then(r => {
+            const seg4 = Object.values(r.segmentDetails)[3];
+            const desc = (seg4 as any)?.description || '';
+            if (extCoaTarget === 'asset') setExtAssetDesc(desc);
+            else setExtOffsetDesc(desc);
+          }).catch(() => {});
+          setExtCoaOpen(false);
+        }}
+      />
 
       {/* Shared API Debug Modal */}
       <Modal
