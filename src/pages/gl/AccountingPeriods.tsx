@@ -673,11 +673,11 @@ const AccountingPeriods: React.FC = () => {
 
   // Webservices used on this page
   const webservices = [
-    { method: 'GET', url: '/api/apex/applications/getall', description: 'Fetch applications list' },
-    { method: 'GET', url: '/api/apex/ledgers', description: 'Fetch ledgers list' },
-    { method: 'GET', url: '/api/apex/currentperiodstatus', description: 'Fetch current period statuses (prior/current/next)' },
-    { method: 'GET', url: '/api/apex/periodsstatus/create?P_APPLICATION_NAME=...&P_LEDGER_NAME=...', description: 'Fetch period status details for application/ledger' },
-    { method: 'GET', url: '/api/fusion/fscmRestApi/resources/11.13.18.05/accountingPeriodsLOV', description: 'Fetch all periods from Fusion (All Periods tab)' },
+    { method: 'GET', url: `${APEX_DB_CONFIG.baseUrl}/applications/getall`, description: 'Fetch applications list' },
+    { method: 'GET', url: `${APEX_DB_CONFIG.baseUrl}/ledgers`, description: 'Fetch ledgers list' },
+    { method: 'GET', url: `${APEX_DB_CONFIG.baseUrl}/currentperiodstatus`, description: 'Fetch current period status (prior/current/next) per ledger & application' },
+    { method: 'GET', url: `${APEX_DB_CONFIG.baseUrl}/periodsstatus/create?P_APPLICATION_NAME=General+Ledger&P_LEDGER_NAME={ledger}`, description: 'Fetch all period statuses for selected ledger/application' },
+    { method: 'PUT', url: `${APEX_DB_CONFIG.baseUrl}/gl/periodstatus`, description: 'Open or close a period (body: periodName, app, action)' },
   ];
 
   // API Log Popover Content
