@@ -197,6 +197,7 @@ const AssignmentModal: React.FC<{
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const [acctSelectorOpen, setAcctSelectorOpen] = useState(false);
+  const [taxAccountDesc,   setTaxAccountDesc]   = useState('');
 
   useEffect(() => {
     if (open) {
@@ -209,9 +210,11 @@ const AssignmentModal: React.FC<{
           effectiveTo:     editing.effectiveTo   ? dayjs(editing.effectiveTo)   : null,
           status:          editing.status,
         });
+        setTaxAccountDesc('');
       } else {
         form.resetFields();
         form.setFieldsValue({ status: 'ACTIVE' });
+        setTaxAccountDesc('');
       }
     }
   }, [open, editing, form]);
@@ -288,6 +291,11 @@ const AssignmentModal: React.FC<{
               onClick={() => setAcctSelectorOpen(true)}
               style={{ cursor: 'pointer' }}
             />
+            {taxAccountDesc && (
+              <Text type="secondary" style={{ fontSize: 12, marginTop: 4, display: 'block' }}>
+                {taxAccountDesc}
+              </Text>
+            )}
           </Form.Item>
           <Row gutter={16}>
             <Col span={12}>
@@ -310,13 +318,16 @@ const AssignmentModal: React.FC<{
         </Form>
       </Modal>
       <AccountSelector
-        open={acctSelectorOpen}
+        visible={acctSelectorOpen}
         initialValue={taxAccount || ''}
-        onSelect={(combo) => {
-          form.setFieldValue('taxAccount', combo);
+        onSelect={(accountCode, segments) => {
+          form.setFieldValue('taxAccount', accountCode);
+          const naturalValue = accountCode.split('-')[3] || '';
+          const desc = Object.values(segments).find(s => s.value === naturalValue)?.description || '';
+          setTaxAccountDesc(desc);
           setAcctSelectorOpen(false);
         }}
-        onClose={() => setAcctSelectorOpen(false)}
+        onCancel={() => setAcctSelectorOpen(false)}
       />
     </>
   );
