@@ -927,7 +927,7 @@ const StatementForm: React.FC<{
       ),
     },
     {
-      title: 'Description',
+      title: 'Description', width: 320,
       render: (_, r) => (
         <Input size="small" value={r.description}
           onChange={e => updateLine(r._key, 'description', e.target.value)} />
