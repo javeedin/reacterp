@@ -830,40 +830,6 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const fetchSysTxns = useCallback(async (params: SearchParams, txnType?: string) => {
     setLoadingSys(true);
 
-    // CM = external/manual transactions from cash/externaltransactions
-    if (txnType === 'CM') {
-      try {
-        const q = new URLSearchParams();
-        if (params.bankAccount) q.set('bank_account', params.bankAccount);
-        if (params.dateFrom)    q.set('date_from',    params.dateFrom.format('YYYY-MM-DD'));
-        if (params.dateTo)      q.set('date_to',      params.dateTo.format('YYYY-MM-DD'));
-        q.set('status', 'UNR');
-        q.set('row_limit', '500');
-        const res  = await fetch(`${EXT_TXN_URL}?${q.toString()}`);
-        const data = await res.json();
-        const items = (data.items ?? []) as any[];
-        setSysTxns(items.map((i: any) => ({
-          txnId:           i.ExternalTransactionId ?? i.external_transaction_id ?? 0,
-          txnNumber:       i.ReferenceText         ?? i.reference_text          ?? '',
-          reference:       i.ReferenceText         ?? '',
-          txnDate:         i.TransactionDate       ?? i.transaction_date        ?? '',
-          amount:          i.Amount                ?? i.amount                  ?? 0,
-          currencyCode:    i.CurrencyCode          ?? i.currency_code           ?? '',
-          businessUnit:    i.BusinessUnitName      ?? i.business_unit_name      ?? '',
-          bankAccountName: i.BankAccountName       ?? i.bank_account_name       ?? '',
-          txnStatus:       i.Status                ?? i.status                  ?? '',
-          source:          'CM',
-          payee:           i.Description           ?? '',
-        })));
-      } catch (err) {
-        msgApi.error('Failed to load CM transactions');
-        console.error(err);
-      } finally {
-        setLoadingSys(false);
-      }
-      return;
-    }
-
     const q = new URLSearchParams();
     if (params.bankAccount) q.set('bank_account', params.bankAccount);
     if (params.dateFrom)   q.set('date_from',    params.dateFrom.format('YYYY-MM-DD'));
@@ -962,7 +928,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const handleReconcile = useCallback(async () => {
     if (selectedStmtKeys.length === 0 || selectedSysKeys.length === 0) return;
 
-    const visibleSysTxns = txnSourceFilter === 'ALL'
+    const visibleSysTxns = txnSourceFilter === 'ALL' || txnSourceFilter === 'CM'
       ? sysTxns
       : sysTxns.filter((t) => t.source === txnSourceFilter);
 
@@ -1318,7 +1284,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     txnSourceFilter === 'CM'         ? sysColumnsCM :
     sysColumnsAll;
 
-  const filteredSysTxns = txnSourceFilter === 'ALL'
+  const filteredSysTxns = txnSourceFilter === 'ALL' || txnSourceFilter === 'CM'
     ? sysTxns
     : sysTxns.filter((t) => t.source === txnSourceFilter);
 
