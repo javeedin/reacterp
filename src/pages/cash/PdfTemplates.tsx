@@ -533,11 +533,13 @@ const PdfTemplates: React.FC = () => {
           open={designerOpen} onCancel={closeDesigner}
           width={860} footer={designerFooter} destroyOnClose
         >
-          <Steps current={step} size="small" style={{ marginBottom: 20 }}>
-            <Steps.Step title="Template Info" />
-            <Steps.Step title="Upload & Detect" />
-            <Steps.Step title="Map Columns" />
-          </Steps>
+          <Steps current={step} size="small" style={{ marginBottom: 20 }}
+            items={[
+              { title: 'Template Info' },
+              { title: 'Upload & Detect' },
+              { title: 'Map Columns' },
+            ]}
+          />
 
           {/* ─ Step 0: Info ─ */}
           {step === 0 && (
