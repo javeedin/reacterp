@@ -1088,12 +1088,17 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
     activeLines.forEach((l) => {
       const amt = Math.abs(l.amount || 0);
-      const drAccount = l.distributionCombination || l.distributionSet || '';
+      // Multi-period lines (accrualAccount filled in Multiperiod tab) debit the accrual account.
+      // Standard lines debit the expense distribution directly.
+      const isMpa = !!(l.accrualAccount && l.startDate && l.endDate);
+      const drAccount = isMpa
+        ? l.accrualAccount
+        : (l.distributionCombination || l.distributionSet || '');
       // DR line (for credit memo this becomes CR)
       result.push({
         lineNumber: lineNum++,
         lineType: isCreditMemo ? 'CR' : 'DR',
-        accountingClass: 'EXPENSE',
+        accountingClass: isMpa ? 'ACCRUAL' : 'EXPENSE',
         accountCombination: drAccount,
         enteredDr:   isCreditMemo ? 0   : amt,
         enteredCr:   isCreditMemo ? amt : 0,
