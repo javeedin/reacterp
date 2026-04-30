@@ -336,14 +336,28 @@ const StatementForm: React.FC<{
     } finally { setSaving(false); }
   };
 
-  // Line columns — inline editing
-  const lineColumns: ColumnsType<StatementLine> = [
+  // Running balance computation — uses opening balance from form
+  const openingBal = Number(form.getFieldValue('openingBalance') ?? initialHeader?.openingBalance ?? 0);
+  const linesWithBalance = (() => {
+    let bal = openingBal;
+    return lines.map(l => {
+      const amt = l.amount ?? 0;
+      if (l.transactionCode === 'CR') bal += amt;
+      else if (l.transactionCode === 'DR') bal -= amt;
+      return { ...l, _balance: bal };
+    });
+  })();
+
+  const fmt = (v: number) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  // Line columns — inline editing with bank-statement-style Withdrawal/Deposit/Balance view
+  const lineColumns: ColumnsType<StatementLine & { _balance: number }> = [
     {
-      title: '#', width: 50,
-      render: (_, __, idx) => <Text style={{ fontSize: 12 }}>{idx + 1}</Text>,
+      title: '#', width: 44,
+      render: (_, __, idx) => <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{idx + 1}</Text>,
     },
     {
-      title: 'Txn Date', width: 130,
+      title: 'Date', width: 120,
       render: (_, r) => (
         <DatePicker size="small" format="D-MMM-YYYY" style={{ width: '100%' }}
           value={r.transactionDate ? dayjs(r.transactionDate) : undefined}
@@ -351,23 +365,21 @@ const StatementForm: React.FC<{
       ),
     },
     {
-      title: 'Value Date', width: 130,
+      title: 'Narration / Description',
       render: (_, r) => (
-        <DatePicker size="small" format="D-MMM-YYYY" style={{ width: '100%' }}
-          value={r.valueDate ? dayjs(r.valueDate) : undefined}
-          onChange={d => updateLine(r._key, 'valueDate', d?.format('YYYY-MM-DD') ?? '')} />
+        <Input size="small" value={r.description}
+          onChange={e => updateLine(r._key, 'description', e.target.value)} />
       ),
     },
     {
-      title: 'Amount', width: 130,
+      title: 'Chq / Ref', width: 110,
       render: (_, r) => (
-        <InputNumber size="small" style={{ width: '100%' }} precision={2}
-          value={r.amount ?? undefined}
-          onChange={v => updateLine(r._key, 'amount', v)} />
+        <Input size="small" value={r.reference}
+          onChange={e => updateLine(r._key, 'reference', e.target.value)} />
       ),
     },
     {
-      title: 'Type', width: 80,
+      title: 'Type', width: 72,
       render: (_, r) => (
         <Select size="small" style={{ width: '100%' }} value={r.transactionCode}
           onChange={v => updateLine(r._key, 'transactionCode', v)}>
@@ -377,29 +389,35 @@ const StatementForm: React.FC<{
       ),
     },
     {
-      title: 'Description',
-      render: (_, r) => (
-        <Input size="small" value={r.description}
-          onChange={e => updateLine(r._key, 'description', e.target.value)} />
+      title: 'Withdrawal (DR)', width: 130, align: 'right' as const,
+      render: (_, r) => r.transactionCode === 'DR' ? (
+        <InputNumber size="small" style={{ width: '100%' }} precision={2}
+          value={r.amount ?? undefined}
+          onChange={v => updateLine(r._key, 'amount', v)} />
+      ) : (
+        <Text style={{ fontSize: 11, color: REDWOOD.neutral300 }}>—</Text>
       ),
     },
     {
-      title: 'Reference', width: 140,
-      render: (_, r) => (
-        <Input size="small" value={r.reference}
-          onChange={e => updateLine(r._key, 'reference', e.target.value)} />
+      title: 'Deposit (CR)', width: 130, align: 'right' as const,
+      render: (_, r) => r.transactionCode === 'CR' ? (
+        <InputNumber size="small" style={{ width: '100%' }} precision={2}
+          value={r.amount ?? undefined}
+          onChange={v => updateLine(r._key, 'amount', v)} />
+      ) : (
+        <Text style={{ fontSize: 11, color: REDWOOD.neutral300 }}>—</Text>
       ),
     },
     {
-      title: 'Counterparty', width: 160,
-      render: (_, r) => (
-        <Input size="small" value={r.counterpartyName}
-          onChange={e => updateLine(r._key, 'counterpartyName', e.target.value)} />
+      title: 'Balance', width: 130, align: 'right' as const,
+      render: (_, r: any) => (
+        <Text style={{ fontSize: 12, fontWeight: 500, color: r._balance >= 0 ? REDWOOD.neutral900 : REDWOOD.error }}>
+          {fmt(r._balance)}
+        </Text>
       ),
     },
     ...(isEdit ? [{
-      title: 'Recon',
-      width: 130,
+      title: 'Recon', width: 120,
       render: (_: any, r: StatementLine) => (
         <Tag color={RECON_COLOR[r.reconStatus ?? 'UNRECONCILED'] as any} style={{ fontSize: 11 }}>
           {r.reconStatus ?? 'UNRECONCILED'}
@@ -408,7 +426,7 @@ const StatementForm: React.FC<{
     }] : []),
     {
       title: '', width: 40, align: 'center' as const,
-      render: (_, r) => {
+      render: (_: any, r: StatementLine) => {
         const isReconciled = r.reconStatus === 'RECONCILED' || r.reconStatus === 'PARTIALLY_RECONCILED';
         return (
           <Tooltip title={isReconciled ? 'Cannot delete a reconciled line' : 'Delete line'}>
@@ -522,7 +540,7 @@ const StatementForm: React.FC<{
       </div>
 
       <Table
-        dataSource={lines} columns={lineColumns} rowKey="_key"
+        dataSource={linesWithBalance} columns={lineColumns as any} rowKey="_key"
         size="small" pagination={false}
         scroll={{ x: 1100 }}
         locale={{ emptyText: <Empty description="No lines — add manually or import CSV" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
