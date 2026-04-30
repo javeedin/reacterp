@@ -516,6 +516,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     invoiceDate: initialData?.invoiceId ? undefined : dayjs(),
   });
   const [taxRate, setTaxRate] = useState<number>(0);
+  const [taxCodes, setTaxCodes] = useState<{ taxCode: string; taxName: string; taxRate: number; taxAccount: string }[]>([]);
+  const taxRateMapRef = useRef<Record<string, number>>({});
+  const taxRateMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    taxCodes.forEach(t => { map[t.taxCode] = t.taxRate; });
+    taxRateMapRef.current = map;
+    return map;
+  }, [taxCodes]);
 
   // Check if all required header fields are filled
   const isHeaderComplete = useMemo(() => {
@@ -1114,7 +1122,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         partyType: 'SUPPLIER',
       });
       // Tax line (DR in standard, CR in credit memo)
-      const taxRate = getTaxRateForClassification(l.taxClassification);
+      const taxRate = taxRateMapRef.current[l.taxClassification] ?? getTaxRateForClassification(l.taxClassification);
       if (taxRate > 0) {
         const taxAmt = Math.round(amt * taxRate / 100 * 100) / 100;
         result.push({
@@ -1138,7 +1146,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     const totalLiability = Math.round(
       activeLines.reduce((sum, l) => {
         const amt = Math.abs(l.amount || 0);
-        const taxRate = getTaxRateForClassification(l.taxClassification);
+        const taxRate = taxRateMapRef.current[l.taxClassification] ?? getTaxRateForClassification(l.taxClassification);
         const taxAmt  = taxRate > 0 ? Math.round(amt * taxRate / 100 * 100) / 100 : 0;
         return sum + amt + taxAmt;
       }, 0) * 100
@@ -2295,6 +2303,26 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     }
   }, [autoPostPending, slaHeaderId, handlePostToLedger]);
 
+  const fetchTaxCodes = useCallback(async (businessUnit: string) => {
+    if (!businessUnit) { setTaxCodes([]); return; }
+    try {
+      const params = new URLSearchParams({ business_unit: businessUnit, applicability: 'PURCHASES' });
+      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/tax/taxes/bybu?${params}`);
+      const data = await res.json();
+      const items: any[] = data?.items ?? [];
+      setTaxCodes(
+        items
+          .map((t: any) => ({
+            taxCode:    t.taxCode    || '',
+            taxName:    t.taxName    || '',
+            taxRate:    Number(t.taxRate) || 0,
+            taxAccount: t.taxAccount || '',
+          }))
+          .filter(t => t.taxCode)
+      );
+    } catch { /* silent */ }
+  }, []);
+
   useEffect(() => {
     fetch(APEX_BUSINESS_UNITS_URL, { headers: { Accept: 'application/json' } })
       .then(r => r.json())
@@ -2305,6 +2333,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         setBusinessUnits(items.length > 0 ? items : FALLBACK_BUSINESS_UNITS);
       })
       .catch(() => setBusinessUnits(FALLBACK_BUSINESS_UNITS));
+
+    if (initialData?.businessUnit) fetchTaxCodes(initialData.businessUnit);
 
     searchCombinations({})
       .then(data => setDistCombinations(data))
@@ -3378,7 +3408,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         // Recalculate line-level tax when amount or taxClassification changes
         if (field === 'amount' || field === 'quantity' || field === 'unitPrice' || field === 'taxClassification') {
           const lineAmount = updated.amount || 0;
-          const lineRate = getTaxRateForClassification(updated.taxClassification);
+          const lineRate = taxRateMapRef.current[updated.taxClassification] ?? getTaxRateForClassification(updated.taxClassification);
           updated.taxAmount = Math.round(lineAmount * (lineRate / 100) * 100) / 100;
         }
         // Auto-derive multiperiod dates when accounting date changes
@@ -3751,7 +3781,21 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       detail: needsRate && !convRate ? `Currency is ${currency} — conversion rate is required` : undefined,
     });
 
-    // 6. At least one line
+    // 6. Tax classification on all amount lines
+    const linesWithAmountNoTax = lines.filter((l) => (l.amount || 0) !== 0 && !l.taxClassification);
+    results.push({
+      label: 'Tax classification on invoice lines',
+      passed: linesWithAmountNoTax.length === 0,
+      detail: linesWithAmountNoTax.length > 0
+        ? `${linesWithAmountNoTax.length} line(s) are missing a tax classification`
+        : undefined,
+      subItems: linesWithAmountNoTax.map((l) => ({
+        label: `Line ${l.lineNumber}`,
+        detail: `${l.description || 'Item'} — ${formatAmount(l.amount)}`,
+      })),
+    });
+
+    // 7. At least one line
     results.push({
       label: 'Invoice lines exist',
       passed: lines.some((l) => l.amount !== 0 || l.description),
@@ -4800,11 +4844,20 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           allowClear
           disabled={isReadOnly}
         >
-          <Option value="VAT 5%">VAT 5%</Option>
-          <Option value="Zero Rated">Zero Rated</Option>
-          <Option value="Exempt">Exempt</Option>
-          <Option value="Reverse Charge">Reverse Charge</Option>
-          <Option value="Out of Scope">Out of Scope</Option>
+          {taxCodes.length > 0
+            ? taxCodes.map(t => (
+                <Option key={t.taxCode} value={t.taxCode}>
+                  {t.taxCode}{t.taxRate > 0 ? ` (${t.taxRate}%)` : ''}
+                </Option>
+              ))
+            : [
+                <Option key="VAT 5%" value="VAT 5%">VAT 5%</Option>,
+                <Option key="Zero Rated" value="Zero Rated">Zero Rated</Option>,
+                <Option key="Exempt" value="Exempt">Exempt</Option>,
+                <Option key="Reverse Charge" value="Reverse Charge">Reverse Charge</Option>,
+                <Option key="Out of Scope" value="Out of Scope">Out of Scope</Option>,
+              ]
+          }
         </Select>
       ),
     },
@@ -4815,7 +4868,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       width: 110,
       align: 'right',
       render: (val: number, record: InvoiceLine) => {
-        const rate = getTaxRateForClassification(record.taxClassification);
+        const rate = taxRateMap[record.taxClassification] ?? getTaxRateForClassification(record.taxClassification);
         const computed = Math.round((record.amount || 0) * (rate / 100) * 100) / 100;
         return (
           <Text style={{ fontSize: 12, fontWeight: 600, color: computed > 0 ? REDWOOD.info : REDWOOD.neutral600 }}>
@@ -5477,6 +5530,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               // When business unit changes, update buSelected gate
               if ('businessUnit' in changedValues) {
                 setBuSelected(!!changedValues.businessUnit);
+                fetchTaxCodes(changedValues.businessUnit || '');
               }
               // When business unit changes, build liability distribution:
               // segment 1 = company from BU webservice; rest is fixed
@@ -7658,7 +7712,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                       if (record.isGroupHeader) {
                         const pl = periodMap.get(v) || [];
                         const periodTotal = pl.reduce((s: number, l: any) => s + (l.amount || 0), 0);
-                        const periodTax = pl.reduce((s: number, l: any) => s + Math.round((l.amount || 0) * (getTaxRateForClassification(l.taxClassification) / 100) * 100) / 100, 0);
+                        const periodTax = pl.reduce((s: number, l: any) => s + Math.round((l.amount || 0) * ((taxRateMapRef.current[l.taxClassification] ?? getTaxRateForClassification(l.taxClassification)) / 100) * 100) / 100, 0);
                         return (
                           <span>
                             Period: <strong>{v}</strong>
@@ -7835,7 +7889,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 periodAccountedDebit += acctAmt;
               });
 
-              const periodLineTax = periodLines.reduce((sum, l) => sum + Math.round((l.amount || 0) * (getTaxRateForClassification(l.taxClassification) / 100) * 100) / 100, 0);
+              const periodLineTax = periodLines.reduce((sum, l) => sum + Math.round((l.amount || 0) * ((taxRateMapRef.current[l.taxClassification] ?? getTaxRateForClassification(l.taxClassification)) / 100) * 100) / 100, 0);
               if (periodLineTax > 0) {
                 const acctTax = Math.round(periodLineTax * effectiveRate * 100) / 100;
                 allEntries.push({ key: keyIdx++, period, line: 'Tax', account: 'Tax Recoverable', description: 'Input VAT', lineClass: 'Tax Recoverable', debit: periodLineTax, credit: 0, accountedDebit: acctTax, accountedCredit: 0 });
