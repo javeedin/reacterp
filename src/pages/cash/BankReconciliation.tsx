@@ -450,7 +450,14 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const [apiExecResult, setApiExecResult] = useState<{ loading: boolean; response: string | null }>({ loading: false, response: null });
   const [showApiLog, setShowApiLog]           = useState(false);
   const [reconLogOpen, setReconLogOpen]       = useState(false);
-  interface ReconCall { lineId: number; statementId: number; txnId: number; txnType: string; txnNumber: string; reconAmount: number; status: 'pending' | 'running' | 'success' | 'error'; response?: string; }
+  interface ReconCall {
+    lineId: number; statementId: number; txnId: number; txnType: string; txnNumber: string; reconAmount: number;
+    // Statement line reconcile (POST)
+    status: 'pending' | 'running' | 'success' | 'error'; response?: string;
+    // Transaction-side update (PUT/PATCH)
+    txnUrl: string; txnBody: object; txnLabel: string;
+    txnStatus: 'pending' | 'running' | 'success' | 'error' | 'skipped'; txnResponse?: string;
+  }
   const [reconCalls, setReconCalls]           = useState<ReconCall[]>([]);
 
   // Resize drag handlers
@@ -1081,6 +1088,43 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   }, [selectedStmtKeys, selectedSysKeys, stmtLines, sysTxns, txnSourceFilter, lastParams, selectedStatement, handleSelectStatement, fetchStmtLines, fetchSysTxns, msgApi]);
 
   // ── Reconcile API Log ────────────────────────────────────────────────────
+  const buildTxnSideCall = (sysTxn: SysTxn): { url: string; body: object; label: string } => {
+    const today = new Date().toISOString().slice(0, 10);
+    if (txnSourceFilter === 'CM' || sysTxn.source === 'ORA_MAN') {
+      return {
+        url:   `${EXT_TXN_URL}/${sysTxn.txnId}`,
+        body:  { status: 'REC', reconciledFlag: 'Y', reconciledDate: today },
+        label: 'External Transaction',
+      };
+    }
+    if (sysTxn.source === 'AP_PAYMENT') {
+      return {
+        url:   `${APEX_BASE}/cash/reconciliation/ap_payments/${sysTxn.txnId}`,
+        body:  { reconciledFlag: 'Y', reconciledDate: today, paymentStatus: 'CLEARED' },
+        label: 'AP Payment',
+      };
+    }
+    if (sysTxn.source === 'AR_RECEIPT') {
+      return {
+        url:   `${APEX_BASE}/cash/reconciliation/ar_receipts/${sysTxn.txnId}`,
+        body:  { reconciledFlag: 'Y', reconciledDate: today, receiptStatus: 'CLEARED' },
+        label: 'AR Receipt',
+      };
+    }
+    if (sysTxn.source === 'GL_JOURNAL') {
+      return {
+        url:   `${APEX_BASE}/cash/reconciliation/gl_journals/${sysTxn.txnId}`,
+        body:  { reconciledFlag: 'Y', reconciledDate: today },
+        label: 'GL Journal',
+      };
+    }
+    return {
+      url:   `${APEX_BASE}/cash/reconciliation/systxns/${sysTxn.txnId}`,
+      body:  { reconciledFlag: 'Y', reconciledDate: today },
+      label: sysTxn.source || 'System Txn',
+    };
+  };
+
   const openReconLog = useCallback(() => {
     const visibleSysTxns = txnSourceFilter === 'ALL' || txnSourceFilter === 'CM'
       ? sysTxns : sysTxns.filter((t) => t.source === txnSourceFilter);
@@ -1088,6 +1132,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     const selectedTxns  = visibleSysTxns.filter((t) => selectedSysKeys.includes(t.txnId));
     const calls: ReconCall[] = selectedLines.map((line, i) => {
       const sysTxn = selectedTxns[i] ?? selectedTxns[0];
+      const txnSide = buildTxnSideCall(sysTxn);
       return {
         lineId:      line.lineId,
         statementId: line.statementId,
@@ -1096,23 +1141,54 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
         txnNumber:   sysTxn.txnNumber,
         reconAmount: line.amount,
         status:      'pending' as const,
+        txnUrl:      txnSide.url,
+        txnBody:     txnSide.body,
+        txnLabel:    txnSide.label,
+        txnStatus:   'pending' as const,
       };
     });
     setReconCalls(calls);
     setReconLogOpen(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [txnSourceFilter, sysTxns, stmtLines, selectedStmtKeys, selectedSysKeys]);
 
   const executeReconCall = useCallback(async (idx: number) => {
     const call = reconCalls[idx];
     if (!call) return;
+    // Step 1: POST bankstatements reconcile
     setReconCalls(prev => prev.map((c, i) => i === idx ? { ...c, status: 'running' } : c));
     const body = { lineId: call.lineId, txnType: call.txnType, txnId: call.txnId, txnNumber: call.txnNumber, reconAmount: call.reconAmount, notes: '' };
     try {
       const res  = await fetch(`${APEX_BASE}/cash/bankstatements/${call.statementId}/reconcile`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await parseApexJson(res);
-      setReconCalls(prev => prev.map((c, i) => i === idx ? { ...c, status: data.status === 'success' ? 'success' : 'error', response: JSON.stringify(data, null, 2) } : c));
+      const stmtOk = data.status === 'success';
+      setReconCalls(prev => prev.map((c, i) => i === idx ? { ...c, status: stmtOk ? 'success' : 'error', response: JSON.stringify(data, null, 2) } : c));
+      // Step 2: PUT transaction-side update (only if step 1 succeeded)
+      if (stmtOk) {
+        setReconCalls(prev => prev.map((c, i) => i === idx ? { ...c, txnStatus: 'running' } : c));
+        try {
+          const r2   = await fetch(call.txnUrl, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(call.txnBody) });
+          const d2   = await parseApexJson(r2);
+          setReconCalls(prev => prev.map((c, i) => i === idx ? { ...c, txnStatus: d2.status === 'success' || r2.ok ? 'success' : 'error', txnResponse: JSON.stringify(d2, null, 2) } : c));
+        } catch (err2: any) {
+          setReconCalls(prev => prev.map((c, i) => i === idx ? { ...c, txnStatus: 'error', txnResponse: String(err2) } : c));
+        }
+      }
     } catch (err: any) {
       setReconCalls(prev => prev.map((c, i) => i === idx ? { ...c, status: 'error', response: String(err) } : c));
+    }
+  }, [reconCalls]);
+
+  const executeTxnCall = useCallback(async (idx: number) => {
+    const call = reconCalls[idx];
+    if (!call) return;
+    setReconCalls(prev => prev.map((c, i) => i === idx ? { ...c, txnStatus: 'running' } : c));
+    try {
+      const r   = await fetch(call.txnUrl, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(call.txnBody) });
+      const d   = await parseApexJson(r);
+      setReconCalls(prev => prev.map((c, i) => i === idx ? { ...c, txnStatus: d.status === 'success' || r.ok ? 'success' : 'error', txnResponse: JSON.stringify(d, null, 2) } : c));
+    } catch (err: any) {
+      setReconCalls(prev => prev.map((c, i) => i === idx ? { ...c, txnStatus: 'error', txnResponse: String(err) } : c));
     }
   }, [reconCalls]);
 
@@ -2052,56 +2128,76 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
           </Row>
         }
       >
-        <div style={{ marginBottom: 12 }}>
-          <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>
-            Endpoint: <code style={{ color: REDWOOD.info, fontSize: 11 }}>{APEX_BASE}/cash/bankstatements/:statementId/reconcile</code>
-            <Tag color="orange" style={{ marginLeft: 8, fontSize: 10 }}>POST</Tag>
-          </Text>
-        </div>
-        <div style={{ maxHeight: 480, overflowY: 'auto' }}>
+        <div style={{ maxHeight: 520, overflowY: 'auto' }}>
           {reconCalls.map((call, idx) => {
-            const body = { lineId: call.lineId, txnType: call.txnType, txnId: call.txnId, txnNumber: call.txnNumber, reconAmount: call.reconAmount, notes: '' };
-            const statusColor = call.status === 'success' ? REDWOOD.success : call.status === 'error' ? REDWOOD.error : call.status === 'running' ? REDWOOD.info : REDWOOD.neutral400;
-            const statusLabel = call.status === 'success' ? 'Done' : call.status === 'error' ? 'Error' : call.status === 'running' ? 'Running…' : 'Pending';
-            return (
-              <div key={idx} style={{ marginBottom: 12, border: `1px solid ${call.status === 'success' ? REDWOOD.success : call.status === 'error' ? REDWOOD.error : REDWOOD.neutral200}`, borderRadius: 6, overflow: 'hidden' }}>
-                {/* Header row */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px', background: REDWOOD.neutral100, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
-                  <Space size={8}>
-                    <Tag color="orange" style={{ fontSize: 10, margin: 0 }}>POST</Tag>
-                    <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>
-                      /cash/bankstatements/<strong>{call.statementId}</strong>/reconcile
-                    </Text>
-                    <Tag style={{ fontSize: 10, margin: 0, color: statusColor, borderColor: statusColor }}>{statusLabel}</Tag>
+            const stmtBody  = { lineId: call.lineId, txnType: call.txnType, txnId: call.txnId, txnNumber: call.txnNumber, reconAmount: call.reconAmount, notes: '' };
+            const mkColor   = (s: string) => s === 'success' ? REDWOOD.success : s === 'error' ? REDWOOD.error : s === 'running' ? REDWOOD.info : REDWOOD.neutral400;
+            const mkLabel   = (s: string) => s === 'success' ? 'Done' : s === 'error' ? 'Error' : s === 'running' ? 'Running…' : 'Pending';
+            const overallOk = call.status === 'success' && call.txnStatus === 'success';
+            const overallErr = call.status === 'error' || call.txnStatus === 'error';
+
+            const ApiRow = ({ method, url, body, status, response, onExecute, label }: {
+              method: string; url: string; body: object; status: string; response?: string; onExecute: () => void; label: string;
+            }) => (
+              <div style={{ borderTop: `1px solid ${REDWOOD.neutral200}` }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 12px', background: REDWOOD.neutral100 }}>
+                  <Space size={6}>
+                    <Tag color={method === 'POST' ? 'orange' : 'blue'} style={{ fontSize: 10, margin: 0 }}>{method}</Tag>
+                    <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{label}</Text>
+                    <Text style={{ fontFamily: 'monospace', fontSize: 10, color: REDWOOD.neutral500 }} ellipsis>{url.replace(APEX_BASE, '')}</Text>
+                    <Tag style={{ fontSize: 10, margin: 0, color: mkColor(status), borderColor: mkColor(status) }}>{mkLabel(status)}</Tag>
                   </Space>
-                  <Button
-                    size="small"
-                    type="primary"
-                    disabled={call.status === 'success' || call.status === 'running'}
-                    loading={call.status === 'running'}
-                    onClick={() => executeReconCall(idx)}
-                    style={{ fontSize: 11, backgroundColor: call.status === 'success' ? REDWOOD.success : REDWOOD.primary, borderColor: call.status === 'success' ? REDWOOD.success : REDWOOD.primary }}
-                  >
-                    {call.status === 'success' ? 'Done' : 'Execute'}
+                  <Button size="small" type="primary" disabled={status === 'success' || status === 'running'} loading={status === 'running'} onClick={onExecute}
+                    style={{ fontSize: 11, backgroundColor: status === 'success' ? REDWOOD.success : REDWOOD.primary, borderColor: status === 'success' ? REDWOOD.success : REDWOOD.primary }}>
+                    {status === 'success' ? 'Done' : 'Execute'}
                   </Button>
                 </div>
-                {/* Request body */}
-                <div style={{ display: 'flex', gap: 0 }}>
-                  <div style={{ flex: 1, padding: '8px 12px', background: '#0d1117', borderRight: call.response ? `1px solid ${REDWOOD.neutral200}` : 'none' }}>
-                    <Text style={{ fontSize: 10, color: REDWOOD.neutral400, display: 'block', marginBottom: 4 }}>REQUEST BODY</Text>
-                    <pre style={{ margin: 0, fontFamily: 'monospace', fontSize: 11, color: '#9cdcfe', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                      {JSON.stringify(body, null, 2)}
-                    </pre>
+                <div style={{ display: 'flex' }}>
+                  <div style={{ flex: 1, padding: '6px 12px', background: '#0d1117', borderRight: response ? `1px solid #30363d` : 'none' }}>
+                    <Text style={{ fontSize: 9, color: '#6e7681', display: 'block', marginBottom: 2 }}>REQUEST BODY</Text>
+                    <pre style={{ margin: 0, fontFamily: 'monospace', fontSize: 10, color: '#9cdcfe', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{JSON.stringify(body, null, 2)}</pre>
                   </div>
-                  {call.response && (
-                    <div style={{ flex: 1, padding: '8px 12px', background: call.status === 'error' ? '#1a0a0a' : '#0a1a0a' }}>
-                      <Text style={{ fontSize: 10, color: REDWOOD.neutral400, display: 'block', marginBottom: 4 }}>RESPONSE</Text>
-                      <pre style={{ margin: 0, fontFamily: 'monospace', fontSize: 11, color: call.status === 'error' ? '#f97583' : '#85e89d', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                        {call.response}
-                      </pre>
+                  {response && (
+                    <div style={{ flex: 1, padding: '6px 12px', background: status === 'error' ? '#1a0a0a' : '#0a1a0a' }}>
+                      <Text style={{ fontSize: 9, color: '#6e7681', display: 'block', marginBottom: 2 }}>RESPONSE</Text>
+                      <pre style={{ margin: 0, fontFamily: 'monospace', fontSize: 10, color: status === 'error' ? '#f97583' : '#85e89d', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{response}</pre>
                     </div>
                   )}
                 </div>
+              </div>
+            );
+
+            return (
+              <div key={idx} style={{ marginBottom: 14, border: `1px solid ${overallOk ? REDWOOD.success : overallErr ? REDWOOD.error : REDWOOD.neutral200}`, borderRadius: 6, overflow: 'hidden' }}>
+                {/* Card title */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 12px', background: overallOk ? '#0a1a0a' : overallErr ? '#1a0a0a' : '#161b22' }}>
+                  <Space size={6}>
+                    <Text style={{ fontFamily: 'monospace', fontSize: 11, color: '#c9d1d9' }}>Line #{call.lineId}</Text>
+                    <Text style={{ fontSize: 11, color: '#6e7681' }}>→ {call.txnLabel} #{call.txnId}</Text>
+                    <Tag color={call.txnType === 'ORA_MAN' ? 'cyan' : call.txnType === 'AP_PAYMENT' ? 'geekblue' : call.txnType === 'AR_RECEIPT' ? 'green' : 'purple'} style={{ fontSize: 10, margin: 0 }}>{call.txnType}</Tag>
+                  </Space>
+                  <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info }}>{call.reconAmount.toLocaleString()}</Text>
+                </div>
+                {/* Call 1: Statement reconcile */}
+                <ApiRow
+                  method="POST"
+                  label="Bank Statement Line"
+                  url={`${APEX_BASE}/cash/bankstatements/${call.statementId}/reconcile`}
+                  body={stmtBody}
+                  status={call.status}
+                  response={call.response}
+                  onExecute={() => executeReconCall(idx)}
+                />
+                {/* Call 2: Transaction-side update */}
+                <ApiRow
+                  method="PUT"
+                  label={call.txnLabel}
+                  url={call.txnUrl}
+                  body={call.txnBody}
+                  status={call.txnStatus}
+                  response={call.txnResponse}
+                  onExecute={() => executeTxnCall(idx)}
+                />
               </div>
             );
           })}
