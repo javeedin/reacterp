@@ -10670,7 +10670,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             <Button onClick={() => setSlaModalVisible(false)}>Close</Button>
           </Space>
         }
-        width={900}
+        width={1100}
         destroyOnClose
       >
         <Spin spinning={slaFetching} tip="Loading accounting data...">
@@ -10679,41 +10679,92 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           const slaLineColumns = [
             { title: '#', dataIndex: 'lineNumber', width: 45, render: (v: number) => <Text style={{ fontSize: 11 }}>{v}</Text> },
             { title: 'Type', dataIndex: 'lineType', width: 55, render: (v: string) => <Tag color={v === 'DR' ? 'blue' : 'red'} style={{ fontSize: 11, fontWeight: 700 }}>{v}</Tag> },
-            { title: 'Class', dataIndex: 'accountingClass', width: 110, render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
-            { title: 'Account Combination', dataIndex: 'accountCombination', ellipsis: true, render: (v: string, r: any) => (
+            { title: 'Class', dataIndex: 'accountingClass', width: 120, render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
+            { title: 'Account Combination', dataIndex: 'accountCombination', width: 260, render: (v: string, r: any) => (
               <div>
-                <Text code style={{ fontSize: 11 }}>{v || '—'}</Text>
+                <Text code style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{v || '—'}</Text>
                 {r.accountDescription && <div style={{ fontSize: 10, color: '#888', marginTop: 1 }}>{r.accountDescription}</div>}
               </div>
             ) },
-            { title: 'Ent. Dr',  dataIndex: 'enteredDr',   width: 110, align: 'right' as const, render: (v: number, r: any) => v ? <Text strong style={{ fontSize: 11, color: REDWOOD.info }}>{formatAmount(v)}</Text>   : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text> },
-            { title: 'Ent. Cr',  dataIndex: 'enteredCr',   width: 110, align: 'right' as const, render: (v: number, r: any) => v ? <Text strong style={{ fontSize: 11, color: REDWOOD.error }}>{formatAmount(v)}</Text>  : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text> },
-            { title: 'Acc. Dr',  dataIndex: 'accountedDr', width: 110, align: 'right' as const, render: (v: number, r: any) => v ? <Text style={{ fontSize: 11, color: REDWOOD.info }}>{formatAmount(v)}</Text>          : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text> },
-            { title: 'Acc. Cr',  dataIndex: 'accountedCr', width: 110, align: 'right' as const, render: (v: number, r: any) => v ? <Text style={{ fontSize: 11, color: REDWOOD.error }}>{formatAmount(v)}</Text>         : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text> },
-            { title: 'Description', dataIndex: 'description', ellipsis: true, render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
+            { title: 'Ent. Dr',  dataIndex: 'enteredDr',   width: 110, align: 'right' as const, render: (v: number) => v ? <Text strong style={{ fontSize: 11, color: REDWOOD.info }}>{formatAmount(v)}</Text>   : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text> },
+            { title: 'Ent. Cr',  dataIndex: 'enteredCr',   width: 110, align: 'right' as const, render: (v: number) => v ? <Text strong style={{ fontSize: 11, color: REDWOOD.error }}>{formatAmount(v)}</Text>  : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text> },
+            { title: 'Acc. Dr',  dataIndex: 'accountedDr', width: 110, align: 'right' as const, render: (v: number) => v ? <Text style={{ fontSize: 11, color: REDWOOD.info }}>{formatAmount(v)}</Text>          : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text> },
+            { title: 'Acc. Cr',  dataIndex: 'accountedCr', width: 110, align: 'right' as const, render: (v: number) => v ? <Text style={{ fontSize: 11, color: REDWOOD.error }}>{formatAmount(v)}</Text>         : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text> },
+            { title: 'Description', dataIndex: 'description', width: 180, ellipsis: true, render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
           ];
 
-          const renderLinesTable = (lines: any[]) => (
-            <Table
-              dataSource={lines.map((l, i) => ({ ...l, key: l.lineId || i }))}
-              size="small" pagination={false} bordered scroll={{ x: 800 }}
-              summary={(data) => {
-                const totEntDr  = data.reduce((s, r) => s + (r.enteredDr   || 0), 0);
-                const totEntCr  = data.reduce((s, r) => s + (r.enteredCr   || 0), 0);
-                const totAccDr  = data.reduce((s, r) => s + (r.accountedDr || 0), 0);
-                const totAccCr  = data.reduce((s, r) => s + (r.accountedCr || 0), 0);
-                return (
-                  <Table.Summary.Row style={{ background: '#f5f5f5', fontWeight: 700 }}>
-                    <Table.Summary.Cell index={0} colSpan={4}>Total</Table.Summary.Cell>
-                    <Table.Summary.Cell index={4} align="right"><Text strong style={{ color: REDWOOD.info }}>{formatAmount(totEntDr)}</Text></Table.Summary.Cell>
-                    <Table.Summary.Cell index={5} align="right"><Text strong style={{ color: REDWOOD.error }}>{formatAmount(totEntCr)}</Text></Table.Summary.Cell>
-                    <Table.Summary.Cell index={6} align="right"><Text style={{ color: REDWOOD.info }}>{formatAmount(totAccDr)}</Text></Table.Summary.Cell>
-                    <Table.Summary.Cell index={7} align="right"><Text style={{ color: REDWOOD.error }}>{formatAmount(totAccCr)}</Text></Table.Summary.Cell>
-                  </Table.Summary.Row>
-                );
-              }}
-              columns={slaLineColumns}
-            />
+          const exportSlaToExcel = (headerLines: any[], label: string) => {
+            const invoiceNum  = form.getFieldValue('invoiceNumber') || 'invoice';
+            const supplier    = form.getFieldValue('supplier')       || '';
+            const bu          = form.getFieldValue('businessUnit')   || '';
+            const currency    = form.getFieldValue('invoiceCurrency') || '';
+            const invoiceAmt  = form.getFieldValue('invoiceAmount')  || '';
+
+            // Sheet 1 — Header info
+            const headerRows = [
+              ['Invoice Number', invoiceNum],
+              ['Supplier',       supplier],
+              ['Business Unit',  bu],
+              ['Currency',       currency],
+              ['Invoice Amount', invoiceAmt],
+              ['SLA Header ID',  slaHeaderId ?? ''],
+              ['Status',         slaStatus   ?? ''],
+              ['GL Batch',       slaGlBatchName ?? ''],
+              ['Exported',       new Date().toLocaleString()],
+            ];
+
+            // Sheet 2 — Journal lines
+            const lineRows = [
+              ['#', 'Type', 'Class', 'Account Combination', 'Entered Dr', 'Entered Cr', 'Accounted Dr', 'Accounted Cr', 'Description'],
+              ...headerLines.map(l => [
+                l.lineNumber, l.lineType, l.accountingClass,
+                l.accountCombination || '',
+                l.enteredDr   || 0, l.enteredCr   || 0,
+                l.accountedDr || 0, l.accountedCr || 0,
+                l.description || '',
+              ]),
+            ];
+
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(headerRows), 'Header');
+            const ws2 = XLSX.utils.aoa_to_sheet(lineRows);
+            ws2['!cols'] = [{ wch: 5 }, { wch: 6 }, { wch: 18 }, { wch: 40 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 30 }];
+            XLSX.utils.book_append_sheet(wb, ws2, 'Journal Lines');
+            XLSX.writeFile(wb, `SLA_${invoiceNum}_${label}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+          };
+
+          const renderLinesTable = (lines: any[], exportLabel: string = 'Invoice') => (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
+                <Button
+                  size="small"
+                  icon={<FileExcelOutlined style={{ color: '#217346' }} />}
+                  onClick={() => exportSlaToExcel(lines, exportLabel)}
+                >
+                  Export to Excel
+                </Button>
+              </div>
+              <Table
+                dataSource={lines.map((l, i) => ({ ...l, key: l.lineId || i }))}
+                size="small" pagination={false} bordered scroll={{ x: 1060 }}
+                summary={(data) => {
+                  const totEntDr  = data.reduce((s, r) => s + (r.enteredDr   || 0), 0);
+                  const totEntCr  = data.reduce((s, r) => s + (r.enteredCr   || 0), 0);
+                  const totAccDr  = data.reduce((s, r) => s + (r.accountedDr || 0), 0);
+                  const totAccCr  = data.reduce((s, r) => s + (r.accountedCr || 0), 0);
+                  return (
+                    <Table.Summary.Row style={{ background: '#f5f5f5', fontWeight: 700 }}>
+                      <Table.Summary.Cell index={0} colSpan={4}>Total</Table.Summary.Cell>
+                      <Table.Summary.Cell index={4} align="right"><Text strong style={{ color: REDWOOD.info }}>{formatAmount(totEntDr)}</Text></Table.Summary.Cell>
+                      <Table.Summary.Cell index={5} align="right"><Text strong style={{ color: REDWOOD.error }}>{formatAmount(totEntCr)}</Text></Table.Summary.Cell>
+                      <Table.Summary.Cell index={6} align="right"><Text style={{ color: REDWOOD.info }}>{formatAmount(totAccDr)}</Text></Table.Summary.Cell>
+                      <Table.Summary.Cell index={7} align="right"><Text style={{ color: REDWOOD.error }}>{formatAmount(totAccCr)}</Text></Table.Summary.Cell>
+                    </Table.Summary.Row>
+                  );
+                }}
+                columns={slaLineColumns}
+              />
+            </>
           );
 
           return (
@@ -10754,7 +10805,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           {slaGlBatchName && <Descriptions.Item label="GL Batch Name" span={2}>{slaGlBatchName}</Descriptions.Item>}
                           {slaGlHeaderId && <Descriptions.Item label="GL Header ID">{slaGlHeaderId}</Descriptions.Item>}
                         </Descriptions>
-                        {renderLinesTable(slaLines)}
+                        {renderLinesTable(slaLines, 'Invoice')}
                         {slaStatus === 'POSTED' && cancelSlaLines.length === 0 && (
                           <div style={{ marginTop: 10, padding: '8px 12px', background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 6, fontSize: 12, color: '#52c41a' }}>
                             <CheckCircleOutlined style={{ marginRight: 6 }} />
@@ -10774,7 +10825,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                             </Tag>
                             <Text type="secondary" style={{ fontSize: 11 }}>Header ID: {cancelSlaHeaderId}</Text>
                           </div>
-                          {renderLinesTable(cancelSlaLines)}
+                          {renderLinesTable(cancelSlaLines, 'Cancellation')}
                           {cancelPostError && (
                             <Alert
                               type="error"
@@ -10848,7 +10899,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                               {notLoaded
                                 ? <Text type="secondary" style={{ fontSize: 12 }}>Switch to this tab to load lines…</Text>
                                 : lines.length > 0
-                                  ? renderLinesTable(lines)
+                                  ? renderLinesTable(lines, 'Prepayment')
                                   : <Text type="secondary" style={{ fontSize: 12 }}>{headerId ? 'No accounting lines found for this header.' : 'Accounting not yet created.'}</Text>
                               }
                             </div>
@@ -10910,7 +10961,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                               {notLoaded
                                 ? <Text type="secondary" style={{ fontSize: 12 }}>Switch to this tab to load lines…</Text>
                                 : lines.length > 0
-                                  ? renderLinesTable(lines)
+                                  ? renderLinesTable(lines, 'Payment')
                                   : <Text type="secondary" style={{ fontSize: 12 }}>{headerId ? 'No accounting lines found for this header.' : 'Payment accounting not yet created.'}</Text>
                               }
                             </div>
