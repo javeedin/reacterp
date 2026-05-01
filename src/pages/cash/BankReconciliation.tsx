@@ -10,7 +10,7 @@ import type { TableRowSelection } from 'antd/es/table/interface';
 import {
   HomeOutlined, BankOutlined, SearchOutlined, ReloadOutlined,
   CheckOutlined, CloseOutlined, ReconciliationOutlined, FileTextOutlined,
-  ApiOutlined, CopyOutlined, PlusOutlined,
+  ApiOutlined, CopyOutlined, PlusOutlined, ThunderboltOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
@@ -471,6 +471,22 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const [apiExecResult, setApiExecResult] = useState<{ loading: boolean; response: string | null }>({ loading: false, response: null });
   const [showApiLog, setShowApiLog]           = useState(false);
   const [reconLogOpen, setReconLogOpen]       = useState(false);
+
+  // ── Auto Recon ────────────────────────────────────────────────────────────
+  interface AutoReconMatch {
+    stmtLine: StmtLine;
+    sysTxn:   SysTxn;
+    matchedBy: string[];
+    confirmed: boolean;
+    status: 'pending' | 'success' | 'error';
+    errorMsg?: string;
+  }
+  const [autoReconOpen,     setAutoReconOpen]     = useState(false);
+  const [autoReconCriteria, setAutoReconCriteria] = useState<string[]>(['amount', 'reference']);
+  const [autoReconMatches,  setAutoReconMatches]  = useState<AutoReconMatch[]>([]);
+  const [autoReconStep,     setAutoReconStep]     = useState<'criteria' | 'results'>('criteria');
+  const [autoReconRunning,  setAutoReconRunning]  = useState(false);
+  const [autoReconTxnType,  setAutoReconTxnType]  = useState<string>('ALL');
   interface ReconCall {
     lineId: number; statementId: number; txnId: number; txnType: string; txnNumber: string; reconAmount: number;
     // Statement line reconcile (POST)
@@ -1149,6 +1165,111 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   }, [selectedStmtKeys, selectedSysKeys, stmtLines, sysTxns, txnSourceFilter, lastParams, selectedStatement, handleSelectStatement, fetchStmtLines, fetchSysTxns, msgApi]);
 
   // ── Reconcile API Log ────────────────────────────────────────────────────
+  const runAutoRecon = useCallback(async () => {
+    setAutoReconRunning(true);
+    const pool = autoReconTxnType === 'ALL' || autoReconTxnType === 'CM'
+      ? sysTxns
+      : sysTxns.filter(t => t.source === autoReconTxnType);
+    const unmatchedSys  = pool.filter(t => !t.reconciledFlag || t.reconciledFlag === 'N');
+    const unmatchedStmt = stmtLines.filter(l => l.reconStatus !== 'RECONCILED' && !l.externalTxnId);
+    const usedSysIds    = new Set<number>();
+    const matches: AutoReconMatch[] = [];
+
+    for (const stmt of unmatchedStmt) {
+      for (const sys of unmatchedSys) {
+        if (usedSysIds.has(sys.txnId)) continue;
+        const matchedBy: string[] = [];
+
+        if (autoReconCriteria.includes('amount')) {
+          if (Math.abs(stmt.amount) !== Math.abs(sys.amount)) continue;
+          matchedBy.push('Amount');
+        }
+        if (autoReconCriteria.includes('bankTxnId')) {
+          const ref = (stmt.bankTxnReference || '').trim();
+          if (!ref || (ref !== (sys.txnNumber || '').trim() && ref !== (sys.reference || '').trim())) continue;
+          matchedBy.push('Bank Txn ID');
+        }
+        if (autoReconCriteria.includes('reference')) {
+          const ref = (stmt.reference || '').trim();
+          if (!ref || (ref !== (sys.txnNumber || '').trim() && ref !== (sys.reference || '').trim())) continue;
+          matchedBy.push('Reference');
+        }
+        if (autoReconCriteria.includes('checkNumber')) {
+          const ref = (stmt.reference || stmt.bankTxnReference || '').trim();
+          if (!ref || (ref !== (sys.txnNumber || '').trim() && ref !== (sys.reference || '').trim())) continue;
+          matchedBy.push('Check / Payment No.');
+        }
+        if (autoReconCriteria.includes('date')) {
+          if (stmt.transactionDate?.slice(0, 10) !== sys.txnDate?.slice(0, 10)) continue;
+          matchedBy.push('Date');
+        }
+        if (autoReconCriteria.includes('counterparty')) {
+          const cp = (stmt.counterpartyName || '').trim().toLowerCase();
+          const py = (sys.payee || '').trim().toLowerCase();
+          if (!cp || !py || !cp.includes(py) && !py.includes(cp)) continue;
+          matchedBy.push('Counterparty');
+        }
+
+        matches.push({ stmtLine: stmt, sysTxn: sys, matchedBy, confirmed: true, status: 'pending' });
+        usedSysIds.add(sys.txnId);
+        break;
+      }
+    }
+
+    setAutoReconMatches(matches);
+    setAutoReconStep('results');
+    setAutoReconRunning(false);
+  }, [stmtLines, sysTxns, autoReconCriteria, autoReconTxnType]);
+
+  const executeAutoRecon = useCallback(async () => {
+    const confirmed = autoReconMatches.filter(m => m.confirmed);
+    if (confirmed.length === 0) return;
+    setAutoReconRunning(true);
+    const today = new Date().toISOString().slice(0, 10);
+    const updated = [...autoReconMatches];
+
+    for (let i = 0; i < updated.length; i++) {
+      const m = updated[i];
+      if (!m.confirmed) continue;
+      try {
+        // Step 1: POST stmt line reconcile
+        const stmtBody = {
+          lineId:      m.stmtLine.lineId,
+          txnType:     m.sysTxn.source,
+          txnId:       m.sysTxn.txnId,
+          txnNumber:   m.sysTxn.txnNumber,
+          reconAmount: m.stmtLine.amount,
+          notes:       'Auto Reconciled',
+        };
+        const res = await fetch(
+          `${APEX_BASE}/cash/bankstatements/${m.stmtLine.statementId}/reconcile`,
+          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(stmtBody) }
+        );
+        const data = await parseApexJson(res);
+        if (data.status !== 'success') throw new Error(data.message || 'Reconcile failed');
+
+        // Step 2: PUT txn side
+        const txnSide = buildTxnSideCall(m.sysTxn, m.stmtLine);
+        await fetch(txnSide.url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(txnSide.body) });
+
+        updated[i] = { ...m, status: 'success' };
+      } catch (err: any) {
+        updated[i] = { ...m, status: 'error', errorMsg: err.message || 'Failed' };
+      }
+      setAutoReconMatches([...updated]);
+    }
+
+    setAutoReconRunning(false);
+    const success = updated.filter(m => m.status === 'success').length;
+    const errors  = updated.filter(m => m.status === 'error').length;
+    if (success > 0) msgApi.success(`Auto-reconciled ${success} pair(s)`);
+    if (errors  > 0) msgApi.error(`${errors} pair(s) failed`);
+    if (success > 0) {
+      if (selectedStatement) handleSelectStatement(selectedStatement);
+      else if (lastParams) { fetchStmtLines(lastParams, stmtReconFilter); fetchSysTxns(lastParams, txnSourceFilter, cmReconFilter); }
+    }
+  }, [autoReconMatches, buildTxnSideCall, selectedStatement, lastParams, handleSelectStatement, fetchStmtLines, fetchSysTxns, stmtReconFilter, txnSourceFilter, cmReconFilter, msgApi]);
+
   const buildTxnSideCall = (sysTxn: SysTxn, line: StmtLine): { url: string; body: object; label: string } => {
     const today = new Date().toISOString().slice(0, 10);
     if (txnSourceFilter === 'CM' || sysTxn.source === 'ORA_MAN') {
@@ -2031,6 +2152,16 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
         </Col>
         <Col>
           <Button
+            icon={<ThunderboltOutlined />}
+            size="large"
+            onClick={() => { setAutoReconStep('criteria'); setAutoReconMatches([]); setAutoReconOpen(true); }}
+            style={{ borderColor: '#722ed1', color: '#722ed1' }}
+          >
+            Auto Recon
+          </Button>
+        </Col>
+        <Col>
+          <Button
             type="primary"
             icon={showApiLog ? <ApiOutlined /> : <CheckOutlined />}
             size="large"
@@ -2745,6 +2876,202 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
           setExtCoaOpen(false);
         }}
       />
+
+      {/* ── Auto Recon Modal ─────────────────────────────────────────── */}
+      <Modal
+        title={<Space><ThunderboltOutlined style={{ color: '#722ed1' }} /><span>Auto Reconciliation</span></Space>}
+        open={autoReconOpen}
+        onCancel={() => setAutoReconOpen(false)}
+        width={autoReconStep === 'results' ? 900 : 520}
+        footer={
+          autoReconStep === 'criteria' ? (
+            <Space>
+              <Button onClick={() => setAutoReconOpen(false)}>Cancel</Button>
+              <Button
+                type="primary"
+                icon={<ThunderboltOutlined />}
+                loading={autoReconRunning}
+                disabled={autoReconCriteria.length === 0}
+                onClick={runAutoRecon}
+                style={{ background: '#722ed1', borderColor: '#722ed1' }}
+              >
+                Find Matches
+              </Button>
+            </Space>
+          ) : (
+            <Space>
+              <Button onClick={() => setAutoReconStep('criteria')}>← Back</Button>
+              <Button onClick={() => setAutoReconOpen(false)}>Close</Button>
+              <Button
+                type="primary"
+                icon={<CheckOutlined />}
+                loading={autoReconRunning}
+                disabled={!autoReconMatches.some(m => m.confirmed && m.status === 'pending')}
+                onClick={executeAutoRecon}
+                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+              >
+                Reconcile {autoReconMatches.filter(m => m.confirmed && m.status === 'pending').length} Pair(s)
+              </Button>
+            </Space>
+          )
+        }
+        destroyOnClose
+      >
+        {autoReconStep === 'criteria' ? (
+          <div>
+            <div style={{ marginBottom: 16, color: '#8c8c8c', fontSize: 12 }}>
+              Select the criteria used to find matches between bank statement lines and system transactions.
+              All selected criteria must match for a pair to be proposed.
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Transaction Source</div>
+              <Segmented
+                value={autoReconTxnType}
+                onChange={v => setAutoReconTxnType(v as string)}
+                options={[
+                  { label: 'All',  value: 'ALL' },
+                  { label: 'AP',   value: 'AP_PAYMENT' },
+                  { label: 'AR',   value: 'AR_RECEIPT' },
+                  { label: 'GL',   value: 'GL_JOURNAL' },
+                  { label: 'CM',   value: 'CM' },
+                ]}
+              />
+            </div>
+
+            <Divider style={{ margin: '12px 0' }} />
+
+            <div style={{ fontWeight: 600, marginBottom: 10 }}>Matching Criteria</div>
+            <Checkbox.Group
+              value={autoReconCriteria}
+              onChange={v => setAutoReconCriteria(v as string[])}
+            >
+              <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                <Checkbox value="amount">
+                  <div>
+                    <div style={{ fontWeight: 500 }}>By Amount</div>
+                    <div style={{ fontSize: 11, color: '#8c8c8c' }}>Statement line amount equals system transaction amount</div>
+                  </div>
+                </Checkbox>
+                <Checkbox value="bankTxnId">
+                  <div>
+                    <div style={{ fontWeight: 500 }}>By Bank Transaction ID</div>
+                    <div style={{ fontSize: 11, color: '#8c8c8c' }}>Bank txn reference on statement matches transaction number or reference</div>
+                  </div>
+                </Checkbox>
+                <Checkbox value="reference">
+                  <div>
+                    <div style={{ fontWeight: 500 }}>By Bank Reference</div>
+                    <div style={{ fontSize: 11, color: '#8c8c8c' }}>Statement reference matches system transaction reference or number</div>
+                  </div>
+                </Checkbox>
+                <Checkbox value="checkNumber">
+                  <div>
+                    <div style={{ fontWeight: 500 }}>By AP Check / Payment Number</div>
+                    <div style={{ fontSize: 11, color: '#8c8c8c' }}>Statement reference or bank txn ref matches AP check/payment number</div>
+                  </div>
+                </Checkbox>
+                <Checkbox value="date">
+                  <div>
+                    <div style={{ fontWeight: 500 }}>By Date</div>
+                    <div style={{ fontSize: 11, color: '#8c8c8c' }}>Transaction dates must match exactly</div>
+                  </div>
+                </Checkbox>
+                <Checkbox value="counterparty">
+                  <div>
+                    <div style={{ fontWeight: 500 }}>By Counterparty / Payee Name</div>
+                    <div style={{ fontSize: 11, color: '#8c8c8c' }}>Statement counterparty contains or matches system transaction payee</div>
+                  </div>
+                </Checkbox>
+              </Space>
+            </Checkbox.Group>
+
+            <div style={{ marginTop: 16, padding: '8px 12px', background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 6, fontSize: 12 }}>
+              <strong>{stmtLines.filter(l => l.reconStatus !== 'RECONCILED' && !l.externalTxnId).length}</strong> unreconciled statement lines ·{' '}
+              <strong>{(autoReconTxnType === 'ALL' || autoReconTxnType === 'CM' ? sysTxns : sysTxns.filter(t => t.source === autoReconTxnType)).filter(t => !t.reconciledFlag || t.reconciledFlag === 'N').length}</strong> unreconciled system transactions available
+            </div>
+          </div>
+        ) : (
+          <div>
+            {autoReconMatches.length === 0 ? (
+              <Empty description="No matches found with the selected criteria" />
+            ) : (
+              <div>
+                <div style={{ marginBottom: 10, fontSize: 12, color: '#8c8c8c' }}>
+                  Found <strong>{autoReconMatches.length}</strong> match(es). Uncheck any pairs you don't want to reconcile.
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 520, overflowY: 'auto' }}>
+                  {autoReconMatches.map((m, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        border: `1px solid ${m.status === 'success' ? '#b7eb8f' : m.status === 'error' ? '#ffccc7' : '#d9d9d9'}`,
+                        borderRadius: 8,
+                        padding: '10px 14px',
+                        background: m.status === 'success' ? '#f6ffed' : m.status === 'error' ? '#fff2f0' : m.confirmed ? '#fff' : '#fafafa',
+                        opacity: m.confirmed ? 1 : 0.5,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                        <Checkbox
+                          checked={m.confirmed}
+                          disabled={m.status !== 'pending'}
+                          onChange={e => {
+                            const copy = [...autoReconMatches];
+                            copy[idx] = { ...m, confirmed: e.target.checked };
+                            setAutoReconMatches(copy);
+                          }}
+                        />
+                        <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 12, alignItems: 'center' }}>
+                          {/* Statement side */}
+                          <div style={{ background: '#e6f4ff', borderRadius: 6, padding: '6px 10px' }}>
+                            <div style={{ fontSize: 10, color: '#1677ff', fontWeight: 600, marginBottom: 3, textTransform: 'uppercase' }}>Bank Statement Line</div>
+                            <div style={{ fontWeight: 500, fontSize: 12 }}>{m.stmtLine.description || m.stmtLine.reference || `Line #${m.stmtLine.lineId}`}</div>
+                            <div style={{ fontSize: 11, color: '#595959', marginTop: 2 }}>
+                              <Space size={6}>
+                                <span>{m.stmtLine.transactionDate?.slice(0, 10)}</span>
+                                <Tag color={m.stmtLine.transactionCode === 'CR' ? 'volcano' : 'blue'} style={{ margin: 0, fontSize: 10 }}>{m.stmtLine.transactionCode}</Tag>
+                                <strong>{Math.abs(m.stmtLine.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
+                              </Space>
+                            </div>
+                            {m.stmtLine.reference && <div style={{ fontSize: 10, color: '#8c8c8c', marginTop: 2 }}>Ref: {m.stmtLine.reference}</div>}
+                          </div>
+
+                          {/* Match badges */}
+                          <div style={{ textAlign: 'center' }}>
+                            {m.status === 'success' && <Tag color="success">Reconciled</Tag>}
+                            {m.status === 'error'   && <Tag color="error">{m.errorMsg || 'Failed'}</Tag>}
+                            {m.status === 'pending' && (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'center' }}>
+                                <span style={{ fontSize: 16, color: '#52c41a' }}>⇄</span>
+                                {m.matchedBy.map(r => <Tag key={r} color="purple" style={{ margin: 0, fontSize: 10 }}>{r}</Tag>)}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* System txn side */}
+                          <div style={{ background: '#f9f0ff', borderRadius: 6, padding: '6px 10px' }}>
+                            <div style={{ fontSize: 10, color: '#722ed1', fontWeight: 600, marginBottom: 3, textTransform: 'uppercase' }}>System Transaction</div>
+                            <div style={{ fontWeight: 500, fontSize: 12 }}>{m.sysTxn.payee || m.sysTxn.txnNumber}</div>
+                            <div style={{ fontSize: 11, color: '#595959', marginTop: 2 }}>
+                              <Space size={6}>
+                                <span>{m.sysTxn.txnDate?.slice(0, 10)}</span>
+                                <Tag color="geekblue" style={{ margin: 0, fontSize: 10 }}>{m.sysTxn.source?.replace('_', ' ')}</Tag>
+                                <strong>{Math.abs(m.sysTxn.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
+                              </Space>
+                            </div>
+                            {m.sysTxn.txnNumber && <div style={{ fontSize: 10, color: '#8c8c8c', marginTop: 2 }}>#{m.sysTxn.txnNumber}</div>}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
 
       {/* Shared API Debug Modal */}
       <Modal
