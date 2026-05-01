@@ -348,10 +348,12 @@ async function parseBankStatementPdf(file: File): Promise<{ lines: StatementLine
 function parseDateStr(str: string, fmt: string): dayjs.Dayjs | null {
   const s = str.trim();
   if (fmt === 'DD/MM/YYYY' || fmt === 'DD-MM-YYYY') {
-    const sep = fmt.includes('/') ? '/' : '-';
-    const re = new RegExp(`^(\\d{1,2})\\${sep}(\\d{1,2})\\${sep}(\\d{4})$`);
-    const m = s.match(re);
-    if (m) return dayjs(`${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`);
+    // Accept both / and - separators regardless of which the format string specifies
+    for (const sep of ['/', '-']) {
+      const re = new RegExp(`^(\\d{1,2})\\${sep}(\\d{1,2})\\${sep}(\\d{4})$`);
+      const m = s.match(re);
+      if (m) return dayjs(`${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`);
+    }
   } else if (fmt === 'MM/DD/YYYY') {
     const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
     if (m) return dayjs(`${m[3]}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`);
@@ -446,12 +448,19 @@ async function parseBankStatementPdfWithTemplate(
         log.push(`  Row ${rowNum}: [HEADER/PAGE] "${rowPreview}"`);
         continue;
       }
-      if (lines.length > 0 && narCol) {
-        const narItems = row.filter(it => it.x >= narCol.xMin && it.x <= narCol.xMax);
+      if (lines.length > 0) {
         const amtItems = row.filter(it => amtRe.test(it.str.replace(/,/g, '')));
-        if (narItems.length > 0 && amtItems.length === 0) {
-          const extra = narItems.map(i => i.str).join(' ').trim();
-          if (extra) {
+        if (amtItems.length === 0) {
+          // Try narration column first; fall back to all non-date text in the row
+          const narItems = narCol
+            ? row.filter(it => it.x >= narCol.xMin && it.x <= narCol.xMax)
+            : [];
+          const candidates = narItems.length > 0 ? narItems : row;
+          const extra = candidates
+            .map(i => i.str)
+            .filter(s => !parseDateStr(s, template.dateFormat)?.isValid())
+            .join(' ').trim();
+          if (extra.length > 2) {
             lines[lines.length - 1].description =
               (lines[lines.length - 1].description + ' ' + extra).trim();
             log.push(`  Row ${rowNum}: [NARRATION+] "${extra.slice(0, 60)}"`);
