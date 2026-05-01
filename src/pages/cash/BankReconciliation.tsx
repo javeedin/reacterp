@@ -1506,10 +1506,93 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       const slaResult = await createAccounting(slaPayload);
       if (!slaResult?.headerId) { setExtAcctResult({ ok: false, msg: 'SLA creation failed' }); setExtAcctRunning(false); return; }
 
-      // Mark accounting flag on the external transaction
-      await fetch(`${EXT_TXN_URL}/${extTxnCreatedId}/acctflag?updated_by=SYSTEM`, { method: 'PUT', headers: { Accept: 'application/json' } }).catch(() => {});
+      // 2. Create GL journal
+      const batchName = `BANK-${extTxnCreatedId}-${Date.now()}`;
+      const glPayload = {
+        batch: {
+          batchName,
+          batchDescription: `Bank External Txn ${extTxnCreatedId}`,
+          ledgerName: ledger.ledgerName,
+          ledgerId:   ledger.ledgerId,
+          status:     'NEW',
+          accountingPeriod:  periodName,
+          controlTotal:      absAmount,
+          runningTotalDr:    absAmount,
+          runningTotalCr:    absAmount,
+          batchSource:  'Cash Management',
+          createdBy:    'SYSTEM',
+        },
+        header: {
+          ledgerId:    ledger.ledgerId,
+          ledgerName:  ledger.ledgerName,
+          jeCategory:  'Cash Management',
+          jeSource:    'Cash Management',
+          periodName,
+          journalName: `BANK-EXT-${extTxnCreatedId}`,
+          description: `Bank Ext Txn – ${values.referenceText || extTxnCreatedId}`,
+          currencyCode:             values.currencyCode || 'AED',
+          currencyConversionType:   'User',
+          currencyConversionDate:   txnDate,
+          currencyConversionRate:   1,
+          defaultEffectiveDate:     txnDate,
+          status:          'NEW',
+          runningTotalDr:  absAmount,
+          runningTotalCr:  absAmount,
+          createdBy:       'SYSTEM',
+        },
+        lines: slaPayload.lines.map(l => ({
+          enteredDr:   l.lineType === 'DR' ? l.enteredDr  : null,
+          enteredCr:   l.lineType === 'CR' ? l.enteredCr  : null,
+          accountedDr: l.accountedDr || null,
+          accountedCr: l.accountedCr || null,
+          statAmount:  null,
+          description: l.description,
+          currencyCode:               values.currencyCode || 'AED',
+          currencyConversionDate:     txnDate,
+          currencyConversionRate:     1,
+          userCurrencyConversionType: 'User',
+          accountCombination:         l.accountCombination,
+          chartOfAccountsName:        'Chart of Accounts',
+          reference1: String(extTxnCreatedId),
+          reference2: values.referenceText || '',
+          reference3: l.accountingClass || null,
+          reference4: values.businessUnitName || null,
+          reference5: null,
+          createdBy:  'SYSTEM',
+        })),
+      };
 
-      setExtAcctResult({ ok: true, msg: `Accounting created — SLA Header ${slaResult.headerId}` });
+      const glRes = await fetch(`${APEX_BASE}/journals/create`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body:    JSON.stringify(glPayload),
+      });
+
+      let glMsg = '';
+      if (glRes.ok) {
+        const glData = await glRes.json();
+        // 3. Post SLA — link to GL batch/header
+        await fetch(`${APEX_BASE}/sla/accounting/post`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body:    JSON.stringify({
+            headerId:    slaResult.headerId,
+            glBatchId:   glData.batchId  || 0,
+            glBatchName: batchName,
+            glHeaderId:  glData.headerId || 0,
+            postedBy:    'SYSTEM',
+          }),
+        });
+        glMsg = `GL: ${batchName}`;
+      } else {
+        glMsg = 'GL journal failed — SLA is Draft';
+      }
+
+      // 4. Mark accounting flag on the external transaction
+      const flagUrl = `${EXT_TXN_URL}/${extTxnCreatedId}/acctflag?updated_by=SYSTEM`;
+      await fetch(flagUrl, { method: 'PUT', headers: { Accept: 'application/json' } }).catch(() => {});
+
+      setExtAcctResult({ ok: true, msg: `Accounting created — SLA Header ${slaResult.headerId} — ${glMsg}` });
     } catch (err: any) {
       setExtAcctResult({ ok: false, msg: err?.message || 'Accounting failed' });
     } finally {
