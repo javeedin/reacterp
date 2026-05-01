@@ -482,7 +482,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     errorMsg?: string;
   }
   const [autoReconOpen,     setAutoReconOpen]     = useState(false);
-  const [autoReconCriteria, setAutoReconCriteria] = useState<string[]>(['amount', 'reference']);
+  const [autoReconCriteria, setAutoReconCriteria] = useState<string[]>(['amount']);
   const [autoReconMatches,  setAutoReconMatches]  = useState<AutoReconMatch[]>([]);
   const [autoReconStep,     setAutoReconStep]     = useState<'criteria' | 'results'>('criteria');
   const [autoReconRunning,  setAutoReconRunning]  = useState(false);
@@ -1218,9 +1218,39 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
 
   const runAutoRecon = useCallback(async () => {
     setAutoReconRunning(true);
+
+    // Fetch system transactions if not loaded yet for the selected type
+    let currentSysTxns = sysTxns;
+    if (lastParams && (sysTxns.length === 0 || autoReconTxnType !== txnSourceFilter)) {
+      try {
+        await fetchSysTxns(lastParams, autoReconTxnType, 'UNRECONCILED');
+        // fetchSysTxns updates state async; read from local fetch instead
+        const q = new URLSearchParams();
+        if (lastParams.bankAccount) q.set('bank_account', lastParams.bankAccount);
+        if (lastParams.dateFrom)    q.set('date_from',    lastParams.dateFrom.format('YYYY-MM-DD'));
+        if (lastParams.dateTo)      q.set('date_to',      lastParams.dateTo.format('YYYY-MM-DD'));
+        q.set('reconciled', 'N');
+        if (autoReconTxnType !== 'ALL' && autoReconTxnType !== 'CM') q.set('txn_type', autoReconTxnType);
+        const res  = await fetch(`${APEX_BASE}/cash/reconciliation/systxns?${q.toString()}`);
+        const data = await parseApexJson(res);
+        currentSysTxns = (data.items || []).map((i: any) => ({
+          txnId:       i.txnId       ?? i.TXN_ID       ?? 0,
+          txnNumber:   String(i.txnNumber ?? i.TXN_NUMBER ?? ''),
+          reference:   i.reference   ?? i.REFERENCE     ?? '',
+          txnDate:     i.txnDate     ?? i.TXN_DATE      ?? '',
+          amount:      i.amount      ?? i.AMOUNT        ?? 0,
+          source:      i.txnType     ?? i.TXN_TYPE      ?? '',
+          payee:       i.payee       ?? i.PAYEE         ?? '',
+          reconciledFlag: i.reconciledFlag ?? 'N',
+          businessUnit:   i.businessUnit  ?? '',
+          bankAccountName: i.bankAccountName ?? '',
+        }));
+      } catch { /* use whatever we have */ }
+    }
+
     const pool = autoReconTxnType === 'ALL' || autoReconTxnType === 'CM'
-      ? sysTxns
-      : sysTxns.filter(t => t.source === autoReconTxnType);
+      ? currentSysTxns
+      : currentSysTxns.filter(t => t.source === autoReconTxnType);
     const unmatchedSys  = pool.filter(t => !t.reconciledFlag || t.reconciledFlag === 'N');
     const unmatchedStmt = stmtLines.filter(l => l.reconStatus !== 'RECONCILED' && !l.externalTxnId);
     const usedSysIds    = new Set<number>();
@@ -1257,10 +1287,11 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
         if (autoReconCriteria.includes('counterparty')) {
           const cp = (stmt.counterpartyName || '').trim().toLowerCase();
           const py = (sys.payee || '').trim().toLowerCase();
-          if (!cp || !py || !cp.includes(py) && !py.includes(cp)) continue;
+          if (!cp || !py || (!cp.includes(py) && !py.includes(cp))) continue;
           matchedBy.push('Counterparty');
         }
 
+        if (matchedBy.length === 0) continue; // no criteria matched (safety guard)
         matches.push({ stmtLine: stmt, sysTxn: sys, matchedBy, confirmed: true, status: 'pending' });
         usedSysIds.add(sys.txnId);
         break;
@@ -1270,7 +1301,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     setAutoReconMatches(matches);
     setAutoReconStep('results');
     setAutoReconRunning(false);
-  }, [stmtLines, sysTxns, autoReconCriteria, autoReconTxnType]);
+  }, [stmtLines, sysTxns, autoReconCriteria, autoReconTxnType, lastParams, fetchSysTxns, txnSourceFilter]);
 
   const executeAutoRecon = useCallback(async () => {
     const confirmed = autoReconMatches.filter(m => m.confirmed);
@@ -3002,7 +3033,18 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
         ) : (
           <div>
             {autoReconMatches.length === 0 ? (
-              <Empty description="No matches found with the selected criteria" />
+              <Empty
+                description={
+                  <div>
+                    <div>No matches found with the selected criteria</div>
+                    <div style={{ fontSize: 11, color: '#8c8c8c', marginTop: 4 }}>
+                      Try selecting fewer criteria (e.g. Amount only) or broader date/amount ranges.
+                      Checked <strong>{stmtLines.filter(l => l.reconStatus !== 'RECONCILED' && !l.externalTxnId).length}</strong> statement lines
+                      against <strong>{sysTxns.filter(t => !t.reconciledFlag || t.reconciledFlag === 'N').length}</strong> system transactions.
+                    </div>
+                  </div>
+                }
+              />
             ) : (
               <div>
                 <div style={{ marginBottom: 10, fontSize: 12, color: '#8c8c8c' }}>
