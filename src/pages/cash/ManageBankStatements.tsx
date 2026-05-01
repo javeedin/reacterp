@@ -431,8 +431,13 @@ async function parseBankStatementPdfWithTemplate(
     return /transaction\s+date|value\s+date|narration|running\s+balance/.test(j)
       || /^\s*page\s+\d/.test(j) || /^\d+\s+of\s+\d+/.test(j);
   };
+  const isNonNarration = (text: string) =>
+    /^-[\d,]+(\.\d+)?$/.test(text.trim()) || text.includes('@') || /^https?:\/\/|^www\./i.test(text);
+  const splitAmts = (str: string): number[] =>
+    str.trim().split(/\s+/).map(s => parseFloat(s.replace(/,/g, ''))).filter(n => !isNaN(n) && n >= 0);
 
   let rowNum = 0;
+  let lastDateRowFailed = false;
   for (const row of sortedRows) {
     rowNum++;
     const rowPreview = row.map(i => i.str).slice(0, 5).join(' | ');
@@ -448,7 +453,7 @@ async function parseBankStatementPdfWithTemplate(
         log.push(`  Row ${rowNum}: [HEADER/PAGE] "${rowPreview}"`);
         continue;
       }
-      if (lines.length > 0) {
+      if (lines.length > 0 && !lastDateRowFailed) {
         const amtItems = row.filter(it => amtRe.test(it.str.replace(/,/g, '')));
         if (amtItems.length === 0) {
           // Try narration column first; fall back to all non-date text in the row
@@ -460,7 +465,7 @@ async function parseBankStatementPdfWithTemplate(
             .map(i => i.str)
             .filter(s => !parseDateStr(s, template.dateFormat)?.isValid())
             .join(' ').trim();
-          if (extra.length > 2) {
+          if (extra.length > 2 && !isNonNarration(extra)) {
             lines[lines.length - 1].description =
               (lines[lines.length - 1].description + ' ' + extra).trim();
             log.push(`  Row ${rowNum}: [NARRATION+] "${extra.slice(0, 60)}"`);
@@ -488,15 +493,33 @@ async function parseBankStatementPdfWithTemplate(
     let amount: number | null = null;
     let txCode = 'CR';
     let amtReason = '';
-    const wdStr  = (bucket['withdrawal'] ?? '').replace(/,/g, '');
-    const depStr = (bucket['deposit']    ?? '').replace(/,/g, '');
     const amtStr = (bucket['amount']     ?? '').replace(/,/g, '');
     const typStr = (bucket['type']       ?? '').trim().toUpperCase();
 
-    if (wdStr && amtRe.test(wdStr) && parseFloat(wdStr) > 0) {
-      amount = parseFloat(wdStr); txCode = 'DR'; amtReason = `withdrawal=${wdStr}`;
-    } else if (depStr && amtRe.test(depStr) && parseFloat(depStr) > 0) {
-      amount = parseFloat(depStr); txCode = 'CR'; amtReason = `deposit=${depStr}`;
+    const wdAmts  = splitAmts(bucket['withdrawal'] ?? '');
+    const depAmts = splitAmts(bucket['deposit']    ?? '');
+    const wdVal   = wdAmts.find(v => v > 0) ?? 0;
+
+    if (wdVal > 0) {
+      amount = wdVal; txCode = 'DR'; amtReason = `withdrawal=${wdVal}`;
+    } else if (depAmts.length >= 2) {
+      // Two numbers in deposit bucket: one is Debit column, one is Credit column
+      // Whichever is non-zero (and not the other) determines direction
+      const nonZero = depAmts.filter(v => v > 0);
+      const zeroIdx = depAmts.findIndex(v => v === 0);
+      const nonZeroIdx = depAmts.findIndex(v => v > 0);
+      if (nonZero.length === 1) {
+        amount = nonZero[0];
+        // first value non-zero, second zero → Debit (DR); first zero, second non-zero → Credit (CR)
+        txCode = nonZeroIdx < zeroIdx ? 'DR' : 'CR';
+        amtReason = `deposit-split=[${depAmts.join(',')}] idx=${nonZeroIdx}→${txCode}`;
+      } else if (nonZero.length >= 2) {
+        // Both non-zero — take last (credit column) as CR
+        amount = depAmts[depAmts.length - 1]; txCode = 'CR';
+        amtReason = `deposit-split-both=[${depAmts.join(',')}]→CR`;
+      }
+    } else if (depAmts.length === 1 && depAmts[0] > 0) {
+      amount = depAmts[0]; txCode = 'CR'; amtReason = `deposit=${depAmts[0]}`;
     } else if (amtStr && amtRe.test(amtStr)) {
       amount = parseFloat(amtStr);
       txCode = typStr.startsWith('D') ? 'DR' : 'CR';
@@ -504,10 +527,12 @@ async function parseBankStatementPdfWithTemplate(
     }
 
     if (!amount) {
+      lastDateRowFailed = true;
       log.push(`  Row ${rowNum}: [SKIP no-amount] date=${txDate.format('DD/MM/YYYY')} bucket=${JSON.stringify(bucket).slice(0, 100)}`);
       continue;
     }
 
+    lastDateRowFailed = false;
     log.push(`  Row ${rowNum}: [OK] ${txDate.format('DD/MM/YYYY')} ${txCode} ${amount.toLocaleString()} | ${amtReason} | narration="${(bucket['narration']??'').slice(0,50)}"`);
 
     lines.push({
