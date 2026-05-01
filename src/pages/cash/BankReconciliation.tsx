@@ -1411,9 +1411,9 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       if (!ledger) { setExtAcctResult({ ok: false, msg: 'Could not resolve ledger for BU' }); setExtAcctRunning(false); return; }
 
       const absAmount  = Math.abs(values.amount ?? 0);
-      const direction  = values.transactionDirection ?? 'DR';
+      const direction  = values.transactionDirection ?? extTxnDirection;
       const txnDate    = values.transactionDate?.format('YYYY-MM-DD') ?? new Date().toISOString().slice(0, 10);
-      const periodName = derivePeriodName(txnDate);
+      const periodName = derivePeriodName(new Date(txnDate));
 
       // DR = money in: DR bank asset / CR offset. CR = money out: DR offset / CR bank asset
       const drAcct = direction === 'DR' ? values.assetAccountCombination : values.offsetAccountCombination;
