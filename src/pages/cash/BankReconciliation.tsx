@@ -457,7 +457,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const [sysSearch,  setSysSearch]            = useState('');
   const [selectedStmtKeys, setSelectedStmtKeys] = useState<React.Key[]>([]);
   const [selectedSysKeys, setSelectedSysKeys]   = useState<React.Key[]>([]);
-  const [pendingAutoSelectTxnId, setPendingAutoSelectTxnId] = useState<number | null>(null);
+  const [pendingAutoSelectTxnId, setPendingAutoSelectTxnId] = useState<number[]>([]);
   const [lastParams, setLastParams]           = useState<SearchParams | null>(null);
   const [leftPct, setLeftPct]                 = useState(50);
   const isDragging                            = React.useRef(false);
@@ -1029,13 +1029,15 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     return `${APEX_BASE}/cash/reconciliation/systxns?${q.toString()}`;
   }, [lastParams]);
 
-  // When CM records finish loading, auto-select the pending linked transaction
+  // When CM records finish loading, auto-select all pending linked transactions
   useEffect(() => {
-    if (pendingAutoSelectTxnId == null || sysTxns.length === 0) return;
-    const match = sysTxns.find(t => t.txnId === pendingAutoSelectTxnId);
-    if (match) {
-      setSelectedSysKeys([match.txnId]);
-      setPendingAutoSelectTxnId(null);
+    if (pendingAutoSelectTxnId.length === 0 || sysTxns.length === 0) return;
+    const matched = sysTxns
+      .filter(t => pendingAutoSelectTxnId.includes(t.txnId))
+      .map(t => t.txnId);
+    if (matched.length > 0) {
+      setSelectedSysKeys(matched);
+      setPendingAutoSelectTxnId([]);
     }
   }, [sysTxns, pendingAutoSelectTxnId]);
 
@@ -1219,38 +1221,68 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const runAutoRecon = useCallback(async () => {
     setAutoReconRunning(true);
 
-    // Fetch system transactions if not loaded yet for the selected type
-    let currentSysTxns = sysTxns;
-    if (lastParams && (sysTxns.length === 0 || autoReconTxnType !== txnSourceFilter)) {
-      try {
-        await fetchSysTxns(lastParams, autoReconTxnType, 'UNRECONCILED');
-        // fetchSysTxns updates state async; read from local fetch instead
-        const q = new URLSearchParams();
-        if (lastParams.bankAccount) q.set('bank_account', lastParams.bankAccount);
-        if (lastParams.dateFrom)    q.set('date_from',    lastParams.dateFrom.format('YYYY-MM-DD'));
-        if (lastParams.dateTo)      q.set('date_to',      lastParams.dateTo.format('YYYY-MM-DD'));
-        q.set('reconciled', 'N');
-        if (autoReconTxnType !== 'ALL' && autoReconTxnType !== 'CM') q.set('txn_type', autoReconTxnType);
-        const res  = await fetch(`${APEX_BASE}/cash/reconciliation/systxns?${q.toString()}`);
-        const data = await parseApexJson(res);
-        currentSysTxns = (data.items || []).map((i: any) => ({
-          txnId:       i.txnId       ?? i.TXN_ID       ?? 0,
-          txnNumber:   String(i.txnNumber ?? i.TXN_NUMBER ?? ''),
-          reference:   i.reference   ?? i.REFERENCE     ?? '',
-          txnDate:     i.txnDate     ?? i.TXN_DATE      ?? '',
-          amount:      i.amount      ?? i.AMOUNT        ?? 0,
-          source:      i.txnType     ?? i.TXN_TYPE      ?? '',
-          payee:       i.payee       ?? i.PAYEE         ?? '',
-          reconciledFlag: i.reconciledFlag ?? 'N',
-          businessUnit:   i.businessUnit  ?? '',
-          bankAccountName: i.bankAccountName ?? '',
-        }));
-      } catch { /* use whatever we have */ }
-    }
+    const fetchSystxnsLocal = async (): Promise<SysTxn[]> => {
+      if (!lastParams) return [];
+      const q = new URLSearchParams();
+      if (lastParams.bankAccount) q.set('bank_account', lastParams.bankAccount);
+      if (lastParams.dateFrom)    q.set('date_from',    lastParams.dateFrom.format('YYYY-MM-DD'));
+      if (lastParams.dateTo)      q.set('date_to',      lastParams.dateTo.format('YYYY-MM-DD'));
+      q.set('reconciled', 'N');
+      if (autoReconTxnType !== 'ALL' && autoReconTxnType !== 'CM') q.set('txn_type', autoReconTxnType);
+      q.set('row_limit', '500');
+      const res  = await fetch(`${APEX_BASE}/cash/reconciliation/systxns?${q.toString()}`);
+      const data = await parseApexJson(res);
+      return (data.items || []).map((i: any) => ({
+        txnId:        i.txnId       ?? i.TXN_ID       ?? 0,
+        txnNumber:    String(i.txnNumber ?? i.TXN_NUMBER ?? ''),
+        reference:    i.reference   ?? i.REFERENCE     ?? '',
+        txnDate:      i.txnDate     ?? i.TXN_DATE      ?? '',
+        amount:       i.amount      ?? i.AMOUNT        ?? 0,
+        source:       i.source      ?? i.txnType       ?? i.TXN_TYPE ?? '',
+        payee:        i.payee       ?? i.PAYEE         ?? '',
+        reconciledFlag: i.reconciledFlag ?? 'N',
+        businessUnit:   i.businessUnit  ?? '',
+        bankAccountName: i.bankAccountName ?? '',
+      } as SysTxn));
+    };
 
-    const pool = autoReconTxnType === 'ALL' || autoReconTxnType === 'CM'
-      ? currentSysTxns
-      : currentSysTxns.filter(t => t.source === autoReconTxnType);
+    const fetchCmLocal = async (): Promise<SysTxn[]> => {
+      if (!lastParams) return [];
+      const q = new URLSearchParams();
+      if (lastParams.bankAccount) q.set('bank_account', lastParams.bankAccount);
+      if (lastParams.dateFrom)    q.set('date_from',    lastParams.dateFrom.format('YYYY-MM-DD'));
+      if (lastParams.dateTo)      q.set('date_to',      lastParams.dateTo.format('YYYY-MM-DD'));
+      q.set('recon_status', 'UNRECONCILED');
+      q.set('row_limit', '500');
+      const res  = await fetch(`${EXT_TXN_URL}?${q.toString()}`);
+      const data = await parseApexJson(res);
+      const items = Array.isArray(data) ? data : (data.items ?? []);
+      return items.map((i: any) => ({
+        txnId:        i.externalTransactionId ?? 0,
+        txnNumber:    String(i.externalTransactionId ?? ''),
+        reference:    i.referenceText ?? i.description ?? '',
+        txnDate:      i.transactionDate ?? '',
+        amount:       i.amount          ?? 0,
+        source:       'ORA_MAN',
+        payee:        i.description     ?? '',
+        reconciledFlag: i.reconciledFlag ?? i.RECONCILED_FLAG ?? 'N',
+        businessUnit:   i.businessUnitName ?? '',
+        bankAccountName: i.bankAccountName ?? '',
+      } as SysTxn));
+    };
+
+    let pool: SysTxn[] = [];
+    try {
+      if (autoReconTxnType === 'CM') {
+        pool = await fetchCmLocal();
+      } else if (autoReconTxnType === 'ALL') {
+        const [regular, cm] = await Promise.all([fetchSystxnsLocal(), fetchCmLocal()]);
+        pool = [...regular, ...cm];
+      } else {
+        pool = await fetchSystxnsLocal();
+      }
+    } catch { pool = sysTxns; }
+
     const unmatchedSys  = pool.filter(t => !t.reconciledFlag || t.reconciledFlag === 'N');
     const unmatchedStmt = stmtLines.filter(l => l.reconStatus !== 'RECONCILED' && !l.externalTxnId);
     const usedSysIds    = new Set<number>();
@@ -1266,8 +1298,9 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
           matchedBy.push('Amount');
         }
         if (autoReconCriteria.includes('bankTxnId')) {
-          const ref = (stmt.bankTxnReference || '').trim();
-          if (!ref || (ref !== (sys.txnNumber || '').trim() && ref !== (sys.reference || '').trim())) continue;
+          const stmtRef = (stmt.bankTxnReference || '').trim();
+          const sysRef  = (sys.reference || sys.txnNumber || '').trim();
+          if (!stmtRef || !sysRef || stmtRef !== sysRef) continue;
           matchedBy.push('Bank Txn ID');
         }
         if (autoReconCriteria.includes('reference')) {
@@ -1799,16 +1832,16 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     selectedRowKeys: selectedStmtKeys,
     onChange: (keys, rows) => {
       setSelectedStmtKeys(keys);
-      // Auto-select matching CM record when a single linked line is selected
-      if (keys.length === 1 && rows[0]?.externalTxnId) {
-        const extId = rows[0].externalTxnId;
+      // Auto-select matching CM records for all selected lines that have an externalTxnId
+      const linkedIds = rows.map(r => r.externalTxnId).filter((id): id is number => !!id);
+      if (linkedIds.length > 0) {
         setSelectedSysKeys([]);
-        setPendingAutoSelectTxnId(extId);
+        setPendingAutoSelectTxnId(linkedIds);
         setTxnSourceFilter('CM');
         setCmReconFilter('ALL');
         if (lastParams) fetchSysTxns(lastParams, 'CM', 'ALL');
       } else {
-        setPendingAutoSelectTxnId(null);
+        setPendingAutoSelectTxnId([]);
       }
     },
   };
