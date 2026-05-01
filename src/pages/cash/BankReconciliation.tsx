@@ -2458,22 +2458,15 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
             const drCode  = isMoneyIn ? assetCode   : offsetCode;
             const crCode  = isMoneyIn ? offsetCode  : assetCode;
             return (
-              <div style={{ marginBottom: 10, padding: '8px 12px', borderRadius: 6, background: '#0d1117', border: '1px solid #30363d' }}>
-                <div style={{ color: '#6e7681', marginBottom: 6, fontSize: 10, letterSpacing: '0.05em' }}>JOURNAL ENTRY PREVIEW</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                  <span style={{ background: '#1f6feb33', border: '1px solid #1f6feb', color: '#79c0ff', borderRadius: 4, padding: '1px 7px', fontWeight: 700, fontSize: 11, minWidth: 28, textAlign: 'center', flexShrink: 0 }}>DR</span>
-                  <div>
-                    <div style={{ fontSize: 12, color: '#e6edf3', fontWeight: 500 }}>{drLabel}</div>
-                    {drCode && <div style={{ fontFamily: 'monospace', fontSize: 10, color: '#8b949e', marginTop: 1 }}>{drCode}</div>}
-                  </div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 20 }}>
-                  <span style={{ background: '#2ea04326', border: '1px solid #2ea043', color: '#56d364', borderRadius: 4, padding: '1px 7px', fontWeight: 700, fontSize: 11, minWidth: 28, textAlign: 'center', flexShrink: 0 }}>CR</span>
-                  <div>
-                    <div style={{ fontSize: 12, color: '#e6edf3', fontWeight: 500 }}>{crLabel}</div>
-                    {crCode && <div style={{ fontFamily: 'monospace', fontSize: 10, color: '#8b949e', marginTop: 1 }}>{crCode}</div>}
-                  </div>
-                </div>
+              <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 11, color: '#8c8c8c', flexShrink: 0 }}>Journal:</span>
+                <Tag color="blue" style={{ margin: 0, fontWeight: 600 }}>DR</Tag>
+                <span style={{ fontSize: 12 }}>{drLabel}</span>
+                {drCode && <span style={{ fontFamily: 'monospace', fontSize: 10, color: '#8c8c8c' }}>({drCode})</span>}
+                <span style={{ color: '#d9d9d9' }}>|</span>
+                <Tag color="green" style={{ margin: 0, fontWeight: 600 }}>CR</Tag>
+                <span style={{ fontSize: 12 }}>{crLabel}</span>
+                {crCode && <span style={{ fontFamily: 'monospace', fontSize: 10, color: '#8c8c8c' }}>({crCode})</span>}
               </div>
             );
           })()}
