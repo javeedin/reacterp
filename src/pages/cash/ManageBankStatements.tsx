@@ -180,12 +180,15 @@ async function parseBankStatementPdf(file: File): Promise<{ lines: StatementLine
   const allItems: TextItem[] = [];
 
   for (let p = 1; p <= pdf.numPages; p++) {
+    // Offset Y by page index so rows from different pages never share the same Y bucket.
+    // Subtract so page 1 stays highest (sorts first) and later pages go lower.
+    const pageYOffset = (p - 1) * 100000;
     const page = await pdf.getPage(p);
     const content = await page.getTextContent();
     for (const item of content.items) {
       if ('str' in item && item.str.trim()) {
         const tx = item.transform;
-        allItems.push({ str: item.str.trim(), x: tx[4], y: tx[5] });
+        allItems.push({ str: item.str.trim(), x: tx[4], y: tx[5] - pageYOffset });
       }
     }
   }
@@ -330,12 +333,13 @@ async function parseBankStatementPdfWithTemplate(
   type TItem = { str: string; x: number; y: number };
   const allItems: TItem[] = [];
   for (let p = 1; p <= pdf.numPages; p++) {
+    const pageYOffset = (p - 1) * 100000;
     const page = await pdf.getPage(p);
     const content = await page.getTextContent();
     for (const item of content.items) {
       if ('str' in item && item.str.trim()) {
         const tx = item.transform;
-        allItems.push({ str: item.str.trim(), x: tx[4], y: tx[5] });
+        allItems.push({ str: item.str.trim(), x: tx[4], y: tx[5] - pageYOffset });
       }
     }
   }
