@@ -491,53 +491,6 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const [autoReconTxnType,  setAutoReconTxnType]  = useState<string>('ALL');
   const [exporting, setExporting] = useState(false);
 
-  const exportToExcel = useCallback(() => {
-    setExporting(true);
-    try {
-      const wb = XLSX.utils.book_new();
-      const date = new Date().toISOString().slice(0, 10);
-
-      // Sheet 1: Bank Statement Lines
-      const stmtRows = stmtLines.map(l => ({
-        'Line ID':        l.lineId,
-        'Statement No.':  l.statementNumber,
-        'Date':           l.transactionDate,
-        'Dr/Cr':          l.transactionCode,
-        'Amount':         l.amount,
-        'Currency':       l.currencyCode,
-        'Description':    l.description,
-        'Reference':      l.reference,
-        'Bank Txn Ref':   l.bankTxnReference,
-        'Counterparty':   l.counterpartyName,
-        'Recon Status':   l.reconStatus,
-        'Ext Txn ID':     l.externalTxnId,
-        'Ext Txn Ref':    l.externalTxnRef,
-      }));
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(stmtRows), 'Bank Statement Lines');
-
-      // Sheet 2: System Transactions
-      const sysRows = filteredSysTxns.map(t => ({
-        'Txn ID':         t.txnId,
-        'Txn Number':     t.txnNumber,
-        'Date':           t.txnDate,
-        'Source':         t.source,
-        'Amount':         t.amount,
-        'Currency':       t.currencyCode,
-        'Payee':          t.payee,
-        'Reference':      t.reference,
-        'Business Unit':  t.businessUnit,
-        'Status':         t.txnStatus,
-        'Recon Flag':     t.reconciledFlag,
-      }));
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sysRows), 'System Transactions');
-
-      const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-      saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `BankRecon_${date}.xlsx`);
-    } finally {
-      setExporting(false);
-    }
-  }, [stmtLines, filteredSysTxns]);
-
   interface ReconCall {
     lineId: number; statementId: number; txnId: number; txnType: string; txnNumber: string; reconAmount: number;
     // Statement line reconcile (POST)
@@ -1877,6 +1830,48 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
         (l.transactionCode   || '').toLowerCase().includes(stmtQ)
       )
     : stmtLines;
+
+  const exportToExcel = useCallback(() => {
+    setExporting(true);
+    try {
+      const wb = XLSX.utils.book_new();
+      const date = new Date().toISOString().slice(0, 10);
+      const stmtRows = stmtLines.map(l => ({
+        'Line ID':        l.lineId,
+        'Statement No.':  l.statementNumber,
+        'Date':           l.transactionDate,
+        'Dr/Cr':          l.transactionCode,
+        'Amount':         l.amount,
+        'Currency':       l.currencyCode,
+        'Description':    l.description,
+        'Reference':      l.reference,
+        'Bank Txn Ref':   l.bankTxnReference,
+        'Counterparty':   l.counterpartyName,
+        'Recon Status':   l.reconStatus,
+        'Ext Txn ID':     l.externalTxnId,
+        'Ext Txn Ref':    l.externalTxnRef,
+      }));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(stmtRows), 'Bank Statement Lines');
+      const sysRows = filteredSysTxns.map(t => ({
+        'Txn ID':         t.txnId,
+        'Txn Number':     t.txnNumber,
+        'Date':           t.txnDate,
+        'Source':         t.source,
+        'Amount':         t.amount,
+        'Currency':       t.currencyCode,
+        'Payee':          t.payee,
+        'Reference':      t.reference,
+        'Business Unit':  t.businessUnit,
+        'Status':         t.txnStatus,
+        'Recon Flag':     t.reconciledFlag,
+      }));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sysRows), 'System Transactions');
+      const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `BankRecon_${date}.xlsx`);
+    } finally {
+      setExporting(false);
+    }
+  }, [stmtLines, filteredSysTxns]);
 
   const stmtRowSelection: TableRowSelection<StmtLine> = {
     type: 'checkbox',
