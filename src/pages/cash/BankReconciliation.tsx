@@ -16,7 +16,7 @@ import { Link } from 'react-router-dom';
 import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import { buildPcBankTxnSlaPayload, fetchLedgerByBusinessUnit, derivePeriodName, createAccounting } from '../../services/sla.service';
-import ExcelJS from 'exceljs';
+import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 
 const { Content } = Layout;
@@ -491,120 +491,47 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const [autoReconTxnType,  setAutoReconTxnType]  = useState<string>('ALL');
   const [exporting, setExporting] = useState(false);
 
-  const exportToExcel = useCallback(async (includeReconSheet = false, reconLinesData: StmtLine[] = []) => {
+  const exportToExcel = useCallback(() => {
     setExporting(true);
     try {
-      const wb = new ExcelJS.Workbook();
-      wb.creator = 'Bank Reconciliation';
-      wb.created = new Date();
-
-      const headerFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2D6A9F' } };
-      const headerFont: Partial<ExcelJS.Font> = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
-      const addHeaders = (ws: ExcelJS.Worksheet, cols: { header: string; key: string; width: number }[]) => {
-        ws.columns = cols;
-        const row = ws.getRow(1);
-        row.eachCell(cell => {
-          cell.fill = headerFill;
-          cell.font = headerFont;
-          cell.alignment = { vertical: 'middle', horizontal: 'center' };
-          cell.border = { bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } } };
-        });
-        row.height = 18;
-      };
-      const styleDataRows = (ws: ExcelJS.Worksheet) => {
-        ws.eachRow((row, i) => {
-          if (i === 1) return;
-          row.eachCell(cell => {
-            cell.font = { size: 9 };
-            cell.border = { bottom: { style: 'hair', color: { argb: 'FFEEEEEE' } } };
-          });
-          if (i % 2 === 0) row.eachCell(c => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F8FC' } }; });
-        });
-      };
-
-      // ── Sheet 1: Bank Statement Lines ──────────────────────────────
-      const ws1 = wb.addWorksheet('Bank Statement Lines');
-      addHeaders(ws1, [
-        { header: 'Line ID',        key: 'lineId',          width: 10 },
-        { header: 'Statement No.',  key: 'statementNumber', width: 18 },
-        { header: 'Date',           key: 'transactionDate', width: 14 },
-        { header: 'Dr/Cr',          key: 'transactionCode', width: 8  },
-        { header: 'Amount',         key: 'amount',          width: 16 },
-        { header: 'Currency',       key: 'currencyCode',    width: 10 },
-        { header: 'Description',    key: 'description',     width: 30 },
-        { header: 'Reference',      key: 'reference',       width: 20 },
-        { header: 'Bank Txn Ref',   key: 'bankTxnReference',width: 20 },
-        { header: 'Counterparty',   key: 'counterpartyName',width: 22 },
-        { header: 'Recon Status',   key: 'reconStatus',     width: 14 },
-        { header: 'Ext Txn ID',     key: 'externalTxnId',   width: 12 },
-        { header: 'Ext Txn Ref',    key: 'externalTxnRef',  width: 20 },
-      ]);
-      stmtLines.forEach(l => {
-        const r = ws1.addRow(l);
-        const amtCell = r.getCell('amount');
-        amtCell.numFmt = '#,##0.00';
-        amtCell.alignment = { horizontal: 'right' };
-      });
-      styleDataRows(ws1);
-      ws1.autoFilter = { from: 'A1', to: 'M1' };
-
-      // ── Sheet 2: System Transactions ───────────────────────────────
-      const ws2 = wb.addWorksheet('System Transactions');
-      addHeaders(ws2, [
-        { header: 'Txn ID',         key: 'txnId',       width: 10 },
-        { header: 'Txn Number',     key: 'txnNumber',   width: 18 },
-        { header: 'Date',           key: 'txnDate',     width: 14 },
-        { header: 'Source',         key: 'source',      width: 14 },
-        { header: 'Amount',         key: 'amount',      width: 16 },
-        { header: 'Currency',       key: 'currencyCode',width: 10 },
-        { header: 'Payee',          key: 'payee',       width: 26 },
-        { header: 'Reference',      key: 'reference',   width: 20 },
-        { header: 'Business Unit',  key: 'businessUnit',width: 20 },
-        { header: 'Status',         key: 'txnStatus',   width: 14 },
-        { header: 'Recon Flag',     key: 'reconciledFlag', width: 12 },
-      ]);
-      filteredSysTxns.forEach(t => {
-        const r = ws2.addRow(t);
-        const amtCell = r.getCell('amount');
-        amtCell.numFmt = '#,##0.00';
-        amtCell.alignment = { horizontal: 'right' };
-      });
-      styleDataRows(ws2);
-      ws2.autoFilter = { from: 'A1', to: 'K1' };
-
-      // ── Sheet 3: Reconciled Lines (optional) ───────────────────────
-      if (includeReconSheet && reconLinesData.length > 0) {
-        const ws3 = wb.addWorksheet('Reconciled Lines');
-        addHeaders(ws3, [
-          { header: 'Line ID',        key: 'lineId',          width: 10 },
-          { header: 'Statement No.',  key: 'statementNumber', width: 18 },
-          { header: 'Date',           key: 'transactionDate', width: 14 },
-          { header: 'Dr/Cr',          key: 'transactionCode', width: 8  },
-          { header: 'Amount',         key: 'amount',          width: 16 },
-          { header: 'Currency',       key: 'currencyCode',    width: 10 },
-          { header: 'Description',    key: 'description',     width: 30 },
-          { header: 'Reference',      key: 'reference',       width: 20 },
-          { header: 'Counterparty',   key: 'counterpartyName',width: 22 },
-          { header: 'Recon Txn Type', key: 'reconTxnType',    width: 14 },
-          { header: 'Recon Txn No.',  key: 'reconTxnNumber',  width: 18 },
-          { header: 'Recon Date',     key: 'reconDate',       width: 14 },
-          { header: 'Recon Amount',   key: 'reconAmount',     width: 14 },
-          { header: 'Ext Txn ID',     key: 'externalTxnId',   width: 12 },
-        ]);
-        reconLinesData.forEach(l => {
-          const r = ws3.addRow(l);
-          ['amount', 'reconAmount'].forEach(k => {
-            const c = r.getCell(k);
-            c.numFmt = '#,##0.00';
-            c.alignment = { horizontal: 'right' };
-          });
-        });
-        styleDataRows(ws3);
-        ws3.autoFilter = { from: 'A1', to: 'N1' };
-      }
-
-      const buf  = await wb.xlsx.writeBuffer();
+      const wb = XLSX.utils.book_new();
       const date = new Date().toISOString().slice(0, 10);
+
+      // Sheet 1: Bank Statement Lines
+      const stmtRows = stmtLines.map(l => ({
+        'Line ID':        l.lineId,
+        'Statement No.':  l.statementNumber,
+        'Date':           l.transactionDate,
+        'Dr/Cr':          l.transactionCode,
+        'Amount':         l.amount,
+        'Currency':       l.currencyCode,
+        'Description':    l.description,
+        'Reference':      l.reference,
+        'Bank Txn Ref':   l.bankTxnReference,
+        'Counterparty':   l.counterpartyName,
+        'Recon Status':   l.reconStatus,
+        'Ext Txn ID':     l.externalTxnId,
+        'Ext Txn Ref':    l.externalTxnRef,
+      }));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(stmtRows), 'Bank Statement Lines');
+
+      // Sheet 2: System Transactions
+      const sysRows = filteredSysTxns.map(t => ({
+        'Txn ID':         t.txnId,
+        'Txn Number':     t.txnNumber,
+        'Date':           t.txnDate,
+        'Source':         t.source,
+        'Amount':         t.amount,
+        'Currency':       t.currencyCode,
+        'Payee':          t.payee,
+        'Reference':      t.reference,
+        'Business Unit':  t.businessUnit,
+        'Status':         t.txnStatus,
+        'Recon Flag':     t.reconciledFlag,
+      }));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sysRows), 'System Transactions');
+
+      const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
       saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `BankRecon_${date}.xlsx`);
     } finally {
       setExporting(false);
@@ -3358,65 +3285,31 @@ const ReconciledTab: React.FC<ReconciledTabProps> = ({ bankAccounts, businessUni
   const [exporting, setExporting]     = useState(false);
   const [msgApi, contextHolder]       = message.useMessage();
 
-  const exportReconExcel = useCallback(async () => {
-    if (reconLines.length === 0) { return; }
+  const exportReconExcel = useCallback(() => {
+    if (reconLines.length === 0) return;
     setExporting(true);
     try {
-      const wb = new ExcelJS.Workbook();
-      wb.creator = 'Bank Reconciliation';
-      wb.created = new Date();
-
-      const headerFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2D6A9F' } };
-      const headerFont: Partial<ExcelJS.Font> = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
-      const addHeaders = (ws: ExcelJS.Worksheet, cols: { header: string; key: string; width: number }[]) => {
-        ws.columns = cols;
-        const row = ws.getRow(1);
-        row.eachCell(cell => {
-          cell.fill = headerFill; cell.font = headerFont;
-          cell.alignment = { vertical: 'middle', horizontal: 'center' };
-          cell.border = { bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } } };
-        });
-        row.height = 18;
-      };
-      const styleRows = (ws: ExcelJS.Worksheet) => {
-        ws.eachRow((row, i) => {
-          if (i === 1) return;
-          row.eachCell(cell => { cell.font = { size: 9 }; cell.border = { bottom: { style: 'hair', color: { argb: 'FFEEEEEE' } } }; });
-          if (i % 2 === 0) row.eachCell(c => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F8FC' } }; });
-        });
-      };
-
-      const ws = wb.addWorksheet('Reconciled Lines');
-      addHeaders(ws, [
-        { header: 'Line ID',        key: 'lineId',          width: 10 },
-        { header: 'Statement No.',  key: 'statementNumber', width: 18 },
-        { header: 'Date',           key: 'transactionDate', width: 14 },
-        { header: 'Dr/Cr',          key: 'transactionCode', width: 8  },
-        { header: 'Amount',         key: 'amount',          width: 16 },
-        { header: 'Currency',       key: 'currencyCode',    width: 10 },
-        { header: 'Description',    key: 'description',     width: 30 },
-        { header: 'Reference',      key: 'reference',       width: 20 },
-        { header: 'Counterparty',   key: 'counterpartyName',width: 22 },
-        { header: 'Recon Txn Type', key: 'reconTxnType',    width: 14 },
-        { header: 'Recon Txn No.',  key: 'reconTxnNumber',  width: 18 },
-        { header: 'Recon Date',     key: 'reconDate',       width: 14 },
-        { header: 'Recon Amount',   key: 'reconAmount',     width: 14 },
-        { header: 'Ext Txn ID',     key: 'externalTxnId',   width: 12 },
-        { header: 'Ext Txn Ref',    key: 'externalTxnRef',  width: 20 },
-      ]);
-      reconLines.forEach(l => {
-        const r = ws.addRow(l);
-        ['amount', 'reconAmount'].forEach(k => {
-          const c = r.getCell(k);
-          c.numFmt = '#,##0.00';
-          c.alignment = { horizontal: 'right' };
-        });
-      });
-      styleRows(ws);
-      ws.autoFilter = { from: 'A1', to: 'O1' };
-
-      const buf  = await wb.xlsx.writeBuffer();
+      const wb   = XLSX.utils.book_new();
       const date = new Date().toISOString().slice(0, 10);
+      const rows = reconLines.map(l => ({
+        'Line ID':        l.lineId,
+        'Statement No.':  l.statementNumber,
+        'Date':           l.transactionDate,
+        'Dr/Cr':          l.transactionCode,
+        'Amount':         l.amount,
+        'Currency':       l.currencyCode,
+        'Description':    l.description,
+        'Reference':      l.reference,
+        'Counterparty':   l.counterpartyName,
+        'Recon Txn Type': l.reconTxnType,
+        'Recon Txn No.':  l.reconTxnNumber,
+        'Recon Date':     l.reconDate,
+        'Recon Amount':   l.reconAmount,
+        'Ext Txn ID':     l.externalTxnId,
+        'Ext Txn Ref':    l.externalTxnRef,
+      }));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Reconciled Lines');
+      const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
       saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `ReconciledLines_${date}.xlsx`);
     } finally {
       setExporting(false);
