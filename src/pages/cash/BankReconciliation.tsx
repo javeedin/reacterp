@@ -745,21 +745,29 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
           }
         }
         setExtTxnResponse(results);
-        const firstId: number | null = results[0]?.externalTransactionId ?? results[0]?.items?.[0]?.ExternalTransactionId ?? null;
-        if (firstId && selectedStmtKeys.length > 0) {
-          const lids = stmtLines.filter(l => selectedStmtKeys.includes(l.lineId)).map(l => l.lineId);
-          await Promise.allSettled(lids.map(lid =>
-            fetch(`${APEX_BASE}/cash/reconciliation/stmtlines/${lid}`, {
+        const selectedLines = stmtLines.filter(l => selectedStmtKeys.includes(l.lineId));
+        // Link each statement line[i] to its corresponding created transaction results[i]
+        await Promise.allSettled(
+          results.map((r, i) => {
+            const txnId = r?.externalTransactionId ?? r?.items?.[0]?.ExternalTransactionId ?? null;
+            const line  = selectedLines[i];
+            const ref   = extTxnLines.length > 1 ? `${baseRef}-${i + 1}` : baseRef;
+            if (!txnId || !line) return Promise.resolve();
+            return fetch(`${APEX_BASE}/cash/reconciliation/stmtlines/${line.lineId}`, {
               method: 'PUT', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ ExternalTxnId: firstId, ExternalTxnRef: baseRef }),
-            })
-          ));
-          setStmtLines(prev => prev.map(l =>
-            selectedStmtKeys.includes(l.lineId) ? { ...l, externalTxnId: firstId, externalTxnRef: baseRef } : l
-          ));
-        }
+              body: JSON.stringify({ ExternalTxnId: txnId, ExternalTxnRef: ref }),
+            });
+          })
+        );
+        setStmtLines(prev => prev.map(l => {
+          const idx   = selectedLines.findIndex(s => s.lineId === l.lineId);
+          if (idx < 0) return l;
+          const txnId = results[idx]?.externalTransactionId ?? results[idx]?.items?.[0]?.ExternalTransactionId ?? null;
+          const ref   = extTxnLines.length > 1 ? `${baseRef}-${idx + 1}` : baseRef;
+          return { ...l, externalTxnId: txnId, externalTxnRef: ref };
+        }));
         msgApi.success(`${results.length} external transaction(s) created successfully`);
-        setExtTxnCreatedId(firstId);
+        setExtTxnCreatedId(results[0]?.externalTransactionId ?? results[0]?.items?.[0]?.ExternalTransactionId ?? null);
         setSelectedStmtKeys([]);
       } catch (e: any) {
         setExtTxnRawError(`Error: ${e.message}`);
