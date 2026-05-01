@@ -677,6 +677,9 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
 
   // Submit external transaction
   const handleExtTxnSubmit = async (values: any) => {
+    if (!values.referenceText?.trim()) { msgApi.error('Reference is required'); return; }
+    if (!values.assetAccountCombination?.trim()) { msgApi.error('Cash / Asset account is required'); return; }
+    if (extTxnMode === 'single' && !values.offsetAccountCombination?.trim()) { msgApi.error('Offset account is required'); return; }
     if (extTxnMode === 'multiple') {
       const invalid = extTxnLines.filter(l => !l.amount);
       if (invalid.length > 0) { msgApi.error('All lines must have an amount'); return; }
@@ -2430,7 +2433,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
           </Row>
           <Row gutter={12}>
             <Col span={16}>
-              <Form.Item label="Reference" name="referenceText" style={{ marginBottom: 8 }}>
+              <Form.Item label="Reference" name="referenceText" style={{ marginBottom: 8 }} rules={[{ required: true, message: 'Reference is required' }]}>
                 <Input placeholder="e.g. STMT-REF-001" />
               </Form.Item>
             </Col>
@@ -2478,7 +2481,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
           {/* Cash Account (always in header) */}
           <Form.Item label="Cash / Asset Account" style={{ marginBottom: 8 }}>
             <Space.Compact style={{ width: '100%' }}>
-              <Form.Item name="assetAccountCombination" noStyle>
+              <Form.Item name="assetAccountCombination" noStyle rules={[{ required: true, message: 'Cash / Asset account is required' }]}>
                 <Input readOnly placeholder="Select account" style={{ fontFamily: 'monospace', fontSize: 11 }} />
               </Form.Item>
               <Button icon={<SearchOutlined />} onClick={() => {
@@ -2528,7 +2531,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
               </Row>
               <Form.Item label="Offset Account">
                 <Space.Compact style={{ width: '100%' }}>
-                  <Form.Item name="offsetAccountCombination" noStyle>
+                  <Form.Item name="offsetAccountCombination" noStyle rules={[{ required: true, message: 'Offset account is required' }]}>
                     <Input readOnly placeholder="Select account" style={{ fontFamily: 'monospace', fontSize: 11 }} />
                   </Form.Item>
                   <Button icon={<SearchOutlined />} onClick={() => {
