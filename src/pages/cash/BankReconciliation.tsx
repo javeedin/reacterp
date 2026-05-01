@@ -456,6 +456,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const [sysSearch,  setSysSearch]            = useState('');
   const [selectedStmtKeys, setSelectedStmtKeys] = useState<React.Key[]>([]);
   const [selectedSysKeys, setSelectedSysKeys]   = useState<React.Key[]>([]);
+  const [pendingAutoSelectTxnId, setPendingAutoSelectTxnId] = useState<number | null>(null);
   const [lastParams, setLastParams]           = useState<SearchParams | null>(null);
   const [leftPct, setLeftPct]                 = useState(50);
   const isDragging                            = React.useRef(false);
@@ -1002,6 +1003,16 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     q.set('row_limit', '500');
     return `${APEX_BASE}/cash/reconciliation/systxns?${q.toString()}`;
   }, [lastParams]);
+
+  // When CM records finish loading, auto-select the pending linked transaction
+  useEffect(() => {
+    if (pendingAutoSelectTxnId == null || sysTxns.length === 0) return;
+    const match = sysTxns.find(t => t.txnId === pendingAutoSelectTxnId);
+    if (match) {
+      setSelectedSysKeys([match.txnId]);
+      setPendingAutoSelectTxnId(null);
+    }
+  }, [sysTxns, pendingAutoSelectTxnId]);
 
   const buildExtTxnUrl = useCallback(() => {
     const q = new URLSearchParams();
@@ -1625,7 +1636,20 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const stmtRowSelection: TableRowSelection<StmtLine> = {
     type: 'checkbox',
     selectedRowKeys: selectedStmtKeys,
-    onChange: (keys) => setSelectedStmtKeys(keys),
+    onChange: (keys, rows) => {
+      setSelectedStmtKeys(keys);
+      // Auto-select matching CM record when a single linked line is selected
+      if (keys.length === 1 && rows[0]?.externalTxnId) {
+        const extId = rows[0].externalTxnId;
+        setSelectedSysKeys([]);
+        setPendingAutoSelectTxnId(extId);
+        setTxnSourceFilter('CM');
+        setCmReconFilter('ALL');
+        if (lastParams) fetchSysTxns(lastParams, 'CM', 'ALL');
+      } else {
+        setPendingAutoSelectTxnId(null);
+      }
+    },
   };
 
   const sysRowSelection: TableRowSelection<SysTxn> = {
