@@ -1831,12 +1831,24 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       )
     : stmtLines;
 
-  const exportToExcel = useCallback(() => {
+  const exportToExcel = useCallback(async () => {
+    if (!lastParams) { msgApi.warning('Run a search first before exporting'); return; }
     setExporting(true);
     try {
-      const wb = XLSX.utils.book_new();
+      const wb   = XLSX.utils.book_new();
       const date = new Date().toISOString().slice(0, 10);
-      const stmtRows = stmtLines.map(l => ({
+
+      // ── Sheet 1: ALL Bank Statement Lines (recon + unrecon) ──────────
+      const qAll = new URLSearchParams();
+      if (lastParams.bankAccount) qAll.set('bank_account', lastParams.bankAccount);
+      if (lastParams.dateFrom)    qAll.set('date_from',    lastParams.dateFrom.format('YYYY-MM-DD'));
+      if (lastParams.dateTo)      qAll.set('date_to',      lastParams.dateTo.format('YYYY-MM-DD'));
+      if (lastParams.statementId) qAll.set('statement_id', lastParams.statementId);
+      qAll.set('row_limit', '5000');
+      const allStmt: StmtLine[] = await fetch(`${APEX_BASE}/cash/reconciliation/stmtlines?${qAll}`)
+        .then(r => r.json()).then(d => d.items ?? []).catch(() => stmtLines);
+
+      const stmtRows = allStmt.map(l => ({
         'Line ID':        l.lineId,
         'Statement No.':  l.statementNumber,
         'Date':           l.transactionDate,
@@ -1848,10 +1860,13 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
         'Bank Txn Ref':   l.bankTxnReference,
         'Counterparty':   l.counterpartyName,
         'Recon Status':   l.reconStatus,
+        'Recon Txn No.':  l.reconTxnNumber,
+        'Recon Date':     l.reconDate,
         'Ext Txn ID':     l.externalTxnId,
-        'Ext Txn Ref':    l.externalTxnRef,
       }));
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(stmtRows), 'Bank Statement Lines');
+
+      // ── Sheet 2: System Transactions ─────────────────────────────────
       const sysRows = filteredSysTxns.map(t => ({
         'Txn ID':         t.txnId,
         'Txn Number':     t.txnNumber,
@@ -1866,12 +1881,43 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
         'Recon Flag':     t.reconciledFlag,
       }));
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sysRows), 'System Transactions');
+
+      // ── Sheet 3: Matched / Reconciled Pairs ──────────────────────────
+      const qRec = new URLSearchParams(qAll);
+      qRec.set('recon_status', 'RECONCILED');
+      qRec.set('row_limit', '5000');
+      const reconStmt: StmtLine[] = await fetch(`${APEX_BASE}/cash/reconciliation/stmtlines?${qRec}`)
+        .then(r => r.json()).then(d => d.items ?? []).catch(() => []);
+
+      const reconRows = reconStmt.map(l => ({
+        // Bank side
+        'Bank Line ID':     l.lineId,
+        'Bank Stmt No.':    l.statementNumber,
+        'Bank Date':        l.transactionDate,
+        'Bank Dr/Cr':       l.transactionCode,
+        'Bank Amount':      l.amount,
+        'Bank Currency':    l.currencyCode,
+        'Bank Description': l.description,
+        'Bank Reference':   l.reference,
+        'Bank Txn Ref':     l.bankTxnReference,
+        'Counterparty':     l.counterpartyName,
+        // System / CM side
+        'Sys Txn Type':     l.reconTxnType,
+        'Sys Txn Number':   l.reconTxnNumber,
+        'Sys Recon Amount': l.reconAmount,
+        'Recon Date':       l.reconDate,
+        'CM Ext Txn ID':    l.externalTxnId,
+        'CM Ext Txn Ref':   l.externalTxnRef,
+      }));
+      if (reconRows.length > 0)
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(reconRows), 'Matched Pairs');
+
       const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
       saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `BankRecon_${date}.xlsx`);
     } finally {
       setExporting(false);
     }
-  }, [stmtLines, filteredSysTxns]);
+  }, [stmtLines, filteredSysTxns, lastParams, msgApi]);
 
   const stmtRowSelection: TableRowSelection<StmtLine> = {
     type: 'checkbox',
