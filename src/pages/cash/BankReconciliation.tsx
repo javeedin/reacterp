@@ -10,12 +10,14 @@ import type { TableRowSelection } from 'antd/es/table/interface';
 import {
   HomeOutlined, BankOutlined, SearchOutlined, ReloadOutlined,
   CheckOutlined, CloseOutlined, ReconciliationOutlined, FileTextOutlined,
-  ApiOutlined, CopyOutlined, PlusOutlined, ThunderboltOutlined,
+  ApiOutlined, CopyOutlined, PlusOutlined, ThunderboltOutlined, DownloadOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import { buildPcBankTxnSlaPayload, fetchLedgerByBusinessUnit, derivePeriodName, createAccounting } from '../../services/sla.service';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -487,6 +489,128 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const [autoReconStep,     setAutoReconStep]     = useState<'criteria' | 'results'>('criteria');
   const [autoReconRunning,  setAutoReconRunning]  = useState(false);
   const [autoReconTxnType,  setAutoReconTxnType]  = useState<string>('ALL');
+  const [exporting, setExporting] = useState(false);
+
+  const exportToExcel = useCallback(async (includeReconSheet = false, reconLinesData: StmtLine[] = []) => {
+    setExporting(true);
+    try {
+      const wb = new ExcelJS.Workbook();
+      wb.creator = 'Bank Reconciliation';
+      wb.created = new Date();
+
+      const headerFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2D6A9F' } };
+      const headerFont: Partial<ExcelJS.Font> = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
+      const addHeaders = (ws: ExcelJS.Worksheet, cols: { header: string; key: string; width: number }[]) => {
+        ws.columns = cols;
+        const row = ws.getRow(1);
+        row.eachCell(cell => {
+          cell.fill = headerFill;
+          cell.font = headerFont;
+          cell.alignment = { vertical: 'middle', horizontal: 'center' };
+          cell.border = { bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } } };
+        });
+        row.height = 18;
+      };
+      const styleDataRows = (ws: ExcelJS.Worksheet) => {
+        ws.eachRow((row, i) => {
+          if (i === 1) return;
+          row.eachCell(cell => {
+            cell.font = { size: 9 };
+            cell.border = { bottom: { style: 'hair', color: { argb: 'FFEEEEEE' } } };
+          });
+          if (i % 2 === 0) row.eachCell(c => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F8FC' } }; });
+        });
+      };
+
+      // ── Sheet 1: Bank Statement Lines ──────────────────────────────
+      const ws1 = wb.addWorksheet('Bank Statement Lines');
+      addHeaders(ws1, [
+        { header: 'Line ID',        key: 'lineId',          width: 10 },
+        { header: 'Statement No.',  key: 'statementNumber', width: 18 },
+        { header: 'Date',           key: 'transactionDate', width: 14 },
+        { header: 'Dr/Cr',          key: 'transactionCode', width: 8  },
+        { header: 'Amount',         key: 'amount',          width: 16 },
+        { header: 'Currency',       key: 'currencyCode',    width: 10 },
+        { header: 'Description',    key: 'description',     width: 30 },
+        { header: 'Reference',      key: 'reference',       width: 20 },
+        { header: 'Bank Txn Ref',   key: 'bankTxnReference',width: 20 },
+        { header: 'Counterparty',   key: 'counterpartyName',width: 22 },
+        { header: 'Recon Status',   key: 'reconStatus',     width: 14 },
+        { header: 'Ext Txn ID',     key: 'externalTxnId',   width: 12 },
+        { header: 'Ext Txn Ref',    key: 'externalTxnRef',  width: 20 },
+      ]);
+      stmtLines.forEach(l => {
+        const r = ws1.addRow(l);
+        const amtCell = r.getCell('amount');
+        amtCell.numFmt = '#,##0.00';
+        amtCell.alignment = { horizontal: 'right' };
+      });
+      styleDataRows(ws1);
+      ws1.autoFilter = { from: 'A1', to: 'M1' };
+
+      // ── Sheet 2: System Transactions ───────────────────────────────
+      const ws2 = wb.addWorksheet('System Transactions');
+      addHeaders(ws2, [
+        { header: 'Txn ID',         key: 'txnId',       width: 10 },
+        { header: 'Txn Number',     key: 'txnNumber',   width: 18 },
+        { header: 'Date',           key: 'txnDate',     width: 14 },
+        { header: 'Source',         key: 'source',      width: 14 },
+        { header: 'Amount',         key: 'amount',      width: 16 },
+        { header: 'Currency',       key: 'currencyCode',width: 10 },
+        { header: 'Payee',          key: 'payee',       width: 26 },
+        { header: 'Reference',      key: 'reference',   width: 20 },
+        { header: 'Business Unit',  key: 'businessUnit',width: 20 },
+        { header: 'Status',         key: 'txnStatus',   width: 14 },
+        { header: 'Recon Flag',     key: 'reconciledFlag', width: 12 },
+      ]);
+      filteredSysTxns.forEach(t => {
+        const r = ws2.addRow(t);
+        const amtCell = r.getCell('amount');
+        amtCell.numFmt = '#,##0.00';
+        amtCell.alignment = { horizontal: 'right' };
+      });
+      styleDataRows(ws2);
+      ws2.autoFilter = { from: 'A1', to: 'K1' };
+
+      // ── Sheet 3: Reconciled Lines (optional) ───────────────────────
+      if (includeReconSheet && reconLinesData.length > 0) {
+        const ws3 = wb.addWorksheet('Reconciled Lines');
+        addHeaders(ws3, [
+          { header: 'Line ID',        key: 'lineId',          width: 10 },
+          { header: 'Statement No.',  key: 'statementNumber', width: 18 },
+          { header: 'Date',           key: 'transactionDate', width: 14 },
+          { header: 'Dr/Cr',          key: 'transactionCode', width: 8  },
+          { header: 'Amount',         key: 'amount',          width: 16 },
+          { header: 'Currency',       key: 'currencyCode',    width: 10 },
+          { header: 'Description',    key: 'description',     width: 30 },
+          { header: 'Reference',      key: 'reference',       width: 20 },
+          { header: 'Counterparty',   key: 'counterpartyName',width: 22 },
+          { header: 'Recon Txn Type', key: 'reconTxnType',    width: 14 },
+          { header: 'Recon Txn No.',  key: 'reconTxnNumber',  width: 18 },
+          { header: 'Recon Date',     key: 'reconDate',       width: 14 },
+          { header: 'Recon Amount',   key: 'reconAmount',     width: 14 },
+          { header: 'Ext Txn ID',     key: 'externalTxnId',   width: 12 },
+        ]);
+        reconLinesData.forEach(l => {
+          const r = ws3.addRow(l);
+          ['amount', 'reconAmount'].forEach(k => {
+            const c = r.getCell(k);
+            c.numFmt = '#,##0.00';
+            c.alignment = { horizontal: 'right' };
+          });
+        });
+        styleDataRows(ws3);
+        ws3.autoFilter = { from: 'A1', to: 'N1' };
+      }
+
+      const buf  = await wb.xlsx.writeBuffer();
+      const date = new Date().toISOString().slice(0, 10);
+      saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `BankRecon_${date}.xlsx`);
+    } finally {
+      setExporting(false);
+    }
+  }, [stmtLines, filteredSysTxns]);
+
   interface ReconCall {
     lineId: number; statementId: number; txnId: number; txnType: string; txnNumber: string; reconAmount: number;
     // Statement line reconcile (POST)
@@ -2224,6 +2348,17 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
         </Col>
         <Col>
           <Button
+            icon={<DownloadOutlined />}
+            size="large"
+            loading={exporting}
+            onClick={() => exportToExcel(false)}
+            style={{ borderColor: '#389e0d', color: '#389e0d' }}
+          >
+            Export Excel
+          </Button>
+        </Col>
+        <Col>
+          <Button
             icon={<ThunderboltOutlined />}
             size="large"
             onClick={() => { setAutoReconStep('criteria'); setAutoReconMatches([]); setAutoReconOpen(true); }}
@@ -3220,7 +3355,73 @@ interface ReconciledTabProps {
 const ReconciledTab: React.FC<ReconciledTabProps> = ({ bankAccounts, businessUnits, loadingAccounts }) => {
   const [reconLines, setReconLines]   = useState<StmtLine[]>([]);
   const [loading, setLoading]         = useState(false);
+  const [exporting, setExporting]     = useState(false);
   const [msgApi, contextHolder]       = message.useMessage();
+
+  const exportReconExcel = useCallback(async () => {
+    if (reconLines.length === 0) { return; }
+    setExporting(true);
+    try {
+      const wb = new ExcelJS.Workbook();
+      wb.creator = 'Bank Reconciliation';
+      wb.created = new Date();
+
+      const headerFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2D6A9F' } };
+      const headerFont: Partial<ExcelJS.Font> = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
+      const addHeaders = (ws: ExcelJS.Worksheet, cols: { header: string; key: string; width: number }[]) => {
+        ws.columns = cols;
+        const row = ws.getRow(1);
+        row.eachCell(cell => {
+          cell.fill = headerFill; cell.font = headerFont;
+          cell.alignment = { vertical: 'middle', horizontal: 'center' };
+          cell.border = { bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } } };
+        });
+        row.height = 18;
+      };
+      const styleRows = (ws: ExcelJS.Worksheet) => {
+        ws.eachRow((row, i) => {
+          if (i === 1) return;
+          row.eachCell(cell => { cell.font = { size: 9 }; cell.border = { bottom: { style: 'hair', color: { argb: 'FFEEEEEE' } } }; });
+          if (i % 2 === 0) row.eachCell(c => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F8FC' } }; });
+        });
+      };
+
+      const ws = wb.addWorksheet('Reconciled Lines');
+      addHeaders(ws, [
+        { header: 'Line ID',        key: 'lineId',          width: 10 },
+        { header: 'Statement No.',  key: 'statementNumber', width: 18 },
+        { header: 'Date',           key: 'transactionDate', width: 14 },
+        { header: 'Dr/Cr',          key: 'transactionCode', width: 8  },
+        { header: 'Amount',         key: 'amount',          width: 16 },
+        { header: 'Currency',       key: 'currencyCode',    width: 10 },
+        { header: 'Description',    key: 'description',     width: 30 },
+        { header: 'Reference',      key: 'reference',       width: 20 },
+        { header: 'Counterparty',   key: 'counterpartyName',width: 22 },
+        { header: 'Recon Txn Type', key: 'reconTxnType',    width: 14 },
+        { header: 'Recon Txn No.',  key: 'reconTxnNumber',  width: 18 },
+        { header: 'Recon Date',     key: 'reconDate',       width: 14 },
+        { header: 'Recon Amount',   key: 'reconAmount',     width: 14 },
+        { header: 'Ext Txn ID',     key: 'externalTxnId',   width: 12 },
+        { header: 'Ext Txn Ref',    key: 'externalTxnRef',  width: 20 },
+      ]);
+      reconLines.forEach(l => {
+        const r = ws.addRow(l);
+        ['amount', 'reconAmount'].forEach(k => {
+          const c = r.getCell(k);
+          c.numFmt = '#,##0.00';
+          c.alignment = { horizontal: 'right' };
+        });
+      });
+      styleRows(ws);
+      ws.autoFilter = { from: 'A1', to: 'O1' };
+
+      const buf  = await wb.xlsx.writeBuffer();
+      const date = new Date().toISOString().slice(0, 10);
+      saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `ReconciledLines_${date}.xlsx`);
+    } finally {
+      setExporting(false);
+    }
+  }, [reconLines]);
 
   const fetchReconLines = useCallback(async (params: SearchParams) => {
     const q = new URLSearchParams();
@@ -3426,6 +3627,18 @@ const ReconciledTab: React.FC<ReconciledTabProps> = ({ bankAccounts, businessUni
             <span style={{ fontWeight: 600 }}>Reconciled Statement Lines</span>
             <Badge count={reconLines.length} style={{ backgroundColor: REDWOOD.success }} showZero />
           </Space>
+        }
+        extra={
+          <Button
+            size="small"
+            icon={<DownloadOutlined />}
+            loading={exporting}
+            disabled={reconLines.length === 0}
+            onClick={exportReconExcel}
+            style={{ borderColor: '#389e0d', color: '#389e0d' }}
+          >
+            Export Excel
+          </Button>
         }
         styles={{ body: { padding: 0 } }}
       >
