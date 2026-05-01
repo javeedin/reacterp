@@ -453,6 +453,7 @@ const StatementForm: React.FC<{
   const [balanceTick, setBalanceTick]   = useState(0);
   const [pdfTemplates, setPdfTemplates] = useState<PdfTplOption[]>([]);
   const [pdfTplModal, setPdfTplModal]   = useState(false);
+  const [pdfSearch,   setPdfSearch]     = useState('');
   const [selectedTplId, setSelectedTplId] = useState<number | null>(null);
   const [apiModal, setApiModal]       = useState(false);
   const [apiPayload, setApiPayload]   = useState('');
@@ -684,6 +685,16 @@ const StatementForm: React.FC<{
       if (pdfFileRef.current) pdfFileRef.current.value = '';
     }
   };
+
+  const pdfQ = pdfSearch.trim().toLowerCase();
+  const filteredPdfPreview = pdfQ
+    ? pdfPreview.filter(l =>
+        (l.description ?? '').toLowerCase().includes(pdfQ) ||
+        (l.reference   ?? '').toLowerCase().includes(pdfQ) ||
+        (l.transactionDate ?? '').includes(pdfQ) ||
+        (l.transactionCode ?? '').toLowerCase().includes(pdfQ)
+      )
+    : pdfPreview;
 
   const getPdfSelected = () =>
     pdfSelKeys.length > 0 ? pdfPreview.filter(l => pdfSelKeys.includes(l._key)) : pdfPreview;
@@ -1432,10 +1443,10 @@ const StatementForm: React.FC<{
       <Modal
         title={<Space><UploadOutlined style={{ color: '#d46b08' }} /><span>Import Lines from PDF</span></Space>}
         open={pdfModal}
-        onCancel={() => { setPdfModal(false); setPdfPreview([]); setPdfErrors([]); setPdfFileName(''); setPdfSelKeys([]); setPdfApiOpen(false); setPdfApiResponse(null); setPdfBatchLog([]); setPdfBatchProgress(0); setPdfGetResponse(null); }}
+        onCancel={() => { setPdfModal(false); setPdfPreview([]); setPdfErrors([]); setPdfFileName(''); setPdfSelKeys([]); setPdfApiOpen(false); setPdfApiResponse(null); setPdfBatchLog([]); setPdfBatchProgress(0); setPdfGetResponse(null); setPdfSearch(''); }}
         width={980}
         footer={[
-          <Button key="cancel" onClick={() => { setPdfModal(false); setPdfPreview([]); setPdfErrors([]); setPdfFileName(''); setPdfSelKeys([]); setPdfApiOpen(false); setPdfApiResponse(null); setPdfBatchLog([]); setPdfBatchProgress(0); setPdfGetResponse(null); }}>
+          <Button key="cancel" onClick={() => { setPdfModal(false); setPdfPreview([]); setPdfErrors([]); setPdfFileName(''); setPdfSelKeys([]); setPdfApiOpen(false); setPdfApiResponse(null); setPdfBatchLog([]); setPdfBatchProgress(0); setPdfGetResponse(null); setPdfSearch(''); }}>
             Cancel
           </Button>,
           pdfPreview.length > 0 && (
@@ -1479,10 +1490,21 @@ const StatementForm: React.FC<{
         )}
         {!pdfParsing && pdfPreview.length > 0 && (
           <>
-            <Alert type="success" showIcon style={{ marginBottom: 8 }}
-              message={`${pdfPreview.length} transactions found — select rows to import, then click Add`} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <Alert type="success" showIcon style={{ flex: 1, margin: 0 }}
+                message={`${pdfPreview.length} transactions found${filteredPdfPreview.length !== pdfPreview.length ? ` — showing ${filteredPdfPreview.length}` : ''} — select rows to import, then click Add`} />
+              <Input.Search
+                placeholder="Search description, ref, date…"
+                allowClear
+                value={pdfSearch}
+                onChange={e => setPdfSearch(e.target.value)}
+                onSearch={v => setPdfSearch(v)}
+                style={{ width: 240 }}
+                size="small"
+              />
+            </div>
             <Table
-              dataSource={pdfPreview} rowKey="_key" size="small" pagination={false}
+              dataSource={filteredPdfPreview} rowKey="_key" size="small" pagination={false}
               scroll={{ y: 320, x: 800 }}
               rowSelection={{
                 selectedRowKeys: pdfSelKeys,
