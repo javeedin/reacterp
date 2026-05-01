@@ -238,9 +238,9 @@ const SearchPanel: React.FC<SearchPanelProps> = ({
           ),
           children: (
             <Form form={form} layout="vertical" size="small">
-              <Row gutter={[12, 0]}>
-                <Col xs={24} sm={12} lg={5}>
-                  <Form.Item name="businessUnit" label={<Text style={{ fontWeight: 600 }}>Business Unit</Text>}>
+              <Row gutter={[8, 0]} align="bottom" wrap={false}>
+                <Col flex="180px">
+                  <Form.Item name="businessUnit" label="Business Unit" style={{ marginBottom: 0 }}>
                     <Select
                       showSearch allowClear
                       placeholder="Select BU"
@@ -255,17 +255,18 @@ const SearchPanel: React.FC<SearchPanelProps> = ({
                     />
                   </Form.Item>
                 </Col>
-                <Col xs={24} sm={12} lg={7}>
+                <Col flex="240px">
                   <Form.Item
                     name="bankAccount"
                     label={<Text style={{ fontWeight: 600 }}>Bank Account</Text>}
                     rules={[{ required: true, message: 'Bank account is required' }]}
+                    style={{ marginBottom: 0 }}
                   >
                     <Select
                       showSearch
                       allowClear
                       loading={loadingAccounts}
-                      placeholder={selectedBu ? 'Select bank account' : 'Select BU first or pick account'}
+                      placeholder={selectedBu ? 'Select bank account' : 'Select account'}
                       filterOption={(input, option) =>
                         (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
                       }
@@ -273,46 +274,46 @@ const SearchPanel: React.FC<SearchPanelProps> = ({
                     />
                   </Form.Item>
                 </Col>
-                <Col xs={24} sm={12} lg={4}>
-                  <Form.Item name="dateFrom" label="Date From">
+                <Col flex="140px">
+                  <Form.Item name="dateFrom" label="Date From" style={{ marginBottom: 0 }}>
                     <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" />
                   </Form.Item>
                 </Col>
-                <Col xs={24} sm={12} lg={4}>
-                  <Form.Item name="dateTo" label="Date To">
+                <Col flex="140px">
+                  <Form.Item name="dateTo" label="Date To" style={{ marginBottom: 0 }}>
                     <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" />
                   </Form.Item>
                 </Col>
-                <Col xs={24} sm={12} lg={3}>
-                  <Form.Item name="amountMin" label="Amount From">
+                <Col flex="110px">
+                  <Form.Item name="amountMin" label="Amt From" style={{ marginBottom: 0 }}>
                     <InputNumber style={{ width: '100%' }} min={0} placeholder="0.00" />
                   </Form.Item>
                 </Col>
-                <Col xs={24} sm={12} lg={3}>
-                  <Form.Item name="amountMax" label="Amount To">
+                <Col flex="110px">
+                  <Form.Item name="amountMax" label="Amt To" style={{ marginBottom: 0 }}>
                     <InputNumber style={{ width: '100%' }} min={0} placeholder="0.00" />
                   </Form.Item>
                 </Col>
-                <Col xs={24} sm={12} lg={3}>
-                  <Form.Item name="reference" label="Reference">
+                <Col flex="120px">
+                  <Form.Item name="reference" label="Reference" style={{ marginBottom: 0 }}>
                     <Input placeholder="Reference" />
                   </Form.Item>
                 </Col>
-              </Row>
-              <Row justify="end">
-                <Space>
-                  <Button
-                    type="primary"
-                    icon={<SearchOutlined />}
-                    onClick={handleSearch}
-                    style={{ backgroundColor: REDWOOD.primary, borderColor: REDWOOD.primary }}
-                  >
-                    Search
-                  </Button>
-                  <Button icon={<ReloadOutlined />} onClick={handleReset}>
-                    Reset
-                  </Button>
-                </Space>
+                <Col flex="none">
+                  <Form.Item style={{ marginBottom: 0 }}>
+                    <Space>
+                      <Button
+                        type="primary"
+                        icon={<SearchOutlined />}
+                        onClick={handleSearch}
+                        style={{ backgroundColor: REDWOOD.primary, borderColor: REDWOOD.primary }}
+                      >
+                        Search
+                      </Button>
+                      <Button icon={<ReloadOutlined />} onClick={handleReset}>Reset</Button>
+                    </Space>
+                  </Form.Item>
+                </Col>
               </Row>
             </Form>
           ),
