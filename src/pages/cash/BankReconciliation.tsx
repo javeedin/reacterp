@@ -1165,6 +1165,49 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   }, [selectedStmtKeys, selectedSysKeys, stmtLines, sysTxns, txnSourceFilter, lastParams, selectedStatement, handleSelectStatement, fetchStmtLines, fetchSysTxns, msgApi]);
 
   // ── Reconcile API Log ────────────────────────────────────────────────────
+  const buildTxnSideCall = (sysTxn: SysTxn, line: StmtLine): { url: string; body: object; label: string } => {
+    const today = new Date().toISOString().slice(0, 10);
+    if (txnSourceFilter === 'CM' || sysTxn.source === 'ORA_MAN') {
+      return {
+        url:   `${EXT_TXN_URL}/${sysTxn.txnId}`,
+        body:  {
+          status:          'REC',
+          reconciledFlag:  'Y',
+          reconciledDate:  today,
+          statementId:     line.statementId,
+          stmtLineId:      line.lineId,
+        },
+        label: 'External Transaction',
+      };
+    }
+    if (sysTxn.source === 'AP_PAYMENT') {
+      return {
+        url:   `${APEX_BASE}/cash/reconciliation/ap_payments/${sysTxn.txnId}`,
+        body:  { reconciledFlag: 'Y', reconciledDate: today, paymentStatus: 'CLEARED', statementId: line.statementId, stmtLineId: line.lineId },
+        label: 'AP Payment',
+      };
+    }
+    if (sysTxn.source === 'AR_RECEIPT') {
+      return {
+        url:   `${APEX_BASE}/cash/reconciliation/ar_receipts/${sysTxn.txnId}`,
+        body:  { reconciledFlag: 'Y', reconciledDate: today, receiptStatus: 'CLEARED', statementId: line.statementId, stmtLineId: line.lineId },
+        label: 'AR Receipt',
+      };
+    }
+    if (sysTxn.source === 'GL_JOURNAL') {
+      return {
+        url:   `${APEX_BASE}/cash/reconciliation/gl_journals/${sysTxn.txnId}`,
+        body:  { reconciledFlag: 'Y', reconciledDate: today, statementId: line.statementId, stmtLineId: line.lineId },
+        label: 'GL Journal',
+      };
+    }
+    return {
+      url:   `${APEX_BASE}/cash/reconciliation/systxns/${sysTxn.txnId}`,
+      body:  { reconciledFlag: 'Y', reconciledDate: today, statementId: line.statementId, stmtLineId: line.lineId },
+      label: sysTxn.source || 'System Txn',
+    };
+  };
+
   const runAutoRecon = useCallback(async () => {
     setAutoReconRunning(true);
     const pool = autoReconTxnType === 'ALL' || autoReconTxnType === 'CM'
@@ -1269,49 +1312,6 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       else if (lastParams) { fetchStmtLines(lastParams, stmtReconFilter); fetchSysTxns(lastParams, txnSourceFilter, cmReconFilter); }
     }
   }, [autoReconMatches, buildTxnSideCall, selectedStatement, lastParams, handleSelectStatement, fetchStmtLines, fetchSysTxns, stmtReconFilter, txnSourceFilter, cmReconFilter, msgApi]);
-
-  const buildTxnSideCall = (sysTxn: SysTxn, line: StmtLine): { url: string; body: object; label: string } => {
-    const today = new Date().toISOString().slice(0, 10);
-    if (txnSourceFilter === 'CM' || sysTxn.source === 'ORA_MAN') {
-      return {
-        url:   `${EXT_TXN_URL}/${sysTxn.txnId}`,
-        body:  {
-          status:          'REC',
-          reconciledFlag:  'Y',
-          reconciledDate:  today,
-          statementId:     line.statementId,   // link back to bank statement
-          stmtLineId:      line.lineId,         // link back to statement line
-        },
-        label: 'External Transaction',
-      };
-    }
-    if (sysTxn.source === 'AP_PAYMENT') {
-      return {
-        url:   `${APEX_BASE}/cash/reconciliation/ap_payments/${sysTxn.txnId}`,
-        body:  { reconciledFlag: 'Y', reconciledDate: today, paymentStatus: 'CLEARED', statementId: line.statementId, stmtLineId: line.lineId },
-        label: 'AP Payment',
-      };
-    }
-    if (sysTxn.source === 'AR_RECEIPT') {
-      return {
-        url:   `${APEX_BASE}/cash/reconciliation/ar_receipts/${sysTxn.txnId}`,
-        body:  { reconciledFlag: 'Y', reconciledDate: today, receiptStatus: 'CLEARED', statementId: line.statementId, stmtLineId: line.lineId },
-        label: 'AR Receipt',
-      };
-    }
-    if (sysTxn.source === 'GL_JOURNAL') {
-      return {
-        url:   `${APEX_BASE}/cash/reconciliation/gl_journals/${sysTxn.txnId}`,
-        body:  { reconciledFlag: 'Y', reconciledDate: today, statementId: line.statementId, stmtLineId: line.lineId },
-        label: 'GL Journal',
-      };
-    }
-    return {
-      url:   `${APEX_BASE}/cash/reconciliation/systxns/${sysTxn.txnId}`,
-      body:  { reconciledFlag: 'Y', reconciledDate: today, statementId: line.statementId, stmtLineId: line.lineId },
-      label: sysTxn.source || 'System Txn',
-    };
-  };
 
   const openReconLog = useCallback(() => {
     const visibleSysTxns = txnSourceFilter === 'ALL' || txnSourceFilter === 'CM'
