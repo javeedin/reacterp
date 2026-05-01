@@ -150,9 +150,10 @@ function csvRowToLine(row: Record<string, string>): StatementLine {
 // ── PDF Parser ────────────────────────────────────────────────────────────────
 // Extracts text from all pages, then finds transaction rows by detecting
 // the date pattern dd/mm/yyyy at the start of a line.
-async function parseBankStatementPdf(file: File): Promise<{ lines: StatementLine[]; errors: string[] }> {
+async function parseBankStatementPdf(file: File): Promise<{ lines: StatementLine[]; errors: string[]; log: string[] }> {
   const errors: string[] = [];
   const lines: StatementLine[] = [];
+  const log: string[] = [];
 
   // Dynamic import so the page loads even when pdfjs-dist is not yet installed.
   // Run `npm install pdfjs-dist` if you see a "module not found" error here.
@@ -175,6 +176,8 @@ async function parseBankStatementPdf(file: File): Promise<{ lines: StatementLine
     useSystemFonts: true,
   }).promise;
 
+  log.push(`PDF loaded: ${pdf.numPages} page(s)`);
+
   // Extract all text items with their x/y positions from all pages
   type TextItem = { str: string; x: number; y: number };
   const allItems: TextItem[] = [];
@@ -185,12 +188,15 @@ async function parseBankStatementPdf(file: File): Promise<{ lines: StatementLine
     const pageYOffset = (p - 1) * 100000;
     const page = await pdf.getPage(p);
     const content = await page.getTextContent();
+    let pageItems = 0;
     for (const item of content.items) {
       if ('str' in item && item.str.trim()) {
         const tx = item.transform;
         allItems.push({ str: item.str.trim(), x: tx[4], y: tx[5] - pageYOffset });
+        pageItems++;
       }
     }
+    log.push(`  Page ${p}: ${pageItems} text item(s) extracted`);
   }
 
   // Group items into rows by similar Y coordinate (within 3px)
@@ -206,6 +212,8 @@ async function parseBankStatementPdf(file: File): Promise<{ lines: StatementLine
     .sort((a, b) => b[0] - a[0])
     .map(([, items]) => items.sort((a, b) => a.x - b.x).map(i => i.str));
 
+  log.push(`Row grouping: ${sortedRows.length} distinct Y-rows found`);
+
   // Matches DD/MM/YYYY and DD-MM-YYYY (BOB, ENBD, etc.)
   const dateRe = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/;
   // Positive numbers only — negative balances (e.g. "-11,277,307.46") are intentionally excluded
@@ -219,26 +227,37 @@ async function parseBankStatementPdf(file: File): Promise<{ lines: StatementLine
     return false;
   };
 
+  let rowNum = 0;
   for (const row of sortedRows) {
+    rowNum++;
+    const rowPreview = row.slice(0, 6).join(' | ');
     const first = row[0] ?? '';
     const dm = first.match(dateRe);
 
     // ── Continuation row (no date, no amounts) → stitch narration to last line ──
     if (!dm) {
-      if (lines.length > 0 && !isHeaderOrPageRow(row)) {
-        const amtCount = row.filter(t => amountRe.test(t.replace(/,/g, ''))).length;
-        const text = row.join(' ').trim();
-        if (amtCount === 0 && text.length > 2) {
-          lines[lines.length - 1].description =
-            (lines[lines.length - 1].description + ' ' + text).trim();
-        }
+      if (isHeaderOrPageRow(row)) {
+        log.push(`  Row ${rowNum}: [HEADER/PAGE] "${rowPreview}"`);
+        continue;
+      }
+      const amtCount = row.filter(t => amountRe.test(t.replace(/,/g, ''))).length;
+      const text = row.join(' ').trim();
+      if (lines.length > 0 && amtCount === 0 && text.length > 2) {
+        lines[lines.length - 1].description =
+          (lines[lines.length - 1].description + ' ' + text).trim();
+        log.push(`  Row ${rowNum}: [NARRATION+] appended to prev → "${text.slice(0, 60)}"`);
+      } else {
+        log.push(`  Row ${rowNum}: [SKIP no-date] "${rowPreview}"`);
       }
       continue;
     }
 
     // Parse date
     const txDate = dayjs(`${dm[3]}-${dm[2].padStart(2, '0')}-${dm[1].padStart(2, '0')}`);
-    if (!txDate.isValid()) continue;
+    if (!txDate.isValid()) {
+      log.push(`  Row ${rowNum}: [SKIP bad-date] first="${first}"`);
+      continue;
+    }
 
     // Collect remaining tokens (skip an immediately-following value date if present)
     let rest = row.slice(1);
@@ -250,57 +269,56 @@ async function parseBankStatementPdf(file: File): Promise<{ lines: StatementLine
       .filter(({ v }) => amountRe.test(v.replace(/,/g, '')));
 
     if (amountIdxs.length < 1) {
-      // Row has a date but no amounts — treat as narration continuation seed; skip as transaction
+      log.push(`  Row ${rowNum}: [SKIP no-amounts] date=${txDate.format('DD/MM/YYYY')} tokens="${rest.join(' | ')}"`);
       continue;
     }
 
     let txAmt: number;
     let txCode: string;
+    let amtReason: string;
 
     if (amountIdxs.length >= 3) {
       // Layout: [DR_col, CR_col, Balance] — third-to-last is DR, second-to-last is CR
       const drVal = parseFloat(amountIdxs[amountIdxs.length - 3].v.replace(/,/g, ''));
       const crVal = parseFloat(amountIdxs[amountIdxs.length - 2].v.replace(/,/g, ''));
       if (drVal > 0 && crVal === 0) {
-        txAmt = drVal; txCode = 'DR';
+        txAmt = drVal; txCode = 'DR'; amtReason = `3-col DR=${drVal} CR=0`;
       } else if (crVal > 0 && drVal === 0) {
-        txAmt = crVal; txCode = 'CR';
+        txAmt = crVal; txCode = 'CR'; amtReason = `3-col DR=0 CR=${crVal}`;
       } else {
-        // Both non-zero (unusual) or combined-amount layout — second-to-last is txAmt
         txAmt = crVal || drVal;
         txCode = drVal > 0 ? 'DR' : 'CR';
+        amtReason = `3-col both-nonzero DR=${drVal} CR=${crVal}`;
       }
     } else if (amountIdxs.length === 2) {
-      // Two amounts — could be [DR, CR] (negative balance excluded) or [txAmt, balance]
       const a0 = parseFloat(amountIdxs[0].v.replace(/,/g, ''));
       const a1 = parseFloat(amountIdxs[1].v.replace(/,/g, ''));
       if (a0 > 0 && a1 === 0) {
-        // First is debit, second (credit) is zero → DR
-        txAmt = a0; txCode = 'DR';
+        txAmt = a0; txCode = 'DR'; amtReason = `2-amt [${a0},0] → DR`;
       } else if (a0 === 0 && a1 > 0) {
-        // First (debit) is zero, second is credit → CR
-        txAmt = a1; txCode = 'CR';
+        txAmt = a1; txCode = 'CR'; amtReason = `2-amt [0,${a1}] → CR`;
       } else {
-        // Both non-zero → [txAmt, balance] layout; use keyword detection for direction
         txAmt = a0;
         const rowText = rest.join(' ').toUpperCase();
         txCode = (rowText.includes('WITHDRAWAL') || rowText.includes('DEBIT') || rowText.endsWith('DR'))
           ? 'DR' : 'CR';
+        amtReason = `2-amt both-nonzero [${a0},${a1}] keyword→${txCode}`;
       }
     } else {
-      // Only 1 amount — use it, default to CR
       txAmt = parseFloat(amountIdxs[0].v.replace(/,/g, ''));
-      txCode = 'CR';
+      txCode = 'CR'; amtReason = `1-amt ${txAmt} default→CR`;
     }
 
-    if (isNaN(txAmt) || txAmt === 0) continue;
+    if (isNaN(txAmt) || txAmt === 0) {
+      log.push(`  Row ${rowNum}: [SKIP zero-amt] date=${txDate.format('DD/MM/YYYY')} amounts=[${amountIdxs.map(a=>a.v).join(',')}]`);
+      continue;
+    }
 
-    // Description = tokens before the first amount token
     const descEnd = amountIdxs[0].i;
     const description = rest.slice(0, descEnd).join(' ');
-
-    // Reference — short numeric token (cheque number etc.)
     const ref = rest.find(t => /^\d{1,8}$/.test(t)) ?? '';
+
+    log.push(`  Row ${rowNum}: [OK] ${txDate.format('DD/MM/YYYY')} ${txCode} ${txAmt.toLocaleString()} | ${amtReason} | desc="${(description||first).slice(0,50)}"`);
 
     lines.push({
       _key:            newKey(),
@@ -317,11 +335,13 @@ async function parseBankStatementPdf(file: File): Promise<{ lines: StatementLine
     });
   }
 
+  log.push(`Done: ${lines.length} transaction(s) parsed, ${errors.length} error(s)`);
+
   if (lines.length === 0 && errors.length === 0) {
     errors.push('No transaction rows found. The PDF layout may not match the expected format.');
   }
 
-  return { lines, errors };
+  return { lines, errors, log };
 }
 
 // ── Template-based PDF parser ─────────────────────────────────────────────────
@@ -348,11 +368,12 @@ function parseDateStr(str: string, fmt: string): dayjs.Dayjs | null {
 async function parseBankStatementPdfWithTemplate(
   file: File,
   template: PdfTplOption | null,
-): Promise<{ lines: StatementLine[]; errors: string[] }> {
+): Promise<{ lines: StatementLine[]; errors: string[]; log: string[] }> {
   if (!template) return parseBankStatementPdf(file);
 
   const errors: string[] = [];
   const lines:  StatementLine[] = [];
+  const log:    string[] = [];
 
   let pdfjsLib: any;
   try {
@@ -367,6 +388,7 @@ async function parseBankStatementPdfWithTemplate(
 
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, useSystemFonts: true }).promise;
+  log.push(`PDF loaded: ${pdf.numPages} page(s) | Template: ${template.name} | DateFmt: ${template.dateFormat}`);
 
   type TItem = { str: string; x: number; y: number };
   const allItems: TItem[] = [];
@@ -374,12 +396,15 @@ async function parseBankStatementPdfWithTemplate(
     const pageYOffset = (p - 1) * 100000;
     const page = await pdf.getPage(p);
     const content = await page.getTextContent();
+    let pageItems = 0;
     for (const item of content.items) {
       if ('str' in item && item.str.trim()) {
         const tx = item.transform;
         allItems.push({ str: item.str.trim(), x: tx[4], y: tx[5] - pageYOffset });
+        pageItems++;
       }
     }
+    log.push(`  Page ${p}: ${pageItems} text item(s) extracted`);
   }
 
   const rowMap = new Map<number, TItem[]>();
@@ -393,6 +418,9 @@ async function parseBankStatementPdfWithTemplate(
     .sort((a, b) => b[0] - a[0])
     .map(([, items]) => items.sort((a, b) => a.x - b.x));
 
+  log.push(`Row grouping: ${sortedRows.length} distinct Y-rows`);
+  log.push(`Column mappings: ${template.columns.map(c => `${c.field}(x${Math.round(c.xMin)}-${Math.round(c.xMax)})`).join(', ')}`);
+
   const dateCol    = template.columns.find(c => c.field === 'date');
   const narCol     = template.columns.find(c => c.field === 'narration');
   const amtRe      = /^[\d,]+(\.\d{1,2})?$/;
@@ -402,7 +430,11 @@ async function parseBankStatementPdfWithTemplate(
       || /^\s*page\s+\d/.test(j) || /^\d+\s+of\s+\d+/.test(j);
   };
 
+  let rowNum = 0;
   for (const row of sortedRows) {
+    rowNum++;
+    const rowPreview = row.map(i => i.str).slice(0, 5).join(' | ');
+
     // Find date value in the date-column X range
     const dateItem = dateCol
       ? row.find(it => it.x >= dateCol.xMin && it.x <= dateCol.xMax)
@@ -410,20 +442,29 @@ async function parseBankStatementPdfWithTemplate(
 
     // No date → possible narration continuation row
     if (!dateItem || !parseDateStr(dateItem.str, template.dateFormat)?.isValid()) {
-      if (lines.length > 0 && narCol && !isHdrOrPg(row)) {
+      if (isHdrOrPg(row)) {
+        log.push(`  Row ${rowNum}: [HEADER/PAGE] "${rowPreview}"`);
+        continue;
+      }
+      if (lines.length > 0 && narCol) {
         const narItems = row.filter(it => it.x >= narCol.xMin && it.x <= narCol.xMax);
         const amtItems = row.filter(it => amtRe.test(it.str.replace(/,/g, '')));
         if (narItems.length > 0 && amtItems.length === 0) {
           const extra = narItems.map(i => i.str).join(' ').trim();
-          if (extra) lines[lines.length - 1].description =
-            (lines[lines.length - 1].description + ' ' + extra).trim();
+          if (extra) {
+            lines[lines.length - 1].description =
+              (lines[lines.length - 1].description + ' ' + extra).trim();
+            log.push(`  Row ${rowNum}: [NARRATION+] "${extra.slice(0, 60)}"`);
+            continue;
+          }
         }
       }
+      const noDate = dateItem ? `date-col="${dateItem.str}" not parseable` : `no item in date-col x${Math.round(dateCol?.xMin ?? 0)}-${Math.round(dateCol?.xMax ?? 0)}`;
+      log.push(`  Row ${rowNum}: [SKIP] ${noDate} | "${rowPreview}"`);
       continue;
     }
 
     const txDate = parseDateStr(dateItem.str, template.dateFormat)!;
-    if (!txDate.isValid()) continue;
 
     // Bucket items into their column fields
     const bucket: Record<string, string> = {};
@@ -437,20 +478,28 @@ async function parseBankStatementPdfWithTemplate(
     // Resolve amount and CR/DR direction
     let amount: number | null = null;
     let txCode = 'CR';
+    let amtReason = '';
     const wdStr  = (bucket['withdrawal'] ?? '').replace(/,/g, '');
     const depStr = (bucket['deposit']    ?? '').replace(/,/g, '');
     const amtStr = (bucket['amount']     ?? '').replace(/,/g, '');
     const typStr = (bucket['type']       ?? '').trim().toUpperCase();
 
     if (wdStr && amtRe.test(wdStr) && parseFloat(wdStr) > 0) {
-      amount = parseFloat(wdStr); txCode = 'DR';
+      amount = parseFloat(wdStr); txCode = 'DR'; amtReason = `withdrawal=${wdStr}`;
     } else if (depStr && amtRe.test(depStr) && parseFloat(depStr) > 0) {
-      amount = parseFloat(depStr); txCode = 'CR';
+      amount = parseFloat(depStr); txCode = 'CR'; amtReason = `deposit=${depStr}`;
     } else if (amtStr && amtRe.test(amtStr)) {
       amount = parseFloat(amtStr);
       txCode = typStr.startsWith('D') ? 'DR' : 'CR';
+      amtReason = `amount=${amtStr} type="${typStr}"→${txCode}`;
     }
-    if (!amount) continue;
+
+    if (!amount) {
+      log.push(`  Row ${rowNum}: [SKIP no-amount] date=${txDate.format('DD/MM/YYYY')} bucket=${JSON.stringify(bucket).slice(0, 100)}`);
+      continue;
+    }
+
+    log.push(`  Row ${rowNum}: [OK] ${txDate.format('DD/MM/YYYY')} ${txCode} ${amount.toLocaleString()} | ${amtReason} | narration="${(bucket['narration']??'').slice(0,50)}"`);
 
     lines.push({
       _key:            newKey(),
@@ -467,10 +516,12 @@ async function parseBankStatementPdfWithTemplate(
     });
   }
 
+  log.push(`Done: ${lines.length} transaction(s) parsed, ${errors.length} error(s)`);
+
   if (lines.length === 0 && errors.length === 0)
     errors.push('No transaction rows found using this template. Check that the column mappings match the PDF.');
 
-  return { lines, errors };
+  return { lines, errors, log };
 }
 
 // ── StatementForm ─────────────────────────────────────────────────────────────
@@ -495,6 +546,7 @@ const StatementForm: React.FC<{
   const [pdfParsing, setPdfParsing]     = useState(false);
   const [pdfPreview, setPdfPreview]     = useState<StatementLine[]>([]);
   const [pdfErrors, setPdfErrors]       = useState<string[]>([]);
+  const [pdfLog, setPdfLog]             = useState<string[]>([]);
   const [pdfFileName, setPdfFileName]   = useState('');
   const [pdfSelKeys, setPdfSelKeys]     = useState<string[]>([]);
   const [pdfApiOpen, setPdfApiOpen]     = useState(false);
@@ -726,13 +778,15 @@ const StatementForm: React.FC<{
     setPdfFileName(file.name);
     setPdfPreview([]);
     setPdfErrors([]);
+    setPdfLog([]);
     setPdfParsing(true);
     setPdfModal(true);
     try {
       const tpl = selectedTplId ? (pdfTemplates.find(t => t.templateId === selectedTplId) ?? null) : null;
-      const { lines: parsed, errors } = await parseBankStatementPdfWithTemplate(file, tpl);
+      const { lines: parsed, errors, log } = await parseBankStatementPdfWithTemplate(file, tpl);
       setPdfPreview(parsed);
       setPdfErrors(errors);
+      setPdfLog(log);
       setPdfSelKeys(parsed.map(l => l._key)); // select all by default
       setPdfApiOpen(false);
       setPdfApiResponse(null);
@@ -1501,7 +1555,7 @@ const StatementForm: React.FC<{
       <Modal
         title={<Space><UploadOutlined style={{ color: '#d46b08' }} /><span>Import Lines from PDF</span></Space>}
         open={pdfModal}
-        onCancel={() => { setPdfModal(false); setPdfPreview([]); setPdfErrors([]); setPdfFileName(''); setPdfSelKeys([]); setPdfApiOpen(false); setPdfApiResponse(null); setPdfBatchLog([]); setPdfBatchProgress(0); setPdfGetResponse(null); setPdfSearch(''); }}
+        onCancel={() => { setPdfModal(false); setPdfPreview([]); setPdfErrors([]); setPdfLog([]); setPdfFileName(''); setPdfSelKeys([]); setPdfApiOpen(false); setPdfApiResponse(null); setPdfBatchLog([]); setPdfBatchProgress(0); setPdfGetResponse(null); setPdfSearch(''); }}
         width={980}
         footer={[
           <Button key="cancel" onClick={() => { setPdfModal(false); setPdfPreview([]); setPdfErrors([]); setPdfFileName(''); setPdfSelKeys([]); setPdfApiOpen(false); setPdfApiResponse(null); setPdfBatchLog([]); setPdfBatchProgress(0); setPdfGetResponse(null); setPdfSearch(''); }}>
@@ -1612,6 +1666,42 @@ const StatementForm: React.FC<{
               }}
             />
           </>
+        )}
+
+        {/* Parse Log */}
+        {!pdfParsing && pdfLog.length > 0 && (
+          <Collapse size="small" style={{ marginTop: 10 }}
+            items={[{
+              key: 'log',
+              label: (
+                <span style={{ fontSize: 11, color: '#595959' }}>
+                  Parse Log — {pdfLog.length} entries
+                  {pdfLog.filter(l => l.includes('[OK]')).length > 0 &&
+                    <Tag color="green" style={{ marginLeft: 8, fontSize: 10 }}>{pdfLog.filter(l => l.includes('[OK]')).length} OK</Tag>}
+                  {pdfLog.filter(l => l.includes('[SKIP')).length > 0 &&
+                    <Tag color="orange" style={{ fontSize: 10 }}>{pdfLog.filter(l => l.includes('[SKIP')).length} skipped</Tag>}
+                  {pdfLog.filter(l => l.includes('[NARRATION+')).length > 0 &&
+                    <Tag color="blue" style={{ fontSize: 10 }}>{pdfLog.filter(l => l.includes('[NARRATION+')).length} narration continuations</Tag>}
+                </span>
+              ),
+              children: (
+                <pre style={{
+                  maxHeight: 240, overflowY: 'auto', margin: 0,
+                  fontSize: 10, lineHeight: 1.6, background: '#1e1e2e', color: '#cdd6f4',
+                  padding: '10px 12px', borderRadius: 4,
+                }}>
+                  {pdfLog.map((line, i) => {
+                    const color = line.includes('[OK]') ? '#a6e3a1'
+                      : line.includes('[SKIP') ? '#f38ba8'
+                      : line.includes('[NARRATION+]') ? '#89b4fa'
+                      : line.includes('[HEADER') ? '#6c7086'
+                      : '#cdd6f4';
+                    return <span key={i} style={{ color, display: 'block' }}>{line}</span>;
+                  })}
+                </pre>
+              ),
+            }]}
+          />
         )}
 
         {/* API Inspector */}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input, Select,
-  Space, Tag, Modal, Popconfirm, message, Steps, Alert, Divider, Tooltip,
+  Space, Tag, Modal, Popconfirm, message, Steps, Alert, Divider, Tooltip, Collapse,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -117,9 +117,10 @@ function parseDateStr(str: string, fmt: string): dayjs.Dayjs | null {
 async function testPdfWithTemplate(
   file: File,
   template: PdfTemplate,
-): Promise<{ lines: ParsedLine[]; errors: string[] }> {
+): Promise<{ lines: ParsedLine[]; errors: string[]; log: string[] }> {
   const errors: string[] = [];
   const lines: ParsedLine[] = [];
+  const log: string[] = [];
   let pdfjsLib: any;
   try {
     pdfjsLib = await import('pdfjs-dist');
@@ -128,11 +129,12 @@ async function testPdfWithTemplate(
     pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${ver}/build/pdf.worker.${ext}`;
   } catch {
     errors.push('pdfjs-dist is not installed. Run: npm install pdfjs-dist');
-    return { lines, errors };
+    return { lines, errors, log };
   }
 
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, useSystemFonts: true }).promise;
+  log.push(`PDF loaded: ${pdf.numPages} page(s) | Template: ${template.templateName} | DateFmt: ${template.dateFormat}`);
 
   type TItem = { str: string; x: number; y: number };
   const allItems: TItem[] = [];
@@ -140,12 +142,15 @@ async function testPdfWithTemplate(
     const pageYOffset = (p - 1) * 100000;
     const page = await pdf.getPage(p);
     const content = await page.getTextContent();
+    let pageItems = 0;
     for (const item of content.items) {
       if ('str' in item && item.str.trim()) {
         const tx = (item as any).transform;
         allItems.push({ str: item.str.trim(), x: tx[4], y: tx[5] - pageYOffset });
+        pageItems++;
       }
     }
+    log.push(`  Page ${p}: ${pageItems} text item(s) extracted`);
   }
 
   const rowMap = new Map<number, TItem[]>();
@@ -159,6 +164,9 @@ async function testPdfWithTemplate(
     .sort((a, b) => b[0] - a[0])
     .map(([, items]) => items.sort((a, b) => a.x - b.x));
 
+  log.push(`Row grouping: ${sortedRows.length} distinct Y-rows`);
+  log.push(`Columns: ${template.columnMappings.map(c => `${c.field}(x${Math.round(c.xMin)}-${Math.round(c.xMax)})`).join(', ')}`);
+
   const dateCol   = template.columnMappings.find(c => c.field === 'date');
   const narCol    = template.columnMappings.find(c => c.field === 'narration');
   const amtRe     = /^[\d,]+(\.\d{1,2})?$/;
@@ -168,28 +176,43 @@ async function testPdfWithTemplate(
       || /^\s*page\s+\d/.test(j) || /^\d+\s+of\s+\d+/.test(j);
   };
   let rowIdx = 0;
+  let rowNum = 0;
 
   for (const row of sortedRows) {
+    rowNum++;
+    const rowPreview = row.map(i => i.str).slice(0, 5).join(' | ');
+
     const dateItem = dateCol
       ? row.find(it => it.x >= dateCol.xMin && it.x <= dateCol.xMax)
       : row[0];
 
     // No date → possible narration continuation
     if (!dateItem || !parseDateStr(dateItem.str, template.dateFormat)?.isValid()) {
-      if (lines.length > 0 && narCol && !isHdrOrPg(row)) {
+      if (isHdrOrPg(row)) {
+        log.push(`  Row ${rowNum}: [HEADER/PAGE] "${rowPreview}"`);
+        continue;
+      }
+      if (lines.length > 0 && narCol) {
         const narItems = row.filter(it => it.x >= narCol.xMin && it.x <= narCol.xMax);
         const amtItems = row.filter(it => amtRe.test(it.str.replace(/,/g, '')));
         if (narItems.length > 0 && amtItems.length === 0) {
           const extra = narItems.map(i => i.str).join(' ').trim();
-          if (extra) lines[lines.length - 1].description =
-            (lines[lines.length - 1].description + ' ' + extra).trim();
+          if (extra) {
+            lines[lines.length - 1].description =
+              (lines[lines.length - 1].description + ' ' + extra).trim();
+            log.push(`  Row ${rowNum}: [NARRATION+] "${extra.slice(0, 60)}"`);
+            continue;
+          }
         }
       }
+      const noDate = dateItem
+        ? `date-col="${dateItem.str}" not parseable as ${template.dateFormat}`
+        : `no item in date-col x${Math.round(dateCol?.xMin ?? 0)}-${Math.round(dateCol?.xMax ?? 0)}`;
+      log.push(`  Row ${rowNum}: [SKIP] ${noDate} | "${rowPreview}"`);
       continue;
     }
 
     const txDate = parseDateStr(dateItem.str, template.dateFormat)!;
-    if (!txDate.isValid()) continue;
 
     const bucket: Record<string, string> = {};
     for (const item of row) {
@@ -201,20 +224,28 @@ async function testPdfWithTemplate(
 
     let amount: number | null = null;
     let txCode = 'CR';
+    let amtReason = '';
     const wdStr  = (bucket['withdrawal'] ?? '').replace(/,/g, '');
     const depStr = (bucket['deposit']    ?? '').replace(/,/g, '');
     const amtStr = (bucket['amount']     ?? '').replace(/,/g, '');
     const typStr = (bucket['type']       ?? '').trim().toUpperCase();
 
     if (wdStr && amtRe.test(wdStr) && parseFloat(wdStr) > 0) {
-      amount = parseFloat(wdStr); txCode = 'DR';
+      amount = parseFloat(wdStr); txCode = 'DR'; amtReason = `withdrawal=${wdStr}`;
     } else if (depStr && amtRe.test(depStr) && parseFloat(depStr) > 0) {
-      amount = parseFloat(depStr); txCode = 'CR';
+      amount = parseFloat(depStr); txCode = 'CR'; amtReason = `deposit=${depStr}`;
     } else if (amtStr && amtRe.test(amtStr)) {
       amount = parseFloat(amtStr);
       txCode = typStr.startsWith('D') ? 'DR' : 'CR';
+      amtReason = `amount=${amtStr} type="${typStr}"→${txCode}`;
     }
-    if (!amount) continue;
+
+    if (!amount) {
+      log.push(`  Row ${rowNum}: [SKIP no-amount] date=${txDate.format('DD/MM/YYYY')} bucket=${JSON.stringify(bucket).slice(0,100)}`);
+      continue;
+    }
+
+    log.push(`  Row ${rowNum}: [OK] ${txDate.format('DD/MM/YYYY')} ${txCode} ${amount.toLocaleString()} | ${amtReason} | narration="${(bucket['narration']??'').slice(0,50)}"`);
 
     lines.push({
       _key:            String(rowIdx++),
@@ -226,10 +257,12 @@ async function testPdfWithTemplate(
     });
   }
 
+  log.push(`Done: ${lines.length} transaction(s) parsed, ${errors.length} error(s)`);
+
   if (lines.length === 0 && errors.length === 0)
     errors.push('No transaction rows found. Check that column X-ranges match this PDF.');
 
-  return { lines, errors };
+  return { lines, errors, log };
 }
 
 function suggestField(headerText: string): string {
@@ -295,6 +328,7 @@ const PdfTemplates: React.FC = () => {
   const [testParsing, setTestParsing]   = useState(false);
   const [testLines, setTestLines]       = useState<ParsedLine[]>([]);
   const [testErrors, setTestErrors]     = useState<string[]>([]);
+  const [testLog, setTestLog]           = useState<string[]>([]);
   const [testFileName, setTestFileName] = useState('');
   const [testSearch, setTestSearch]     = useState('');
   const testFileRef = useRef<HTMLInputElement>(null);
@@ -586,6 +620,7 @@ const PdfTemplates: React.FC = () => {
     setTestTemplate(null);
     setTestLines([]);
     setTestErrors([]);
+    setTestLog([]);
     setTestFileName('');
     setTestSearch('');
   };
@@ -597,10 +632,12 @@ const PdfTemplates: React.FC = () => {
     setTestParsing(true);
     setTestLines([]);
     setTestErrors([]);
+    setTestLog([]);
     try {
-      const { lines, errors } = await testPdfWithTemplate(file, testTemplate);
+      const { lines, errors, log } = await testPdfWithTemplate(file, testTemplate);
       setTestLines(lines);
       setTestErrors(errors);
+      setTestLog(log);
     } catch (err: any) {
       setTestErrors([err.message ?? 'Parse error']);
     } finally {
@@ -1129,6 +1166,42 @@ skip        — Ignore this column`}</pre>
                 }}
               />
             </>
+          )}
+
+          {/* Parse Log */}
+          {!testParsing && testLog.length > 0 && (
+            <Collapse size="small" style={{ marginTop: 10 }}
+              items={[{
+                key: 'log',
+                label: (
+                  <span style={{ fontSize: 11, color: '#595959' }}>
+                    Parse Log — {testLog.length} entries
+                    {testLog.filter(l => l.includes('[OK]')).length > 0 &&
+                      <Tag color="green" style={{ marginLeft: 8, fontSize: 10 }}>{testLog.filter(l => l.includes('[OK]')).length} OK</Tag>}
+                    {testLog.filter(l => l.includes('[SKIP')).length > 0 &&
+                      <Tag color="orange" style={{ fontSize: 10 }}>{testLog.filter(l => l.includes('[SKIP')).length} skipped</Tag>}
+                    {testLog.filter(l => l.includes('[NARRATION+')).length > 0 &&
+                      <Tag color="blue" style={{ fontSize: 10 }}>{testLog.filter(l => l.includes('[NARRATION+')).length} narration+</Tag>}
+                  </span>
+                ),
+                children: (
+                  <pre style={{
+                    maxHeight: 260, overflowY: 'auto', margin: 0,
+                    fontSize: 10, lineHeight: 1.6, background: '#1e1e2e', color: '#cdd6f4',
+                    padding: '10px 12px', borderRadius: 4,
+                  }}>
+                    {testLog.map((line, i) => {
+                      const color = line.includes('[OK]') ? '#a6e3a1'
+                        : line.includes('[SKIP') ? '#f38ba8'
+                        : line.includes('[NARRATION+]') ? '#89b4fa'
+                        : line.includes('[HEADER') ? '#6c7086'
+                        : '#cdd6f4';
+                      return <span key={i} style={{ color, display: 'block' }}>{line}</span>;
+                    })}
+                  </pre>
+                ),
+              }]}
+            />
           )}
         </Modal>
 
