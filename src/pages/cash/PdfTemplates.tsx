@@ -159,17 +159,37 @@ async function testPdfWithTemplate(
     .sort((a, b) => b[0] - a[0])
     .map(([, items]) => items.sort((a, b) => a.x - b.x));
 
-  const dateCol = template.columnMappings.find(c => c.field === 'date');
-  const amtRe   = /^[\d,]+(\.\d{1,2})?$/;
+  const dateCol   = template.columnMappings.find(c => c.field === 'date');
+  const narCol    = template.columnMappings.find(c => c.field === 'narration');
+  const amtRe     = /^[\d,]+(\.\d{1,2})?$/;
+  const isHdrOrPg = (tokens: { str: string }[]) => {
+    const j = tokens.map(t => t.str).join(' ').toLowerCase();
+    return /transaction\s+date|value\s+date|narration|running\s+balance/.test(j)
+      || /^\s*page\s+\d/.test(j) || /^\d+\s+of\s+\d+/.test(j);
+  };
   let rowIdx = 0;
 
   for (const row of sortedRows) {
     const dateItem = dateCol
       ? row.find(it => it.x >= dateCol.xMin && it.x <= dateCol.xMax)
       : row[0];
-    if (!dateItem) continue;
-    const txDate = parseDateStr(dateItem.str, template.dateFormat);
-    if (!txDate || !txDate.isValid()) continue;
+
+    // No date → possible narration continuation
+    if (!dateItem || !parseDateStr(dateItem.str, template.dateFormat)?.isValid()) {
+      if (lines.length > 0 && narCol && !isHdrOrPg(row)) {
+        const narItems = row.filter(it => it.x >= narCol.xMin && it.x <= narCol.xMax);
+        const amtItems = row.filter(it => amtRe.test(it.str.replace(/,/g, '')));
+        if (narItems.length > 0 && amtItems.length === 0) {
+          const extra = narItems.map(i => i.str).join(' ').trim();
+          if (extra) lines[lines.length - 1].description =
+            (lines[lines.length - 1].description + ' ' + extra).trim();
+        }
+      }
+      continue;
+    }
+
+    const txDate = parseDateStr(dateItem.str, template.dateFormat)!;
+    if (!txDate.isValid()) continue;
 
     const bucket: Record<string, string> = {};
     for (const item of row) {

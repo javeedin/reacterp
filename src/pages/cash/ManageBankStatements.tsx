@@ -206,69 +206,107 @@ async function parseBankStatementPdf(file: File): Promise<{ lines: StatementLine
     .sort((a, b) => b[0] - a[0])
     .map(([, items]) => items.sort((a, b) => a.x - b.x).map(i => i.str));
 
-  // Date pattern: dd/mm/yyyy
-  const dateRe = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
+  // Matches DD/MM/YYYY and DD-MM-YYYY (BOB, ENBD, etc.)
+  const dateRe = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/;
+  // Positive numbers only — negative balances (e.g. "-11,277,307.46") are intentionally excluded
   const amountRe = /^[\d,]+(\.\d{1,2})?$/;
+
+  const isHeaderOrPageRow = (tokens: string[]) => {
+    const joined = tokens.join(' ').toLowerCase();
+    if (/transaction\s+date|value\s+date|narration|running\s+balance/.test(joined)) return true;
+    if (/^\s*page\s+\d+\s+(of\s+\d+)?\s*$/i.test(joined)) return true;
+    if (/^\s*\d+\s+of\s+\d+\s*$/i.test(joined)) return true;
+    return false;
+  };
 
   for (const row of sortedRows) {
     const first = row[0] ?? '';
     const dm = first.match(dateRe);
-    if (!dm) continue; // not a transaction row
+
+    // ── Continuation row (no date, no amounts) → stitch narration to last line ──
+    if (!dm) {
+      if (lines.length > 0 && !isHeaderOrPageRow(row)) {
+        const amtCount = row.filter(t => amountRe.test(t.replace(/,/g, ''))).length;
+        const text = row.join(' ').trim();
+        if (amtCount === 0 && text.length > 2) {
+          lines[lines.length - 1].description =
+            (lines[lines.length - 1].description + ' ' + text).trim();
+        }
+      }
+      continue;
+    }
 
     // Parse date
     const txDate = dayjs(`${dm[3]}-${dm[2].padStart(2, '0')}-${dm[1].padStart(2, '0')}`);
     if (!txDate.isValid()) continue;
 
-    // Collect remaining tokens
-    const rest = row.slice(1);
+    // Collect remaining tokens (skip an immediately-following value date if present)
+    let rest = row.slice(1);
+    if (rest.length > 0 && dateRe.test(rest[0])) rest = rest.slice(1);
 
-    // Identify amount tokens (digits/commas/dots) — last is balance, before that CR or DR
+    // Identify positive amount tokens
     const amountIdxs = rest
       .map((v, i) => ({ v, i }))
       .filter(({ v }) => amountRe.test(v.replace(/,/g, '')));
 
-    if (amountIdxs.length < 2) {
-      errors.push(`Row ${txDate.format('DD/MM/YYYY')}: could not identify amounts`);
+    if (amountIdxs.length < 1) {
+      // Row has a date but no amounts — treat as narration continuation seed; skip as transaction
       continue;
     }
 
-    // Last amount = balance, second-last = transaction amount
-    // Determine DR vs CR: if there's a "Dr"/"CR" token or column position
-    // We look at which second-to-last amount column it falls into
-    const txAmtIdx = amountIdxs[amountIdxs.length - 2].i;
-    const txAmt    = parseFloat(amountIdxs[amountIdxs.length - 2].v.replace(/,/g, ''));
+    let txAmt: number;
+    let txCode: string;
 
-    // Determine if withdrawal (DR) or deposit (CR) based on column position among amounts
-    // Typical layout: narration ... [CHQ] [DR_amt | —] [CR_amt | —] [balance]
-    // If there are 3 amount groups: [DR, CR, BAL]; if 2: one of DR/CR is missing
-    let txCode = 'CR';
     if (amountIdxs.length >= 3) {
-      // Second-to-last of all amounts
-      const drIdx = amountIdxs[amountIdxs.length - 3].i;
-      // If txAmtIdx is same as drIdx → it's a withdrawal (DR)
-      txCode = (txAmtIdx === drIdx) ? 'DR' : 'CR';
-    } else {
-      // Only 2 amounts (txAmt + balance) — look for "Dr" suffix or check narration
-      const rowText = rest.join(' ').toUpperCase();
-      if (rowText.includes('WITHDRAWAL') || rowText.includes('DEBIT') || rowText.endsWith('DR')) {
-        txCode = 'DR';
+      // Layout: [DR_col, CR_col, Balance] — third-to-last is DR, second-to-last is CR
+      const drVal = parseFloat(amountIdxs[amountIdxs.length - 3].v.replace(/,/g, ''));
+      const crVal = parseFloat(amountIdxs[amountIdxs.length - 2].v.replace(/,/g, ''));
+      if (drVal > 0 && crVal === 0) {
+        txAmt = drVal; txCode = 'DR';
+      } else if (crVal > 0 && drVal === 0) {
+        txAmt = crVal; txCode = 'CR';
+      } else {
+        // Both non-zero (unusual) or combined-amount layout — second-to-last is txAmt
+        txAmt = crVal || drVal;
+        txCode = drVal > 0 ? 'DR' : 'CR';
       }
+    } else if (amountIdxs.length === 2) {
+      // Two amounts — could be [DR, CR] (negative balance excluded) or [txAmt, balance]
+      const a0 = parseFloat(amountIdxs[0].v.replace(/,/g, ''));
+      const a1 = parseFloat(amountIdxs[1].v.replace(/,/g, ''));
+      if (a0 > 0 && a1 === 0) {
+        // First is debit, second (credit) is zero → DR
+        txAmt = a0; txCode = 'DR';
+      } else if (a0 === 0 && a1 > 0) {
+        // First (debit) is zero, second is credit → CR
+        txAmt = a1; txCode = 'CR';
+      } else {
+        // Both non-zero → [txAmt, balance] layout; use keyword detection for direction
+        txAmt = a0;
+        const rowText = rest.join(' ').toUpperCase();
+        txCode = (rowText.includes('WITHDRAWAL') || rowText.includes('DEBIT') || rowText.endsWith('DR'))
+          ? 'DR' : 'CR';
+      }
+    } else {
+      // Only 1 amount — use it, default to CR
+      txAmt = parseFloat(amountIdxs[0].v.replace(/,/g, ''));
+      txCode = 'CR';
     }
 
-    // Description = everything between date and first amount token
-    const descTokens = rest.slice(0, amountIdxs.length >= 3
-      ? amountIdxs[amountIdxs.length - 3].i
-      : amountIdxs[0].i);
-    const description = descTokens.join(' ');
+    if (isNaN(txAmt) || txAmt === 0) continue;
 
-    // Reference — look for CHQ.NO. style tokens (numeric, short)
-    const ref = rest.find(t => /^\d{1,8}$/.test(t) && t !== dm[1]) ?? '';
+    // Description = tokens before the first amount token
+    const descEnd = amountIdxs[0].i;
+    const description = rest.slice(0, descEnd).join(' ');
+
+    // Reference — short numeric token (cheque number etc.)
+    const ref = rest.find(t => /^\d{1,8}$/.test(t)) ?? '';
 
     lines.push({
       _key:            newKey(),
       transactionDate: txDate.format('YYYY-MM-DD'),
       valueDate:       '',
-      amount:          isNaN(txAmt) ? null : txAmt,
+      amount:          txAmt,
       transactionCode: txCode,
       description:     description || first,
       reference:       ref,
@@ -355,17 +393,37 @@ async function parseBankStatementPdfWithTemplate(
     .sort((a, b) => b[0] - a[0])
     .map(([, items]) => items.sort((a, b) => a.x - b.x));
 
-  const dateCol  = template.columns.find(c => c.field === 'date');
-  const amtRe    = /^[\d,]+(\.\d{1,2})?$/;
+  const dateCol    = template.columns.find(c => c.field === 'date');
+  const narCol     = template.columns.find(c => c.field === 'narration');
+  const amtRe      = /^[\d,]+(\.\d{1,2})?$/;
+  const isHdrOrPg  = (tokens: { str: string }[]) => {
+    const j = tokens.map(t => t.str).join(' ').toLowerCase();
+    return /transaction\s+date|value\s+date|narration|running\s+balance/.test(j)
+      || /^\s*page\s+\d/.test(j) || /^\d+\s+of\s+\d+/.test(j);
+  };
 
   for (const row of sortedRows) {
     // Find date value in the date-column X range
     const dateItem = dateCol
       ? row.find(it => it.x >= dateCol.xMin && it.x <= dateCol.xMax)
       : row[0];
-    if (!dateItem) continue;
-    const txDate = parseDateStr(dateItem.str, template.dateFormat);
-    if (!txDate || !txDate.isValid()) continue;
+
+    // No date → possible narration continuation row
+    if (!dateItem || !parseDateStr(dateItem.str, template.dateFormat)?.isValid()) {
+      if (lines.length > 0 && narCol && !isHdrOrPg(row)) {
+        const narItems = row.filter(it => it.x >= narCol.xMin && it.x <= narCol.xMax);
+        const amtItems = row.filter(it => amtRe.test(it.str.replace(/,/g, '')));
+        if (narItems.length > 0 && amtItems.length === 0) {
+          const extra = narItems.map(i => i.str).join(' ').trim();
+          if (extra) lines[lines.length - 1].description =
+            (lines[lines.length - 1].description + ' ' + extra).trim();
+        }
+      }
+      continue;
+    }
+
+    const txDate = parseDateStr(dateItem.str, template.dateFormat)!;
+    if (!txDate.isValid()) continue;
 
     // Bucket items into their column fields
     const bucket: Record<string, string> = {};
