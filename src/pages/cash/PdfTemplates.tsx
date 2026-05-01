@@ -7,8 +7,9 @@ import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, BankOutlined, PlusOutlined, EditOutlined, DeleteOutlined,
   UploadOutlined, FileTextOutlined, CheckOutlined, ArrowRightOutlined, ArrowLeftOutlined,
-  ApiOutlined,
+  ApiOutlined, ExperimentOutlined,
 } from '@ant-design/icons';
+import { Empty } from 'antd';
 import { Link } from 'react-router-dom';
 import dayjs from 'dayjs';
 
@@ -84,6 +85,133 @@ const FIELD_KEYWORD_MAP: Record<string, string[]> = {
   balance:    ['balance', 'running balance', 'avail balance'],
 };
 
+interface ParsedLine {
+  _key: string;
+  transactionDate: string;
+  description: string;
+  reference: string;
+  transactionCode: string;
+  amount: number | null;
+}
+
+function parseDateStr(str: string, fmt: string): dayjs.Dayjs | null {
+  const s = str.trim();
+  if (fmt === 'DD/MM/YYYY' || fmt === 'DD-MM-YYYY') {
+    const sep = fmt.includes('/') ? '/' : '-';
+    const re = new RegExp(`^(\\d{1,2})\\${sep}(\\d{1,2})\\${sep}(\\d{4})$`);
+    const m = s.match(re);
+    if (m) return dayjs(`${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`);
+  } else if (fmt === 'MM/DD/YYYY') {
+    const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) return dayjs(`${m[3]}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`);
+  } else if (fmt === 'D-MMM-YYYY' || fmt === 'DD-MMM-YYYY') {
+    const months: Record<string,string> = {jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
+    const m = s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/);
+    if (m) { const mo = months[m[2].toLowerCase()]; if (mo) return dayjs(`${m[3]}-${mo}-${m[1].padStart(2,'0')}`); }
+  } else if (fmt === 'YYYY-MM-DD') {
+    const d = dayjs(s); if (d.isValid()) return d;
+  }
+  const d = dayjs(s); return d.isValid() ? d : null;
+}
+
+async function testPdfWithTemplate(
+  file: File,
+  template: PdfTemplate,
+): Promise<{ lines: ParsedLine[]; errors: string[] }> {
+  const errors: string[] = [];
+  const lines: ParsedLine[] = [];
+  let pdfjsLib: any;
+  try {
+    pdfjsLib = await import('pdfjs-dist');
+    const ver: string = pdfjsLib.version;
+    const ext = ver.startsWith('3.') || ver.startsWith('2.') ? 'min.js' : 'min.mjs';
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${ver}/build/pdf.worker.${ext}`;
+  } catch {
+    errors.push('pdfjs-dist is not installed. Run: npm install pdfjs-dist');
+    return { lines, errors };
+  }
+
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, useSystemFonts: true }).promise;
+
+  type TItem = { str: string; x: number; y: number };
+  const allItems: TItem[] = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const pageYOffset = (p - 1) * 100000;
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    for (const item of content.items) {
+      if ('str' in item && item.str.trim()) {
+        const tx = (item as any).transform;
+        allItems.push({ str: item.str.trim(), x: tx[4], y: tx[5] - pageYOffset });
+      }
+    }
+  }
+
+  const rowMap = new Map<number, TItem[]>();
+  for (const item of allItems) {
+    const key = Math.round(item.y / 3) * 3;
+    if (!rowMap.has(key)) rowMap.set(key, []);
+    rowMap.get(key)!.push(item);
+  }
+
+  const sortedRows = [...rowMap.entries()]
+    .sort((a, b) => b[0] - a[0])
+    .map(([, items]) => items.sort((a, b) => a.x - b.x));
+
+  const dateCol = template.columnMappings.find(c => c.field === 'date');
+  const amtRe   = /^[\d,]+(\.\d{1,2})?$/;
+  let rowIdx = 0;
+
+  for (const row of sortedRows) {
+    const dateItem = dateCol
+      ? row.find(it => it.x >= dateCol.xMin && it.x <= dateCol.xMax)
+      : row[0];
+    if (!dateItem) continue;
+    const txDate = parseDateStr(dateItem.str, template.dateFormat);
+    if (!txDate || !txDate.isValid()) continue;
+
+    const bucket: Record<string, string> = {};
+    for (const item of row) {
+      const col = template.columnMappings.find(c => item.x >= c.xMin && item.x <= c.xMax);
+      if (col && col.field !== 'skip') {
+        bucket[col.field] = bucket[col.field] ? bucket[col.field] + ' ' + item.str : item.str;
+      }
+    }
+
+    let amount: number | null = null;
+    let txCode = 'CR';
+    const wdStr  = (bucket['withdrawal'] ?? '').replace(/,/g, '');
+    const depStr = (bucket['deposit']    ?? '').replace(/,/g, '');
+    const amtStr = (bucket['amount']     ?? '').replace(/,/g, '');
+    const typStr = (bucket['type']       ?? '').trim().toUpperCase();
+
+    if (wdStr && amtRe.test(wdStr) && parseFloat(wdStr) > 0) {
+      amount = parseFloat(wdStr); txCode = 'DR';
+    } else if (depStr && amtRe.test(depStr) && parseFloat(depStr) > 0) {
+      amount = parseFloat(depStr); txCode = 'CR';
+    } else if (amtStr && amtRe.test(amtStr)) {
+      amount = parseFloat(amtStr);
+      txCode = typStr.startsWith('D') ? 'DR' : 'CR';
+    }
+    if (!amount) continue;
+
+    lines.push({
+      _key:            String(rowIdx++),
+      transactionDate: txDate.format('YYYY-MM-DD'),
+      description:     bucket['narration'] ?? '',
+      reference:       bucket['reference'] ?? '',
+      transactionCode: txCode,
+      amount,
+    });
+  }
+
+  if (lines.length === 0 && errors.length === 0)
+    errors.push('No transaction rows found. Check that column X-ranges match this PDF.');
+
+  return { lines, errors };
+}
+
 function suggestField(headerText: string): string {
   const lower = headerText.toLowerCase().trim();
   for (const [field, keywords] of Object.entries(FIELD_KEYWORD_MAP)) {
@@ -140,6 +268,16 @@ const PdfTemplates: React.FC = () => {
   const [inspectPayload, setInspectPayload] = useState('');
   const [inspectPosting, setInspectPosting] = useState(false);
   const [inspectResponse, setInspectResponse] = useState<{ status: number; body: string } | null>(null);
+
+  // Test PDF state
+  const [testModal, setTestModal]       = useState(false);
+  const [testTemplate, setTestTemplate] = useState<PdfTemplate | null>(null);
+  const [testParsing, setTestParsing]   = useState(false);
+  const [testLines, setTestLines]       = useState<ParsedLine[]>([]);
+  const [testErrors, setTestErrors]     = useState<string[]>([]);
+  const [testFileName, setTestFileName] = useState('');
+  const [testSearch, setTestSearch]     = useState('');
+  const testFileRef = useRef<HTMLInputElement>(null);
 
   // Load BUs
   useEffect(() => {
@@ -414,6 +552,53 @@ const PdfTemplates: React.FC = () => {
     }
   };
 
+  const openTest = (tpl: PdfTemplate) => {
+    setTestTemplate(tpl);
+    setTestLines([]);
+    setTestErrors([]);
+    setTestFileName('');
+    setTestSearch('');
+    setTestModal(true);
+  };
+
+  const closeTest = () => {
+    setTestModal(false);
+    setTestTemplate(null);
+    setTestLines([]);
+    setTestErrors([]);
+    setTestFileName('');
+    setTestSearch('');
+  };
+
+  const handleTestUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !testTemplate) return;
+    setTestFileName(file.name);
+    setTestParsing(true);
+    setTestLines([]);
+    setTestErrors([]);
+    try {
+      const { lines, errors } = await testPdfWithTemplate(file, testTemplate);
+      setTestLines(lines);
+      setTestErrors(errors);
+    } catch (err: any) {
+      setTestErrors([err.message ?? 'Parse error']);
+    } finally {
+      setTestParsing(false);
+      if (testFileRef.current) testFileRef.current.value = '';
+    }
+  };
+
+  const testQ = testSearch.trim().toLowerCase();
+  const filteredTestLines = testQ
+    ? testLines.filter(l =>
+        (l.description ?? '').toLowerCase().includes(testQ) ||
+        (l.reference   ?? '').toLowerCase().includes(testQ) ||
+        (l.transactionDate ?? '').includes(testQ) ||
+        (l.transactionCode ?? '').toLowerCase().includes(testQ)
+      )
+    : testLines;
+
   const columns: ColumnsType<PdfTemplate> = [
     {
       title: 'Template Name', dataIndex: 'templateName', key: 'templateName',
@@ -448,6 +633,10 @@ const PdfTemplates: React.FC = () => {
       title: '', key: 'actions', width: 80, align: 'center',
       render: (_: unknown, r: PdfTemplate) => (
         <Space size={4}>
+          <Tooltip title="Test PDF parsing with this template">
+            <Button type="text" size="small" icon={<ExperimentOutlined />}
+              style={{ color: REDWOOD.success }} onClick={() => openTest(r)} />
+          </Tooltip>
           <Button type="text" size="small" icon={<EditOutlined />}
             style={{ color: REDWOOD.info }} onClick={() => openDesigner(r)} />
           <Popconfirm title="Delete this template?" description="This cannot be undone."
@@ -795,6 +984,134 @@ skip        — Ignore this column`}</pre>
             </>
           )}
         </Modal>
+        {/* ── Test PDF Modal ── */}
+        <Modal
+          title={
+            <Space>
+              <ExperimentOutlined style={{ color: REDWOOD.success }} />
+              <span>Test PDF — {testTemplate?.templateName}</span>
+            </Space>
+          }
+          open={testModal} onCancel={closeTest} width={900}
+          footer={[
+            <Button key="close" onClick={closeTest}>Close</Button>,
+            <Button key="upload" type="primary" icon={<UploadOutlined />}
+              loading={testParsing}
+              style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+              onClick={() => testFileRef.current?.click()}>
+              {testParsing ? 'Parsing…' : 'Upload PDF to Test'}
+            </Button>,
+          ]}
+        >
+          <input ref={testFileRef} type="file" accept=".pdf" style={{ display: 'none' }}
+            onChange={handleTestUpload} />
+
+          {/* Template summary */}
+          {testTemplate && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+              <Tag color="blue">{testTemplate.dateFormat}</Tag>
+              {testTemplate.businessUnitName
+                ? <Tag color="purple">{testTemplate.businessUnitName}</Tag>
+                : <Tag>All BUs</Tag>}
+              {testTemplate.columnMappings.filter(c => c.field !== 'skip').map(c => (
+                <Tag key={c.text}
+                  style={{ fontSize: 10, background: (FIELD_COLORS[c.field] ?? '#999') + '20', border: `1px solid ${FIELD_COLORS[c.field] ?? '#999'}`, color: FIELD_COLORS[c.field] ?? '#999' }}>
+                  {c.text} → {c.field}
+                </Tag>
+              ))}
+            </div>
+          )}
+
+          {testFileName && (
+            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+              File: <strong>{testFileName}</strong>
+            </Text>
+          )}
+
+          {testParsing && (
+            <div style={{ textAlign: 'center', padding: 32 }}>
+              <Text type="secondary">Reading PDF…</Text>
+            </div>
+          )}
+
+          {!testParsing && testErrors.length > 0 && (
+            <Alert type="warning" showIcon style={{ marginBottom: 8 }}
+              message={`${testErrors.length} warning(s)`}
+              description={testErrors.slice(0, 5).join(' | ')} />
+          )}
+
+          {!testParsing && testLines.length === 0 && !testFileName && (
+            <div style={{ textAlign: 'center', padding: 32, color: REDWOOD.neutral600 }}>
+              <ExperimentOutlined style={{ fontSize: 32, marginBottom: 8, display: 'block' }} />
+              <Text type="secondary">Upload a bank statement PDF to test how this template parses it.</Text>
+            </div>
+          )}
+
+          {!testParsing && testLines.length === 0 && testFileName && testErrors.length > 0 && (
+            <Empty description="No transactions could be parsed. Try adjusting column mappings." />
+          )}
+
+          {!testParsing && testLines.length > 0 && (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <Alert type="success" showIcon style={{ flex: 1, margin: 0 }}
+                  message={`${testLines.length} transactions parsed${filteredTestLines.length !== testLines.length ? ` — showing ${filteredTestLines.length}` : ''}`} />
+                <Input.Search
+                  placeholder="Search description, ref, date…"
+                  allowClear
+                  value={testSearch}
+                  onChange={e => setTestSearch(e.target.value)}
+                  onSearch={v => setTestSearch(v)}
+                  style={{ width: 240 }}
+                  size="small"
+                />
+              </div>
+              <Table<ParsedLine>
+                dataSource={filteredTestLines} rowKey="_key" size="small" pagination={false}
+                scroll={{ y: 340, x: 800 }}
+                columns={[
+                  { title: 'Date', dataIndex: 'transactionDate', width: 110,
+                    render: (v: string) => <Text style={{ fontSize: 11 }}>{v ? dayjs(v).format('D-MMM-YYYY') : '—'}</Text> },
+                  { title: 'Description', dataIndex: 'description', ellipsis: true,
+                    render: (v: string) => <Tooltip title={v}><Text style={{ fontSize: 11 }}>{v || '—'}</Text></Tooltip> },
+                  { title: 'Ref', dataIndex: 'reference', width: 100,
+                    render: (v: string) => <Text style={{ fontSize: 11 }}>{v || '—'}</Text> },
+                  { title: 'Type', dataIndex: 'transactionCode', width: 60,
+                    render: (v: string) => <Tag color={v === 'CR' ? 'green' : 'red'} style={{ fontSize: 10 }}>{v}</Tag> },
+                  { title: 'Amount', dataIndex: 'amount', width: 130, align: 'right',
+                    render: (v: number, r: ParsedLine) => (
+                      <Text style={{ fontSize: 11, color: r.transactionCode === 'CR' ? REDWOOD.success : REDWOOD.error }}>
+                        {v != null ? v.toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—'}
+                      </Text>
+                    )},
+                ]}
+                summary={() => {
+                  const cr = filteredTestLines.filter(r => r.transactionCode === 'CR').reduce((s, r) => s + (r.amount ?? 0), 0);
+                  const dr = filteredTestLines.filter(r => r.transactionCode === 'DR').reduce((s, r) => s + (r.amount ?? 0), 0);
+                  return (
+                    <Table.Summary fixed>
+                      <Table.Summary.Row style={{ background: '#fafafa' }}>
+                        <Table.Summary.Cell index={0} colSpan={3}>
+                          <Text strong style={{ fontSize: 11 }}>
+                            {filteredTestLines.length} rows shown / {testLines.length} total
+                          </Text>
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={3} colSpan={2} align="right">
+                          <Text strong style={{ fontSize: 11 }}>
+                            <span style={{ color: REDWOOD.success }}>CR: {cr.toLocaleString('en-AE', { minimumFractionDigits: 2 })}</span>
+                            {' | '}
+                            <span style={{ color: REDWOOD.error }}>DR: {dr.toLocaleString('en-AE', { minimumFractionDigits: 2 })}</span>
+                          </Text>
+                        </Table.Summary.Cell>
+                      </Table.Summary.Row>
+                    </Table.Summary>
+                  );
+                }}
+              />
+            </>
+          )}
+        </Modal>
+
       </Content>
     </Layout>
   );
