@@ -452,6 +452,8 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const [txnSourceFilter, setTxnSourceFilter] = useState<string>('ALL');
   const [stmtReconFilter, setStmtReconFilter] = useState<'ALL' | 'UNRECONCILED' | 'RECONCILED'>('UNRECONCILED');
   const [cmReconFilter,  setCmReconFilter]   = useState<'ALL' | 'UNRECONCILED' | 'RECONCILED'>('UNRECONCILED');
+  const [stmtSearch, setStmtSearch]           = useState('');
+  const [sysSearch,  setSysSearch]            = useState('');
   const [selectedStmtKeys, setSelectedStmtKeys] = useState<React.Key[]>([]);
   const [selectedSysKeys, setSelectedSysKeys]   = useState<React.Key[]>([]);
   const [lastParams, setLastParams]           = useState<SearchParams | null>(null);
@@ -1592,9 +1594,30 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     txnSourceFilter === 'CM'         ? sysColumnsCM :
     sysColumnsAll;
 
-  const filteredSysTxns = txnSourceFilter === 'ALL' || txnSourceFilter === 'CM'
+  const filteredSysTxnsBase = txnSourceFilter === 'ALL' || txnSourceFilter === 'CM'
     ? sysTxns
     : sysTxns.filter((t) => t.source === txnSourceFilter);
+
+  const sysQ = sysSearch.toLowerCase();
+  const filteredSysTxns = sysQ
+    ? filteredSysTxnsBase.filter(t =>
+        (t.txnNumber  || '').toLowerCase().includes(sysQ) ||
+        (t.reference  || '').toLowerCase().includes(sysQ) ||
+        (t.payee      || '').toLowerCase().includes(sysQ) ||
+        (t.businessUnit || '').toLowerCase().includes(sysQ)
+      )
+    : filteredSysTxnsBase;
+
+  const stmtQ = stmtSearch.toLowerCase();
+  const filteredStmtLines = stmtQ
+    ? stmtLines.filter(l =>
+        (l.description       || '').toLowerCase().includes(stmtQ) ||
+        (l.reference         || '').toLowerCase().includes(stmtQ) ||
+        (l.bankTxnReference  || '').toLowerCase().includes(stmtQ) ||
+        (l.counterpartyName  || '').toLowerCase().includes(stmtQ) ||
+        (l.transactionCode   || '').toLowerCase().includes(stmtQ)
+      )
+    : stmtLines;
 
   const stmtRowSelection: TableRowSelection<StmtLine> = {
     type: 'checkbox',
@@ -1710,7 +1733,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                 <Space>
                   <BankOutlined style={{ color: REDWOOD.primary }} />
                   <span style={{ fontWeight: 600 }}>Bank Statement Lines</span>
-                  <Badge count={stmtLines.length} style={{ backgroundColor: REDWOOD.info }} showZero />
+                  <Badge count={filteredStmtLines.length} style={{ backgroundColor: REDWOOD.info }} showZero />
                 </Space>
                 <Space size={4}>
                   <Segmented
@@ -1771,12 +1794,23 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
             }
             styles={{ body: { padding: 0 } }}
           >
+            <div style={{ padding: '6px 8px', borderBottom: '1px solid #f0f0f0' }}>
+              <Input.Search
+                size="small"
+                placeholder="Search description, reference, counterparty…"
+                allowClear
+                value={stmtSearch}
+                onChange={e => setStmtSearch(e.target.value)}
+                onSearch={v => setStmtSearch(v)}
+                style={{ width: '100%' }}
+              />
+            </div>
             <Table<StmtLine>
               rowKey="lineId"
               size="small"
               loading={loadingStmt}
               columns={stmtColumns}
-              dataSource={stmtLines}
+              dataSource={filteredStmtLines}
               rowSelection={stmtRowSelection}
               pagination={false}
               scroll={{ x: 560, y: 420 }}
@@ -1885,6 +1919,17 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
             }
             styles={{ body: { padding: 0 } }}
           >
+            <div style={{ padding: '6px 8px', borderBottom: '1px solid #f0f0f0' }}>
+              <Input.Search
+                size="small"
+                placeholder="Search transaction number, reference, payee…"
+                allowClear
+                value={sysSearch}
+                onChange={e => setSysSearch(e.target.value)}
+                onSearch={v => setSysSearch(v)}
+                style={{ width: '100%' }}
+              />
+            </div>
             <Table<SysTxn>
               rowKey="txnId"
               size="small"
