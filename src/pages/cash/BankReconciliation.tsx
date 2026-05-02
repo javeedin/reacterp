@@ -2444,7 +2444,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
             icon={<DownloadOutlined />}
             size="large"
             loading={exporting}
-            onClick={() => exportToExcel(false)}
+            onClick={() => exportToExcel()}
             style={{ borderColor: '#389e0d', color: '#389e0d' }}
           >
             Export Excel
@@ -2639,7 +2639,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
         <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${REDWOOD.neutral200}` }}>
           <Space style={{ marginBottom: 8 }}>
             <Tag color="cyan" style={{ fontSize: 11, margin: 0 }}>External Transactions (GET)</Tag>
-            <Text style={{ fontSize: 11, color: REDWOOD.neutral500 }}>{EXT_TXN_URL}</Text>
+            <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{EXT_TXN_URL}</Text>
           </Space>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 10 }}>
             <thead>
@@ -2707,7 +2707,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
           <div style={{ marginTop: 8 }}>
             <Space style={{ marginBottom: 3 }}>
               <Tag color="orange" style={{ fontSize: 11, margin: 0 }}>POST</Tag>
-              <Text style={{ fontSize: 11, color: REDWOOD.neutral500 }}>Create new external transaction</Text>
+              <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Create new external transaction</Text>
             </Space>
             <div
               style={{
@@ -2736,7 +2736,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
         footer={
           <Row justify="space-between" align="middle">
             <Col>
-              <Text style={{ fontSize: 12, color: REDWOOD.neutral500 }}>
+              <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>
                 {reconCalls.filter(c => c.status === 'success').length}/{reconCalls.length} completed
               </Text>
             </Col>
@@ -2760,7 +2760,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
         <div style={{ maxHeight: 520, overflowY: 'auto' }}>
           {reconCalls.map((call, idx) => {
             const stmtBody  = { lineId: call.lineId, txnType: call.txnType, txnId: call.txnId, txnNumber: call.txnNumber, reconAmount: call.reconAmount, notes: '' };
-            const mkColor   = (s: string) => s === 'success' ? REDWOOD.success : s === 'error' ? REDWOOD.error : s === 'running' ? REDWOOD.info : REDWOOD.neutral400;
+            const mkColor   = (s: string) => s === 'success' ? REDWOOD.success : s === 'error' ? REDWOOD.error : s === 'running' ? REDWOOD.info : REDWOOD.neutral300;
             const mkLabel   = (s: string) => s === 'success' ? 'Done' : s === 'error' ? 'Error' : s === 'running' ? 'Running…' : 'Pending';
             const overallOk = call.status === 'success' && call.txnStatus === 'success';
             const overallErr = call.status === 'error' || call.txnStatus === 'error';
@@ -2773,7 +2773,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                   <Space size={6}>
                     <Tag color={method === 'POST' ? 'orange' : 'blue'} style={{ fontSize: 10, margin: 0 }}>{method}</Tag>
                     <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{label}</Text>
-                    <Text style={{ fontFamily: 'monospace', fontSize: 10, color: REDWOOD.neutral500 }} ellipsis>{url.replace(APEX_BASE, '')}</Text>
+                    <Text style={{ fontFamily: 'monospace', fontSize: 10, color: REDWOOD.neutral600 }} ellipsis>{url.replace(APEX_BASE, '')}</Text>
                     <Tag style={{ fontSize: 10, margin: 0, color: mkColor(status), borderColor: mkColor(status) }}>{mkLabel(status)}</Tag>
                   </Space>
                   <Button size="small" type="primary" disabled={status === 'success' || status === 'running'} loading={status === 'running'} onClick={onExecute}

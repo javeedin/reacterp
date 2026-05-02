@@ -167,7 +167,7 @@ async function parseBankStatementPdf(file: File): Promise<{ lines: StatementLine
       `https://unpkg.com/pdfjs-dist@${ver}/build/pdf.worker.${ext}`;
   } catch {
     errors.push('pdfjs-dist is not installed. Run: npm install pdfjs-dist');
-    return { lines, errors };
+    return { lines, errors, log };
   }
 
   const arrayBuffer = await file.arrayBuffer();
@@ -385,12 +385,12 @@ async function parseBankStatementPdfWithTemplate(
     pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${ver}/build/pdf.worker.${ext}`;
   } catch {
     errors.push('pdfjs-dist is not installed. Run: npm install pdfjs-dist');
-    return { lines, errors };
+    return { lines, errors, log };
   }
 
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, useSystemFonts: true }).promise;
-  log.push(`PDF loaded: ${pdf.numPages} page(s) | Template: ${template.name} | DateFmt: ${template.dateFormat}`);
+  log.push(`PDF loaded: ${pdf.numPages} page(s) | Template: ${template.templateName} | DateFmt: ${template.dateFormat}`);
 
   type TItem = { str: string; x: number; y: number };
   const allItems: TItem[] = [];
