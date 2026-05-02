@@ -116,6 +116,7 @@ interface BankAccount {
   CashAccountCombination: string;
   CashClearingAccountCombination: string;
   ReconciliationDifferenceAccountCombination: string;
+  PdcAccountCombination: string;
   ReconStartDate: string;
   CreatedBy: string;
   CreationDate: string;
@@ -192,7 +193,7 @@ const Banks: React.FC = () => {
   const [accountForm] = Form.useForm();
 
   // Account selector state
-  const [accountSelectorField, setAccountSelectorField] = useState<'cash' | 'clearing' | 'recon' | null>(null);
+  const [accountSelectorField, setAccountSelectorField] = useState<'cash' | 'clearing' | 'recon' | 'pdc' | null>(null);
 
   // Payment documents state
   const [paymentDocuments, setPaymentDocuments] = useState<PaymentDocument[]>([]);
@@ -589,6 +590,7 @@ const Banks: React.FC = () => {
       CashAccountCombination: account.CashAccountCombination,
       CashClearingAccountCombination: account.CashClearingAccountCombination,
       ReconciliationDifferenceAccountCombination: account.ReconciliationDifferenceAccountCombination,
+      PdcAccountCombination: account.PdcAccountCombination,
       ReconStartDate: account.ReconStartDate,
       CreatedBy: account.CreatedBy,
       CreationDate: account.CreationDate,
@@ -597,6 +599,18 @@ const Banks: React.FC = () => {
     setEditAccountModalOpen(true);
     // Fetch payment documents for this account
     fetchPaymentDocuments(account.BankAccountId);
+    // Enrich with local APEX data (PDC account combination is stored locally only)
+    fetch('https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/banks/bankaccounts', {
+      headers: { Accept: 'application/json' },
+    })
+      .then(r => r.json())
+      .then(data => {
+        const apex = (data.items || []).find((a: any) => Number(a.bank_account_id) === account.BankAccountId);
+        if (apex?.pdc_account_combination) {
+          accountForm.setFieldsValue({ PdcAccountCombination: apex.pdc_account_combination });
+        }
+      })
+      .catch(() => {/* silently ignore */});
   };
 
   // Handle account selector selection
@@ -607,6 +621,8 @@ const Banks: React.FC = () => {
       accountForm.setFieldsValue({ CashClearingAccountCombination: accountCode });
     } else if (accountSelectorField === 'recon') {
       accountForm.setFieldsValue({ ReconciliationDifferenceAccountCombination: accountCode });
+    } else if (accountSelectorField === 'pdc') {
+      accountForm.setFieldsValue({ PdcAccountCombination: accountCode });
     }
     setAccountSelectorField(null);
   };
@@ -614,12 +630,32 @@ const Banks: React.FC = () => {
   const handleSaveAccount = async () => {
     try {
       const values = await accountForm.validateFields();
-      // TODO: Implement API call to save account
+      if (!editingAccount?.BankAccountId) return;
+
+      const url = `https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/banks/bankaccounts/${editingAccount.BankAccountId}`;
+      const body = {
+        cashAccountCombination:                 values.CashAccountCombination || null,
+        cashClearingAccountCombination:         values.CashClearingAccountCombination || null,
+        reconciliationDifferenceAccountCombination: values.ReconciliationDifferenceAccountCombination || null,
+        pdcAccountCombination:                  values.PdcAccountCombination || null,
+        description:                            values.Description || null,
+      };
+
+      const res = await fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.status === 'error') {
+        throw new Error(data.message || `HTTP ${res.status}`);
+      }
       message.success('Bank Account updated successfully');
       setEditAccountModalOpen(false);
       setEditingAccount(null);
-    } catch (err) {
-      console.error('Validation failed:', err);
+    } catch (err: any) {
+      message.error(err?.message || 'Failed to save bank account');
+      console.error('Save account failed:', err);
     }
   };
 
@@ -748,13 +784,25 @@ const Banks: React.FC = () => {
       title: 'Cash Account',
       dataIndex: 'CashAccountCombination',
       key: 'CashAccountCombination',
-      width: 220,
+      width: 200,
       ellipsis: true,
       render: (combo: string) => (
         <Tooltip title={combo}>
           <Text code style={{ fontSize: 10 }}>{combo}</Text>
         </Tooltip>
       ),
+    },
+    {
+      title: 'PDC Account',
+      dataIndex: 'PdcAccountCombination',
+      key: 'PdcAccountCombination',
+      width: 200,
+      ellipsis: true,
+      render: (combo: string) => combo ? (
+        <Tooltip title={combo}>
+          <Text code style={{ fontSize: 10 }}>{combo}</Text>
+        </Tooltip>
+      ) : <Text type="secondary" style={{ fontSize: 11 }}>—</Text>,
     },
     {
       title: 'Actions',
@@ -1341,6 +1389,20 @@ const Banks: React.FC = () => {
                         style={{ cursor: 'pointer' }}
                       />
                     </Form.Item>
+                    <Form.Item name="PdcAccountCombination" label="PDC Account" style={{ marginBottom: 8 }}>
+                      <Input
+                        size="small"
+                        suffix={
+                          <SearchOutlined
+                            style={{ color: REDWOOD.info, cursor: 'pointer' }}
+                            onClick={() => setAccountSelectorField('pdc')}
+                          />
+                        }
+                        onClick={() => setAccountSelectorField('pdc')}
+                        readOnly
+                        style={{ cursor: 'pointer' }}
+                      />
+                    </Form.Item>
                     <Row gutter={12}>
                       <Col span={12}><Form.Item name="ApUseAllowedFlag" label="AP Use Allowed" style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
                       <Col span={12}><Form.Item name="ArUseAllowedFlag" label="AR Use Allowed" style={{ marginBottom: 0 }}><Input size="small" /></Form.Item></Col>
@@ -1604,6 +1666,8 @@ const Banks: React.FC = () => {
             ? accountForm.getFieldValue('CashClearingAccountCombination')
             : accountSelectorField === 'recon'
             ? accountForm.getFieldValue('ReconciliationDifferenceAccountCombination')
+            : accountSelectorField === 'pdc'
+            ? accountForm.getFieldValue('PdcAccountCombination')
             : undefined
         }
       />
