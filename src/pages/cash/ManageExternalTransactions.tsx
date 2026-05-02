@@ -1174,12 +1174,13 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
 
   // ── Load LOVs ─────────────────────────────────────────────────────────────
   const loadLovs = useCallback(async () => {
+    const buLeMapping: Record<string, string> = {};
+    const buSet = new Set<string>();
+
+    // Step 1: Load BUs from gl/businessunits — isolated try so failures don't block step 2
     try {
-      // Load BU → LE mapping from gl/businessunits
       const buRes = await fetch(`${APEX_BASE}/gl/businessunits`, { headers: { Accept: 'application/json' } });
       const buData = buRes.ok ? await buRes.json() : null;
-      const buLeMapping: Record<string, string> = {};
-      const buSet = new Set<string>();
       if (buData?.items) {
         (buData.items as any[]).forEach(i => {
           const buName = i.business_unit_name || i.businessUnitName || '';
@@ -1187,9 +1188,14 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
           if (buName) { buSet.add(buName); buLeMapping[buName] = leName; }
         });
       }
-      setBuLeMap(buLeMapping);
+    } catch { /* silent */ }
 
-      // Load sample transactions to build bank account → BU mapping
+    // Expose BUs immediately so the dropdown is usable even if step 2 is slow
+    setBuLeMap({ ...buLeMapping });
+    setBusinessUnits([...buSet].sort().map(n => ({ label: n, value: n })));
+
+    // Step 2: Load sample transactions to build bank account → BU mapping
+    try {
       const res = await fetch(`${APEX_BASE}/cash/externaltransactions?row_limit=2000`);
       const data = await parseApexJson(res);
       if (data.success && data.items) {
@@ -1212,7 +1218,6 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
             acctMap[i.bankAccountName] = i.assetAccountCombination;
           if (i.bankAccountName && i.currencyCode)
             ccyMap[i.bankAccountName] = i.currencyCode;
-          // Fill LE from transactions if not already from gl/businessunits
           if (i.businessUnitName && i.legalEntityName && !buLeMapping[i.businessUnitName])
             buLeMapping[i.businessUnitName] = i.legalEntityName;
         });
@@ -1224,10 +1229,10 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
         setBuBankMap(Object.fromEntries(
           Object.entries(buBanks).map(([bu, set]) => [bu, [...set]])
         ));
+        // Merge any extra BUs discovered in transactions
+        setBusinessUnits([...buSet].sort().map(n => ({ label: n, value: n })));
       }
-
-      setBusinessUnits([...buSet].sort().map(n => ({ label: n, value: n })));
-    } catch { /* silently skip */ }
+    } catch { /* silent */ }
   }, []);
 
   useEffect(() => { loadLovs(); }, [loadLovs]);
