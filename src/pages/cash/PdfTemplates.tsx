@@ -185,6 +185,7 @@ async function testPdfWithTemplate(
   let rowIdx = 0;
   let rowNum = 0;
   let lastDateRowFailed = false;
+  let inFooter = false;
 
   for (const row of sortedRows) {
     rowNum++;
@@ -198,6 +199,15 @@ async function testPdfWithTemplate(
     if (!dateItem || !parseDateStr(dateItem.str, template.dateFormat)?.isValid()) {
       if (isHdrOrPg(row)) {
         log.push(`  Row ${rowNum}: [HEADER/PAGE] "${rowPreview}"`);
+        continue;
+      }
+      // Detect footer markers — once seen, stop all narration stitching
+      const rowJoined = row.map(t => t.str).join(' ');
+      if (!inFooter && /closing\s+balance|transaction\s+total|end\s+of\s+statement/i.test(rowJoined)) {
+        inFooter = true;
+      }
+      if (inFooter) {
+        log.push(`  Row ${rowNum}: [FOOTER] "${rowPreview}"`);
         continue;
       }
       if (lines.length > 0 && !lastDateRowFailed) {
@@ -228,12 +238,23 @@ async function testPdfWithTemplate(
 
     const txDate = parseDateStr(dateItem.str, template.dateFormat)!;
 
+    // Bucket items; collect skip-zone text separately for narration fallback
     const bucket: Record<string, string> = {};
+    const skipZoneText: string[] = [];
     for (const item of row) {
       const col = template.columnMappings.find(c => item.x >= c.xMin && item.x <= c.xMax);
       if (col && col.field !== 'skip') {
         bucket[col.field] = bucket[col.field] ? bucket[col.field] + ' ' + item.str : item.str;
+      } else if (col?.field === 'skip') {
+        skipZoneText.push(item.str);
       }
+    }
+    // Narration fallback: if narration empty, use skip-zone non-amount text
+    if (!bucket['narration'] && skipZoneText.length > 0) {
+      const narFallback = skipZoneText
+        .filter(s => !parseDateStr(s, template.dateFormat)?.isValid() && !amtRe.test(s.replace(/,/g, '')))
+        .join(' ').trim();
+      if (narFallback.length > 1) bucket['narration'] = narFallback;
     }
 
     let amount: number | null = null;
