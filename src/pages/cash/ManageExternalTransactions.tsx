@@ -3,14 +3,14 @@ import dayjs, { type Dayjs } from 'dayjs';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input, Select,
   DatePicker, InputNumber, Row, Col, Space, Tag, Tooltip, Tabs, Collapse,
-  message, Empty, Divider, Badge, Modal, Alert, Spin, Segmented,
+  message, Empty, Divider, Badge, Modal, Alert, Spin, Segmented, Upload,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, BankOutlined, PlusOutlined, SearchOutlined, ReloadOutlined,
   EditOutlined, CloseOutlined, DollarOutlined, ApiOutlined, FileTextOutlined,
   SwapOutlined, DownloadOutlined, CheckCircleOutlined, SyncOutlined,
-  AccountBookOutlined, EyeOutlined,
+  AccountBookOutlined, EyeOutlined, UploadOutlined, PaperClipOutlined, DeleteOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -64,6 +64,9 @@ interface ExternalTxnRecord {
   lastUpdateDate: string;
   syncDate: string;
   transactionDirection?: string;
+  paymentMethod?: string;
+  paymentDocument?: string;
+  paperDocumentNumber?: string;
 }
 
 interface BankAccountOption { label: string; value: string; }
@@ -159,6 +162,8 @@ const ExternalTxnForm: React.FC<{
   const [lineCoaOpen, setLineCoaOpen]     = useState(false);
   const [lineCoaIdx, setLineCoaIdx]       = useState(0);
   const [lineCoaInitial, setLineCoaInitial] = useState('');
+  const [attachments, setAttachments]   = useState<Array<{id?: number; uid: string; name: string; fileType: string; fileSize: number; content?: string; status: 'done' | 'uploading' | 'error'}>>([]);
+  const [attachUploading, setAttachUploading] = useState(false);
   const isEdit = !!initialValues?.externalTransactionId;
   const buSelected = !!selectedBu;
 
@@ -192,7 +197,20 @@ const ExternalTxnForm: React.FC<{
         assetAccountCombination:   initialValues.assetAccountCombination,
         offsetAccountCombination:  initialValues.offsetAccountCombination,
         transactionDirection:      dir,
+        paymentMethod:             initialValues.paymentMethod,
+        paymentDocument:           initialValues.paymentDocument,
+        paperDocumentNumber:       initialValues.paperDocumentNumber,
       });
+      // Fetch existing attachments for edit mode
+      if (initialValues.externalTransactionId) {
+        fetch(`${APEX_BASE}/cash/externaltransactions/${initialValues.externalTransactionId}/attachments`, { headers: { Accept: 'application/json' } })
+          .then(r => r.json())
+          .then(d => {
+            setAttachments((d.items || []).map((a: any) => ({
+              id: a.id, uid: String(a.id), name: a.fileName, fileType: a.fileType || '', fileSize: a.fileSize || 0, status: 'done' as const,
+            })));
+          }).catch(() => {});
+      }
     } else {
       form.resetFields();
       form.setFieldsValue({ transactionDate: dayjs(), transactionDirection: 'CR' });
@@ -226,6 +244,9 @@ const ExternalTxnForm: React.FC<{
       AssetAccountCombination:  values.assetAccountCombination ?? '',
       OffsetAccountCombination: values.offsetAccountCombination ?? '',
       TransactionDirection:  values.transactionDirection ?? txnDirection,
+      PaymentMethod:        values.paymentMethod ?? null,
+      PaymentDocument:      values.paymentDocument ?? null,
+      PaperDocumentNumber:  values.paperDocumentNumber ?? null,
     }],
   });
 
@@ -252,6 +273,9 @@ const ExternalTxnForm: React.FC<{
         Source: 'ORA_MAN', Status: 'UNR', AccountingFlag: false,
         CreatedBy: 'ERP_USER', CreationDate: new Date().toISOString(),
         LastUpdatedBy: 'ERP_USER', LastUpdateDate: new Date().toISOString(), LastUpdateLogin: '',
+        PaymentMethod:        values.paymentMethod ?? null,
+        PaymentDocument:      values.paymentDocument ?? null,
+        PaperDocumentNumber:  values.paperDocumentNumber ?? null,
       };
       let successCount = 0;
       for (let i = 0; i < extTxnLines.length; i++) {
@@ -298,6 +322,19 @@ const ExternalTxnForm: React.FC<{
       });
       const data = await res.json();
       if (data.status === 'success') {
+        // Upload attachments
+        const newExtId = data.externalTransactionId;
+        if (newExtId && attachments.length > 0) {
+          for (const att of attachments.filter(a => !a.id)) {
+            try {
+              await fetch(`${APEX_BASE}/cash/externaltransactions/${newExtId}/attachments`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fileName: att.name, fileType: att.fileType, fileSize: att.fileSize, content: att.content, createdBy: 'ERP_USER' }),
+              });
+            } catch { /* ignore upload errors silently */ }
+          }
+        }
         message.success(isEdit ? 'Transaction updated.' : 'Transaction created.');
         onSave();
       } else {
@@ -529,6 +566,37 @@ const ExternalTxnForm: React.FC<{
               </Form.Item>
             </Col>
           </Row>
+          <Row gutter={16} style={{ marginTop: 8 }}>
+            <Col xs={24} md={8}>
+              <Form.Item
+                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Payment Method</span>}
+                name="paymentMethod"
+                style={{ marginBottom: 0 }}
+              >
+                <Select placeholder="Select method" allowClear disabled={isEdit || !buSelected}>
+                  {['CHECK', 'EFT', 'WIRE', 'CASH', 'MISC'].map(m => <Option key={m} value={m}>{m}</Option>)}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={8}>
+              <Form.Item
+                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Payment Document</span>}
+                name="paymentDocument"
+                style={{ marginBottom: 0 }}
+              >
+                <Input placeholder="e.g. Cheque Book Name" disabled={isEdit || !buSelected} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={8}>
+              <Form.Item
+                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Paper Document #</span>}
+                name="paperDocumentNumber"
+                style={{ marginBottom: 0 }}
+              >
+                <Input placeholder="e.g. CHQ-00123" disabled={isEdit || !buSelected} />
+              </Form.Item>
+            </Col>
+          </Row>
         </Card>
 
         {/* ── Section 3: Account Coding ── */}
@@ -657,6 +725,47 @@ const ExternalTxnForm: React.FC<{
                 </tbody>
               </table>
             </div>
+          )}
+        </Card>
+
+        {/* ── Attachments ── */}
+        <Card styles={{ body: { padding: '18px 20px' } }} style={sectionCard(REDWOOD.neutral600)}>
+          <div style={sectionHeader(REDWOOD.neutral600)}>
+            <PaperClipOutlined /> Attachments
+          </div>
+          <Upload
+            fileList={attachments.map(a => ({
+              uid: a.uid, name: a.name, status: a.status,
+              size: a.fileSize, type: a.fileType,
+            }))}
+            beforeUpload={(file) => {
+              const reader = new FileReader();
+              reader.onload = (e) => {
+                const base64 = (e.target?.result as string)?.split(',')[1] || '';
+                setAttachments(prev => [...prev, {
+                  uid: `new-${Date.now()}`, name: file.name, fileType: file.type,
+                  fileSize: file.size, content: base64, status: 'done',
+                }]);
+              };
+              reader.readAsDataURL(file);
+              return false;
+            }}
+            onRemove={(file) => {
+              const att = attachments.find(a => a.uid === file.uid);
+              if (att?.id && initialValues?.externalTransactionId) {
+                fetch(`${APEX_BASE}/cash/externaltransactions/${initialValues.externalTransactionId}/attachments/${att.id}`, { method: 'DELETE' }).catch(() => {});
+              }
+              setAttachments(prev => prev.filter(a => a.uid !== file.uid));
+            }}
+            multiple
+            disabled={!buSelected && !isEdit}
+          >
+            <Button icon={<UploadOutlined />} disabled={!buSelected && !isEdit}>
+              Attach Files
+            </Button>
+          </Upload>
+          {attachments.length === 0 && (
+            <Text type="secondary" style={{ fontSize: 12, marginTop: 8, display: 'block' }}>No attachments</Text>
           )}
         </Card>
 

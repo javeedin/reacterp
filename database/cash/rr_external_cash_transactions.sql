@@ -117,7 +117,10 @@ BEGIN
                 creation_date                VARCHAR2(50)    PATH '$.CreationDate',
                 last_updated_by              VARCHAR2(150)   PATH '$.LastUpdatedBy',
                 last_update_date             VARCHAR2(50)    PATH '$.LastUpdateDate',
-                last_update_login            VARCHAR2(200)   PATH '$.LastUpdateLogin'
+                last_update_login            VARCHAR2(200)   PATH '$.LastUpdateLogin',
+                payment_method               VARCHAR2(60)    PATH '$.PaymentMethod',
+                payment_document             VARCHAR2(240)   PATH '$.PaymentDocument',
+                paper_document_number        VARCHAR2(60)    PATH '$.PaperDocumentNumber'
             )
         )
     ) LOOP
@@ -174,7 +177,10 @@ BEGIN
                     REGEXP_REPLACE(rec.last_update_date, '(Z|[+-]\d{2}:\d{2})$', ''),
                     'YYYY-MM-DD"T"HH24:MI:SS.FF3'
                 ) AS last_update_date,
-                rec.last_update_login                           AS last_update_login
+                rec.last_update_login                           AS last_update_login,
+                rec.payment_method                              AS payment_method,
+                rec.payment_document                           AS payment_document,
+                rec.paper_document_number                      AS paper_document_number
             FROM DUAL
         ) src
         ON (tgt.EXTERNAL_TRANSACTION_ID = src.external_transaction_id)
@@ -215,6 +221,9 @@ BEGIN
                 tgt.LAST_UPDATED_BY              = src.last_updated_by,
                 tgt.LAST_UPDATE_DATE             = src.last_update_date,
                 tgt.LAST_UPDATE_LOGIN            = src.last_update_login,
+                tgt.PAYMENT_METHOD               = src.payment_method,
+                tgt.PAYMENT_DOCUMENT             = src.payment_document,
+                tgt.PAPER_DOCUMENT_NUMBER        = src.paper_document_number,
                 tgt.SYNC_DATE                    = SYSTIMESTAMP
         WHEN NOT MATCHED THEN
             INSERT (
@@ -230,7 +239,9 @@ BEGIN
                 END_TO_END_ID, INSTRUCTION_IDENTIFICATION, RECON_REFERENCE,
                 STRUCTURED_PAYMENT_REFERENCE, BANK_TRANSACTION_ID,
                 CREATED_BY, CREATION_DATE, LAST_UPDATED_BY,
-                LAST_UPDATE_DATE, LAST_UPDATE_LOGIN, SYNC_DATE
+                LAST_UPDATE_DATE, LAST_UPDATE_LOGIN,
+                PAYMENT_METHOD, PAYMENT_DOCUMENT, PAPER_DOCUMENT_NUMBER,
+                SYNC_DATE
             ) VALUES (
                 src.external_transaction_id, src.transaction_id,
                 src.transaction_date, src.value_date, src.cleared_date,
@@ -244,7 +255,9 @@ BEGIN
                 src.end_to_end_id, src.instruction_identification, src.recon_reference,
                 src.structured_payment_reference, src.bank_transaction_id,
                 src.created_by, src.creation_date, src.last_updated_by,
-                src.last_update_date, src.last_update_login, SYSTIMESTAMP
+                src.last_update_date, src.last_update_login,
+                src.payment_method, src.payment_document, src.paper_document_number,
+                SYSTIMESTAMP
             );
 
         p_count := p_count + 1;
@@ -395,6 +408,9 @@ DECLARE
                TO_CHAR(CREATION_DATE,   'YYYY-MM-DD"T"HH24:MI:SS') AS CREATION_DATE,
                LAST_UPDATED_BY,
                TO_CHAR(LAST_UPDATE_DATE,'YYYY-MM-DD"T"HH24:MI:SS') AS LAST_UPDATE_DATE,
+               PAYMENT_METHOD,
+               PAYMENT_DOCUMENT,
+               PAPER_DOCUMENT_NUMBER,
                TO_CHAR(SYNC_DATE,       'YYYY-MM-DD"T"HH24:MI:SS') AS SYNC_DATE
           FROM RR_EXTERNAL_CASH_TRANSACTIONS
          WHERE (l_txn_number IS NULL OR TO_CHAR(TRANSACTION_ID) LIKE '%' || l_txn_number || '%')
@@ -469,6 +485,9 @@ BEGIN
          || '"creationDate":'           || jstr(r.CREATION_DATE)   || ','
          || '"lastUpdatedBy":'          || jstr(r.LAST_UPDATED_BY) || ','
          || '"lastUpdateDate":'         || jstr(r.LAST_UPDATE_DATE) || ','
+         || '"paymentMethod":'          || jstr(r.PAYMENT_METHOD) || ','
+         || '"paymentDocument":'        || jstr(r.PAYMENT_DOCUMENT) || ','
+         || '"paperDocumentNumber":'    || jstr(r.PAPER_DOCUMENT_NUMBER) || ','
          || '"syncDate":'               || jstr(r.SYNC_DATE) || '}'
         ));
     END LOOP;
@@ -562,4 +581,14 @@ END;
 
     COMMIT;
 END;
+/
+
+-- ============================================================
+-- Migration: Add payment fields (run once on existing DBs)
+-- ============================================================
+ALTER TABLE RR_EXTERNAL_CASH_TRANSACTIONS ADD (
+    PAYMENT_METHOD         VARCHAR2(60),
+    PAYMENT_DOCUMENT       VARCHAR2(240),
+    PAPER_DOCUMENT_NUMBER  VARCHAR2(60)
+);
 /
