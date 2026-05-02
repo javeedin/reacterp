@@ -173,11 +173,12 @@ async function testPdfWithTemplate(
   const amtRe     = /^[\d,]+(\.\d{1,2})?$/;
   const isHdrOrPg = (tokens: { str: string }[]) => {
     const j = tokens.map(t => t.str).join(' ').toLowerCase();
-    return /transaction\s+date|value\s+date|narration|running\s+balance/.test(j)
+    return /transaction\s+date|value\s+date|narration|running\s+balance|transaction\s+running|date\s+balance/.test(j)
       || /^\s*page\s+\d/.test(j) || /^\d+\s+of\s+\d+/.test(j);
   };
   const isNonNarration = (text: string) =>
-    /^-[\d,]+(\.\d+)?$/.test(text.trim()) || text.includes('@') || /^https?:\/\/|^www\./i.test(text);
+    /^-[\d,]+(\.\d+)?$/.test(text.trim()) || text.includes('@') ||
+    /^https?:\/\/|^www\./i.test(text) || /^Tel[\s:+]/i.test(text) || /^Timings?:/i.test(text);
   const splitAmts = (str: string): number[] =>
     str.trim().split(/\s+/).map(s => parseFloat(s.replace(/,/g, ''))).filter(n => !isNaN(n) && n >= 0);
 
