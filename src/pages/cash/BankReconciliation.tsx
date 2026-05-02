@@ -592,7 +592,6 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const openExtTxnModal = useCallback(async () => {
     const selectedLines = stmtLines.filter(l => selectedStmtKeys.includes(l.lineId));
     const firstLine     = selectedLines[0];
-    const totalAmount   = selectedLines.reduce((s, l) => s + Math.abs(l.amount ?? 0), 0);
 
     extTxnForm.resetFields();
     setExtTxnPayload(null);
@@ -604,6 +603,9 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     setExtAcctRunning(false);
     setExtAcctResult(null);
     const autoDir = (firstLine?.transactionCode === 'CR' ? 'CR' : 'DR') as 'DR' | 'CR';
+    // CR = Money In = positive, DR = Money Out = negative
+    const applySign = (abs: number) => autoDir === 'CR' ? Math.abs(abs) : -Math.abs(abs);
+    const totalAmount = applySign(selectedLines.reduce((s, l) => s + Math.abs(l.amount ?? 0), 0));
     setExtTxnDirection(autoDir);
     setExtTxnAssetAcct('');
     setExtTxnOffsetAcct('');
@@ -621,7 +623,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       selectedLines.length > 0
         ? selectedLines.map((l, i) => ({
             key: i,
-            amount: Math.abs(l.amount ?? 0),
+            amount: applySign(l.amount ?? 0),
             description: l.description || '',
             offsetAccount: '',
             offsetDesc: '',
@@ -1488,9 +1490,9 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       const txnDate    = values.transactionDate?.format('YYYY-MM-DD') ?? new Date().toISOString().slice(0, 10);
       const periodName = derivePeriodName(new Date(txnDate));
 
-      // DR = money in: DR bank asset / CR offset. CR = money out: DR offset / CR bank asset
-      const drAcct = direction === 'DR' ? values.assetAccountCombination : values.offsetAccountCombination;
-      const crAcct = direction === 'DR' ? values.offsetAccountCombination : values.assetAccountCombination;
+      // CR = money in: DR bank asset / CR offset. DR = money out: DR offset / CR bank asset
+      const drAcct = direction === 'CR' ? values.assetAccountCombination : values.offsetAccountCombination;
+      const crAcct = direction === 'CR' ? values.offsetAccountCombination : values.assetAccountCombination;
 
       const slaPayload = buildPcBankTxnSlaPayload({
         externalTransactionId:    extTxnCreatedId,
@@ -2893,8 +2895,8 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
             </Col>
             <Col span={8}>
               <Form.Item label="Direction (auto)" style={{ marginBottom: 8 }}>
-                <Tag color={extTxnDirection === 'DR' ? 'blue' : 'volcano'} style={{ fontSize: 13, padding: '2px 12px' }}>
-                  {extTxnDirection === 'DR' ? '▲ Money In (DR)' : '▼ Money Out (CR)'}
+                <Tag color={extTxnDirection === 'CR' ? 'blue' : 'volcano'} style={{ fontSize: 13, padding: '2px 12px' }}>
+                  {extTxnDirection === 'CR' ? '▲ Money In (CR)' : '▼ Money Out (DR)'}
                 </Tag>
               </Form.Item>
             </Col>
@@ -2902,7 +2904,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
 
           {/* Accounting entry preview */}
           {(() => {
-            const isMoneyIn = extTxnDirection === 'DR';
+            const isMoneyIn = extTxnDirection === 'CR';
             const assetCode  = extTxnAssetAcct  || '';
             const offsetCode = extTxnOffsetAcct || '';
             const assetLabel  = extAssetDesc  || assetCode  || 'Cash / Asset Account';
