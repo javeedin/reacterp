@@ -1896,21 +1896,57 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const sysQ = sysSearch.toLowerCase();
   const filteredSysTxns = sysQ
     ? filteredSysTxnsBase.filter(t =>
-        (t.txnNumber  || '').toLowerCase().includes(sysQ) ||
-        (t.reference  || '').toLowerCase().includes(sysQ) ||
-        (t.payee      || '').toLowerCase().includes(sysQ) ||
-        (t.businessUnit || '').toLowerCase().includes(sysQ)
+        (t.txnNumber            || '').toLowerCase().includes(sysQ) ||
+        (t.reference            || '').toLowerCase().includes(sysQ) ||
+        (t.txnDate              || '').toLowerCase().includes(sysQ) ||
+        (t.amount != null && String(t.amount).includes(sysQ))       ||
+        (t.currencyCode         || '').toLowerCase().includes(sysQ) ||
+        (t.txnStatus            || '').toLowerCase().includes(sysQ) ||
+        (t.source               || '').toLowerCase().includes(sysQ) ||
+        (t.businessUnit         || '').toLowerCase().includes(sysQ) ||
+        (t.bankAccountName      || '').toLowerCase().includes(sysQ) ||
+        // AP Payment
+        (t.payee                || '').toLowerCase().includes(sysQ) ||
+        (t.supplierNumber       || '').toLowerCase().includes(sysQ) ||
+        (t.paymentMethod        || '').toLowerCase().includes(sysQ) ||
+        (t.paymentType          || '').toLowerCase().includes(sysQ) ||
+        (t.clearingDate         || '').toLowerCase().includes(sysQ) ||
+        // AR Receipt
+        (t.customerName         || '').toLowerCase().includes(sysQ) ||
+        (t.customerNumber       || '').toLowerCase().includes(sysQ) ||
+        (t.receiptMethod        || '').toLowerCase().includes(sysQ) ||
+        // GL Journal
+        (t.accountCode          || '').toLowerCase().includes(sysQ) ||
+        (t.accountDescription   || '').toLowerCase().includes(sysQ) ||
+        (t.journalCategory      || '').toLowerCase().includes(sysQ) ||
+        (t.lineDescription      || '').toLowerCase().includes(sysQ) ||
+        // External / CM
+        (t.assetAccountCombination  || '').toLowerCase().includes(sysQ) ||
+        (t.offsetAccountCombination || '').toLowerCase().includes(sysQ) ||
+        (t.createdBy            || '').toLowerCase().includes(sysQ)
       )
     : filteredSysTxnsBase;
 
   const stmtQ = stmtSearch.toLowerCase();
   const filteredStmtLines = stmtQ
     ? stmtLines.filter(l =>
-        (l.description       || '').toLowerCase().includes(stmtQ) ||
-        (l.reference         || '').toLowerCase().includes(stmtQ) ||
-        (l.bankTxnReference  || '').toLowerCase().includes(stmtQ) ||
-        (l.counterpartyName  || '').toLowerCase().includes(stmtQ) ||
-        (l.transactionCode   || '').toLowerCase().includes(stmtQ)
+        (l.transactionDate    || '').toLowerCase().includes(stmtQ) ||
+        (l.valueDate          || '').toLowerCase().includes(stmtQ) ||
+        (l.amount != null && String(l.amount).includes(stmtQ))     ||
+        (l.transactionCode    || '').toLowerCase().includes(stmtQ) ||
+        (l.description        || '').toLowerCase().includes(stmtQ) ||
+        (l.reference          || '').toLowerCase().includes(stmtQ) ||
+        (l.bankTxnReference   || '').toLowerCase().includes(stmtQ) ||
+        (l.counterpartyName   || '').toLowerCase().includes(stmtQ) ||
+        (l.reconStatus        || '').toLowerCase().includes(stmtQ) ||
+        (l.reconTxnType       || '').toLowerCase().includes(stmtQ) ||
+        (l.reconTxnNumber     || '').toLowerCase().includes(stmtQ) ||
+        (l.reconNotes         || '').toLowerCase().includes(stmtQ) ||
+        (l.reconDate          || '').toLowerCase().includes(stmtQ) ||
+        (l.bankAccountName    || '').toLowerCase().includes(stmtQ) ||
+        (l.currencyCode       || '').toLowerCase().includes(stmtQ) ||
+        (l.statementNumber    || '').toLowerCase().includes(stmtQ) ||
+        (l.externalTxnRef     || '').toLowerCase().includes(stmtQ)
       )
     : stmtLines;
 
