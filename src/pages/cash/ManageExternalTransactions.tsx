@@ -1188,7 +1188,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     const buLeMapping: Record<string, string> = {};
     const buSet = new Set<string>();
 
-    // Step 1: Load BUs from gl/businessunits — isolated try so failures don't block step 2
+    // Step 1: BUs from gl/businessunits
     try {
       const buRes = await fetch(`${APEX_BASE}/gl/businessunits`, { headers: { Accept: 'application/json' } });
       const buData = buRes.ok ? await buRes.json() : null;
@@ -1201,24 +1201,43 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       }
     } catch { /* silent */ }
 
-    // Expose BUs immediately so the dropdown is usable even if step 2 is slow
     setBuLeMap({ ...buLeMapping });
     setBusinessUnits([...buSet].sort().map(n => ({ label: n, value: n })));
 
-    // Step 2: Load sample transactions to build bank account → BU mapping
+    // Step 2: Bank accounts from banks/bankaccounts (same source as AP / Bank Recon)
+    try {
+      const baRes = await fetch(`${APEX_BASE}/banks/bankaccounts`, { headers: { Accept: 'application/json' } });
+      const baData = baRes.ok ? await baRes.json() : null;
+      if (baData?.items) {
+        const acctMap: Record<string, string> = {};
+        const ccyMap:  Record<string, string> = {};
+        const allAccts: string[] = [];
+        (baData.items as any[]).forEach((i: any) => {
+          const name = i.bank_account_name || '';
+          if (!name) return;
+          allAccts.push(name);
+          if (i.cash_account_combination) acctMap[name] = i.cash_account_combination;
+          if (i.currency_code)            ccyMap[name]  = i.currency_code;
+        });
+        setAllBankAccounts(allAccts.sort().map(n => ({ label: n, value: n })));
+        setBankAccountMap(acctMap);
+        setBankAccountCurrencyMap(ccyMap);
+      }
+    } catch { /* silent */ }
+
+    // Step 3: Scan existing transactions to build BU → bank-account mapping
+    // and enrich acctMap / ccyMap with values from actual transaction records.
     try {
       const res = await fetch(`${APEX_BASE}/cash/externaltransactions?row_limit=2000`);
       const data = await parseApexJson(res);
       if (data.success && data.items) {
         const items: ExternalTxnRecord[] = data.items;
-        const acctSet  = new Set<string>();
-        const acctMap: Record<string, string>    = {};
-        const ccyMap:  Record<string, string>    = {};
+        const acctMap: Record<string, string>      = {};
+        const ccyMap:  Record<string, string>      = {};
         const buBanks: Record<string, Set<string>> = {};
 
         items.forEach(i => {
           if (i.bankAccountName) {
-            acctSet.add(i.bankAccountName);
             if (i.businessUnitName) {
               if (!buBanks[i.businessUnitName]) buBanks[i.businessUnitName] = new Set();
               buBanks[i.businessUnitName].add(i.bankAccountName);
@@ -1233,14 +1252,13 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
             buLeMapping[i.businessUnitName] = i.legalEntityName;
         });
 
-        setAllBankAccounts([...acctSet].sort().map(n => ({ label: n, value: n })));
-        setBankAccountMap(acctMap);
-        setBankAccountCurrencyMap(ccyMap);
+        // Merge transaction-derived account/currency hints (don't overwrite bank master)
+        setBankAccountMap(prev => ({ ...prev, ...acctMap }));
+        setBankAccountCurrencyMap(prev => ({ ...prev, ...ccyMap }));
         setBuLeMap({ ...buLeMapping });
         setBuBankMap(Object.fromEntries(
           Object.entries(buBanks).map(([bu, set]) => [bu, [...set]])
         ));
-        // Merge any extra BUs discovered in transactions
         setBusinessUnits([...buSet].sort().map(n => ({ label: n, value: n })));
       }
     } catch { /* silent */ }
