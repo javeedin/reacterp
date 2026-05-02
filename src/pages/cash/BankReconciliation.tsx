@@ -2969,7 +2969,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
               <Row gutter={12}>
                 <Col span={12}>
                   <Form.Item label="Amount" name="amount" rules={[{ required: true, message: 'Required' }]}>
-                    <InputNumber style={{ width: '100%' }} precision={2} placeholder="0.00" />
+                    <InputNumber style={{ width: '100%', background: '#f5f5f5' }} precision={2} readOnly />
                   </Form.Item>
                 </Col>
                 <Col span={12}>
@@ -3008,10 +3008,10 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                   },
                   {
                     title: 'Amount', width: 110,
-                    render: (_: any, record: any, idx: number) => (
-                      <InputNumber size="small" style={{ width: '100%' }} precision={2}
+                    render: (_: any, record: any) => (
+                      <InputNumber size="small" style={{ width: '100%', background: '#f5f5f5' }} precision={2}
                         value={record.amount}
-                        onChange={(v) => updateExtLine(idx, 'amount', v)}
+                        readOnly
                       />
                     ),
                   },
