@@ -361,7 +361,10 @@ const ExternalTxnForm: React.FC<{
 
   return (
     <div style={{ maxWidth: 980, margin: '0 auto', padding: '0 0 80px' }}>
-
+      <style>{`
+        .direction-dr .ant-segmented-item-selected { background: #1677ff !important; color: #fff !important; }
+        .direction-cr .ant-segmented-item-selected { background: #ff4d4f !important; color: #fff !important; }
+      `}</style>
 
       <Form form={form} layout="vertical" size="middle">
 
@@ -495,8 +498,21 @@ const ExternalTxnForm: React.FC<{
                     { label: '▲ DR — Money In',  value: 'DR' },
                     { label: '▼ CR — Money Out', value: 'CR' },
                   ]}
-                  onChange={(v) => setTxnDirection(v as 'DR' | 'CR')}
+                  onChange={(v) => {
+                    const dir = v as 'DR' | 'CR';
+                    setTxnDirection(dir);
+                    // Auto-sign the amount field
+                    const cur = form.getFieldValue('amount');
+                    if (cur != null && cur !== '' && cur !== 0) {
+                      const abs = Math.abs(Number(cur));
+                      form.setFieldsValue({ amount: dir === 'DR' ? abs : -abs });
+                    }
+                  }}
                   disabled={isEdit || !buSelected}
+                  style={{
+                    background: txnDirection === 'DR' ? '#e6f4ff' : '#fff1f0',
+                  }}
+                  className={`direction-segmented direction-${txnDirection.toLowerCase()}`}
                 />
               </Form.Item>
             </Col>
@@ -654,8 +670,13 @@ const ExternalTxnForm: React.FC<{
                     style={{ width: '100%' }}
                     precision={2}
                     disabled={isEdit || !buSelected}
-                    placeholder="0.00 (negative for debit)"
+                    placeholder={txnDirection === 'DR' ? 'Positive — Money In' : 'Negative — Money Out'}
                     formatter={v => v ? String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''}
+                    onChange={(v) => {
+                      if (v == null) return;
+                      const signed = txnDirection === 'DR' ? Math.abs(Number(v)) : -Math.abs(Number(v));
+                      if (signed !== Number(v)) form.setFieldsValue({ amount: signed });
+                    }}
                   />
                 </Form.Item>
               </Col>
