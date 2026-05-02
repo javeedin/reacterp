@@ -150,6 +150,8 @@ const ExternalTxnForm: React.FC<{
   const [apiResponse, setApiResponse]     = useState<{ status: number; body: string } | null>(null);
   const [cashAcctOpen, setCashAcctOpen]   = useState(false);
   const [offsetAcctOpen, setOffsetAcctOpen] = useState(false);
+  const [assetAcctDesc,  setAssetAcctDesc]  = useState('');
+  const [offsetAcctDesc, setOffsetAcctDesc] = useState('');
   const [extTxnMode, setExtTxnMode]       = useState<'single' | 'multiple'>('single');
   const [extTxnLines, setExtTxnLines]     = useState<ExtTxnLine[]>([
     { key: 0, amount: undefined, description: '', offsetAccount: '', offsetDesc: '' },
@@ -193,8 +195,10 @@ const ExternalTxnForm: React.FC<{
       });
     } else {
       form.resetFields();
-      form.setFieldsValue({ transactionDate: dayjs(), transactionDirection: 'DR' });
-      setTxnDirection('DR');
+      form.setFieldsValue({ transactionDate: dayjs(), transactionDirection: 'CR' });
+      setTxnDirection('CR');
+      setAssetAcctDesc('');
+      setOffsetAcctDesc('');
     }
   }, [initialValues, form]);
 
@@ -547,6 +551,7 @@ const ExternalTxnForm: React.FC<{
                     />
                   )}
                 </div>
+                {assetAcctDesc && <div style={{ fontSize: 11, color: REDWOOD.info, marginTop: 3 }}>{assetAcctDesc}</div>}
               </Form.Item>
             </Col>
             {extTxnMode === 'single' && (
@@ -574,6 +579,7 @@ const ExternalTxnForm: React.FC<{
                       />
                     )}
                   </div>
+                  {offsetAcctDesc && <div style={{ fontSize: 11, color: REDWOOD.info, marginTop: 3 }}>{offsetAcctDesc}</div>}
                 </Form.Item>
               </Col>
             )}
@@ -604,27 +610,39 @@ const ExternalTxnForm: React.FC<{
                   {txnDirection === 'DR' ? (
                     <>
                       <tr>
-                        <td style={{ color: '#89b4fa', fontWeight: 700, paddingTop: 2 }}>DR</td>
-                        <td style={{ color: '#cdd6f4', paddingTop: 2 }}>{watchedAsset}</td>
-                        <td style={{ color: '#89b4fa', textAlign: 'right', paddingTop: 2 }}>{fmtAmount(Math.abs(watchedAmount ?? 0))}</td>
+                        <td style={{ color: '#89b4fa', fontWeight: 700, paddingTop: 2, verticalAlign: 'top' }}>DR</td>
+                        <td style={{ color: '#cdd6f4', paddingTop: 2 }}>
+                          {watchedAsset}
+                          {assetAcctDesc && <div style={{ color: '#6c7086', fontSize: 10, marginTop: 1 }}>{assetAcctDesc}</div>}
+                        </td>
+                        <td style={{ color: '#89b4fa', textAlign: 'right', paddingTop: 2, verticalAlign: 'top' }}>{fmtAmount(Math.abs(watchedAmount ?? 0))}</td>
                       </tr>
                       <tr>
-                        <td style={{ color: '#a6e3a1', fontWeight: 700, paddingTop: 2 }}>CR</td>
-                        <td style={{ color: '#cdd6f4', paddingTop: 2 }}>{watchedOffset}</td>
-                        <td style={{ color: '#a6e3a1', textAlign: 'right', paddingTop: 2 }}>{fmtAmount(Math.abs(watchedAmount ?? 0))}</td>
+                        <td style={{ color: '#a6e3a1', fontWeight: 700, paddingTop: 4, verticalAlign: 'top' }}>CR</td>
+                        <td style={{ color: '#cdd6f4', paddingTop: 4 }}>
+                          {watchedOffset}
+                          {offsetAcctDesc && <div style={{ color: '#6c7086', fontSize: 10, marginTop: 1 }}>{offsetAcctDesc}</div>}
+                        </td>
+                        <td style={{ color: '#a6e3a1', textAlign: 'right', paddingTop: 4, verticalAlign: 'top' }}>{fmtAmount(Math.abs(watchedAmount ?? 0))}</td>
                       </tr>
                     </>
                   ) : (
                     <>
                       <tr>
-                        <td style={{ color: '#89b4fa', fontWeight: 700, paddingTop: 2 }}>DR</td>
-                        <td style={{ color: '#cdd6f4', paddingTop: 2 }}>{watchedOffset}</td>
-                        <td style={{ color: '#89b4fa', textAlign: 'right', paddingTop: 2 }}>{fmtAmount(Math.abs(watchedAmount ?? 0))}</td>
+                        <td style={{ color: '#89b4fa', fontWeight: 700, paddingTop: 2, verticalAlign: 'top' }}>DR</td>
+                        <td style={{ color: '#cdd6f4', paddingTop: 2 }}>
+                          {watchedOffset}
+                          {offsetAcctDesc && <div style={{ color: '#6c7086', fontSize: 10, marginTop: 1 }}>{offsetAcctDesc}</div>}
+                        </td>
+                        <td style={{ color: '#89b4fa', textAlign: 'right', paddingTop: 2, verticalAlign: 'top' }}>{fmtAmount(Math.abs(watchedAmount ?? 0))}</td>
                       </tr>
                       <tr>
-                        <td style={{ color: '#a6e3a1', fontWeight: 700, paddingTop: 2 }}>CR</td>
-                        <td style={{ color: '#cdd6f4', paddingTop: 2 }}>{watchedAsset}</td>
-                        <td style={{ color: '#a6e3a1', textAlign: 'right', paddingTop: 2 }}>{fmtAmount(Math.abs(watchedAmount ?? 0))}</td>
+                        <td style={{ color: '#a6e3a1', fontWeight: 700, paddingTop: 4, verticalAlign: 'top' }}>CR</td>
+                        <td style={{ color: '#cdd6f4', paddingTop: 4 }}>
+                          {watchedAsset}
+                          {assetAcctDesc && <div style={{ color: '#6c7086', fontSize: 10, marginTop: 1 }}>{assetAcctDesc}</div>}
+                        </td>
+                        <td style={{ color: '#a6e3a1', textAlign: 'right', paddingTop: 4, verticalAlign: 'top' }}>{fmtAmount(Math.abs(watchedAmount ?? 0))}</td>
                       </tr>
                     </>
                   )}
@@ -849,13 +867,27 @@ const ExternalTxnForm: React.FC<{
         visible={cashAcctOpen}
         onCancel={() => setCashAcctOpen(false)}
         initialValue={form.getFieldValue('assetAccountCombination') || ''}
-        onSelect={(code: string) => { form.setFieldValue('assetAccountCombination', code); setCashAcctOpen(false); }}
+        onSelect={(code: string) => {
+          form.setFieldValue('assetAccountCombination', code);
+          setCashAcctOpen(false);
+          validateAccountCode(code).then(r => {
+            const seg4 = Object.values(r.segmentDetails)[3];
+            setAssetAcctDesc((seg4 as any)?.description || '');
+          }).catch(() => {});
+        }}
       />
       <AccountSelector
         visible={offsetAcctOpen}
         onCancel={() => setOffsetAcctOpen(false)}
         initialValue={form.getFieldValue('offsetAccountCombination') || ''}
-        onSelect={(code: string) => { form.setFieldValue('offsetAccountCombination', code); setOffsetAcctOpen(false); }}
+        onSelect={(code: string) => {
+          form.setFieldValue('offsetAccountCombination', code);
+          setOffsetAcctOpen(false);
+          validateAccountCode(code).then(r => {
+            const seg4 = Object.values(r.segmentDetails)[3];
+            setOffsetAcctDesc((seg4 as any)?.description || '');
+          }).catch(() => {});
+        }}
       />
       <AccountSelector
         visible={lineCoaOpen}
