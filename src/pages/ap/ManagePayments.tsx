@@ -196,8 +196,11 @@ interface BankAccountRecord {
   currencyCode: string;
   bankNumber: string;
   branchNumber: string;
+  description: string;
   cashAccountCombination: string;
+  cashAccountDescription: string;
   cashClearingAccountCombination: string;
+  cashClearingAccountDescription: string;
   legalEntityName: string;
 }
 
@@ -564,8 +567,11 @@ const ManagePayments: React.FC = () => {
         currencyCode: item.currency_code || '',
         bankNumber: item.bank_number || '',
         branchNumber: item.branch_number || '',
+        description: item.description || '',
         cashAccountCombination: item.cash_account_combination || '',
+        cashAccountDescription: item.cash_account_description || '',
         cashClearingAccountCombination: item.cash_clearing_account_combination || '',
+        cashClearingAccountDescription: item.cash_clearing_account_description || '',
         legalEntityName: item.legal_entity_name || '',
       }));
       setBankAccounts(items);
@@ -709,6 +715,7 @@ const ManagePayments: React.FC = () => {
   const [createAccountingChecked, setCreateAccountingChecked] = useState(true);
   const [paymentConfirmed, setPaymentConfirmed]             = useState(false);
   const [confirmedPaymentNumber, setConfirmedPaymentNumber] = useState<string>('');
+  const [confirmedCheckId, setConfirmedCheckId]             = useState<number | null>(null);
   const [savePaymentLoading, setSavePaymentLoading]         = useState(false);
 
   type ConfirmStepKey = 'payment' | 'installments' | 'link' | 'sla' | 'gl';
@@ -760,6 +767,7 @@ const ManagePayments: React.FC = () => {
 
       const checkId: number | null = data1?.checkId ?? null;
       const paymentNumber: string = data1?.paymentNumber ?? (checkId ? String(checkId) : 'Unknown');
+      if (checkId) setConfirmedCheckId(checkId);
       setConfStep('payment', { status: 'success', detail: `Payment #${paymentNumber} created` });
 
       // ── Step 2: PUT /ap/createinvoice/installments — reduce UNPAID_AMOUNT ──
@@ -849,7 +857,7 @@ const ManagePayments: React.FC = () => {
           const relItems: any[] = relData.items || [];
 
           const bank = bankAccounts.find(b => b.bankAccountName === v2.disbursementBankAccount || b.bankAccountName === v2.paymentDocument);
-          const cashClearingAcct = bank?.cashClearingAccountCombination || '';
+          const cashAcct = bank?.cashAccountCombination || '';
           const ledger = await fetchLedgerByBusinessUnit(buName);
           const ccy    = v2.paymentCurrency || 'AED';
           const exRate = (v2.conversionRate && v2.conversionRate > 0) ? Number(v2.conversionRate) : 1;
@@ -910,15 +918,15 @@ const ManagePayments: React.FC = () => {
               {
                 lineNumber:         appliedInvoices.length + 1,
                 lineType:           'CR' as const,
-                accountingClass:    'CASH_CLEARING',
-                accountCombination: cashClearingAcct,
+                accountingClass:    'CASH',
+                accountCombination: cashAcct,
                 enteredDr:          0,
                 enteredCr:          totalAmount,
                 accountedDr:        0,
                 accountedCr:        Math.round(totalAmount * exRate * 100) / 100,
                 currencyCode:       ccy,
                 exchangeRate:       exRate,
-                description:        `Cash Clearing – Payment ${paperDocNum} / Invoices: ${appliedInvoices.map(i => i.invoiceNumber).join(', ')}`,
+                description:        `Cash – Payment ${paperDocNum} / Invoices: ${appliedInvoices.map(i => i.invoiceNumber).join(', ')}`,
                 sourceLineNumber:   appliedInvoices.length + 1,
               },
             ],
@@ -3076,9 +3084,15 @@ const ManagePayments: React.FC = () => {
                             <Col span={12}>
                               <Form.Item label="Cash Account Combination">
                                 <Input readOnly value={selectedBankAccount.cashAccountCombination} style={{ background: '#f5f5f5', color: '#333' }} />
+                                {selectedBankAccount.cashAccountDescription && (
+                                  <Text type="secondary" style={{ fontSize: 11 }}>{selectedBankAccount.cashAccountDescription}</Text>
+                                )}
                               </Form.Item>
                               <Form.Item label="Cash Clearing Account Combination">
                                 <Input readOnly value={selectedBankAccount.cashClearingAccountCombination} style={{ background: '#f5f5f5', color: '#333' }} />
+                                {selectedBankAccount.cashClearingAccountDescription && (
+                                  <Text type="secondary" style={{ fontSize: 11 }}>{selectedBankAccount.cashClearingAccountDescription}</Text>
+                                )}
                               </Form.Item>
                             </Col>
                           </Row>
@@ -4270,6 +4284,58 @@ const ManagePayments: React.FC = () => {
           <Button disabled={savePaymentLoading} onClick={() => setConfirmPaymentOpen(false)}>
             {paymentConfirmed ? 'Close' : 'Cancel'}
           </Button>
+          {paymentConfirmed && confirmedCheckId && (
+            <Button
+              icon={<FileTextOutlined />}
+              onClick={() => handleViewAccounting({
+                key: String(confirmedCheckId),
+                checkId: confirmedCheckId,
+                paymentNumber: Number(confirmedPaymentNumber),
+                paymentId: 0,
+                paymentDocument: '',
+                paymentStatus: 'NEGOTIABLE',
+                reconciled: false,
+                payee: '',
+                paymentDate: '',
+                paymentAmount: 0,
+                paymentCurrency: 'AED',
+                remitToAddress: '',
+                remitToAccountNumber: '',
+                businessUnit: form.getFieldValue('businessUnit') || '',
+                legalEntity: '',
+                paymentMethod: '',
+                accountingStatus: '',
+                paymentType: '',
+                supplierNumber: '',
+                payeeSite: '',
+                disbursementBankAccount: '',
+                paymentProcessProfile: '',
+                voucherNumber: 0,
+                documentCategory: '',
+                documentSequence: '',
+                withheldAmount: null,
+                paymentReference: 0,
+                paymentFileReference: 0,
+                paymentProcessRequest: '',
+                accountingDate: '',
+                paymentDescription: '',
+                conversionRate: null,
+                conversionDate: '',
+                conversionRateType: '',
+                maturityDate: '',
+                anticipatedValueDate: '',
+                voidDate: '',
+                voidAccountingDate: '',
+                stopDate: '',
+                stopReason: '',
+                stopReference: '',
+                thirdPartySupplier: '',
+                currency: '',
+              } as any)}
+            >
+              View Accounting
+            </Button>
+          )}
           {!paymentConfirmed && (
             <Button
               type="primary"

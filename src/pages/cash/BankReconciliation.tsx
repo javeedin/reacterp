@@ -455,6 +455,8 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const [txnSourceFilter, setTxnSourceFilter] = useState<string>('ALL');
   const [stmtReconFilter, setStmtReconFilter] = useState<'ALL' | 'UNRECONCILED' | 'RECONCILED'>('UNRECONCILED');
   const [cmReconFilter,  setCmReconFilter]   = useState<'ALL' | 'UNRECONCILED' | 'RECONCILED'>('UNRECONCILED');
+  // unified recon filter applied to all sys-txn modules (AP/AR/GL/CM)
+  const [sysReconFilter, setSysReconFilter]  = useState<'ALL' | 'UNRECONCILED' | 'RECONCILED'>('UNRECONCILED');
   const [stmtSearch, setStmtSearch]           = useState('');
   const [sysSearch,  setSysSearch]            = useState('');
   const [selectedStmtKeys, setSelectedStmtKeys] = useState<React.Key[]>([]);
@@ -971,7 +973,10 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     if (params.amountMax != null) q.set('amount_max', String(params.amountMax));
     if (params.reference) q.set('reference', params.reference);
     if (txnType && txnType !== 'ALL') q.set('txn_type', txnType);
-    q.set('reconciled', 'N');
+    // recon filter: use cmFilter arg (which now carries sysReconFilter for all modules)
+    { const rf = cmFilter ?? 'UNRECONCILED';
+      if (rf === 'RECONCILED') q.set('reconciled', 'Y');
+      else if (rf !== 'ALL') q.set('reconciled', 'N'); }
     q.set('row_limit', '500');
 
     try {
@@ -1092,7 +1097,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       dateTo:   lastParams?.dateTo   ?? null,
     };
     fetchStmtLines(lineParams, stmtReconFilter);
-    fetchSysTxns(txnParams, txnSourceFilter, cmReconFilter);
+    fetchSysTxns(txnParams, txnSourceFilter, sysReconFilter);
   }, [lastParams, fetchStmtLines, fetchSysTxns, txnSourceFilter, stmtReconFilter, cmReconFilter]);
 
   const handleReset = useCallback(() => {
@@ -1174,7 +1179,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       handleSelectStatement(selectedStatement);
     } else if (lastParams) {
       fetchStmtLines(lastParams, stmtReconFilter);
-      fetchSysTxns(lastParams, txnSourceFilter, cmReconFilter);
+      fetchSysTxns(lastParams, txnSourceFilter, sysReconFilter);
     }
   }, [selectedStmtKeys, selectedSysKeys, stmtLines, sysTxns, txnSourceFilter, lastParams, selectedStatement, handleSelectStatement, fetchStmtLines, fetchSysTxns, msgApi]);
 
@@ -1385,7 +1390,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     if (errors  > 0) msgApi.error(`${errors} pair(s) failed`);
     if (success > 0) {
       if (selectedStatement) handleSelectStatement(selectedStatement);
-      else if (lastParams) { fetchStmtLines(lastParams, stmtReconFilter); fetchSysTxns(lastParams, txnSourceFilter, cmReconFilter); }
+      else if (lastParams) { fetchStmtLines(lastParams, stmtReconFilter); fetchSysTxns(lastParams, txnSourceFilter, sysReconFilter); }
     }
   }, [autoReconMatches, buildTxnSideCall, selectedStatement, lastParams, handleSelectStatement, fetchStmtLines, fetchSysTxns, stmtReconFilter, txnSourceFilter, cmReconFilter, msgApi]);
 
@@ -1464,7 +1469,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     if (allDone) {
       setSelectedStmtKeys([]); setSelectedSysKeys([]);
       if (selectedStatement) handleSelectStatement(selectedStatement);
-      else if (lastParams) { fetchStmtLines(lastParams, stmtReconFilter); fetchSysTxns(lastParams, txnSourceFilter, cmReconFilter); }
+      else if (lastParams) { fetchStmtLines(lastParams, stmtReconFilter); fetchSysTxns(lastParams, txnSourceFilter, sysReconFilter); }
     }
   }, [reconCalls, executeReconCall, selectedStatement, lastParams, handleSelectStatement, fetchStmtLines, fetchSysTxns, stmtReconFilter]);
 
@@ -2302,25 +2307,24 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
             }
             extra={
               <Space size={8}>
-                {/* CM recon status toggle — only visible when CM tab active */}
-                {txnSourceFilter === 'CM' && (
-                  <Segmented
-                    size="small"
-                    value={cmReconFilter}
-                    onChange={(v) => {
-                      const rf = v as 'ALL' | 'UNRECONCILED' | 'RECONCILED';
-                      setCmReconFilter(rf);
-                      setSysTxns([]);
-                      setSelectedSysKeys([]);
-                      if (lastParams) fetchSysTxns(lastParams, 'CM', rf);
-                    }}
-                    options={[
-                      { label: 'All',     value: 'ALL' },
-                      { label: 'Unrecon', value: 'UNRECONCILED' },
-                      { label: 'Recon',   value: 'RECONCILED' },
-                    ]}
-                  />
-                )}
+                {/* Recon status toggle — shown for all modules */}
+                <Segmented
+                  size="small"
+                  value={sysReconFilter}
+                  onChange={(v) => {
+                    const rf = v as 'ALL' | 'UNRECONCILED' | 'RECONCILED';
+                    setSysReconFilter(rf);
+                    if (txnSourceFilter === 'CM') setCmReconFilter(rf);
+                    setSysTxns([]);
+                    setSelectedSysKeys([]);
+                    if (lastParams) fetchSysTxns(lastParams, txnSourceFilter, rf);
+                  }}
+                  options={[
+                    { label: 'All',     value: 'ALL' },
+                    { label: 'Unrecon', value: 'UNRECONCILED' },
+                    { label: 'Recon',   value: 'RECONCILED' },
+                  ]}
+                />
                 <Segmented
                   size="small"
                   value={txnSourceFilter}
@@ -2329,7 +2333,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                     setTxnSourceFilter(filter);
                     setSysTxns([]);
                     setSelectedSysKeys([]);
-                    if (lastParams) fetchSysTxns(lastParams, filter, cmReconFilter);
+                    if (lastParams) fetchSysTxns(lastParams, filter, sysReconFilter);
                   }}
                   options={[
                     { label: 'All', value: 'ALL' },

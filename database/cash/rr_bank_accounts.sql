@@ -385,8 +385,12 @@ BEGIN
         SELECT BANK_ACCOUNT_NAME,
                BANK_ACCOUNT_NUMBER,
                CURRENCY_CODE,
+               DESCRIPTION,
+               BANK_NUMBER,
+               BRANCH_NUMBER,
                LEGAL_ENTITY_NAME,
-               CASH_ACCOUNT_COMBINATION
+               CASH_ACCOUNT_COMBINATION,
+               CASH_CLEARING_ACCOUNT_COMBINATION
           FROM RR_BANK_ACCOUNTS
          WHERE (END_DATE IS NULL OR END_DATE >= SYSDATE)
          ORDER BY BANK_ACCOUNT_NAME
@@ -394,11 +398,15 @@ BEGIN
         IF NOT l_first THEN l_json := l_json || ','; END IF;
         l_first := FALSE;
         l_json := l_json || '{'
-            || '"bankAccountName":'  || '"' || REPLACE(r.BANK_ACCOUNT_NAME, '"', '\"') || '",'
-            || '"bankAccountNumber":' || '"' || NVL(r.BANK_ACCOUNT_NUMBER, '') || '",'
-            || '"currencyCode":'     || '"' || NVL(r.CURRENCY_CODE, '') || '",'
-            || '"legalEntityName":'  || '"' || NVL(REPLACE(r.LEGAL_ENTITY_NAME, '"', '\"'), '') || '",'
-            || '"cashAccountCombination":' || '"' || NVL(r.CASH_ACCOUNT_COMBINATION, '') || '"'
+            || '"bankAccountName":'               || '"' || REPLACE(r.BANK_ACCOUNT_NAME, '"', '\"') || '",'
+            || '"bankAccountNumber":'             || '"' || NVL(r.BANK_ACCOUNT_NUMBER, '') || '",'
+            || '"currencyCode":'                  || '"' || NVL(r.CURRENCY_CODE, '') || '",'
+            || '"description":'                   || '"' || NVL(REPLACE(r.DESCRIPTION, '"', '\"'), '') || '",'
+            || '"bankNumber":'                    || '"' || NVL(r.BANK_NUMBER, '') || '",'
+            || '"branchNumber":'                  || '"' || NVL(r.BRANCH_NUMBER, '') || '",'
+            || '"legalEntityName":'               || '"' || NVL(REPLACE(r.LEGAL_ENTITY_NAME, '"', '\"'), '') || '",'
+            || '"cashAccountCombination":'        || '"' || NVL(r.CASH_ACCOUNT_COMBINATION, '') || '",'
+            || '"cashClearingAccountCombination":' || '"' || NVL(r.CASH_CLEARING_ACCOUNT_COMBINATION, '') || '"'
             || '}';
     END LOOP;
     l_json := l_json || ']}';
