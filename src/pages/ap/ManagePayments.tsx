@@ -70,6 +70,7 @@ import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 import FloatingMenu from '../../components/FloatingMenu';
 import Autopilot from '../../components/Autopilot';
+import AccountSelector from '../../components/AccountSelector';
 import PaymentDetail from './PaymentDetail';
 import { ORACLE_FUSION_CONFIG, APEX_DB_CONFIG } from '../../config/api.config';
 import {
@@ -201,6 +202,7 @@ interface BankAccountRecord {
   cashAccountDescription: string;
   cashClearingAccountCombination: string;
   cashClearingAccountDescription: string;
+  pdcAccountCombination: string;
   legalEntityName: string;
 }
 
@@ -528,6 +530,10 @@ const ManagePayments: React.FC = () => {
   const [bankAccounts, setBankAccounts] = useState<BankAccountRecord[]>([]);
   const [bankAccountsLoading, setBankAccountsLoading] = useState(false);
   const [selectedBankAccount, setSelectedBankAccount] = useState<BankAccountRecord | null>(null);
+  // Local overrides so user can set missing account combinations without leaving the form
+  const [bankAcctCashOverride,    setBankAcctCashOverride]    = useState<string>('');
+  const [bankAcctPdcOverride,     setBankAcctPdcOverride]     = useState<string>('');
+  const [bankAcctSelectorField,   setBankAcctSelectorField]   = useState<'cash' | 'pdc' | null>(null);
 
   // Payment accounting state
   const [acctPayment, setAcctPayment] = useState<PaymentRecord | null>(null);
@@ -572,6 +578,7 @@ const ManagePayments: React.FC = () => {
         cashAccountDescription: item.cash_account_description || '',
         cashClearingAccountCombination: item.cash_clearing_account_combination || '',
         cashClearingAccountDescription: item.cash_clearing_account_description || '',
+        pdcAccountCombination: item.pdc_account_combination || '',
         legalEntityName: item.legal_entity_name || '',
       }));
       setBankAccounts(items);
@@ -733,6 +740,12 @@ const ManagePayments: React.FC = () => {
   const handleConfirmPaymentClick = async () => {
     try { await createPaymentForm.validateFields(); } catch { message.warning('Please fill in all required fields'); return; }
     if (invoicesToPay.length === 0) { message.warning('Please add at least one invoice before confirming the payment'); return; }
+    const fv = createPaymentForm.getFieldsValue();
+    const effectiveCash = bankAcctCashOverride || selectedBankAccount?.cashAccountCombination || '';
+    const effectivePdc  = bankAcctPdcOverride  || selectedBankAccount?.pdcAccountCombination  || '';
+    const hasMaturity   = !!fv.maturityDate;
+    if (!effectiveCash) { message.error('Cash Account Combination is missing. Please set it in the Bank Details tab before confirming.'); return; }
+    if (hasMaturity && !effectivePdc) { message.error('PDC Account Combination is missing. Please set it in the Bank Details tab before confirming.'); return; }
     setConfirmSteps({
       payment:      { label: 'Create Payment',              status: 'idle' },
       installments: { label: 'Update Invoice Installments', status: 'idle' },
@@ -857,7 +870,11 @@ const ManagePayments: React.FC = () => {
           const relItems: any[] = relData.items || [];
 
           const bank = bankAccounts.find(b => b.bankAccountName === v2.disbursementBankAccount || b.bankAccountName === v2.paymentDocument);
-          const cashAcct = bank?.cashAccountCombination || '';
+          const hasMaturityDate = !!v2.maturityDate;
+          const cashAcct = bankAcctCashOverride || bank?.cashAccountCombination || '';
+          const pdcAcct  = bankAcctPdcOverride  || bank?.pdcAccountCombination  || '';
+          const crAcct   = hasMaturityDate ? pdcAcct : cashAcct;
+          const crClass  = hasMaturityDate ? 'PDC' : 'CASH';
           const ledger = await fetchLedgerByBusinessUnit(buName);
           const ccy    = v2.paymentCurrency || 'AED';
           const exRate = (v2.conversionRate && v2.conversionRate > 0) ? Number(v2.conversionRate) : 1;
@@ -918,15 +935,15 @@ const ManagePayments: React.FC = () => {
               {
                 lineNumber:         appliedInvoices.length + 1,
                 lineType:           'CR' as const,
-                accountingClass:    'CASH',
-                accountCombination: cashAcct,
+                accountingClass:    crClass,
+                accountCombination: crAcct,
                 enteredDr:          0,
                 enteredCr:          totalAmount,
                 accountedDr:        0,
                 accountedCr:        Math.round(totalAmount * exRate * 100) / 100,
                 currencyCode:       ccy,
                 exchangeRate:       exRate,
-                description:        `Cash – Payment ${paperDocNum} / Invoices: ${appliedInvoices.map(i => i.invoiceNumber).join(', ')}`,
+                description:        `${crClass} – Payment ${paperDocNum} / Invoices: ${appliedInvoices.map(i => i.invoiceNumber).join(', ')}`,
                 sourceLineNumber:   appliedInvoices.length + 1,
               },
             ],
@@ -2889,8 +2906,10 @@ const ManagePayments: React.FC = () => {
                                 onChange={(value) => {
                                   const acct = filteredBankAccounts.find(a => a.bankAccountName === value) || null;
                                   setSelectedBankAccount(acct);
+                                  setBankAcctCashOverride('');
+                                  setBankAcctPdcOverride('');
                                 }}
-                                onClear={() => setSelectedBankAccount(null)}
+                                onClear={() => { setSelectedBankAccount(null); setBankAcctCashOverride(''); setBankAcctPdcOverride(''); }}
                               >
                                 {filteredBankAccounts.map((acct, idx) => (
                                   <Option key={idx} value={acct.bankAccountName}>
@@ -3082,18 +3101,62 @@ const ManagePayments: React.FC = () => {
                               </Form.Item>
                             </Col>
                             <Col span={12}>
-                              <Form.Item label="Cash Account Combination">
-                                <Input readOnly value={selectedBankAccount.cashAccountCombination} style={{ background: '#f5f5f5', color: '#333' }} />
-                                {selectedBankAccount.cashAccountDescription && (
-                                  <Text type="secondary" style={{ fontSize: 11 }}>{selectedBankAccount.cashAccountDescription}</Text>
-                                )}
-                              </Form.Item>
-                              <Form.Item label="Cash Clearing Account Combination">
-                                <Input readOnly value={selectedBankAccount.cashClearingAccountCombination} style={{ background: '#f5f5f5', color: '#333' }} />
-                                {selectedBankAccount.cashClearingAccountDescription && (
-                                  <Text type="secondary" style={{ fontSize: 11 }}>{selectedBankAccount.cashClearingAccountDescription}</Text>
-                                )}
-                              </Form.Item>
+                              {(() => {
+                                const effectiveCash = bankAcctCashOverride || selectedBankAccount.cashAccountCombination;
+                                const effectivePdc  = bankAcctPdcOverride  || selectedBankAccount.pdcAccountCombination;
+                                const maturityDate  = createPaymentForm.getFieldValue('maturityDate');
+                                return (
+                                  <>
+                                    <Form.Item
+                                      label="Cash Account Combination"
+                                      validateStatus={!effectiveCash ? 'error' : ''}
+                                      help={!effectiveCash ? 'Required — click to select' : ''}
+                                    >
+                                      <Input.Group compact>
+                                        <Input
+                                          readOnly
+                                          value={effectiveCash}
+                                          style={{ background: effectiveCash ? '#f5f5f5' : '#fff2f0', color: '#333', width: 'calc(100% - 32px)', borderColor: !effectiveCash ? '#ff4d4f' : undefined }}
+                                          placeholder="Not set"
+                                        />
+                                        <Button
+                                          icon={<SearchOutlined />}
+                                          onClick={() => setBankAcctSelectorField('cash')}
+                                          style={{ borderColor: !effectiveCash ? '#ff4d4f' : undefined }}
+                                        />
+                                      </Input.Group>
+                                      {selectedBankAccount.cashAccountDescription && (
+                                        <Text type="secondary" style={{ fontSize: 11 }}>{selectedBankAccount.cashAccountDescription}</Text>
+                                      )}
+                                    </Form.Item>
+                                    <Form.Item label="Cash Clearing Account Combination">
+                                      <Input readOnly value={selectedBankAccount.cashClearingAccountCombination} style={{ background: '#f5f5f5', color: '#333' }} />
+                                      {selectedBankAccount.cashClearingAccountDescription && (
+                                        <Text type="secondary" style={{ fontSize: 11 }}>{selectedBankAccount.cashClearingAccountDescription}</Text>
+                                      )}
+                                    </Form.Item>
+                                    <Form.Item
+                                      label="PDC Account Combination"
+                                      validateStatus={maturityDate && !effectivePdc ? 'error' : ''}
+                                      help={maturityDate && !effectivePdc ? 'Required when Maturity Date is set' : ''}
+                                    >
+                                      <Input.Group compact>
+                                        <Input
+                                          readOnly
+                                          value={effectivePdc}
+                                          style={{ background: effectivePdc ? '#f5f5f5' : (maturityDate ? '#fff2f0' : '#fafafa'), color: '#333', width: 'calc(100% - 32px)', borderColor: maturityDate && !effectivePdc ? '#ff4d4f' : undefined }}
+                                          placeholder="Not set"
+                                        />
+                                        <Button
+                                          icon={<SearchOutlined />}
+                                          onClick={() => setBankAcctSelectorField('pdc')}
+                                          style={{ borderColor: maturityDate && !effectivePdc ? '#ff4d4f' : undefined }}
+                                        />
+                                      </Input.Group>
+                                    </Form.Item>
+                                  </>
+                                );
+                              })()}
                             </Col>
                           </Row>
                         ) : (
@@ -4856,6 +4919,22 @@ const ManagePayments: React.FC = () => {
           <Alert type="warning" showIcon message="Add invoices to the payment to see Step 2 & 3 calls" style={{ fontSize: 12 }} />
         )}
       </Drawer>
+
+      {/* Account selector for missing cash / PDC combinations in Bank Details */}
+      <AccountSelector
+        visible={bankAcctSelectorField !== null}
+        onCancel={() => setBankAcctSelectorField(null)}
+        onSelect={(code: string) => {
+          if (bankAcctSelectorField === 'cash') setBankAcctCashOverride(code);
+          else if (bankAcctSelectorField === 'pdc') setBankAcctPdcOverride(code);
+          setBankAcctSelectorField(null);
+        }}
+        initialValue={
+          bankAcctSelectorField === 'cash'
+            ? (bankAcctCashOverride || selectedBankAccount?.cashAccountCombination || '')
+            : (bankAcctPdcOverride  || selectedBankAccount?.pdcAccountCombination  || '')
+        }
+      />
 
       <Autopilot module="ap" />
       <FloatingMenu />
