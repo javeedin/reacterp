@@ -440,7 +440,16 @@ async function parseBankStatementPdfWithTemplate(
   let rowNum = 0;
   let lastDateRowFailed = false;
   let inFooter = false;
-  for (const row of sortedRows) {
+  let pendingNarration = ''; // narration row that appeared ABOVE the next date row
+
+  // Helper: does this row have a parseable date in the date column?
+  const rowHasDate = (r: typeof sortedRows[0]) => {
+    const di = dateCol ? r.find(it => it.x >= dateCol.xMin && it.x <= dateCol.xMax) : r[0];
+    return !!(di && parseDateStr(di.str, template.dateFormat)?.isValid());
+  };
+
+  for (let ri = 0; ri < sortedRows.length; ri++) {
+    const row = sortedRows[ri];
     rowNum++;
     const rowPreview = row.map(i => i.str).slice(0, 5).join(' | ');
 
@@ -464,19 +473,27 @@ async function parseBankStatementPdfWithTemplate(
         log.push(`  Row ${rowNum}: [FOOTER] "${rowPreview}"`);
         continue;
       }
-      if (lines.length > 0 && !lastDateRowFailed) {
-        const amtItems = row.filter(it => amtRe.test(it.str.replace(/,/g, '')));
-        if (amtItems.length === 0) {
-          // Try narration column first; fall back to all non-date text in the row
-          const narItems = narCol
-            ? row.filter(it => it.x >= narCol.xMin && it.x <= narCol.xMax)
-            : [];
-          const candidates = narItems.length > 0 ? narItems : row;
-          const extra = candidates
-            .map(i => i.str)
-            .filter(s => !parseDateStr(s, template.dateFormat)?.isValid())
-            .join(' ').trim();
-          if (extra.length > 2 && !isNonNarration(extra)) {
+      const amtItems = row.filter(it => amtRe.test(it.str.replace(/,/g, '')));
+      if (amtItems.length === 0) {
+        const narItems = narCol
+          ? row.filter(it => it.x >= narCol.xMin && it.x <= narCol.xMax)
+          : [];
+        const candidates = narItems.length > 0 ? narItems : row;
+        const extra = candidates
+          .map(i => i.str)
+          .filter(s => !parseDateStr(s, template.dateFormat)?.isValid())
+          .join(' ').trim();
+        if (extra.length > 2 && !isNonNarration(extra)) {
+          // Look-ahead: if the NEXT row is a date row, this text belongs to that
+          // transaction (pre-narration), not the previous one (post-narration)
+          const nextRow = sortedRows[ri + 1];
+          if (nextRow && rowHasDate(nextRow)) {
+            pendingNarration = (pendingNarration + ' ' + extra).trim();
+            log.push(`  Row ${rowNum}: [NARRATION>] (pre-narration for next txn) "${extra.slice(0, 60)}"`);
+            continue;
+          }
+          // Post-narration: stitch to previous transaction
+          if (lines.length > 0 && !lastDateRowFailed) {
             lines[lines.length - 1].description =
               (lines[lines.length - 1].description + ' ' + extra).trim();
             log.push(`  Row ${rowNum}: [NARRATION+] "${extra.slice(0, 60)}"`);
@@ -491,7 +508,7 @@ async function parseBankStatementPdfWithTemplate(
 
     const txDate = parseDateStr(dateItem.str, template.dateFormat)!;
 
-    // Bucket items into their column fields; collect skip-zone text separately for narration fallback
+    // Bucket items into their column fields; collect skip-zone text separately
     const bucket: Record<string, string> = {};
     const skipZoneText: string[] = [];
     for (const item of row) {
@@ -502,12 +519,36 @@ async function parseBankStatementPdfWithTemplate(
         skipZoneText.push(item.str);
       }
     }
-    // Narration fallback: if narration empty, use skip-zone non-amount text
+
+    // Narration fallback 1: pending pre-narration from the row above
+    if (!bucket['narration'] && pendingNarration) {
+      bucket['narration'] = pendingNarration;
+    }
+    pendingNarration = '';
+
+    // Narration fallback 2: skip-zone non-amount text
     if (!bucket['narration'] && skipZoneText.length > 0) {
-      const narFallback = skipZoneText
+      const fb = skipZoneText
         .filter(s => !parseDateStr(s, template.dateFormat)?.isValid() && !amtRe.test(s.replace(/,/g, '')))
         .join(' ').trim();
-      if (narFallback.length > 1) bucket['narration'] = narFallback;
+      if (fb.length > 1) bucket['narration'] = fb;
+    }
+
+    // Narration fallback 3: any non-amount, non-date, non-skip item on the row
+    // that didn't land in the narration bucket (catches misaligned Particulars text)
+    if (!bucket['narration']) {
+      const ignoreFields = new Set(['date', 'valueDate', 'balance', 'skip']);
+      const fb = row
+        .filter(it => {
+          const col = template.columns.find(c => it.x >= c.xMin && it.x <= c.xMax);
+          if (!col || ignoreFields.has(col.field)) return false;
+          if (amtRe.test(it.str.replace(/,/g, ''))) return false;
+          if (parseDateStr(it.str, template.dateFormat)?.isValid()) return false;
+          return true;
+        })
+        .map(it => it.str)
+        .join(' ').trim();
+      if (fb.length > 1 && !isNonNarration(fb)) bucket['narration'] = fb;
     }
 
     // Resolve amount and CR/DR direction
