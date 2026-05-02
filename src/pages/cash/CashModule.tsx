@@ -3,6 +3,7 @@ import { Layout, Breadcrumb, Typography, Card, Row, Col } from 'antd';
 import {
   HomeOutlined, BankOutlined, SwapOutlined, ReconciliationOutlined,
   BarChartOutlined, FileTextOutlined, SettingOutlined, CheckCircleOutlined,
+  TeamOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -27,6 +28,7 @@ interface MenuItemType {
 const transferItems: MenuItemType[] = [
   { key: 'manage-transfers',    icon: <SwapOutlined />,    label: 'Manage Bank Account Transfers', description: 'Search, create and manage interbank fund transfers', color: REDWOOD.info,    path: '/cash/bank-transfers' },
   { key: 'external-txns',       icon: <FileTextOutlined />, label: 'Manage External Transactions',  description: 'Search and create external cash transactions',       color: REDWOOD.success, path: '/cash/external-transactions' },
+  { key: 'manage-payees',       icon: <TeamOutlined />,     label: 'Manage Payees',                 description: 'Create and manage ad-hoc payees and bank accounts',  color: REDWOOD.primary, path: '/cash/payees' },
   { key: 'manage-banks',        icon: <BankOutlined />,     label: 'Banks & Accounts',              description: 'View banks, branches and bank accounts',             color: REDWOOD.info },
 ];
 
