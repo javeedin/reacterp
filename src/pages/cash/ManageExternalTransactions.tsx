@@ -420,8 +420,16 @@ const ExternalTxnForm: React.FC<{
                   notFoundContent={<Text type="secondary">No accounts for this BU</Text>}
                   onChange={v => {
                     if (!isEdit) {
-                      form.setFieldValue('assetAccountCombination', bankAccountMap[v] ?? '');
+                      const acct = bankAccountMap[v] ?? '';
+                      form.setFieldValue('assetAccountCombination', acct);
                       form.setFieldValue('currencyCode', bankAccountCurrencyMap[v] ?? '');
+                      setAssetAcctDesc('');
+                      if (acct) {
+                        validateAccountCode(acct).then(r => {
+                          const seg4 = Object.values(r.segmentDetails)[3];
+                          setAssetAcctDesc((seg4 as any)?.description || '');
+                        }).catch(() => {});
+                      }
                     }
                   }}
                 />
