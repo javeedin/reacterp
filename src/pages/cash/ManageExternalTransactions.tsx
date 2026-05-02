@@ -146,16 +146,19 @@ const newTabKey = () => `tab_${++tabCounter}`;
 // ────────────────────────────────────────────────────────────────────────────
 interface ExtTxnLine { key: number; amount?: number; description: string; offsetAccount: string; offsetDesc: string; }
 
+interface PayeeOption { label: string; value: number; payeeName: string; }
+
 const ExternalTxnForm: React.FC<{
   initialValues?: Partial<ExternalTxnRecord>;
   bankAccounts: BankAccountOption[];
   businessUnits: BUOption[];
   bankAccountMap: Record<string, string>;
   bankAccountCurrencyMap: Record<string, string>;
+  payeeOptions: PayeeOption[];
   buBankMap: Record<string, string[]>;
   onSave: () => void;
   onCancel: () => void;
-}> = ({ initialValues, bankAccounts, businessUnits, bankAccountMap, bankAccountCurrencyMap, buBankMap, onSave, onCancel }) => {
+}> = ({ initialValues, bankAccounts, businessUnits, bankAccountMap, bankAccountCurrencyMap, buBankMap, payeeOptions, onSave, onCancel }) => {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const [txnDirection, setTxnDirection] = useState<'DR' | 'CR'>('CR');
@@ -180,9 +183,20 @@ const ExternalTxnForm: React.FC<{
   const isEdit = !!initialValues?.externalTransactionId;
   const buSelected = !!selectedBu;
 
-  const watchedAsset  = Form.useWatch('assetAccountCombination', form);
-  const watchedOffset = Form.useWatch('offsetAccountCombination', form);
-  const watchedAmount = Form.useWatch('amount', form);
+  const watchedAsset   = Form.useWatch('assetAccountCombination', form);
+  const watchedOffset  = Form.useWatch('offsetAccountCombination', form);
+  const watchedAmount  = Form.useWatch('amount', form);
+  const watchedTxnType = Form.useWatch('transactionType', form);
+  const isAdhocPayment = watchedTxnType === 'Adhoc Payment';
+
+  // Adhoc Payment → always money out (CR), always single mode
+  useEffect(() => {
+    if (isAdhocPayment) {
+      setTxnDirection('CR');
+      form.setFieldsValue({ transactionDirection: 'CR' });
+      setExtTxnMode('single');
+    }
+  }, [isAdhocPayment, form]);
 
   const filteredBankAccounts = selectedBu && buBankMap[selectedBu]?.length
     ? buBankMap[selectedBu].sort().map(n => ({ label: n, value: n }))
@@ -539,7 +553,8 @@ const ExternalTxnForm: React.FC<{
                 style={{ marginBottom: 14 }}
               >
                 <Select placeholder="Select type" allowClear disabled={isEdit || !buSelected}>
-                  {['EFT', 'WIRE', 'CHECK', 'MISC'].map(t => <Option key={t} value={t}>{t}</Option>)}
+                  <Option value="External Transaction">External Transaction</Option>
+                  <Option value="Adhoc Payment">Adhoc Payment</Option>
                 </Select>
               </Form.Item>
             </Col>
@@ -576,9 +591,10 @@ const ExternalTxnForm: React.FC<{
                       form.setFieldsValue({ amount: dir === 'DR' ? abs : -abs });
                     }
                   }}
-                  disabled={isEdit || !buSelected}
+                  disabled={isEdit || !buSelected || isAdhocPayment}
                   style={{
                     background: txnDirection === 'DR' ? '#e6f4ff' : '#fff1f0',
+                    opacity: isAdhocPayment ? 0.7 : 1,
                   }}
                   className={`direction-segmented direction-${txnDirection.toLowerCase()}`}
                 />
@@ -616,26 +632,32 @@ const ExternalTxnForm: React.FC<{
               </Form.Item>
             </Col>
           </Row>
-          <Row gutter={16} style={{ marginTop: 8 }}>
-            <Col xs={24} md={16}>
-              <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Payee Name</span>}
-                name="payeeName"
-                style={{ marginBottom: 0 }}
-              >
-                <Input placeholder="Payee / vendor name" disabled={isEdit || !buSelected} />
-              </Form.Item>
-            </Col>
-            <Col xs={24} md={8}>
-              <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Payee ID</span>}
-                name="payeeId"
-                style={{ marginBottom: 0 }}
-              >
-                <InputNumber placeholder="Payee ID" style={{ width: '100%' }} disabled={isEdit || !buSelected} />
-              </Form.Item>
-            </Col>
-          </Row>
+          {isAdhocPayment && (
+            <Row gutter={16} style={{ marginTop: 8 }}>
+              <Col xs={24}>
+                <Form.Item
+                  label={<span style={{ fontWeight: 600, fontSize: 13 }}>Payee</span>}
+                  name="payeeId"
+                  rules={[{ required: true, message: 'Select a payee for Adhoc Payment' }]}
+                  style={{ marginBottom: 0 }}
+                >
+                  <Select
+                    showSearch
+                    placeholder="Select payee..."
+                    disabled={isEdit || !buSelected}
+                    optionFilterProp="label"
+                    options={payeeOptions}
+                    onChange={(val: number) => {
+                      const p = payeeOptions.find(o => o.value === val);
+                      if (p) form.setFieldsValue({ payeeName: p.payeeName });
+                    }}
+                  />
+                </Form.Item>
+                {/* hidden field keeps payeeName in sync */}
+                <Form.Item name="payeeName" hidden><Input /></Form.Item>
+              </Col>
+            </Row>
+          )}
         </Card>
 
         {/* ── Section 3: Account Coding ── */}
@@ -817,7 +839,7 @@ const ExternalTxnForm: React.FC<{
               <span style={{ ...sectionHeader(REDWOOD.warning), marginBottom: 0 }}>
                 <SwapOutlined /> Transaction Line{extTxnMode === 'multiple' ? 's' : ''}
               </span>
-              {!isEdit && (
+              {!isEdit && !isAdhocPayment && (
                 <Segmented
                   size="small"
                   value={extTxnMode}
@@ -1116,8 +1138,9 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   const [businessUnits, setBusinessUnits] = useState<BUOption[]>([]);
   const [bankAccountMap, setBankAccountMap] = useState<Record<string, string>>({});
   const [bankAccountCurrencyMap, setBankAccountCurrencyMap] = useState<Record<string, string>>({});
-  const [buLeMap, setBuLeMap]             = useState<Record<string, string>>({});   // bu → legalEntity
-  const [buBankMap, setBuBankMap]         = useState<Record<string, string[]>>({});  // bu → bankNames[]
+  const [buLeMap, setBuLeMap]             = useState<Record<string, string>>({});
+  const [buBankMap, setBuBankMap]         = useState<Record<string, string[]>>({});
+  const [payeeOptions, setPayeeOptions]   = useState<PayeeOption[]>([]);
   const [selectedBU, setSelectedBU]       = useState<string>('');
   const [derivedLE, setDerivedLE]         = useState<string>('');
   const [activeTabKey, setActiveTabKey]   = useState('search');
@@ -1204,7 +1227,24 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     setBuLeMap({ ...buLeMapping });
     setBusinessUnits([...buSet].sort().map(n => ({ label: n, value: n })));
 
-    // Step 2: Bank accounts from banks/bankaccounts (same source as AP / Bank Recon)
+    // Step 2: Payees from cash/payees
+    try {
+      const pyRes = await fetch(`${APEX_BASE}/cash/payees`, { headers: { Accept: 'application/json' } });
+      const pyData = pyRes.ok ? await pyRes.json() : null;
+      if (pyData?.items) {
+        const opts: PayeeOption[] = (pyData.items as any[])
+          .filter((i: any) => i.active !== 'N')
+          .map((i: any) => ({
+            label: i.payee_name || '',
+            value: i.payee_id,
+            payeeName: i.payee_name || '',
+          }))
+          .sort((a: PayeeOption, b: PayeeOption) => a.label.localeCompare(b.label));
+        setPayeeOptions(opts);
+      }
+    } catch { /* silent */ }
+
+    // Step 3: Bank accounts from banks/bankaccounts (same source as AP / Bank Recon)
     try {
       const baRes = await fetch(`${APEX_BASE}/banks/bankaccounts`, { headers: { Accept: 'application/json' } });
       const baData = baRes.ok ? await baRes.json() : null;
@@ -1830,11 +1870,8 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
             <Col xs={24} md={12}>
               <Form.Item label="Transaction Type" name="transactionType" style={{ marginBottom: 10 }}>
                 <Select placeholder="Select type" allowClear>
-                  <Option value="EFT">EFT</Option>
-                  <Option value="WIRE">WIRE</Option>
-                  <Option value="CHECK">CHECK</Option>
-                  <Option value="MISC">MISC</Option>
-                  <Option value="BKF">BKF</Option>
+                  <Option value="External Transaction">External Transaction</Option>
+                  <Option value="Adhoc Payment">Adhoc Payment</Option>
                 </Select>
               </Form.Item>
             </Col>
@@ -1953,6 +1990,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
           bankAccountMap={bankAccountMap}
           bankAccountCurrencyMap={bankAccountCurrencyMap}
           buBankMap={buBankMap}
+          payeeOptions={payeeOptions}
           onSave={() => { closeTab(t.key); handleSearch(); loadLovs(); }}
           onCancel={() => closeTab(t.key)}
         />
