@@ -142,7 +142,7 @@ const ExternalTxnForm: React.FC<{
 }> = ({ initialValues, bankAccounts, businessUnits, bankAccountMap, bankAccountCurrencyMap, buBankMap, onSave, onCancel }) => {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
-  const [txnDirection, setTxnDirection] = useState<'DR' | 'CR'>('DR');
+  const [txnDirection, setTxnDirection] = useState<'DR' | 'CR'>('CR');
   const [selectedBu, setSelectedBu] = useState<string | undefined>(initialValues?.businessUnitName);
   const [apiModal, setApiModal]           = useState(false);
   const [apiPayload, setApiPayload]       = useState('');
@@ -490,7 +490,7 @@ const ExternalTxnForm: React.FC<{
               <Form.Item
                 label={<span style={{ fontWeight: 600, fontSize: 13 }}>Direction</span>}
                 name="transactionDirection"
-                initialValue="DR"
+                initialValue="CR"
                 style={{ marginBottom: 0 }}
               >
                 <Segmented
