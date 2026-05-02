@@ -467,41 +467,43 @@ BEGIN
         END IF;
         v_first := FALSE;
 
-        DBMS_LOB.APPEND(v_clob, TO_CLOB(
-            '{"externalTransactionId":' || TO_CHAR(r.EXTERNAL_TRANSACTION_ID) || ','
-         || '"transactionId":'          || NVL(TO_CHAR(r.TRANSACTION_ID), 'null') || ','
-         || '"transactionDate":'        || jstr(r.TRANSACTION_DATE) || ','
-         || '"valueDate":'              || jstr(r.VALUE_DATE)       || ','
-         || '"clearedDate":'            || jstr(r.CLEARED_DATE)     || ','
-         || '"amount":'                 || NVL(TO_CHAR(r.AMOUNT), 'null') || ','
-         || '"currencyCode":'           || jstr(r.CURRENCY_CODE)    || ','
-         || '"description":'            || jstr(r.DESCRIPTION)      || ','
-         || '"referenceText":'          || jstr(r.REFERENCE_TEXT)   || ','
-         || '"source":'                 || jstr(r.SOURCE)           || ','
-         || '"status":'                 || jstr(r.STATUS)           || ','
-         || '"transactionType":'        || jstr(r.TRANSACTION_TYPE) || ','
-         || '"accountingFlag":'         || jstr(r.ACCOUNTING_FLAG)  || ','
-         || '"bankAccountName":'        || jstr(r.BANK_ACCOUNT_NAME)          || ','
-         || '"businessUnitName":'       || jstr(r.BUSINESS_UNIT_NAME)         || ','
-         || '"legalEntityName":'        || jstr(r.LEGAL_ENTITY_NAME)          || ','
-         || '"assetAccountCombination":' || jstr(r.ASSET_ACCOUNT_COMBINATION) || ','
-         || '"offsetAccountCombination":' || jstr(r.OFFSET_ACCOUNT_COMBINATION) || ','
-         || '"bankConversionRate":'     || NVL(TO_CHAR(r.BANK_CONVERSION_RATE), 'null') || ','
-         || '"bankConversionRateType":' || jstr(r.BANK_CONVERSION_RATE_TYPE)  || ','
-         || '"transferId":'             || NVL(TO_CHAR(r.TRANSFER_ID), 'null') || ','
-         || '"checkNumber":'            || jstr(r.CHECK_NUMBER)    || ','
-         || '"reconReference":'         || jstr(r.RECON_REFERENCE) || ','
-         || '"createdBy":'              || jstr(r.CREATED_BY)      || ','
-         || '"creationDate":'           || jstr(r.CREATION_DATE)   || ','
-         || '"lastUpdatedBy":'          || jstr(r.LAST_UPDATED_BY) || ','
-         || '"lastUpdateDate":'         || jstr(r.LAST_UPDATE_DATE) || ','
-         || '"paymentMethod":'          || jstr(r.PAYMENT_METHOD) || ','
-         || '"paymentDocument":'        || jstr(r.PAYMENT_DOCUMENT) || ','
-         || '"paperDocumentNumber":'    || jstr(r.PAPER_DOCUMENT_NUMBER) || ','
-         || '"payeeName":'              || jstr(r.PAYEE_NAME) || ','
-         || '"payeeId":'                || NVL(TO_CHAR(r.PAYEE_ID), 'null') || ','
-         || '"syncDate":'               || jstr(r.SYNC_DATE) || '}'
-        ));
+        -- Build each record field-by-field into the CLOB to avoid
+        -- hitting PL/SQL's 32767-byte VARCHAR2 expression limit.
+        DBMS_LOB.APPEND(v_clob, TO_CLOB('{'));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB('"externalTransactionId":' || TO_CHAR(r.EXTERNAL_TRANSACTION_ID)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"transactionId":'    || NVL(TO_CHAR(r.TRANSACTION_ID), 'null')));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"transactionDate":') ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.TRANSACTION_DATE)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"valueDate":')       ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.VALUE_DATE)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"clearedDate":')     ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.CLEARED_DATE)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"amount":'           || NVL(TO_CHAR(r.AMOUNT), 'null')));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"currencyCode":')    ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.CURRENCY_CODE)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"description":')     ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.DESCRIPTION)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"referenceText":')   ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.REFERENCE_TEXT)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"source":')          ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.SOURCE)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"status":')          ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.STATUS)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"transactionType":') ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.TRANSACTION_TYPE)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"accountingFlag":')  ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.ACCOUNTING_FLAG)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"bankAccountName":') ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.BANK_ACCOUNT_NAME)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"businessUnitName":')   ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.BUSINESS_UNIT_NAME)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"legalEntityName":')    ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.LEGAL_ENTITY_NAME)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"assetAccountCombination":') ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.ASSET_ACCOUNT_COMBINATION)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"offsetAccountCombination":') ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.OFFSET_ACCOUNT_COMBINATION)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"bankConversionRate":' || NVL(TO_CHAR(r.BANK_CONVERSION_RATE), 'null')));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"bankConversionRateType":') ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.BANK_CONVERSION_RATE_TYPE)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"transferId":'  || NVL(TO_CHAR(r.TRANSFER_ID), 'null')));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"checkNumber":')    ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.CHECK_NUMBER)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"reconReference":') ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.RECON_REFERENCE)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"createdBy":')      ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.CREATED_BY)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"creationDate":')   ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.CREATION_DATE)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"lastUpdatedBy":')  ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.LAST_UPDATED_BY)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"lastUpdateDate":') ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.LAST_UPDATE_DATE)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"paymentMethod":')      ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.PAYMENT_METHOD)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"paymentDocument":')    ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.PAYMENT_DOCUMENT)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"paperDocumentNumber":') ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.PAPER_DOCUMENT_NUMBER)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"payeeName":')  ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.PAYEE_NAME)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"payeeId":'     || NVL(TO_CHAR(r.PAYEE_ID), 'null')));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"syncDate":')   ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.SYNC_DATE)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB('}'));
     END LOOP;
     CLOSE c_txns;
 

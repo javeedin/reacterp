@@ -78,10 +78,21 @@ interface BUOption          { label: string; value: string; }
 
 const parseApexJson = async (res: Response) => {
   const text = await res.text();
-  const fixed = text
-    .replace(/:(-?)\.(\d)/g, ':$10.$2')   // .428 → 0.428  (missing leading zero)
-    .replace(/(\d)\.([,}\]])/g, '$1$2');  // 100., → 100,  (trailing dot on integers)
-  return JSON.parse(fixed);
+  const fix = (s: string) => s
+    .replace(/:(-?)\.(\d)/g, ':$10.$2')   // .428 → 0.428
+    .replace(/(\d)\.([,}\]])/g, '$1$2');  // 100., → 100,
+  try {
+    return JSON.parse(fix(text));
+  } catch {
+    // Sanitise raw control characters that Oracle may not have escaped,
+    // then retry — handles edge cases in long description/reference fields.
+    const cleaned = fix(
+      text.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+          .replace(/\x0a/g, '\\n')
+          .replace(/\x0d/g, '\\r')
+    );
+    return JSON.parse(cleaned);
+  }
 };
 
 const fmtAmount = (val?: number, ccy?: string) => {
