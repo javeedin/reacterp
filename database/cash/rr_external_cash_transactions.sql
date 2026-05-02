@@ -120,7 +120,9 @@ BEGIN
                 last_update_login            VARCHAR2(200)   PATH '$.LastUpdateLogin',
                 payment_method               VARCHAR2(60)    PATH '$.PaymentMethod',
                 payment_document             VARCHAR2(240)   PATH '$.PaymentDocument',
-                paper_document_number        VARCHAR2(60)    PATH '$.PaperDocumentNumber'
+                paper_document_number        VARCHAR2(60)    PATH '$.PaperDocumentNumber',
+                payee_name                   VARCHAR2(360)   PATH '$.PayeeName',
+                payee_id                     NUMBER          PATH '$.PayeeId'
             )
         )
     ) LOOP
@@ -180,7 +182,9 @@ BEGIN
                 rec.last_update_login                           AS last_update_login,
                 rec.payment_method                              AS payment_method,
                 rec.payment_document                           AS payment_document,
-                rec.paper_document_number                      AS paper_document_number
+                rec.paper_document_number                      AS paper_document_number,
+                rec.payee_name                                 AS payee_name,
+                rec.payee_id                                   AS payee_id
             FROM DUAL
         ) src
         ON (tgt.EXTERNAL_TRANSACTION_ID = src.external_transaction_id)
@@ -224,6 +228,8 @@ BEGIN
                 tgt.PAYMENT_METHOD               = src.payment_method,
                 tgt.PAYMENT_DOCUMENT             = src.payment_document,
                 tgt.PAPER_DOCUMENT_NUMBER        = src.paper_document_number,
+                tgt.PAYEE_NAME                   = src.payee_name,
+                tgt.PAYEE_ID                     = src.payee_id,
                 tgt.SYNC_DATE                    = SYSTIMESTAMP
         WHEN NOT MATCHED THEN
             INSERT (
@@ -241,6 +247,7 @@ BEGIN
                 CREATED_BY, CREATION_DATE, LAST_UPDATED_BY,
                 LAST_UPDATE_DATE, LAST_UPDATE_LOGIN,
                 PAYMENT_METHOD, PAYMENT_DOCUMENT, PAPER_DOCUMENT_NUMBER,
+                PAYEE_NAME, PAYEE_ID,
                 SYNC_DATE
             ) VALUES (
                 src.external_transaction_id, src.transaction_id,
@@ -257,6 +264,7 @@ BEGIN
                 src.created_by, src.creation_date, src.last_updated_by,
                 src.last_update_date, src.last_update_login,
                 src.payment_method, src.payment_document, src.paper_document_number,
+                src.payee_name, src.payee_id,
                 SYSTIMESTAMP
             );
 
@@ -411,6 +419,8 @@ DECLARE
                PAYMENT_METHOD,
                PAYMENT_DOCUMENT,
                PAPER_DOCUMENT_NUMBER,
+               PAYEE_NAME,
+               PAYEE_ID,
                TO_CHAR(SYNC_DATE,       'YYYY-MM-DD"T"HH24:MI:SS') AS SYNC_DATE
           FROM RR_EXTERNAL_CASH_TRANSACTIONS
          WHERE (l_txn_number IS NULL OR TO_CHAR(TRANSACTION_ID) LIKE '%' || l_txn_number || '%')
@@ -488,6 +498,8 @@ BEGIN
          || '"paymentMethod":'          || jstr(r.PAYMENT_METHOD) || ','
          || '"paymentDocument":'        || jstr(r.PAYMENT_DOCUMENT) || ','
          || '"paperDocumentNumber":'    || jstr(r.PAPER_DOCUMENT_NUMBER) || ','
+         || '"payeeName":'              || jstr(r.PAYEE_NAME) || ','
+         || '"payeeId":'                || NVL(TO_CHAR(r.PAYEE_ID), 'null') || ','
          || '"syncDate":'               || jstr(r.SYNC_DATE) || '}'
         ));
     END LOOP;
@@ -590,5 +602,12 @@ ALTER TABLE RR_EXTERNAL_CASH_TRANSACTIONS ADD (
     PAYMENT_METHOD         VARCHAR2(60),
     PAYMENT_DOCUMENT       VARCHAR2(240),
     PAPER_DOCUMENT_NUMBER  VARCHAR2(60)
+);
+/
+
+-- Migration: Add payee fields (run once on existing DBs)
+ALTER TABLE RR_EXTERNAL_CASH_TRANSACTIONS ADD (
+    PAYEE_NAME  VARCHAR2(360),
+    PAYEE_ID    NUMBER
 );
 /

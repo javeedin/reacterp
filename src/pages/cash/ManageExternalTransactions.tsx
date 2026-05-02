@@ -67,6 +67,8 @@ interface ExternalTxnRecord {
   paymentMethod?: string;
   paymentDocument?: string;
   paperDocumentNumber?: string;
+  payeeName?: string;
+  payeeId?: number;
 }
 
 interface BankAccountOption { label: string; value: string; }
@@ -200,6 +202,8 @@ const ExternalTxnForm: React.FC<{
         paymentMethod:             initialValues.paymentMethod,
         paymentDocument:           initialValues.paymentDocument,
         paperDocumentNumber:       initialValues.paperDocumentNumber,
+        payeeName:                 initialValues.payeeName,
+        payeeId:                   initialValues.payeeId,
       });
       // Fetch existing attachments for edit mode
       if (initialValues.externalTransactionId) {
@@ -247,6 +251,8 @@ const ExternalTxnForm: React.FC<{
       PaymentMethod:        values.paymentMethod ?? null,
       PaymentDocument:      values.paymentDocument ?? null,
       PaperDocumentNumber:  values.paperDocumentNumber ?? null,
+      PayeeName:            values.payeeName ?? null,
+      PayeeId:              values.payeeId ?? null,
     }],
   });
 
@@ -276,6 +282,8 @@ const ExternalTxnForm: React.FC<{
         PaymentMethod:        values.paymentMethod ?? null,
         PaymentDocument:      values.paymentDocument ?? null,
         PaperDocumentNumber:  values.paperDocumentNumber ?? null,
+        PayeeName:            values.payeeName ?? null,
+        PayeeId:              values.payeeId ?? null,
       };
       let successCount = 0;
       for (let i = 0; i < extTxnLines.length; i++) {
@@ -594,6 +602,26 @@ const ExternalTxnForm: React.FC<{
                 style={{ marginBottom: 0 }}
               >
                 <Input placeholder="e.g. CHQ-00123" disabled={isEdit || !buSelected} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={16} style={{ marginTop: 8 }}>
+            <Col xs={24} md={16}>
+              <Form.Item
+                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Payee Name</span>}
+                name="payeeName"
+                style={{ marginBottom: 0 }}
+              >
+                <Input placeholder="Payee / vendor name" disabled={isEdit || !buSelected} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={8}>
+              <Form.Item
+                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Payee ID</span>}
+                name="payeeId"
+                style={{ marginBottom: 0 }}
+              >
+                <InputNumber placeholder="Payee ID" style={{ width: '100%' }} disabled={isEdit || !buSelected} />
               </Form.Item>
             </Col>
           </Row>
