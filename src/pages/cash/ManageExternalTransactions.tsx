@@ -895,71 +895,23 @@ const ExternalTxnForm: React.FC<{
           )}
         </Card>
 
-        {/* ── Section 4: Transaction Lines ── */}
+        </Col>
+        </Row>
+
+        {/* ── Transaction Lines (multiple mode only) ── */}
+        {!isEdit && extTxnMode === 'multiple' && (
         <Card
-          styles={{ body: { padding: '18px 20px' } }}
-          style={{ ...sectionCard(REDWOOD.warning), marginBottom: 0 }}
+          styles={{ body: { padding: '14px 16px' } }}
+          style={{ ...sectionCard(REDWOOD.warning), marginTop: 12, marginBottom: 0 }}
           title={
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
               <span style={{ ...sectionHeader(REDWOOD.warning), marginBottom: 0 }}>
-                <SwapOutlined /> Transaction Line{extTxnMode === 'multiple' ? 's' : ''}
+                <SwapOutlined /> Transaction Lines
               </span>
-              {!isEdit && !isAdhocPayment && (
-                <Segmented
-                  size="small"
-                  value={extTxnMode}
-                  onChange={(v) => setExtTxnMode(v as 'single' | 'multiple')}
-                  options={[
-                    { label: 'Single', value: 'single' },
-                    { label: 'Multiple', value: 'multiple' },
-                  ]}
-                />
-              )}
             </div>
           }
         >
-          {(isEdit || extTxnMode === 'single') && (
-            <Row gutter={16}>
-              <Col xs={24} md={8}>
-                <Form.Item
-                  label={<span style={{ fontWeight: 600, fontSize: 13 }}>Amount</span>}
-                  name="amount"
-                  rules={[{ required: !isEdit, message: 'Required' }]}
-                  style={{ marginBottom: 0 }}
-                >
-                  <InputNumber
-                    style={{ width: '100%' }}
-                    precision={2}
-                    disabled={isEdit || !buSelected}
-                    placeholder={txnDirection === 'DR' ? 'Positive — Money In' : 'Negative — Money Out'}
-                    formatter={v => v ? String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''}
-                    onChange={(v) => {
-                      if (v == null) return;
-                      const signed = txnDirection === 'DR' ? Math.abs(Number(v)) : -Math.abs(Number(v));
-                      if (signed !== Number(v)) form.setFieldsValue({ amount: signed });
-                    }}
-                  />
-                </Form.Item>
-              </Col>
-              <Col xs={24} md={16}>
-                <Form.Item
-                  label={<span style={{ fontWeight: 600, fontSize: 13 }}>Description</span>}
-                  name="description"
-                  style={{ marginBottom: 0 }}
-                >
-                  <Input.TextArea
-                    rows={1}
-                    autoSize={{ minRows: 1, maxRows: 3 }}
-                    placeholder="Enter description"
-                    disabled={isEdit || !buSelected}
-                  />
-                </Form.Item>
-              </Col>
-            </Row>
-          )}
-
-          {!isEdit && extTxnMode === 'multiple' && (
-            <>
+          <>
               <Table
                 size="small"
                 dataSource={extTxnLines}
@@ -1053,9 +1005,9 @@ const ExternalTxnForm: React.FC<{
                   </div>
                 )}
               />
-            </>
-          )}
+          </>
         </Card>
+        )}
       </Form>
 
       {/* ── Sticky footer ── */}
