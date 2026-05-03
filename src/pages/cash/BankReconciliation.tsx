@@ -11,6 +11,7 @@ import {
   HomeOutlined, BankOutlined, SearchOutlined, ReloadOutlined,
   CheckOutlined, CloseOutlined, ReconciliationOutlined, FileTextOutlined,
   ApiOutlined, CopyOutlined, PlusOutlined, ThunderboltOutlined, DownloadOutlined,
+  CheckCircleOutlined, CloseCircleOutlined, SyncOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
@@ -502,6 +503,10 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     txnStatus: 'pending' | 'running' | 'success' | 'error' | 'skipped'; txnResponse?: string;
   }
   const [reconCalls, setReconCalls]           = useState<ReconCall[]>([]);
+  interface ProgressStep { label: string; status: 'pending' | 'running' | 'success' | 'error'; }
+  const [progressOpen,  setProgressOpen]  = useState(false);
+  const [progressSteps, setProgressSteps] = useState<ProgressStep[]>([]);
+  const [progressDone,  setProgressDone]  = useState(false);
 
   // Resize drag handlers
   useEffect(() => {
@@ -1119,61 +1124,72 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       ? sysTxns
       : sysTxns.filter((t) => t.source === txnSourceFilter);
 
-    const selectedLines = stmtLines.filter((l) =>
-      selectedStmtKeys.includes(l.lineId)
-    );
-    const selectedTxns = visibleSysTxns.filter((t) =>
-      selectedSysKeys.includes(t.txnId)
-    );
+    const selectedLines = stmtLines.filter((l) => selectedStmtKeys.includes(l.lineId));
+    const selectedTxns  = visibleSysTxns.filter((t) => selectedSysKeys.includes(t.txnId));
 
+    // Build flat step list: for each line pair → step 1 (stmt reconcile) + step 2 (txn update)
+    const initialSteps: ProgressStep[] = [];
+    for (let i = 0; i < selectedLines.length; i++) {
+      const line   = selectedLines[i];
+      const sysTxn = selectedTxns[i] ?? selectedTxns[0];
+      const txnSide = buildTxnSideCall(sysTxn, line);
+      initialSteps.push({ label: `Bank Statement Line ${line.lineId} — Reconcile`, status: 'pending' });
+      initialSteps.push({ label: `${txnSide.label} ${sysTxn.txnNumber} — Update`, status: 'pending' });
+    }
+
+    setProgressSteps(initialSteps);
+    setProgressDone(false);
+    setProgressOpen(true);
     setReconciling(true);
+
+    let stepIdx = 0;
+    const update = (idx: number, status: ProgressStep['status']) =>
+      setProgressSteps(prev => prev.map((s, i) => i === idx ? { ...s, status } : s));
+
     let successCount = 0;
     let errorCount   = 0;
 
     for (let i = 0; i < selectedLines.length; i++) {
       const line   = selectedLines[i];
-      // Use matching txn by index if multiple, otherwise always use first
       const sysTxn = selectedTxns[i] ?? selectedTxns[0];
+      const txnSide = buildTxnSideCall(sysTxn, line);
+      const s1 = stepIdx++;
+      const s2 = stepIdx++;
 
-      const body = {
-        lineId:      line.lineId,
-        txnType:     sysTxn.source,
-        txnId:       sysTxn.txnId,
-        txnNumber:   sysTxn.txnNumber,
-        reconAmount: line.amount,
-        notes:       '',
-      };
-
+      // Step 1: POST bankstatements reconcile
+      update(s1, 'running');
+      let stmtOk = false;
       try {
-        const res = await fetch(
-          `${APEX_BASE}/cash/bankstatements/${line.statementId}/reconcile`,
-          {
-            method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify(body),
-          }
-        );
+        const res  = await fetch(`${APEX_BASE}/cash/bankstatements/${line.statementId}/reconcile`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lineId: line.lineId, txnType: sysTxn.source, txnId: sysTxn.txnId, txnNumber: sysTxn.txnNumber, reconAmount: line.amount, notes: '' }),
+        });
         const data = await parseApexJson(res);
-        if (data.status === 'success') {
-          successCount++;
-        } else {
-          errorCount++;
-          console.error('Reconcile error for line', line.lineId, data.message);
-        }
-      } catch (err) {
+        stmtOk = data.status === 'success';
+        update(s1, stmtOk ? 'success' : 'error');
+        if (stmtOk) successCount++; else errorCount++;
+      } catch {
+        update(s1, 'error');
         errorCount++;
-        console.error('Network error reconciling line', line.lineId, err);
+      }
+
+      // Step 2: PUT transaction-side update (only if step 1 succeeded)
+      if (stmtOk) {
+        update(s2, 'running');
+        try {
+          const r2   = await fetch(txnSide.url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(txnSide.body) });
+          const d2   = await parseApexJson(r2);
+          update(s2, d2.status === 'success' || r2.ok ? 'success' : 'error');
+        } catch {
+          update(s2, 'error');
+        }
+      } else {
+        update(s2, 'error');
       }
     }
 
     setReconciling(false);
-
-    if (successCount > 0) {
-      msgApi.success(`Reconciled ${successCount} line(s) successfully`);
-    }
-    if (errorCount > 0) {
-      msgApi.error(`${errorCount} line(s) failed to reconcile`);
-    }
+    setProgressDone(true);
 
     setSelectedStmtKeys([]);
     setSelectedSysKeys([]);
@@ -1183,6 +1199,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       fetchStmtLines(lastParams, stmtReconFilter);
       fetchSysTxns(lastParams, txnSourceFilter, sysReconFilter);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedStmtKeys, selectedSysKeys, stmtLines, sysTxns, txnSourceFilter, lastParams, selectedStatement, handleSelectStatement, fetchStmtLines, fetchSysTxns, msgApi]);
 
   // ── Reconcile API Log ────────────────────────────────────────────────────
@@ -2724,6 +2741,37 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
               {EXT_TXN_URL}
             </div>
           </div>
+        </div>
+      </Modal>
+
+      {/* ── Reconcile Progress Modal ─────────────────────────────── */}
+      <Modal
+        open={progressOpen}
+        onCancel={() => { if (progressDone) setProgressOpen(false); }}
+        closable={progressDone}
+        maskClosable={false}
+        width={460}
+        title={<Space><SyncOutlined spin={!progressDone} style={{ color: progressDone ? REDWOOD.success : REDWOOD.info }} /><span>Reconciling…</span></Space>}
+        footer={
+          progressDone
+            ? <Button type="primary" onClick={() => setProgressOpen(false)}>Close</Button>
+            : null
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 0' }}>
+          {progressSteps.map((step, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px', borderRadius: 6, background: '#fafafa', border: '1px solid #f0f0f0' }}>
+              <span style={{ fontSize: 16, width: 20, textAlign: 'center' }}>
+                {step.status === 'pending'  && <span style={{ color: '#bbb' }}>○</span>}
+                {step.status === 'running'  && <SyncOutlined spin style={{ color: REDWOOD.info }} />}
+                {step.status === 'success'  && <CheckCircleOutlined style={{ color: REDWOOD.success }} />}
+                {step.status === 'error'    && <CloseCircleOutlined style={{ color: REDWOOD.error }} />}
+              </span>
+              <span style={{ fontSize: 12, color: step.status === 'error' ? REDWOOD.error : step.status === 'success' ? REDWOOD.success : REDWOOD.neutral600 }}>
+                {step.label}
+              </span>
+            </div>
+          ))}
         </div>
       </Modal>
 
