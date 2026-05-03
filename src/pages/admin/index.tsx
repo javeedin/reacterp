@@ -5,6 +5,7 @@ import {
   TeamOutlined,
   SettingOutlined,
   SafetyOutlined,
+  RobotOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -62,6 +63,14 @@ const adminCards: AdminCard[] = [
     icon: <SafetyOutlined />,
     color: REDWOOD.success,
     badge: 'Coming Soon',
+  },
+  {
+    key: 'claude-key',
+    title: 'Claude AI Key Settings',
+    description: 'Add, activate, or rotate the Anthropic Claude API key used by AI agents such as Bank Reconciliation.',
+    icon: <RobotOutlined />,
+    color: '#722ed1',
+    path: '/admin/claude-key',
   },
 ];
 
