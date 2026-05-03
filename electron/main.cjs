@@ -1041,6 +1041,34 @@ async function getClaudeKey() {
   );
 }
 
+ipcMain.handle('claude:test-key', async () => {
+  try {
+    const apiKey = await getClaudeKey();
+    const res = await fetch(CLAUDE_API_URL, {
+      method: 'POST',
+      headers: {
+        'x-api-key':         apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type':      'application/json',
+      },
+      body: JSON.stringify({
+        model:      'claude-haiku-4-5-20251001',
+        max_tokens: 32,
+        messages:   [{ role: 'user', content: 'Reply with exactly: OK' }],
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      return { success: false, error: `Claude API ${res.status}: ${err.substring(0, 200)}` };
+    }
+    const data = await res.json();
+    const reply = data.content?.[0]?.text?.trim() ?? '(empty)';
+    return { success: true, reply };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 ipcMain.handle('claude:recon-agent', async (_event, { stmtLines, sysTxns, bankAccount }) => {
   try {
     const apiKey = await getClaudeKey();

@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Claude AI Agents
   claudeReconAgent: (params) => ipcRenderer.invoke('claude:recon-agent', params),
+  claudeTestKey:    ()       => ipcRenderer.invoke('claude:test-key'),
 
   // Check if running in Electron
   isElectron: true,
