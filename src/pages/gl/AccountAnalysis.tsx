@@ -89,6 +89,7 @@ interface JournalLineSegment {
   intercompany: string;
   future1: string;
   isOpeningBalance?: boolean;
+  isClosingBalance?: boolean;
   accountType?: string;
   future2: string;
   enteredDr: number;
@@ -616,16 +617,15 @@ const AccountAnalysis: React.FC = () => {
         }];
       });
 
-      // If searching a single account, prepend opening balance as the first row
+      // If searching a single account, prepend opening balance and append closing balance
       const finalItems: JournalLineSegment[] = [...items];
       if (accountFilter && selectedPeriods.length > 0) {
         const sortedPeriods = [...selectedPeriods].sort(
           (a, b) => parsePeriodToDate(a).getTime() - parsePeriodToDate(b).getTime()
         );
-        const openingRow = await fetchOpeningBalance(accountFilter, selectedCompany, sortedPeriods[0]);
-        if (openingRow) {
-          finalItems.unshift(openingRow);
-        }
+        const { opening: openingRow, closing: closingRow } = await fetchBalanceRows(accountFilter, selectedCompany, sortedPeriods[0]);
+        if (openingRow) finalItems.unshift(openingRow);
+        if (closingRow) finalItems.push(closingRow);
       }
 
       setSearchData(finalItems);
@@ -694,12 +694,13 @@ const AccountAnalysis: React.FC = () => {
     });
   };
 
-  // Fetch opening balance from gl/rr-trialbalance/standard for an account and period
-  const fetchOpeningBalance = async (
+  // Fetch opening + closing balance rows from the trial balance API
+  const fetchBalanceRows = async (
     account: string,
     company: string,
     period: string
-  ): Promise<JournalLineSegment | null> => {
+  ): Promise<{ opening: JournalLineSegment | null; closing: JournalLineSegment | null }> => {
+    const none = { opening: null, closing: null };
     try {
       const params = new URLSearchParams();
       params.append('ledger_name', selectedLedger);
@@ -708,73 +709,56 @@ const AccountAnalysis: React.FC = () => {
       if (company) params.append('company', company);
       const url = `${API_BASE_URL}/rr-trialbalance/standard?${params.toString()}`;
       const resp = await fetch(url);
-      if (!resp.ok) return null;
+      if (!resp.ok) return none;
       const data = await resp.json();
       const allItems: any[] = data.items || [];
-      // Filter client-side by account in case the DB handler hasn't been updated with :account bind yet
       const items = allItems.filter((i: any) => String(i.account) === String(account));
-      if (items.length === 0) return null;
+      if (items.length === 0) return none;
 
       const accountType: string = items[0].account_type || '';
       const isRetainedEarnings = accountType === 'O';
-
-      // Sum opening/closing across all matching account combinations
-      const opening: number = items.reduce((s: number, i: any) => s + (i.opening || 0), 0);
-      const closingSum: number = items.reduce((s: number, i: any) => s + (i.closing || 0), 0);
-
-      // For R/E use closing (YTD net); otherwise use opening
-      const balanceAmt: number = isRetainedEarnings ? closingSum : opening;
-      if (balanceAmt === 0) return null;
-
-      // Positive balance = debit side for Asset/Expense; credit side for Liability/Equity/Revenue
       const isDebitNormal = accountType === 'A' || accountType === 'E';
-      const finalDr = isDebitNormal && balanceAmt > 0 ? balanceAmt : (!isDebitNormal && balanceAmt < 0 ? Math.abs(balanceAmt) : 0);
-      const finalCr = !isDebitNormal && balanceAmt > 0 ? balanceAmt : (isDebitNormal && balanceAmt < 0 ? Math.abs(balanceAmt) : 0);
+      const currencyCode = items[0].currency_code || 'AED';
+      const accountDesc = items[0].account_desc || '';
 
-      if (finalDr === 0 && finalCr === 0) return null;
+      const openingAmt: number = items.reduce((s: number, i: any) => s + (i.opening || 0), 0);
+      const closingAmt: number = items.reduce((s: number, i: any) => s + (i.closing || 0), 0);
 
-      const label = isRetainedEarnings ? 'Current Year Balance' : 'Opening Balance';
+      const makeRow = (amt: number, label: string, key: string, isOpen: boolean): JournalLineSegment | null => {
+        const effAmt = isRetainedEarnings && isOpen ? closingAmt : amt;
+        if (effAmt === 0) return null;
+        const dr = isDebitNormal && effAmt > 0 ? effAmt : (!isDebitNormal && effAmt < 0 ? Math.abs(effAmt) : 0);
+        const cr = !isDebitNormal && effAmt > 0 ? effAmt : (isDebitNormal && effAmt < 0 ? Math.abs(effAmt) : 0);
+        if (dr === 0 && cr === 0) return null;
+        return {
+          key,
+          batchId: 0, jeHeaderId: 0, jeLineNumber: 0,
+          currencyCode, company: items[0].company || company,
+          lob: '', department: '', account, subAccount: '', analysis: '', intercompany: '', future1: '', future2: '',
+          enteredDr: dr, enteredCr: cr, accountedDr: dr, accountedCr: cr,
+          chartOfAccountsName: '', accountingDate: '', defaultPeriodName: period,
+          batchName: '', actualFlagMeaning: '', approvalStatusMeaning: '', userPeriodSetName: '',
+          userJeSourceName: '', ledgerName: selectedLedger, legalEntityName: '', userJeCategoryName: '',
+          jeLineDescription: label, concatenatedSegments: account, accountDescription: accountDesc,
+          isOpeningBalance: isOpen,
+          isClosingBalance: !isOpen,
+          accountType,
+        };
+      };
 
+      const openingLabel = isRetainedEarnings ? 'Current Year Balance' : 'Opening Balance';
       return {
-        key: 'opening-balance',
-        batchId: 0,
-        jeHeaderId: 0,
-        jeLineNumber: 0,
-        currencyCode: items[0].currency_code || 'AED',
-        company: items[0].company || company,
-        lob: '',
-        department: '',
-        account,
-        subAccount: '',
-        analysis: '',
-        intercompany: '',
-        future1: '',
-        future2: '',
-        enteredDr: finalDr,
-        enteredCr: finalCr,
-        accountedDr: finalDr,
-        accountedCr: finalCr,
-        chartOfAccountsName: '',
-        accountingDate: '',
-        defaultPeriodName: period,
-        batchName: '',
-        actualFlagMeaning: '',
-        approvalStatusMeaning: '',
-        userPeriodSetName: '',
-        userJeSourceName: '',
-        ledgerName: selectedLedger,
-        legalEntityName: '',
-        userJeCategoryName: '',
-        jeLineDescription: label,
-        concatenatedSegments: account,
-        accountDescription: items[0].account_desc || '',
-        isOpeningBalance: true,
-        accountType,
+        opening: makeRow(openingAmt, openingLabel, 'opening-balance', true),
+        closing: makeRow(closingAmt, 'Closing Balance', 'closing-balance', false),
       };
     } catch {
-      return null;
+      return none;
     }
   };
+
+  // Kept as alias so existing call sites work
+  const fetchOpeningBalance = async (account: string, company: string, period: string) =>
+    (await fetchBalanceRows(account, company, period)).opening;
 
   // Fetch account data for drill-down
   const fetchAccountData = async (account: string, company: string): Promise<JournalLineSegment[]> => {
@@ -837,16 +821,15 @@ const AccountAnalysis: React.FC = () => {
         allItems.push(...items);
       }
 
-      // Prepend opening balance row using the earliest selected period
+      // Prepend opening balance and append closing balance using the earliest selected period
       const sortedPeriods = [...selectedPeriods].sort(
         (a, b) => parsePeriodToDate(a).getTime() - parsePeriodToDate(b).getTime()
       );
       const earliestPeriod = sortedPeriods[0];
       if (earliestPeriod) {
-        const openingRow = await fetchOpeningBalance(account, company, earliestPeriod);
-        if (openingRow) {
-          allItems.unshift(openingRow);
-        }
+        const { opening: openingRow, closing: closingRow } = await fetchBalanceRows(account, company, earliestPeriod);
+        if (openingRow) allItems.unshift(openingRow);
+        if (closingRow) allItems.push(closingRow);
       }
 
       console.log('Fetched total items:', allItems.length);
@@ -979,9 +962,9 @@ const AccountAnalysis: React.FC = () => {
     });
   };
 
-  // Calculate totals (excludes opening balance row to avoid double-counting)
+  // Calculate totals (excludes opening/closing balance rows to avoid double-counting)
   const calculateTotals = (data: JournalLineSegment[]) => {
-    return data.filter(row => !row.isOpeningBalance).reduce(
+    return data.filter(row => !row.isOpeningBalance && !row.isClosingBalance).reduce(
       (acc, row) => ({
         enteredDr: acc.enteredDr + (row.enteredDr || 0),
         enteredCr: acc.enteredCr + (row.enteredCr || 0),
@@ -1298,6 +1281,10 @@ const AccountAnalysis: React.FC = () => {
           <Text strong style={{ fontSize: 11, color: REDWOOD.warning }}>
             {record.jeLineDescription}
           </Text>
+        ) : record.isClosingBalance ? (
+          <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>
+            {record.jeLineDescription}
+          </Text>
         ) : (
           <a
             onClick={() => openAccountTab(record)}
@@ -1327,7 +1314,7 @@ const AccountAnalysis: React.FC = () => {
       ellipsis: true,
       render: (text: string, record: JournalLineSegment) => (
         <Tooltip title={text}>
-          <span style={{ fontSize: 11, fontWeight: record.isOpeningBalance ? 600 : undefined }}>
+          <span style={{ fontSize: 11, fontWeight: (record.isOpeningBalance || record.isClosingBalance) ? 600 : undefined }}>
             {text || '-'}
           </span>
         </Tooltip>
@@ -1338,7 +1325,7 @@ const AccountAnalysis: React.FC = () => {
     { title: 'Batch', dataIndex: 'batchName', key: 'batchName', width: 150, ellipsis: true },
     { title: 'Source', dataIndex: 'userJeSourceName', key: 'userJeSourceName', width: 100 },
     { title: 'Category', dataIndex: 'userJeCategoryName', key: 'userJeCategoryName', width: 120 },
-    { title: 'Currency', dataIndex: 'currencyCode', key: 'currencyCode', width: 70 },
+    { title: 'Currency', dataIndex: 'currencyCode', key: 'currencyCode', width: 90 },
     {
       title: 'Entered Dr',
       dataIndex: 'enteredDr',
@@ -1573,6 +1560,8 @@ const AccountAnalysis: React.FC = () => {
       render: (v: number, record: JournalLineSegment) =>
         record.isOpeningBalance ? (
           <Text strong style={{ color: REDWOOD.warning, fontSize: 11 }}>★</Text>
+        ) : record.isClosingBalance ? (
+          <Text strong style={{ color: REDWOOD.success, fontSize: 11 }}>★</Text>
         ) : v,
     },
     createFilterableColumn('Description', 'jeLineDescription', 180, { ellipsis: true }),
@@ -1582,7 +1571,7 @@ const AccountAnalysis: React.FC = () => {
     createFilterableColumn('Category', 'userJeCategoryName', 120),
     createFilterableColumn('Status', 'approvalStatusMeaning', 100),
     createFilterableColumn('Actual', 'actualFlagMeaning', 80),
-    createFilterableColumn('Currency', 'currencyCode', 80),
+    createFilterableColumn('Currency', 'currencyCode', 90),
     createFilterableColumn('Entered Dr', 'enteredDr', 110, {
       align: 'right',
       render: (v: number) => <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span>,
@@ -2035,7 +2024,7 @@ const AccountAnalysis: React.FC = () => {
               size="small"
               className="compact-table"
               rowClassName={(record: JournalLineSegment) =>
-                record.isOpeningBalance ? 'opening-balance-row' : ''
+                record.isOpeningBalance ? 'opening-balance-row' : record.isClosingBalance ? 'closing-balance-row' : ''
               }
               locale={{ emptyText: <Empty description="Click Search to load data" /> }}
               summary={() =>
@@ -3573,6 +3562,12 @@ const AccountAnalysis: React.FC = () => {
           font-weight: 600 !important;
           border-top: 2px solid #D4A800 !important;
           border-bottom: 2px solid #D4A800 !important;
+        }
+        .closing-balance-row td {
+          background: #F0FFF4 !important;
+          font-weight: 600 !important;
+          border-top: 2px solid #1D7B4D !important;
+          border-bottom: 2px solid #1D7B4D !important;
         }
       `}</style>
     </Layout>
