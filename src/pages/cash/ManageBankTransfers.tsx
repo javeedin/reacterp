@@ -121,7 +121,12 @@ const TransferForm: React.FC<{
 
   const [fromCurrency, setFromCurrency] = useState<string>(initialValues?.fromCurrencyCode ?? '');
   const [toCurrency, setToCurrency] = useState<string>(initialValues?.toCurrencyCode ?? '');
-  const watchedPaymentCcy = Form.useWatch('paymentCurrencyCode', form);
+  const watchedPaymentCcy  = Form.useWatch('paymentCurrencyCode', form);
+  const watchedAmount      = Form.useWatch('paymentAmount', form);
+  const watchedRate        = Form.useWatch('conversionRate', form);
+  const isCrossCurrency    = !!watchedPaymentCcy && !!fromCurrency && watchedPaymentCcy !== fromCurrency;
+  const fromAmount         = isCrossCurrency && watchedAmount && watchedRate
+    ? watchedAmount * watchedRate : null;
 
   useEffect(() => {
     if (initialValues) {
@@ -184,7 +189,9 @@ const TransferForm: React.FC<{
       TransactionDate:           values.transactionDate?.format('YYYY-MM-DD'),
       Memo:                      values.memo ?? '',
       PaymentAmount:             values.paymentAmount,
-      FromAmount:                values.paymentAmount,
+      FromAmount:                (values.paymentCurrencyCode && values.paymentCurrencyCode !== fromCurrency && values.conversionRate)
+                                   ? values.paymentAmount * values.conversionRate
+                                   : values.paymentAmount,
       FromBankAccountName:       values.fromBankAccountName,
       ToBankAccountName:         values.toBankAccountName,
       FromCurrencyCode:          fromCurrency,
@@ -299,36 +306,34 @@ const TransferForm: React.FC<{
         <Row gutter={40}>
           {/* Left column */}
           <Col xs={24} lg={12}>
-            <Form.Item label="From Account" name="fromBankAccountName" rules={[{ required: true, message: 'From Account is required' }]} style={fs}>
-              <Space.Compact style={{ width: '100%' }}>
-                <Select showSearch placeholder="Select bank account" optionFilterProp="label" options={bankAccounts}
-                  style={{ flex: 1 }} disabled={isEdit || !buSelected}
-                  notFoundContent={<Text type="secondary">No accounts loaded</Text>}
-                  onChange={(v: string) => {
-                    const ccy = bankCurrencyMap[v] ?? '';
-                    setFromCurrency(ccy);
-                  }}
-                />
+            <Form.Item label="From Account" style={fs}>
+              <div style={{ display: 'flex', gap: 0 }}>
+                <Form.Item name="fromBankAccountName" noStyle rules={[{ required: true, message: 'From Account is required' }]}>
+                  <Select showSearch placeholder="Select bank account" optionFilterProp="label" options={bankAccounts}
+                    style={{ borderRadius: '6px 0 0 6px', flex: 1 }} disabled={isEdit || !buSelected}
+                    notFoundContent={<Text type="secondary">No accounts loaded</Text>}
+                    onChange={(v: string) => { setFromCurrency(bankCurrencyMap[v] ?? ''); }}
+                  />
+                </Form.Item>
                 <div style={{ display: 'flex', alignItems: 'center', padding: '0 10px', background: '#f5f5f5', border: '1px solid #d9d9d9', borderLeft: 0, borderRadius: '0 6px 6px 0', minWidth: 52, justifyContent: 'center' }}>
                   <Text style={{ fontSize: 12, fontWeight: 600, color: fromCurrency ? REDWOOD.info : REDWOOD.neutral300 }}>{fromCurrency || 'CCY'}</Text>
                 </div>
-              </Space.Compact>
+              </div>
             </Form.Item>
 
-            <Form.Item label="To Account" name="toBankAccountName" rules={[{ required: true, message: 'To Account is required' }]} style={fs}>
-              <Space.Compact style={{ width: '100%' }}>
-                <Select showSearch placeholder="Select bank account" optionFilterProp="label" options={bankAccounts}
-                  style={{ flex: 1 }} disabled={isEdit || !buSelected}
-                  notFoundContent={<Text type="secondary">No accounts loaded</Text>}
-                  onChange={(v: string) => {
-                    const ccy = bankCurrencyMap[v] ?? '';
-                    setToCurrency(ccy);
-                  }}
-                />
+            <Form.Item label="To Account" style={fs}>
+              <div style={{ display: 'flex', gap: 0 }}>
+                <Form.Item name="toBankAccountName" noStyle rules={[{ required: true, message: 'To Account is required' }]}>
+                  <Select showSearch placeholder="Select bank account" optionFilterProp="label" options={bankAccounts}
+                    style={{ borderRadius: '6px 0 0 6px', flex: 1 }} disabled={isEdit || !buSelected}
+                    notFoundContent={<Text type="secondary">No accounts loaded</Text>}
+                    onChange={(v: string) => { setToCurrency(bankCurrencyMap[v] ?? ''); }}
+                  />
+                </Form.Item>
                 <div style={{ display: 'flex', alignItems: 'center', padding: '0 10px', background: '#f5f5f5', border: '1px solid #d9d9d9', borderLeft: 0, borderRadius: '0 6px 6px 0', minWidth: 52, justifyContent: 'center' }}>
                   <Text style={{ fontSize: 12, fontWeight: 600, color: toCurrency ? REDWOOD.info : REDWOOD.neutral300 }}>{toCurrency || 'CCY'}</Text>
                 </div>
-              </Space.Compact>
+              </div>
             </Form.Item>
 
             <Form.Item label="Payment Currency" name="paymentCurrencyCode" style={fs}>
@@ -343,9 +348,24 @@ const TransferForm: React.FC<{
               <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={isEdit || !buSelected} />
             </Form.Item>
 
-            <Form.Item label="Transfer Amount" name="paymentAmount" rules={[{ required: true, message: 'Amount is required' }]} style={fs}>
+            <Form.Item label="Transfer Amount" name="paymentAmount" rules={[{ required: true, message: 'Amount is required' }]} style={{ marginBottom: fromAmount != null ? 6 : 14 }}>
               <InputNumber style={{ width: '100%' }} min={0} precision={2} disabled={isEdit || !buSelected} />
             </Form.Item>
+            {fromAmount != null && (
+              <div style={{ marginBottom: 14, marginLeft: lc.span * (100 / 24) + '%', padding: '8px 12px', background: '#e6f4ff', border: '1px solid #91caff', borderRadius: 6, fontSize: 12 }}>
+                <SwapOutlined style={{ color: REDWOOD.info, marginRight: 6 }} />
+                <Text style={{ color: REDWOOD.neutral600 }}>
+                  {new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(watchedAmount)} {watchedPaymentCcy}
+                  {' = '}
+                </Text>
+                <Text strong style={{ color: REDWOOD.info, fontSize: 13 }}>
+                  {new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(fromAmount)} {fromCurrency}
+                </Text>
+                <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>
+                  (Rate: 1 {watchedPaymentCcy} = {watchedRate} {fromCurrency})
+                </Text>
+              </div>
+            )}
 
             <Form.Item label="Conversion Rate Type" name="conversionRateType" style={fs}>
               <Select placeholder="Select type" allowClear disabled={isEdit || !buSelected}>
