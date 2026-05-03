@@ -278,6 +278,7 @@ const AccountAnalysis: React.FC = () => {
   const [isClosing, setIsClosing] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const floatingIconsRef = useRef<HTMLDivElement>(null);
+  const [searchPageSize, setSearchPageSize] = useState(20);
 
   // Pivot view state - segments before and after Account column
   const [segmentsBeforeAccount, setSegmentsBeforeAccount] = useState<string[]>([]);
@@ -2019,7 +2020,7 @@ const AccountAnalysis: React.FC = () => {
             <Table
               columns={searchColumns}
               dataSource={searchData}
-              pagination={{ pageSize: 20, size: 'small', showSizeChanger: true, showTotal: (total) => `Total ${total} records` }}
+              pagination={{ pageSize: searchPageSize, size: 'small', showSizeChanger: true, pageSizeOptions: ['10','20','50','100','200'], onShowSizeChange: (_current, size) => setSearchPageSize(size), onChange: (_page, size) => size && setSearchPageSize(size), showTotal: (total) => `Total ${total} records` }}
               scroll={{ x: 1400 }}
               size="small"
               className="compact-table"
