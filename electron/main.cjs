@@ -1013,14 +1013,32 @@ async function getClaudeKey() {
   if (_claudeKeyCache && (Date.now() - _claudeKeyCacheAt) < CLAUDE_KEY_CACHE_TTL) {
     return _claudeKeyCache;
   }
-  const res = await fetch(`${APEX_BASE}/settings/claudekey`);
-  const data = await res.json();
+  const res  = await fetch(`${APEX_BASE}/settings/claudekey`);
+  const text = await res.text();
+
+  // If APEX returned an HTML page the endpoint is not deployed yet
+  if (text.trimStart().startsWith('<')) {
+    throw new Error(
+      `APEX endpoint not found (HTTP ${res.status}). ` +
+      'Please run database/cash/rr_claude_key.sql in Oracle APEX SQL Workshop, ' +
+      'then go to Administration → Claude AI Key Settings to add your key.'
+    );
+  }
+
+  let data;
+  try { data = JSON.parse(text); } catch {
+    throw new Error('Unexpected response from /settings/claudekey: ' + text.substring(0, 120));
+  }
+
   if (data.status === 'success' && data.apiKey) {
     _claudeKeyCache = data.apiKey;
     _claudeKeyCacheAt = Date.now();
     return data.apiKey;
   }
-  throw new Error(data.message || 'No active Claude API key found. Please insert a key into the RR_CLAUDE_KEY table in Oracle APEX.');
+  throw new Error(
+    data.message ||
+    'No active Claude API key found. Go to Administration → Claude AI Key Settings to add your key.'
+  );
 }
 
 ipcMain.handle('claude:recon-agent', async (_event, { stmtLines, sysTxns, bankAccount }) => {
