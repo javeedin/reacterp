@@ -434,16 +434,18 @@ const ExternalTxnForm: React.FC<{
   };
 
   return (
-    <div style={{ maxWidth: 980, margin: '0 auto', padding: '0 0 80px' }}>
+    <div style={{ padding: '0 0 72px' }}>
       <style>{`
         .direction-dr .ant-segmented-item-selected { background: #1677ff !important; color: #fff !important; }
         .direction-cr .ant-segmented-item-selected { background: #ff4d4f !important; color: #fff !important; }
       `}</style>
 
       <Form form={form} layout="vertical" size="middle">
+        <Row gutter={16} align="stretch">
+        <Col xs={24} xl={14} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
         {/* ── Section 1: Organisation ── */}
-        <Card styles={{ body: { padding: '18px 20px' } }} style={sectionCard(REDWOOD.info)}>
+        <Card styles={{ body: { padding: '14px 16px' } }} style={sectionCard(REDWOOD.info)}>
           <div style={sectionHeader(REDWOOD.info)}>
             <BankOutlined /> Organisation
           </div>
@@ -509,7 +511,7 @@ const ExternalTxnForm: React.FC<{
         </Card>
 
         {/* ── Section 2: Transaction Details ── */}
-        <Card styles={{ body: { padding: '18px 20px' } }} style={sectionCard(REDWOOD.primary)}>
+        <Card styles={{ body: { padding: '14px 16px' } }} style={{ ...sectionCard(REDWOOD.primary), flex: 1 }}>
           <div style={sectionHeader(REDWOOD.primary)}>
             <DollarOutlined /> Transaction Details
           </div>
@@ -519,7 +521,7 @@ const ExternalTxnForm: React.FC<{
                 label={<span style={{ fontWeight: 600, fontSize: 13 }}>Transaction Date</span>}
                 name="transactionDate"
                 rules={[{ required: !isEdit, message: 'Required' }]}
-                style={{ marginBottom: 14 }}
+                style={{ marginBottom: 10 }}
               >
                 <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={isEdit || !buSelected} />
               </Form.Item>
@@ -528,7 +530,7 @@ const ExternalTxnForm: React.FC<{
               <Form.Item
                 label={<span style={{ fontWeight: 600, fontSize: 13 }}>Value Date</span>}
                 name="valueDate"
-                style={{ marginBottom: 14 }}
+                style={{ marginBottom: 10 }}
               >
                 <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={isEdit || !buSelected} />
               </Form.Item>
@@ -537,7 +539,7 @@ const ExternalTxnForm: React.FC<{
               <Form.Item
                 label={<span style={{ fontWeight: 600, fontSize: 13 }}>Currency</span>}
                 name="currencyCode"
-                style={{ marginBottom: 14 }}
+                style={{ marginBottom: 10 }}
               >
                 <Select placeholder="Auto-filled" allowClear disabled={isEdit || !buSelected}>
                   {['AED', 'USD', 'EUR', 'GBP', 'SAR', 'QAR', 'KWD', 'BHD', 'OMR'].map(c => (
@@ -550,7 +552,7 @@ const ExternalTxnForm: React.FC<{
               <Form.Item
                 label={<span style={{ fontWeight: 600, fontSize: 13 }}>Transaction Type</span>}
                 name="transactionType"
-                style={{ marginBottom: 14 }}
+                style={{ marginBottom: 10 }}
               >
                 <Select placeholder="Select type" allowClear disabled={isEdit || !buSelected}>
                   <Option value="External Transaction">External Transaction</Option>
@@ -606,7 +608,7 @@ const ExternalTxnForm: React.FC<{
               <Form.Item
                 label={<span style={{ fontWeight: 600, fontSize: 13 }}>Payment Method</span>}
                 name="paymentMethod"
-                style={{ marginBottom: 0 }}
+                style={{ marginBottom: isAdhocPayment ? 10 : 0 }}
               >
                 <Select placeholder="Select method" allowClear disabled={isEdit || !buSelected}>
                   {['CHECK', 'EFT', 'WIRE', 'CASH', 'MISC'].map(m => <Option key={m} value={m}>{m}</Option>)}
@@ -617,7 +619,7 @@ const ExternalTxnForm: React.FC<{
               <Form.Item
                 label={<span style={{ fontWeight: 600, fontSize: 13 }}>Payment Document</span>}
                 name="paymentDocument"
-                style={{ marginBottom: 0 }}
+                style={{ marginBottom: isAdhocPayment ? 10 : 0 }}
               >
                 <Input placeholder="e.g. Cheque Book Name" disabled={isEdit || !buSelected} />
               </Form.Item>
@@ -626,7 +628,7 @@ const ExternalTxnForm: React.FC<{
               <Form.Item
                 label={<span style={{ fontWeight: 600, fontSize: 13 }}>Paper Document #</span>}
                 name="paperDocumentNumber"
-                style={{ marginBottom: 0 }}
+                style={{ marginBottom: isAdhocPayment ? 10 : 0 }}
               >
                 <Input placeholder="e.g. CHQ-00123" disabled={isEdit || !buSelected} />
               </Form.Item>
@@ -660,11 +662,33 @@ const ExternalTxnForm: React.FC<{
           )}
         </Card>
 
+        </Col>
+        {/* RIGHT COLUMN */}
+        <Col xs={24} xl={10} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+
         {/* ── Section 3: Account Coding ── */}
-        <Card styles={{ body: { padding: '18px 20px' } }} style={sectionCard(REDWOOD.success)}>
-          <div style={sectionHeader(REDWOOD.success)}>
-            <FileTextOutlined /> Account Coding
-          </div>
+        <Card
+          styles={{ body: { padding: '14px 16px' } }}
+          style={{ ...sectionCard(REDWOOD.success), flex: 1 }}
+          title={
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
+              <span style={{ ...sectionHeader(REDWOOD.success), marginBottom: 0 }}>
+                <FileTextOutlined /> Account Coding
+              </span>
+              {!isEdit && !isAdhocPayment && (
+                <Segmented
+                  size="small"
+                  value={extTxnMode}
+                  onChange={(v) => setExtTxnMode(v as 'single' | 'multiple')}
+                  options={[
+                    { label: 'Single', value: 'single' },
+                    { label: 'Multiple', value: 'multiple' },
+                  ]}
+                />
+              )}
+            </div>
+          }
+        >
           <Row gutter={16}>
             <Col xs={24} md={extTxnMode === 'single' ? 12 : 24}>
               <Form.Item
@@ -721,6 +745,47 @@ const ExternalTxnForm: React.FC<{
               </Col>
             )}
           </Row>
+
+          {/* ── Amount + Description (single mode) ── */}
+          {(isEdit || extTxnMode === 'single') && (
+            <Row gutter={12} style={{ marginTop: 10 }}>
+              <Col xs={24} md={10}>
+                <Form.Item
+                  label={<span style={{ fontWeight: 600, fontSize: 13 }}>Amount</span>}
+                  name="amount"
+                  rules={[{ required: !isEdit, message: 'Required' }]}
+                  style={{ marginBottom: 0 }}
+                >
+                  <InputNumber
+                    style={{ width: '100%' }}
+                    precision={2}
+                    disabled={isEdit || !buSelected}
+                    placeholder={txnDirection === 'DR' ? '+ve Money In' : '-ve Money Out'}
+                    formatter={v => v ? String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''}
+                    onChange={(v) => {
+                      if (v == null) return;
+                      const signed = txnDirection === 'DR' ? Math.abs(Number(v)) : -Math.abs(Number(v));
+                      if (signed !== Number(v)) form.setFieldsValue({ amount: signed });
+                    }}
+                  />
+                </Form.Item>
+              </Col>
+              <Col xs={24} md={14}>
+                <Form.Item
+                  label={<span style={{ fontWeight: 600, fontSize: 13 }}>Description</span>}
+                  name="description"
+                  style={{ marginBottom: 0 }}
+                >
+                  <Input.TextArea
+                    rows={1}
+                    autoSize={{ minRows: 1, maxRows: 3 }}
+                    placeholder="Enter description"
+                    disabled={isEdit || !buSelected}
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+          )}
 
           {/* ── Journal Entry Preview ── */}
           {extTxnMode === 'single' && watchedAsset && watchedOffset && (
@@ -790,7 +855,7 @@ const ExternalTxnForm: React.FC<{
         </Card>
 
         {/* ── Attachments ── */}
-        <Card styles={{ body: { padding: '18px 20px' } }} style={sectionCard(REDWOOD.neutral600)}>
+        <Card styles={{ body: { padding: '14px 16px' } }} style={sectionCard(REDWOOD.neutral600)}>
           <div style={sectionHeader(REDWOOD.neutral600)}>
             <PaperClipOutlined /> Attachments
           </div>
