@@ -186,6 +186,8 @@ const ExternalTxnForm: React.FC<{
   const [deleting, setDeleting] = useState(false);
   const isEdit = !!initialValues?.externalTransactionId;
   const buSelected = !!selectedBu;
+  const [selectedBank, setSelectedBank] = useState<string | undefined>(initialValues?.bankAccountName);
+  const bankSelected = !!selectedBank;
 
   const watchedAsset   = Form.useWatch('assetAccountCombination', form);
   const watchedOffset  = Form.useWatch('offsetAccountCombination', form);
@@ -491,6 +493,7 @@ const ExternalTxnForm: React.FC<{
                   style={{ width: '100%' }}
                   onChange={v => {
                     setSelectedBu(v);
+                    setSelectedBank(undefined);
                     if (!isEdit) {
                       const banks = buBankMap[v] || [];
                       const cur = form.getFieldValue('bankAccountName');
@@ -499,7 +502,7 @@ const ExternalTxnForm: React.FC<{
                       }
                     }
                   }}
-                  allowClear onClear={() => setSelectedBu(undefined)}
+                  allowClear onClear={() => { setSelectedBu(undefined); setSelectedBank(undefined); }}
                 />
               </Form.Item>
             </Col>
@@ -518,6 +521,7 @@ const ExternalTxnForm: React.FC<{
                   style={{ width: '100%' }}
                   notFoundContent={<Text type="secondary">No accounts for this BU</Text>}
                   onChange={v => {
+                    setSelectedBank(v);
                     if (!isEdit) {
                       const acct = bankAccountMap[v] ?? '';
                       form.setFieldValue('assetAccountCombination', acct);
@@ -550,7 +554,7 @@ const ExternalTxnForm: React.FC<{
                 rules={[{ required: !isEdit, message: 'Required' }]}
                 style={{ marginBottom: 10 }}
               >
-                <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={isEdit || !buSelected || saved} />
+                <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={isEdit || !bankSelected || saved} />
               </Form.Item>
             </Col>
             <Col xs={12} md={6}>
@@ -559,7 +563,7 @@ const ExternalTxnForm: React.FC<{
                 name="valueDate"
                 style={{ marginBottom: 10 }}
               >
-                <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={isEdit || !buSelected || saved} />
+                <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={isEdit || !bankSelected || saved} />
               </Form.Item>
             </Col>
             <Col xs={12} md={6}>
@@ -568,7 +572,7 @@ const ExternalTxnForm: React.FC<{
                 name="currencyCode"
                 style={{ marginBottom: 10 }}
               >
-                <Select placeholder="Auto-filled" allowClear disabled={isEdit || !buSelected || saved}>
+                <Select placeholder="Auto-filled" allowClear disabled={isEdit || !bankSelected || saved}>
                   {['AED', 'USD', 'EUR', 'GBP', 'SAR', 'QAR', 'KWD', 'BHD', 'OMR'].map(c => (
                     <Option key={c} value={c}>{c}</Option>
                   ))}
@@ -583,7 +587,7 @@ const ExternalTxnForm: React.FC<{
                 rules={[{ required: true, message: 'Transaction Type is required' }]}
                 style={{ marginBottom: 10 }}
               >
-                <Select placeholder="Select type" disabled={isEdit || !buSelected || saved}>
+                <Select placeholder="Select type" disabled={isEdit || !bankSelected || saved}>
                   <Option value="External Transaction">External Transaction</Option>
                   <Option value="Adhoc Payment">Adhoc Payment</Option>
                 </Select>
@@ -597,7 +601,7 @@ const ExternalTxnForm: React.FC<{
                 name="referenceText"
                 style={{ marginBottom: 0 }}
               >
-                <Input placeholder="e.g. STMT-REF-001" disabled={isEdit || !buSelected || saved} />
+                <Input placeholder="e.g. STMT-REF-001" disabled={isEdit || !bankSelected || saved} />
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
@@ -622,7 +626,7 @@ const ExternalTxnForm: React.FC<{
                       form.setFieldsValue({ amount: dir === 'DR' ? abs : -abs });
                     }
                   }}
-                  disabled={isEdit || !buSelected || isAdhocPayment}
+                  disabled={isEdit || !bankSelected || isAdhocPayment || saved}
                   style={{
                     background: txnDirection === 'DR' ? '#e6f4ff' : '#fff1f0',
                     opacity: isAdhocPayment ? 0.7 : 1,
@@ -639,7 +643,7 @@ const ExternalTxnForm: React.FC<{
                 name="paymentMethod"
                 style={{ marginBottom: isAdhocPayment ? 10 : 0 }}
               >
-                <Select placeholder="Select method" allowClear disabled={isEdit || !buSelected || saved}>
+                <Select placeholder="Select method" allowClear disabled={isEdit || !bankSelected || saved}>
                   {['CHECK', 'EFT', 'WIRE', 'CASH', 'MISC'].map(m => <Option key={m} value={m}>{m}</Option>)}
                 </Select>
               </Form.Item>
@@ -650,7 +654,7 @@ const ExternalTxnForm: React.FC<{
                 name="paymentDocument"
                 style={{ marginBottom: isAdhocPayment ? 10 : 0 }}
               >
-                <Input placeholder="e.g. Cheque Book Name" disabled={isEdit || !buSelected || saved} />
+                <Input placeholder="e.g. Cheque Book Name" disabled={isEdit || !bankSelected || saved} />
               </Form.Item>
             </Col>
             <Col xs={24} md={8}>
@@ -659,7 +663,7 @@ const ExternalTxnForm: React.FC<{
                 name="paperDocumentNumber"
                 style={{ marginBottom: isAdhocPayment ? 10 : 0 }}
               >
-                <Input placeholder="e.g. CHQ-00123" disabled={isEdit || !buSelected || saved} />
+                <Input placeholder="e.g. CHQ-00123" disabled={isEdit || !bankSelected || saved} />
               </Form.Item>
             </Col>
           </Row>
@@ -675,7 +679,7 @@ const ExternalTxnForm: React.FC<{
                   <Select
                     showSearch
                     placeholder="Select payee..."
-                    disabled={isEdit || !buSelected || saved}
+                    disabled={isEdit || !bankSelected || saved}
                     optionFilterProp="label"
                     options={payeeOptions}
                     onChange={(val: number) => {
@@ -735,7 +739,7 @@ const ExternalTxnForm: React.FC<{
                   {!isEdit && !saved && (
                     <Button
                       icon={<SearchOutlined />}
-                      disabled={!buSelected}
+                      disabled={!bankSelected}
                       onClick={() => setCashAcctOpen(true)}
                       style={{ borderRadius: '0 6px 6px 0', height: 36, borderLeft: 0 }}
                     />
@@ -763,7 +767,7 @@ const ExternalTxnForm: React.FC<{
                     {!isEdit && !saved && (
                       <Button
                         icon={<SearchOutlined />}
-                        disabled={!buSelected}
+                        disabled={!bankSelected}
                         onClick={() => setOffsetAcctOpen(true)}
                         style={{ borderRadius: '0 6px 6px 0', height: 36, borderLeft: 0 }}
                       />
@@ -788,7 +792,7 @@ const ExternalTxnForm: React.FC<{
                   <InputNumber
                     style={{ width: '100%' }}
                     precision={2}
-                    disabled={isEdit || !buSelected || saved}
+                    disabled={isEdit || !bankSelected || saved}
                     placeholder={txnDirection === 'DR' ? '+ve Money In' : '-ve Money Out'}
                     formatter={v => v ? String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''}
                     onChange={(v) => {
@@ -809,7 +813,7 @@ const ExternalTxnForm: React.FC<{
                     rows={1}
                     autoSize={{ minRows: 1, maxRows: 3 }}
                     placeholder="Enter description"
-                    disabled={isEdit || !buSelected || saved}
+                    disabled={isEdit || !bankSelected || saved}
                   />
                 </Form.Item>
               </Col>
@@ -1021,9 +1025,9 @@ const ExternalTxnForm: React.FC<{
               setAttachments(prev => prev.filter(a => a.uid !== file.uid));
             }}
             multiple
-            disabled={(!buSelected && !isEdit) || saved}
+            disabled={(!bankSelected && !isEdit) || saved}
           >
-            <Button icon={<UploadOutlined />} disabled={(!buSelected && !isEdit) || saved}>
+            <Button icon={<UploadOutlined />} disabled={(!bankSelected && !isEdit) || saved}>
               Attach Files
             </Button>
           </Upload>
