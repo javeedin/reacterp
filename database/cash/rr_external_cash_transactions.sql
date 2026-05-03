@@ -613,3 +613,9 @@ ALTER TABLE RR_EXTERNAL_CASH_TRANSACTIONS ADD (
     PAYEE_ID    NUMBER
 );
 /
+
+-- Migration: Add transaction direction (run once on existing DBs)
+ALTER TABLE RR_EXTERNAL_CASH_TRANSACTIONS ADD (
+    TRANSACTION_DIRECTION VARCHAR2(2)
+);
+/
