@@ -122,7 +122,8 @@ BEGIN
                 payment_document             VARCHAR2(240)   PATH '$.PaymentDocument',
                 paper_document_number        VARCHAR2(60)    PATH '$.PaperDocumentNumber',
                 payee_name                   VARCHAR2(360)   PATH '$.PayeeName',
-                payee_id                     NUMBER          PATH '$.PayeeId'
+                payee_id                     NUMBER          PATH '$.PayeeId',
+                transaction_direction        VARCHAR2(2)     PATH '$.TransactionDirection'
             )
         )
     ) LOOP
@@ -184,7 +185,8 @@ BEGIN
                 rec.payment_document                           AS payment_document,
                 rec.paper_document_number                      AS paper_document_number,
                 rec.payee_name                                 AS payee_name,
-                rec.payee_id                                   AS payee_id
+                rec.payee_id                                   AS payee_id,
+                rec.transaction_direction                      AS transaction_direction
             FROM DUAL
         ) src
         ON (tgt.EXTERNAL_TRANSACTION_ID = src.external_transaction_id)
@@ -230,6 +232,7 @@ BEGIN
                 tgt.PAPER_DOCUMENT_NUMBER        = src.paper_document_number,
                 tgt.PAYEE_NAME                   = src.payee_name,
                 tgt.PAYEE_ID                     = src.payee_id,
+                tgt.TRANSACTION_DIRECTION        = src.transaction_direction,
                 tgt.SYNC_DATE                    = SYSTIMESTAMP
         WHEN NOT MATCHED THEN
             INSERT (
@@ -247,7 +250,7 @@ BEGIN
                 CREATED_BY, CREATION_DATE, LAST_UPDATED_BY,
                 LAST_UPDATE_DATE, LAST_UPDATE_LOGIN,
                 PAYMENT_METHOD, PAYMENT_DOCUMENT, PAPER_DOCUMENT_NUMBER,
-                PAYEE_NAME, PAYEE_ID,
+                PAYEE_NAME, PAYEE_ID, TRANSACTION_DIRECTION,
                 SYNC_DATE
             ) VALUES (
                 src.external_transaction_id, src.transaction_id,
@@ -264,7 +267,7 @@ BEGIN
                 src.created_by, src.creation_date, src.last_updated_by,
                 src.last_update_date, src.last_update_login,
                 src.payment_method, src.payment_document, src.paper_document_number,
-                src.payee_name, src.payee_id,
+                src.payee_name, src.payee_id, src.transaction_direction,
                 SYSTIMESTAMP
             );
 
@@ -416,6 +419,7 @@ DECLARE
                TO_CHAR(CREATION_DATE,   'YYYY-MM-DD"T"HH24:MI:SS') AS CREATION_DATE,
                LAST_UPDATED_BY,
                TO_CHAR(LAST_UPDATE_DATE,'YYYY-MM-DD"T"HH24:MI:SS') AS LAST_UPDATE_DATE,
+               TRANSACTION_DIRECTION,
                PAYMENT_METHOD,
                PAYMENT_DOCUMENT,
                PAPER_DOCUMENT_NUMBER,
@@ -496,8 +500,9 @@ BEGIN
         DBMS_LOB.APPEND(v_clob, TO_CLOB(',"createdBy":')      ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.CREATED_BY)));
         DBMS_LOB.APPEND(v_clob, TO_CLOB(',"creationDate":')   ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.CREATION_DATE)));
         DBMS_LOB.APPEND(v_clob, TO_CLOB(',"lastUpdatedBy":')  ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.LAST_UPDATED_BY)));
-        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"lastUpdateDate":') ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.LAST_UPDATE_DATE)));
-        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"paymentMethod":')      ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.PAYMENT_METHOD)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"lastUpdateDate":')      ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.LAST_UPDATE_DATE)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"transactionDirection":') ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.TRANSACTION_DIRECTION)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"paymentMethod":')        ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.PAYMENT_METHOD)));
         DBMS_LOB.APPEND(v_clob, TO_CLOB(',"paymentDocument":')    ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.PAYMENT_DOCUMENT)));
         DBMS_LOB.APPEND(v_clob, TO_CLOB(',"paperDocumentNumber":') ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.PAPER_DOCUMENT_NUMBER)));
         DBMS_LOB.APPEND(v_clob, TO_CLOB(',"payeeName":')  ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.PAYEE_NAME)));
