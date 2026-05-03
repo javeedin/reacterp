@@ -3,7 +3,7 @@ import dayjs, { type Dayjs } from 'dayjs';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input, Select,
   DatePicker, InputNumber, Row, Col, Space, Tag, Tooltip, Tabs, Collapse,
-  message, Empty, Divider, Badge, Modal, Alert, Spin, Segmented, Upload,
+  message, Empty, Divider, Badge, Modal, Alert, Spin, Segmented, Upload, Popconfirm,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -11,6 +11,7 @@ import {
   EditOutlined, CloseOutlined, DollarOutlined, ApiOutlined, FileTextOutlined,
   SwapOutlined, DownloadOutlined, CheckCircleOutlined, SyncOutlined,
   AccountBookOutlined, EyeOutlined, UploadOutlined, PaperClipOutlined, DeleteOutlined,
+  LockOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -180,6 +181,9 @@ const ExternalTxnForm: React.FC<{
   const [lineCoaInitial, setLineCoaInitial] = useState('');
   const [attachments, setAttachments]   = useState<Array<{id?: number; uid: string; name: string; fileType: string; fileSize: number; content?: string; status: 'done' | 'uploading' | 'error'}>>([]);
   const [attachUploading, setAttachUploading] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [savedExtId, setSavedExtId] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const isEdit = !!initialValues?.externalTransactionId;
   const buSelected = !!selectedBu;
 
@@ -369,7 +373,12 @@ const ExternalTxnForm: React.FC<{
           }
         }
         message.success(isEdit ? 'Transaction updated.' : 'Transaction created.');
-        onSave();
+        if (isEdit) {
+          onSave();
+        } else {
+          setSaved(true);
+          setSavedExtId(data.externalTransactionId ?? null);
+        }
       } else {
         message.error(data.message || 'Save failed.');
       }
@@ -398,6 +407,24 @@ const ExternalTxnForm: React.FC<{
     } catch (e: any) {
       setApiResponse({ status: 0, body: 'Network error: ' + e.message });
     } finally { setApiPosting(false); }
+  };
+
+  const handleDelete = async () => {
+    const extId = savedExtId ?? initialValues?.externalTransactionId;
+    if (!extId) { message.error('Transaction ID not available'); return; }
+    setDeleting(true);
+    try {
+      const res = await fetch(`${APEX_BASE}/cash/externaltransactions/${extId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.status === 'success') {
+        message.success('Transaction deleted.');
+        onSave();
+      } else {
+        message.error(data.message || 'Delete failed.');
+      }
+    } catch (e: any) {
+      message.error('Network error: ' + e.message);
+    } finally { setDeleting(false); }
   };
 
   // ── Styles ──────────────────────────────────────────────────────────────────
@@ -460,7 +487,7 @@ const ExternalTxnForm: React.FC<{
                 <Select
                   showSearch optionFilterProp="label" options={businessUnits}
                   placeholder="Select business unit"
-                  disabled={isEdit}
+                  disabled={isEdit || saved}
                   style={{ width: '100%' }}
                   onChange={v => {
                     setSelectedBu(v);
@@ -487,7 +514,7 @@ const ExternalTxnForm: React.FC<{
                   showSearch optionFilterProp="label"
                   options={filteredBankAccounts}
                   placeholder={buSelected ? 'Select bank account' : 'Select Business Unit first'}
-                  disabled={isEdit || !buSelected}
+                  disabled={isEdit || !buSelected || saved}
                   style={{ width: '100%' }}
                   notFoundContent={<Text type="secondary">No accounts for this BU</Text>}
                   onChange={v => {
@@ -523,7 +550,7 @@ const ExternalTxnForm: React.FC<{
                 rules={[{ required: !isEdit, message: 'Required' }]}
                 style={{ marginBottom: 10 }}
               >
-                <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={isEdit || !buSelected} />
+                <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={isEdit || !buSelected || saved} />
               </Form.Item>
             </Col>
             <Col xs={12} md={6}>
@@ -532,7 +559,7 @@ const ExternalTxnForm: React.FC<{
                 name="valueDate"
                 style={{ marginBottom: 10 }}
               >
-                <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={isEdit || !buSelected} />
+                <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={isEdit || !buSelected || saved} />
               </Form.Item>
             </Col>
             <Col xs={12} md={6}>
@@ -541,7 +568,7 @@ const ExternalTxnForm: React.FC<{
                 name="currencyCode"
                 style={{ marginBottom: 10 }}
               >
-                <Select placeholder="Auto-filled" allowClear disabled={isEdit || !buSelected}>
+                <Select placeholder="Auto-filled" allowClear disabled={isEdit || !buSelected || saved}>
                   {['AED', 'USD', 'EUR', 'GBP', 'SAR', 'QAR', 'KWD', 'BHD', 'OMR'].map(c => (
                     <Option key={c} value={c}>{c}</Option>
                   ))}
@@ -556,7 +583,7 @@ const ExternalTxnForm: React.FC<{
                 rules={[{ required: true, message: 'Transaction Type is required' }]}
                 style={{ marginBottom: 10 }}
               >
-                <Select placeholder="Select type" disabled={isEdit || !buSelected}>
+                <Select placeholder="Select type" disabled={isEdit || !buSelected || saved}>
                   <Option value="External Transaction">External Transaction</Option>
                   <Option value="Adhoc Payment">Adhoc Payment</Option>
                 </Select>
@@ -570,7 +597,7 @@ const ExternalTxnForm: React.FC<{
                 name="referenceText"
                 style={{ marginBottom: 0 }}
               >
-                <Input placeholder="e.g. STMT-REF-001" disabled={isEdit || !buSelected} />
+                <Input placeholder="e.g. STMT-REF-001" disabled={isEdit || !buSelected || saved} />
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
@@ -612,7 +639,7 @@ const ExternalTxnForm: React.FC<{
                 name="paymentMethod"
                 style={{ marginBottom: isAdhocPayment ? 10 : 0 }}
               >
-                <Select placeholder="Select method" allowClear disabled={isEdit || !buSelected}>
+                <Select placeholder="Select method" allowClear disabled={isEdit || !buSelected || saved}>
                   {['CHECK', 'EFT', 'WIRE', 'CASH', 'MISC'].map(m => <Option key={m} value={m}>{m}</Option>)}
                 </Select>
               </Form.Item>
@@ -623,7 +650,7 @@ const ExternalTxnForm: React.FC<{
                 name="paymentDocument"
                 style={{ marginBottom: isAdhocPayment ? 10 : 0 }}
               >
-                <Input placeholder="e.g. Cheque Book Name" disabled={isEdit || !buSelected} />
+                <Input placeholder="e.g. Cheque Book Name" disabled={isEdit || !buSelected || saved} />
               </Form.Item>
             </Col>
             <Col xs={24} md={8}>
@@ -632,7 +659,7 @@ const ExternalTxnForm: React.FC<{
                 name="paperDocumentNumber"
                 style={{ marginBottom: isAdhocPayment ? 10 : 0 }}
               >
-                <Input placeholder="e.g. CHQ-00123" disabled={isEdit || !buSelected} />
+                <Input placeholder="e.g. CHQ-00123" disabled={isEdit || !buSelected || saved} />
               </Form.Item>
             </Col>
           </Row>
@@ -648,7 +675,7 @@ const ExternalTxnForm: React.FC<{
                   <Select
                     showSearch
                     placeholder="Select payee..."
-                    disabled={isEdit || !buSelected}
+                    disabled={isEdit || !buSelected || saved}
                     optionFilterProp="label"
                     options={payeeOptions}
                     onChange={(val: number) => {
@@ -700,12 +727,12 @@ const ExternalTxnForm: React.FC<{
                 <div style={{ display: 'flex', gap: 0, alignItems: 'center' }}>
                   <Form.Item name="assetAccountCombination" noStyle>
                     <Input
-                      readOnly disabled={isEdit}
+                      readOnly disabled={isEdit || saved}
                       placeholder={isEdit ? '—' : 'Auto-populated from bank account'}
                       style={{ ...acctFieldStyle, borderRadius: isEdit ? 6 : '6px 0 0 6px' }}
                     />
                   </Form.Item>
-                  {!isEdit && (
+                  {!isEdit && !saved && (
                     <Button
                       icon={<SearchOutlined />}
                       disabled={!buSelected}
@@ -728,12 +755,12 @@ const ExternalTxnForm: React.FC<{
                       rules={[{ required: !isEdit, message: 'Offset account is required' }]}
                     >
                       <Input
-                        readOnly disabled={isEdit}
+                        readOnly disabled={isEdit || saved}
                         placeholder={isEdit ? '—' : 'Select offset account'}
                         style={{ ...acctFieldStyle, borderRadius: isEdit ? 6 : '6px 0 0 6px' }}
                       />
                     </Form.Item>
-                    {!isEdit && (
+                    {!isEdit && !saved && (
                       <Button
                         icon={<SearchOutlined />}
                         disabled={!buSelected}
@@ -761,7 +788,7 @@ const ExternalTxnForm: React.FC<{
                   <InputNumber
                     style={{ width: '100%' }}
                     precision={2}
-                    disabled={isEdit || !buSelected}
+                    disabled={isEdit || !buSelected || saved}
                     placeholder={txnDirection === 'DR' ? '+ve Money In' : '-ve Money Out'}
                     formatter={v => v ? String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''}
                     onChange={(v) => {
@@ -782,7 +809,7 @@ const ExternalTxnForm: React.FC<{
                     rows={1}
                     autoSize={{ minRows: 1, maxRows: 3 }}
                     placeholder="Enter description"
-                    disabled={isEdit || !buSelected}
+                    disabled={isEdit || !buSelected || saved}
                   />
                 </Form.Item>
               </Col>
@@ -994,9 +1021,9 @@ const ExternalTxnForm: React.FC<{
               setAttachments(prev => prev.filter(a => a.uid !== file.uid));
             }}
             multiple
-            disabled={!buSelected && !isEdit}
+            disabled={(!buSelected && !isEdit) || saved}
           >
-            <Button icon={<UploadOutlined />} disabled={!buSelected && !isEdit}>
+            <Button icon={<UploadOutlined />} disabled={(!buSelected && !isEdit) || saved}>
               Attach Files
             </Button>
           </Upload>
@@ -1026,7 +1053,7 @@ const ExternalTxnForm: React.FC<{
         boxShadow: '0 -2px 8px rgba(0,0,0,0.08)',
       }}>
         <div>
-          {!isEdit && (
+          {!isEdit && !saved && (
             <Button
               icon={<ApiOutlined />}
               onClick={handleApiOpen}
@@ -1035,12 +1062,38 @@ const ExternalTxnForm: React.FC<{
               API Inspector
             </Button>
           )}
+          {saved && (
+            <Space>
+              <LockOutlined style={{ color: REDWOOD.success }} />
+              <span style={{ fontSize: 13, color: REDWOOD.success, fontWeight: 600 }}>Saved &amp; Locked</span>
+            </Space>
+          )}
         </div>
         <Space size={8}>
+          {/* Delete button — shown after save (new) or in edit when not accounted */}
+          {(saved || (isEdit && initialValues?.accountingFlag !== 'Y')) && (
+            <Popconfirm
+              title="Delete this transaction?"
+              description="This action cannot be undone."
+              onConfirm={handleDelete}
+              okText="Delete"
+              okButtonProps={{ danger: true }}
+            >
+              <Button
+                size="large"
+                danger
+                loading={deleting}
+                icon={<DeleteOutlined />}
+                style={{ minWidth: 110 }}
+              >
+                Delete
+              </Button>
+            </Popconfirm>
+          )}
           <Button size="large" onClick={onCancel} style={{ minWidth: 100 }}>
-            {isEdit ? 'Close' : 'Cancel'}
+            {isEdit || saved ? 'Close' : 'Cancel'}
           </Button>
-          {!isEdit && (
+          {!isEdit && !saved && (
             <Button
               size="large"
               type="primary"

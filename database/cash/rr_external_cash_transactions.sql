@@ -603,6 +603,78 @@ END;
 /
 
 -- ============================================================
+-- DELETE cash/externaltransactions/:externalTransactionId
+-- Only allowed when ACCOUNTING_FLAG != 'Y'
+-- ============================================================
+BEGIN
+    BEGIN
+        ORDS.DELETE_HANDLER(
+            p_module_name => 'reerp',
+            p_pattern     => 'cash/externaltransactions/:externalTransactionId',
+            p_method      => 'DELETE'
+        );
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+
+    BEGIN
+        ORDS.DEFINE_TEMPLATE(
+            p_module_name => 'reerp',
+            p_pattern     => 'cash/externaltransactions/:externalTransactionId'
+        );
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+
+    ORDS.DEFINE_HANDLER(
+        p_module_name    => 'reerp',
+        p_pattern        => 'cash/externaltransactions/:externalTransactionId',
+        p_method         => 'DELETE',
+        p_source_type    => ORDS.source_type_plsql,
+        p_mimes_allowed  => '',
+        p_source         => '
+DECLARE
+    l_flag  VARCHAR2(1);
+    l_rows  NUMBER;
+BEGIN
+    SELECT NVL(ACCOUNTING_FLAG, ''N'') INTO l_flag
+    FROM RR_EXTERNAL_CASH_TRANSACTIONS
+    WHERE EXTERNAL_TRANSACTION_ID = :externalTransactionId;
+
+    IF l_flag = ''Y'' THEN
+        :status_code := 400;
+        HTP.PRN(''{"status":"error","message":"Cannot delete an accounted transaction"}'');
+        RETURN;
+    END IF;
+
+    DELETE FROM RR_EXTERNAL_CASH_TRANSACTIONS
+    WHERE EXTERNAL_TRANSACTION_ID = :externalTransactionId;
+
+    l_rows := SQL%ROWCOUNT;
+    COMMIT;
+
+    IF l_rows = 0 THEN
+        :status_code := 404;
+        HTP.PRN(''{"status":"error","message":"Transaction not found"}'');
+    ELSE
+        :status_code := 200;
+        HTP.PRN(''{"status":"success","message":"Transaction deleted"}'');
+    END IF;
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        :status_code := 404;
+        HTP.PRN(''{"status":"error","message":"Transaction not found"}'');
+    WHEN OTHERS THEN
+        ROLLBACK;
+        :status_code := 500;
+        HTP.PRN(''{"status":"error","message":'' || APEX_JSON.STRINGIFY(SQLERRM) || ''}'');
+END;
+'
+    );
+
+    COMMIT;
+END;
+/
+
+-- ============================================================
 -- Migration: Add payment fields (run once on existing DBs)
 -- ============================================================
 ALTER TABLE RR_EXTERNAL_CASH_TRANSACTIONS ADD (
