@@ -1762,6 +1762,26 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
         : <Tag color="default" style={{ fontSize: 11, margin: 0 }}>No</Tag>,
     },
     {
+      title: 'Dir', dataIndex: 'transactionDirection', width: 60, align: 'center',
+      render: v => v
+        ? <Tag color={v === 'DR' ? 'blue' : 'volcano'} style={{ fontSize: 11, margin: 0 }}>{v}</Tag>
+        : <Text style={{ fontSize: 12, color: '#bbb' }}>—</Text>,
+    },
+    {
+      title: 'Type', dataIndex: 'transactionType', ellipsis: true, width: 130,
+      render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text>,
+    },
+    {
+      title: 'Pmt Method', dataIndex: 'paymentMethod', width: 100,
+      render: v => v
+        ? <Tag style={{ fontSize: 11, margin: 0 }}>{v}</Tag>
+        : <Text style={{ fontSize: 12, color: '#bbb' }}>—</Text>,
+    },
+    {
+      title: 'Payee', dataIndex: 'payeeName', ellipsis: true,
+      render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text>,
+    },
+    {
       title: 'Actions', key: 'actions', width: 130, align: 'center',
       render: (_, r) => (
         <Space size={2}>
