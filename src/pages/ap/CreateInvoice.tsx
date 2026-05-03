@@ -245,6 +245,7 @@ interface InvoiceLine {
   endDate: string;
   accrualAccount: string;
   taxAmount: number;
+  taxAccountCombination?: string;  // GL account for this line's tax, from BU tax assignment
   accountDescription?: string;
 }
 
@@ -516,6 +517,17 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     invoiceDate: initialData?.invoiceId ? undefined : dayjs(),
   });
   const [taxRate, setTaxRate] = useState<number>(0);
+  const [taxCodes, setTaxCodes] = useState<{ taxCode: string; taxName: string; taxRate: number; taxAccount: string }[]>([]);
+  const taxRateMapRef    = useRef<Record<string, number>>({});
+  const taxAccountMapRef = useRef<Record<string, string>>({});
+  const taxRateMap = useMemo(() => {
+    const rateMap: Record<string, number> = {};
+    const acctMap: Record<string, string> = {};
+    taxCodes.forEach(t => { rateMap[t.taxCode] = t.taxRate; acctMap[t.taxCode] = t.taxAccount; });
+    taxRateMapRef.current    = rateMap;
+    taxAccountMapRef.current = acctMap;
+    return rateMap;
+  }, [taxCodes]);
 
   // Check if all required header fields are filled
   const isHeaderComplete = useMemo(() => {
@@ -1114,14 +1126,15 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         partyType: 'SUPPLIER',
       });
       // Tax line (DR in standard, CR in credit memo)
-      const taxRate = getTaxRateForClassification(l.taxClassification);
+      const taxRate = taxRateMapRef.current[l.taxClassification] ?? getTaxRateForClassification(l.taxClassification);
       if (taxRate > 0) {
         const taxAmt = Math.round(amt * taxRate / 100 * 100) / 100;
+        const taxAcct = l.taxAccountCombination || taxAccountMapRef.current[l.taxClassification] || 'Tax Recoverable';
         result.push({
           lineNumber: lineNum++,
           lineType: isCreditMemo ? 'CR' : 'DR',
           accountingClass: 'TAX',
-          accountCombination: 'Tax Recoverable',
+          accountCombination: taxAcct,
           enteredDr:   isCreditMemo ? 0       : taxAmt,
           enteredCr:   isCreditMemo ? taxAmt  : 0,
           accountedDr: isCreditMemo ? 0       : taxAmt,
@@ -1138,7 +1151,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     const totalLiability = Math.round(
       activeLines.reduce((sum, l) => {
         const amt = Math.abs(l.amount || 0);
-        const taxRate = getTaxRateForClassification(l.taxClassification);
+        const taxRate = taxRateMapRef.current[l.taxClassification] ?? getTaxRateForClassification(l.taxClassification);
         const taxAmt  = taxRate > 0 ? Math.round(amt * taxRate / 100 * 100) / 100 : 0;
         return sum + amt + taxAmt;
       }, 0) * 100
@@ -2295,6 +2308,26 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     }
   }, [autoPostPending, slaHeaderId, handlePostToLedger]);
 
+  const fetchTaxCodes = useCallback(async (businessUnit: string) => {
+    if (!businessUnit) { setTaxCodes([]); return; }
+    try {
+      const params = new URLSearchParams({ business_unit: businessUnit });
+      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/tax/taxes/bybu?${params}`);
+      const data = await res.json();
+      const items: any[] = data?.items ?? [];
+      setTaxCodes(
+        items
+          .map((t: any) => ({
+            taxCode:    t.taxCode    || '',
+            taxName:    t.taxName    || '',
+            taxRate:    Number(t.taxRate) || 0,
+            taxAccount: t.taxAccount || '',
+          }))
+          .filter(t => t.taxCode)
+      );
+    } catch { /* silent */ }
+  }, []);
+
   useEffect(() => {
     fetch(APEX_BUSINESS_UNITS_URL, { headers: { Accept: 'application/json' } })
       .then(r => r.json())
@@ -2305,6 +2338,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         setBusinessUnits(items.length > 0 ? items : FALLBACK_BUSINESS_UNITS);
       })
       .catch(() => setBusinessUnits(FALLBACK_BUSINESS_UNITS));
+
+    if (initialData?.businessUnit) fetchTaxCodes(initialData.businessUnit);
 
     searchCombinations({})
       .then(data => setDistCombinations(data))
@@ -3378,8 +3413,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         // Recalculate line-level tax when amount or taxClassification changes
         if (field === 'amount' || field === 'quantity' || field === 'unitPrice' || field === 'taxClassification') {
           const lineAmount = updated.amount || 0;
-          const lineRate = getTaxRateForClassification(updated.taxClassification);
+          const lineRate = taxRateMapRef.current[updated.taxClassification] ?? getTaxRateForClassification(updated.taxClassification);
           updated.taxAmount = Math.round(lineAmount * (lineRate / 100) * 100) / 100;
+        }
+        if (field === 'taxClassification') {
+          updated.taxAccountCombination = taxAccountMapRef.current[updated.taxClassification] || '';
         }
         // Auto-derive multiperiod dates when accounting date changes
         if (field === 'accountingDate' && value) {
@@ -3751,7 +3789,37 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       detail: needsRate && !convRate ? `Currency is ${currency} — conversion rate is required` : undefined,
     });
 
-    // 6. At least one line
+    // 6. Tax classification on all amount lines
+    const linesWithAmountNoTax = lines.filter((l) => (l.amount || 0) !== 0 && !l.taxClassification);
+    results.push({
+      label: 'Tax classification on invoice lines',
+      passed: linesWithAmountNoTax.length === 0,
+      detail: linesWithAmountNoTax.length > 0
+        ? `${linesWithAmountNoTax.length} line(s) are missing a tax classification`
+        : undefined,
+      subItems: linesWithAmountNoTax.map((l) => ({
+        label: `Line ${l.lineNumber}`,
+        detail: `${l.description || 'Item'} — ${formatAmount(l.amount)}`,
+      })),
+    });
+
+    // 6b. Tax account must be set for every taxed line
+    const linesWithTaxNoAccount = lines.filter(
+      (l) => l.taxClassification && !l.taxAccountCombination && !taxAccountMapRef.current[l.taxClassification]
+    );
+    results.push({
+      label: 'Tax GL account on taxed lines',
+      passed: linesWithTaxNoAccount.length === 0,
+      detail: linesWithTaxNoAccount.length > 0
+        ? `${linesWithTaxNoAccount.length} line(s) have a tax code with no GL account assigned in Tax Setup`
+        : undefined,
+      subItems: linesWithTaxNoAccount.map((l) => ({
+        label: `Line ${l.lineNumber}`,
+        detail: `Tax code "${l.taxClassification}" has no account — assign one in Tax Setup → BU Assignments`,
+      })),
+    });
+
+    // 7. At least one line
     results.push({
       label: 'Invoice lines exist',
       passed: lines.some((l) => l.amount !== 0 || l.description),
@@ -4788,25 +4856,43 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       title: 'Tax Classification',
       dataIndex: 'taxClassification',
       key: 'taxClassification',
-      width: 160,
-      render: (val: string, record: InvoiceLine) => (
-        <Select
-          size="small"
-          value={val || undefined}
-          onChange={(v) => updateLine(record.key, 'taxClassification', v)}
-          style={{ width: '100%' }}
-          variant="borderless"
-          placeholder=""
-          allowClear
-          disabled={isReadOnly}
-        >
-          <Option value="VAT 5%">VAT 5%</Option>
-          <Option value="Zero Rated">Zero Rated</Option>
-          <Option value="Exempt">Exempt</Option>
-          <Option value="Reverse Charge">Reverse Charge</Option>
-          <Option value="Out of Scope">Out of Scope</Option>
-        </Select>
-      ),
+      width: 180,
+      render: (val: string, record: InvoiceLine) => {
+        const taxEntry   = taxCodes.find(t => t.taxCode === val);
+        const taxAcct    = record.taxAccountCombination || taxEntry?.taxAccount || '';
+        const missingAcct = val && !taxAcct;
+        return (
+          <div>
+            <Select
+              size="small"
+              value={val || undefined}
+              onChange={(v) => updateLine(record.key, 'taxClassification', v)}
+              style={{ width: '100%' }}
+              variant="borderless"
+              placeholder={!buSelected ? 'Select BU first' : ''}
+              allowClear
+              disabled={isReadOnly || !buSelected}
+              notFoundContent={!buSelected ? 'Select a business unit to load taxes' : 'No taxes configured for this BU'}
+            >
+              {taxCodes.map(t => (
+                <Option key={t.taxCode} value={t.taxCode}>
+                  {t.taxCode}{t.taxRate > 0 ? ` (${t.taxRate}%)` : ''}
+                </Option>
+              ))}
+            </Select>
+            {taxAcct && (
+              <Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 1, lineHeight: 1.3 }}>
+                {taxAcct}
+              </Text>
+            )}
+            {missingAcct && (
+              <Text style={{ fontSize: 10, display: 'block', marginTop: 1, color: '#faad14' }}>
+                ⚠ No tax account assigned
+              </Text>
+            )}
+          </div>
+        );
+      },
     },
     {
       title: 'Tax Amount',
@@ -4815,7 +4901,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       width: 110,
       align: 'right',
       render: (val: number, record: InvoiceLine) => {
-        const rate = getTaxRateForClassification(record.taxClassification);
+        const rate = taxRateMap[record.taxClassification] ?? getTaxRateForClassification(record.taxClassification);
         const computed = Math.round((record.amount || 0) * (rate / 100) * 100) / 100;
         return (
           <Text style={{ fontSize: 12, fontWeight: 600, color: computed > 0 ? REDWOOD.info : REDWOOD.neutral600 }}>
@@ -5477,6 +5563,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               // When business unit changes, update buSelected gate
               if ('businessUnit' in changedValues) {
                 setBuSelected(!!changedValues.businessUnit);
+                fetchTaxCodes(changedValues.businessUnit || '');
               }
               // When business unit changes, build liability distribution:
               // segment 1 = company from BU webservice; rest is fixed
@@ -7658,7 +7745,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                       if (record.isGroupHeader) {
                         const pl = periodMap.get(v) || [];
                         const periodTotal = pl.reduce((s: number, l: any) => s + (l.amount || 0), 0);
-                        const periodTax = pl.reduce((s: number, l: any) => s + Math.round((l.amount || 0) * (getTaxRateForClassification(l.taxClassification) / 100) * 100) / 100, 0);
+                        const periodTax = pl.reduce((s: number, l: any) => s + Math.round((l.amount || 0) * ((taxRateMapRef.current[l.taxClassification] ?? getTaxRateForClassification(l.taxClassification)) / 100) * 100) / 100, 0);
                         return (
                           <span>
                             Period: <strong>{v}</strong>
@@ -7835,10 +7922,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 periodAccountedDebit += acctAmt;
               });
 
-              const periodLineTax = periodLines.reduce((sum, l) => sum + Math.round((l.amount || 0) * (getTaxRateForClassification(l.taxClassification) / 100) * 100) / 100, 0);
+              const periodLineTax = periodLines.reduce((sum, l) => sum + Math.round((l.amount || 0) * ((taxRateMapRef.current[l.taxClassification] ?? getTaxRateForClassification(l.taxClassification)) / 100) * 100) / 100, 0);
               if (periodLineTax > 0) {
                 const acctTax = Math.round(periodLineTax * effectiveRate * 100) / 100;
-                allEntries.push({ key: keyIdx++, period, line: 'Tax', account: 'Tax Recoverable', description: 'Input VAT', lineClass: 'Tax Recoverable', debit: periodLineTax, credit: 0, accountedDebit: acctTax, accountedCredit: 0 });
+                const firstTaxedLine = periodLines.find(l => l.taxClassification);
+                const taxAcct = firstTaxedLine?.taxAccountCombination
+                  || (firstTaxedLine ? taxAccountMapRef.current[firstTaxedLine.taxClassification] : '')
+                  || 'Tax Recoverable';
+                allEntries.push({ key: keyIdx++, period, line: 'Tax', account: taxAcct, description: 'Input VAT', lineClass: 'Tax Recoverable', debit: periodLineTax, credit: 0, accountedDebit: acctTax, accountedCredit: 0 });
                 periodDebit += periodLineTax;
                 periodAccountedDebit += acctTax;
               }
@@ -10579,7 +10670,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             <Button onClick={() => setSlaModalVisible(false)}>Close</Button>
           </Space>
         }
-        width={900}
+        width={1100}
         destroyOnClose
       >
         <Spin spinning={slaFetching} tip="Loading accounting data...">
@@ -10588,41 +10679,92 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           const slaLineColumns = [
             { title: '#', dataIndex: 'lineNumber', width: 45, render: (v: number) => <Text style={{ fontSize: 11 }}>{v}</Text> },
             { title: 'Type', dataIndex: 'lineType', width: 55, render: (v: string) => <Tag color={v === 'DR' ? 'blue' : 'red'} style={{ fontSize: 11, fontWeight: 700 }}>{v}</Tag> },
-            { title: 'Class', dataIndex: 'accountingClass', width: 110, render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
-            { title: 'Account Combination', dataIndex: 'accountCombination', ellipsis: true, render: (v: string, r: any) => (
+            { title: 'Class', dataIndex: 'accountingClass', width: 120, render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
+            { title: 'Account Combination', dataIndex: 'accountCombination', width: 260, render: (v: string, r: any) => (
               <div>
-                <Text code style={{ fontSize: 11 }}>{v || '—'}</Text>
+                <Text code style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{v || '—'}</Text>
                 {r.accountDescription && <div style={{ fontSize: 10, color: '#888', marginTop: 1 }}>{r.accountDescription}</div>}
               </div>
             ) },
-            { title: 'Ent. Dr',  dataIndex: 'enteredDr',   width: 110, align: 'right' as const, render: (v: number, r: any) => v ? <Text strong style={{ fontSize: 11, color: REDWOOD.info }}>{formatAmount(v)}</Text>   : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text> },
-            { title: 'Ent. Cr',  dataIndex: 'enteredCr',   width: 110, align: 'right' as const, render: (v: number, r: any) => v ? <Text strong style={{ fontSize: 11, color: REDWOOD.error }}>{formatAmount(v)}</Text>  : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text> },
-            { title: 'Acc. Dr',  dataIndex: 'accountedDr', width: 110, align: 'right' as const, render: (v: number, r: any) => v ? <Text style={{ fontSize: 11, color: REDWOOD.info }}>{formatAmount(v)}</Text>          : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text> },
-            { title: 'Acc. Cr',  dataIndex: 'accountedCr', width: 110, align: 'right' as const, render: (v: number, r: any) => v ? <Text style={{ fontSize: 11, color: REDWOOD.error }}>{formatAmount(v)}</Text>         : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text> },
-            { title: 'Description', dataIndex: 'description', ellipsis: true, render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
+            { title: 'Ent. Dr',  dataIndex: 'enteredDr',   width: 110, align: 'right' as const, render: (v: number) => v ? <Text strong style={{ fontSize: 11, color: REDWOOD.info }}>{formatAmount(v)}</Text>   : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text> },
+            { title: 'Ent. Cr',  dataIndex: 'enteredCr',   width: 110, align: 'right' as const, render: (v: number) => v ? <Text strong style={{ fontSize: 11, color: REDWOOD.error }}>{formatAmount(v)}</Text>  : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text> },
+            { title: 'Acc. Dr',  dataIndex: 'accountedDr', width: 110, align: 'right' as const, render: (v: number) => v ? <Text style={{ fontSize: 11, color: REDWOOD.info }}>{formatAmount(v)}</Text>          : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text> },
+            { title: 'Acc. Cr',  dataIndex: 'accountedCr', width: 110, align: 'right' as const, render: (v: number) => v ? <Text style={{ fontSize: 11, color: REDWOOD.error }}>{formatAmount(v)}</Text>         : <Text style={{ fontSize: 11, color: REDWOOD.neutral400 }}>—</Text> },
+            { title: 'Description', dataIndex: 'description', width: 180, ellipsis: true, render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
           ];
 
-          const renderLinesTable = (lines: any[]) => (
-            <Table
-              dataSource={lines.map((l, i) => ({ ...l, key: l.lineId || i }))}
-              size="small" pagination={false} bordered scroll={{ x: 800 }}
-              summary={(data) => {
-                const totEntDr  = data.reduce((s, r) => s + (r.enteredDr   || 0), 0);
-                const totEntCr  = data.reduce((s, r) => s + (r.enteredCr   || 0), 0);
-                const totAccDr  = data.reduce((s, r) => s + (r.accountedDr || 0), 0);
-                const totAccCr  = data.reduce((s, r) => s + (r.accountedCr || 0), 0);
-                return (
-                  <Table.Summary.Row style={{ background: '#f5f5f5', fontWeight: 700 }}>
-                    <Table.Summary.Cell index={0} colSpan={4}>Total</Table.Summary.Cell>
-                    <Table.Summary.Cell index={4} align="right"><Text strong style={{ color: REDWOOD.info }}>{formatAmount(totEntDr)}</Text></Table.Summary.Cell>
-                    <Table.Summary.Cell index={5} align="right"><Text strong style={{ color: REDWOOD.error }}>{formatAmount(totEntCr)}</Text></Table.Summary.Cell>
-                    <Table.Summary.Cell index={6} align="right"><Text style={{ color: REDWOOD.info }}>{formatAmount(totAccDr)}</Text></Table.Summary.Cell>
-                    <Table.Summary.Cell index={7} align="right"><Text style={{ color: REDWOOD.error }}>{formatAmount(totAccCr)}</Text></Table.Summary.Cell>
-                  </Table.Summary.Row>
-                );
-              }}
-              columns={slaLineColumns}
-            />
+          const exportSlaToExcel = (headerLines: any[], label: string) => {
+            const invoiceNum  = form.getFieldValue('invoiceNumber') || 'invoice';
+            const supplier    = form.getFieldValue('supplier')       || '';
+            const bu          = form.getFieldValue('businessUnit')   || '';
+            const currency    = form.getFieldValue('invoiceCurrency') || '';
+            const invoiceAmt  = form.getFieldValue('invoiceAmount')  || '';
+
+            // Sheet 1 — Header info
+            const headerRows = [
+              ['Invoice Number', invoiceNum],
+              ['Supplier',       supplier],
+              ['Business Unit',  bu],
+              ['Currency',       currency],
+              ['Invoice Amount', invoiceAmt],
+              ['SLA Header ID',  slaHeaderId ?? ''],
+              ['Status',         slaStatus   ?? ''],
+              ['GL Batch',       slaGlBatchName ?? ''],
+              ['Exported',       new Date().toLocaleString()],
+            ];
+
+            // Sheet 2 — Journal lines
+            const lineRows = [
+              ['#', 'Type', 'Class', 'Account Combination', 'Entered Dr', 'Entered Cr', 'Accounted Dr', 'Accounted Cr', 'Description'],
+              ...headerLines.map(l => [
+                l.lineNumber, l.lineType, l.accountingClass,
+                l.accountCombination || '',
+                l.enteredDr   || 0, l.enteredCr   || 0,
+                l.accountedDr || 0, l.accountedCr || 0,
+                l.description || '',
+              ]),
+            ];
+
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(headerRows), 'Header');
+            const ws2 = XLSX.utils.aoa_to_sheet(lineRows);
+            ws2['!cols'] = [{ wch: 5 }, { wch: 6 }, { wch: 18 }, { wch: 40 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 30 }];
+            XLSX.utils.book_append_sheet(wb, ws2, 'Journal Lines');
+            XLSX.writeFile(wb, `SLA_${invoiceNum}_${label}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+          };
+
+          const renderLinesTable = (lines: any[], exportLabel: string = 'Invoice') => (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
+                <Button
+                  size="small"
+                  icon={<FileExcelOutlined style={{ color: '#217346' }} />}
+                  onClick={() => exportSlaToExcel(lines, exportLabel)}
+                >
+                  Export to Excel
+                </Button>
+              </div>
+              <Table
+                dataSource={lines.map((l, i) => ({ ...l, key: l.lineId || i }))}
+                size="small" pagination={false} bordered scroll={{ x: 1060 }}
+                summary={(data) => {
+                  const totEntDr  = data.reduce((s, r) => s + (r.enteredDr   || 0), 0);
+                  const totEntCr  = data.reduce((s, r) => s + (r.enteredCr   || 0), 0);
+                  const totAccDr  = data.reduce((s, r) => s + (r.accountedDr || 0), 0);
+                  const totAccCr  = data.reduce((s, r) => s + (r.accountedCr || 0), 0);
+                  return (
+                    <Table.Summary.Row style={{ background: '#f5f5f5', fontWeight: 700 }}>
+                      <Table.Summary.Cell index={0} colSpan={4}>Total</Table.Summary.Cell>
+                      <Table.Summary.Cell index={4} align="right"><Text strong style={{ color: REDWOOD.info }}>{formatAmount(totEntDr)}</Text></Table.Summary.Cell>
+                      <Table.Summary.Cell index={5} align="right"><Text strong style={{ color: REDWOOD.error }}>{formatAmount(totEntCr)}</Text></Table.Summary.Cell>
+                      <Table.Summary.Cell index={6} align="right"><Text style={{ color: REDWOOD.info }}>{formatAmount(totAccDr)}</Text></Table.Summary.Cell>
+                      <Table.Summary.Cell index={7} align="right"><Text style={{ color: REDWOOD.error }}>{formatAmount(totAccCr)}</Text></Table.Summary.Cell>
+                    </Table.Summary.Row>
+                  );
+                }}
+                columns={slaLineColumns}
+              />
+            </>
           );
 
           return (
@@ -10663,7 +10805,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           {slaGlBatchName && <Descriptions.Item label="GL Batch Name" span={2}>{slaGlBatchName}</Descriptions.Item>}
                           {slaGlHeaderId && <Descriptions.Item label="GL Header ID">{slaGlHeaderId}</Descriptions.Item>}
                         </Descriptions>
-                        {renderLinesTable(slaLines)}
+                        {renderLinesTable(slaLines, 'Invoice')}
                         {slaStatus === 'POSTED' && cancelSlaLines.length === 0 && (
                           <div style={{ marginTop: 10, padding: '8px 12px', background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 6, fontSize: 12, color: '#52c41a' }}>
                             <CheckCircleOutlined style={{ marginRight: 6 }} />
@@ -10683,7 +10825,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                             </Tag>
                             <Text type="secondary" style={{ fontSize: 11 }}>Header ID: {cancelSlaHeaderId}</Text>
                           </div>
-                          {renderLinesTable(cancelSlaLines)}
+                          {renderLinesTable(cancelSlaLines, 'Cancellation')}
                           {cancelPostError && (
                             <Alert
                               type="error"
@@ -10757,7 +10899,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                               {notLoaded
                                 ? <Text type="secondary" style={{ fontSize: 12 }}>Switch to this tab to load lines…</Text>
                                 : lines.length > 0
-                                  ? renderLinesTable(lines)
+                                  ? renderLinesTable(lines, 'Prepayment')
                                   : <Text type="secondary" style={{ fontSize: 12 }}>{headerId ? 'No accounting lines found for this header.' : 'Accounting not yet created.'}</Text>
                               }
                             </div>
@@ -10819,7 +10961,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                               {notLoaded
                                 ? <Text type="secondary" style={{ fontSize: 12 }}>Switch to this tab to load lines…</Text>
                                 : lines.length > 0
-                                  ? renderLinesTable(lines)
+                                  ? renderLinesTable(lines, 'Payment')
                                   : <Text type="secondary" style={{ fontSize: 12 }}>{headerId ? 'No accounting lines found for this header.' : 'Payment accounting not yet created.'}</Text>
                               }
                             </div>

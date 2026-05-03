@@ -9,6 +9,9 @@ let autoUpdater = null;
 let nodemailer = null;
 try { nodemailer = require('nodemailer'); } catch (_) { /* optional */ }
 
+const rag = require('./rag.cjs');
+const getUserDataPath = () => app.getPath('userData');
+
 // ── Email sender (IPC) ──────────────────────────────────────────────────────
 const APEX_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp';
 
@@ -1000,5 +1003,217 @@ app.on('certificate-error', (event, webContents, url, error, certificate, callba
     callback(true);
   } else {
     callback(false);
+  }
+});
+
+// ── Claude AI Agent ────────────────────────────────────────────────────────
+const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
+let _claudeKeyCache = null;
+let _claudeKeyCacheAt = 0;
+const CLAUDE_KEY_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+async function getClaudeKey() {
+  if (_claudeKeyCache && (Date.now() - _claudeKeyCacheAt) < CLAUDE_KEY_CACHE_TTL) {
+    return _claudeKeyCache;
+  }
+  const res  = await fetch(`${APEX_BASE}/settings/claudekey`);
+  const text = await res.text();
+
+  // If APEX returned an HTML page the endpoint is not deployed yet
+  if (text.trimStart().startsWith('<')) {
+    throw new Error(
+      `APEX endpoint not found (HTTP ${res.status}). ` +
+      'Please run database/cash/rr_claude_key.sql in Oracle APEX SQL Workshop, ' +
+      'then go to Administration → Claude AI Key Settings to add your key.'
+    );
+  }
+
+  let data;
+  try { data = JSON.parse(text); } catch {
+    throw new Error('Unexpected response from /settings/claudekey: ' + text.substring(0, 120));
+  }
+
+  if (data.status === 'success' && data.apiKey) {
+    _claudeKeyCache = data.apiKey.trim();
+    _claudeKeyCacheAt = Date.now();
+    return _claudeKeyCache;
+  }
+  throw new Error(
+    data.message ||
+    'No active Claude API key found. Go to Administration → Claude AI Key Settings to add your key.'
+  );
+}
+
+ipcMain.handle('claude:test-key', async () => {
+  try {
+    const apiKey = await getClaudeKey();
+    const res = await fetch(CLAUDE_API_URL, {
+      method: 'POST',
+      headers: {
+        'x-api-key':         apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type':      'application/json',
+      },
+      body: JSON.stringify({
+        model:      'claude-haiku-4-5-20251001',
+        max_tokens: 32,
+        messages:   [{ role: 'user', content: 'Reply with exactly: OK' }],
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      return { success: false, error: `Claude API ${res.status}: ${err.substring(0, 200)}` };
+    }
+    const data = await res.json();
+    const reply = data.content?.[0]?.text?.trim() ?? '(empty)';
+    return { success: true, reply };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('claude:recon-agent', async (_event, { stmtLines, sysTxns, bankAccount }) => {
+  try {
+    const apiKey = await getClaudeKey();
+
+    const systemPrompt = `You are a bank reconciliation assistant for an Oracle ERP system.
+Your job is to match unreconciled bank statement lines with unreconciled system transactions.
+
+Matching rules:
+- Amount must match exactly or within 0.01 rounding difference
+- Date can be up to 3 days apart (bank processing lag is normal)
+- Reference/description similarity increases confidence but is not required
+- Each statement line matches at most one system transaction (and vice versa)
+
+Confidence scoring:
+- 95-100: Exact amount + date within 1 day + reference matches
+- 80-94:  Exact amount + date within 3 days
+- 65-79:  Exact amount + date more than 3 days apart
+- Below 65: Do not include — too uncertain
+
+Return ONLY valid JSON, no explanation outside the JSON:
+{
+  "matches": [
+    {
+      "stmtLineId": <number>,
+      "stmtAmount": <number>,
+      "stmtDate": "<YYYY-MM-DD>",
+      "stmtRef": "<string>",
+      "txnId": <number>,
+      "txnSource": "<string>",
+      "txnNumber": "<string>",
+      "txnAmount": <number>,
+      "txnDate": "<YYYY-MM-DD>",
+      "txnRef": "<string>",
+      "confidence": <number>,
+      "reason": "<one sentence>"
+    }
+  ],
+  "unmatchedStmt": [<lineId>, ...],
+  "unmatchedTxn": [<txnId>, ...],
+  "summary": "<one sentence summary>"
+}`;
+
+    const userContent = `Bank Account: ${bankAccount || 'Unknown'}
+
+BANK STATEMENT LINES (unreconciled, ${stmtLines.length} lines):
+${JSON.stringify(stmtLines.map(l => ({
+  lineId:      l.lineId,
+  amount:      l.amount,
+  date:        l.transactionDate,
+  ref:         l.referenceNumber || l.transactionRef || l.reference || '',
+  description: l.description || '',
+})), null, 2)}
+
+SYSTEM TRANSACTIONS (unreconciled, ${sysTxns.length} transactions):
+${JSON.stringify(sysTxns.map(t => ({
+  txnId:     t.txnId,
+  txnNumber: t.txnNumber,
+  source:    t.source,
+  amount:    t.amount,
+  date:      t.txnDate,
+  ref:       t.reference || t.referenceText || '',
+  payee:     t.payee || '',
+})), null, 2)}
+
+Find the best matches. Only include confident matches (65+).`;
+
+    const claudeRes = await fetch(CLAUDE_API_URL, {
+      method: 'POST',
+      headers: {
+        'x-api-key':         apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type':      'application/json',
+      },
+      body: JSON.stringify({
+        model:      'claude-sonnet-4-6',
+        max_tokens: 4096,
+        system:     systemPrompt,
+        messages:   [{ role: 'user', content: userContent }],
+      }),
+    });
+
+    if (!claudeRes.ok) {
+      const errText = await claudeRes.text();
+      throw new Error(`Claude API ${claudeRes.status}: ${errText}`);
+    }
+
+    const claudeData = await claudeRes.json();
+    const text = claudeData.content?.[0]?.text ?? '';
+
+    // Extract JSON block from response
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('Claude returned no JSON. Response: ' + text.substring(0, 200));
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    console.log(`[claude:recon-agent] Found ${parsed.matches?.length ?? 0} matches`);
+    return { success: true, ...parsed };
+
+  } catch (err) {
+    console.error('[claude:recon-agent]', err.message);
+    return { success: false, error: err.message };
+  }
+});
+
+// ── RAG: Ingest file ─────────────────────────────────────────────────────────
+ipcMain.handle('rag:ingest-file', async (_event, { buffer, filename, mimeType }) => {
+  try {
+    const buf = Buffer.from(buffer);
+    const result = await rag.ingestFile(getUserDataPath(), buf, filename, mimeType);
+    return { success: true, ...result };
+  } catch (err) {
+    console.error('[rag:ingest-file]', err.message);
+    return { success: false, error: err.message };
+  }
+});
+
+// ── RAG: List documents ──────────────────────────────────────────────────────
+ipcMain.handle('rag:list-docs', async () => {
+  try {
+    return { success: true, docs: rag.listDocuments(getUserDataPath()) };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// ── RAG: Delete document ─────────────────────────────────────────────────────
+ipcMain.handle('rag:delete-doc', async (_event, { docId }) => {
+  try {
+    rag.deleteDocument(getUserDataPath(), docId);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// ── RAG: Query (chat) ────────────────────────────────────────────────────────
+ipcMain.handle('rag:query', async (_event, { question, mode, history }) => {
+  try {
+    const apiKey = await getClaudeKey();
+    const result = await rag.ragQuery(getUserDataPath(), APEX_BASE, apiKey, { question, mode, history });
+    return { success: true, ...result };
+  } catch (err) {
+    console.error('[rag:query]', err.message);
+    return { success: false, error: err.message };
   }
 });

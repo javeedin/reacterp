@@ -74,6 +74,8 @@ const ManageCustomers         = lazy(() => import('./pages/rm').then(m => ({ def
 const ManageExpenses          = lazy(() => import('./pages/rm').then(m => ({ default: m.ManageExpenses })));
 const AdminModule             = lazy(() => import('./pages/admin/index'));
 const UserManagement          = lazy(() => import('./pages/admin/UserManagement'));
+const ClaudeKeySettings       = lazy(() => import('./pages/admin/ClaudeKeySettings'));
+const RagAssistant            = lazy(() => import('./pages/admin/RagAssistant'));
 const CashModule              = lazy(() => import('./pages/cash/CashModule'));
 const ManageBankTransfers     = lazy(() => import('./pages/cash/ManageBankTransfers'));
 const ManageExternalTransactions = lazy(() => import('./pages/cash/ManageExternalTransactions'));
@@ -81,6 +83,7 @@ const ManageBankStatements    = lazy(() => import('./pages/cash/ManageBankStatem
 const BankReconciliation      = lazy(() => import('./pages/cash/BankReconciliation'));
 const TransactionCodes        = lazy(() => import('./pages/cash/TransactionCodes'));
 const PdfTemplates            = lazy(() => import('./pages/cash/PdfTemplates'));
+const ManagePayees            = lazy(() => import('./pages/cash/ManagePayees'));
 const ManageTaxes             = lazy(() => import('./pages/tax/ManageTaxes'));
 const SupportModule           = lazy(() => import('./pages/support/SupportModule'));
 const ManageTickets           = lazy(() => import('./pages/support/ManageTickets'));
@@ -215,6 +218,8 @@ function App() {
               <Route path="reports/*" element={<ComingSoon moduleName="Reports & Analytics" />} />
               <Route path="admin" element={<AdminModule />} />
               <Route path="admin/users" element={<UserManagement />} />
+              <Route path="admin/claude-key" element={<ClaudeKeySettings />} />
+              <Route path="admin/ai-assistant" element={<RagAssistant />} />
               {/* Petty Cash */}
               <Route path="pc/registers" element={<PettyCash />} />
               {/* Cash Management */}
@@ -230,6 +235,7 @@ function App() {
               <Route path="cash/bank-reconciliation" element={<BankReconciliation />} />
               <Route path="cash/transaction-codes" element={<TransactionCodes />} />
               <Route path="cash/pdf-templates" element={<PdfTemplates />} />
+              <Route path="cash/payees" element={<ManagePayees />} />
               <Route path="setup/taxes" element={<ManageTaxes />} />
               <Route path="ap/external-transactions"   element={<ManageExternalTransactions module="ap" />} />
               <Route path="sync/*" element={<SyncData />} />

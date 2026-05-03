@@ -52,6 +52,7 @@ import type { Dayjs } from 'dayjs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
+import { APEX_DB_CONFIG } from '../../config/api.config';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -431,9 +432,11 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
     const fetchPeriods = async () => {
       setLoadingPeriods(true);
       try {
-        const encodedLedgerName = encodeURIComponent(selectedLedger.ledger_name);
+        const params = new URLSearchParams();
+        params.append('P_APPLICATION_NAME', 'General Ledger');
+        params.append('P_LEDGER_NAME', selectedLedger.ledger_name);
         const response = await fetch(
-          `https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/periodsstatus/create?P_LEDGER_NAME=${encodedLedgerName}&P_APPLICATION_NAME=General Ledger`
+          `${APEX_DB_CONFIG.baseUrl}/periodsstatus/create?${params.toString()}`
         );
         const data = await response.json();
         if (data.items && data.items.length > 0) {

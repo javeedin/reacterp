@@ -2,11 +2,13 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input, Select,
   Space, Tag, Modal, Popconfirm, message, Tabs, InputNumber, DatePicker, Row, Col,
+  Tooltip, Divider,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, PlusOutlined, EditOutlined, DeleteOutlined,
   SearchOutlined, ReloadOutlined, PercentageOutlined, BankOutlined,
+  ApiOutlined, CopyOutlined, CheckOutlined, BugOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -197,9 +199,16 @@ const AssignmentModal: React.FC<{
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const [acctSelectorOpen, setAcctSelectorOpen] = useState(false);
+  const [taxAccountDesc,   setTaxAccountDesc]   = useState('');
+  const [showDebug,        setShowDebug]        = useState(false);
+  const [testing,          setTesting]          = useState(false);
+  const [testResponse,     setTestResponse]     = useState<string | null>(null);
+  const [copied,           setCopied]           = useState(false);
 
   useEffect(() => {
     if (open) {
+      setShowDebug(false);
+      setTestResponse(null);
       if (editing) {
         form.setFieldsValue({
           taxId:           editing.taxId,
@@ -209,9 +218,11 @@ const AssignmentModal: React.FC<{
           effectiveTo:     editing.effectiveTo   ? dayjs(editing.effectiveTo)   : null,
           status:          editing.status,
         });
+        setTaxAccountDesc('');
       } else {
         form.resetFields();
         form.setFieldsValue({ status: 'ACTIVE' });
+        setTaxAccountDesc('');
       }
     }
   }, [open, editing, form]);
@@ -245,14 +256,55 @@ const AssignmentModal: React.FC<{
     } finally { setSaving(false); }
   };
 
+  const buildPayload = () => {
+    const values = form.getFieldsValue();
+    const payload: any = {
+      ...values,
+      effectiveFrom: values.effectiveFrom ? values.effectiveFrom.format('YYYY-MM-DD') : null,
+      effectiveTo:   values.effectiveTo   ? values.effectiveTo.format('YYYY-MM-DD')   : null,
+      lastUpdatedBy: 'ERP_USER',
+    };
+    if (editing) payload.assignmentId = editing.assignmentId;
+    return payload;
+  };
+
+  const handleTestApi = async () => {
+    const payload = buildPayload();
+    setTesting(true);
+    setTestResponse(null);
+    try {
+      const res  = await fetch(`${APEX_BASE}/tax/assignments`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const text = await res.text();
+      setTestResponse(`HTTP ${res.status} ${res.statusText}\n\n${text}`);
+    } catch (e: any) {
+      setTestResponse(`Network error: ${e.message}`);
+    } finally { setTesting(false); }
+  };
+
+  const handleCopyPayload = () => {
+    navigator.clipboard.writeText(JSON.stringify(buildPayload(), null, 2));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   const taxAccount = Form.useWatch('taxAccount', form);
 
   return (
     <>
       <Modal
         open={open} title={editing ? 'Edit Tax Assignment' : 'Assign Tax to Business Unit'}
-        onCancel={onClose} width={580}
+        onCancel={onClose} width={600}
         footer={[
+          <Tooltip key="api-tip" title="Debug API payload">
+            <Button
+              icon={<ApiOutlined />}
+              onClick={() => { setShowDebug(v => !v); setTestResponse(null); }}
+              style={{ float: 'left', color: showDebug ? REDWOOD.info : undefined }}
+            />
+          </Tooltip>,
           <Button key="cancel" onClick={onClose}>Cancel</Button>,
           <Button key="save" type="primary" loading={saving} onClick={handleSave}
             style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
@@ -288,6 +340,11 @@ const AssignmentModal: React.FC<{
               onClick={() => setAcctSelectorOpen(true)}
               style={{ cursor: 'pointer' }}
             />
+            {taxAccountDesc && (
+              <Text type="secondary" style={{ fontSize: 12, marginTop: 4, display: 'block' }}>
+                {taxAccountDesc}
+              </Text>
+            )}
           </Form.Item>
           <Row gutter={16}>
             <Col span={12}>
@@ -307,16 +364,79 @@ const AssignmentModal: React.FC<{
               <Option value="INACTIVE">Inactive</Option>
             </Select>
           </Form.Item>
+
+          {showDebug && (
+            <>
+              <Divider style={{ margin: '12px 0' }} />
+              <div style={{ background: '#0d1117', borderRadius: 8, padding: 12 }}>
+                <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <Space>
+                    <BugOutlined style={{ color: '#58a6ff' }} />
+                    <Text style={{ color: '#58a6ff', fontSize: 12, fontFamily: 'monospace' }}>
+                      POST {APEX_BASE}/tax/assignments
+                    </Text>
+                  </Space>
+                  <Space>
+                    <Tooltip title={copied ? 'Copied!' : 'Copy payload'}>
+                      <Button
+                        size="small" type="text"
+                        icon={copied ? <CheckOutlined style={{ color: '#3fb950' }} /> : <CopyOutlined style={{ color: '#8b949e' }} />}
+                        onClick={handleCopyPayload}
+                      />
+                    </Tooltip>
+                    <Button
+                      size="small" type="primary" loading={testing}
+                      onClick={handleTestApi}
+                      style={{ background: '#238636', borderColor: '#238636', fontSize: 12 }}
+                    >
+                      Send Test
+                    </Button>
+                  </Space>
+                </Space>
+                <pre style={{
+                  background: '#161b22', color: '#e6edf3', fontSize: 11,
+                  padding: 10, borderRadius: 6, margin: 0, overflowX: 'auto',
+                  maxHeight: 200, overflowY: 'auto', fontFamily: 'monospace',
+                }}>
+                  {JSON.stringify(buildPayload(), null, 2)}
+                </pre>
+                {testResponse !== null && (
+                  <>
+                    <div style={{ color: '#8b949e', fontSize: 11, marginTop: 8, marginBottom: 4 }}>Response:</div>
+                    <pre style={{
+                      background: '#161b22', fontSize: 11, padding: 10,
+                      borderRadius: 6, margin: 0, overflowX: 'auto',
+                      maxHeight: 180, overflowY: 'auto', fontFamily: 'monospace',
+                      color: testResponse.includes('"status":"success"') || testResponse.includes('"status": "success"')
+                        ? '#3fb950' : '#f85149',
+                    }}>
+                      {(() => {
+                        try {
+                          const jsonStart = testResponse.indexOf('\n\n') + 2;
+                          const header   = testResponse.substring(0, jsonStart);
+                          const body     = JSON.stringify(JSON.parse(testResponse.substring(jsonStart)), null, 2);
+                          return header + body;
+                        } catch { return testResponse; }
+                      })()}
+                    </pre>
+                  </>
+                )}
+              </div>
+            </>
+          )}
         </Form>
       </Modal>
       <AccountSelector
-        open={acctSelectorOpen}
+        visible={acctSelectorOpen}
         initialValue={taxAccount || ''}
-        onSelect={(combo) => {
-          form.setFieldValue('taxAccount', combo);
+        onSelect={(accountCode, segments) => {
+          form.setFieldValue('taxAccount', accountCode);
+          const naturalValue = accountCode.split('-')[3] || '';
+          const desc = Object.values(segments).find(s => s.value === naturalValue)?.description || '';
+          setTaxAccountDesc(desc);
           setAcctSelectorOpen(false);
         }}
-        onClose={() => setAcctSelectorOpen(false)}
+        onCancel={() => setAcctSelectorOpen(false)}
       />
     </>
   );
@@ -382,7 +502,7 @@ const ManageTaxes: React.FC = () => {
   // ── Fetch BUs ──
   const fetchBUs = useCallback(async () => {
     try {
-      const res  = await fetch(`${APEX_BASE}/hr/businessunits`);
+      const res  = await fetch(`${APEX_BASE}/gl/businessunits`);
       const data = await res.json();
       const items: any[] = data?.items ?? data ?? [];
       setBusinessUnits(

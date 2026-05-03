@@ -117,7 +117,13 @@ BEGIN
                 creation_date                VARCHAR2(50)    PATH '$.CreationDate',
                 last_updated_by              VARCHAR2(150)   PATH '$.LastUpdatedBy',
                 last_update_date             VARCHAR2(50)    PATH '$.LastUpdateDate',
-                last_update_login            VARCHAR2(200)   PATH '$.LastUpdateLogin'
+                last_update_login            VARCHAR2(200)   PATH '$.LastUpdateLogin',
+                payment_method               VARCHAR2(60)    PATH '$.PaymentMethod',
+                payment_document             VARCHAR2(240)   PATH '$.PaymentDocument',
+                paper_document_number        VARCHAR2(60)    PATH '$.PaperDocumentNumber',
+                payee_name                   VARCHAR2(360)   PATH '$.PayeeName',
+                payee_id                     NUMBER          PATH '$.PayeeId',
+                transaction_direction        VARCHAR2(2)     PATH '$.TransactionDirection'
             )
         )
     ) LOOP
@@ -174,7 +180,13 @@ BEGIN
                     REGEXP_REPLACE(rec.last_update_date, '(Z|[+-]\d{2}:\d{2})$', ''),
                     'YYYY-MM-DD"T"HH24:MI:SS.FF3'
                 ) AS last_update_date,
-                rec.last_update_login                           AS last_update_login
+                rec.last_update_login                           AS last_update_login,
+                rec.payment_method                              AS payment_method,
+                rec.payment_document                           AS payment_document,
+                rec.paper_document_number                      AS paper_document_number,
+                rec.payee_name                                 AS payee_name,
+                rec.payee_id                                   AS payee_id,
+                rec.transaction_direction                      AS transaction_direction
             FROM DUAL
         ) src
         ON (tgt.EXTERNAL_TRANSACTION_ID = src.external_transaction_id)
@@ -215,6 +227,12 @@ BEGIN
                 tgt.LAST_UPDATED_BY              = src.last_updated_by,
                 tgt.LAST_UPDATE_DATE             = src.last_update_date,
                 tgt.LAST_UPDATE_LOGIN            = src.last_update_login,
+                tgt.PAYMENT_METHOD               = src.payment_method,
+                tgt.PAYMENT_DOCUMENT             = src.payment_document,
+                tgt.PAPER_DOCUMENT_NUMBER        = src.paper_document_number,
+                tgt.PAYEE_NAME                   = src.payee_name,
+                tgt.PAYEE_ID                     = src.payee_id,
+                tgt.TRANSACTION_DIRECTION        = src.transaction_direction,
                 tgt.SYNC_DATE                    = SYSTIMESTAMP
         WHEN NOT MATCHED THEN
             INSERT (
@@ -230,7 +248,10 @@ BEGIN
                 END_TO_END_ID, INSTRUCTION_IDENTIFICATION, RECON_REFERENCE,
                 STRUCTURED_PAYMENT_REFERENCE, BANK_TRANSACTION_ID,
                 CREATED_BY, CREATION_DATE, LAST_UPDATED_BY,
-                LAST_UPDATE_DATE, LAST_UPDATE_LOGIN, SYNC_DATE
+                LAST_UPDATE_DATE, LAST_UPDATE_LOGIN,
+                PAYMENT_METHOD, PAYMENT_DOCUMENT, PAPER_DOCUMENT_NUMBER,
+                PAYEE_NAME, PAYEE_ID, TRANSACTION_DIRECTION,
+                SYNC_DATE
             ) VALUES (
                 src.external_transaction_id, src.transaction_id,
                 src.transaction_date, src.value_date, src.cleared_date,
@@ -244,7 +265,10 @@ BEGIN
                 src.end_to_end_id, src.instruction_identification, src.recon_reference,
                 src.structured_payment_reference, src.bank_transaction_id,
                 src.created_by, src.creation_date, src.last_updated_by,
-                src.last_update_date, src.last_update_login, SYSTIMESTAMP
+                src.last_update_date, src.last_update_login,
+                src.payment_method, src.payment_document, src.paper_document_number,
+                src.payee_name, src.payee_id, src.transaction_direction,
+                SYSTIMESTAMP
             );
 
         p_count := p_count + 1;
@@ -395,6 +419,12 @@ DECLARE
                TO_CHAR(CREATION_DATE,   'YYYY-MM-DD"T"HH24:MI:SS') AS CREATION_DATE,
                LAST_UPDATED_BY,
                TO_CHAR(LAST_UPDATE_DATE,'YYYY-MM-DD"T"HH24:MI:SS') AS LAST_UPDATE_DATE,
+               TRANSACTION_DIRECTION,
+               PAYMENT_METHOD,
+               PAYMENT_DOCUMENT,
+               PAPER_DOCUMENT_NUMBER,
+               PAYEE_NAME,
+               PAYEE_ID,
                TO_CHAR(SYNC_DATE,       'YYYY-MM-DD"T"HH24:MI:SS') AS SYNC_DATE
           FROM RR_EXTERNAL_CASH_TRANSACTIONS
          WHERE (l_txn_number IS NULL OR TO_CHAR(TRANSACTION_ID) LIKE '%' || l_txn_number || '%')
@@ -441,36 +471,44 @@ BEGIN
         END IF;
         v_first := FALSE;
 
-        DBMS_LOB.APPEND(v_clob, TO_CLOB(
-            '{"externalTransactionId":' || TO_CHAR(r.EXTERNAL_TRANSACTION_ID) || ','
-         || '"transactionId":'          || NVL(TO_CHAR(r.TRANSACTION_ID), 'null') || ','
-         || '"transactionDate":'        || jstr(r.TRANSACTION_DATE) || ','
-         || '"valueDate":'              || jstr(r.VALUE_DATE)       || ','
-         || '"clearedDate":'            || jstr(r.CLEARED_DATE)     || ','
-         || '"amount":'                 || NVL(TO_CHAR(r.AMOUNT), 'null') || ','
-         || '"currencyCode":'           || jstr(r.CURRENCY_CODE)    || ','
-         || '"description":'            || jstr(r.DESCRIPTION)      || ','
-         || '"referenceText":'          || jstr(r.REFERENCE_TEXT)   || ','
-         || '"source":'                 || jstr(r.SOURCE)           || ','
-         || '"status":'                 || jstr(r.STATUS)           || ','
-         || '"transactionType":'        || jstr(r.TRANSACTION_TYPE) || ','
-         || '"accountingFlag":'         || jstr(r.ACCOUNTING_FLAG)  || ','
-         || '"bankAccountName":'        || jstr(r.BANK_ACCOUNT_NAME)          || ','
-         || '"businessUnitName":'       || jstr(r.BUSINESS_UNIT_NAME)         || ','
-         || '"legalEntityName":'        || jstr(r.LEGAL_ENTITY_NAME)          || ','
-         || '"assetAccountCombination":' || jstr(r.ASSET_ACCOUNT_COMBINATION) || ','
-         || '"offsetAccountCombination":' || jstr(r.OFFSET_ACCOUNT_COMBINATION) || ','
-         || '"bankConversionRate":'     || NVL(TO_CHAR(r.BANK_CONVERSION_RATE), 'null') || ','
-         || '"bankConversionRateType":' || jstr(r.BANK_CONVERSION_RATE_TYPE)  || ','
-         || '"transferId":'             || NVL(TO_CHAR(r.TRANSFER_ID), 'null') || ','
-         || '"checkNumber":'            || jstr(r.CHECK_NUMBER)    || ','
-         || '"reconReference":'         || jstr(r.RECON_REFERENCE) || ','
-         || '"createdBy":'              || jstr(r.CREATED_BY)      || ','
-         || '"creationDate":'           || jstr(r.CREATION_DATE)   || ','
-         || '"lastUpdatedBy":'          || jstr(r.LAST_UPDATED_BY) || ','
-         || '"lastUpdateDate":'         || jstr(r.LAST_UPDATE_DATE) || ','
-         || '"syncDate":'               || jstr(r.SYNC_DATE) || '}'
-        ));
+        -- Build each record field-by-field into the CLOB to avoid
+        -- hitting PL/SQL's 32767-byte VARCHAR2 expression limit.
+        DBMS_LOB.APPEND(v_clob, TO_CLOB('{'));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB('"externalTransactionId":' || TO_CHAR(r.EXTERNAL_TRANSACTION_ID)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"transactionId":'    || NVL(TO_CHAR(r.TRANSACTION_ID), 'null')));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"transactionDate":') ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.TRANSACTION_DATE)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"valueDate":')       ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.VALUE_DATE)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"clearedDate":')     ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.CLEARED_DATE)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"amount":'           || NVL(TO_CHAR(r.AMOUNT), 'null')));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"currencyCode":')    ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.CURRENCY_CODE)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"description":')     ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.DESCRIPTION)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"referenceText":')   ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.REFERENCE_TEXT)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"source":')          ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.SOURCE)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"status":')          ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.STATUS)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"transactionType":') ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.TRANSACTION_TYPE)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"accountingFlag":')  ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.ACCOUNTING_FLAG)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"bankAccountName":') ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.BANK_ACCOUNT_NAME)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"businessUnitName":')   ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.BUSINESS_UNIT_NAME)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"legalEntityName":')    ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.LEGAL_ENTITY_NAME)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"assetAccountCombination":') ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.ASSET_ACCOUNT_COMBINATION)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"offsetAccountCombination":') ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.OFFSET_ACCOUNT_COMBINATION)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"bankConversionRate":' || NVL(TO_CHAR(r.BANK_CONVERSION_RATE), 'null')));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"bankConversionRateType":') ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.BANK_CONVERSION_RATE_TYPE)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"transferId":'  || NVL(TO_CHAR(r.TRANSFER_ID), 'null')));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"checkNumber":')    ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.CHECK_NUMBER)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"reconReference":') ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.RECON_REFERENCE)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"createdBy":')      ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.CREATED_BY)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"creationDate":')   ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.CREATION_DATE)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"lastUpdatedBy":')  ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.LAST_UPDATED_BY)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"lastUpdateDate":')      ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.LAST_UPDATE_DATE)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"transactionDirection":') ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.TRANSACTION_DIRECTION)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"paymentMethod":')        ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.PAYMENT_METHOD)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"paymentDocument":')    ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.PAYMENT_DOCUMENT)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"paperDocumentNumber":') ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.PAPER_DOCUMENT_NUMBER)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"payeeName":')  ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.PAYEE_NAME)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"payeeId":'     || NVL(TO_CHAR(r.PAYEE_ID), 'null')));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB(',"syncDate":')   ); DBMS_LOB.APPEND(v_clob, TO_CLOB(jstr(r.SYNC_DATE)));
+        DBMS_LOB.APPEND(v_clob, TO_CLOB('}'));
     END LOOP;
     CLOSE c_txns;
 
@@ -562,4 +600,99 @@ END;
 
     COMMIT;
 END;
+/
+
+-- ============================================================
+-- DELETE cash/externaltransactions/:externalTransactionId
+-- Only allowed when ACCOUNTING_FLAG != 'Y'
+-- ============================================================
+BEGIN
+    BEGIN
+        ORDS.DELETE_HANDLER(
+            p_module_name => 'reerp',
+            p_pattern     => 'cash/externaltransactions/:externalTransactionId',
+            p_method      => 'DELETE'
+        );
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+
+    BEGIN
+        ORDS.DEFINE_TEMPLATE(
+            p_module_name => 'reerp',
+            p_pattern     => 'cash/externaltransactions/:externalTransactionId'
+        );
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+
+    ORDS.DEFINE_HANDLER(
+        p_module_name    => 'reerp',
+        p_pattern        => 'cash/externaltransactions/:externalTransactionId',
+        p_method         => 'DELETE',
+        p_source_type    => ORDS.source_type_plsql,
+        p_mimes_allowed  => '',
+        p_source         => '
+DECLARE
+    l_flag  VARCHAR2(1);
+    l_rows  NUMBER;
+BEGIN
+    SELECT NVL(ACCOUNTING_FLAG, ''N'') INTO l_flag
+    FROM RR_EXTERNAL_CASH_TRANSACTIONS
+    WHERE EXTERNAL_TRANSACTION_ID = :externalTransactionId;
+
+    IF l_flag = ''Y'' THEN
+        :status_code := 400;
+        HTP.PRN(''{"status":"error","message":"Cannot delete an accounted transaction"}'');
+        RETURN;
+    END IF;
+
+    DELETE FROM RR_EXTERNAL_CASH_TRANSACTIONS
+    WHERE EXTERNAL_TRANSACTION_ID = :externalTransactionId;
+
+    l_rows := SQL%ROWCOUNT;
+    COMMIT;
+
+    IF l_rows = 0 THEN
+        :status_code := 404;
+        HTP.PRN(''{"status":"error","message":"Transaction not found"}'');
+    ELSE
+        :status_code := 200;
+        HTP.PRN(''{"status":"success","message":"Transaction deleted"}'');
+    END IF;
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        :status_code := 404;
+        HTP.PRN(''{"status":"error","message":"Transaction not found"}'');
+    WHEN OTHERS THEN
+        ROLLBACK;
+        :status_code := 500;
+        HTP.PRN(''{"status":"error","message":'' || APEX_JSON.STRINGIFY(SQLERRM) || ''}'');
+END;
+'
+    );
+
+    COMMIT;
+END;
+/
+
+-- ============================================================
+-- Migration: Add payment fields (run once on existing DBs)
+-- ============================================================
+ALTER TABLE RR_EXTERNAL_CASH_TRANSACTIONS ADD (
+    PAYMENT_METHOD         VARCHAR2(60),
+    PAYMENT_DOCUMENT       VARCHAR2(240),
+    PAPER_DOCUMENT_NUMBER  VARCHAR2(60)
+);
+/
+
+-- Migration: Add payee fields (run once on existing DBs)
+ALTER TABLE RR_EXTERNAL_CASH_TRANSACTIONS ADD (
+    PAYEE_NAME  VARCHAR2(360),
+    PAYEE_ID    NUMBER
+);
+/
+
+-- Migration: Add transaction direction (run once on existing DBs)
+ALTER TABLE RR_EXTERNAL_CASH_TRANSACTIONS ADD (
+    TRANSACTION_DIRECTION VARCHAR2(2)
+);
 /

@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input, Select,
-  Space, Tag, Modal, Popconfirm, message, Steps, Alert, Divider, Tooltip,
+  Space, Tag, Modal, Popconfirm, message, Steps, Alert, Divider, Tooltip, Collapse,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, BankOutlined, PlusOutlined, EditOutlined, DeleteOutlined,
   UploadOutlined, FileTextOutlined, CheckOutlined, ArrowRightOutlined, ArrowLeftOutlined,
-  ApiOutlined,
+  ApiOutlined, ExperimentOutlined,
 } from '@ant-design/icons';
+import { Empty } from 'antd';
 import { Link } from 'react-router-dom';
 import dayjs from 'dayjs';
 
@@ -84,6 +85,279 @@ const FIELD_KEYWORD_MAP: Record<string, string[]> = {
   balance:    ['balance', 'running balance', 'avail balance'],
 };
 
+interface ParsedLine {
+  _key: string;
+  transactionDate: string;
+  description: string;
+  reference: string;
+  transactionCode: string;
+  amount: number | null;
+}
+
+function parseDateStr(str: string, fmt: string): dayjs.Dayjs | null {
+  const s = str.trim();
+  if (fmt === 'DD/MM/YYYY' || fmt === 'DD-MM-YYYY') {
+    for (const sep of ['/', '-']) {
+      const re = new RegExp(`^(\\d{1,2})\\${sep}(\\d{1,2})\\${sep}(\\d{4})$`);
+      const m = s.match(re);
+      if (m) return dayjs(`${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`);
+    }
+  } else if (fmt === 'MM/DD/YYYY') {
+    const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) return dayjs(`${m[3]}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`);
+  } else if (fmt === 'D-MMM-YYYY' || fmt === 'DD-MMM-YYYY') {
+    const months: Record<string,string> = {jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
+    const m = s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/);
+    if (m) { const mo = months[m[2].toLowerCase()]; if (mo) return dayjs(`${m[3]}-${mo}-${m[1].padStart(2,'0')}`); }
+  } else if (fmt === 'YYYY-MM-DD') {
+    const d = dayjs(s); if (d.isValid()) return d;
+  }
+  const d = dayjs(s); return d.isValid() ? d : null;
+}
+
+async function testPdfWithTemplate(
+  file: File,
+  template: PdfTemplate,
+): Promise<{ lines: ParsedLine[]; errors: string[]; log: string[] }> {
+  const errors: string[] = [];
+  const lines: ParsedLine[] = [];
+  const log: string[] = [];
+  let pdfjsLib: any;
+  try {
+    pdfjsLib = await import('pdfjs-dist');
+    const ver: string = pdfjsLib.version;
+    const ext = ver.startsWith('3.') || ver.startsWith('2.') ? 'min.js' : 'min.mjs';
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${ver}/build/pdf.worker.${ext}`;
+  } catch {
+    errors.push('pdfjs-dist is not installed. Run: npm install pdfjs-dist');
+    return { lines, errors, log };
+  }
+
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, useSystemFonts: true }).promise;
+  log.push(`PDF loaded: ${pdf.numPages} page(s) | Template: ${template.templateName} | DateFmt: ${template.dateFormat}`);
+
+  type TItem = { str: string; x: number; y: number };
+  const allItems: TItem[] = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const pageYOffset = (p - 1) * 100000;
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    let pageItems = 0;
+    for (const item of content.items) {
+      if ('str' in item && item.str.trim()) {
+        const tx = (item as any).transform;
+        allItems.push({ str: item.str.trim(), x: tx[4], y: tx[5] - pageYOffset });
+        pageItems++;
+      }
+    }
+    log.push(`  Page ${p}: ${pageItems} text item(s) extracted`);
+  }
+
+  const rowMap = new Map<number, TItem[]>();
+  for (const item of allItems) {
+    const key = Math.round(item.y / 3) * 3;
+    if (!rowMap.has(key)) rowMap.set(key, []);
+    rowMap.get(key)!.push(item);
+  }
+
+  const sortedRows = [...rowMap.entries()]
+    .sort((a, b) => b[0] - a[0])
+    .map(([, items]) => items.sort((a, b) => a.x - b.x));
+
+  log.push(`Row grouping: ${sortedRows.length} distinct Y-rows`);
+  log.push(`Columns: ${template.columnMappings.map(c => `${c.field}(x${Math.round(c.xMin)}-${Math.round(c.xMax)})`).join(', ')}`);
+
+  const dateCol   = template.columnMappings.find(c => c.field === 'date');
+  const narCol    = template.columnMappings.find(c => c.field === 'narration');
+  const amtRe     = /^[\d,]+(\.\d{1,2})?$/;
+  const isHdrOrPg = (tokens: { str: string }[]) => {
+    const j = tokens.map(t => t.str).join(' ').toLowerCase();
+    return /transaction\s+date|value\s+date|narration|running\s+balance|transaction\s+running|date\s+balance/.test(j)
+      || /^\s*page\s+\d/.test(j) || /^\d+\s+of\s+\d+/.test(j);
+  };
+  const isNonNarration = (text: string) =>
+    /^-[\d,]+(\.\d+)?$/.test(text.trim()) || text.includes('@') ||
+    /^https?:\/\/|^www\./i.test(text) || /^Tel[\s:+]/i.test(text) || /^Timings?:/i.test(text);
+  const splitAmts = (str: string): number[] =>
+    str.trim().split(/\s+/).map(s => parseFloat(s.replace(/,/g, ''))).filter(n => !isNaN(n) && n >= 0);
+
+  let rowIdx = 0;
+  let rowNum = 0;
+  let lastDateRowFailed = false;
+  let inFooter = false;
+  let pendingNarration = ''; // narration row that appeared ABOVE the next date row
+
+  // Helper: does this row have a parseable date in the date column?
+  const rowHasDate = (r: typeof sortedRows[0]) => {
+    const di = dateCol ? r.find(it => it.x >= dateCol.xMin && it.x <= dateCol.xMax) : r[0];
+    return !!(di && parseDateStr(di.str, template.dateFormat)?.isValid());
+  };
+
+  for (let ri = 0; ri < sortedRows.length; ri++) {
+    const row = sortedRows[ri];
+    rowNum++;
+    const rowPreview = row.map(i => i.str).slice(0, 5).join(' | ');
+
+    const dateItem = dateCol
+      ? row.find(it => it.x >= dateCol.xMin && it.x <= dateCol.xMax)
+      : row[0];
+
+    // No date → possible narration continuation
+    if (!dateItem || !parseDateStr(dateItem.str, template.dateFormat)?.isValid()) {
+      if (isHdrOrPg(row)) {
+        log.push(`  Row ${rowNum}: [HEADER/PAGE] "${rowPreview}"`);
+        continue;
+      }
+      // Detect footer markers — once seen, stop all narration stitching
+      const rowJoined = row.map(t => t.str).join(' ');
+      if (!inFooter && /closing\s+balance|transaction\s+total|end\s+of\s+statement/i.test(rowJoined)) {
+        inFooter = true;
+      }
+      if (inFooter) {
+        log.push(`  Row ${rowNum}: [FOOTER] "${rowPreview}"`);
+        continue;
+      }
+      const amtItems = row.filter(it => amtRe.test(it.str.replace(/,/g, '')));
+      if (amtItems.length === 0) {
+        const narItems = narCol
+          ? row.filter(it => it.x >= narCol.xMin && it.x <= narCol.xMax)
+          : [];
+        const candidates = narItems.length > 0 ? narItems : row;
+        const extra = candidates
+          .map(i => i.str)
+          .filter(s => !parseDateStr(s, template.dateFormat)?.isValid())
+          .join(' ').trim();
+        if (extra.length > 2 && !isNonNarration(extra)) {
+          // Look-ahead: if the NEXT row is a date row, this text belongs to that
+          // transaction (pre-narration), not the previous one (post-narration)
+          const nextRow = sortedRows[ri + 1];
+          if (nextRow && rowHasDate(nextRow)) {
+            pendingNarration = (pendingNarration + ' ' + extra).trim();
+            log.push(`  Row ${rowNum}: [NARRATION>] (pre-narration for next txn) "${extra.slice(0, 60)}"`);
+            continue;
+          }
+          // Post-narration: stitch to previous transaction
+          if (lines.length > 0 && !lastDateRowFailed) {
+            lines[lines.length - 1].description =
+              (lines[lines.length - 1].description + ' ' + extra).trim();
+            log.push(`  Row ${rowNum}: [NARRATION+] "${extra.slice(0, 60)}"`);
+            continue;
+          }
+        }
+      }
+      const noDate = dateItem
+        ? `date-col="${dateItem.str}" not parseable as ${template.dateFormat}`
+        : `no item in date-col x${Math.round(dateCol?.xMin ?? 0)}-${Math.round(dateCol?.xMax ?? 0)}`;
+      log.push(`  Row ${rowNum}: [SKIP] ${noDate} | "${rowPreview}"`);
+      continue;
+    }
+
+    const txDate = parseDateStr(dateItem.str, template.dateFormat)!;
+
+    // Bucket items; collect skip-zone text separately
+    const bucket: Record<string, string> = {};
+    const skipZoneText: string[] = [];
+    for (const item of row) {
+      const col = template.columnMappings.find(c => item.x >= c.xMin && item.x <= c.xMax);
+      if (col && col.field !== 'skip') {
+        bucket[col.field] = bucket[col.field] ? bucket[col.field] + ' ' + item.str : item.str;
+      } else if (col?.field === 'skip') {
+        skipZoneText.push(item.str);
+      }
+    }
+
+    // Narration fallback 1: pending pre-narration from the row above
+    if (!bucket['narration'] && pendingNarration) {
+      bucket['narration'] = pendingNarration;
+    }
+    pendingNarration = '';
+
+    // Narration fallback 2: skip-zone non-amount text
+    if (!bucket['narration'] && skipZoneText.length > 0) {
+      const fb = skipZoneText
+        .filter(s => !parseDateStr(s, template.dateFormat)?.isValid() && !amtRe.test(s.replace(/,/g, '')))
+        .join(' ').trim();
+      if (fb.length > 1) bucket['narration'] = fb;
+    }
+
+    // Narration fallback 3: any non-amount, non-date, non-skip item on the row
+    // that didn't land in the narration bucket (catches misaligned Particulars text)
+    if (!bucket['narration']) {
+      const ignoreFields = new Set(['date', 'valueDate', 'balance', 'skip']);
+      const fb = row
+        .filter(it => {
+          const col = template.columnMappings.find(c => it.x >= c.xMin && it.x <= c.xMax);
+          if (!col || ignoreFields.has(col.field)) return false;
+          if (amtRe.test(it.str.replace(/,/g, ''))) return false;
+          if (parseDateStr(it.str, template.dateFormat)?.isValid()) return false;
+          return true;
+        })
+        .map(it => it.str)
+        .join(' ').trim();
+      if (fb.length > 1 && !isNonNarration(fb)) bucket['narration'] = fb;
+    }
+
+    let amount: number | null = null;
+    let txCode = 'CR';
+    let amtReason = '';
+    const amtStr = (bucket['amount']     ?? '').replace(/,/g, '');
+    const typStr = (bucket['type']       ?? '').trim().toUpperCase();
+
+    const wdAmts  = splitAmts(bucket['withdrawal'] ?? '');
+    const depAmts = splitAmts(bucket['deposit']    ?? '');
+    const wdVal   = wdAmts.find(v => v > 0) ?? 0;
+
+    if (wdVal > 0) {
+      amount = wdVal; txCode = 'DR'; amtReason = `withdrawal=${wdVal}`;
+    } else if (depAmts.length >= 2) {
+      // Two numbers in deposit bucket: one is Debit column, one is Credit column
+      const nonZero = depAmts.filter(v => v > 0);
+      const zeroIdx = depAmts.findIndex(v => v === 0);
+      const nonZeroIdx = depAmts.findIndex(v => v > 0);
+      if (nonZero.length === 1) {
+        amount = nonZero[0];
+        txCode = nonZeroIdx < zeroIdx ? 'DR' : 'CR';
+        amtReason = `deposit-split=[${depAmts.join(',')}] idx=${nonZeroIdx}→${txCode}`;
+      } else if (nonZero.length >= 2) {
+        amount = depAmts[depAmts.length - 1]; txCode = 'CR';
+        amtReason = `deposit-split-both=[${depAmts.join(',')}]→CR`;
+      }
+    } else if (depAmts.length === 1 && depAmts[0] > 0) {
+      amount = depAmts[0]; txCode = 'CR'; amtReason = `deposit=${depAmts[0]}`;
+    } else if (amtStr && amtRe.test(amtStr)) {
+      amount = parseFloat(amtStr);
+      txCode = typStr.startsWith('D') ? 'DR' : 'CR';
+      amtReason = `amount=${amtStr} type="${typStr}"→${txCode}`;
+    }
+
+    if (!amount) {
+      lastDateRowFailed = true;
+      log.push(`  Row ${rowNum}: [SKIP no-amount] date=${txDate.format('DD/MM/YYYY')} bucket=${JSON.stringify(bucket).slice(0,100)}`);
+      continue;
+    }
+
+    lastDateRowFailed = false;
+    log.push(`  Row ${rowNum}: [OK] ${txDate.format('DD/MM/YYYY')} ${txCode} ${amount.toLocaleString()} | ${amtReason} | narration="${(bucket['narration']??'').slice(0,50)}"`);
+
+    lines.push({
+      _key:            String(rowIdx++),
+      transactionDate: txDate.format('YYYY-MM-DD'),
+      description:     bucket['narration'] ?? '',
+      reference:       bucket['reference'] ?? '',
+      transactionCode: txCode,
+      amount,
+    });
+  }
+
+  log.push(`Done: ${lines.length} transaction(s) parsed, ${errors.length} error(s)`);
+
+  if (lines.length === 0 && errors.length === 0)
+    errors.push('No transaction rows found. Check that column X-ranges match this PDF.');
+
+  return { lines, errors, log };
+}
+
 function suggestField(headerText: string): string {
   const lower = headerText.toLowerCase().trim();
   for (const [field, keywords] of Object.entries(FIELD_KEYWORD_MAP)) {
@@ -140,6 +414,17 @@ const PdfTemplates: React.FC = () => {
   const [inspectPayload, setInspectPayload] = useState('');
   const [inspectPosting, setInspectPosting] = useState(false);
   const [inspectResponse, setInspectResponse] = useState<{ status: number; body: string } | null>(null);
+
+  // Test PDF state
+  const [testModal, setTestModal]       = useState(false);
+  const [testTemplate, setTestTemplate] = useState<PdfTemplate | null>(null);
+  const [testParsing, setTestParsing]   = useState(false);
+  const [testLines, setTestLines]       = useState<ParsedLine[]>([]);
+  const [testErrors, setTestErrors]     = useState<string[]>([]);
+  const [testLog, setTestLog]           = useState<string[]>([]);
+  const [testFileName, setTestFileName] = useState('');
+  const [testSearch, setTestSearch]     = useState('');
+  const testFileRef = useRef<HTMLInputElement>(null);
 
   // Load BUs
   useEffect(() => {
@@ -414,6 +699,56 @@ const PdfTemplates: React.FC = () => {
     }
   };
 
+  const openTest = (tpl: PdfTemplate) => {
+    setTestTemplate(tpl);
+    setTestLines([]);
+    setTestErrors([]);
+    setTestFileName('');
+    setTestSearch('');
+    setTestModal(true);
+  };
+
+  const closeTest = () => {
+    setTestModal(false);
+    setTestTemplate(null);
+    setTestLines([]);
+    setTestErrors([]);
+    setTestLog([]);
+    setTestFileName('');
+    setTestSearch('');
+  };
+
+  const handleTestUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !testTemplate) return;
+    setTestFileName(file.name);
+    setTestParsing(true);
+    setTestLines([]);
+    setTestErrors([]);
+    setTestLog([]);
+    try {
+      const { lines, errors, log } = await testPdfWithTemplate(file, testTemplate);
+      setTestLines(lines);
+      setTestErrors(errors);
+      setTestLog(log);
+    } catch (err: any) {
+      setTestErrors([err.message ?? 'Parse error']);
+    } finally {
+      setTestParsing(false);
+      if (testFileRef.current) testFileRef.current.value = '';
+    }
+  };
+
+  const testQ = testSearch.trim().toLowerCase();
+  const filteredTestLines = testQ
+    ? testLines.filter(l =>
+        (l.description ?? '').toLowerCase().includes(testQ) ||
+        (l.reference   ?? '').toLowerCase().includes(testQ) ||
+        (l.transactionDate ?? '').includes(testQ) ||
+        (l.transactionCode ?? '').toLowerCase().includes(testQ)
+      )
+    : testLines;
+
   const columns: ColumnsType<PdfTemplate> = [
     {
       title: 'Template Name', dataIndex: 'templateName', key: 'templateName',
@@ -448,6 +783,10 @@ const PdfTemplates: React.FC = () => {
       title: '', key: 'actions', width: 80, align: 'center',
       render: (_: unknown, r: PdfTemplate) => (
         <Space size={4}>
+          <Tooltip title="Test PDF parsing with this template">
+            <Button type="text" size="small" icon={<ExperimentOutlined />}
+              style={{ color: REDWOOD.success }} onClick={() => openTest(r)} />
+          </Tooltip>
           <Button type="text" size="small" icon={<EditOutlined />}
             style={{ color: REDWOOD.info }} onClick={() => openDesigner(r)} />
           <Popconfirm title="Delete this template?" description="This cannot be undone."
@@ -533,11 +872,13 @@ const PdfTemplates: React.FC = () => {
           open={designerOpen} onCancel={closeDesigner}
           width={860} footer={designerFooter} destroyOnClose
         >
-          <Steps current={step} size="small" style={{ marginBottom: 20 }}>
-            <Steps.Step title="Template Info" />
-            <Steps.Step title="Upload & Detect" />
-            <Steps.Step title="Map Columns" />
-          </Steps>
+          <Steps current={step} size="small" style={{ marginBottom: 20 }}
+            items={[
+              { title: 'Template Info' },
+              { title: 'Upload & Detect' },
+              { title: 'Map Columns' },
+            ]}
+          />
 
           {/* ─ Step 0: Info ─ */}
           {step === 0 && (
@@ -793,6 +1134,170 @@ skip        — Ignore this column`}</pre>
             </>
           )}
         </Modal>
+        {/* ── Test PDF Modal ── */}
+        <Modal
+          title={
+            <Space>
+              <ExperimentOutlined style={{ color: REDWOOD.success }} />
+              <span>Test PDF — {testTemplate?.templateName}</span>
+            </Space>
+          }
+          open={testModal} onCancel={closeTest} width={900}
+          footer={[
+            <Button key="close" onClick={closeTest}>Close</Button>,
+            <Button key="upload" type="primary" icon={<UploadOutlined />}
+              loading={testParsing}
+              style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+              onClick={() => testFileRef.current?.click()}>
+              {testParsing ? 'Parsing…' : 'Upload PDF to Test'}
+            </Button>,
+          ]}
+        >
+          <input ref={testFileRef} type="file" accept=".pdf" style={{ display: 'none' }}
+            onChange={handleTestUpload} />
+
+          {/* Template summary */}
+          {testTemplate && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+              <Tag color="blue">{testTemplate.dateFormat}</Tag>
+              {testTemplate.businessUnitName
+                ? <Tag color="purple">{testTemplate.businessUnitName}</Tag>
+                : <Tag>All BUs</Tag>}
+              {testTemplate.columnMappings.filter(c => c.field !== 'skip').map(c => (
+                <Tag key={c.text}
+                  style={{ fontSize: 10, background: (FIELD_COLORS[c.field] ?? '#999') + '20', border: `1px solid ${FIELD_COLORS[c.field] ?? '#999'}`, color: FIELD_COLORS[c.field] ?? '#999' }}>
+                  {c.text} → {c.field}
+                </Tag>
+              ))}
+            </div>
+          )}
+
+          {testFileName && (
+            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+              File: <strong>{testFileName}</strong>
+            </Text>
+          )}
+
+          {testParsing && (
+            <div style={{ textAlign: 'center', padding: 32 }}>
+              <Text type="secondary">Reading PDF…</Text>
+            </div>
+          )}
+
+          {!testParsing && testErrors.length > 0 && (
+            <Alert type="warning" showIcon style={{ marginBottom: 8 }}
+              message={`${testErrors.length} warning(s)`}
+              description={testErrors.slice(0, 5).join(' | ')} />
+          )}
+
+          {!testParsing && testLines.length === 0 && !testFileName && (
+            <div style={{ textAlign: 'center', padding: 32, color: REDWOOD.neutral600 }}>
+              <ExperimentOutlined style={{ fontSize: 32, marginBottom: 8, display: 'block' }} />
+              <Text type="secondary">Upload a bank statement PDF to test how this template parses it.</Text>
+            </div>
+          )}
+
+          {!testParsing && testLines.length === 0 && testFileName && testErrors.length > 0 && (
+            <Empty description="No transactions could be parsed. Try adjusting column mappings." />
+          )}
+
+          {!testParsing && testLines.length > 0 && (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <Alert type="success" showIcon style={{ flex: 1, margin: 0 }}
+                  message={`${testLines.length} transactions parsed${filteredTestLines.length !== testLines.length ? ` — showing ${filteredTestLines.length}` : ''}`} />
+                <Input.Search
+                  placeholder="Search description, ref, date…"
+                  allowClear
+                  value={testSearch}
+                  onChange={e => setTestSearch(e.target.value)}
+                  onSearch={v => setTestSearch(v)}
+                  style={{ width: 240 }}
+                  size="small"
+                />
+              </div>
+              <Table<ParsedLine>
+                dataSource={filteredTestLines} rowKey="_key" size="small" pagination={false}
+                scroll={{ y: 340, x: 800 }}
+                columns={[
+                  { title: 'Date', dataIndex: 'transactionDate', width: 110,
+                    render: (v: string) => <Text style={{ fontSize: 11 }}>{v ? dayjs(v).format('D-MMM-YYYY') : '—'}</Text> },
+                  { title: 'Description', dataIndex: 'description', ellipsis: true,
+                    render: (v: string) => <Tooltip title={v}><Text style={{ fontSize: 11 }}>{v || '—'}</Text></Tooltip> },
+                  { title: 'Ref', dataIndex: 'reference', width: 100,
+                    render: (v: string) => <Text style={{ fontSize: 11 }}>{v || '—'}</Text> },
+                  { title: 'Type', dataIndex: 'transactionCode', width: 60,
+                    render: (v: string) => <Tag color={v === 'CR' ? 'green' : 'red'} style={{ fontSize: 10 }}>{v}</Tag> },
+                  { title: 'Amount', dataIndex: 'amount', width: 130, align: 'right',
+                    render: (v: number, r: ParsedLine) => (
+                      <Text style={{ fontSize: 11, color: r.transactionCode === 'CR' ? REDWOOD.success : REDWOOD.error }}>
+                        {v != null ? v.toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—'}
+                      </Text>
+                    )},
+                ]}
+                summary={() => {
+                  const cr = filteredTestLines.filter(r => r.transactionCode === 'CR').reduce((s, r) => s + (r.amount ?? 0), 0);
+                  const dr = filteredTestLines.filter(r => r.transactionCode === 'DR').reduce((s, r) => s + (r.amount ?? 0), 0);
+                  return (
+                    <Table.Summary fixed>
+                      <Table.Summary.Row style={{ background: '#fafafa' }}>
+                        <Table.Summary.Cell index={0} colSpan={3}>
+                          <Text strong style={{ fontSize: 11 }}>
+                            {filteredTestLines.length} rows shown / {testLines.length} total
+                          </Text>
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={3} colSpan={2} align="right">
+                          <Text strong style={{ fontSize: 11 }}>
+                            <span style={{ color: REDWOOD.success }}>CR: {cr.toLocaleString('en-AE', { minimumFractionDigits: 2 })}</span>
+                            {' | '}
+                            <span style={{ color: REDWOOD.error }}>DR: {dr.toLocaleString('en-AE', { minimumFractionDigits: 2 })}</span>
+                          </Text>
+                        </Table.Summary.Cell>
+                      </Table.Summary.Row>
+                    </Table.Summary>
+                  );
+                }}
+              />
+            </>
+          )}
+
+          {/* Parse Log */}
+          {!testParsing && testLog.length > 0 && (
+            <Collapse size="small" style={{ marginTop: 10 }}
+              items={[{
+                key: 'log',
+                label: (
+                  <span style={{ fontSize: 11, color: '#595959' }}>
+                    Parse Log — {testLog.length} entries
+                    {testLog.filter(l => l.includes('[OK]')).length > 0 &&
+                      <Tag color="green" style={{ marginLeft: 8, fontSize: 10 }}>{testLog.filter(l => l.includes('[OK]')).length} OK</Tag>}
+                    {testLog.filter(l => l.includes('[SKIP')).length > 0 &&
+                      <Tag color="orange" style={{ fontSize: 10 }}>{testLog.filter(l => l.includes('[SKIP')).length} skipped</Tag>}
+                    {testLog.filter(l => l.includes('[NARRATION+')).length > 0 &&
+                      <Tag color="blue" style={{ fontSize: 10 }}>{testLog.filter(l => l.includes('[NARRATION+')).length} narration+</Tag>}
+                  </span>
+                ),
+                children: (
+                  <pre style={{
+                    maxHeight: 260, overflowY: 'auto', margin: 0,
+                    fontSize: 10, lineHeight: 1.6, background: '#1e1e2e', color: '#cdd6f4',
+                    padding: '10px 12px', borderRadius: 4,
+                  }}>
+                    {testLog.map((line, i) => {
+                      const color = line.includes('[OK]') ? '#a6e3a1'
+                        : line.includes('[SKIP') ? '#f38ba8'
+                        : line.includes('[NARRATION+]') ? '#89b4fa'
+                        : line.includes('[HEADER') ? '#6c7086'
+                        : '#cdd6f4';
+                      return <span key={i} style={{ color, display: 'block' }}>{line}</span>;
+                    })}
+                  </pre>
+                ),
+              }]}
+            />
+          )}
+        </Modal>
+
       </Content>
     </Layout>
   );

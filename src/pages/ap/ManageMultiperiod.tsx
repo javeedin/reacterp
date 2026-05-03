@@ -46,7 +46,7 @@ const fmtAmt = (v: number | null | undefined, currency = 'AED') =>
 const fmtDate = (s: string | null | undefined) =>
   s ? dayjs(s).format('DD MMM YYYY') : '—';
 
-const currentPeriod = () => dayjs().format('MMM-YYYY');   // e.g. "Apr-2026"
+const currentPeriod = () => dayjs().format('MMM-YY');   // e.g. "Apr-26"
 
 const statusTag = (status: string) => {
   if (status === 'Posted')     return <Tag color="success" icon={<CheckCircleOutlined />}>Posted</Tag>;

@@ -47,6 +47,7 @@ CREATE TABLE RR_BANK_ACCOUNTS (
     CASH_ACCOUNT_COMBINATION                VARCHAR2(500),
     CASH_CLEARING_ACCOUNT_COMBINATION       VARCHAR2(500),
     RECON_DIFFERENCE_ACCOUNT_COMBINATION    VARCHAR2(500),
+    PDC_ACCOUNT_COMBINATION                 VARCHAR2(500),
     CASH_CCID_FIXED_SEGMENTS                VARCHAR2(500),
     -- Dates
     END_DATE                                DATE,
@@ -87,7 +88,14 @@ COMMENT ON TABLE RR_BANK_ACCOUNTS IS 'Bank accounts master data synced from Orac
 COMMENT ON COLUMN RR_BANK_ACCOUNTS.BANK_ACCOUNT_ID IS 'Unique bank account identifier from Fusion';
 COMMENT ON COLUMN RR_BANK_ACCOUNTS.IBAN_NUMBER IS 'International Bank Account Number';
 COMMENT ON COLUMN RR_BANK_ACCOUNTS.CASH_ACCOUNT_COMBINATION IS 'GL cash account code combination';
+COMMENT ON COLUMN RR_BANK_ACCOUNTS.PDC_ACCOUNT_COMBINATION IS 'GL PDC (Post-Dated Cheque) account code combination';
 COMMENT ON COLUMN RR_BANK_ACCOUNTS.SYNC_DATE IS 'Timestamp when record was synced';
+
+-- ============================================
+-- Migration: Add PDC_ACCOUNT_COMBINATION column (run once on existing DBs)
+-- ============================================
+ALTER TABLE RR_BANK_ACCOUNTS ADD (PDC_ACCOUNT_COMBINATION VARCHAR2(500));
+/
 
 -- ============================================
 -- Procedure: RR_SYNC_BANK_ACCOUNTS
@@ -367,43 +375,30 @@ BEGIN
         p_comments       => 'Bank accounts sync endpoint'
     );
 
-    -- Define GET handler (LOV)
+    -- Define GET handler (LOV) — collection feed; ORDS serialises column names as lowercase snake_case
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'reerp',
         p_pattern        => 'banks/bankaccounts',
         p_method         => 'GET',
-        p_source_type    => 'plsql/block',
+        p_source_type    => ORDS.source_type_collection_feed,
         p_items_per_page => 0,
         p_mimes_allowed  => '',
         p_comments       => 'Get bank accounts list for LOV',
         p_source         => q'[
-DECLARE
-    l_json CLOB := '{"status":"success","items":[';
-    l_first BOOLEAN := TRUE;
-BEGIN
-    FOR r IN (
-        SELECT BANK_ACCOUNT_NAME,
-               BANK_ACCOUNT_NUMBER,
-               CURRENCY_CODE,
-               LEGAL_ENTITY_NAME,
-               CASH_ACCOUNT_COMBINATION
-          FROM RR_BANK_ACCOUNTS
-         WHERE (END_DATE IS NULL OR END_DATE >= SYSDATE)
-         ORDER BY BANK_ACCOUNT_NAME
-    ) LOOP
-        IF NOT l_first THEN l_json := l_json || ','; END IF;
-        l_first := FALSE;
-        l_json := l_json || '{'
-            || '"bankAccountName":'  || '"' || REPLACE(r.BANK_ACCOUNT_NAME, '"', '\"') || '",'
-            || '"bankAccountNumber":' || '"' || NVL(r.BANK_ACCOUNT_NUMBER, '') || '",'
-            || '"currencyCode":'     || '"' || NVL(r.CURRENCY_CODE, '') || '",'
-            || '"legalEntityName":'  || '"' || NVL(REPLACE(r.LEGAL_ENTITY_NAME, '"', '\"'), '') || '",'
-            || '"cashAccountCombination":' || '"' || NVL(r.CASH_ACCOUNT_COMBINATION, '') || '"'
-            || '}';
-    END LOOP;
-    l_json := l_json || ']}';
-    HTP.P(l_json);
-END;
+SELECT BANK_ACCOUNT_ID,
+       BANK_ACCOUNT_NAME,
+       BANK_ACCOUNT_NUMBER,
+       CURRENCY_CODE,
+       DESCRIPTION,
+       BANK_NUMBER,
+       BRANCH_NUMBER,
+       LEGAL_ENTITY_NAME,
+       CASH_ACCOUNT_COMBINATION,
+       CASH_CLEARING_ACCOUNT_COMBINATION,
+       PDC_ACCOUNT_COMBINATION
+  FROM RR_BANK_ACCOUNTS
+ WHERE (END_DATE IS NULL OR END_DATE >= SYSDATE)
+ ORDER BY BANK_ACCOUNT_NAME
 ]'
     );
 
@@ -441,6 +436,119 @@ END;
 ]'
     );
 
+    COMMIT;
+END;
+/
+
+-- ============================================
+-- ORDS REST Handler: PUT /banks/bankaccounts/:bank_account_id
+-- Updates editable account fields (account combinations, description).
+-- ============================================
+
+BEGIN
+    ORDS.DELETE_TEMPLATE(
+        p_module_name => 'reerp',
+        p_pattern     => 'banks/bankaccounts/:bank_account_id'
+    );
+    COMMIT;
+EXCEPTION
+    WHEN OTHERS THEN NULL;
+END;
+/
+
+BEGIN
+    ORDS.DEFINE_TEMPLATE(
+        p_module_name => 'reerp',
+        p_pattern     => 'banks/bankaccounts/:bank_account_id',
+        p_priority    => 0,
+        p_etag_type   => 'HASH',
+        p_comments    => 'Single bank account update endpoint'
+    );
+    COMMIT;
+END;
+/
+
+BEGIN
+    ORDS.DEFINE_HANDLER(
+        p_module_name    => 'reerp',
+        p_pattern        => 'banks/bankaccounts/:bank_account_id',
+        p_method         => 'PUT',
+        p_source_type    => ORDS.source_type_plsql,
+        p_items_per_page => 0,
+        p_comments       => 'Update bank account combinations and description',
+        p_source         => q'[
+DECLARE
+    v_bank_account_id   NUMBER;
+    v_cash_acct         VARCHAR2(500);
+    v_clearing_acct     VARCHAR2(500);
+    v_recon_acct        VARCHAR2(500);
+    v_pdc_acct          VARCHAR2(500);
+    v_description       VARCHAR2(240);
+    v_rows              NUMBER;
+BEGIN
+    v_bank_account_id := TO_NUMBER(:bank_account_id);
+
+    SELECT jt.cash_account_combination,
+           jt.cash_clearing_account_combination,
+           jt.reconciliation_difference_account_combination,
+           jt.pdc_account_combination,
+           jt.description
+    INTO   v_cash_acct,
+           v_clearing_acct,
+           v_recon_acct,
+           v_pdc_acct,
+           v_description
+    FROM   JSON_TABLE(:body_text, '$'
+             COLUMNS (
+               cash_account_combination                     VARCHAR2(500) PATH '$.cashAccountCombination',
+               cash_clearing_account_combination            VARCHAR2(500) PATH '$.cashClearingAccountCombination',
+               reconciliation_difference_account_combination VARCHAR2(500) PATH '$.reconciliationDifferenceAccountCombination',
+               pdc_account_combination                      VARCHAR2(500) PATH '$.pdcAccountCombination',
+               description                                  VARCHAR2(240) PATH '$.description'
+             )
+           ) jt;
+
+    UPDATE RR_BANK_ACCOUNTS
+    SET    CASH_ACCOUNT_COMBINATION              = NVL(v_cash_acct,     CASH_ACCOUNT_COMBINATION),
+           CASH_CLEARING_ACCOUNT_COMBINATION     = NVL(v_clearing_acct, CASH_CLEARING_ACCOUNT_COMBINATION),
+           RECON_DIFFERENCE_ACCOUNT_COMBINATION  = NVL(v_recon_acct,    RECON_DIFFERENCE_ACCOUNT_COMBINATION),
+           PDC_ACCOUNT_COMBINATION               = v_pdc_acct,
+           DESCRIPTION                           = NVL(v_description,   DESCRIPTION),
+           SYNC_DATE                             = SYSTIMESTAMP
+    WHERE  BANK_ACCOUNT_ID = v_bank_account_id;
+
+    v_rows := SQL%ROWCOUNT;
+    COMMIT;
+
+    OWA_UTIL.MIME_HEADER('application/json', FALSE);
+    IF v_rows = 0 THEN
+        HTP.P('{"status":"error","message":"No bank account found for id ' || v_bank_account_id || '"}');
+    ELSE
+        HTP.P('{"status":"success","bankAccountId":' || v_bank_account_id || ',"rowsUpdated":' || v_rows || '}');
+    END IF;
+
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+        OWA_UTIL.MIME_HEADER('application/json', FALSE);
+        HTP.P('{"status":"error","message":' || APEX_JSON.STRINGIFY(SQLERRM) || '}');
+END;
+]'
+    );
+    COMMIT;
+END;
+/
+
+BEGIN
+    ORDS.DEFINE_HANDLER(
+        p_module_name    => 'reerp',
+        p_pattern        => 'banks/bankaccounts/:bank_account_id',
+        p_method         => 'OPTIONS',
+        p_source_type    => ORDS.source_type_plsql,
+        p_items_per_page => 0,
+        p_comments       => 'CORS preflight',
+        p_source         => q'[BEGIN OWA_UTIL.MIME_HEADER('application/json', FALSE); HTP.P(''); END;]'
+    );
     COMMIT;
 END;
 /

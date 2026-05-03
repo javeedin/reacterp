@@ -63,9 +63,11 @@ export const ALL_MENU_ITEMS: MenuSearchItem[] = [
   { key: 'cash-bank-recon',       label: 'Bank Reconciliation',         module: 'CASH', moduleLabel: 'Cash Management',         path: '/cash/bank-reconciliation',       description: 'Reconcile bank statements', keywords: 'reconcile bank recon' },
   { key: 'cash-txn-codes',        label: 'Transaction Codes',           module: 'CASH', moduleLabel: 'Cash Management',         path: '/cash/transaction-codes',         description: 'Maintain bank statement transaction codes', keywords: 'transaction code bank charge neft rtgs' },
   { key: 'cash-pdf-templates',    label: 'PDF Statement Templates',     module: 'CASH', moduleLabel: 'Cash Management',         path: '/cash/pdf-templates',             description: 'Design templates for parsing PDF bank statements', keywords: 'pdf template bank statement import parse columns' },
+  { key: 'cash-payees',          label: 'Manage Payees',               module: 'CASH', moduleLabel: 'Cash Management',         path: '/cash/payees',                    description: 'Create and manage ad-hoc payees and bank accounts', keywords: 'payee adhoc payment beneficiary bank account' },
 
   // ── Tax Setup ────────────────────────────────────────────────────────────────
   { key: 'setup-taxes',           label: 'Tax Setup',                   module: 'SETUP', moduleLabel: 'Setup',                   path: '/setup/taxes',                    description: 'Define input/output taxes and assign to business units with GL accounts', keywords: 'tax vat gst input output rate code business unit assignment gl account' },
+  { key: 'ap-taxes',              label: 'Tax Setup',                   module: 'AP',    moduleLabel: 'Accounts Payable',        path: '/setup/taxes',                    description: 'Define input/output taxes and assign to business units with GL accounts', keywords: 'tax vat gst input output rate code business unit assignment gl account' },
 
   // ── Petty Cash ──────────────────────────────────────────────────────────────
   { key: 'pc-registers',          label: 'Petty Cash Registers',        module: 'PC',   moduleLabel: 'Petty Cash',              path: '/pc/registers',                   description: 'Manage petty cash registers and transactions', keywords: 'petty cash pc register custodian' },
@@ -98,6 +100,8 @@ export const ALL_MENU_ITEMS: MenuSearchItem[] = [
   // ── Admin ────────────────────────────────────────────────────────────────────
   { key: 'admin',                 label: 'Administration',              module: 'ADMIN', moduleLabel: 'Administration',         path: '/admin',                          description: 'System administration', keywords: 'admin system settings' },
   { key: 'admin-users',           label: 'User Management',             module: 'ADMIN', moduleLabel: 'Administration',         path: '/admin/users',                    description: 'Manage system users and roles', keywords: 'users roles permissions security' },
+  { key: 'admin-claude-key',      label: 'Claude AI Key Settings',      module: 'ADMIN', moduleLabel: 'Administration',         path: '/admin/claude-key',               description: 'Manage Anthropic Claude API keys for AI agents', keywords: 'claude ai anthropic api key agent reconciliation' },
+  { key: 'admin-ai-assistant',    label: 'AI Assistant',                module: 'ADMIN', moduleLabel: 'Administration',         path: '/admin/ai-assistant',             description: 'RAG-powered AI chat — query documents and live ERP data', keywords: 'ai chat rag assistant documents erp query natural language help' },
 
   // ── Sync ─────────────────────────────────────────────────────────────────────
   { key: 'sync',                  label: 'Sync Data',                   module: 'SYNC',  moduleLabel: 'Data Sync',              path: '/sync',                           description: 'Synchronise data from Oracle Fusion', keywords: 'sync fusion oracle import data' },
