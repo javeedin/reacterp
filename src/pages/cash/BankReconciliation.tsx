@@ -15,6 +15,7 @@ import {
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
+import ReconAgent from './ReconAgent';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import { buildPcBankTxnSlaPayload, fetchLedgerByBusinessUnit, derivePeriodName, createAccounting } from '../../services/sla.service';
 import * as XLSX from 'xlsx';
@@ -1201,6 +1202,56 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedStmtKeys, selectedSysKeys, stmtLines, sysTxns, txnSourceFilter, lastParams, selectedStatement, handleSelectStatement, fetchStmtLines, fetchSysTxns, msgApi]);
+
+  // ── AI Agent: reconcile explicit pairs ───────────────────────────────────
+  const handleAgentReconcile = useCallback(async (pairs: { stmtLineId: number; txnId: number }[]) => {
+    const steps: ProgressStep[] = [];
+    for (const { stmtLineId, txnId } of pairs) {
+      const line   = stmtLines.find(l => l.lineId   === stmtLineId);
+      const sysTxn = sysTxns.find(t  => t.txnId     === txnId);
+      if (!line || !sysTxn) continue;
+      const txnSide = buildTxnSideCall(sysTxn, line);
+      steps.push({ label: `Stmt Line ${line.lineId} — Reconcile`, status: 'pending' });
+      steps.push({ label: `${txnSide.label} ${sysTxn.txnNumber} — Update`, status: 'pending' });
+    }
+    setProgressSteps(steps);
+    setProgressDone(false);
+    setProgressOpen(true);
+    let stepIdx = 0;
+    const upd = (idx: number, s: ProgressStep['status']) =>
+      setProgressSteps(prev => prev.map((p, i) => i === idx ? { ...p, status: s } : p));
+    for (const { stmtLineId, txnId } of pairs) {
+      const line   = stmtLines.find(l => l.lineId === stmtLineId);
+      const sysTxn = sysTxns.find(t  => t.txnId  === txnId);
+      if (!line || !sysTxn) { stepIdx += 2; continue; }
+      const txnSide = buildTxnSideCall(sysTxn, line);
+      const s1 = stepIdx++;
+      const s2 = stepIdx++;
+      upd(s1, 'running');
+      let ok = false;
+      try {
+        const res  = await fetch(`${APEX_BASE}/cash/bankstatements/${line.statementId}/reconcile`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lineId: line.lineId, txnType: sysTxn.source, txnId: sysTxn.txnId, txnNumber: sysTxn.txnNumber, reconAmount: line.amount, notes: 'AI Agent' }),
+        });
+        const data = await parseApexJson(res);
+        ok = data.status === 'success';
+        upd(s1, ok ? 'success' : 'error');
+      } catch { upd(s1, 'error'); }
+      if (ok) {
+        upd(s2, 'running');
+        try {
+          const r2 = await fetch(txnSide.url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(txnSide.body) });
+          const d2 = await parseApexJson(r2);
+          upd(s2, d2.status === 'success' || r2.ok ? 'success' : 'error');
+        } catch { upd(s2, 'error'); }
+      } else { upd(s2, 'error'); }
+    }
+    setProgressDone(true);
+    if (selectedStatement) handleSelectStatement(selectedStatement);
+    else if (lastParams) { fetchStmtLines(lastParams, stmtReconFilter); fetchSysTxns(lastParams, txnSourceFilter, sysReconFilter); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stmtLines, sysTxns, lastParams, selectedStatement, handleSelectStatement, fetchStmtLines, fetchSysTxns, stmtReconFilter]);
 
   // ── Reconcile API Log ────────────────────────────────────────────────────
   const buildTxnSideCall = (sysTxn: SysTxn, line: StmtLine): { url: string; body: object; label: string } => {
@@ -2476,6 +2527,15 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
           >
             Auto Recon
           </Button>
+        </Col>
+        <Col>
+          <ReconAgent
+            stmtLines={stmtLines}
+            sysTxns={sysTxns}
+            bankAccount={lastParams?.bankAccount}
+            disabled={stmtLines.length === 0}
+            onApplyMatches={handleAgentReconcile}
+          />
         </Col>
         <Col>
           <Button

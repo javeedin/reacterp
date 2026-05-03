@@ -1002,3 +1002,126 @@ app.on('certificate-error', (event, webContents, url, error, certificate, callba
     callback(false);
   }
 });
+
+// ── Claude AI Agent ────────────────────────────────────────────────────────
+const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
+let _claudeKeyCache = null;
+let _claudeKeyCacheAt = 0;
+const CLAUDE_KEY_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+async function getClaudeKey() {
+  if (_claudeKeyCache && (Date.now() - _claudeKeyCacheAt) < CLAUDE_KEY_CACHE_TTL) {
+    return _claudeKeyCache;
+  }
+  const res = await fetch(`${APEX_BASE}/settings/claudekey`);
+  const data = await res.json();
+  if (data.status === 'success' && data.apiKey) {
+    _claudeKeyCache = data.apiKey;
+    _claudeKeyCacheAt = Date.now();
+    return data.apiKey;
+  }
+  throw new Error(data.message || 'No active Claude API key found. Please insert a key into the RR_CLAUDE_KEY table in Oracle APEX.');
+}
+
+ipcMain.handle('claude:recon-agent', async (_event, { stmtLines, sysTxns, bankAccount }) => {
+  try {
+    const apiKey = await getClaudeKey();
+
+    const systemPrompt = `You are a bank reconciliation assistant for an Oracle ERP system.
+Your job is to match unreconciled bank statement lines with unreconciled system transactions.
+
+Matching rules:
+- Amount must match exactly or within 0.01 rounding difference
+- Date can be up to 3 days apart (bank processing lag is normal)
+- Reference/description similarity increases confidence but is not required
+- Each statement line matches at most one system transaction (and vice versa)
+
+Confidence scoring:
+- 95-100: Exact amount + date within 1 day + reference matches
+- 80-94:  Exact amount + date within 3 days
+- 65-79:  Exact amount + date more than 3 days apart
+- Below 65: Do not include — too uncertain
+
+Return ONLY valid JSON, no explanation outside the JSON:
+{
+  "matches": [
+    {
+      "stmtLineId": <number>,
+      "stmtAmount": <number>,
+      "stmtDate": "<YYYY-MM-DD>",
+      "stmtRef": "<string>",
+      "txnId": <number>,
+      "txnSource": "<string>",
+      "txnNumber": "<string>",
+      "txnAmount": <number>,
+      "txnDate": "<YYYY-MM-DD>",
+      "txnRef": "<string>",
+      "confidence": <number>,
+      "reason": "<one sentence>"
+    }
+  ],
+  "unmatchedStmt": [<lineId>, ...],
+  "unmatchedTxn": [<txnId>, ...],
+  "summary": "<one sentence summary>"
+}`;
+
+    const userContent = `Bank Account: ${bankAccount || 'Unknown'}
+
+BANK STATEMENT LINES (unreconciled, ${stmtLines.length} lines):
+${JSON.stringify(stmtLines.map(l => ({
+  lineId:      l.lineId,
+  amount:      l.amount,
+  date:        l.transactionDate,
+  ref:         l.referenceNumber || l.transactionRef || l.reference || '',
+  description: l.description || '',
+})), null, 2)}
+
+SYSTEM TRANSACTIONS (unreconciled, ${sysTxns.length} transactions):
+${JSON.stringify(sysTxns.map(t => ({
+  txnId:     t.txnId,
+  txnNumber: t.txnNumber,
+  source:    t.source,
+  amount:    t.amount,
+  date:      t.txnDate,
+  ref:       t.reference || t.referenceText || '',
+  payee:     t.payee || '',
+})), null, 2)}
+
+Find the best matches. Only include confident matches (65+).`;
+
+    const claudeRes = await fetch(CLAUDE_API_URL, {
+      method: 'POST',
+      headers: {
+        'x-api-key':         apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type':      'application/json',
+      },
+      body: JSON.stringify({
+        model:      'claude-sonnet-4-6',
+        max_tokens: 4096,
+        system:     systemPrompt,
+        messages:   [{ role: 'user', content: userContent }],
+      }),
+    });
+
+    if (!claudeRes.ok) {
+      const errText = await claudeRes.text();
+      throw new Error(`Claude API ${claudeRes.status}: ${errText}`);
+    }
+
+    const claudeData = await claudeRes.json();
+    const text = claudeData.content?.[0]?.text ?? '';
+
+    // Extract JSON block from response
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('Claude returned no JSON. Response: ' + text.substring(0, 200));
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    console.log(`[claude:recon-agent] Found ${parsed.matches?.length ?? 0} matches`);
+    return { success: true, ...parsed };
+
+  } catch (err) {
+    console.error('[claude:recon-agent]', err.message);
+    return { success: false, error: err.message };
+  }
+});

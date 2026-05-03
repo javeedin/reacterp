@@ -47,6 +47,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getFusionCredentials: () => ipcRenderer.invoke('get-fusion-credentials'),
   clearFusionCredentials: () => ipcRenderer.invoke('clear-fusion-credentials'),
 
+  // Claude AI Agents
+  claudeReconAgent: (params) => ipcRenderer.invoke('claude:recon-agent', params),
+
   // Check if running in Electron
   isElectron: true,
 
