@@ -1,46 +1,101 @@
 /**
- * RAG Engine — runs entirely in the Electron main process.
+ * RAG Engine — pure JavaScript, no native compilation required.
  *
- * Storage  : SQLite (better-sqlite3) with FTS5 for keyword search
- * Parsing  : pdf-parse (PDF), mammoth (Word), plain text for others
- * Retrieval: FTS5 BM25 ranking, top-K chunks
- * Generation: Claude API (key from APEX RR_CLAUDE_KEY)
+ * Storage  : JSON file (rag_store.json in Electron userData)
+ * Search   : In-memory BM25 ranking (pure JS)
+ * Parsing  : pdf-parse (PDF), mammoth (Word), plain text fallback
+ * Generation: Claude API
  */
 
 'use strict';
 
-const path    = require('path');
-const fs      = require('fs');
-const Database = require('better-sqlite3');
+const path = require('path');
+const fs   = require('fs');
 
-let _db = null;
+// ── Store shape ───────────────────────────────────────────────────────────────
+// { documents: [...], chunks: [...], nextDocId: N, nextChunkId: N }
 
-// ── DB init ──────────────────────────────────────────────────────────────────
-function getDb(userDataPath) {
-  if (_db) return _db;
-  const dbPath = path.join(userDataPath, 'rag_store.db');
-  _db = new Database(dbPath);
-  _db.pragma('journal_mode = WAL');
-  _db.pragma('foreign_keys = ON');
+let _store    = null;
+let _storePath = null;
 
-  _db.exec(`
-    CREATE TABLE IF NOT EXISTS rag_documents (
-      id          INTEGER PRIMARY KEY AUTOINCREMENT,
-      name        TEXT NOT NULL,
-      type        TEXT,
-      size_bytes  INTEGER DEFAULT 0,
-      chunk_count INTEGER DEFAULT 0,
-      created_at  TEXT    DEFAULT (datetime('now'))
-    );
+function loadStore(userDataPath) {
+  if (_store) return _store;
+  _storePath = path.join(userDataPath, 'rag_store.json');
+  if (fs.existsSync(_storePath)) {
+    try { _store = JSON.parse(fs.readFileSync(_storePath, 'utf8')); } catch { _store = null; }
+  }
+  if (!_store) {
+    _store = { documents: [], chunks: [], nextDocId: 1, nextChunkId: 1 };
+  }
+  return _store;
+}
 
-    CREATE VIRTUAL TABLE IF NOT EXISTS rag_chunks USING fts5(
-      content,
-      doc_id,
-      chunk_index,
-      tokenize = 'porter unicode61'
-    );
-  `);
-  return _db;
+function saveStore() {
+  if (!_storePath || !_store) return;
+  fs.writeFileSync(_storePath, JSON.stringify(_store), 'utf8');
+}
+
+// ── Tokeniser ─────────────────────────────────────────────────────────────────
+const STOP_WORDS = new Set([
+  'a','an','the','and','or','but','in','on','at','to','for','of','with',
+  'by','from','is','it','its','as','be','are','was','were','been','have',
+  'has','had','do','does','did','will','would','could','should','may','might',
+  'this','that','these','those','i','you','he','she','we','they',
+]);
+
+function tokenise(text) {
+  return text.toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(t => t.length > 1 && !STOP_WORDS.has(t));
+}
+
+function termFreq(tokens) {
+  const tf = {};
+  for (const t of tokens) tf[t] = (tf[t] || 0) + 1;
+  return tf;
+}
+
+// ── BM25 ──────────────────────────────────────────────────────────────────────
+function bm25Score(chunk, queryTerms, avgDocLen, N, df, k1 = 1.5, b = 0.75) {
+  const docLen = chunk.tokenCount;
+  let score = 0;
+  for (const term of queryTerms) {
+    const tf  = chunk.tf[term] || 0;
+    if (tf === 0) continue;
+    const idf = Math.log((N - (df[term] || 0) + 0.5) / ((df[term] || 0) + 0.5) + 1);
+    score += idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * docLen / avgDocLen));
+  }
+  return score;
+}
+
+function searchChunks(userDataPath, query, limit = 6) {
+  const store = loadStore(userDataPath);
+  if (store.chunks.length === 0) return [];
+
+  const queryTerms = tokenise(query);
+  if (queryTerms.length === 0) return [];
+
+  // Build document frequency index
+  const df  = {};
+  const N   = store.chunks.length;
+  let totalLen = 0;
+  for (const c of store.chunks) {
+    totalLen += c.tokenCount;
+    for (const t of Object.keys(c.tf)) df[t] = (df[t] || 0) + 1;
+  }
+  const avgDocLen = totalLen / N;
+
+  const scored = store.chunks
+    .map(c => ({ chunk: c, score: bm25Score(c, queryTerms, avgDocLen, N, df) }))
+    .filter(x => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+
+  return scored.map(({ chunk }) => {
+    const doc = store.documents.find(d => d.id === chunk.docId);
+    return { content: chunk.content, doc_id: chunk.docId, chunk_index: chunk.chunkIndex, doc_name: doc?.name ?? 'Unknown' };
+  });
 }
 
 // ── Text chunking ─────────────────────────────────────────────────────────────
@@ -57,6 +112,7 @@ function chunkText(text, chunkSize = 800, overlap = 120) {
     const chunk = clean.slice(start, end).trim();
     if (chunk.length > 40) chunks.push(chunk);
     start = end - overlap;
+    if (start >= clean.length) break;
   }
   return chunks;
 }
@@ -64,261 +120,168 @@ function chunkText(text, chunkSize = 800, overlap = 120) {
 // ── File parsing ──────────────────────────────────────────────────────────────
 async function extractText(buffer, filename) {
   const ext = path.extname(filename).toLowerCase();
-
   if (ext === '.pdf') {
     const pdfParse = require('pdf-parse');
     const data = await pdfParse(buffer);
     return data.text;
   }
-
   if (ext === '.docx' || ext === '.doc') {
     const mammoth = require('mammoth');
     const result  = await mammoth.extractRawText({ buffer });
     return result.value;
   }
-
-  // Plain text fallback (txt, md, csv, json, etc.)
   return buffer.toString('utf8');
 }
 
 // ── Ingest ────────────────────────────────────────────────────────────────────
 async function ingestFile(userDataPath, buffer, filename, mimeType) {
-  const db = getDb(userDataPath);
+  const store = loadStore(userDataPath);
 
-  // Delete existing doc with same name (re-ingest)
-  const existing = db.prepare('SELECT id FROM rag_documents WHERE name = ?').get(filename);
-  if (existing) {
-    db.prepare("DELETE FROM rag_chunks WHERE doc_id = ?").run(existing.id);
-    db.prepare('DELETE FROM rag_documents WHERE id = ?').run(existing.id);
+  // Remove existing doc with same name
+  const existingIdx = store.documents.findIndex(d => d.name === filename);
+  if (existingIdx !== -1) {
+    const existingId = store.documents[existingIdx].id;
+    store.chunks    = store.chunks.filter(c => c.docId !== existingId);
+    store.documents.splice(existingIdx, 1);
   }
 
   const text   = await extractText(buffer, filename);
   const chunks = chunkText(text);
 
-  const insertDoc = db.prepare(
-    'INSERT INTO rag_documents (name, type, size_bytes, chunk_count) VALUES (?, ?, ?, ?)'
-  );
-  const docId = insertDoc.run(filename, mimeType || ext(filename), buffer.length, chunks.length).lastInsertRowid;
-
-  const insertChunk = db.prepare(
-    'INSERT INTO rag_chunks (content, doc_id, chunk_index) VALUES (?, ?, ?)'
-  );
-  const insertMany = db.transaction((rows) => {
-    for (const [i, content] of rows) insertChunk.run(content, String(docId), i);
+  const docId = store.nextDocId++;
+  store.documents.push({
+    id: docId, name: filename,
+    type: mimeType || path.extname(filename).slice(1),
+    size_bytes: buffer.length, chunk_count: chunks.length,
+    created_at: new Date().toISOString(),
   });
-  insertMany(chunks.map((c, i) => [i, c]));
 
+  for (let i = 0; i < chunks.length; i++) {
+    const tokens = tokenise(chunks[i]);
+    store.chunks.push({
+      id: store.nextChunkId++,
+      docId, chunkIndex: i,
+      content: chunks[i],
+      tokenCount: tokens.length,
+      tf: termFreq(tokens),
+    });
+  }
+
+  saveStore();
   return { docId, chunkCount: chunks.length, textLength: text.length };
-}
-
-function ext(filename) {
-  return path.extname(filename).toLowerCase().replace('.', '');
-}
-
-// ── Search ────────────────────────────────────────────────────────────────────
-function searchChunks(userDataPath, query, limit = 6) {
-  const db = getDb(userDataPath);
-  // FTS5 MATCH with BM25 ranking
-  const rows = db.prepare(`
-    SELECT c.content, c.doc_id, c.chunk_index,
-           d.name AS doc_name,
-           bm25(rag_chunks) AS score
-      FROM rag_chunks c
-      JOIN rag_documents d ON d.id = CAST(c.doc_id AS INTEGER)
-     WHERE rag_chunks MATCH ?
-     ORDER BY bm25(rag_chunks)
-     LIMIT ?
-  `).all(sanitizeFts(query), limit);
-  return rows;
-}
-
-function sanitizeFts(q) {
-  // Escape FTS5 special chars, wrap in quotes for phrase search fallback
-  return q.replace(/["]/g, '""').replace(/[*^()]/g, ' ').trim();
 }
 
 // ── List / Delete ─────────────────────────────────────────────────────────────
 function listDocuments(userDataPath) {
-  const db = getDb(userDataPath);
-  return db.prepare('SELECT * FROM rag_documents ORDER BY created_at DESC').all();
+  return loadStore(userDataPath).documents.slice().reverse();
 }
 
 function deleteDocument(userDataPath, docId) {
-  const db = getDb(userDataPath);
-  db.prepare('DELETE FROM rag_chunks WHERE doc_id = ?').run(String(docId));
-  db.prepare('DELETE FROM rag_documents WHERE id = ?').run(docId);
+  const store = loadStore(userDataPath);
+  store.documents = store.documents.filter(d => d.id !== docId);
+  store.chunks    = store.chunks.filter(c => c.docId !== docId);
+  saveStore();
 }
 
-// ── ERP endpoint catalogue (for NL → API translation) ────────────────────────
+// ── ERP endpoint catalogue ────────────────────────────────────────────────────
 const ERP_ENDPOINTS = [
   { method: 'GET', path: '/cash/banktransfers',        desc: 'Bank account transfers. Params: date_from, date_to, from_account, to_account, status, business_unit, row_limit' },
   { method: 'GET', path: '/cash/externaltransactions', desc: 'External cash transactions. Params: date_from, date_to, bank_account, direction (DR/CR), txn_type, business_unit, row_limit' },
-  { method: 'GET', path: '/cash/bankstatements',       desc: 'Bank statements. Params: bank_account, date_from, date_to, business_unit, row_limit' },
-  { method: 'GET', path: '/cash/transactioncodes',     desc: 'Transaction codes / types list' },
+  { method: 'GET', path: '/cash/bankstatements',       desc: 'Bank statements / statement lines. Params: bank_account, date_from, date_to, business_unit, row_limit' },
+  { method: 'GET', path: '/cash/transactioncodes',     desc: 'Transaction codes/types list' },
   { method: 'GET', path: '/gl/journals',               desc: 'GL journals. Params: date_from, date_to, status, business_unit, row_limit' },
   { method: 'GET', path: '/ap/invoices',               desc: 'AP invoices. Params: date_from, date_to, vendor, status, business_unit, row_limit' },
   { method: 'GET', path: '/ap/payments',               desc: 'AP payments. Params: date_from, date_to, vendor, status, business_unit, row_limit' },
-  { method: 'GET', path: '/admin/claudekeys',          desc: 'Claude API key management (admin only)' },
 ];
 
-// ── Main RAG query ────────────────────────────────────────────────────────────
+// ── Main RAG query ─────────────────────────────────────────────────────────────
 async function ragQuery(userDataPath, apexBase, apiKey, { question, mode, history }) {
-  // mode: 'docs' | 'erp' | 'auto'
   const systemBase = `You are an intelligent ERP assistant for an Oracle-based ERP system.
 Today's date: ${new Date().toISOString().split('T')[0]}.
 Be concise, accurate, and always cite sources when answering from documents.`;
 
-  // ── ERP data query mode ──────────────────────────────────────────────────
-  if (mode === 'erp') {
-    return erpQuery(apexBase, apiKey, question, history, systemBase);
-  }
+  if (mode === 'erp')  return erpQuery(apexBase, apiKey, question, history, systemBase);
+  if (mode === 'docs') return docsQuery(userDataPath, apiKey, question, history, systemBase);
 
-  // ── Docs-only mode ───────────────────────────────────────────────────────
-  if (mode === 'docs') {
-    return docsQuery(userDataPath, apiKey, question, history, systemBase);
-  }
-
-  // ── Auto: detect intent ──────────────────────────────────────────────────
-  // Simple heuristic: if question contains data-like keywords, try ERP first
-  const erpKeywords = /\b(how many|list|show|find|total|sum|count|invoice|payment|transfer|journal|statement|balance|amount|vendor|supplier|unreconciled|overdue|unpaid)\b/i;
+  // Auto: try ERP for data-like questions, else docs
+  const erpKeywords = /\b(how many|list|show|find|total|sum|count|invoice|payment|transfer|journal|statement|balance|amount|vendor|unreconciled|overdue|unpaid|pending)\b/i;
   if (erpKeywords.test(question)) {
-    const erpResult = await erpQuery(apexBase, apiKey, question, history, systemBase);
-    if (erpResult.type === 'erp_data') return erpResult;
+    const result = await erpQuery(apexBase, apiKey, question, history, systemBase);
+    if (result.type === 'erp_data') return result;
   }
   return docsQuery(userDataPath, apiKey, question, history, systemBase);
 }
 
-// ── ERP natural-language query ────────────────────────────────────────────────
+// ── ERP NL query ──────────────────────────────────────────────────────────────
 async function erpQuery(apexBase, apiKey, question, history, systemBase) {
   const endpointList = ERP_ENDPOINTS.map(e => `  ${e.method} ${e.path} — ${e.desc}`).join('\n');
-
   const systemPrompt = `${systemBase}
 
 You can query the ERP system using these REST endpoints:
 ${endpointList}
 
-When the user asks for ERP data, respond with ONLY this JSON (no explanation):
-{
-  "type": "api_call",
-  "endpoint": "/path/to/endpoint",
-  "params": { "param_name": "value" },
-  "description": "one sentence describing what this fetches"
-}
+When the user asks for ERP data, respond with ONLY this JSON:
+{ "type": "api_call", "endpoint": "/path", "params": { "key": "value" }, "description": "one sentence" }
 
-If the question is NOT about fetching ERP data, respond with:
-{ "type": "text", "answer": "your answer here" }
+If not a data query:
+{ "type": "text", "answer": "..." }
 
-Rules:
-- dates must be YYYY-MM-DD format
-- row_limit defaults to 50 unless user specifies
-- Only use endpoints from the list above`;
+Rules: dates = YYYY-MM-DD, row_limit defaults to 50.`;
 
-  const messages = [
-    ...(history || []).slice(-6),
-    { role: 'user', content: question },
-  ];
-
+  const messages = [...(history || []).slice(-6), { role: 'user', content: question }];
   const claude = await callClaude(apiKey, systemPrompt, messages, 512);
   const raw = claude.content?.[0]?.text ?? '';
 
   let parsed;
   try {
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    parsed = JSON.parse(jsonMatch?.[0] ?? '{}');
+    const m = raw.match(/\{[\s\S]*\}/);
+    parsed = JSON.parse(m?.[0] ?? '{}');
   } catch {
     return { type: 'text', answer: raw, sources: [] };
   }
 
   if (parsed.type === 'api_call') {
-    // Execute the API call
     const params = new URLSearchParams(parsed.params ?? {});
     const url = `${apexBase}${parsed.endpoint}${params.toString() ? '?' + params.toString() : ''}`;
     try {
-      const res  = await fetch(url);
-      const text = await res.text();
-      const data = JSON.parse(text);
+      const res   = await fetch(url);
+      const text  = await res.text();
+      const data  = JSON.parse(text);
       const items = data.items ?? data.data ?? [];
 
-      // Ask Claude to summarise the results
-      const summaryPrompt = `${systemBase}\nSummarise these ERP results for the user in a clear, concise way. Use a table or bullet list if helpful. If empty, say so.`;
-      const summaryMsg = [{ role: 'user', content: `Question: ${question}\n\nAPI: ${parsed.description}\nURL: ${url}\n\nData (${items.length} records):\n${JSON.stringify(items.slice(0, 30), null, 2)}` }];
+      const summaryPrompt = `${systemBase}\nSummarise these ERP query results clearly. Use a table or bullet list. If empty, say so.`;
+      const summaryMsg = [{ role: 'user', content: `Question: ${question}\nAPI: ${parsed.description}\nURL: ${url}\n\nData (${items.length} records):\n${JSON.stringify(items.slice(0, 30), null, 2)}` }];
       const summary = await callClaude(apiKey, summaryPrompt, summaryMsg, 1024);
-      return {
-        type:        'erp_data',
-        answer:      summary.content?.[0]?.text ?? 'No summary.',
-        apiUrl:      url,
-        apiDesc:     parsed.description,
-        recordCount: items.length,
-        rawData:     items.slice(0, 30),
-        sources:     [],
-      };
+      return { type: 'erp_data', answer: summary.content?.[0]?.text ?? 'No summary.', apiUrl: url, apiDesc: parsed.description, recordCount: items.length, rawData: items.slice(0, 30), sources: [] };
     } catch (e) {
       return { type: 'text', answer: `I would query ${url} but got an error: ${e.message}`, sources: [] };
     }
   }
-
   return { type: 'text', answer: parsed.answer ?? raw, sources: [] };
 }
 
-// ── Document RAG query ────────────────────────────────────────────────────────
+// ── Docs RAG query ────────────────────────────────────────────────────────────
 async function docsQuery(userDataPath, apiKey, question, history, systemBase) {
   const chunks = searchChunks(userDataPath, question, 6);
-
   if (chunks.length === 0) {
-    return {
-      type: 'text',
-      answer: "I couldn't find relevant information in the uploaded documents. Try uploading relevant manuals or SOPs, or switch to ERP Data mode to query live data.",
-      sources: [],
-    };
+    return { type: 'text', answer: "I couldn't find relevant information in the uploaded documents. Try uploading relevant manuals or SOPs, or switch to ERP Data mode to query live data.", sources: [] };
   }
-
-  const context = chunks.map((c, i) =>
-    `[Source ${i + 1}: ${c.doc_name}]\n${c.content}`
-  ).join('\n\n---\n\n');
-
-  const systemPrompt = `${systemBase}
-
-Answer using ONLY the context below. Cite sources as [Source N].
-If the answer is not in the context, say so clearly — do not make things up.
-
-CONTEXT:
-${context}`;
-
-  const messages = [
-    ...(history || []).slice(-6),
-    { role: 'user', content: question },
-  ];
-
+  const context = chunks.map((c, i) => `[Source ${i + 1}: ${c.doc_name}]\n${c.content}`).join('\n\n---\n\n');
+  const systemPrompt = `${systemBase}\n\nAnswer using ONLY the context below. Cite sources as [Source N]. If not in context, say so.\n\nCONTEXT:\n${context}`;
+  const messages = [...(history || []).slice(-6), { role: 'user', content: question }];
   const claude = await callClaude(apiKey, systemPrompt, messages, 1024);
-  return {
-    type:    'docs',
-    answer:  claude.content?.[0]?.text ?? 'No response.',
-    sources: [...new Set(chunks.map(c => c.doc_name))],
-    chunks:  chunks.map(c => ({ docName: c.doc_name, snippet: c.content.substring(0, 120) + '…' })),
-  };
+  return { type: 'docs', answer: claude.content?.[0]?.text ?? 'No response.', sources: [...new Set(chunks.map(c => c.doc_name))], chunks: chunks.map(c => ({ docName: c.doc_name, snippet: c.content.substring(0, 120) + '…' })) };
 }
 
-// ── Claude API helper ─────────────────────────────────────────────────────────
+// ── Claude helper ─────────────────────────────────────────────────────────────
 async function callClaude(apiKey, system, messages, maxTokens = 1024) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method:  'POST',
-    headers: {
-      'x-api-key':         apiKey,
-      'anthropic-version': '2023-06-01',
-      'content-type':      'application/json',
-    },
-    body: JSON.stringify({
-      model:      'claude-sonnet-4-6',
-      max_tokens: maxTokens,
-      system,
-      messages,
-    }),
+    method: 'POST',
+    headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: maxTokens, system, messages }),
   });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Claude API ${res.status}: ${err.substring(0, 200)}`);
-  }
+  if (!res.ok) { const err = await res.text(); throw new Error(`Claude API ${res.status}: ${err.substring(0, 200)}`); }
   return res.json();
 }
 
-module.exports = { ingestFile, searchChunks, listDocuments, deleteDocument, ragQuery, getDb };
+module.exports = { ingestFile, searchChunks, listDocuments, deleteDocument, ragQuery };
