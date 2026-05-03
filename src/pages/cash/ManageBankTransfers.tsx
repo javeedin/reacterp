@@ -327,7 +327,11 @@ const TransferForm: React.FC<{
                   <Select showSearch placeholder="Select bank account" optionFilterProp="label" options={bankAccounts}
                     style={{ borderRadius: '6px 0 0 6px', flex: 1 }} disabled={isEdit || !buSelected}
                     notFoundContent={<Text type="secondary">No accounts loaded</Text>}
-                    onChange={(v: string) => { setToCurrency(bankCurrencyMap[v] ?? ''); }}
+                    onChange={(v: string) => {
+                      const ccy = bankCurrencyMap[v] ?? '';
+                      setToCurrency(ccy);
+                      if (ccy) form.setFieldsValue({ paymentCurrencyCode: ccy });
+                    }}
                   />
                 </Form.Item>
                 <div style={{ display: 'flex', alignItems: 'center', padding: '0 10px', background: '#f5f5f5', border: '1px solid #d9d9d9', borderLeft: 0, borderRadius: '0 6px 6px 0', minWidth: 52, justifyContent: 'center' }}>
