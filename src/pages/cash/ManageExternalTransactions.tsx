@@ -442,7 +442,7 @@ const ExternalTxnForm: React.FC<{
 
       <Form form={form} layout="vertical" size="middle">
         <Row gutter={16} align="stretch">
-        <Col xs={24} xl={14} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <Col xs={24} xl={11} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
         {/* ── Section 1: Organisation ── */}
         <Card styles={{ body: { padding: '14px 16px' } }} style={sectionCard(REDWOOD.info)}>
@@ -664,7 +664,7 @@ const ExternalTxnForm: React.FC<{
 
         </Col>
         {/* RIGHT COLUMN */}
-        <Col xs={24} xl={10} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <Col xs={24} xl={13} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
         {/* ── Section 3: Account Coding ── */}
         <Card
@@ -854,6 +854,114 @@ const ExternalTxnForm: React.FC<{
           )}
         </Card>
 
+        {/* ── Transaction Lines (multiple mode, inside right column) ── */}
+        {!isEdit && extTxnMode === 'multiple' && (
+        <Card
+          styles={{ body: { padding: '14px 16px' } }}
+          style={{ ...sectionCard(REDWOOD.warning), marginBottom: 0 }}
+          title={
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
+              <span style={{ ...sectionHeader(REDWOOD.warning), marginBottom: 0 }}>
+                <SwapOutlined /> Transaction Lines
+              </span>
+            </div>
+          }
+        >
+          <Table
+            size="small"
+            dataSource={extTxnLines}
+            rowKey="key"
+            pagination={false}
+            scroll={{ y: 200 }}
+            style={{ marginBottom: 10, borderRadius: 6, overflow: 'hidden' }}
+            rowClassName={(_, idx) => idx % 2 === 1 ? 'alt-row' : ''}
+            columns={[
+              {
+                title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>#</span>,
+                width: 32,
+                render: (_: any, _r: any, idx: number) => (
+                  <span style={{ fontSize: 12, color: REDWOOD.neutral600, fontWeight: 600 }}>{idx + 1}</span>
+                ),
+              },
+              {
+                title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Amount</span>,
+                width: 120,
+                render: (_: any, record: ExtTxnLine, idx: number) => (
+                  <InputNumber
+                    size="small" style={{ width: '100%' }} precision={2}
+                    value={record.amount} placeholder="0.00"
+                    onChange={(v) => updateExtLine(idx, 'amount', v)}
+                  />
+                ),
+              },
+              {
+                title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Description</span>,
+                render: (_: any, record: ExtTxnLine, idx: number) => (
+                  <Input
+                    size="small" value={record.description}
+                    placeholder="Optional"
+                    onChange={(e) => updateExtLine(idx, 'description', e.target.value)}
+                  />
+                ),
+              },
+              {
+                title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Offset Account</span>,
+                width: 200,
+                render: (_: any, record: ExtTxnLine, idx: number) => (
+                  <>
+                    <Space.Compact style={{ width: '100%' }}>
+                      <Input
+                        size="small" readOnly value={record.offsetAccount}
+                        style={{ fontFamily: 'monospace', fontSize: 11, background: record.offsetAccount ? '#f0f7ff' : undefined }}
+                        placeholder="Select account…"
+                      />
+                      <Button size="small" icon={<SearchOutlined />} onClick={() => {
+                        setLineCoaIdx(idx);
+                        setLineCoaInitial(record.offsetAccount || '');
+                        setLineCoaOpen(true);
+                      }} />
+                    </Space.Compact>
+                    {record.offsetDesc && (
+                      <div style={{ fontSize: 10, color: REDWOOD.info, marginTop: 2, paddingLeft: 2 }}>{record.offsetDesc}</div>
+                    )}
+                  </>
+                ),
+              },
+              {
+                title: '',
+                width: 32,
+                render: (_: any, _r: any, idx: number) => (
+                  <Tooltip title="Remove line">
+                    <Button size="small" type="text" danger icon={<CloseOutlined />}
+                      onClick={() => setExtTxnLines(prev => prev.filter((_, i) => i !== idx))} />
+                  </Tooltip>
+                ),
+              },
+            ]}
+            footer={() => (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
+                <Button
+                  size="small" type="dashed" icon={<PlusOutlined />}
+                  onClick={() => setExtTxnLines(prev => [
+                    ...prev,
+                    { key: Date.now(), amount: undefined, description: '', offsetAccount: '', offsetDesc: '' },
+                  ])}
+                >
+                  Add Line
+                </Button>
+                <Space>
+                  <Text type="secondary" style={{ fontSize: 12 }}>{extTxnLines.length} line(s)</Text>
+                  <Divider type="vertical" />
+                  <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>
+                    {fmtAmount(extTxnLines.reduce((s, l) => s + (l.amount ?? 0), 0), form.getFieldValue('currencyCode'))}
+                  </Text>
+                </Space>
+              </div>
+            )}
+          />
+        </Card>
+        )}
+
         {/* ── Attachments ── */}
         <Card styles={{ body: { padding: '14px 16px' } }} style={sectionCard(REDWOOD.neutral600)}>
           <div style={sectionHeader(REDWOOD.neutral600)}>
@@ -898,116 +1006,6 @@ const ExternalTxnForm: React.FC<{
         </Col>
         </Row>
 
-        {/* ── Transaction Lines (multiple mode only) ── */}
-        {!isEdit && extTxnMode === 'multiple' && (
-        <Card
-          styles={{ body: { padding: '14px 16px' } }}
-          style={{ ...sectionCard(REDWOOD.warning), marginTop: 12, marginBottom: 0 }}
-          title={
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
-              <span style={{ ...sectionHeader(REDWOOD.warning), marginBottom: 0 }}>
-                <SwapOutlined /> Transaction Lines
-              </span>
-            </div>
-          }
-        >
-          <>
-              <Table
-                size="small"
-                dataSource={extTxnLines}
-                rowKey="key"
-                pagination={false}
-                scroll={{ y: 220 }}
-                style={{ marginBottom: 10, borderRadius: 6, overflow: 'hidden' }}
-                rowClassName={(_, idx) => idx % 2 === 1 ? 'alt-row' : ''}
-                columns={[
-                  {
-                    title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>#</span>,
-                    width: 36,
-                    render: (_: any, _r: any, idx: number) => (
-                      <span style={{ fontSize: 12, color: REDWOOD.neutral600, fontWeight: 600 }}>{idx + 1}</span>
-                    ),
-                  },
-                  {
-                    title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Amount</span>,
-                    width: 140,
-                    render: (_: any, record: ExtTxnLine, idx: number) => (
-                      <InputNumber
-                        size="small" style={{ width: '100%' }} precision={2}
-                        value={record.amount} placeholder="0.00"
-                        onChange={(v) => updateExtLine(idx, 'amount', v)}
-                      />
-                    ),
-                  },
-                  {
-                    title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Description</span>,
-                    render: (_: any, record: ExtTxnLine, idx: number) => (
-                      <Input
-                        size="small" value={record.description}
-                        placeholder="Optional"
-                        onChange={(e) => updateExtLine(idx, 'description', e.target.value)}
-                      />
-                    ),
-                  },
-                  {
-                    title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Offset Account</span>,
-                    width: 230,
-                    render: (_: any, record: ExtTxnLine, idx: number) => (
-                      <>
-                        <Space.Compact style={{ width: '100%' }}>
-                          <Input
-                            size="small" readOnly value={record.offsetAccount}
-                            style={{ fontFamily: 'monospace', fontSize: 11, background: record.offsetAccount ? '#f0f7ff' : undefined }}
-                            placeholder="Select account…"
-                          />
-                          <Button size="small" icon={<SearchOutlined />} onClick={() => {
-                            setLineCoaIdx(idx);
-                            setLineCoaInitial(record.offsetAccount || '');
-                            setLineCoaOpen(true);
-                          }} />
-                        </Space.Compact>
-                        {record.offsetDesc && (
-                          <div style={{ fontSize: 10, color: REDWOOD.info, marginTop: 2, paddingLeft: 2 }}>{record.offsetDesc}</div>
-                        )}
-                      </>
-                    ),
-                  },
-                  {
-                    title: '',
-                    width: 36,
-                    render: (_: any, _r: any, idx: number) => (
-                      <Tooltip title="Remove line">
-                        <Button size="small" type="text" danger icon={<CloseOutlined />}
-                          onClick={() => setExtTxnLines(prev => prev.filter((_, i) => i !== idx))} />
-                      </Tooltip>
-                    ),
-                  },
-                ]}
-                footer={() => (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
-                    <Button
-                      size="small" type="dashed" icon={<PlusOutlined />}
-                      onClick={() => setExtTxnLines(prev => [
-                        ...prev,
-                        { key: Date.now(), amount: undefined, description: '', offsetAccount: '', offsetDesc: '' },
-                      ])}
-                    >
-                      Add Line
-                    </Button>
-                    <Space>
-                      <Text type="secondary" style={{ fontSize: 12 }}>{extTxnLines.length} line(s)</Text>
-                      <Divider type="vertical" />
-                      <Text style={{ fontSize: 12 }}>Total:</Text>
-                      <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>
-                        {fmtAmount(extTxnLines.reduce((s, l) => s + (l.amount ?? 0), 0), form.getFieldValue('currencyCode'))}
-                      </Text>
-                    </Space>
-                  </div>
-                )}
-              />
-          </>
-        </Card>
-        )}
       </Form>
 
       {/* ── Sticky footer ── */}
