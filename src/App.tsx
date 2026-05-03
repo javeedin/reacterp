@@ -75,6 +75,7 @@ const ManageExpenses          = lazy(() => import('./pages/rm').then(m => ({ def
 const AdminModule             = lazy(() => import('./pages/admin/index'));
 const UserManagement          = lazy(() => import('./pages/admin/UserManagement'));
 const ClaudeKeySettings       = lazy(() => import('./pages/admin/ClaudeKeySettings'));
+const RagAssistant            = lazy(() => import('./pages/admin/RagAssistant'));
 const CashModule              = lazy(() => import('./pages/cash/CashModule'));
 const ManageBankTransfers     = lazy(() => import('./pages/cash/ManageBankTransfers'));
 const ManageExternalTransactions = lazy(() => import('./pages/cash/ManageExternalTransactions'));
@@ -218,6 +219,7 @@ function App() {
               <Route path="admin" element={<AdminModule />} />
               <Route path="admin/users" element={<UserManagement />} />
               <Route path="admin/claude-key" element={<ClaudeKeySettings />} />
+              <Route path="admin/ai-assistant" element={<RagAssistant />} />
               {/* Petty Cash */}
               <Route path="pc/registers" element={<PettyCash />} />
               {/* Cash Management */}

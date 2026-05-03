@@ -101,6 +101,7 @@ export const ALL_MENU_ITEMS: MenuSearchItem[] = [
   { key: 'admin',                 label: 'Administration',              module: 'ADMIN', moduleLabel: 'Administration',         path: '/admin',                          description: 'System administration', keywords: 'admin system settings' },
   { key: 'admin-users',           label: 'User Management',             module: 'ADMIN', moduleLabel: 'Administration',         path: '/admin/users',                    description: 'Manage system users and roles', keywords: 'users roles permissions security' },
   { key: 'admin-claude-key',      label: 'Claude AI Key Settings',      module: 'ADMIN', moduleLabel: 'Administration',         path: '/admin/claude-key',               description: 'Manage Anthropic Claude API keys for AI agents', keywords: 'claude ai anthropic api key agent reconciliation' },
+  { key: 'admin-ai-assistant',    label: 'AI Assistant',                module: 'ADMIN', moduleLabel: 'Administration',         path: '/admin/ai-assistant',             description: 'RAG-powered AI chat — query documents and live ERP data', keywords: 'ai chat rag assistant documents erp query natural language help' },
 
   // ── Sync ─────────────────────────────────────────────────────────────────────
   { key: 'sync',                  label: 'Sync Data',                   module: 'SYNC',  moduleLabel: 'Data Sync',              path: '/sync',                           description: 'Synchronise data from Oracle Fusion', keywords: 'sync fusion oracle import data' },

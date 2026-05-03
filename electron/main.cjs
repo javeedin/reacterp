@@ -9,6 +9,9 @@ let autoUpdater = null;
 let nodemailer = null;
 try { nodemailer = require('nodemailer'); } catch (_) { /* optional */ }
 
+const rag = require('./rag.cjs');
+const getUserDataPath = () => app.getPath('userData');
+
 // ── Email sender (IPC) ──────────────────────────────────────────────────────
 const APEX_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp';
 
@@ -1168,6 +1171,49 @@ Find the best matches. Only include confident matches (65+).`;
 
   } catch (err) {
     console.error('[claude:recon-agent]', err.message);
+    return { success: false, error: err.message };
+  }
+});
+
+// ── RAG: Ingest file ─────────────────────────────────────────────────────────
+ipcMain.handle('rag:ingest-file', async (_event, { buffer, filename, mimeType }) => {
+  try {
+    const buf = Buffer.from(buffer);
+    const result = await rag.ingestFile(getUserDataPath(), buf, filename, mimeType);
+    return { success: true, ...result };
+  } catch (err) {
+    console.error('[rag:ingest-file]', err.message);
+    return { success: false, error: err.message };
+  }
+});
+
+// ── RAG: List documents ──────────────────────────────────────────────────────
+ipcMain.handle('rag:list-docs', async () => {
+  try {
+    return { success: true, docs: rag.listDocuments(getUserDataPath()) };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// ── RAG: Delete document ─────────────────────────────────────────────────────
+ipcMain.handle('rag:delete-doc', async (_event, { docId }) => {
+  try {
+    rag.deleteDocument(getUserDataPath(), docId);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// ── RAG: Query (chat) ────────────────────────────────────────────────────────
+ipcMain.handle('rag:query', async (_event, { question, mode, history }) => {
+  try {
+    const apiKey = await getClaudeKey();
+    const result = await rag.ragQuery(getUserDataPath(), APEX_BASE, apiKey, { question, mode, history });
+    return { success: true, ...result };
+  } catch (err) {
+    console.error('[rag:query]', err.message);
     return { success: false, error: err.message };
   }
 });

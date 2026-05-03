@@ -51,6 +51,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   claudeReconAgent: (params) => ipcRenderer.invoke('claude:recon-agent', params),
   claudeTestKey:    ()       => ipcRenderer.invoke('claude:test-key'),
 
+  // RAG Assistant
+  ragIngestFile: (params)   => ipcRenderer.invoke('rag:ingest-file', params),
+  ragListDocs:   ()         => ipcRenderer.invoke('rag:list-docs'),
+  ragDeleteDoc:  (params)   => ipcRenderer.invoke('rag:delete-doc', params),
+  ragQuery:      (params)   => ipcRenderer.invoke('rag:query', params),
+
   // Check if running in Electron
   isElectron: true,
 

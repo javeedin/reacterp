@@ -6,6 +6,7 @@ import {
   SettingOutlined,
   SafetyOutlined,
   RobotOutlined,
+  MessageOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -71,6 +72,14 @@ const adminCards: AdminCard[] = [
     icon: <RobotOutlined />,
     color: '#722ed1',
     path: '/admin/claude-key',
+  },
+  {
+    key: 'ai-assistant',
+    title: 'AI Assistant',
+    description: 'RAG-powered chat assistant. Upload manuals and SOPs, then ask questions — or query live ERP data in natural language.',
+    icon: <MessageOutlined />,
+    color: '#08979c',
+    path: '/admin/ai-assistant',
   },
 ];
 
