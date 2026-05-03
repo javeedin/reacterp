@@ -242,7 +242,7 @@ const ExternalTxnForm: React.FC<{
       }
     } else {
       form.resetFields();
-      form.setFieldsValue({ transactionDate: dayjs(), transactionDirection: 'CR' });
+      form.setFieldsValue({ transactionDate: dayjs(), transactionDirection: 'CR', transactionType: 'External Transaction' });
       setTxnDirection('CR');
       setAssetAcctDesc('');
       setOffsetAcctDesc('');
@@ -552,9 +552,11 @@ const ExternalTxnForm: React.FC<{
               <Form.Item
                 label={<span style={{ fontWeight: 600, fontSize: 13 }}>Transaction Type</span>}
                 name="transactionType"
+                initialValue="External Transaction"
+                rules={[{ required: true, message: 'Transaction Type is required' }]}
                 style={{ marginBottom: 10 }}
               >
-                <Select placeholder="Select type" allowClear disabled={isEdit || !buSelected}>
+                <Select placeholder="Select type" disabled={isEdit || !buSelected}>
                   <Option value="External Transaction">External Transaction</Option>
                   <Option value="Adhoc Payment">Adhoc Payment</Option>
                 </Select>
