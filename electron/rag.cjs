@@ -107,12 +107,12 @@ const ERP_ENDPOINTS = [
 // ── Main query ────────────────────────────────────────────────────────────────
 async function ragQuery(userDataPath, apexBase, apiKey, { question, mode, history }) {
   const today = new Date().toISOString().split('T')[0];
-  const systemBase = `You are a powerful ERP AI assistant for an Oracle-based ERP system. Today: ${today}. Be concise and accurate.`;
+  const systemBase = `You are a powerful ERP data analyst for an Oracle ERP system. Today: ${today}.`;
 
   if (mode==='erp')  return erpQuery(apexBase,apiKey,question,history,systemBase);
   if (mode==='docs') return docsQuery(userDataPath,apiKey,question,history,systemBase);
 
-  const erpKw = /\b(report|chart|graph|aging|ageing|trend|list|show|find|total|sum|count|invoice|payment|transfer|journal|statement|balance|vendor|unreconciled|overdue|unpaid|pending|cash flow|summary|breakdown|analysis)\b/i;
+  const erpKw = /\b(report|chart|graph|aging|ageing|trend|list|show|find|total|sum|count|invoice|payment|transfer|journal|statement|balance|vendor|unreconciled|overdue|unpaid|pending|cash flow|summary|breakdown|analysis|pdf|excel|export|download)\b/i;
   if (erpKw.test(question)) {
     const r = await erpQuery(apexBase,apiKey,question,history,systemBase);
     if (r.type!=='text') return r;
@@ -122,21 +122,30 @@ async function ragQuery(userDataPath, apexBase, apiKey, { question, mode, histor
 
 // ── ERP query (two-step: plan → execute → visualise) ─────────────────────────
 async function erpQuery(apexBase, apiKey, question, history, systemBase) {
-  // Step 1: plan
-  const planPrompt = `${systemBase}
+  // Step 1: plan — strip output-format intent (pdf/excel/chart) so Claude picks the right endpoint
+  const today = new Date().toISOString().split('T')[0];
+  const planPrompt = `You are an ERP API router. Your ONLY job is to pick which API endpoint to call.
+
+IMPORTANT RULES:
+- PDF, Excel, charts, and downloads are handled automatically by the UI — you do NOT need to mention them.
+- ALWAYS return type "api_call" for any data/report/analysis question.
+- Only return type "text" if the question is completely unrelated to ERP data (e.g. a greeting).
+- Never refuse to answer — always pick the best matching endpoint.
 
 Available ERP endpoints:
 ${ERP_ENDPOINTS.map(e=>`  GET ${e.path} — ${e.desc}`).join('\n')}
 
-Decide how to answer. Reply with ONLY JSON:
-{ "type": "api_call", "endpoint": "/path", "params": { "key": "value" }, "intent": "report|chart|table|lookup", "description": "one sentence" }
-OR if not a data query:
-{ "type": "text", "answer": "..." }
+Reply with ONLY valid JSON, no extra text:
+{ "type": "api_call", "endpoint": "/path", "params": { "key": "value" }, "intent": "report|chart|table|lookup", "description": "one sentence about what data this fetches" }
 
-Rules: dates=YYYY-MM-DD, row_limit max 500. Today=${new Date().toISOString().split('T')[0]}.`;
+Rules: dates=YYYY-MM-DD, row_limit max 500. Today=${today}.
+For aging/overdue: use /ap/invoices with status=UNPAID and a wide date range (date_from 2+ years ago).
+For trends: use appropriate date range and row_limit=500.`;
 
-  const planMsg = [...(history||[]).slice(-4), { role:'user', content:question }];
-  const plan = await callClaude(apiKey, planPrompt, planMsg, 400);
+  // Strip output-format hints so Claude focuses on data intent
+  const cleanQuestion = question.replace(/\b(as|in|to|into|download|export|generate|create|make|give me|show me)\s+(a\s+)?(pdf|excel|xlsx|csv|chart|graph|spreadsheet)\b/gi, '').trim();
+  const planMsg = [...(history||[]).slice(-4), { role:'user', content:cleanQuestion }];
+  const plan = await callClaude(apiKey, planPrompt, planMsg, 500);
   const planRaw = plan.content?.[0]?.text ?? '';
 
   let planned;
@@ -160,14 +169,10 @@ Rules: dates=YYYY-MM-DD, row_limit max 500. Today=${new Date().toISOString().spl
   const intent = planned.intent ?? 'table';
   const isVisual = ['report','chart','table'].includes(intent);
 
-  const vizPrompt = `${systemBase}
-
-The user asked: "${question}"
-API: ${planned.description}
-Records returned: ${items.length}
-Data sample: ${JSON.stringify(items.slice(0, 60), null, 1)}
-
-${isVisual ? `Create a rich structured response. Return ONLY this JSON (no extra text):
+  const vizSystem = isVisual
+    ? `You are an ERP data analyst. Analyse the provided data and return a structured JSON report.
+Return ONLY valid JSON — absolutely no extra text, no markdown fences, no explanations.
+JSON schema:
 {
   "type": "report",
   "title": "clear report title",
@@ -179,7 +184,7 @@ ${isVisual ? `Create a rich structured response. Return ONLY this JSON (no extra
     {
       "type": "table",
       "title": "section title",
-      "columns": ["Col1", "Col2", "Col3"],
+      "columns": ["Col1","Col2","Col3"],
       "rows": [["val1","val2","val3"]]
     },
     {
@@ -187,18 +192,23 @@ ${isVisual ? `Create a rich structured response. Return ONLY this JSON (no extra
       "chartType": "bar",
       "title": "chart title",
       "xKey": "name",
-      "data": [{ "name": "label", "value": number, "amount": number }]
+      "data": [{ "name": "label", "value": 0, "amount": 0 }]
     }
   ]
 }
 Chart types: "bar" (comparisons), "pie" (proportions), "line" (trends over time).
-For aging reports: bucket by 0-30, 31-60, 61-90, 91-120, 120+ days using invoice dates.
-For trends: group by month. For vendor breakdown: group by vendor name (top 10).
-All monetary values: round to 2 decimals, include currency AED unless specified.` :
-`Summarise the data clearly in 3-5 sentences. Highlight key figures.`}`;
+For aging reports: bucket amounts by 0-30, 31-60, 61-90, 91-120, 120+ days overdue.
+For trends: group by month (YYYY-MM). For vendor breakdowns: top 10 vendors.
+Monetary values: 2 decimal places, currency AED unless data says otherwise.`
+    : `You are an ERP data analyst. Summarise the data in 3-5 sentences highlighting key figures.`;
 
-  const vizMsg = [{ role:'user', content: vizPrompt }];
-  const viz = await callClaude(apiKey, '', vizMsg, 2000, true);
+  const vizUserMsg = `User question: "${question}"
+API called: ${planned.description}
+Records returned: ${items.length}
+Data: ${JSON.stringify(items.slice(0, 60), null, 1)}`;
+
+  const vizMsg = [{ role:'user', content: vizUserMsg }];
+  const viz = await callClaude(apiKey, vizSystem, vizMsg, 2500);
   const vizRaw = viz.content?.[0]?.text ?? '';
 
   if (isVisual) {
@@ -226,9 +236,9 @@ async function docsQuery(userDataPath, apiKey, question, history, systemBase) {
 }
 
 // ── Claude helper ─────────────────────────────────────────────────────────────
-async function callClaude(apiKey, system, messages, maxTokens=1024, noSystem=false) {
+async function callClaude(apiKey, system, messages, maxTokens=1024) {
   const body = { model:'claude-sonnet-4-6', max_tokens:maxTokens, messages };
-  if (!noSystem && system) body.system = system;
+  if (system) body.system = system;
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method:'POST',
     headers:{ 'x-api-key':apiKey, 'anthropic-version':'2023-06-01', 'content-type':'application/json' },
