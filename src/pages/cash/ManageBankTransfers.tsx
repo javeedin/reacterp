@@ -104,16 +104,24 @@ const TransferForm: React.FC<{
   initialValues?: Partial<TransferRecord>;
   bankAccounts: BankAccountOption[];
   businessUnits: BUOption[];
+  bankCurrencyMap: Record<string, string>;
   onSave: () => void;
   onCancel: () => void;
-}> = ({ initialValues, bankAccounts, businessUnits, onSave, onCancel }) => {
+}> = ({ initialValues, bankAccounts, businessUnits, bankCurrencyMap, onSave, onCancel }) => {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const [apiModal, setApiModal]       = useState(false);
   const [apiPayload, setApiPayload]   = useState('');
   const [apiPosting, setApiPosting]   = useState(false);
   const [apiResponse, setApiResponse] = useState<{ status: number; body: string } | null>(null);
+  const [apiGetRunning, setApiGetRunning] = useState(false);
+  const [apiGetResponse, setApiGetResponse] = useState<{ status: number; body: string } | null>(null);
+  const [apiTab, setApiTab] = useState<'get' | 'post'>('post');
   const isEdit = !!initialValues?.bankAccountTransferId;
+
+  const [fromCurrency, setFromCurrency] = useState<string>(initialValues?.fromCurrencyCode ?? '');
+  const [toCurrency, setToCurrency] = useState<string>(initialValues?.toCurrencyCode ?? '');
+  const watchedPaymentCcy = Form.useWatch('paymentCurrencyCode', form);
 
   useEffect(() => {
     if (initialValues) {
@@ -129,10 +137,15 @@ const TransferForm: React.FC<{
         paymentMethod: initialValues.paymentMethod,
         paymentProfileName: initialValues.paymentProfileName,
         memo: initialValues.memo,
+        paymentCurrencyCode: initialValues.paymentCurrencyCode ?? '',
       });
+      setFromCurrency(initialValues.fromCurrencyCode ?? '');
+      setToCurrency(initialValues.toCurrencyCode ?? '');
     } else {
       form.resetFields();
       form.setFieldsValue({ transactionDate: dayjs(), isSettledWithIbyFlag: true });
+      setFromCurrency('');
+      setToCurrency('');
     }
   }, [initialValues, form]);
 
@@ -174,9 +187,9 @@ const TransferForm: React.FC<{
       FromAmount:                values.paymentAmount,
       FromBankAccountName:       values.fromBankAccountName,
       ToBankAccountName:         values.toBankAccountName,
-      FromCurrencyCode:          '',
-      ToCurrencyCode:            '',
-      PaymentCurrencyCode:       '',
+      FromCurrencyCode:          fromCurrency,
+      ToCurrencyCode:            toCurrency,
+      PaymentCurrencyCode:       values.paymentCurrencyCode ?? '',
       ConversionRateType:        values.conversionRateType ?? '',
       ConversionRate:            values.conversionRate ?? null,
       Status:                    initialValues?.status ?? 'Pending',
@@ -195,10 +208,27 @@ const TransferForm: React.FC<{
 
   const handleApiOpen = async () => {
     let values: any;
-    try { values = await form.validateFields(); } catch { return; }
+    try { values = await form.getFieldsValue(); } catch { return; }
     setApiPayload(JSON.stringify(buildPayload(values), null, 2));
     setApiResponse(null);
+    setApiGetResponse(null);
+    setApiTab('post');
     setApiModal(true);
+  };
+
+  const handleApiGet = async () => {
+    setApiGetRunning(true);
+    setApiGetResponse(null);
+    try {
+      const url = `${APEX_BASE}/cash/banktransfers?row_limit=10`;
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      const text = await res.text();
+      setApiGetResponse({ status: res.status, body: (() => { try { return JSON.stringify(JSON.parse(text), null, 2); } catch { return text; } })() });
+    } catch (e: any) {
+      setApiGetResponse({ status: 0, body: 'Network error: ' + e.message });
+    } finally {
+      setApiGetRunning(false);
+    }
   };
 
   const handleApiPost = async () => {
@@ -270,15 +300,43 @@ const TransferForm: React.FC<{
           {/* Left column */}
           <Col xs={24} lg={12}>
             <Form.Item label="From Account" name="fromBankAccountName" rules={[{ required: true, message: 'From Account is required' }]} style={fs}>
-              <Select showSearch placeholder="Select bank account" optionFilterProp="label" options={bankAccounts}
-                style={{ width: '100%' }} disabled={isEdit || !buSelected}
-                notFoundContent={<Text type="secondary">No accounts loaded</Text>} />
+              <Space.Compact style={{ width: '100%' }}>
+                <Select showSearch placeholder="Select bank account" optionFilterProp="label" options={bankAccounts}
+                  style={{ flex: 1 }} disabled={isEdit || !buSelected}
+                  notFoundContent={<Text type="secondary">No accounts loaded</Text>}
+                  onChange={(v: string) => {
+                    const ccy = bankCurrencyMap[v] ?? '';
+                    setFromCurrency(ccy);
+                  }}
+                />
+                <div style={{ display: 'flex', alignItems: 'center', padding: '0 10px', background: '#f5f5f5', border: '1px solid #d9d9d9', borderLeft: 0, borderRadius: '0 6px 6px 0', minWidth: 52, justifyContent: 'center' }}>
+                  <Text style={{ fontSize: 12, fontWeight: 600, color: fromCurrency ? REDWOOD.info : REDWOOD.neutral300 }}>{fromCurrency || 'CCY'}</Text>
+                </div>
+              </Space.Compact>
             </Form.Item>
 
             <Form.Item label="To Account" name="toBankAccountName" rules={[{ required: true, message: 'To Account is required' }]} style={fs}>
-              <Select showSearch placeholder="Select bank account" optionFilterProp="label" options={bankAccounts}
-                style={{ width: '100%' }} disabled={isEdit || !buSelected}
-                notFoundContent={<Text type="secondary">No accounts loaded</Text>} />
+              <Space.Compact style={{ width: '100%' }}>
+                <Select showSearch placeholder="Select bank account" optionFilterProp="label" options={bankAccounts}
+                  style={{ flex: 1 }} disabled={isEdit || !buSelected}
+                  notFoundContent={<Text type="secondary">No accounts loaded</Text>}
+                  onChange={(v: string) => {
+                    const ccy = bankCurrencyMap[v] ?? '';
+                    setToCurrency(ccy);
+                  }}
+                />
+                <div style={{ display: 'flex', alignItems: 'center', padding: '0 10px', background: '#f5f5f5', border: '1px solid #d9d9d9', borderLeft: 0, borderRadius: '0 6px 6px 0', minWidth: 52, justifyContent: 'center' }}>
+                  <Text style={{ fontSize: 12, fontWeight: 600, color: toCurrency ? REDWOOD.info : REDWOOD.neutral300 }}>{toCurrency || 'CCY'}</Text>
+                </div>
+              </Space.Compact>
+            </Form.Item>
+
+            <Form.Item label="Payment Currency" name="paymentCurrencyCode" style={fs}>
+              <Select placeholder="Select currency" allowClear disabled={isEdit || !buSelected}>
+                {['AED', 'USD', 'EUR', 'GBP', 'SAR', 'QAR', 'BHD', 'KWD', 'OMR', 'JOD', 'EGP', 'INR', 'PKR'].map(c => (
+                  <Option key={c} value={c}>{c}</Option>
+                ))}
+              </Select>
             </Form.Item>
 
             <Form.Item label="Transfer Date" name="transactionDate" rules={[{ required: true, message: 'Transfer Date is required' }]} style={fs}>
@@ -298,9 +356,22 @@ const TransferForm: React.FC<{
               </Select>
             </Form.Item>
 
-            <Form.Item label="Conversion Rate" name="conversionRate" style={fs}>
+            <Form.Item
+              label="Conversion Rate"
+              name="conversionRate"
+              style={fs}
+              rules={[{
+                required: !!watchedPaymentCcy && watchedPaymentCcy !== 'AED',
+                message: 'Conversion Rate is required for non-AED payment currency',
+              }]}
+            >
               <InputNumber style={{ width: '100%' }} min={0} precision={6} disabled={isEdit || !buSelected} />
             </Form.Item>
+            {watchedPaymentCcy && watchedPaymentCcy !== 'AED' && (
+              <div style={{ fontSize: 11, color: REDWOOD.warning, marginTop: -10, marginBottom: 8 }}>
+                Required: payment currency is {watchedPaymentCcy} (functional: AED)
+              </div>
+            )}
           </Col>
 
           {/* Right column */}
@@ -341,12 +412,9 @@ const TransferForm: React.FC<{
 
         <Divider />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          {!isEdit && (
-            <Button icon={<ApiOutlined />} onClick={handleApiOpen} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>
-              API
-            </Button>
-          )}
-          {isEdit && <span />}
+          <Button icon={<ApiOutlined />} onClick={handleApiOpen} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>
+            API
+          </Button>
           <Space>
             <Button onClick={onCancel}>{isEdit ? 'Close' : 'Cancel'}</Button>
             {!isEdit && (
@@ -361,60 +429,145 @@ const TransferForm: React.FC<{
 
       {/* ── API Inspector Modal ── */}
       <Modal
-        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>API Inspector — POST /cash/banktransfers</span></Space>}
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>API Inspector — Bank Transfers</span></Space>}
         open={apiModal}
         onCancel={() => setApiModal(false)}
-        width={780}
+        width={820}
         footer={null}
         styles={{ body: { padding: '16px 24px' } }}
       >
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          Endpoint: <Text code copyable style={{ fontSize: 12 }}>{APEX_BASE}/cash/banktransfers</Text>
-        </Text>
+        <Tabs
+          activeKey={apiTab}
+          onChange={k => setApiTab(k as 'get' | 'post')}
+          items={[
+            {
+              key: 'get',
+              label: 'GET /cash/banktransfers',
+              children: (
+                <div>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    Endpoint: <Text code copyable style={{ fontSize: 12 }}>{APEX_BASE}/cash/banktransfers</Text>
+                  </Text>
 
-        <div style={{ marginTop: 12, marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Text strong>Request Body (JSON)</Text>
-        </div>
-        <pre style={{
-          background: '#1e1e2e', color: '#cdd6f4', padding: 16, borderRadius: 6,
-          fontSize: 12, overflowX: 'auto', maxHeight: 320, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-          margin: 0,
-        }}>
-          {apiPayload}
-        </pre>
+                  <div style={{ marginTop: 12, marginBottom: 8 }}>
+                    <Text strong style={{ fontSize: 13 }}>Available Query Parameters</Text>
+                  </div>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 16 }}>
+                    <thead>
+                      <tr style={{ background: REDWOOD.neutral100 }}>
+                        <th style={{ padding: '6px 10px', textAlign: 'left', border: `1px solid ${REDWOOD.neutral200}`, fontWeight: 600 }}>Parameter</th>
+                        <th style={{ padding: '6px 10px', textAlign: 'left', border: `1px solid ${REDWOOD.neutral200}`, fontWeight: 600 }}>Description</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[
+                        ['date_from', 'Filter transfers from this date (YYYY-MM-DD)'],
+                        ['date_to', 'Filter transfers up to this date (YYYY-MM-DD)'],
+                        ['from_account', 'Filter by source bank account name'],
+                        ['to_account', 'Filter by destination bank account name'],
+                        ['status', 'Filter by transfer status (e.g. Completed, Cancelled)'],
+                        ['row_limit', 'Maximum number of rows to return (default 200)'],
+                      ].map(([param, desc]) => (
+                        <tr key={param}>
+                          <td style={{ padding: '6px 10px', border: `1px solid ${REDWOOD.neutral200}`, fontFamily: 'monospace', color: REDWOOD.info }}>{param}</td>
+                          <td style={{ padding: '6px 10px', border: `1px solid ${REDWOOD.neutral200}`, color: REDWOOD.neutral600 }}>{desc}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
 
-        <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
-          <Button
-            type="primary"
-            icon={<ApiOutlined />}
-            loading={apiPosting}
-            onClick={handleApiPost}
-            style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
-          >
-            POST Request
-          </Button>
-        </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+                    <Button
+                      type="primary"
+                      icon={<ApiOutlined />}
+                      loading={apiGetRunning}
+                      onClick={handleApiGet}
+                      style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+                    >
+                      Run GET (limit 10)
+                    </Button>
+                  </div>
 
-        {apiResponse && (
-          <>
-            <Divider style={{ margin: '16px 0 12px' }} />
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-              <Text strong>Response</Text>
-              <Tag color={apiResponse.status >= 200 && apiResponse.status < 300 ? 'success' : 'error'}>
-                HTTP {apiResponse.status || 'Error'}
-              </Tag>
-            </div>
-            <pre style={{
-              background: apiResponse.status >= 200 && apiResponse.status < 300 ? '#f6ffed' : '#fff2f0',
-              border: `1px solid ${apiResponse.status >= 200 && apiResponse.status < 300 ? '#b7eb8f' : '#ffccc7'}`,
-              color: REDWOOD.neutral900, padding: 16, borderRadius: 6,
-              fontSize: 12, overflowX: 'auto', maxHeight: 240, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-              margin: 0,
-            }}>
-              {apiResponse.body}
-            </pre>
-          </>
-        )}
+                  {apiGetResponse && (
+                    <>
+                      <Divider style={{ margin: '12px 0' }} />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                        <Text strong>Response</Text>
+                        <Tag color={apiGetResponse.status >= 200 && apiGetResponse.status < 300 ? 'success' : 'error'}>
+                          HTTP {apiGetResponse.status || 'Error'}
+                        </Tag>
+                      </div>
+                      <pre style={{
+                        background: apiGetResponse.status >= 200 && apiGetResponse.status < 300 ? '#f6ffed' : '#fff2f0',
+                        border: `1px solid ${apiGetResponse.status >= 200 && apiGetResponse.status < 300 ? '#b7eb8f' : '#ffccc7'}`,
+                        color: REDWOOD.neutral900, padding: 16, borderRadius: 6,
+                        fontSize: 12, overflowX: 'auto', maxHeight: 280, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                        margin: 0,
+                      }}>
+                        {apiGetResponse.body}
+                      </pre>
+                    </>
+                  )}
+                </div>
+              ),
+            },
+            {
+              key: 'post',
+              label: 'POST /cash/banktransfers',
+              children: (
+                <div>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    Endpoint: <Text code copyable style={{ fontSize: 12 }}>{APEX_BASE}/cash/banktransfers</Text>
+                  </Text>
+
+                  <div style={{ marginTop: 12, marginBottom: 8 }}>
+                    <Text strong>Request Body (JSON)</Text>
+                  </div>
+                  <pre style={{
+                    background: '#1e1e2e', color: '#cdd6f4', padding: 16, borderRadius: 6,
+                    fontSize: 12, overflowX: 'auto', maxHeight: 320, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                    margin: 0,
+                  }}>
+                    {apiPayload}
+                  </pre>
+
+                  <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
+                    <Button
+                      type="primary"
+                      icon={<ApiOutlined />}
+                      loading={apiPosting}
+                      onClick={handleApiPost}
+                      style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+                    >
+                      POST Request
+                    </Button>
+                  </div>
+
+                  {apiResponse && (
+                    <>
+                      <Divider style={{ margin: '16px 0 12px' }} />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                        <Text strong>Response</Text>
+                        <Tag color={apiResponse.status >= 200 && apiResponse.status < 300 ? 'success' : 'error'}>
+                          HTTP {apiResponse.status || 'Error'}
+                        </Tag>
+                      </div>
+                      <pre style={{
+                        background: apiResponse.status >= 200 && apiResponse.status < 300 ? '#f6ffed' : '#fff2f0',
+                        border: `1px solid ${apiResponse.status >= 200 && apiResponse.status < 300 ? '#b7eb8f' : '#ffccc7'}`,
+                        color: REDWOOD.neutral900, padding: 16, borderRadius: 6,
+                        fontSize: 12, overflowX: 'auto', maxHeight: 240, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                        margin: 0,
+                      }}>
+                        {apiResponse.body}
+                      </pre>
+                    </>
+                  )}
+                </div>
+              ),
+            },
+          ]}
+        />
       </Modal>
     </div>
   );
@@ -432,6 +585,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
   const [hasSearched, setHasSearched]     = useState(false);
   const [bankAccounts, setBankAccounts]   = useState<BankAccountOption[]>([]);
   const [businessUnits, setBusinessUnits] = useState<BUOption[]>([]);
+  const [bankCurrencyMap, setBankCurrencyMap] = useState<Record<string, string>>({});
   const [activeTab, setActiveTab]         = useState('search');
   const [editTabs, setEditTabs]           = useState<TabItem[]>([]);
   const [showApiModal, setShowApiModal]   = useState(false);
@@ -453,6 +607,14 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
         const acctSet = new Set<string>();
         items.forEach(i => { if (i.fromBankAccountName) acctSet.add(i.fromBankAccountName); if (i.toBankAccountName) acctSet.add(i.toBankAccountName); });
         setBankAccounts([...acctSet].sort().map(n => ({ label: n, value: n })));
+
+        // Currency map: account name → currency code
+        const currMap: Record<string, string> = {};
+        items.forEach(i => {
+          if (i.fromBankAccountName && i.fromCurrencyCode) currMap[i.fromBankAccountName] = i.fromCurrencyCode;
+          if (i.toBankAccountName && i.toCurrencyCode) currMap[i.toBankAccountName] = i.toCurrencyCode;
+        });
+        setBankCurrencyMap(currMap);
 
         // Unique BUs
         const buSet = new Set<string>();
@@ -850,6 +1012,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
         <TransferForm
           bankAccounts={bankAccounts}
           businessUnits={businessUnits}
+          bankCurrencyMap={bankCurrencyMap}
           onSave={handleSaved}
           onCancel={() => closeTab('create')}
         />
@@ -869,6 +1032,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
           initialValues={t.record}
           bankAccounts={bankAccounts}
           businessUnits={businessUnits}
+          bankCurrencyMap={bankCurrencyMap}
           onSave={handleSaved}
           onCancel={() => closeTab(t.key)}
         />
