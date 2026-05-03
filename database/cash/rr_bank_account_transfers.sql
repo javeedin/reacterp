@@ -55,6 +55,9 @@ COMMENT ON TABLE RR_BANK_ACCOUNT_TRANSFERS IS 'Bank account transfers synced fro
 COMMENT ON COLUMN RR_BANK_ACCOUNT_TRANSFERS.BANK_ACCOUNT_TRANSFER_ID IS 'Unique transfer identifier from Fusion';
 COMMENT ON COLUMN RR_BANK_ACCOUNT_TRANSFERS.SYNC_DATE IS 'Timestamp when record was last synced';
 
+-- Sequence for manually-created transfers (starts beyond last known Fusion number × 10)
+CREATE SEQUENCE RR_BAT_MANUAL_SEQ START WITH 2420250 INCREMENT BY 1 NOCACHE;
+
 
 -- ============================================================
 -- Procedure: RR_SYNC_BANK_ACCOUNT_TRANSFERS
@@ -62,13 +65,16 @@ COMMENT ON COLUMN RR_BANK_ACCOUNT_TRANSFERS.SYNC_DATE IS 'Timestamp when record 
 -- ============================================================
 
 CREATE OR REPLACE PROCEDURE RR_SYNC_BANK_ACCOUNT_TRANSFERS (
-    p_json  IN  CLOB,
-    p_count OUT NUMBER,
-    p_error OUT VARCHAR2
+    p_json       IN  CLOB,
+    p_count      OUT NUMBER,
+    p_error      OUT VARCHAR2,
+    p_last_id    OUT NUMBER
 ) AS
+    l_transfer_id NUMBER;
 BEGIN
-    p_count := 0;
-    p_error := NULL;
+    p_count   := 0;
+    p_error   := NULL;
+    p_last_id := NULL;
 
     FOR rec IN (
         SELECT *
@@ -105,11 +111,18 @@ BEGIN
             )
         )
     ) LOOP
+        -- Assign sequence ID for manually-created transfers (no Fusion ID)
+        IF rec.bank_account_transfer_id IS NULL THEN
+            SELECT RR_BAT_MANUAL_SEQ.NEXTVAL INTO l_transfer_id FROM DUAL;
+        ELSE
+            l_transfer_id := rec.bank_account_transfer_id;
+        END IF;
+
         MERGE INTO RR_BANK_ACCOUNT_TRANSFERS tgt
         USING (
             SELECT
-                rec.bank_account_transfer_id     AS bank_account_transfer_id,
-                rec.bank_account_transfer_number AS bank_account_transfer_number,
+                l_transfer_id                    AS bank_account_transfer_id,
+                NVL(rec.bank_account_transfer_number, l_transfer_id) AS bank_account_transfer_number,
                 TO_DATE(rec.transaction_date, 'YYYY-MM-DD') AS transaction_date,
                 rec.memo                         AS memo,
                 rec.payment_request_id           AS payment_request_id,
@@ -196,7 +209,8 @@ BEGIN
                 src.last_update_login, SYSTIMESTAMP
             );
 
-        p_count := p_count + 1;
+        p_count   := p_count + 1;
+        p_last_id := l_transfer_id;
     END LOOP;
 
     COMMIT;
@@ -234,16 +248,18 @@ BEGIN
         p_comments       => 'Sync bank account transfers from Oracle Fusion',
         p_source         => q'[
 DECLARE
-    l_json   CLOB;
-    l_count  NUMBER;
-    l_error  VARCHAR2(4000);
+    l_json      CLOB;
+    l_count     NUMBER;
+    l_error     VARCHAR2(4000);
+    l_last_id   NUMBER;
 BEGIN
     l_json := :body_text;
 
     RR_SYNC_BANK_ACCOUNT_TRANSFERS(
-        p_json  => l_json,
-        p_count => l_count,
-        p_error => l_error
+        p_json    => l_json,
+        p_count   => l_count,
+        p_error   => l_error,
+        p_last_id => l_last_id
     );
 
     IF l_error IS NOT NULL THEN
@@ -251,7 +267,8 @@ BEGIN
         HTP.P('{"status":"error","message":"' || REPLACE(l_error, '"', '\"') || '"}');
     ELSE
         :status_code := 200;
-        HTP.P('{"status":"success","count":' || l_count || '}');
+        HTP.P('{"status":"success","count":' || l_count ||
+              ',"bankAccountTransferId":' || NVL(TO_CHAR(l_last_id), 'null') || '}');
     END IF;
 END;
 ]'
