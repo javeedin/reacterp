@@ -16,7 +16,7 @@ import {
   ResponsiveContainer, Cell,
 } from 'recharts';
 import { Link } from 'react-router-dom';
-import jsPDF from 'jspdf';
+import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
@@ -124,60 +124,75 @@ const TableBlock:React.FC<{sec:TableSection; onExcelExport:()=>void}> = ({sec, o
 
 // ── PDF export ─────────────────────────────────────────────────────────────────
 function exportReportPdf(report: ReportData) {
-  const doc = new jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
-  const pageW = doc.internal.pageSize.getWidth();
-  let y = 15;
+  try {
+    const doc = new jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
+    const pageW = doc.internal.pageSize.getWidth();
+    let y = 15;
 
-  // Header
-  doc.setFillColor(114,46,209);
-  doc.rect(0,0,pageW,22,'F');
-  doc.setTextColor(255,255,255);
-  doc.setFontSize(14); doc.setFont('helvetica','bold');
-  doc.text(report.title, 14, 14);
-  doc.setFontSize(9); doc.setFont('helvetica','normal');
-  doc.text(`Generated: ${dayjs().format('D MMM YYYY HH:mm')}`, pageW-14, 14, {align:'right'});
-  y = 30;
+    // Header bar
+    doc.setFillColor(114, 46, 209);
+    doc.rect(0, 0, pageW, 22, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(14); doc.setFont('helvetica', 'bold');
+    doc.text(report.title, 14, 14);
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+    doc.text(`Generated: ${dayjs().format('D MMM YYYY HH:mm')}`, pageW - 14, 14, { align: 'right' });
+    y = 30;
 
-  // Summary
-  doc.setTextColor(30,30,30);
-  doc.setFontSize(10); doc.setFont('helvetica','normal');
-  const sumLines = doc.splitTextToSize(report.summary, pageW-28);
-  doc.text(sumLines, 14, y); y += sumLines.length*5+6;
+    // Summary
+    doc.setTextColor(30, 30, 30);
+    doc.setFontSize(10); doc.setFont('helvetica', 'normal');
+    const sumLines = doc.splitTextToSize(report.summary, pageW - 28);
+    doc.text(sumLines, 14, y);
+    y += sumLines.length * 5 + 8;
 
-  // Stats
-  if (report.stats?.length) {
-    const cols = Math.min(report.stats.length, 4);
-    const w = (pageW-28)/cols;
-    report.stats.forEach((s,i)=>{
-      const x = 14+(i%cols)*w;
-      if(i%cols===0 && i>0) y+=18;
-      doc.setFillColor(248,240,255); doc.roundedRect(x,y,w-3,14,2,2,'F');
-      doc.setFontSize(8); doc.setTextColor(100,100,100); doc.text(s.label,x+4,y+5);
-      doc.setFontSize(11); doc.setFont('helvetica','bold');
-      const col = s.color==='green'?[29,123,77]:s.color==='red'?[199,70,52]:s.color==='orange'?[212,168,0]:[5,114,206];
-      doc.setTextColor(col[0],col[1],col[2]);
-      doc.text(s.value,x+4,y+11);
-      doc.setFont('helvetica','normal'); doc.setTextColor(30,30,30);
-    });
-    y += 22;
-  }
-
-  // Sections
-  for (const sec of report.sections) {
-    if (sec.type==='table') {
-      doc.setFontSize(11); doc.setFont('helvetica','bold'); doc.setTextColor(30,30,30);
-      doc.text(sec.title, 14, y); y+=5;
-      (autoTable as any)(doc, {
-        startY: y, head:[sec.columns], body:sec.rows,
-        theme:'grid', headStyles:{fillColor:[114,46,209],textColor:255,fontSize:9},
-        bodyStyles:{fontSize:8}, alternateRowStyles:{fillColor:[249,240,255]},
-        margin:{left:14,right:14},
+    // KPI stat boxes
+    if (report.stats?.length) {
+      const cols = Math.min(report.stats.length, 4);
+      const w = (pageW - 28) / cols;
+      report.stats.forEach((s, i) => {
+        const x = 14 + (i % cols) * w;
+        if (i % cols === 0 && i > 0) y += 18;
+        doc.setFillColor(248, 240, 255);
+        doc.roundedRect(x, y, w - 3, 15, 2, 2, 'F');
+        doc.setFontSize(8); doc.setTextColor(100, 100, 100);
+        doc.text(s.label, x + 4, y + 5);
+        doc.setFontSize(11); doc.setFont('helvetica', 'bold');
+        const col = s.color === 'green' ? [29,123,77] : s.color === 'red' ? [199,70,52] : s.color === 'orange' ? [212,168,0] : [5,114,206];
+        doc.setTextColor(col[0] as number, col[1] as number, col[2] as number);
+        doc.text(String(s.value), x + 4, y + 12);
+        doc.setFont('helvetica', 'normal'); doc.setTextColor(30, 30, 30);
       });
-      y = (doc as any).lastAutoTable.finalY+8;
+      y += 24;
     }
-  }
 
-  doc.save(`${report.title.replace(/\s+/g,'_')}_${dayjs().format('YYYYMMDD')}.pdf`);
+    // Table sections
+    for (const sec of report.sections) {
+      if (sec.type === 'table' && sec.columns?.length && sec.rows?.length) {
+        if (y > 250) { doc.addPage(); y = 15; }
+        doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(30, 30, 30);
+        doc.text(sec.title, 14, y); y += 5;
+        autoTable(doc, {
+          startY: y,
+          head: [sec.columns],
+          body: sec.rows.map(row => row.map(cell => String(cell ?? ''))),
+          theme: 'grid',
+          headStyles: { fillColor: [114, 46, 209], textColor: 255, fontSize: 9, fontStyle: 'bold' },
+          bodyStyles: { fontSize: 8 },
+          alternateRowStyles: { fillColor: [249, 240, 255] },
+          margin: { left: 14, right: 14 },
+        });
+        y = (doc as any).lastAutoTable?.finalY + 10 || y + 20;
+      }
+    }
+
+    // Save via blob so it works in both Electron and browser
+    const blob = doc.output('blob');
+    saveAs(blob, `${report.title.replace(/[^a-z0-9]/gi, '_')}_${dayjs().format('YYYYMMDD')}.pdf`);
+  } catch (err) {
+    console.error('PDF export error:', err);
+    message.error('PDF export failed: ' + (err as any)?.message);
+  }
 }
 
 function exportTableExcel(sec: TableSection) {
