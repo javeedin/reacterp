@@ -58,14 +58,14 @@ BEGIN
         p_source_type    => ORDS.source_type_plsql,
         p_mimes_allowed  => '',
         p_comments       => 'Return active Claude API key for Electron AI agents',
-        p_source         => '
+        p_source         => q'[
 DECLARE
     l_key VARCHAR2(300);
 BEGIN
     BEGIN
         SELECT API_KEY INTO l_key
         FROM   RR_CLAUDE_KEY
-        WHERE  IS_ACTIVE = ''Y''
+        WHERE  IS_ACTIVE = 'Y'
         ORDER BY ID DESC
         FETCH FIRST 1 ROWS ONLY;
     EXCEPTION WHEN NO_DATA_FOUND THEN
@@ -74,13 +74,16 @@ BEGIN
 
     IF l_key IS NULL THEN
         :status_code := 404;
-        HTP.PRN(''{"status":"error","message":"No active Claude API key found in RR_CLAUDE_KEY"}'');
+        HTP.PRN('{"status":"error","message":"No active Claude API key found in RR_CLAUDE_KEY"}');
     ELSE
         :status_code := 200;
-        HTP.PRN(''{"status":"success","apiKey":"'' || l_key || ''"}'');
+        APEX_JSON.OPEN_OBJECT;
+        APEX_JSON.WRITE('status', 'success');
+        APEX_JSON.WRITE('apiKey', l_key);
+        APEX_JSON.CLOSE_OBJECT;
     END IF;
 END;
-'
+]'
     );
 
     COMMIT;
