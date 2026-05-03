@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import {
-  Button, Drawer, Table, Tag, Space, Alert, Tooltip, Typography, Divider, Badge,
+  Button, Drawer, Table, Tag, Space, Alert, Tooltip, Typography, Divider, Badge, Modal, Spin,
 } from 'antd';
 import {
   RobotOutlined, CheckOutlined, CloseOutlined, ThunderboltOutlined, SyncOutlined,
-  CheckCircleOutlined,
+  CheckCircleOutlined, ApiOutlined, CheckCircleFilled, CloseCircleFilled,
 } from '@ant-design/icons';
 
 const { Text } = Typography;
@@ -70,6 +70,12 @@ const confidenceColor = (c: number) =>
 const fmtAmt = (v: number) =>
   new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
 
+const APEX_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp';
+
+const maskKey = (k: string) => !k || k.length < 16 ? k : k.substring(0, 14) + '••••••••••••' + k.substring(k.length - 4);
+
+interface ApiTestResult { step: string; status: 'ok' | 'error' | 'warn'; detail: string; }
+
 // ── Component ────────────────────────────────────────────────────────────────
 const ReconAgent: React.FC<ReconAgentProps> = ({
   stmtLines,
@@ -91,8 +97,77 @@ const ReconAgent: React.FC<ReconAgentProps> = ({
   const [accepted, setAccepted] = useState<Set<number>>(new Set());
   const [rejected, setRejected] = useState<Set<number>>(new Set());
 
+  // API test modal
+  const [apiOpen,      setApiOpen]      = useState(false);
+  const [apiTesting,   setApiTesting]   = useState(false);
+  const [apiResults,   setApiResults]   = useState<ApiTestResult[]>([]);
+
   const unreconciledStmt = stmtLines.filter(l => l.reconStatus !== 'RECONCILED');
   const unreconciledSys  = sysTxns.filter(t => !t.reconciledFlag || t.reconciledFlag === 'N');
+
+  const handleApiTest = async () => {
+    setApiResults([]);
+    setApiTesting(true);
+    setApiOpen(true);
+    const results: ApiTestResult[] = [];
+
+    // Step 1 — APEX endpoint reachable?
+    try {
+      const res  = await fetch(`${APEX_BASE}/settings/claudekey`);
+      const text = await res.text();
+      if (text.trimStart().startsWith('<')) {
+        results.push({
+          step: 'APEX: GET /settings/claudekey',
+          status: 'error',
+          detail: `HTTP ${res.status} — endpoint not deployed. Run database/cash/rr_claude_key.sql in Oracle APEX SQL Workshop.`,
+        });
+        setApiResults([...results]);
+        setApiTesting(false);
+        return;
+      }
+      let data: any;
+      try { data = JSON.parse(text); } catch {
+        results.push({ step: 'APEX: GET /settings/claudekey', status: 'error', detail: 'Invalid JSON: ' + text.substring(0, 100) });
+        setApiResults([...results]);
+        setApiTesting(false);
+        return;
+      }
+      if (data.status === 'success' && data.apiKey) {
+        results.push({ step: 'APEX: GET /settings/claudekey', status: 'ok', detail: 'Key retrieved — ' + maskKey(data.apiKey) });
+      } else {
+        results.push({ step: 'APEX: GET /settings/claudekey', status: 'error', detail: data.message || 'No active key in RR_CLAUDE_KEY. Go to Admin → Claude AI Key Settings → Add Key.' });
+        setApiResults([...results]);
+        setApiTesting(false);
+        return;
+      }
+    } catch (e: any) {
+      results.push({ step: 'APEX: GET /settings/claudekey', status: 'error', detail: 'Network error: ' + e.message });
+      setApiResults([...results]);
+      setApiTesting(false);
+      return;
+    }
+    setApiResults([...results]);
+
+    // Step 2 — Claude API ping via Electron
+    const elApi = (window as any).electronAPI;
+    if (elApi?.claudeTestKey) {
+      try {
+        const result = await elApi.claudeTestKey();
+        if (result.success) {
+          results.push({ step: 'Claude API: ping test', status: 'ok', detail: `Claude replied: "${result.reply}"` });
+        } else {
+          results.push({ step: 'Claude API: ping test', status: 'error', detail: result.error || 'Claude API returned an error.' });
+        }
+      } catch (e: any) {
+        results.push({ step: 'Claude API: ping test', status: 'error', detail: e.message });
+      }
+    } else {
+      results.push({ step: 'Claude API: ping test', status: 'warn', detail: 'Requires Electron desktop app. APEX key is ready — AI analysis will work when running as desktop app.' });
+    }
+
+    setApiResults([...results]);
+    setApiTesting(false);
+  };
 
   const handleOpen = () => {
     setOpen(true);
@@ -282,11 +357,23 @@ const ReconAgent: React.FC<ReconAgentProps> = ({
 
       <Drawer
         title={
-          <Space>
-            <RobotOutlined style={{ color: '#722ed1', fontSize: 16 }} />
-            <span>AI Reconciliation Agent</span>
-            {running && <SyncOutlined spin style={{ color: '#722ed1' }} />}
-          </Space>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: 32 }}>
+            <Space>
+              <RobotOutlined style={{ color: '#722ed1', fontSize: 16 }} />
+              <span>AI Reconciliation Agent</span>
+              {running && <SyncOutlined spin style={{ color: '#722ed1' }} />}
+            </Space>
+            <Tooltip title="Test API connection">
+              <Button
+                size="small"
+                icon={<ApiOutlined />}
+                onClick={handleApiTest}
+                style={{ color: '#722ed1', borderColor: '#722ed1' }}
+              >
+                Test API
+              </Button>
+            </Tooltip>
+          </div>
         }
         open={open}
         onClose={() => { if (!running && !applying) setOpen(false); }}
@@ -415,6 +502,62 @@ const ReconAgent: React.FC<ReconAgentProps> = ({
           Claude AI key is loaded from your Oracle APEX RR_CLAUDE_KEY table.
         </Text>
       </Drawer>
+
+      {/* ── API Test Modal ── */}
+      <Modal
+        title={<Space><ApiOutlined style={{ color: '#722ed1' }} /><span>AI Agent — API Connection Test</span></Space>}
+        open={apiOpen}
+        onCancel={() => setApiOpen(false)}
+        footer={<Button onClick={() => setApiOpen(false)}>Close</Button>}
+        width={520}
+      >
+        <div style={{ padding: '8px 0' }}>
+          {apiTesting && apiResults.length === 0 && (
+            <div style={{ textAlign: 'center', padding: 32 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 12, color: '#666' }}>Testing connection…</div>
+            </div>
+          )}
+
+          {apiResults.map((r, i) => (
+            <div key={i} style={{
+              display: 'flex', alignItems: 'flex-start', gap: 12, padding: '12px 0',
+              borderBottom: i < apiResults.length - 1 ? '1px solid #f0f0f0' : 'none',
+            }}>
+              <div style={{ marginTop: 2, flexShrink: 0 }}>
+                {r.status === 'ok'    && <CheckCircleFilled style={{ fontSize: 18, color: '#1D7B4D' }} />}
+                {r.status === 'error' && <CloseCircleFilled  style={{ fontSize: 18, color: '#C74634' }} />}
+                {r.status === 'warn'  && <CheckCircleFilled style={{ fontSize: 18, color: '#D4A800' }} />}
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>{r.step}</div>
+                <div style={{ fontSize: 12, color: r.status === 'error' ? '#C74634' : '#666', marginTop: 3 }}>
+                  {r.detail}
+                </div>
+                {r.status === 'error' && r.step.includes('APEX') && (
+                  <div style={{ marginTop: 6, fontSize: 11, padding: '6px 10px', background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 4 }}>
+                    Fix: go to <strong>Administration → Claude AI Key Settings</strong> and add your key,
+                    or run <code>database/cash/rr_claude_key.sql</code> in Oracle APEX SQL Workshop first.
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {!apiTesting && apiResults.length > 0 && (
+            <div style={{ marginTop: 16, padding: '10px 14px', borderRadius: 6,
+              background: apiResults.every(r => r.status !== 'error') ? '#f6ffed' : '#fff2f0',
+              border: `1px solid ${apiResults.every(r => r.status !== 'error') ? '#b7eb8f' : '#ffccc7'}`,
+            }}>
+              <Text style={{ fontSize: 12, color: apiResults.every(r => r.status !== 'error') ? '#1D7B4D' : '#C74634' }}>
+                {apiResults.every(r => r.status !== 'error')
+                  ? '✓ All checks passed — AI analysis is ready to use.'
+                  : '✗ Setup incomplete. Fix the errors above, then try again.'}
+              </Text>
+            </div>
+          )}
+        </div>
+      </Modal>
     </>
   );
 };
