@@ -6,7 +6,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, TeamOutlined, PlusOutlined, EditOutlined, DeleteOutlined,
-  SearchOutlined, ReloadOutlined, BankOutlined, UserOutlined,
+  SearchOutlined, ReloadOutlined, BankOutlined, UserOutlined, ApiOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 
@@ -72,6 +72,9 @@ const ManagePayees: React.FC = () => {
   // Bank accounts (shown inside payee modal, Accounts tab)
   const [bankAccounts, setBankAccounts]   = useState<PayeeBankAccount[]>([]);
   const [loadingBanks, setLoadingBanks]   = useState(false);
+
+  // API info modal
+  const [apiModal, setApiModal]           = useState(false);
 
   // Bank account modal
   const [bankModal, setBankModal]         = useState(false);
@@ -429,14 +432,22 @@ const ManagePayees: React.FC = () => {
                 <Text type="secondary" style={{ fontSize: 12 }}>Create and manage ad-hoc payees and their bank accounts</Text>
               </div>
             </div>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={openCreatePayee}
-              style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
-            >
-              Create New Payee
-            </Button>
+            <Space>
+              <Button
+                icon={<ApiOutlined />}
+                onClick={() => setApiModal(true)}
+              >
+                API
+              </Button>
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={openCreatePayee}
+                style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+              >
+                Create New Payee
+              </Button>
+            </Space>
           </div>
 
           {/* Search + table */}
@@ -583,6 +594,54 @@ const ManagePayees: React.FC = () => {
             },
           ]}
         />
+      </Modal>
+
+      {/* ── API Info Modal ──────────────────────────────────── */}
+      <Modal
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>Payees API Endpoints</span></Space>}
+        open={apiModal}
+        onCancel={() => setApiModal(false)}
+        footer={<Button onClick={() => setApiModal(false)}>Close</Button>}
+        width={720}
+        destroyOnClose
+      >
+        {(() => {
+          const base = APEX_BASE;
+          const endpoints = [
+            { method: 'GET',    color: 'blue',   url: `${base}/cash/payees`,                                            note: 'List all payees' },
+            { method: 'POST',   color: 'green',  url: `${base}/cash/payees`,                                            note: 'Create a new payee' },
+            { method: 'PUT',    color: 'orange', url: `${base}/cash/payees/:payee_id`,                                  note: 'Update a payee' },
+            { method: 'DELETE', color: 'red',    url: `${base}/cash/payees/:payee_id`,                                  note: 'Delete payee (cascades to bank accounts)' },
+            { method: 'GET',    color: 'blue',   url: `${base}/cash/payees/:payee_id/bankaccounts`,                     note: 'List bank accounts for a payee' },
+            { method: 'POST',   color: 'green',  url: `${base}/cash/payees/:payee_id/bankaccounts`,                     note: 'Add a bank account to a payee' },
+            { method: 'PUT',    color: 'orange', url: `${base}/cash/payees/:payee_id/bankaccounts/:account_id`,         note: 'Update a bank account' },
+            { method: 'DELETE', color: 'red',    url: `${base}/cash/payees/:payee_id/bankaccounts/:account_id`,         note: 'Remove a bank account' },
+          ];
+          return (
+            <div style={{ fontSize: 13 }}>
+              {endpoints.map((ep, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 10 }}>
+                  <Tag color={ep.color} style={{ minWidth: 60, textAlign: 'center', fontWeight: 600, marginTop: 1 }}>{ep.method}</Tag>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <Text code copyable style={{ fontSize: 11, wordBreak: 'break-all' }}>{ep.url}</Text>
+                    <Text type="secondary" style={{ display: 'block', fontSize: 11, marginTop: 2 }}>{ep.note}</Text>
+                  </div>
+                </div>
+              ))}
+
+              <Divider style={{ margin: '16px 0 12px' }} />
+              <Text strong style={{ fontSize: 12 }}>POST / PUT body — Payee</Text>
+              <pre style={{ background: REDWOOD.neutral100, borderRadius: 6, padding: '10px 14px', fontSize: 11, marginTop: 6, marginBottom: 16, overflowX: 'auto' }}>
+                {JSON.stringify({ payeeName: 'string', taxRegistrationNumber: 'string | null', description: 'string | null', active: '"Y" | "N"' }, null, 2)}
+              </pre>
+
+              <Text strong style={{ fontSize: 12 }}>POST / PUT body — Bank Account</Text>
+              <pre style={{ background: REDWOOD.neutral100, borderRadius: 6, padding: '10px 14px', fontSize: 11, marginTop: 6, overflowX: 'auto' }}>
+                {JSON.stringify({ country: 'string | null', accountNumber: 'string | null', currencyCode: 'string | null', iban: 'string | null', accountHolderName: 'string | null', bankName: 'string | null', bankBranch: 'string | null', bicCode: 'string | null', active: '"Y" | "N"' }, null, 2)}
+              </pre>
+            </div>
+          );
+        })()}
       </Modal>
 
       {/* ── Bank Account Modal ───────────────────────────────── */}
