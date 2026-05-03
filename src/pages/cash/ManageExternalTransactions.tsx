@@ -619,12 +619,18 @@ const ExternalTxnForm: React.FC<{
                   onChange={(v) => {
                     const dir = v as 'DR' | 'CR';
                     setTxnDirection(dir);
-                    // Auto-sign the amount field
+                    // Re-sign single-mode amount
                     const cur = form.getFieldValue('amount');
                     if (cur != null && cur !== '' && cur !== 0) {
                       const abs = Math.abs(Number(cur));
                       form.setFieldsValue({ amount: dir === 'DR' ? abs : -abs });
                     }
+                    // Re-sign all multi-line amounts
+                    setExtTxnLines(prev => prev.map(l =>
+                      l.amount != null
+                        ? { ...l, amount: dir === 'DR' ? Math.abs(l.amount) : -Math.abs(l.amount) }
+                        : l
+                    ));
                   }}
                   disabled={isEdit || !bankSelected || isAdhocPayment || saved}
                   style={{
@@ -922,8 +928,13 @@ const ExternalTxnForm: React.FC<{
                 render: (_: any, record: ExtTxnLine, idx: number) => (
                   <InputNumber
                     size="small" style={{ width: '100%' }} precision={2}
-                    value={record.amount} placeholder="0.00"
-                    onChange={(v) => updateExtLine(idx, 'amount', v)}
+                    value={record.amount}
+                    placeholder={txnDirection === 'DR' ? '+ve' : '-ve'}
+                    onChange={(v) => {
+                      if (v === null || v === undefined) { updateExtLine(idx, 'amount', v); return; }
+                      const signed = txnDirection === 'DR' ? Math.abs(Number(v)) : -Math.abs(Number(v));
+                      updateExtLine(idx, 'amount', signed);
+                    }}
                   />
                 ),
               },
