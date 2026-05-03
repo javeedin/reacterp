@@ -63,7 +63,7 @@ DECLARE
     l_key VARCHAR2(300);
 BEGIN
     BEGIN
-        SELECT API_KEY INTO l_key
+        SELECT TRIM(API_KEY) INTO l_key
         FROM   RR_CLAUDE_KEY
         WHERE  IS_ACTIVE = 'Y'
         ORDER BY ID DESC

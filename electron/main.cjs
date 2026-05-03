@@ -1031,9 +1031,9 @@ async function getClaudeKey() {
   }
 
   if (data.status === 'success' && data.apiKey) {
-    _claudeKeyCache = data.apiKey;
+    _claudeKeyCache = data.apiKey.trim();
     _claudeKeyCacheAt = Date.now();
-    return data.apiKey;
+    return _claudeKeyCache;
   }
   throw new Error(
     data.message ||
