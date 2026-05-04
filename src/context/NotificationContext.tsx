@@ -8,13 +8,13 @@ export type NotificationStatus = 'Unread' | 'Read' | 'Actioned';
 export interface AppNotification {
   id: string;
   module: NotificationModule;
-  date: string;          // ISO date of the event/transaction
-  transaction: string;   // e.g. 'PDC Payment', 'Journal'
+  date: string;
+  transaction: string;
   trxNo: string;
   details: string;
   status: NotificationStatus;
   severity?: 'info' | 'warning' | 'error';
-  createdAt: number;     // timestamp for sorting
+  createdAt: number;
 }
 
 interface NotificationContextValue {
@@ -37,49 +37,54 @@ const APEX_PAYMENTS_URL = `${APEX_DB_CONFIG.baseUrl}/ap/payments`;
 export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [pdcChecking, setPdcChecking] = useState(false);
-  const checkedRef = useRef(false); // prevent duplicate background checks
+  const isRunningRef = useRef(false);  // ref-based guard — no stale closure issues
+  const didMountCheck = useRef(false);
 
   const addNotification = useCallback((n: Omit<AppNotification, 'id' | 'createdAt'>) => {
     const notif: AppNotification = { ...n, id: uid(), createdAt: Date.now() };
     setNotifications(prev => {
-      // deduplicate by trxNo + module
       if (prev.some(x => x.trxNo === notif.trxNo && x.module === notif.module && x.transaction === notif.transaction)) return prev;
       return [notif, ...prev];
     });
   }, []);
 
-  const markRead = useCallback((id: string) => {
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, status: 'Read' } : n));
-  }, []);
-
-  const markAllRead = useCallback(() => {
-    setNotifications(prev => prev.map(n => ({ ...n, status: 'Read' })));
-  }, []);
-
-  const clearAll = useCallback(() => setNotifications([]), []);
+  const markRead    = useCallback((id: string) => setNotifications(prev => prev.map(n => n.id === id ? { ...n, status: 'Read' } : n)), []);
+  const markAllRead = useCallback(() => setNotifications(prev => prev.map(n => ({ ...n, status: 'Read' }))), []);
+  const clearAll    = useCallback(() => setNotifications([]), []);
 
   const checkPdcMaturity = useCallback(async () => {
-    if (pdcChecking) return;
+    if (isRunningRef.current) return;
+    isRunningRef.current = true;
     setPdcChecking(true);
     try {
       const today = dayjs().startOf('day');
 
-      // Fetch Issued PDC payments — server filters by only_pdc=Y (maturity date not null)
-      // Client-side then narrows to ±3 days window
+      // Fetch Issued payments with maturity date (only_pdc=Y if ORDS handler supports it,
+      // client-side filter handles it regardless)
       const url = `${APEX_PAYMENTS_URL}?payment_status=Issued&only_pdc=Y&limit=500`;
+      console.log('[PDC Check] Fetching:', url);
+
       const res = await fetch(url, { headers: { Accept: 'application/json' } });
-      if (!res.ok) return;
+      if (!res.ok) {
+        console.error('[PDC Check] HTTP error:', res.status, res.statusText);
+        return;
+      }
+
       const data = await res.json();
       const items: any[] = data.items || [];
+      console.log('[PDC Check] Total items returned:', items.length);
 
-      // Keep only payments that have a maturity date AND it falls within ±3 days of today
-      const relevant = items.filter(p => {
-        const md = p.MaturityDate;
-        if (!md) return false;
-        const mat = dayjs(md).startOf('day');
-        const diff = mat.diff(today, 'day'); // negative = overdue, 0 = today, positive = upcoming
+      // Client-side: keep only those with a maturity date set
+      const withMaturity = items.filter(p => !!p.MaturityDate);
+      console.log('[PDC Check] Items with MaturityDate:', withMaturity.length,
+        withMaturity.map(p => ({ no: p.PaymentNumber, mat: p.MaturityDate, payee: p.Payee })));
+
+      // Narrow to ±3 days window
+      const relevant = withMaturity.filter(p => {
+        const diff = dayjs(p.MaturityDate).startOf('day').diff(today, 'day');
         return diff >= -3 && diff <= 3;
       });
+      console.log('[PDC Check] Within ±3 days:', relevant.length);
 
       relevant.forEach(p => {
         const matDate = dayjs(p.MaturityDate).startOf('day');
@@ -111,30 +116,35 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
           severity,
         });
       });
-    } catch {
-      // silent — background task
+    } catch (err) {
+      console.error('[PDC Check] Error:', err);
     } finally {
+      isRunningRef.current = false;
       setPdcChecking(false);
     }
-  }, [addNotification, pdcChecking]);
+  }, [addNotification]); // removed pdcChecking from deps — use ref guard instead
 
-  // Refresh: clear existing PDC notifications then re-fetch fresh data
   const refreshPdcNotifications = useCallback(async () => {
     setNotifications(prev => prev.filter(n => !(n.module === 'AP' && n.transaction === 'PDC Payment')));
+    isRunningRef.current = false; // reset guard so refresh always runs
     await checkPdcMaturity();
   }, [checkPdcMaturity]);
 
   // Run once on mount
   React.useEffect(() => {
-    if (checkedRef.current) return;
-    checkedRef.current = true;
+    if (didMountCheck.current) return;
+    didMountCheck.current = true;
     checkPdcMaturity();
-  }, [checkPdcMaturity]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const unreadCount = notifications.filter(n => n.status === 'Unread').length;
 
   return (
-    <NotificationContext.Provider value={{ notifications, unreadCount, addNotification, markRead, markAllRead, clearAll, checkPdcMaturity, refreshPdcNotifications, pdcChecking }}>
+    <NotificationContext.Provider value={{
+      notifications, unreadCount,
+      addNotification, markRead, markAllRead, clearAll,
+      checkPdcMaturity, refreshPdcNotifications, pdcChecking,
+    }}>
       {children}
     </NotificationContext.Provider>
   );
