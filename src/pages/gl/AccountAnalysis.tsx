@@ -43,6 +43,9 @@ import {
   BugOutlined,
   AuditOutlined,
   LinkOutlined,
+  ApiOutlined,
+  CopyOutlined,
+  CheckOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -167,8 +170,9 @@ const reportMenuItems: MenuItemType[] = [
 // Available ledgers
 const availableLedgers = ['BUIMERC LEDGER'];
 
-// Available companies
-const availableCompanies = ['01', '02', '03'];
+const VALUES_API = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/valuesets/getvalues';
+const COMPANY_VALUESET = 'BUIMERC_FIN_GLB_COA_CO';
+const COMPANY_LOV_URL  = `${VALUES_API}/${COMPANY_VALUESET}`;
 
 // Period status response interface (from periodsstatus/create endpoint)
 interface PeriodStatusItem {
@@ -260,7 +264,7 @@ const AccountAnalysis: React.FC = () => {
 
   // Segment LOV state
   const [segmentValues, setSegmentValues] = useState<SegmentValues>({
-    companies: availableCompanies,
+    companies: [],
     lobs: [], departments: [], subAccounts: [],
     analyses: [], intercompanies: [], sources: [], categories: [],
   });
@@ -417,39 +421,41 @@ const AccountAnalysis: React.FC = () => {
 
   // Fetch distinct segment LOV values
   const fetchSegmentValues = useCallback(async () => {
+    // Fetch other segment values (lobs, departments, etc.) from segment-values endpoint
     try {
       const params = new URLSearchParams({ ledger_name: selectedLedger });
       const res = await fetch(`${API_BASE_URL}/segment-values?${params.toString()}`);
-      if (!res.ok) return;
-      const data = await res.json();
-      const companies: string[] = data.companies?.length ? data.companies : availableCompanies;
-      setSegmentValues({
-        companies,
-        lobs:          data.lobs          || [],
-        departments:   data.departments   || [],
-        subAccounts:   data.subAccounts   || [],
-        analyses:      data.analyses      || [],
-        intercompanies: data.intercompanies || [],
-        sources:       data.sources       || [],
-        categories:    data.categories    || [],
-      });
-      // Fetch company names directly from the BUIMERC_FIN_GLB_COA_CO value set
-      try {
-        const VALUES_API = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/valuesets/getvalues';
-        const valRes = await fetch(`${VALUES_API}/BUIMERC_FIN_GLB_COA_CO`);
-        if (valRes.ok) {
-          const valData = await valRes.json();
-          const nameMap: Record<string, string> = {};
-          (valData.items || []).forEach((item: any) => {
-            if (item.Value) nameMap[item.Value] = item.Description || item.Value;
-          });
-          setCompanyNames(nameMap);
-        }
-      } catch {
-        // company names unavailable — codes will show as-is
+      if (res.ok) {
+        const data = await res.json();
+        setSegmentValues(prev => ({
+          ...prev,
+          lobs:           data.lobs           || [],
+          departments:    data.departments    || [],
+          subAccounts:    data.subAccounts    || [],
+          analyses:       data.analyses       || [],
+          intercompanies: data.intercompanies || [],
+          sources:        data.sources        || [],
+          categories:     data.categories     || [],
+        }));
       }
     } catch {
-      // silently ignore — inputs fall back to free-text
+      // silently ignore
+    }
+
+    // Fetch companies + names directly from BUIMERC_FIN_GLB_COA_CO value set
+    try {
+      const valRes = await fetch(COMPANY_LOV_URL);
+      if (valRes.ok) {
+        const valData = await valRes.json();
+        const items: any[] = valData.items || [];
+        const codes = items.map((i: any) => i.Value).filter(Boolean);
+        const nameMap: Record<string, string> = {};
+        items.forEach((i: any) => { if (i.Value) nameMap[i.Value] = i.Description || i.Value; });
+        setSegmentValues(prev => ({ ...prev, companies: codes }));
+        setCompanyNames(nameMap);
+      }
+    } catch {
+      // company names unavailable
     }
   }, [selectedLedger]);
 
@@ -1898,7 +1904,18 @@ const AccountAnalysis: React.FC = () => {
           {/* Row 2: All account combination segments — Select LOVs */}
           <Row gutter={[10, 8]} align="bottom">
             <Col xs={12} sm={8} md={3}>
-              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Company</Text>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3 }}>
+                <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Company</Text>
+                <Tooltip title={`API: ${COMPANY_LOV_URL}`}>
+                  <ApiOutlined
+                    style={{ fontSize: 11, color: REDWOOD.info, cursor: 'pointer' }}
+                    onClick={() => {
+                      navigator.clipboard.writeText(COMPANY_LOV_URL);
+                      message.info('Company LOV URL copied to clipboard');
+                    }}
+                  />
+                </Tooltip>
+              </div>
               <Select
                 value={selectedCompany || undefined}
                 onChange={(v) => setSelectedCompany(v ?? '')}
