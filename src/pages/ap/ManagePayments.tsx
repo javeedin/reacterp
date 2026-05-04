@@ -2164,10 +2164,6 @@ const ManagePayments: React.FC = () => {
   // ── Clear Payment handlers ────────────────────────────────────────────────
 
   const openClearModal = async (record: PaymentRecord) => {
-    if (record.accountingStatus !== 'Accounted') {
-      message.error('Accounting must be completed before clearing this payment. Create accounting first.');
-      return;
-    }
     setClearTargetPayment(record);
     setClearStepMap(initClearSteps());
     setClearStepsOpen(false);
@@ -2177,7 +2173,7 @@ const ManagePayments: React.FC = () => {
       clearLines: [], slaHeaderId: null, glBatchId: null, glHeaderId: null, batchName: '',
       pdcAccount: '', cashAccount: '' };
     setClearModalOpen(true);
-    // Load existing accounting entries
+    // Load existing accounting entries — also used to verify accounting exists
     setClearExistingAcctLoading(true);
     try {
       const result = await getAccounting('AP_PAYMENTS', record.checkId);
@@ -2943,7 +2939,7 @@ const ManagePayments: React.FC = () => {
                   const isIssued = sel.paymentStatus === 'Issued';
                   if (!isMatured || !isIssued) return null;
                   return (
-                    <Tooltip title={sel.accountingStatus !== 'Accounted' ? 'Create accounting first before clearing' : 'Clear PDC Payment'}>
+                    <Tooltip title="Clear PDC Payment">
                       <Button
                         size="small"
                         style={{ background: REDWOOD.success, borderColor: REDWOOD.success, color: '#fff' }}
@@ -4586,11 +4582,11 @@ const ManagePayments: React.FC = () => {
             </div>
           )}
 
-          {clearTargetPayment?.accountingStatus !== 'Accounted' && (
+          {!clearExistingAcctLoading && clearExistingAcctData && !clearExistingAcctData.found && (
             <Alert
               type="error" showIcon style={{ marginBottom: 14 }}
               message="Accounting Required"
-              description="You must create and post accounting for this payment before it can be cleared."
+              description="No SLA accounting entries found for this payment. Create and post accounting first."
             />
           )}
 
@@ -4674,7 +4670,7 @@ const ManagePayments: React.FC = () => {
               type="primary"
               style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
               icon={<CheckCircleOutlined />}
-              disabled={clearTargetPayment?.accountingStatus !== 'Accounted'}
+              disabled={clearExistingAcctLoading || !clearExistingAcctData?.found}
               onClick={() => { setClearStepMap(initClearSteps()); setClearStepsOpen(true); }}
             >
               Proceed to Clear
