@@ -239,6 +239,7 @@ const AccountAnalysis: React.FC = () => {
   const [accountTabs, setAccountTabs] = useState<AccountTab[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchData, setSearchData] = useState<JournalLineSegment[]>([]);
+  const [openingBalanceRow, setOpeningBalanceRow] = useState<JournalLineSegment | null>(null);
   const [closingBalanceRow, setClosingBalanceRow] = useState<JournalLineSegment | null>(null);
   const [totalCount, setTotalCount] = useState(0);
 
@@ -666,7 +667,7 @@ const AccountAnalysis: React.FC = () => {
         const { opening: openingRow, closing: closingRow } = await fetchBalanceRows(accountFilter, selectedCompany, sortedPeriods[0]);
         if (openingRow) finalItems.unshift(openingRow);
         newClosingRow = closingRow;
-        if (newClosingRow) finalItems.push(newClosingRow);
+        setOpeningBalanceRow(openingRow);
       }
 
       setClosingBalanceRow(newClosingRow);
@@ -677,6 +678,7 @@ const AccountAnalysis: React.FC = () => {
       console.error('Error fetching data:', error);
       message.error('Failed to fetch data. Please try again.');
       setSearchData([]);
+      setOpeningBalanceRow(null);
       setClosingBalanceRow(null);
       setTotalCount(0);
     } finally {
@@ -2096,44 +2098,59 @@ const AccountAnalysis: React.FC = () => {
               size="small"
               className="compact-table"
               rowClassName={(record: JournalLineSegment) =>
-                record.isOpeningBalance ? 'opening-balance-row' : record.isClosingBalance ? 'closing-balance-row' : ''
+                record.isOpeningBalance ? 'opening-balance-row' : ''
               }
               locale={{ emptyText: <Empty description="Click Search to load data" /> }}
-              summary={() =>
-                searchData.length > 0 ? (
-                  <Table.Summary fixed>
-                    {/* PTD Totals row */}
-                    <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
-                      <Table.Summary.Cell index={0} colSpan={9}>
-                        <Text strong style={{ fontSize: 13 }}>PTD Totals</Text>
-                      </Table.Summary.Cell>
-                      <Table.Summary.Cell index={9} align="right">
-                        <Text strong style={{ fontSize: 13, color: REDWOOD.success }}>
-                          {formatNumber(totals.enteredDr)}
-                        </Text>
-                      </Table.Summary.Cell>
-                      <Table.Summary.Cell index={10} align="right">
-                        <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>
-                          {formatNumber(totals.enteredCr)}
-                        </Text>
-                      </Table.Summary.Cell>
-                      <Table.Summary.Cell index={11} align="right">
-                        <Text strong style={{ fontSize: 13, color: REDWOOD.success }}>
-                          {formatNumber(totals.accountedDr)}
-                        </Text>
-                      </Table.Summary.Cell>
-                      <Table.Summary.Cell index={12} align="right">
-                        <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>
-                          {formatNumber(totals.accountedCr)}
-                        </Text>
-                      </Table.Summary.Cell>
-                      <Table.Summary.Cell index={13} />
-                    </Table.Summary.Row>
-                  </Table.Summary>
-                ) : null
-              }
             />
           </Spin>
+
+          {/* Balance Summary Section */}
+          {searchData.length > 0 && (
+            <div style={{
+              marginTop: 12,
+              padding: '12px 16px',
+              background: REDWOOD.neutral100,
+              borderRadius: 8,
+              border: `1px solid ${REDWOOD.neutral200}`,
+            }}>
+              <Row gutter={0} align="middle">
+                {/* Opening Balance */}
+                <Col flex="1" style={{ textAlign: 'center', padding: '8px 16px', borderRight: `1px solid ${REDWOOD.neutral300}` }}>
+                  <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Opening Balance</Text>
+                  <Text strong style={{ fontSize: 14, color: REDWOOD.warning }}>
+                    {openingBalanceRow
+                      ? formatNumber((openingBalanceRow.accountedDr || 0) - (openingBalanceRow.accountedCr || 0))
+                      : '—'}
+                  </Text>
+                </Col>
+                {/* PTD Debits */}
+                <Col flex="1" style={{ textAlign: 'center', padding: '8px 16px', borderRight: `1px solid ${REDWOOD.neutral300}` }}>
+                  <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>PTD Debits</Text>
+                  <Text strong style={{ fontSize: 14, color: REDWOOD.success }}>
+                    {formatNumber(totals.accountedDr)}
+                  </Text>
+                </Col>
+                {/* PTD Credits */}
+                <Col flex="1" style={{ textAlign: 'center', padding: '8px 16px', borderRight: `1px solid ${REDWOOD.neutral300}` }}>
+                  <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>PTD Credits</Text>
+                  <Text strong style={{ fontSize: 14, color: REDWOOD.primary }}>
+                    {formatNumber(totals.accountedCr)}
+                  </Text>
+                </Col>
+                {/* Closing Balance */}
+                <Col flex="1" style={{ textAlign: 'center', padding: '8px 16px' }}>
+                  <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Closing Balance</Text>
+                  <Text strong style={{ fontSize: 14, color: closingBalanceRow
+                    ? ((closingBalanceRow.accountedDr || 0) - (closingBalanceRow.accountedCr || 0)) >= 0 ? REDWOOD.success : REDWOOD.primary
+                    : REDWOOD.neutral600 }}>
+                    {closingBalanceRow
+                      ? formatNumber((closingBalanceRow.accountedDr || 0) - (closingBalanceRow.accountedCr || 0))
+                      : '—'}
+                  </Text>
+                </Col>
+              </Row>
+            </div>
+          )}
         </Card>
       </div>
     );
