@@ -1350,124 +1350,6 @@ const AccountAnalysis: React.FC = () => {
     return Array.from(pivotMap.values());
   };
 
-  // Search tab columns
-  const searchColumns: ColumnsType<JournalLineSegment> = [
-    {
-      title: 'Account',
-      dataIndex: 'concatenatedSegments',
-      key: 'concatenatedSegments',
-      width: 240,
-      fixed: 'left',
-      render: (text: string, record: JournalLineSegment) =>
-        record.isOpeningBalance ? (
-          <Text strong style={{ fontSize: 13, color: REDWOOD.warning }}>
-            {record.jeLineDescription}
-          </Text>
-        ) : record.isClosingBalance ? (
-          <Text strong style={{ fontSize: 13, color: REDWOOD.success }}>
-            {record.jeLineDescription}
-          </Text>
-        ) : (
-          <a
-            onClick={() => openAccountTab(record)}
-            style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 11 }}
-          >
-            {text || `${record.company}-${record.lob}-${record.department}-${record.account}-${record.subAccount}-${record.analysis}-${record.intercompany}`}
-          </a>
-        ),
-    },
-    {
-      title: 'Description',
-      dataIndex: 'accountDescription',
-      key: 'accountDescription',
-      width: 180,
-      ellipsis: true,
-      render: (text: string) => (
-        <Tooltip title={text}>
-          <span style={{ fontSize: 11 }}>{text || '-'}</span>
-        </Tooltip>
-      ),
-    },
-    {
-      title: 'Line Description',
-      dataIndex: 'jeLineDescription',
-      key: 'jeLineDescription',
-      width: 200,
-      ellipsis: true,
-      render: (text: string, record: JournalLineSegment) => (
-        <Tooltip title={text}>
-          <span style={{ fontSize: (record.isOpeningBalance || record.isClosingBalance) ? 13 : 11, fontWeight: (record.isOpeningBalance || record.isClosingBalance) ? 600 : undefined }}>
-            {text || '-'}
-          </span>
-        </Tooltip>
-      ),
-    },
-    { title: 'Period', dataIndex: 'defaultPeriodName', key: 'defaultPeriodName', width: 80 },
-    { title: 'Acctg Date', dataIndex: 'accountingDate', key: 'accountingDate', width: 100 },
-    { title: 'Batch', dataIndex: 'batchName', key: 'batchName', width: 150, ellipsis: true },
-    { title: 'Source', dataIndex: 'userJeSourceName', key: 'userJeSourceName', width: 100 },
-    { title: 'Category', dataIndex: 'userJeCategoryName', key: 'userJeCategoryName', width: 120 },
-    { title: 'Currency', dataIndex: 'currencyCode', key: 'currencyCode', width: 90 },
-    {
-      title: <span style={{ color: '#1677ff', fontWeight: 600 }}>Accounted</span>,
-      children: [
-        {
-          title: 'Dr',
-          dataIndex: 'accountedDr',
-          key: 'accountedDr',
-          width: 120,
-          align: 'right' as const,
-          render: (v: number) => <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span>,
-        },
-        {
-          title: 'Cr',
-          dataIndex: 'accountedCr',
-          key: 'accountedCr',
-          width: 120,
-          align: 'right' as const,
-          render: (v: number) => <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span>,
-        },
-      ],
-    },
-    {
-      title: <span style={{ color: '#52c41a', fontWeight: 600 }}>Entered</span>,
-      children: [
-        {
-          title: 'Dr',
-          dataIndex: 'enteredDr',
-          key: 'enteredDr',
-          width: 120,
-          align: 'right' as const,
-          render: (v: number) => <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span>,
-        },
-        {
-          title: 'Cr',
-          dataIndex: 'enteredCr',
-          key: 'enteredCr',
-          width: 120,
-          align: 'right' as const,
-          render: (v: number) => <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span>,
-        },
-      ],
-    },
-    {
-      title: '',
-      key: 'drillDown',
-      width: 36,
-      fixed: 'right' as const,
-      render: (_: any, record: JournalLineSegment) => (
-        <Tooltip title={`View Journal (Header ${record.jeHeaderId})`}>
-          <Button
-            type="text"
-            size="small"
-            icon={<AuditOutlined style={{ color: REDWOOD.info }} />}
-            onClick={(e) => { e.stopPropagation(); openJournalDrill(record); }}
-          />
-        </Tooltip>
-      ),
-    },
-  ];
-
   // Get segment label by key
   const getSegmentLabel = (segment: string): string => {
     const filter = segmentFilters.find((f) => f.segment === segment);
@@ -1852,6 +1734,170 @@ const AccountAnalysis: React.FC = () => {
       { enteredDr: 0, enteredCr: 0, accountedDr: 0, accountedCr: 0 }
     );
 
+    // Precompute running balances indexed by position in searchData
+    const runningBalances: { accounted: number; entered: number }[] = [];
+    let accRun = 0;
+    let entRun = 0;
+    searchData.forEach(row => {
+      accRun += (row.accountedDr || 0) - (row.accountedCr || 0);
+      entRun += (row.enteredDr   || 0) - (row.enteredCr   || 0);
+      runningBalances.push({ accounted: accRun, entered: entRun });
+    });
+
+    // Border helpers for group separators
+    const groupBorderLeft  = { borderLeft:  '2px solid #888' };
+    const groupBorderRight = { borderRight: '2px solid #888' };
+    const headerStyle = (extra?: React.CSSProperties) => ({
+      onHeaderCell: () => ({ style: extra }),
+      onCell:       () => ({ style: extra }),
+    });
+
+    const fmtBalance = (v: number) => {
+      const abs = formatNumber(Math.abs(v));
+      return v < 0
+        ? <span style={{ color: REDWOOD.primary, fontWeight: 600 }}>{abs} Cr</span>
+        : <span style={{ color: REDWOOD.success,  fontWeight: 600 }}>{abs}</span>;
+    };
+
+    const searchColumns: ColumnsType<JournalLineSegment> = [
+      {
+        title: 'Account',
+        dataIndex: 'concatenatedSegments',
+        key: 'concatenatedSegments',
+        width: 240,
+        fixed: 'left',
+        render: (text: string, record: JournalLineSegment) =>
+          record.isOpeningBalance ? (
+            <Text strong style={{ fontSize: 13, color: REDWOOD.warning }}>
+              {record.jeLineDescription}
+            </Text>
+          ) : record.isClosingBalance ? (
+            <Text strong style={{ fontSize: 13, color: REDWOOD.success }}>
+              {record.jeLineDescription}
+            </Text>
+          ) : (
+            <a
+              onClick={() => openAccountTab(record)}
+              style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 11 }}
+            >
+              {text || `${record.company}-${record.lob}-${record.department}-${record.account}-${record.subAccount}-${record.analysis}-${record.intercompany}`}
+            </a>
+          ),
+      },
+      {
+        title: 'Description',
+        dataIndex: 'accountDescription',
+        key: 'accountDescription',
+        width: 180,
+        ellipsis: true,
+        render: (text: string) => (
+          <Tooltip title={text}>
+            <span style={{ fontSize: 11 }}>{text || '-'}</span>
+          </Tooltip>
+        ),
+      },
+      {
+        title: 'Line Description',
+        dataIndex: 'jeLineDescription',
+        key: 'jeLineDescription',
+        width: 200,
+        ellipsis: true,
+        render: (text: string, record: JournalLineSegment) => (
+          <Tooltip title={text}>
+            <span style={{ fontSize: (record.isOpeningBalance || record.isClosingBalance) ? 13 : 11, fontWeight: (record.isOpeningBalance || record.isClosingBalance) ? 600 : undefined }}>
+              {text || '-'}
+            </span>
+          </Tooltip>
+        ),
+      },
+      { title: 'Period', dataIndex: 'defaultPeriodName', key: 'defaultPeriodName', width: 80 },
+      { title: 'Acctg Date', dataIndex: 'accountingDate', key: 'accountingDate', width: 100 },
+      { title: 'Batch', dataIndex: 'batchName', key: 'batchName', width: 150, ellipsis: true },
+      { title: 'Source', dataIndex: 'userJeSourceName', key: 'userJeSourceName', width: 100 },
+      { title: 'Category', dataIndex: 'userJeCategoryName', key: 'userJeCategoryName', width: 120 },
+      { title: 'Currency', dataIndex: 'currencyCode', key: 'currencyCode', width: 90 },
+      {
+        title: <span style={{ color: '#1677ff', fontWeight: 600 }}>Accounted</span>,
+        onHeaderCell: () => ({ style: groupBorderLeft }),
+        children: [
+          {
+            title: 'Dr',
+            dataIndex: 'accountedDr',
+            key: 'accountedDr',
+            width: 120,
+            align: 'right' as const,
+            ...headerStyle(groupBorderLeft),
+            render: (v: number) => <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span>,
+          },
+          {
+            title: 'Cr',
+            dataIndex: 'accountedCr',
+            key: 'accountedCr',
+            width: 120,
+            align: 'right' as const,
+            render: (v: number) => <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span>,
+          },
+          {
+            title: 'Balance',
+            key: 'accountedRunning',
+            width: 130,
+            align: 'right' as const,
+            ...headerStyle(groupBorderRight),
+            render: (_: any, __: JournalLineSegment, index: number) =>
+              fmtBalance(runningBalances[index]?.accounted ?? 0),
+          },
+        ],
+      },
+      {
+        title: <span style={{ color: '#52c41a', fontWeight: 600 }}>Entered</span>,
+        onHeaderCell: () => ({ style: groupBorderLeft }),
+        children: [
+          {
+            title: 'Dr',
+            dataIndex: 'enteredDr',
+            key: 'enteredDr',
+            width: 120,
+            align: 'right' as const,
+            ...headerStyle(groupBorderLeft),
+            render: (v: number) => <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span>,
+          },
+          {
+            title: 'Cr',
+            dataIndex: 'enteredCr',
+            key: 'enteredCr',
+            width: 120,
+            align: 'right' as const,
+            render: (v: number) => <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span>,
+          },
+          {
+            title: 'Balance',
+            key: 'enteredRunning',
+            width: 130,
+            align: 'right' as const,
+            ...headerStyle(groupBorderRight),
+            render: (_: any, __: JournalLineSegment, index: number) =>
+              fmtBalance(runningBalances[index]?.entered ?? 0),
+          },
+        ],
+      },
+      {
+        title: '',
+        key: 'drillDown',
+        width: 36,
+        fixed: 'right' as const,
+        render: (_: any, record: JournalLineSegment) => (
+          <Tooltip title={`View Journal (Header ${record.jeHeaderId})`}>
+            <Button
+              type="text"
+              size="small"
+              icon={<AuditOutlined style={{ color: REDWOOD.info }} />}
+              onClick={(e) => { e.stopPropagation(); openJournalDrill(record); }}
+            />
+          </Tooltip>
+        ),
+      },
+    ];
+
     return (
       <div style={{ padding: 16 }}>
         {/* Search Filters */}
@@ -2138,7 +2184,7 @@ const AccountAnalysis: React.FC = () => {
               columns={searchColumns}
               dataSource={searchData}
               pagination={{ pageSize: searchPageSize, size: 'small', showSizeChanger: true, pageSizeOptions: ['10','20','50','100','200'], onShowSizeChange: (_current, size) => setSearchPageSize(size), onChange: (_page, size) => size && setSearchPageSize(size), showTotal: (total) => `Total ${total} records` }}
-              scroll={{ x: 1400 }}
+              scroll={{ x: 1800 }}
               size="small"
               className="compact-table"
               rowClassName={(record: JournalLineSegment) =>
@@ -2152,19 +2198,27 @@ const AccountAnalysis: React.FC = () => {
                       <Table.Summary.Cell index={0} colSpan={9}>
                         <Text strong style={{ fontSize: 13 }}>Totals</Text>
                       </Table.Summary.Cell>
-                      <Table.Summary.Cell index={9} align="right">
+                      {/* Accounted Dr */}
+                      <Table.Summary.Cell index={9} align="right" style={groupBorderLeft}>
                         <Text strong style={{ fontSize: 13, color: REDWOOD.success }}>{formatNumber(gridTotals.accountedDr)}</Text>
                       </Table.Summary.Cell>
+                      {/* Accounted Cr */}
                       <Table.Summary.Cell index={10} align="right">
                         <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>{formatNumber(gridTotals.accountedCr)}</Text>
                       </Table.Summary.Cell>
-                      <Table.Summary.Cell index={11} align="right">
+                      {/* Accounted Balance */}
+                      <Table.Summary.Cell index={11} align="right" style={groupBorderRight} />
+                      {/* Entered Dr */}
+                      <Table.Summary.Cell index={12} align="right" style={groupBorderLeft}>
                         <Text strong style={{ fontSize: 13, color: REDWOOD.success }}>{formatNumber(gridTotals.enteredDr)}</Text>
                       </Table.Summary.Cell>
-                      <Table.Summary.Cell index={12} align="right">
+                      {/* Entered Cr */}
+                      <Table.Summary.Cell index={13} align="right">
                         <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>{formatNumber(gridTotals.enteredCr)}</Text>
                       </Table.Summary.Cell>
-                      <Table.Summary.Cell index={13} />
+                      {/* Entered Balance */}
+                      <Table.Summary.Cell index={14} align="right" style={groupBorderRight} />
+                      <Table.Summary.Cell index={15} />
                     </Table.Summary.Row>
                   </Table.Summary>
                 ) : null
