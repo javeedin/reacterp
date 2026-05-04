@@ -1120,7 +1120,7 @@ const AccountAnalysis: React.FC = () => {
     tRow.height = 16;
     ws.mergeCells(rowIdx, 1, rowIdx, 8);
     const tLabel = ws.getCell(rowIdx, 1);
-    tLabel.value = `Total  (${data.length} lines)`;
+    tLabel.value = `PTD Totals  (${data.length} lines)`;
     tLabel.font = { bold: true, size: 10 };
     tLabel.fill = totalFill;
     tLabel.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
@@ -2060,7 +2060,7 @@ const AccountAnalysis: React.FC = () => {
                   <Table.Summary fixed>
                     <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
                       <Table.Summary.Cell index={0} colSpan={9}>
-                        <Text strong style={{ fontSize: 11 }}>Total</Text>
+                        <Text strong style={{ fontSize: 11 }}>PTD Totals</Text>
                       </Table.Summary.Cell>
                       <Table.Summary.Cell index={9} align="right">
                         <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>
@@ -2175,8 +2175,9 @@ const AccountAnalysis: React.FC = () => {
             </Col>
           </Row>
 
-          {/* Totals Summary */}
+          {/* PTD Totals Summary */}
           <Divider style={{ margin: '12px 0' }} />
+          <Text strong style={{ fontSize: 11, color: '#6B6B6B' }}>PTD Totals</Text>
           <Row gutter={[24, 8]}>
             <Col>
               <Text type="secondary" style={{ fontSize: 10 }}>Entered Dr</Text>
@@ -2405,7 +2406,7 @@ const AccountAnalysis: React.FC = () => {
                   <Table.Summary fixed>
                     <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
                       <Table.Summary.Cell index={0} colSpan={segmentColCount}>
-                        <Text strong style={{ fontSize: 11 }}>Total</Text>
+                        <Text strong style={{ fontSize: 11 }}>PTD Totals</Text>
                       </Table.Summary.Cell>
                       {selectedPeriods.map((period, idx) => (
                         <Table.Summary.Cell key={period} index={segmentColCount + idx} align="right">
@@ -2579,8 +2580,9 @@ const AccountAnalysis: React.FC = () => {
             </Col>
           </Row>
 
-          {/* Totals Summary */}
+          {/* PTD Totals Summary */}
           <Divider style={{ margin: '12px 0' }} />
+          <Text strong style={{ fontSize: 11, color: '#6B6B6B' }}>PTD Totals</Text>
           <Row gutter={[24, 8]}>
             <Col>
               <Text type="secondary" style={{ fontSize: 10 }}>Entered Dr</Text>
@@ -2821,7 +2823,7 @@ const AccountAnalysis: React.FC = () => {
                 <Table.Summary fixed>
                   <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
                     <Table.Summary.Cell index={0} colSpan={segmentColCount}>
-                      <Text strong style={{ fontSize: 11 }}>Total</Text>
+                      <Text strong style={{ fontSize: 11 }}>PTD Totals</Text>
                     </Table.Summary.Cell>
                     {/* Period columns: Debit, Credit, Balance for each period */}
                     {selectedPeriods.flatMap((period, idx) => {
@@ -3037,7 +3039,7 @@ const AccountAnalysis: React.FC = () => {
                 <Table.Summary fixed>
                   <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
                     <Table.Summary.Cell index={0} colSpan={9}>
-                      <Text strong style={{ fontSize: 11 }}>Total (filtered)</Text>
+                      <Text strong style={{ fontSize: 11 }}>PTD Totals (filtered)</Text>
                     </Table.Summary.Cell>
                     <Table.Summary.Cell index={9} align="right">
                       <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>
@@ -3482,7 +3484,7 @@ const AccountAnalysis: React.FC = () => {
                   <Table.Summary fixed>
                     <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
                       <Table.Summary.Cell index={0} colSpan={4}>
-                        <Text strong style={{ fontSize: 11 }}>Total</Text>
+                        <Text strong style={{ fontSize: 11 }}>PTD Totals</Text>
                       </Table.Summary.Cell>
                       <Table.Summary.Cell index={4} align="right">
                         <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>{formatNumber(dr)}</Text>
