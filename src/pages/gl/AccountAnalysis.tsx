@@ -1809,7 +1809,17 @@ const AccountAnalysis: React.FC = () => {
 
   // Render Search tab content
   const renderSearchTab = () => {
-    const totals = calculateTotals(searchData);
+    const totals = calculateTotals(searchData); // PTD only (used for balance summary bar)
+    // Grid totals include the opening balance row
+    const gridTotals = searchData.filter(row => !row.isClosingBalance).reduce(
+      (acc, row) => ({
+        enteredDr:   acc.enteredDr   + (row.enteredDr   || 0),
+        enteredCr:   acc.enteredCr   + (row.enteredCr   || 0),
+        accountedDr: acc.accountedDr + (row.accountedDr || 0),
+        accountedCr: acc.accountedCr + (row.accountedCr || 0),
+      }),
+      { enteredDr: 0, enteredCr: 0, accountedDr: 0, accountedCr: 0 }
+    );
 
     return (
       <div style={{ padding: 16 }}>
@@ -2112,16 +2122,16 @@ const AccountAnalysis: React.FC = () => {
                         <Text strong style={{ fontSize: 13 }}>Totals</Text>
                       </Table.Summary.Cell>
                       <Table.Summary.Cell index={9} align="right">
-                        <Text strong style={{ fontSize: 13, color: REDWOOD.success }}>{formatNumber(totals.enteredDr)}</Text>
+                        <Text strong style={{ fontSize: 13, color: REDWOOD.success }}>{formatNumber(gridTotals.enteredDr)}</Text>
                       </Table.Summary.Cell>
                       <Table.Summary.Cell index={10} align="right">
-                        <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>{formatNumber(totals.enteredCr)}</Text>
+                        <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>{formatNumber(gridTotals.enteredCr)}</Text>
                       </Table.Summary.Cell>
                       <Table.Summary.Cell index={11} align="right">
-                        <Text strong style={{ fontSize: 13, color: REDWOOD.success }}>{formatNumber(totals.accountedDr)}</Text>
+                        <Text strong style={{ fontSize: 13, color: REDWOOD.success }}>{formatNumber(gridTotals.accountedDr)}</Text>
                       </Table.Summary.Cell>
                       <Table.Summary.Cell index={12} align="right">
-                        <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>{formatNumber(totals.accountedCr)}</Text>
+                        <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>{formatNumber(gridTotals.accountedCr)}</Text>
                       </Table.Summary.Cell>
                       <Table.Summary.Cell index={13} />
                     </Table.Summary.Row>
