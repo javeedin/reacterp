@@ -989,7 +989,7 @@ const ManageSuppliers: React.FC = () => {
         // APEX API - build params
         const apexParams = new URLSearchParams();
         if (supplierNumber) apexParams.set('supplier_number', supplierNumber);
-        if (supplierName)   apexParams.set('supplier', supplierName);
+        if (supplierName)   apexParams.set('q', supplierName);
         if (businessUnit)   apexParams.set('P_BUSINESS_UNIT', businessUnit);
         const qs = apexParams.toString();
         proxyUrl = `${APEX_DB_CONFIG.baseUrl}/suppliers${qs ? '?' + qs : ''}`;
@@ -1249,10 +1249,10 @@ const ManageSuppliers: React.FC = () => {
                       suffix={
                         <SearchOutlined
                           style={{ color: REDWOOD.info, cursor: 'pointer' }}
-                          onClick={() => openLov(form.getFieldValue('supplier'))}
+                          onClick={handleSearch}
                         />
                       }
-                      onPressEnter={() => openLov(form.getFieldValue('supplier'))}
+                      onPressEnter={handleSearch}
                     />
                   </Form.Item>
                 </Col>
