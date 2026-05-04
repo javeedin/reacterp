@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import {
   Drawer, Button, Badge, Tag, Typography, Space, Tooltip, Empty, Spin,
-  Table, Select,
+  Table, Select, Modal,
 } from 'antd';
 import {
   BellOutlined, CheckOutlined, DeleteOutlined, ReloadOutlined,
-  WarningOutlined, InfoCircleOutlined, CloseCircleOutlined,
+  WarningOutlined, InfoCircleOutlined, CloseCircleOutlined, ApiOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
@@ -43,9 +43,10 @@ const MODULE_COLOR: Record<string, string> = {
 };
 
 const NotificationPanel: React.FC<{ open: boolean; onClose: () => void }> = ({ open, onClose }) => {
-  const { notifications, unreadCount, markRead, markAllRead, clearAll, refreshPdcNotifications, pdcChecking } = useNotifications();
+  const { notifications, unreadCount, markRead, markAllRead, clearAll, refreshPdcNotifications, pdcChecking, lastApiUrl, lastApiResult } = useNotifications();
   const [activeModule, setActiveModule] = useState<'All' | NotificationModule>('All');
   const [statusFilter, setStatusFilter] = useState<string>('All');
+  const [apiModalOpen, setApiModalOpen] = useState(false);
 
   const filtered = notifications.filter(n => {
     if (activeModule !== 'All' && n.module !== activeModule) return false;
@@ -133,6 +134,9 @@ const NotificationPanel: React.FC<{ open: boolean; onClose: () => void }> = ({ o
             {unreadCount > 0 && <Badge count={unreadCount} style={{ background: '#C74634' }} />}
           </Space>
           <Space size={4}>
+            <Tooltip title="View API">
+              <Button size="small" icon={<ApiOutlined style={{ color: '#722ed1' }} />} onClick={() => setApiModalOpen(true)} />
+            </Tooltip>
             <Tooltip title="Refresh PDC maturity notifications">
               <Button size="small" icon={<ReloadOutlined spin={pdcChecking} />} onClick={refreshPdcNotifications} loading={pdcChecking} />
             </Tooltip>
@@ -222,6 +226,38 @@ const NotificationPanel: React.FC<{ open: boolean; onClose: () => void }> = ({ o
         .notif-unread-row td { background: #fdf4ff !important; }
         .notif-unread-row:hover td { background: #f5e6ff !important; }
       `}</style>
+
+      {/* API Inspector Modal */}
+      <Modal
+        open={apiModalOpen}
+        onCancel={() => setApiModalOpen(false)}
+        footer={null}
+        title={<Space><ApiOutlined style={{ color: '#722ed1' }} /><span>Notification API Inspector</span></Space>}
+        width={700}
+      >
+        <div style={{ fontSize: 12, fontFamily: 'monospace' }}>
+          <div style={{ marginBottom: 8, fontWeight: 600, color: '#555' }}>PDC Maturity Check — Endpoint:</div>
+          <div style={{
+            background: '#1e1e2e', color: '#cdd6f4', padding: '10px 14px',
+            borderRadius: 6, wordBreak: 'break-all', marginBottom: 16, userSelect: 'all',
+          }}>
+            {lastApiUrl || '(not yet called)'}
+          </div>
+
+          <div style={{ marginBottom: 8, fontWeight: 600, color: '#555' }}>Last Result:</div>
+          <div style={{
+            background: '#f5f5f5', padding: '10px 14px', borderRadius: 6,
+            whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#333',
+            minHeight: 60,
+          }}>
+            {lastApiResult || '(no result yet)'}
+          </div>
+
+          <div style={{ marginTop: 16, color: '#888', fontSize: 11 }}>
+            Click <strong>Refresh</strong> in the toolbar to re-run the check and update these values.
+          </div>
+        </div>
+      </Modal>
     </Drawer>
   );
 };

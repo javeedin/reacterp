@@ -27,6 +27,8 @@ interface NotificationContextValue {
   checkPdcMaturity: () => Promise<void>;
   refreshPdcNotifications: () => Promise<void>;
   pdcChecking: boolean;
+  lastApiUrl: string;
+  lastApiResult: string;
 }
 
 const NotificationContext = createContext<NotificationContextValue | null>(null);
@@ -37,7 +39,9 @@ const APEX_PAYMENTS_URL = `${APEX_DB_CONFIG.baseUrl}/ap/payments`;
 export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [pdcChecking, setPdcChecking] = useState(false);
-  const isRunningRef = useRef(false);  // ref-based guard — no stale closure issues
+  const [lastApiUrl, setLastApiUrl] = useState('');
+  const [lastApiResult, setLastApiResult] = useState('');
+  const isRunningRef = useRef(false);
   const didMountCheck = useRef(false);
 
   const addNotification = useCallback((n: Omit<AppNotification, 'id' | 'createdAt'>) => {
@@ -58,33 +62,38 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     setPdcChecking(true);
     try {
       const today = dayjs().startOf('day');
-
-      // Fetch Issued payments with maturity date (only_pdc=Y if ORDS handler supports it,
-      // client-side filter handles it regardless)
       const url = `${APEX_PAYMENTS_URL}?payment_status=Issued&only_pdc=Y&limit=500`;
+      setLastApiUrl(url);
+      setLastApiResult('Fetching…');
       console.log('[PDC Check] Fetching:', url);
 
       const res = await fetch(url, { headers: { Accept: 'application/json' } });
       if (!res.ok) {
-        console.error('[PDC Check] HTTP error:', res.status, res.statusText);
+        const msg = `HTTP ${res.status} ${res.statusText}`;
+        setLastApiResult(msg);
+        console.error('[PDC Check]', msg);
         return;
       }
 
       const data = await res.json();
       const items: any[] = data.items || [];
-      console.log('[PDC Check] Total items returned:', items.length);
 
       // Client-side: keep only those with a maturity date set
       const withMaturity = items.filter(p => !!p.MaturityDate);
-      console.log('[PDC Check] Items with MaturityDate:', withMaturity.length,
-        withMaturity.map(p => ({ no: p.PaymentNumber, mat: p.MaturityDate, payee: p.Payee })));
 
       // Narrow to ±3 days window
       const relevant = withMaturity.filter(p => {
         const diff = dayjs(p.MaturityDate).startOf('day').diff(today, 'day');
         return diff >= -3 && diff <= 3;
       });
-      console.log('[PDC Check] Within ±3 days:', relevant.length);
+
+      setLastApiResult(
+        `Total: ${items.length} | With MaturityDate: ${withMaturity.length} | Within ±3 days: ${relevant.length} | Today: ${today.format('YYYY-MM-DD')}` +
+        (withMaturity.length > 0
+          ? `\nMaturity dates: ${withMaturity.map(p => `${p.PaymentNumber} → ${p.MaturityDate}`).join(', ')}`
+          : '')
+      );
+      console.log('[PDC Check] Total:', items.length, '| With MaturityDate:', withMaturity.length, '| Relevant:', relevant.length);
 
       relevant.forEach(p => {
         const matDate = dayjs(p.MaturityDate).startOf('day');
@@ -117,7 +126,9 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         });
       });
     } catch (err) {
-      console.error('[PDC Check] Error:', err);
+      const msg = `Error: ${err instanceof Error ? err.message : String(err)}`;
+      setLastApiResult(msg);
+      console.error('[PDC Check]', msg);
     } finally {
       isRunningRef.current = false;
       setPdcChecking(false);
@@ -144,6 +155,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       notifications, unreadCount,
       addNotification, markRead, markAllRead, clearAll,
       checkPdcMaturity, refreshPdcNotifications, pdcChecking,
+      lastApiUrl, lastApiResult,
     }}>
       {children}
     </NotificationContext.Provider>
