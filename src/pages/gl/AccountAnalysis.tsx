@@ -263,6 +263,7 @@ const AccountAnalysis: React.FC = () => {
     lobs: [], departments: [], subAccounts: [],
     analyses: [], intercompanies: [], sources: [], categories: [],
   });
+  const [companyNames, setCompanyNames] = useState<Record<string, string>>({});
 
   // Account lookup modal state
   const [accountLookupVisible, setAccountLookupVisible] = useState(false);
@@ -420,8 +421,9 @@ const AccountAnalysis: React.FC = () => {
       const res = await fetch(`${API_BASE_URL}/segment-values?${params.toString()}`);
       if (!res.ok) return;
       const data = await res.json();
+      const companies: string[] = data.companies?.length ? data.companies : availableCompanies;
       setSegmentValues({
-        companies: data.companies?.length ? data.companies : availableCompanies,
+        companies,
         lobs:          data.lobs          || [],
         departments:   data.departments   || [],
         subAccounts:   data.subAccounts   || [],
@@ -430,6 +432,31 @@ const AccountAnalysis: React.FC = () => {
         sources:       data.sources       || [],
         categories:    data.categories    || [],
       });
+      // Fetch company names from COA value sets
+      try {
+        const SEGMENTS_API = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/chartofaccounts/structuresegments';
+        const VALUES_API   = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/valuesets/getvalues';
+        const segRes = await fetch(SEGMENTS_API);
+        if (segRes.ok) {
+          const segData = await segRes.json();
+          const segments: { segment_code: string; sequence_no: number }[] = (segData.items || [])
+            .sort((a: any, b: any) => a.sequence_no - b.sequence_no);
+          const companySegCode = segments[0]?.segment_code;
+          if (companySegCode) {
+            const valRes = await fetch(`${VALUES_API}/${companySegCode}`);
+            if (valRes.ok) {
+              const valData = await valRes.json();
+              const nameMap: Record<string, string> = {};
+              (valData.items || []).forEach((item: any) => {
+                if (item.Value) nameMap[item.Value] = item.Description || item.Value;
+              });
+              setCompanyNames(nameMap);
+            }
+          }
+        }
+      } catch {
+        // company names unavailable — codes will show as-is
+      }
     } catch {
       // silently ignore — inputs fall back to free-text
     }
@@ -1886,7 +1913,9 @@ const AccountAnalysis: React.FC = () => {
                 allowClear
                 showSearch
               >
-                {segmentValues.companies.map((c) => <Option key={c} value={c}>{c}</Option>)}
+                {segmentValues.companies.map((c) => (
+                  <Option key={c} value={c}>{companyNames[c] ? `${c} - ${companyNames[c]}` : c}</Option>
+                ))}
               </Select>
             </Col>
             <Col xs={12} sm={8} md={3}>
