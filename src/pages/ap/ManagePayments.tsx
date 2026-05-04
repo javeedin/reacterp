@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import dayjs from 'dayjs';
+import * as XLSX from 'xlsx';
 import {
   Layout,
   Card,
@@ -2687,6 +2688,47 @@ const ManagePayments: React.FC = () => {
     onChange: (keys: React.Key[]) => setSelectedRowKeys(keys),
   };
 
+  const exportToExcel = () => {
+    const rows = (selectedRowKeys.length > 0
+      ? payments.filter(p => selectedRowKeys.includes(p.key))
+      : payments
+    ).map(p => ({
+      'Payment #':           p.paymentNumber,
+      'Payee':               p.payee,
+      'Payment Date':        p.paymentDate,
+      'Amount':              p.paymentAmount,
+      'Currency':            p.paymentCurrency,
+      'Status':              p.paymentStatus,
+      'Accounting Status':   p.accountingStatus,
+      'Business Unit':       p.businessUnit,
+      'Payment Method':      p.paymentMethod,
+      'Bank Account':        p.disbursementBankAccount,
+      'Maturity Date':       p.maturityDate || '',
+      'Void Date':           p.voidDate || '',
+      'Clearing Date':       p.clearingDate || '',
+      'Supplier #':          p.supplierNumber,
+      'Payee Site':          p.payeeSite,
+      'Document Category':   p.documentCategory,
+      'Voucher #':           p.voucherNumber || '',
+      'Accounting Date':     p.accountingDate,
+      'Description':         p.paymentDescription,
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Payments');
+
+    // Auto-fit column widths
+    const colWidths = Object.keys(rows[0] || {}).map(key => ({
+      wch: Math.max(key.length, ...rows.map(r => String((r as any)[key] ?? '').length)) + 2,
+    }));
+    ws['!cols'] = colWidths;
+
+    const filename = `Payments_${dayjs().format('YYYYMMDD_HHmm')}.xlsx`;
+    XLSX.writeFile(wb, filename);
+    message.success(`Exported ${rows.length} payment(s) to ${filename}`);
+  };
+
   // Build tab items
   const tabItems = [
     {
@@ -2923,9 +2965,14 @@ const ManagePayments: React.FC = () => {
                 <Tooltip title="Add Attachment">
                   <Button size="small" icon={<PaperClipOutlined />} />
                 </Tooltip>
-                <Tooltip title="Export">
-                  <Button size="small" icon={<ExportOutlined />} />
-                </Tooltip>
+                <Button
+                  size="small"
+                  icon={<DownloadOutlined />}
+                  onClick={exportToExcel}
+                  disabled={payments.length === 0}
+                >
+                  Export to Excel
+                </Button>
                 <Button size="small" icon={<ScissorOutlined />}>
                   Detach
                 </Button>
