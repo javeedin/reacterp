@@ -217,6 +217,18 @@ const parsePeriodToDate = (period: string): Date => {
   return new Date();
 };
 
+const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+const getPreviousPeriod = (period: string): string => {
+  const parts = period.split('-');
+  if (parts.length !== 2) return period;
+  const monthIdx = MONTH_NAMES.indexOf(parts[0]);
+  if (monthIdx === -1) return period;
+  const year = parseInt(parts[1], 10);
+  if (monthIdx === 0) return `Dec-${String(year - 1).padStart(2, '0')}`;
+  return `${MONTH_NAMES[monthIdx - 1]}-${parts[1]}`;
+};
+
 const AccountAnalysis: React.FC = () => {
   // State
   const [activeTabKey, setActiveTabKey] = useState('search');
@@ -697,7 +709,10 @@ const AccountAnalysis: React.FC = () => {
     });
   };
 
-  // Fetch opening + closing balance rows from the trial balance API
+  // Fetch opening + closing balance rows from the trial balance API.
+  // If the requested period has no data (account had no activity), walk back up to
+  // 24 months to find the most recent period with a balance and use that as the
+  // carried-forward opening/closing for the requested period.
   const fetchBalanceRows = async (
     account: string,
     company: string,
@@ -705,17 +720,27 @@ const AccountAnalysis: React.FC = () => {
   ): Promise<{ opening: JournalLineSegment | null; closing: JournalLineSegment | null }> => {
     const none = { opening: null, closing: null };
     try {
-      const params = new URLSearchParams();
-      params.append('ledger_name', selectedLedger);
-      params.append('period_name', period);
-      params.append('account', account);
-      if (company) params.append('company', company);
-      const url = `${API_BASE_URL}/rr-trialbalance/standard?${params.toString()}`;
-      const resp = await fetch(url);
-      if (!resp.ok) return none;
-      const data = await resp.json();
-      const allItems: any[] = data.items || [];
-      const items = allItems.filter((i: any) => String(i.account) === String(account));
+      let tryPeriod = period;
+      let allItems: any[] = [];
+
+      for (let attempt = 0; attempt < 24; attempt++) {
+        const params = new URLSearchParams();
+        params.append('ledger_name', selectedLedger);
+        params.append('period_name', tryPeriod);
+        params.append('account', account);
+        if (company) params.append('company', company);
+        const url = `${API_BASE_URL}/rr-trialbalance/standard?${params.toString()}`;
+        const resp = await fetch(url);
+        if (resp.ok) {
+          const data = await resp.json();
+          allItems = (data.items || []).filter((i: any) => String(i.account) === String(account));
+        }
+        if (allItems.length > 0) break;
+        // No data for this period — try one month earlier
+        tryPeriod = getPreviousPeriod(tryPeriod);
+      }
+
+      const items = allItems;
       if (items.length === 0) return none;
 
       const accountType: string = items[0].account_type || '';
