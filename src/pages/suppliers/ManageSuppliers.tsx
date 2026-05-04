@@ -1137,10 +1137,6 @@ const ManageSuppliers: React.FC = () => {
                         filterOption={(input, option) =>
                           String(option?.value ?? '').toLowerCase().includes(input.toLowerCase())
                         }
-                        onChange={() => {
-                          // Re-run LOV search with new BU if LOV is open
-                          if (lovVisible) fetchLovResults(lovSearch);
-                        }}
                       >
                         {businessUnits.map(bu => (
                           <Option key={bu} value={bu}>{bu}</Option>
