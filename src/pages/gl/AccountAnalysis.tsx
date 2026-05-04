@@ -1069,10 +1069,12 @@ const AccountAnalysis: React.FC = () => {
     const headerFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC74634' } };
     const filterLabelFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0D6' } };
     const columnHeaderFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3D3D3D' } };
+    const accHeaderFill: ExcelJS.Fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD6E4FF' } }; // light blue
+    const entHeaderFill: ExcelJS.Fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9F7BE' } }; // light green
     const totalFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F0F0' } };
     const white = { argb: 'FFFFFFFF' };
     const numFmt = '#,##0.00';
-    const COLS = 13; // number of data columns
+    const COLS = 15; // 8 descriptive + 3 Accounted + 3 Entered + 1 JE Header
 
     const mergeFull = (row: number) => ws.mergeCells(row, 1, row, COLS);
 
@@ -1115,13 +1117,40 @@ const AccountAnalysis: React.FC = () => {
     // blank separator row
     rowIdx++;
 
+    // ── Group header row (Accounted / Entered bands) ───────────────────
+    const grpRow = ws.getRow(rowIdx);
+    grpRow.height = 16;
+    // columns 1-8: descriptive — leave blank
+    for (let c = 1; c <= 8; c++) ws.getCell(rowIdx, c).fill = columnHeaderFill;
+    // columns 9-11: Accounted
+    ws.mergeCells(rowIdx, 9, rowIdx, 11);
+    const accGrpCell = ws.getCell(rowIdx, 9);
+    accGrpCell.value = 'Accounted';
+    accGrpCell.font = { bold: true, size: 10, color: { argb: 'FF1677FF' } };
+    accGrpCell.fill = accHeaderFill;
+    accGrpCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    accGrpCell.border = { left: { style: 'medium', color: { argb: 'FF888888' } }, right: { style: 'medium', color: { argb: 'FF888888' } } };
+    // columns 12-14: Entered
+    ws.mergeCells(rowIdx, 12, rowIdx, 14);
+    const entGrpCell = ws.getCell(rowIdx, 12);
+    entGrpCell.value = 'Entered';
+    entGrpCell.font = { bold: true, size: 10, color: { argb: 'FF52C41A' } };
+    entGrpCell.fill = entHeaderFill;
+    entGrpCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    entGrpCell.border = { left: { style: 'medium', color: { argb: 'FF888888' } }, right: { style: 'medium', color: { argb: 'FF888888' } } };
+    // column 15: JE Header — blank
+    ws.getCell(rowIdx, 15).fill = columnHeaderFill;
+    rowIdx++;
+
     // ── Column headers ─────────────────────────────────────────────────
     const headers = [
       'Account Combination', 'Account Description', 'Line Description',
       'Period', 'Batch / Journal', 'Source', 'Category', 'Currency',
-      'Entered Dr', 'Entered Cr', 'Accounted Dr', 'Accounted Cr', 'JE Header ID',
+      'Acc Dr', 'Acc Cr', 'Acc Balance',
+      'Ent Dr', 'Ent Cr', 'Ent Balance',
+      'JE Header ID',
     ];
-    const colWidths = [30, 28, 32, 12, 30, 14, 16, 10, 16, 16, 16, 16, 14];
+    const colWidths = [30, 28, 32, 12, 30, 14, 16, 10, 16, 16, 16, 16, 16, 16, 14];
 
     const hRow = ws.getRow(rowIdx);
     hRow.height = 18;
@@ -1129,16 +1158,27 @@ const AccountAnalysis: React.FC = () => {
       const cell = ws.getCell(rowIdx, i + 1);
       cell.value = h;
       cell.font = { bold: true, size: 10, color: white };
-      cell.fill = columnHeaderFill;
-      cell.alignment = { horizontal: i >= 8 && i <= 11 ? 'right' : 'left', vertical: 'middle', indent: 1 };
+      const isAcc = i >= 8 && i <= 10;
+      const isEnt = i >= 11 && i <= 13;
+      cell.fill = isAcc ? { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A5FCC' } }
+                : isEnt ? { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF389E0D' } }
+                : columnHeaderFill;
+      cell.alignment = { horizontal: i >= 8 && i <= 13 ? 'right' : 'left', vertical: 'middle', indent: 1 };
       cell.border = { bottom: { style: 'thin', color: { argb: 'FF888888' } } };
+      if (i === 8 || i === 11) cell.border = { ...cell.border, left: { style: 'medium', color: { argb: 'FF888888' } } };
+      if (i === 10 || i === 13) cell.border = { ...cell.border, right: { style: 'medium', color: { argb: 'FF888888' } } };
       ws.getColumn(i + 1).width = colWidths[i];
     });
     rowIdx++;
 
     // ── Data rows ─────────────────────────────────────────────────────
     const altFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F9' } };
+    let accRunning = 0;
+    let entRunning = 0;
     data.forEach((r, idx) => {
+      accRunning += (r.accountedDr || 0) - (r.accountedCr || 0);
+      entRunning += (r.enteredDr   || 0) - (r.enteredCr   || 0);
+
       const dr = ws.getRow(rowIdx);
       dr.height = 15;
       const isAlt = idx % 2 === 1;
@@ -1151,10 +1191,12 @@ const AccountAnalysis: React.FC = () => {
         r.userJeSourceName || '',
         r.userJeCategoryName || '',
         r.currencyCode || '',
-        r.enteredDr || 0,
-        r.enteredCr || 0,
         r.accountedDr || 0,
         r.accountedCr || 0,
+        accRunning,
+        r.enteredDr || 0,
+        r.enteredCr || 0,
+        entRunning,
         r.jeHeaderId,
       ];
       vals.forEach((v, i) => {
@@ -1162,8 +1204,16 @@ const AccountAnalysis: React.FC = () => {
         cell.value = v;
         cell.font = { size: 10 };
         if (isAlt) cell.fill = altFill;
-        cell.alignment = { horizontal: i >= 8 && i <= 11 ? 'right' : 'left', vertical: 'middle', indent: 1 };
-        if (i >= 8 && i <= 11) cell.numFmt = numFmt;
+        const isNumeric = i >= 8 && i <= 13;
+        cell.alignment = { horizontal: isNumeric ? 'right' : 'left', vertical: 'middle', indent: 1 };
+        if (isNumeric) cell.numFmt = numFmt;
+        if (i === 8 || i === 11) cell.border = { left: { style: 'medium', color: { argb: 'FF888888' } } };
+        if (i === 10 || i === 13) cell.border = { right: { style: 'medium', color: { argb: 'FF888888' } } };
+        // colour running balance cells
+        if (i === 10 || i === 13) {
+          const bal = i === 10 ? accRunning : entRunning;
+          cell.font = { size: 10, bold: true, color: { argb: bal < 0 ? 'FFC41C00' : 'FF237804' } };
+        }
       });
       rowIdx++;
     });
@@ -1179,17 +1229,23 @@ const AccountAnalysis: React.FC = () => {
     tLabel.fill = totalFill;
     tLabel.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
 
-    const totVals = [totals.enteredDr, totals.enteredCr, totals.accountedDr, totals.accountedCr];
+    // Acc Dr, Acc Cr, Acc Balance(final), Ent Dr, Ent Cr, Ent Balance(final)
+    const totVals: (number | string)[] = [
+      totals.accountedDr, totals.accountedCr, accRunning,
+      totals.enteredDr,   totals.enteredCr,   entRunning,
+    ];
     totVals.forEach((v, i) => {
-      const cell = ws.getCell(rowIdx, 9 + i);
+      const col = 9 + i;
+      const cell = ws.getCell(rowIdx, col);
       cell.value = v;
       cell.font = { bold: true, size: 10 };
       cell.fill = totalFill;
       cell.numFmt = numFmt;
       cell.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
+      if (col === 9 || col === 12) cell.border = { left: { style: 'medium', color: { argb: 'FF888888' } } };
+      if (col === 11 || col === 14) cell.border = { right: { style: 'medium', color: { argb: 'FF888888' } } };
     });
-    // blank last col
-    ws.getCell(rowIdx, 13).fill = totalFill;
+    ws.getCell(rowIdx, 15).fill = totalFill;
 
     // ── Freeze panes & auto-filter ─────────────────────────────────────
     const dataStart = rowIdx - data.length; // first data row
