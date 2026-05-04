@@ -2104,6 +2104,30 @@ const AccountAnalysis: React.FC = () => {
                 record.isOpeningBalance ? 'opening-balance-row' : ''
               }
               locale={{ emptyText: <Empty description="Click Search to load data" /> }}
+              summary={() =>
+                searchData.length > 0 ? (
+                  <Table.Summary fixed>
+                    <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
+                      <Table.Summary.Cell index={0} colSpan={9}>
+                        <Text strong style={{ fontSize: 13 }}>Totals</Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={9} align="right">
+                        <Text strong style={{ fontSize: 13, color: REDWOOD.success }}>{formatNumber(totals.enteredDr)}</Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={10} align="right">
+                        <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>{formatNumber(totals.enteredCr)}</Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={11} align="right">
+                        <Text strong style={{ fontSize: 13, color: REDWOOD.success }}>{formatNumber(totals.accountedDr)}</Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={12} align="right">
+                        <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>{formatNumber(totals.accountedCr)}</Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={13} />
+                    </Table.Summary.Row>
+                  </Table.Summary>
+                ) : null
+              }
             />
           </Spin>
 
