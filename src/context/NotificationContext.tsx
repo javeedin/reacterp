@@ -78,22 +78,16 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       const data = await res.json();
       const items: any[] = data.items || [];
 
-      // Client-side: keep only those with a maturity date set
-      const withMaturity = items.filter(p => !!p.MaturityDate);
-
-      // Narrow to ±3 days window
-      const relevant = withMaturity.filter(p => {
-        const diff = dayjs(p.MaturityDate).startOf('day').diff(today, 'day');
-        return diff >= -3 && diff <= 3;
-      });
+      // All returned items already have MaturityDate (server filtered by only_pdc=Y)
+      const relevant = items.filter(p => !!p.MaturityDate);
 
       setLastApiResult(
-        `Total: ${items.length} | With MaturityDate: ${withMaturity.length} | Within ±3 days: ${relevant.length} | Today: ${today.format('YYYY-MM-DD')}` +
-        (withMaturity.length > 0
-          ? `\nMaturity dates: ${withMaturity.map(p => `${p.PaymentNumber} → ${p.MaturityDate}`).join(', ')}`
+        `Total: ${items.length} | PDC payments: ${relevant.length} | Today: ${today.format('YYYY-MM-DD')}` +
+        (relevant.length > 0
+          ? `\nMaturity dates: ${relevant.map(p => `${p.PaymentNumber} → ${p.MaturityDate}`).join(', ')}`
           : '')
       );
-      console.log('[PDC Check] Total:', items.length, '| With MaturityDate:', withMaturity.length, '| Relevant:', relevant.length);
+      console.log('[PDC Check] Total:', items.length, '| PDC payments shown:', relevant.length);
 
       relevant.forEach(p => {
         const matDate = dayjs(p.MaturityDate).startOf('day');
@@ -110,8 +104,11 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         } else if (diffDays === 0) {
           details = `PDC matures TODAY (${matDate.format('DD-MMM-YYYY')}). Payee: ${payee}, ${amt}`;
           severity = 'warning';
-        } else {
+        } else if (diffDays <= 3) {
           details = `PDC matures in ${diffDays} day(s) on ${matDate.format('DD-MMM-YYYY')}. Payee: ${payee}, ${amt}`;
+          severity = 'warning';
+        } else {
+          details = `PDC matures on ${matDate.format('DD-MMM-YYYY')} (${diffDays} days). Payee: ${payee}, ${amt}`;
           severity = 'info';
         }
 
