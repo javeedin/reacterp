@@ -418,6 +418,13 @@ const insertInvoiceToApex = async (
   verbose = true
 ): Promise<{ success: boolean; error?: string; response?: any; payload?: any }> => {
   try {
+    // Guard: InvoiceId is the PK — skip if missing to avoid ORA-01400
+    if (!invoice.InvoiceId) {
+      const msg = `Invoice ${invoice.InvoiceNumber}: InvoiceId is missing, skipping`;
+      log?.('warning', msg);
+      return { success: false, error: msg };
+    }
+
     // Send as a flat object — the PL/SQL handler reads $.InvoiceId etc. directly.
     // Wrapping in {"items":[...]} causes JSON_VALUE to return NULL → ORA-01400.
     const payload = mapToApexInvoicePayload(invoice);
@@ -439,12 +446,12 @@ const insertInvoiceToApex = async (
       log?.('success', JSON.stringify(data, null, 2));
     }
 
-    // Check if successCount > 0 for bulk endpoint
-    const isSuccess = data.status === 'SUCCESS' && (data.successCount > 0 || data.success === true);
+    // Single-invoice endpoint returns {"status":"SUCCESS","invoiceId":...} — no successCount.
+    const isSuccess = data.status === 'SUCCESS';
 
     return {
       success: isSuccess,
-      error: isSuccess ? undefined : (data.message || data.error || 'No invoices inserted'),
+      error: isSuccess ? undefined : (data.message || data.error || 'Insert failed'),
       response: data,
       payload: payload,
     };
