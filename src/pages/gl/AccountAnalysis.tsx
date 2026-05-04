@@ -1803,6 +1803,7 @@ const AccountAnalysis: React.FC = () => {
     // Border helpers for group separators
     const groupBorderLeft  = { borderLeft:  '2px solid #888' };
     const groupBorderRight = { borderRight: '2px solid #888' };
+    const labelStyle: React.CSSProperties = { fontSize: 11, color: REDWOOD.neutral600, marginBottom: 3, fontWeight: 500 };
     const headerStyle = (extra?: React.CSSProperties) => ({
       onHeaderCell: () => ({ style: extra }),
       onCell:       () => ({ style: extra }),
@@ -1955,280 +1956,285 @@ const AccountAnalysis: React.FC = () => {
     ];
 
     return (
-      <div style={{ padding: 16 }}>
-        {/* Search Filters */}
-        <Card
-          style={{ marginBottom: 16, borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
-          bodyStyle={{ padding: '14px 16px 10px' }}
-        >
-          {/* Row 1: Ledger | Periods | Acctg Date From | Acctg Date To | Buttons */}
-          <Row gutter={[12, 10]} align="bottom">
-            <Col xs={24} md={5}>
-              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Ledger</Text>
-              <Select
-                value={selectedLedger}
-                onChange={setSelectedLedger}
-                style={{ width: '100%' }}
+      <div style={{ padding: '12px 16px 16px' }}>
+
+        {/* ── Search Panel ── */}
+        <div style={{
+          background: REDWOOD.surface,
+          borderRadius: 10,
+          border: `1px solid ${REDWOOD.neutral200}`,
+          marginBottom: 14,
+          overflow: 'hidden',
+          boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+        }}>
+          {/* Panel header */}
+          <div style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            padding: '9px 16px',
+            background: `linear-gradient(90deg, ${REDWOOD.primary}12 0%, transparent 100%)`,
+            borderBottom: `1px solid ${REDWOOD.neutral200}`,
+            borderLeft: `3px solid ${REDWOOD.primary}`,
+          }}>
+            <Space size={8}>
+              <FilterOutlined style={{ color: REDWOOD.primary, fontSize: 13 }} />
+              <Text strong style={{ fontSize: 12, color: REDWOOD.neutral900 }}>Search Parameters</Text>
+            </Space>
+            <Space size={6}>
+              <Button
+                type="primary"
+                icon={<SearchOutlined />}
+                onClick={handleSearch}
+                loading={loading}
                 size="small"
+                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary, fontSize: 11 }}
               >
-                {ledgerOptions.map((l) => <Option key={l} value={l}>{l}</Option>)}
-              </Select>
-            </Col>
-            <Col xs={24} md={8}>
-              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Periods (Multiple)</Text>
-              <Select
-                mode="multiple"
-                value={selectedPeriods}
-                onChange={setSelectedPeriods}
-                style={{ width: '100%' }}
-                size="small"
-                maxTagCount={4}
-                placeholder={periodsLoading ? 'Loading…' : 'Select periods'}
-                loading={periodsLoading}
-                notFoundContent={periodsLoading ? <Spin size="small" indicator={<LoadingOutlined />} /> : 'No periods'}
-                disabled={periodsLoading}
-                allowClear
-              >
-                {availablePeriods.map((p) => <Option key={p} value={p}>{p}</Option>)}
-              </Select>
-            </Col>
-            <Col xs={12} md={3}>
-              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Acctg Date From</Text>
-              <DatePicker
-                value={fromDate}
-                onChange={setFromDate}
-                style={{ width: '100%' }}
-                size="small"
-                format="DD-MMM-YYYY"
-                placeholder="From"
-                allowClear
-              />
-            </Col>
-            <Col xs={12} md={3}>
-              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Acctg Date To</Text>
-              <DatePicker
-                value={toDate}
-                onChange={setToDate}
-                style={{ width: '100%' }}
-                size="small"
-                format="DD-MMM-YYYY"
-                placeholder="To"
-                allowClear
-                disabledDate={(d) => !!fromDate && d.isBefore(fromDate, 'day')}
-              />
-            </Col>
-            <Col xs={24} md={5} style={{ display: 'flex', alignItems: 'flex-end' }}>
-              <Space size={6}>
-                <Button
-                  type="primary"
-                  icon={<SearchOutlined />}
-                  onClick={handleSearch}
-                  loading={loading}
-                  size="small"
-                  style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
-                >
-                  Search
-                </Button>
-                <Button icon={<ReloadOutlined />} size="small" onClick={handleReset}>Reset</Button>
+                Search
+              </Button>
+              <Button icon={<ReloadOutlined />} size="small" onClick={handleReset} style={{ fontSize: 11 }}>Reset</Button>
+              <Tooltip title="Log API URL">
                 <Button
                   icon={<BugOutlined />}
                   size="small"
                   onClick={showSearchApiUrl}
-                  style={{ background: '#f0f5ff', borderColor: '#adc6ff', color: '#1d39c4' }}
-                >
-                  Log
-                </Button>
-              </Space>
-            </Col>
-          </Row>
-
-          {/* Divider for segment section */}
-          <div style={{ margin: '12px 0 8px', borderTop: `1px solid ${REDWOOD.neutral200}`, paddingTop: 8 }}>
-            <Text style={{ fontSize: 10, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>
-              Account Combination Segments
-            </Text>
+                  style={{ background: '#f0f5ff', borderColor: '#adc6ff', color: '#1d39c4', fontSize: 11 }}
+                />
+              </Tooltip>
+            </Space>
           </div>
 
-          {/* Row 2: All account combination segments — Select LOVs */}
-          <Row gutter={[10, 8]} align="bottom">
-            <Col xs={12} sm={8} md={3}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3 }}>
-                <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Company</Text>
-                <Tooltip title={`API: ${COMPANY_LOV_URL}`}>
-                  <ApiOutlined
-                    style={{ fontSize: 11, color: REDWOOD.info, cursor: 'pointer' }}
-                    onClick={() => {
-                      navigator.clipboard.writeText(COMPANY_LOV_URL);
-                      message.info('Company LOV URL copied to clipboard');
-                    }}
-                  />
-                </Tooltip>
-              </div>
-              <Select
-                value={selectedCompany || undefined}
-                onChange={(v) => setSelectedCompany(v ?? '')}
-                style={{ width: '100%' }}
-                size="small"
-                placeholder="All"
-                allowClear
-                showSearch
-                optionFilterProp="label"
-              >
-                {segmentValues.companies.map((c) => (
-                  <Option key={c} value={c} label={companyNames[c] ? `${c} - ${companyNames[c]}` : c}>
-                    {companyNames[c] ? `${c} - ${companyNames[c]}` : c}
-                  </Option>
-                ))}
-              </Select>
-            </Col>
-            <Col xs={12} sm={8} md={3}>
-              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>LOB</Text>
-              <Select
-                value={lobFilter || undefined}
-                onChange={(v) => setLobFilter(v ?? '')}
-                style={{ width: '100%' }}
-                size="small"
-                placeholder="Any"
-                allowClear
-                showSearch
-              >
-                {segmentValues.lobs.map((v) => <Option key={v} value={v}>{v}</Option>)}
-              </Select>
-            </Col>
-            <Col xs={12} sm={8} md={3}>
-              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Department</Text>
-              <Select
-                value={departmentFilter || undefined}
-                onChange={(v) => setDepartmentFilter(v ?? '')}
-                style={{ width: '100%' }}
-                size="small"
-                placeholder="Any"
-                allowClear
-                showSearch
-              >
-                {segmentValues.departments.map((v) => <Option key={v} value={v}>{v}</Option>)}
-              </Select>
-            </Col>
-            <Col xs={12} sm={8} md={4}>
-              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Account</Text>
-              <Input.Search
-                allowClear
-                value={accountFilter}
-                onChange={(e) => { setAccountFilter(e.target.value); if (!e.target.value) setAccountFilterDesc(''); }}
-                style={{ width: '100%' }}
-                size="small"
-                placeholder="e.g. 1116100"
-                enterButton={<SearchOutlined />}
-                onSearch={openAccountLookup}
-              />
-              {accountFilterDesc && (
-                <Text style={{ fontSize: 10, color: REDWOOD.info, display: 'block', marginTop: 2 }}>
-                  {accountFilterDesc}
-                </Text>
-              )}
-            </Col>
-            <Col xs={12} sm={8} md={3}>
-              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Sub Account</Text>
-              <Select
-                value={subAccountFilter || undefined}
-                onChange={(v) => setSubAccountFilter(v ?? '')}
-                style={{ width: '100%' }}
-                size="small"
-                placeholder="Any"
-                allowClear
-                showSearch
-              >
-                {segmentValues.subAccounts.map((v) => <Option key={v} value={v}>{v}</Option>)}
-              </Select>
-            </Col>
-            <Col xs={12} sm={8} md={3}>
-              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Analysis</Text>
-              <Select
-                value={analysisFilter || undefined}
-                onChange={(v) => setAnalysisFilter(v ?? '')}
-                style={{ width: '100%' }}
-                size="small"
-                placeholder="Any"
-                allowClear
-                showSearch
-              >
-                {segmentValues.analyses.map((v) => <Option key={v} value={v}>{v}</Option>)}
-              </Select>
-            </Col>
-            <Col xs={12} sm={8} md={3}>
-              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Intercompany</Text>
-              <Select
-                value={intercompanyFilter || undefined}
-                onChange={(v) => setIntercompanyFilter(v ?? '')}
-                style={{ width: '100%' }}
-                size="small"
-                placeholder="Any"
-                allowClear
-                showSearch
-              >
-                {segmentValues.intercompanies.map((v) => <Option key={v} value={v}>{v}</Option>)}
-              </Select>
-            </Col>
-            <Col xs={12} sm={8} md={2}>
-              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Source</Text>
-              <Select
-                value={jeSourceFilter || undefined}
-                onChange={(v) => setJeSourceFilter(v ?? '')}
-                style={{ width: '100%' }}
-                size="small"
-                placeholder="Any"
-                allowClear
-                showSearch
-              >
-                {segmentValues.sources.map((v) => <Option key={v} value={v}>{v}</Option>)}
-              </Select>
-            </Col>
-            <Col xs={12} sm={8} md={2}>
-              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 3 }}>Category</Text>
-              <Select
-                value={jeCategoryFilter || undefined}
-                onChange={(v) => setJeCategoryFilter(v ?? '')}
-                style={{ width: '100%' }}
-                size="small"
-                placeholder="Any"
-                allowClear
-                showSearch
-              >
-                {segmentValues.categories.map((v) => <Option key={v} value={v}>{v}</Option>)}
-              </Select>
-            </Col>
-          </Row>
-        </Card>
+          <div style={{ padding: '12px 16px 10px' }}>
+            {/* Row 1: Ledger | Periods | Date range */}
+            <Row gutter={[12, 8]} align="bottom">
+              <Col xs={24} md={5}>
+                <div style={labelStyle}>Ledger</div>
+                <Select
+                  value={selectedLedger}
+                  onChange={setSelectedLedger}
+                  style={{ width: '100%' }}
+                  size="small"
+                >
+                  {ledgerOptions.map((l) => <Option key={l} value={l}>{l}</Option>)}
+                </Select>
+              </Col>
+              <Col xs={24} md={8}>
+                <div style={labelStyle}>Periods</div>
+                <Select
+                  mode="multiple"
+                  value={selectedPeriods}
+                  onChange={setSelectedPeriods}
+                  style={{ width: '100%' }}
+                  size="small"
+                  maxTagCount={4}
+                  placeholder={periodsLoading ? 'Loading…' : 'Select periods'}
+                  loading={periodsLoading}
+                  notFoundContent={periodsLoading ? <Spin size="small" indicator={<LoadingOutlined />} /> : 'No periods'}
+                  disabled={periodsLoading}
+                  allowClear
+                >
+                  {availablePeriods.map((p) => <Option key={p} value={p}>{p}</Option>)}
+                </Select>
+              </Col>
+              <Col xs={12} md={3}>
+                <div style={labelStyle}>Date From</div>
+                <DatePicker
+                  value={fromDate}
+                  onChange={setFromDate}
+                  style={{ width: '100%' }}
+                  size="small"
+                  format="DD-MMM-YYYY"
+                  placeholder="From"
+                  allowClear
+                />
+              </Col>
+              <Col xs={12} md={3}>
+                <div style={labelStyle}>Date To</div>
+                <DatePicker
+                  value={toDate}
+                  onChange={setToDate}
+                  style={{ width: '100%' }}
+                  size="small"
+                  format="DD-MMM-YYYY"
+                  placeholder="To"
+                  allowClear
+                  disabledDate={(d) => !!fromDate && d.isBefore(fromDate, 'day')}
+                />
+              </Col>
+            </Row>
 
-        {/* Results Table */}
-        <Card style={{ borderRadius: 8 }} bodyStyle={{ padding: 0 }}>
-          <div
-            style={{
-              padding: '10px 16px',
+            {/* Account Combination Segments */}
+            <div style={{
+              margin: '10px 0 8px',
+              padding: '6px 10px',
               background: REDWOOD.neutral100,
-              borderBottom: `1px solid ${REDWOOD.neutral200}`,
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-            }}
-          >
-            <Text strong style={{ fontSize: 12 }}>
-              Journal Lines ({totalCount} records)
-            </Text>
-            <Space size="small">
+              borderRadius: 6,
+              border: `1px solid ${REDWOOD.neutral200}`,
+            }}>
+              <Text style={{ fontSize: 10, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 700 }}>
+                Account Segments
+              </Text>
+            </div>
+
+            <Row gutter={[10, 8]} align="bottom">
+              <Col xs={12} sm={8} md={3}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3 }}>
+                  <span style={labelStyle}>Company</span>
+                  <Tooltip title={`API: ${COMPANY_LOV_URL}`}>
+                    <ApiOutlined
+                      style={{ fontSize: 10, color: REDWOOD.info, cursor: 'pointer' }}
+                      onClick={() => { navigator.clipboard.writeText(COMPANY_LOV_URL); message.info('Copied'); }}
+                    />
+                  </Tooltip>
+                </div>
+                <Select
+                  value={selectedCompany || undefined}
+                  onChange={(v) => setSelectedCompany(v ?? '')}
+                  style={{ width: '100%' }}
+                  size="small"
+                  placeholder="All"
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                >
+                  {segmentValues.companies.map((c) => (
+                    <Option key={c} value={c} label={companyNames[c] ? `${c} - ${companyNames[c]}` : c}>
+                      {companyNames[c] ? `${c} - ${companyNames[c]}` : c}
+                    </Option>
+                  ))}
+                </Select>
+              </Col>
+              <Col xs={12} sm={8} md={3}>
+                <div style={labelStyle}>LOB</div>
+                <Select value={lobFilter || undefined} onChange={(v) => setLobFilter(v ?? '')} style={{ width: '100%' }} size="small" placeholder="Any" allowClear showSearch>
+                  {segmentValues.lobs.map((v) => <Option key={v} value={v}>{v}</Option>)}
+                </Select>
+              </Col>
+              <Col xs={12} sm={8} md={3}>
+                <div style={labelStyle}>Department</div>
+                <Select value={departmentFilter || undefined} onChange={(v) => setDepartmentFilter(v ?? '')} style={{ width: '100%' }} size="small" placeholder="Any" allowClear showSearch>
+                  {segmentValues.departments.map((v) => <Option key={v} value={v}>{v}</Option>)}
+                </Select>
+              </Col>
+              <Col xs={12} sm={8} md={4}>
+                <div style={labelStyle}>Account</div>
+                <Input.Search
+                  allowClear
+                  value={accountFilter}
+                  onChange={(e) => { setAccountFilter(e.target.value); if (!e.target.value) setAccountFilterDesc(''); }}
+                  style={{ width: '100%' }}
+                  size="small"
+                  placeholder="e.g. 1116100"
+                  enterButton={<SearchOutlined />}
+                  onSearch={openAccountLookup}
+                />
+                {accountFilterDesc && (
+                  <Text style={{ fontSize: 10, color: REDWOOD.info, display: 'block', marginTop: 2 }}>{accountFilterDesc}</Text>
+                )}
+              </Col>
+              <Col xs={12} sm={8} md={3}>
+                <div style={labelStyle}>Sub Account</div>
+                <Select value={subAccountFilter || undefined} onChange={(v) => setSubAccountFilter(v ?? '')} style={{ width: '100%' }} size="small" placeholder="Any" allowClear showSearch>
+                  {segmentValues.subAccounts.map((v) => <Option key={v} value={v}>{v}</Option>)}
+                </Select>
+              </Col>
+              <Col xs={12} sm={8} md={3}>
+                <div style={labelStyle}>Analysis</div>
+                <Select value={analysisFilter || undefined} onChange={(v) => setAnalysisFilter(v ?? '')} style={{ width: '100%' }} size="small" placeholder="Any" allowClear showSearch>
+                  {segmentValues.analyses.map((v) => <Option key={v} value={v}>{v}</Option>)}
+                </Select>
+              </Col>
+              <Col xs={12} sm={8} md={3}>
+                <div style={labelStyle}>Intercompany</div>
+                <Select value={intercompanyFilter || undefined} onChange={(v) => setIntercompanyFilter(v ?? '')} style={{ width: '100%' }} size="small" placeholder="Any" allowClear showSearch>
+                  {segmentValues.intercompanies.map((v) => <Option key={v} value={v}>{v}</Option>)}
+                </Select>
+              </Col>
+              <Col xs={12} sm={8} md={2}>
+                <div style={labelStyle}>Source</div>
+                <Select value={jeSourceFilter || undefined} onChange={(v) => setJeSourceFilter(v ?? '')} style={{ width: '100%' }} size="small" placeholder="Any" allowClear showSearch>
+                  {segmentValues.sources.map((v) => <Option key={v} value={v}>{v}</Option>)}
+                </Select>
+              </Col>
+              <Col xs={12} sm={8} md={2}>
+                <div style={labelStyle}>Category</div>
+                <Select value={jeCategoryFilter || undefined} onChange={(v) => setJeCategoryFilter(v ?? '')} style={{ width: '100%' }} size="small" placeholder="Any" allowClear showSearch>
+                  {segmentValues.categories.map((v) => <Option key={v} value={v}>{v}</Option>)}
+                </Select>
+              </Col>
+            </Row>
+          </div>
+        </div>
+
+        {/* ── Summary Bar (shown when results exist) ── */}
+        {searchData.length > 0 && (() => {
+          const activeTxn = searchData.filter(r => !r.isOpeningBalance && !r.isClosingBalance);
+          const totalDr = activeTxn.reduce((s, r) => s + (r.accountedDr || 0), 0);
+          const totalCr = activeTxn.reduce((s, r) => s + (r.accountedCr || 0), 0);
+          const net = totalDr - totalCr;
+          return (
+            <div style={{
+              display: 'flex', gap: 10, marginBottom: 10, flexWrap: 'wrap',
+            }}>
+              {[
+                { label: 'Records', value: activeTxn.length.toLocaleString(), color: REDWOOD.info, bg: '#e8f4fd' },
+                { label: 'Total Debit', value: formatNumber(totalDr), color: REDWOOD.success, bg: '#e8f5ee' },
+                { label: 'Total Credit', value: formatNumber(totalCr), color: REDWOOD.primary, bg: '#fdf0ee' },
+                { label: 'Net Balance', value: formatNumber(Math.abs(net)), color: net >= 0 ? REDWOOD.success : REDWOOD.primary, bg: net >= 0 ? '#e8f5ee' : '#fdf0ee', suffix: net >= 0 ? ' Dr' : ' Cr' },
+              ].map(({ label, value, color, bg, suffix }) => (
+                <div key={label} style={{
+                  flex: '1 1 130px', padding: '7px 14px', borderRadius: 8,
+                  background: bg, border: `1px solid ${color}30`,
+                  display: 'flex', flexDirection: 'column', gap: 2,
+                }}>
+                  <Text style={{ fontSize: 10, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</Text>
+                  <Text strong style={{ fontSize: 13, color, fontVariantNumeric: 'tabular-nums' }}>{value}{suffix ?? ''}</Text>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+
+        {/* ── Results Table ── */}
+        <div style={{
+          background: REDWOOD.surface,
+          borderRadius: 10,
+          border: `1px solid ${REDWOOD.neutral200}`,
+          overflow: 'hidden',
+          boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+        }}>
+          <div style={{
+            padding: '8px 14px',
+            borderBottom: `1px solid ${REDWOOD.neutral200}`,
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            background: `linear-gradient(90deg, ${REDWOOD.info}10 0%, transparent 100%)`,
+            borderLeft: `3px solid ${REDWOOD.info}`,
+          }}>
+            <Space size={8}>
+              <TableOutlined style={{ color: REDWOOD.info, fontSize: 13 }} />
+              <Text strong style={{ fontSize: 12, color: REDWOOD.neutral900 }}>
+                Journal Lines
+              </Text>
+              {searchData.length > 0 && (
+                <Tag color="blue" style={{ fontSize: 10, padding: '0 6px', lineHeight: '18px' }}>
+                  {totalCount.toLocaleString()} records
+                </Tag>
+              )}
+            </Space>
+            <Space size={6}>
               <Button
                 size="small"
                 icon={<PieChartOutlined />}
                 onClick={openAllAccountsPivot}
                 disabled={searchData.length === 0}
+                style={{ fontSize: 11 }}
               >
-                View Pivot for All Accounts
+                View Pivot
               </Button>
               <Button
                 size="small"
                 icon={<DownloadOutlined />}
                 disabled={searchData.length === 0}
                 onClick={() => exportToExcel(searchData, `GL_Account_Analysis_${selectedPeriods.join('_') || 'All_Periods'}`)}
+                style={{ fontSize: 11 }}
               >
                 Export
               </Button>
@@ -2366,7 +2372,7 @@ const AccountAnalysis: React.FC = () => {
               </div>
             </div>
           )}
-        </Card>
+        </div>
       </div>
     );
   };
@@ -3187,7 +3193,7 @@ const AccountAnalysis: React.FC = () => {
         {/* Breadcrumb Header */}
         <div
           style={{
-            padding: '12px 24px',
+            padding: '10px 24px',
             background: REDWOOD.surface,
             borderBottom: `1px solid ${REDWOOD.neutral200}`,
             display: 'flex',
@@ -3195,13 +3201,28 @@ const AccountAnalysis: React.FC = () => {
             alignItems: 'center',
           }}
         >
-          <Breadcrumb
-            items={[
-              { title: <Link to="/home"><HomeOutlined /> Home</Link> },
-              { title: <Link to="/gl">General Ledger</Link> },
-              { title: 'Account Analysis' },
-            ]}
-          />
+          <div>
+            <Breadcrumb
+              style={{ marginBottom: 2 }}
+              items={[
+                { title: <Link to="/home"><HomeOutlined /> Home</Link> },
+                { title: <Link to="/gl">General Ledger</Link> },
+                { title: 'Account Analysis' },
+              ]}
+            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
+              <FundOutlined style={{ color: REDWOOD.primary, fontSize: 16 }} />
+              <Text strong style={{ fontSize: 16, color: REDWOOD.neutral900 }}>Account Analysis</Text>
+              {selectedLedger && (
+                <Tag color="volcano" style={{ fontSize: 10 }}>{selectedLedger}</Tag>
+              )}
+              {selectedPeriods.length > 0 && (
+                <Tag color="blue" style={{ fontSize: 10 }}>
+                  {selectedPeriods.length === 1 ? selectedPeriods[0] : `${selectedPeriods.length} periods`}
+                </Tag>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Tabbed Content */}
