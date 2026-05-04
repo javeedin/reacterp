@@ -2164,35 +2164,6 @@ const AccountAnalysis: React.FC = () => {
           </div>
         </div>
 
-        {/* ── Summary Bar (shown when results exist) ── */}
-        {searchData.length > 0 && (() => {
-          const activeTxn = searchData.filter(r => !r.isOpeningBalance && !r.isClosingBalance);
-          const totalDr = activeTxn.reduce((s, r) => s + (r.accountedDr || 0), 0);
-          const totalCr = activeTxn.reduce((s, r) => s + (r.accountedCr || 0), 0);
-          const net = totalDr - totalCr;
-          return (
-            <div style={{
-              display: 'flex', gap: 10, marginBottom: 10, flexWrap: 'wrap',
-            }}>
-              {[
-                { label: 'Records', value: activeTxn.length.toLocaleString(), color: REDWOOD.info, bg: '#e8f4fd' },
-                { label: 'Total Debit', value: formatNumber(totalDr), color: REDWOOD.success, bg: '#e8f5ee' },
-                { label: 'Total Credit', value: formatNumber(totalCr), color: REDWOOD.primary, bg: '#fdf0ee' },
-                { label: 'Net Balance', value: formatNumber(Math.abs(net)), color: net >= 0 ? REDWOOD.success : REDWOOD.primary, bg: net >= 0 ? '#e8f5ee' : '#fdf0ee', suffix: net >= 0 ? ' Dr' : ' Cr' },
-              ].map(({ label, value, color, bg, suffix }) => (
-                <div key={label} style={{
-                  flex: '1 1 130px', padding: '7px 14px', borderRadius: 8,
-                  background: bg, border: `1px solid ${color}30`,
-                  display: 'flex', flexDirection: 'column', gap: 2,
-                }}>
-                  <Text style={{ fontSize: 10, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</Text>
-                  <Text strong style={{ fontSize: 13, color, fontVariantNumeric: 'tabular-nums' }}>{value}{suffix ?? ''}</Text>
-                </div>
-              ))}
-            </div>
-          );
-        })()}
-
         {/* ── Results Table ── */}
         <div style={{
           background: REDWOOD.surface,
