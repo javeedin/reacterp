@@ -50,6 +50,23 @@ body {
   color: #444 !important;
 }
 
+/* Account Analysis — Opening / Closing Balance row styles */
+.opening-balance-row td {
+  background: #fffbe6 !important;
+  border-top: 2px solid #D4A800 !important;
+  border-bottom: 1px solid #ffe58f !important;
+  font-weight: 600;
+}
+.opening-balance-row:hover td { background: #fff3cd !important; }
+
+.closing-balance-row td {
+  background: #f6ffed !important;
+  border-top: 2px solid #1D7B4D !important;
+  border-bottom: 2px solid #1D7B4D !important;
+  font-weight: 600;
+}
+.closing-balance-row:hover td { background: #d9f7be !important; }
+
 /* PC Transactions table row styles */
 .pc-row-refill td { background: #e6f4ff !important; }
 .pc-row-group  td { background: #f0f5ff !important; font-weight: 600; border-top: 1px solid #adc6ff !important; }

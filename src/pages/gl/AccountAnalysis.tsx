@@ -670,6 +670,7 @@ const AccountAnalysis: React.FC = () => {
         const { opening: openingRow, closing: closingRow } = await fetchBalanceRows(accountFilter, selectedCompany, sortedPeriods[0]);
         if (openingRow) finalItems.unshift(openingRow);
         newClosingRow = closingRow;
+        if (newClosingRow) finalItems.push(newClosingRow);
       }
 
       setClosingBalanceRow(newClosingRow);
@@ -1337,11 +1338,11 @@ const AccountAnalysis: React.FC = () => {
       fixed: 'left',
       render: (text: string, record: JournalLineSegment) =>
         record.isOpeningBalance ? (
-          <Text strong style={{ fontSize: 11, color: REDWOOD.warning }}>
+          <Text strong style={{ fontSize: 13, color: REDWOOD.warning }}>
             {record.jeLineDescription}
           </Text>
         ) : record.isClosingBalance ? (
-          <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>
+          <Text strong style={{ fontSize: 13, color: REDWOOD.success }}>
             {record.jeLineDescription}
           </Text>
         ) : (
@@ -1373,7 +1374,7 @@ const AccountAnalysis: React.FC = () => {
       ellipsis: true,
       render: (text: string, record: JournalLineSegment) => (
         <Tooltip title={text}>
-          <span style={{ fontSize: 11, fontWeight: (record.isOpeningBalance || record.isClosingBalance) ? 600 : undefined }}>
+          <span style={{ fontSize: (record.isOpeningBalance || record.isClosingBalance) ? 13 : 11, fontWeight: (record.isOpeningBalance || record.isClosingBalance) ? 600 : undefined }}>
             {text || '-'}
           </span>
         </Tooltip>
@@ -2094,70 +2095,30 @@ const AccountAnalysis: React.FC = () => {
                     {/* PTD Totals row */}
                     <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
                       <Table.Summary.Cell index={0} colSpan={9}>
-                        <Text strong style={{ fontSize: 11 }}>PTD Totals</Text>
+                        <Text strong style={{ fontSize: 13 }}>PTD Totals</Text>
                       </Table.Summary.Cell>
                       <Table.Summary.Cell index={9} align="right">
-                        <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>
+                        <Text strong style={{ fontSize: 13, color: REDWOOD.success }}>
                           {formatNumber(totals.enteredDr)}
                         </Text>
                       </Table.Summary.Cell>
                       <Table.Summary.Cell index={10} align="right">
-                        <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>
+                        <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>
                           {formatNumber(totals.enteredCr)}
                         </Text>
                       </Table.Summary.Cell>
                       <Table.Summary.Cell index={11} align="right">
-                        <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>
+                        <Text strong style={{ fontSize: 13, color: REDWOOD.success }}>
                           {formatNumber(totals.accountedDr)}
                         </Text>
                       </Table.Summary.Cell>
                       <Table.Summary.Cell index={12} align="right">
-                        <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>
+                        <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>
                           {formatNumber(totals.accountedCr)}
                         </Text>
                       </Table.Summary.Cell>
                       <Table.Summary.Cell index={13} />
                     </Table.Summary.Row>
-                    {/* Closing Balance row — always last */}
-                    {closingBalanceRow && (
-                      <Table.Summary.Row style={{ background: '#f6ffed', borderTop: `2px solid ${REDWOOD.success}` }}>
-                        <Table.Summary.Cell index={0} colSpan={9}>
-                          <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>Closing Balance</Text>
-                          <Text type="secondary" style={{ fontSize: 10, marginLeft: 8 }}>
-                            {closingBalanceRow.defaultPeriodName}
-                          </Text>
-                        </Table.Summary.Cell>
-                        <Table.Summary.Cell index={9} align="right">
-                          {closingBalanceRow.enteredDr > 0 && (
-                            <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>
-                              {formatNumber(closingBalanceRow.enteredDr)}
-                            </Text>
-                          )}
-                        </Table.Summary.Cell>
-                        <Table.Summary.Cell index={10} align="right">
-                          {closingBalanceRow.enteredCr > 0 && (
-                            <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>
-                              {formatNumber(closingBalanceRow.enteredCr)}
-                            </Text>
-                          )}
-                        </Table.Summary.Cell>
-                        <Table.Summary.Cell index={11} align="right">
-                          {closingBalanceRow.accountedDr > 0 && (
-                            <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>
-                              {formatNumber(closingBalanceRow.accountedDr)}
-                            </Text>
-                          )}
-                        </Table.Summary.Cell>
-                        <Table.Summary.Cell index={12} align="right">
-                          {closingBalanceRow.accountedCr > 0 && (
-                            <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>
-                              {formatNumber(closingBalanceRow.accountedCr)}
-                            </Text>
-                          )}
-                        </Table.Summary.Cell>
-                        <Table.Summary.Cell index={13} />
-                      </Table.Summary.Row>
-                    )}
                   </Table.Summary>
                 ) : null
               }
