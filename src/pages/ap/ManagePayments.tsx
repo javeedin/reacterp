@@ -455,6 +455,34 @@ const ManagePayments: React.FC = () => {
     }
   };
 
+  // ── Clear Payment state ─────────────────────────────────────────────────
+  const [clearModalOpen, setClearModalOpen]             = useState(false);
+  const [clearTargetPayment, setClearTargetPayment]     = useState<PaymentRecord | null>(null);
+  const [clearStepsOpen, setClearStepsOpen]             = useState(false);
+  const [clearExistingAcctLoading, setClearExistingAcctLoading] = useState(false);
+  const [clearExistingAcctData, setClearExistingAcctData]       = useState<SlaGetResult | null>(null);
+  type ClearStepKey = 'sla' | 'gl_create' | 'gl_post' | 'sla_stamp' | 'patch';
+  const CLEAR_STEP_KEYS: ClearStepKey[] = ['sla','gl_create','gl_post','sla_stamp','patch'];
+  type ClearStepState = { status: 'idle'|'running'|'success'|'error'; response?: any; error?: string };
+  const initClearSteps = (): Record<ClearStepKey, ClearStepState> => ({
+    sla: { status: 'idle' }, gl_create: { status: 'idle' }, gl_post: { status: 'idle' },
+    sla_stamp: { status: 'idle' }, patch: { status: 'idle' },
+  });
+  const [clearStepMap, setClearStepMap] = useState<Record<ClearStepKey, ClearStepState>>(initClearSteps());
+  const clearCtxRef = useRef<{
+    clearDate: string; paymentNum: string; buName: string; ccy: string; exRate: number;
+    clearPeriod: string; ledgerId: number; ledgerName: string;
+    clearLines: any[]; slaHeaderId: number | null;
+    glBatchId: number | null; glHeaderId: number | null; batchName: string;
+    pdcAccount: string; cashAccount: string;
+  }>({ clearDate: '', paymentNum: '', buName: '', ccy: 'AED', exRate: 1, clearPeriod: '',
+    ledgerId: 300000003259529, ledgerName: 'BCL DIFC',
+    clearLines: [], slaHeaderId: null, glBatchId: null, glHeaderId: null, batchName: '',
+    pdcAccount: '', cashAccount: '' });
+  const setClearStep = (key: ClearStepKey, upd: Partial<ClearStepState>) =>
+    setClearStepMap(prev => ({ ...prev, [key]: { ...prev[key], ...upd } }));
+  // ────────────────────────────────────────────────────────────────────────
+
   // ── Void Payment state ───────────────────────────────────────────────────
   const [voidModalOpen, setVoidModalOpen]           = useState(false);
   const [voidApiDrawerOpen, setVoidApiDrawerOpen]   = useState(false);
@@ -2133,6 +2161,220 @@ const ManagePayments: React.FC = () => {
 
   // ────────────────────────────────────────────────────────────────────────
 
+  // ── Clear Payment handlers ────────────────────────────────────────────────
+
+  const openClearModal = async (record: PaymentRecord) => {
+    if (record.accountingStatus !== 'Accounted') {
+      message.error('Accounting must be completed before clearing this payment. Create accounting first.');
+      return;
+    }
+    setClearTargetPayment(record);
+    setClearStepMap(initClearSteps());
+    setClearStepsOpen(false);
+    setClearExistingAcctData(null);
+    clearCtxRef.current = { clearDate: '', paymentNum: '', buName: '', ccy: 'AED', exRate: 1,
+      clearPeriod: '', ledgerId: 300000003259529, ledgerName: 'BCL DIFC',
+      clearLines: [], slaHeaderId: null, glBatchId: null, glHeaderId: null, batchName: '',
+      pdcAccount: '', cashAccount: '' };
+    setClearModalOpen(true);
+    // Load existing accounting entries
+    setClearExistingAcctLoading(true);
+    try {
+      const result = await getAccounting('AP_PAYMENTS', record.checkId);
+      if (result.headerId) {
+        try {
+          const linesData = await getLinesByHeaderId(result.headerId);
+          const descMap = new Map(linesData.items.map((l: any) => [l.lineId, l.accountDescription]));
+          result.lines = result.lines.map(l => ({ ...l, accountDescription: descMap.get(l.lineId) || undefined }));
+        } catch { /* non-critical */ }
+      }
+      setClearExistingAcctData(result);
+    } catch { setClearExistingAcctData(null); }
+    finally { setClearExistingAcctLoading(false); }
+  };
+
+  // Step 1: Create SLA clearing entry (Dr: PDC Acct → Cr: Cash Acct)
+  const runClearStep_sla = async (): Promise<boolean> => {
+    if (!clearTargetPayment) return false;
+    setClearStep('sla', { status: 'running', response: undefined, error: undefined });
+    try {
+      const today = dayjs().format('YYYY-MM-DD');
+      const paymentNum = String(clearTargetPayment.paymentNumber || clearTargetPayment.checkId);
+      const buName = clearTargetPayment.businessUnit || '';
+      const ccy = clearTargetPayment.paymentCurrency || 'AED';
+      const exRate = (clearTargetPayment.conversionRate && clearTargetPayment.conversionRate > 0) ? clearTargetPayment.conversionRate : 1;
+      const clearPeriod = derivePeriodName(new Date(today));
+      const ledger = await fetchLedgerByBusinessUnit(buName);
+      const ledgerId = ledger?.ledgerId ?? 300000003259529;
+      const ledgerName = ledger?.ledgerName ?? 'BCL DIFC';
+
+      const bank = bankAccounts.find(b => b.bankAccountName === clearTargetPayment.disbursementBankAccount);
+      const pdcAccount = bank?.pdcAccountCombination || '';
+      const cashAccount = (bankAcctCashOverride || bank?.cashAccountCombination || '');
+
+      if (!pdcAccount) throw new Error(`No PDC account found for bank: ${clearTargetPayment.disbursementBankAccount || '(none)'}`);
+      if (!cashAccount) throw new Error(`No Cash account found for bank: ${clearTargetPayment.disbursementBankAccount || '(none)'}`);
+
+      const amt = clearTargetPayment.paymentAmount;
+      const clearLines = [
+        {
+          lineNumber: 1, lineType: 'DR', accountingClass: 'PDC_CLEARING',
+          accountCombination: cashAccount,
+          enteredDr: amt, enteredCr: 0,
+          accountedDr: Math.round(amt * exRate * 100) / 100, accountedCr: 0,
+          currencyCode: ccy, exchangeRate: exRate, sourceLineNumber: 1,
+          description: `PDC Clearing — Debit Cash Acct — Payment ${paymentNum}`,
+        },
+        {
+          lineNumber: 2, lineType: 'CR', accountingClass: 'PDC_CLEARING',
+          accountCombination: pdcAccount,
+          enteredDr: 0, enteredCr: amt,
+          accountedDr: 0, accountedCr: Math.round(amt * exRate * 100) / 100,
+          currencyCode: ccy, exchangeRate: exRate, sourceLineNumber: 2,
+          description: `PDC Clearing — Credit PDC Acct — Payment ${paymentNum}`,
+        },
+      ];
+
+      clearCtxRef.current = { ...clearCtxRef.current, clearDate: today, paymentNum, buName, ccy, exRate, clearPeriod,
+        ledgerId, ledgerName, clearLines, pdcAccount, cashAccount };
+
+      const payload: SlaCreatePayload = {
+        header: { moduleName: 'AP', sourceTable: 'AP_PAYMENTS', sourceId: clearTargetPayment.checkId,
+          sourceNumber: paymentNum, sourceType: 'PAYMENT', eventTypeCode: 'AP_PDC_CLEARING',
+          eventDate: today, accountingDate: today, periodName: clearPeriod,
+          ledgerId, ledgerName, currencyCode: ccy, ledgerCurrency: 'AED', exchangeRate: exRate,
+          exchangeRateType: 'Corporate', businessUnit: buName || undefined,
+          description: `AP PDC Clearing — ${paymentNum}`, createdBy: 'SYSTEM' },
+        lines: clearLines,
+      };
+      const result = await createAccounting(payload);
+      if ((result as any).status === 'error' || !(result.headerId > 0)) {
+        setClearStep('sla', { status: 'error', response: result, error: (result as any).message ?? 'headerId missing' });
+        return false;
+      }
+      clearCtxRef.current.slaHeaderId = result.headerId;
+      setClearStep('sla', { status: 'success', response: result });
+      return true;
+    } catch (e: any) {
+      setClearStep('sla', { status: 'error', error: e.message });
+      return false;
+    }
+  };
+
+  // Step 2: Create GL Journal
+  const runClearStep_glCreate = async (): Promise<boolean> => {
+    if (!clearTargetPayment) return false;
+    setClearStep('gl_create', { status: 'running', response: undefined, error: undefined });
+    try {
+      const ctx = clearCtxRef.current;
+      if (!ctx.clearLines.length) throw new Error('Run Step 1 (Create Accounting) first');
+      const ref5 = eventTypeToRef5('AP_PDC_CLEARING');
+      const batchName = `${ref5}-${ctx.paymentNum}-${ctx.clearDate.replace(/-/g,'')}-${Date.now().toString().slice(-6)}`;
+      clearCtxRef.current.batchName = batchName;
+      const totalDr = ctx.clearLines.reduce((s, l) => s + (l.enteredDr||0), 0);
+      const totalCr = ctx.clearLines.reduce((s, l) => s + (l.enteredCr||0), 0);
+      const payload = {
+        batch: { batchName, batchDescription: `AP-PDC-CLEARING – ${ctx.paymentNum}`,
+          ledgerName: ctx.ledgerName, ledgerId: ctx.ledgerId, status: 'NEW',
+          accountingPeriod: ctx.clearPeriod, controlTotal: totalDr,
+          runningTotalDr: totalDr, runningTotalCr: totalCr, batchSource: 'Payables', createdBy: 'SYSTEM' },
+        header: { ledgerId: ctx.ledgerId, ledgerName: ctx.ledgerName,
+          jeCategory: 'AP_PDC_CLEARING', jeSource: 'Payables', periodName: ctx.clearPeriod,
+          journalName: batchName, description: `AP PDC Clearing — ${ctx.paymentNum}`,
+          currencyCode: ctx.ccy, currencyConversionType: 'User',
+          currencyConversionDate: ctx.clearDate, currencyConversionRate: ctx.exRate,
+          defaultEffectiveDate: ctx.clearDate, status: 'NEW',
+          runningTotalDr: totalDr, runningTotalCr: totalCr, createdBy: 'SYSTEM' },
+        lines: ctx.clearLines.map(l => ({
+          enteredDr: l.enteredDr||null, enteredCr: l.enteredCr||null,
+          accountedDr: l.accountedDr||null, accountedCr: l.accountedCr||null,
+          statAmount: null, description: l.description||'', currencyCode: l.currencyCode||ctx.ccy,
+          currencyConversionDate: ctx.clearDate, currencyConversionRate: ctx.exRate,
+          userCurrencyConversionType: 'User', accountCombination: l.accountCombination||'',
+          chartOfAccountsName: 'Chart of Accounts',
+          reference1: ctx.paymentNum, reference2: String(clearTargetPayment.checkId),
+          reference3: l.accountingClass||null, reference4: ctx.buName||null,
+          reference5: ref5, createdBy: 'SYSTEM',
+        })),
+      };
+      const url = `${APEX_DB_CONFIG.baseUrl}/journals/create`;
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(payload) });
+      const data = await res.json();
+      if (!res.ok) {
+        setClearStep('gl_create', { status: 'error', response: data, error: data.message ?? `HTTP ${res.status}` });
+        return false;
+      }
+      clearCtxRef.current.glBatchId  = data.jeBatchId  ?? data.batchId  ?? null;
+      clearCtxRef.current.glHeaderId = data.jeHeaderId ?? data.headerId ?? null;
+      setClearStep('gl_create', { status: 'success', response: data });
+      return true;
+    } catch (e: any) {
+      setClearStep('gl_create', { status: 'error', error: e.message });
+      return false;
+    }
+  };
+
+  // Step 3: Post GL Journal
+  const runClearStep_glPost = async (): Promise<boolean> => {
+    setClearStep('gl_post', { status: 'running', response: undefined, error: undefined });
+    try {
+      const ctx = clearCtxRef.current;
+      if (!ctx.glBatchId) throw new Error('Run Step 2 (Create GL Journal) first');
+      const url = `${APEX_DB_CONFIG.baseUrl}/gl/journals/${ctx.glBatchId}/post`;
+      const res = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: '{}' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.success === false) {
+        setClearStep('gl_post', { status: 'error', response: data, error: data.error ?? `HTTP ${res.status}` });
+        return false;
+      }
+      setClearStep('gl_post', { status: 'success', response: data });
+      return true;
+    } catch (e: any) {
+      setClearStep('gl_post', { status: 'error', error: e.message });
+      return false;
+    }
+  };
+
+  // Step 4: Stamp SLA as POSTED
+  const runClearStep_stamp = async (): Promise<boolean> => {
+    setClearStep('sla_stamp', { status: 'running', response: undefined, error: undefined });
+    try {
+      const ctx = clearCtxRef.current;
+      if (!ctx.slaHeaderId) throw new Error('Run Step 1 (Create Accounting) first');
+      const result = await postToLedger(ctx.slaHeaderId, ctx.glBatchId ?? 0, ctx.batchName, ctx.glHeaderId ?? 0, 'SYSTEM');
+      setClearStep('sla_stamp', { status: 'success', response: result });
+      return true;
+    } catch (e: any) {
+      setClearStep('sla_stamp', { status: 'error', error: e.message });
+      return false;
+    }
+  };
+
+  // Step 5: Patch payment status to Cleared
+  const runClearStep_patch = async (): Promise<boolean> => {
+    if (!clearTargetPayment) return false;
+    setClearStep('patch', { status: 'running', response: undefined, error: undefined });
+    try {
+      const today = clearCtxRef.current.clearDate || dayjs().format('YYYY-MM-DD');
+      const url = `${APEX_PAYMENTS_URL}/${clearTargetPayment.checkId}`;
+      const body = { PaymentStatus: 'Cleared', ClearingDate: today };
+      const res = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.status === 'error') {
+        setClearStep('patch', { status: 'error', response: data, error: data.message ?? `HTTP ${res.status}` });
+        return false;
+      }
+      setClearStep('patch', { status: 'success', response: data });
+      handleSearch();
+      message.success(`Payment ${clearCtxRef.current.paymentNum} cleared successfully`);
+      return true;
+    } catch (e: any) {
+      setClearStep('patch', { status: 'error', error: e.message });
+      return false;
+    }
+  };
+  // ────────────────────────────────────────────────────────────────────────
+
   // ── View / Post Accounting handlers ──────────────────────────────────────
 
   const handleViewAccounting = async (record: PaymentRecord) => {
@@ -2696,6 +2938,28 @@ const ManagePayments: React.FC = () => {
                 <Button size="small" icon={<ScissorOutlined />}>
                   Detach
                 </Button>
+                {(() => {
+                  if (selectedRowKeys.length !== 1) return null;
+                  const sel = payments.find(p => p.key === selectedRowKeys[0]);
+                  if (!sel) return null;
+                  const matDate = sel.maturityDate ? toApiDate(sel.maturityDate) : null;
+                  const today = dayjs().format('YYYY-MM-DD');
+                  const isMatured = matDate && matDate <= today;
+                  const isIssued = sel.paymentStatus === 'Issued';
+                  if (!isMatured || !isIssued) return null;
+                  return (
+                    <Tooltip title={sel.accountingStatus !== 'Accounted' ? 'Create accounting first before clearing' : 'Clear PDC Payment'}>
+                      <Button
+                        size="small"
+                        style={{ background: REDWOOD.success, borderColor: REDWOOD.success, color: '#fff' }}
+                        icon={<CheckCircleOutlined />}
+                        onClick={() => openClearModal(sel)}
+                      >
+                        Clear Payment
+                      </Button>
+                    </Tooltip>
+                  );
+                })()}
               </Space>
               <Text type="secondary" style={{ fontSize: 12 }}>
                 {payments.length} items | {selectedRowKeys.length} selected
@@ -4266,6 +4530,210 @@ const ManagePayments: React.FC = () => {
                       }
                       extra={
                         <Button size="small" type="primary" danger={card.key === 'void'}
+                          icon={isRunning ? <LoadingOutlined /> : <PlayCircleOutlined />}
+                          loading={isRunning} disabled={!enabled} onClick={card.handler}
+                        >
+                          Run
+                        </Button>
+                      }
+                    >
+                      <code style={{ fontSize: 10, background: '#f0f0f0', padding: '2px 6px', borderRadius: 3, display: 'block', wordBreak: 'break-all', marginBottom: st.response || st.error ? 6 : 0 }}>{card.url}</code>
+                      {st.error && <Alert type="error" message={st.error} style={{ marginTop: 6, fontSize: 11 }} showIcon />}
+                      {st.response && (
+                        <pre style={{ fontSize: 10, background: '#1e1e1e', color: st.status === 'error' ? '#f48771' : '#b5cea8', padding: 8, borderRadius: 4, margin: '6px 0 0', maxHeight: 120, overflowY: 'auto' }}>
+                          {JSON.stringify(st.response, null, 2)}
+                        </pre>
+                      )}
+                    </Card>
+                  );
+                });
+              })(),
+            }]}
+          />
+        </Modal>
+
+        {/* ── Clear Payment Modal ─────────────────────────────────────────── */}
+        <Modal
+          title={
+            <Space>
+              <CheckCircleOutlined style={{ color: REDWOOD.success }} />
+              <span>Clear PDC Payment</span>
+              {clearTargetPayment && <Tag color="green" style={{ marginLeft: 4 }}>{clearTargetPayment.paymentNumber}</Tag>}
+            </Space>
+          }
+          open={clearModalOpen}
+          onCancel={() => { setClearModalOpen(false); setClearStepMap(initClearSteps()); setClearStepsOpen(false); }}
+          footer={null}
+          width={920}
+          destroyOnClose
+          styles={{ body: { maxHeight: '82vh', overflowY: 'auto' } }}
+        >
+          {/* Payment summary */}
+          {clearTargetPayment && (
+            <div style={{ background: '#f6fff9', border: `1px solid ${REDWOOD.success}`, borderRadius: 6, padding: '10px 14px', marginBottom: 14 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px 16px', fontSize: 12 }}>
+                {[
+                  ['Payee',          clearTargetPayment.payee],
+                  ['Payment #',      String(clearTargetPayment.paymentNumber)],
+                  ['Amount',         `${formatAmount(clearTargetPayment.paymentAmount)} ${clearTargetPayment.paymentCurrency}`],
+                  ['Payment Date',   clearTargetPayment.paymentDate || '—'],
+                  ['Maturity Date',  clearTargetPayment.maturityDate || '—'],
+                  ['Bank Account',   clearTargetPayment.disbursementBankAccount || '—'],
+                  ['Accounting',     clearTargetPayment.accountingStatus || '—'],
+                  ['Business Unit',  clearTargetPayment.businessUnit || '—'],
+                ].map(([label, value]) => (
+                  <div key={label}>
+                    <Text type="secondary" style={{ fontSize: 11 }}>{label}</Text>
+                    <div><Text strong style={{ fontSize: 12 }}>{value}</Text></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {clearTargetPayment?.accountingStatus !== 'Accounted' && (
+            <Alert
+              type="error" showIcon style={{ marginBottom: 14 }}
+              message="Accounting Required"
+              description="You must create and post accounting for this payment before it can be cleared."
+            />
+          )}
+
+          {/* Existing Accounting Entries */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <Text strong style={{ fontSize: 13 }}>Existing Accounting Entries</Text>
+              <Button
+                size="small"
+                icon={<FormOutlined />}
+                onClick={() => { if (clearTargetPayment) handleViewAccounting(clearTargetPayment); }}
+              >
+                View Full Detail
+              </Button>
+            </div>
+            {clearExistingAcctLoading ? (
+              <div style={{ textAlign: 'center', padding: 16 }}><Spin size="small" /></div>
+            ) : clearExistingAcctData?.found ? (
+              <Table
+                size="small"
+                pagination={false}
+                scroll={{ y: 160 }}
+                dataSource={(clearExistingAcctData.lines || []).map((l: any, i: number) => ({ ...l, key: i }))}
+                columns={[
+                  { title: 'Type', dataIndex: 'lineType', width: 50, render: (v: string) => <Tag color={v==='DR'?'blue':'green'}>{v}</Tag> },
+                  { title: 'Class', dataIndex: 'accountingClass', width: 130 },
+                  { title: 'Account', dataIndex: 'accountCombination', width: 170, render: (v: string) => <code style={{ fontSize: 11 }}>{v||'—'}</code> },
+                  { title: 'Description', dataIndex: 'description', ellipsis: true },
+                  { title: 'Dr', dataIndex: 'enteredDr', width: 110, align: 'right' as const, render: (v: number) => v ? v.toLocaleString('en-US',{minimumFractionDigits:2}) : <span style={{color:'#bbb'}}>—</span> },
+                  { title: 'Cr', dataIndex: 'enteredCr', width: 110, align: 'right' as const, render: (v: number) => v ? v.toLocaleString('en-US',{minimumFractionDigits:2}) : <span style={{color:'#bbb'}}>—</span> },
+                ]}
+              />
+            ) : (
+              <Alert type="warning" showIcon message="No accounting entries found for this payment." />
+            )}
+          </div>
+
+          <Divider style={{ margin: '12px 0' }} />
+
+          {/* Clearing journal preview */}
+          <div style={{ marginBottom: 12 }}>
+            <Text strong style={{ fontSize: 13 }}>Clearing Journal Entries (to be posted)</Text>
+            <div style={{ marginTop: 8, background: '#f0fff4', border: '1px solid #b7eb8f', borderRadius: 6, padding: '10px 14px' }}>
+              {(() => {
+                const bank = bankAccounts.find(b => b.bankAccountName === clearTargetPayment?.disbursementBankAccount);
+                const pdc  = bank?.pdcAccountCombination  || '(PDC Account — configure in Banks)';
+                const cash = bankAcctCashOverride || bank?.cashAccountCombination || '(Cash Account — configure in Banks)';
+                const amt  = clearTargetPayment?.paymentAmount ?? 0;
+                return (
+                  <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid #d9d9d9' }}>
+                        <th style={{ textAlign: 'left', paddingBottom: 4, width: 50 }}>Type</th>
+                        <th style={{ textAlign: 'left', paddingBottom: 4 }}>Account</th>
+                        <th style={{ textAlign: 'right', paddingBottom: 4, width: 150 }}>Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td><Tag color="blue" style={{ fontSize: 11 }}>DR</Tag></td>
+                        <td><code style={{ fontSize: 11 }}>{cash}</code><span style={{ marginLeft: 8, color: '#888', fontSize: 11 }}>Cash / Bank Account</span></td>
+                        <td style={{ textAlign: 'right', fontWeight: 600, color: REDWOOD.info }}>{formatAmount(amt)}</td>
+                      </tr>
+                      <tr>
+                        <td><Tag color="green" style={{ fontSize: 11 }}>CR</Tag></td>
+                        <td><code style={{ fontSize: 11 }}>{pdc}</code><span style={{ marginLeft: 8, color: '#888', fontSize: 11 }}>PDC Account</span></td>
+                        <td style={{ textAlign: 'right', fontWeight: 600, color: REDWOOD.success }}>{formatAmount(amt)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                );
+              })()}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 10 }}>
+            <Button onClick={() => { setClearModalOpen(false); setClearStepMap(initClearSteps()); setClearStepsOpen(false); }}>
+              Cancel
+            </Button>
+            <Button
+              type="primary"
+              style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+              icon={<CheckCircleOutlined />}
+              disabled={clearTargetPayment?.accountingStatus !== 'Accounted'}
+              onClick={() => { setClearStepMap(initClearSteps()); setClearStepsOpen(true); }}
+            >
+              Proceed to Clear
+            </Button>
+          </div>
+
+          <Collapse
+            activeKey={clearStepsOpen ? ['steps'] : []}
+            onChange={keys => setClearStepsOpen(Array.isArray(keys) ? keys.includes('steps') : keys === 'steps')}
+            style={{ marginTop: 12 }}
+            items={[{
+              key: 'steps',
+              label: (
+                <Space size={4}>
+                  <ApiOutlined style={{ color: REDWOOD.info }} />
+                  <span style={{ fontWeight: 600 }}>API Steps — Clear Payment</span>
+                  {CLEAR_STEP_KEYS.map(k => clearStepMap[k].status).some(s => s === 'running') && <LoadingOutlined style={{ color: '#1677ff' }} spin />}
+                  {CLEAR_STEP_KEYS.every(k => clearStepMap[k].status === 'success') && <CheckCircleOutlined style={{ color: '#52c41a' }} />}
+                  {CLEAR_STEP_KEYS.some(k => clearStepMap[k].status === 'error') && <CloseCircleOutlined style={{ color: '#ff4d4f' }} />}
+                </Space>
+              ),
+              children: (() => {
+                const stepCards: { key: ClearStepKey; step: number; method: string; methodColor: string; label: string; url: string; handler: () => Promise<boolean>; enabledAfter?: ClearStepKey }[] = [
+                  { key: 'sla',       step: 1, method: 'POST', methodColor: 'green',  label: 'Create SLA Clearing Accounting',
+                    url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/create`, handler: runClearStep_sla },
+                  { key: 'gl_create', step: 2, method: 'POST', methodColor: 'green',  label: 'Create GL Journal',
+                    url: `${APEX_DB_CONFIG.baseUrl}/journals/create`, handler: runClearStep_glCreate, enabledAfter: 'sla' },
+                  { key: 'gl_post',   step: 3, method: 'PUT',  methodColor: 'orange', label: 'Post GL Journal',
+                    url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/:batchId/post`, handler: runClearStep_glPost, enabledAfter: 'gl_create' },
+                  { key: 'sla_stamp', step: 4, method: 'POST', methodColor: 'green',  label: 'Stamp SLA as POSTED',
+                    url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`, handler: runClearStep_stamp, enabledAfter: 'gl_post' },
+                  { key: 'patch',     step: 5, method: 'PUT',  methodColor: 'orange', label: 'Update Payment Status → Cleared',
+                    url: `${APEX_PAYMENTS_URL}/${clearTargetPayment?.checkId ?? ':id'}`, handler: runClearStep_patch, enabledAfter: 'sla_stamp' },
+                ];
+                return stepCards.map(card => {
+                  const st = clearStepMap[card.key];
+                  const isRunning = st.status === 'running';
+                  const enabled = !isRunning && (!card.enabledAfter || clearStepMap[card.enabledAfter]?.status === 'success');
+                  const borderColor = st.status === 'success' ? '#52c41a' : st.status === 'error' ? '#ff4d4f' : st.status === 'running' ? '#1677ff' : undefined;
+                  const statusIcon = st.status === 'running' ? <LoadingOutlined style={{ color: '#1677ff' }} spin />
+                    : st.status === 'success' ? <CheckCircleOutlined style={{ color: '#52c41a' }} />
+                    : st.status === 'error'   ? <CloseCircleOutlined style={{ color: '#ff4d4f' }} /> : null;
+                  return (
+                    <Card key={card.key} size="small" style={{ marginBottom: 10, borderColor }}
+                      title={
+                        <Space size={4}>
+                          <Tag color={card.methodColor} style={{ minWidth: 44, textAlign: 'center', margin: 0 }}>{card.method}</Tag>
+                          <Text strong style={{ fontSize: 12 }}>Step {card.step}: {card.label}</Text>
+                          {statusIcon}
+                        </Space>
+                      }
+                      extra={
+                        <Button size="small" type="primary"
+                          style={card.key === 'patch' ? { background: REDWOOD.success, borderColor: REDWOOD.success } : undefined}
                           icon={isRunning ? <LoadingOutlined /> : <PlayCircleOutlined />}
                           loading={isRunning} disabled={!enabled} onClick={card.handler}
                         >
