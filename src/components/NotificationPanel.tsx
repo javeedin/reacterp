@@ -43,7 +43,7 @@ const MODULE_COLOR: Record<string, string> = {
 };
 
 const NotificationPanel: React.FC<{ open: boolean; onClose: () => void }> = ({ open, onClose }) => {
-  const { notifications, unreadCount, markRead, markAllRead, clearAll, checkPdcMaturity, pdcChecking } = useNotifications();
+  const { notifications, unreadCount, markRead, markAllRead, clearAll, refreshPdcNotifications, pdcChecking } = useNotifications();
   const [activeModule, setActiveModule] = useState<'All' | NotificationModule>('All');
   const [statusFilter, setStatusFilter] = useState<string>('All');
 
@@ -133,8 +133,8 @@ const NotificationPanel: React.FC<{ open: boolean; onClose: () => void }> = ({ o
             {unreadCount > 0 && <Badge count={unreadCount} style={{ background: '#C74634' }} />}
           </Space>
           <Space size={4}>
-            <Tooltip title="Refresh PDC maturity check">
-              <Button size="small" icon={<ReloadOutlined spin={pdcChecking} />} onClick={checkPdcMaturity} loading={pdcChecking} />
+            <Tooltip title="Refresh PDC maturity notifications">
+              <Button size="small" icon={<ReloadOutlined spin={pdcChecking} />} onClick={refreshPdcNotifications} loading={pdcChecking} />
             </Tooltip>
             <Tooltip title="Mark all read">
               <Button size="small" icon={<CheckOutlined />} onClick={markAllRead} disabled={unreadCount === 0} />

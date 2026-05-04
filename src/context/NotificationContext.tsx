@@ -25,6 +25,7 @@ interface NotificationContextValue {
   markAllRead: () => void;
   clearAll: () => void;
   checkPdcMaturity: () => Promise<void>;
+  refreshPdcNotifications: () => Promise<void>;
   pdcChecking: boolean;
 }
 
@@ -61,39 +62,42 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     if (pdcChecking) return;
     setPdcChecking(true);
     try {
-      const today = dayjs();
-      const dateFrom = today.subtract(3, 'day').format('YYYY-MM-DD');
-      const dateTo   = today.add(3, 'day').format('YYYY-MM-DD');
+      const today = dayjs().startOf('day');
 
-      const url = `${APEX_PAYMENTS_URL}?only_pdc=Y&payment_status=Issued&limit=200`;
+      // Fetch Issued PDC payments — server filters by only_pdc=Y (maturity date not null)
+      // Client-side then narrows to ±3 days window
+      const url = `${APEX_PAYMENTS_URL}?payment_status=Issued&only_pdc=Y&limit=500`;
       const res = await fetch(url, { headers: { Accept: 'application/json' } });
       if (!res.ok) return;
       const data = await res.json();
       const items: any[] = data.items || [];
 
-      const window3 = items.filter(p => {
+      // Keep only payments that have a maturity date AND it falls within ±3 days of today
+      const relevant = items.filter(p => {
         const md = p.MaturityDate;
         if (!md) return false;
-        const mat = dayjs(md);
-        return mat.isSame(today, 'day') ||
-          (mat.isAfter(today.subtract(3, 'day').startOf('day')) &&
-           mat.isBefore(today.add(3, 'day').endOf('day')));
+        const mat = dayjs(md).startOf('day');
+        const diff = mat.diff(today, 'day'); // negative = overdue, 0 = today, positive = upcoming
+        return diff >= -3 && diff <= 3;
       });
 
-      window3.forEach(p => {
-        const matDate = dayjs(p.MaturityDate);
+      relevant.forEach(p => {
+        const matDate = dayjs(p.MaturityDate).startOf('day');
         const diffDays = matDate.diff(today, 'day');
+        const amt = `AED ${Number(p.PaymentAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+        const payee = p.Payee || 'Unknown';
+
         let details: string;
         let severity: AppNotification['severity'];
 
         if (diffDays < 0) {
-          details = `Maturity date was ${Math.abs(diffDays)} day(s) ago (${matDate.format('DD-MMM-YYYY')}). Payment: ${p.Payee} — AED ${Number(p.PaymentAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+          details = `PDC overdue by ${Math.abs(diffDays)} day(s) — maturity was ${matDate.format('DD-MMM-YYYY')}. Payee: ${payee}, ${amt}`;
           severity = 'error';
         } else if (diffDays === 0) {
-          details = `Maturity date is TODAY (${matDate.format('DD-MMM-YYYY')}). Payment: ${p.Payee} — AED ${Number(p.PaymentAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+          details = `PDC matures TODAY (${matDate.format('DD-MMM-YYYY')}). Payee: ${payee}, ${amt}`;
           severity = 'warning';
         } else {
-          details = `Maturity date in ${diffDays} day(s) on ${matDate.format('DD-MMM-YYYY')}. Payment: ${p.Payee} — AED ${Number(p.PaymentAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+          details = `PDC matures in ${diffDays} day(s) on ${matDate.format('DD-MMM-YYYY')}. Payee: ${payee}, ${amt}`;
           severity = 'info';
         }
 
@@ -114,19 +118,23 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
   }, [addNotification, pdcChecking]);
 
-  // Run once on mount
-  const runOnce = useCallback(async () => {
-    if (checkedRef.current) return;
-    checkedRef.current = true;
+  // Refresh: clear existing PDC notifications then re-fetch fresh data
+  const refreshPdcNotifications = useCallback(async () => {
+    setNotifications(prev => prev.filter(n => !(n.module === 'AP' && n.transaction === 'PDC Payment')));
     await checkPdcMaturity();
   }, [checkPdcMaturity]);
 
-  React.useEffect(() => { runOnce(); }, [runOnce]);
+  // Run once on mount
+  React.useEffect(() => {
+    if (checkedRef.current) return;
+    checkedRef.current = true;
+    checkPdcMaturity();
+  }, [checkPdcMaturity]);
 
   const unreadCount = notifications.filter(n => n.status === 'Unread').length;
 
   return (
-    <NotificationContext.Provider value={{ notifications, unreadCount, addNotification, markRead, markAllRead, clearAll, checkPdcMaturity, pdcChecking }}>
+    <NotificationContext.Provider value={{ notifications, unreadCount, addNotification, markRead, markAllRead, clearAll, checkPdcMaturity, refreshPdcNotifications, pdcChecking }}>
       {children}
     </NotificationContext.Provider>
   );
