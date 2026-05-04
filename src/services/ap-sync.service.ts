@@ -352,6 +352,61 @@ const fetchInvoicesFromOracle = async (
   }
 };
 
+// Map a Fusion invoice to only the fields the APEX ap_invoices table stores.
+// Sending extra / unknown fields causes ORA-17270 (duplicate stream parameter)
+// because ORDS tries to bind every JSON key and CLOB fields end up bound twice.
+const mapToApexInvoicePayload = (invoice: APInvoice) => ({
+  InvoiceId:                    invoice.InvoiceId,
+  InvoiceNumber:                invoice.InvoiceNumber,
+  InvoiceCurrency:              invoice.InvoiceCurrency,
+  PaymentCurrency:              invoice.PaymentCurrency,
+  InvoiceAmount:                invoice.InvoiceAmount,
+  InvoiceDate:                  invoice.InvoiceDate,
+  BusinessUnit:                 invoice.BusinessUnit,
+  Supplier:                     invoice.Supplier,
+  SupplierNumber:               invoice.SupplierNumber,
+  SupplierSite:                 invoice.SupplierSite,
+  InvoiceType:                  invoice.InvoiceType,
+  Description:                  invoice.Description,
+  ValidationStatus:             invoice.ValidationStatus,
+  ApprovalStatus:               invoice.ApprovalStatus,
+  PaidStatus:                   invoice.PaidStatus,
+  AccountingStatus:             invoice.AccountingStatus,
+  AccountingDate:               invoice.AccountingDate,
+  InvoiceSourceCode:            invoice.InvoiceSourceCode,
+  InvoiceSource:                invoice.InvoiceSource,
+  PaymentTerms:                 invoice.PaymentTerms,
+  TermsDate:                    invoice.TermsDate,
+  GoodsReceivedDate:            invoice.GoodsReceivedDate,
+  InvoiceGroup:                 invoice.InvoiceGroup,
+  PayGroup:                     invoice.PayGroup,
+  LiabilityDistribution:        invoice.LiabilityDistribution,
+  ConversionRateType:           invoice.ConversionRateType,
+  ConversionDate:               invoice.ConversionDate,
+  ConversionRate:               invoice.ConversionRate,
+  PaymentMethodCode:            invoice.PaymentMethodCode,
+  PaymentMethod:                invoice.PaymentMethod,
+  LegalEntity:                  invoice.LegalEntity,
+  LegalEntityIdentifier:        invoice.LegalEntityIdentifier,
+  ProcurementBU:                invoice.ProcurementBU,
+  DocumentCategory:             invoice.DocumentCategory,
+  DocumentSequence:             invoice.DocumentSequence,
+  VoucherNumber:                invoice.VoucherNumber,
+  AmountPaid:                   invoice.AmountPaid,
+  CanceledFlag:                 invoice.CanceledFlag,
+  CanceledDate:                 invoice.CanceledDate,
+  CanceledBy:                   invoice.CanceledBy,
+  DeliveryChannelCode:          invoice.DeliveryChannelCode,
+  DeliveryChannel:              invoice.DeliveryChannel,
+  TaxationCountry:              invoice.TaxationCountry,
+  FirstPartyTaxRegistrationId:  invoice.FirstPartyTaxRegistrationId,
+  FirstPartyTaxRegistrationNumber: invoice.FirstPartyTaxRegistrationNumber,
+  CreatedBy:                    invoice.CreatedBy,
+  CreationDate:                 invoice.CreationDate,
+  LastUpdatedBy:                invoice.LastUpdatedBy,
+  LastUpdateDate:               invoice.LastUpdateDate,
+});
+
 // Insert single invoice to APEX
 const insertInvoiceToApex = async (
   invoice: APInvoice,
@@ -359,12 +414,9 @@ const insertInvoiceToApex = async (
   verbose = true
 ): Promise<{ success: boolean; error?: string; response?: any; payload?: any }> => {
   try {
-    // Remove links property from invoice (not needed for insert)
-    const { links, ...invoiceWithoutLinks } = invoice as any;
-
-    // Wrap invoice in expected format (items array)
+    // Only send fields the APEX table knows — extra fields cause ORA-17270
     const payload = {
-      items: [invoiceWithoutLinks]
+      items: [mapToApexInvoicePayload(invoice)]
     };
 
     if (verbose) {
