@@ -287,11 +287,11 @@ const GenerateTrialBalance: React.FC = () => {
       }
       resolveCall('generate', t0, res.status, res.ok, json.message || '');
       setGenResult(json);
-      if (json.success || json.inserted > 0 || json.updated > 0) {
+      if (json.error_msg && !json.success) {
+        message.error(json.error_msg);
+      } else {
         message.success(json.message || 'Trial Balance generated');
         await fetchTB();
-      } else {
-        message.error(json.error_msg || 'Generation failed');
       }
     } catch (e: any) {
       message.error('Generate error: ' + e.message);
