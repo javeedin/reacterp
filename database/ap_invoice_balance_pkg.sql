@@ -46,24 +46,34 @@ CREATE OR REPLACE PACKAGE BODY XXAP_INVOICE_BALANCE_PKG AS
     FUNCTION get_invoice_balance(
         p_invoice_id IN NUMBER
     ) RETURN CLOB IS
-        v_invoice_amount  NUMBER;
-        v_total_paid      NUMBER := 0;
-        v_balance         NUMBER;
-        v_result          CLOB;
+        v_invoice_amount    NUMBER;
+        v_total_paid        NUMBER := 0;
+        v_total_discount    NUMBER := 0;
+        v_balance           NUMBER;
+        v_result            CLOB;
     BEGIN
         SELECT INVOICE_AMOUNT
         INTO v_invoice_amount
         FROM RR_AP_INVOICES_ALL
         WHERE INVOICE_ID = p_invoice_id;
 
-        -- Sum payments, excluding voided
+        -- Sum cash payments, excluding voided
         SELECT NVL(SUM(AMOUNT_PAID_INVOICE_CURRENCY), 0)
         INTO v_total_paid
         FROM V_RR_AP_RELATED_PAYMENTS_ALL
         WHERE INVOICE_ID = p_invoice_id
           AND NVL(PAYMENT_STATUS, 'Active') != 'Voided';
 
-        v_balance := v_invoice_amount - v_total_paid;
+        -- Sum discount taken (reduces outstanding balance)
+        SELECT NVL(SUM(ri.DISCOUNT_TAKEN), 0)
+        INTO v_total_discount
+        FROM RR_AP_PAYMENTS_RELATED_INVOICES ri
+        JOIN RR_AP_PAYMENTS_ALL p ON p.CHECK_ID = ri.CHECK_ID
+        WHERE ri.INVOICE_ID = p_invoice_id
+          AND NVL(p.PAYMENT_STATUS,          'Active') != 'Voided'
+          AND NVL(ri.INVOICE_PAYMENT_STATUS, 'Active') != 'Voided';
+
+        v_balance := v_invoice_amount - v_total_paid - v_total_discount;
 
         SELECT JSON_OBJECT(
             'invoiceId'     VALUE p_invoice_id,
@@ -95,6 +105,7 @@ CREATE OR REPLACE PACKAGE BODY XXAP_INVOICE_BALANCE_PKG AS
     ) RETURN CLOB IS
         v_invoice_amount     NUMBER;
         v_total_paid         NUMBER := 0;
+        v_total_discount     NUMBER := 0;
         v_balance            NUMBER;
         v_gross_amount       NUMBER;
         v_unpaid_amount      NUMBER;
@@ -121,7 +132,16 @@ CREATE OR REPLACE PACKAGE BODY XXAP_INVOICE_BALANCE_PKG AS
         WHERE INVOICE_ID = p_invoice_id
           AND NVL(PAYMENT_STATUS, 'Active') != 'Voided';
 
-        v_balance := v_invoice_amount - v_total_paid;
+        -- Discount taken reduces outstanding balance
+        SELECT NVL(SUM(ri.DISCOUNT_TAKEN), 0)
+        INTO v_total_discount
+        FROM RR_AP_PAYMENTS_RELATED_INVOICES ri
+        JOIN RR_AP_PAYMENTS_ALL p ON p.CHECK_ID = ri.CHECK_ID
+        WHERE ri.INVOICE_ID = p_invoice_id
+          AND NVL(p.PAYMENT_STATUS,          'Active') != 'Voided'
+          AND NVL(ri.INVOICE_PAYMENT_STATUS, 'Active') != 'Voided';
+
+        v_balance := v_invoice_amount - v_total_paid - v_total_discount;
 
         -- Validation: balance must be > 0
         IF v_balance <= 0 THEN
@@ -248,13 +268,14 @@ CREATE OR REPLACE PACKAGE BODY XXAP_INVOICE_BALANCE_PKG AS
 
     -- ----------------------------------------------------------------
     -- get_invoice_net_balance
-    -- Net balance = invoice_amount - cash payments - prepayment applications
+    -- Net balance = invoice_amount - cash payments - discount_taken - prepayment applications
     -- ----------------------------------------------------------------
     FUNCTION get_invoice_net_balance(
         p_invoice_id IN NUMBER
     ) RETURN CLOB IS
         v_invoice_amount           NUMBER;
         v_total_paid               NUMBER := 0;
+        v_total_discount           NUMBER := 0;
         v_total_prepayment_applied NUMBER := 0;
         v_net_balance              NUMBER;
         v_result                   CLOB;
@@ -272,6 +293,15 @@ CREATE OR REPLACE PACKAGE BODY XXAP_INVOICE_BALANCE_PKG AS
         WHERE  INVOICE_ID = p_invoice_id
           AND  NVL(PAYMENT_STATUS, 'Active') != 'Voided';
 
+        -- Discount taken (reduces outstanding balance)
+        SELECT NVL(SUM(ri.DISCOUNT_TAKEN), 0)
+        INTO   v_total_discount
+        FROM   RR_AP_PAYMENTS_RELATED_INVOICES ri
+        JOIN   RR_AP_PAYMENTS_ALL p ON p.CHECK_ID = ri.CHECK_ID
+        WHERE  ri.INVOICE_ID = p_invoice_id
+          AND  NVL(p.PAYMENT_STATUS,          'Active') != 'Voided'
+          AND  NVL(ri.INVOICE_PAYMENT_STATUS, 'Active') != 'Voided';
+
         -- Prepayment applications on this invoice, excluding cancelled
         SELECT NVL(SUM(APPLIED_AMOUNT), 0)
         INTO   v_total_prepayment_applied
@@ -279,12 +309,13 @@ CREATE OR REPLACE PACKAGE BODY XXAP_INVOICE_BALANCE_PKG AS
         WHERE  INVOICE_ID = p_invoice_id
           AND  NVL(STATUS, 'Applied') != 'Cancelled';
 
-        v_net_balance := v_invoice_amount - v_total_paid - v_total_prepayment_applied;
+        v_net_balance := v_invoice_amount - v_total_paid - v_total_discount - v_total_prepayment_applied;
 
         SELECT JSON_OBJECT(
             'invoiceId'               VALUE p_invoice_id,
             'invoiceAmount'           VALUE v_invoice_amount,
             'totalPaid'               VALUE v_total_paid,
+            'totalDiscountTaken'      VALUE v_total_discount,
             'totalPrepaymentApplied'  VALUE v_total_prepayment_applied,
             'netBalance'              VALUE v_net_balance
             RETURNING CLOB
