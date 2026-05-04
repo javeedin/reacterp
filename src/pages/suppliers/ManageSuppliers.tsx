@@ -718,46 +718,34 @@ const ManageSuppliers: React.FC = () => {
   const fetchBalanceDashboard = async (supplierNumber: string): Promise<BalanceData | null> => {
     try {
       const enc = encodeURIComponent(supplierNumber);
-      const [supplierRes, invoicesRes, paymentsRes] = await Promise.all([
-        fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers?supplier_number=${enc}&limit=1`),
-        fetch(`${APEX_DB_CONFIG.baseUrl}/ap/invoices?supplier_number=${enc}&limit=500`),
-        fetch(`${APEX_DB_CONFIG.baseUrl}/ap/payments?supplier_number=${enc}&limit=500`),
-      ]);
+      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers/balance/dashboard/${enc}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = await res.json();
+      if (d.success !== 'true') throw new Error(d.error || 'Dashboard error');
 
-      const supplierData  = supplierRes.ok  ? await supplierRes.json()  : {};
-      const invoicesData  = invoicesRes.ok  ? await invoicesRes.json()  : {};
-      const paymentsData  = paymentsRes.ok  ? await paymentsRes.json()  : {};
-
-      const supplierItem: any  = (supplierData.items || supplierData || [])[0] || {};
-      const invoiceItems: any[] = invoicesData.items || [];
-      const paymentItems: any[] = paymentsData.items || [];
-
-      const totalInvoiceAmount = invoiceItems.reduce((s: number, i: any) => s + Number(i.invoice_amount || 0), 0);
-      const totalPaid          = invoiceItems.reduce((s: number, i: any) => s + Number(i.amount_paid    || 0), 0);
-      const totalRemaining     = invoiceItems.reduce((s: number, i: any) => s + Number(i.amount_remaining ?? (Number(i.invoice_amount || 0) - Number(i.amount_paid || 0))), 0);
-      const totalPaymentAmount = paymentItems.reduce((s: number, p: any) => s + Number(p.PaymentAmount || p.payment_amount || 0), 0);
-      const currency           = invoiceItems[0]?.invoice_currency || 'AED';
+      const sup = d.supplier || {};
+      const bs  = d.balance_summary || {};
 
       return {
         supplier: {
-          supplierId:             supplierItem.supplier_id || 0,
-          supplierNumber:         supplierItem.supplier_number || supplierNumber,
-          supplierName:           supplierItem.supplier || supplierItem.supplier_name || '',
-          supplierType:           supplierItem.supplier_type || null,
-          status:                 supplierItem.status || 'Active',
-          taxRegistrationNumber:  supplierItem.tax_registration_number || null,
-          creationDate:           supplierItem.creation_date || null,
-          address:                null,
+          supplierId:            sup.supplier_id    || 0,
+          supplierNumber:        sup.supplier_number || supplierNumber,
+          supplierName:          sup.supplier_name   || '',
+          supplierType:          sup.supplier_type   || null,
+          status:                sup.status          || 'Active',
+          taxRegistrationNumber: sup.tax_registration_number || null,
+          creationDate:          sup.creation_date   || null,
+          address:               null,
         },
         balanceSummary: {
-          totalInvoices:      invoiceItems.length,
-          totalInvoiceAmount,
-          totalPayments:      paymentItems.length,
-          totalPaymentAmount,
-          balance:            totalRemaining,
-          currency,
+          totalInvoices:      bs.total_invoices       || 0,
+          totalInvoiceAmount: bs.total_invoice_amount || 0,
+          totalPayments:      bs.total_payments       || 0,
+          totalPaymentAmount: bs.total_payment_amount || 0,
+          balance:            bs.balance              || 0,
+          currency:           bs.currency             || 'AED',
         },
-        agingReport: [],
+        agingReport: d.aging_report || [],
       };
     } catch (error) {
       console.error('Error fetching balance dashboard:', error);
