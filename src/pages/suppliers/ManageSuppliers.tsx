@@ -717,53 +717,46 @@ const ManageSuppliers: React.FC = () => {
   // Fetch balance dashboard data
   const fetchBalanceDashboard = async (supplierNumber: string): Promise<BalanceData | null> => {
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/dashboard/${supplierNumber}`;
-      console.log('Fetching balance dashboard:', url);
+      const enc = encodeURIComponent(supplierNumber);
+      const [supplierRes, invoicesRes, paymentsRes] = await Promise.all([
+        fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers?supplier_number=${enc}&limit=1`),
+        fetch(`${APEX_DB_CONFIG.baseUrl}/ap/invoices?supplier_number=${enc}&limit=500`),
+        fetch(`${APEX_DB_CONFIG.baseUrl}/ap/payments?supplier_number=${enc}&limit=500`),
+      ]);
 
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+      const supplierData  = supplierRes.ok  ? await supplierRes.json()  : {};
+      const invoicesData  = invoicesRes.ok  ? await invoicesRes.json()  : {};
+      const paymentsData  = paymentsRes.ok  ? await paymentsRes.json()  : {};
 
-      const data = await response.json();
-      console.log('Balance dashboard response:', data);
+      const supplierItem: any  = (supplierData.items || supplierData || [])[0] || {};
+      const invoiceItems: any[] = invoicesData.items || [];
+      const paymentItems: any[] = paymentsData.items || [];
 
-      if (data.success === 'false') {
-        throw new Error(data.error || 'Failed to load balance data');
-      }
+      const totalInvoiceAmount = invoiceItems.reduce((s: number, i: any) => s + Number(i.invoice_amount || 0), 0);
+      const totalPaid          = invoiceItems.reduce((s: number, i: any) => s + Number(i.amount_paid    || 0), 0);
+      const totalPaymentAmount = paymentItems.reduce((s: number, p: any) => s + Number(p.PaymentAmount || p.payment_amount || 0), 0);
+      const currency           = invoiceItems[0]?.invoice_currency || 'AED';
 
       return {
         supplier: {
-          supplierId: data.supplier?.supplier_id || 0,
-          supplierNumber: data.supplier?.supplier_number || supplierNumber,
-          supplierName: data.supplier?.supplier_name || '',
-          supplierType: data.supplier?.supplier_type || null,
-          status: data.supplier?.status || 'Active',
-          taxRegistrationNumber: data.supplier?.tax_registration_number || null,
-          creationDate: data.supplier?.creation_date || null,
-          address: data.supplier?.address ? {
-            addressLine1: data.supplier.address.address_line_1 || '',
-            addressLine2: data.supplier.address.address_line_2 || '',
-            city: data.supplier.address.city || '',
-            state: data.supplier.address.state || '',
-            postalCode: data.supplier.address.postal_code || '',
-            country: data.supplier.address.country || '',
-          } : null,
+          supplierId:             supplierItem.supplier_id || 0,
+          supplierNumber:         supplierItem.supplier_number || supplierNumber,
+          supplierName:           supplierItem.supplier || supplierItem.supplier_name || '',
+          supplierType:           supplierItem.supplier_type || null,
+          status:                 supplierItem.status || 'Active',
+          taxRegistrationNumber:  supplierItem.tax_registration_number || null,
+          creationDate:           supplierItem.creation_date || null,
+          address:                null,
         },
         balanceSummary: {
-          totalInvoices: data.balance_summary?.total_invoices || 0,
-          totalInvoiceAmount: data.balance_summary?.total_invoice_amount || 0,
-          totalPayments: data.balance_summary?.total_payments || 0,
-          totalPaymentAmount: data.balance_summary?.total_payment_amount || 0,
-          balance: data.balance_summary?.balance || 0,
-          currency: data.balance_summary?.currency || 'AED',
+          totalInvoices:      invoiceItems.length,
+          totalInvoiceAmount,
+          totalPayments:      paymentItems.length,
+          totalPaymentAmount,
+          balance:            totalInvoiceAmount - totalPaid,
+          currency,
         },
-        agingReport: (data.aging_report || []).map((item: any) => ({
-          bucket: item.bucket || '',
-          amount: item.amount || 0,
-          invoiceCount: item.invoice_count || 0,
-          percentage: item.percentage || 0,
-        })),
+        agingReport: [],
       };
     } catch (error) {
       console.error('Error fetching balance dashboard:', error);
@@ -776,29 +769,24 @@ const ManageSuppliers: React.FC = () => {
   const fetchBalanceInvoices = async (supplierNumber: string, tabKey: string) => {
     setInvoicesLoadingMap(prev => ({ ...prev, [tabKey]: true }));
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/${supplierNumber}`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices?supplier_number=${encodeURIComponent(supplierNumber)}&limit=500`;
       const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-
-      const rawText = await response.text();
-      // Strip raw control characters that Oracle may embed in string values
-      // (e.g. \r causes "Bad control character at position N")
-      const sanitized = rawText.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ' ');
-      const data = JSON.parse(sanitized);
-      const items = data.invoices || [];
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      const items: any[] = data.items || [];
       setInvoicesMap(prev => ({
         ...prev,
         [tabKey]: items.map((item: any, index: number) => ({
-          key: item.invoice_id?.toString() || index.toString(),
-          invoiceId: item.invoice_id,
-          invoiceNumber: item.invoice_number || '',
-          invoiceDate: item.invoice_date || '',
-          invoiceAmount: item.invoice_amount || 0,
-          amountPaid: item.amount_paid || 0,
-          amountRemaining: item.amount_remaining || 0,
-          invoiceStatus: item.invoice_status || '',
-          currency: item.currency || 'AED',
-          description: item.description || '',
+          key:            item.invoice_id?.toString() || index.toString(),
+          invoiceId:      item.invoice_id,
+          invoiceNumber:  item.invoice_number  || '',
+          invoiceDate:    item.invoice_date    || '',
+          invoiceAmount:  Number(item.invoice_amount || 0),
+          amountPaid:     Number(item.amount_paid    || 0),
+          amountRemaining: Number(item.invoice_amount || 0) - Number(item.amount_paid || 0),
+          invoiceStatus:  item.validation_status || item.paid_status || '',
+          currency:       item.invoice_currency || 'AED',
+          description:    item.description     || '',
         })),
       }));
     } catch (error) {
@@ -813,27 +801,24 @@ const ManageSuppliers: React.FC = () => {
   const fetchBalancePayments = async (supplierNumber: string, tabKey: string) => {
     setPaymentsLoadingMap(prev => ({ ...prev, [tabKey]: true }));
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/payments/${supplierNumber}`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments?supplier_number=${encodeURIComponent(supplierNumber)}&limit=500`;
       const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-
-      const rawText = await response.text();
-      const sanitized = rawText.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ' ');
-      const data = JSON.parse(sanitized);
-      const items = data.payments || [];
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      const items: any[] = data.items || [];
       setPaymentsMap(prev => ({
         ...prev,
         [tabKey]: items.map((item: any, index: number) => ({
-          key: item.payment_id?.toString() || index.toString(),
-          paymentId: item.payment_id,
-          checkId: item.check_id,
-          paymentNumber: item.payment_number || '',
-          paymentDate: item.payment_date || '',
-          paymentAmount: item.payment_amount || 0,
-          paymentStatus: item.payment_status || '',
-          paymentMethod: item.payment_method || '',
-          currency: item.currency || 'AED',
-          bankAccountName: item.bank_account_name || '',
+          key:           item.CheckId?.toString() || item.check_id?.toString() || index.toString(),
+          paymentId:     item.CheckId   || item.check_id,
+          checkId:       item.CheckId   || item.check_id,
+          paymentNumber: item.PaymentNumber || item.payment_number || '',
+          paymentDate:   item.PaymentDate   || item.payment_date   || '',
+          paymentAmount: Number(item.PaymentAmount  || item.payment_amount  || 0),
+          paymentStatus: item.PaymentStatus || item.payment_status || '',
+          paymentMethod: item.PaymentMethod || item.payment_method || '',
+          currency:      item.PaymentCurrency || item.payment_currency || 'AED',
+          bankAccountName: item.BankAccountName || item.bank_account_name || '',
         })),
       }));
     } catch (error) {
@@ -851,18 +836,18 @@ const ManageSuppliers: React.FC = () => {
     setDrilldownLoading(true);
 
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/payment-invoices/${payment.checkId}`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/${payment.checkId}/related-invoices`;
       const response = await fetch(url);
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
       const data = await response.json();
-      const items = data.invoices || [];
+      const items: any[] = data.items || data.invoices || [];
       setRelatedInvoices(items.map((item: any, index: number) => ({
-        key: item.invoice_id?.toString() || index.toString(),
-        invoiceId: item.invoice_id,
-        invoiceNumber: item.invoice_number || '',
-        invoiceAmount: item.invoice_amount || 0,
-        amountApplied: item.amount_applied || 0,
+        key:           item.invoice_id?.toString() || index.toString(),
+        invoiceId:     item.invoice_id,
+        invoiceNumber: item.invoice_number  || '',
+        invoiceAmount: Number(item.invoice_amount  || 0),
+        amountApplied: Number(item.amount_applied  || item.amount_paid || 0),
       })));
     } catch (error) {
       console.error('Error fetching drilldown:', error);
