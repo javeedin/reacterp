@@ -280,6 +280,9 @@ const TrialBalance: React.FC = () => {
   const [drillComboLedger,  setDrillComboLedger]  = useState('');
   const [drillComboPeriod,  setDrillComboPeriod]  = useState('');
 
+  // ── All companies from COA value set ────────────────────────
+  const [allCompanies, setAllCompanies] = useState<{ value: string; label: string }[]>([]);
+
   // ── TB Drill-down: Journal Lines modal ───────────────────
   interface JournalLine {
     line_id: number;
@@ -994,6 +997,23 @@ const TrialBalance: React.FC = () => {
   useEffect(() => {
     fetchLedgers();
     fetchPeriods();
+    // Fetch all companies from COA value set
+    const VALUES_API = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/valuesets/getvalues';
+    fetch(`${VALUES_API}/BUIMERC_FIN_GLB_COA_CO`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return;
+        const items: any[] = data.items || [];
+        setAllCompanies(items
+          .filter((i: any) => i.value || i.Value)
+          .map((i: any) => {
+            const code = i.value || i.Value;
+            const desc = i.description || i.Description || code;
+            return { value: code, label: `${code} - ${desc}` };
+          })
+        );
+      })
+      .catch(() => {});
   }, []);
 
   // Re-fetch periods when ledger changes
@@ -1520,14 +1540,14 @@ const TrialBalance: React.FC = () => {
               allowClear
               style={{ width: '100%' }}
               showSearch
-            >
-              {tab.companies.map(company => (
-                <Select.Option key={company} value={company}>
-                  <BankOutlined style={{ marginRight: 6, color: REDWOOD.info }} />
-                  {company}
-                </Select.Option>
-              ))}
-            </Select>
+              optionFilterProp="label"
+              options={(allCompanies.length > 0 ? allCompanies : tab.companies.map(c => ({ value: c, label: c }))).map(o => ({
+                value: o.value,
+                label: (
+                  <span><BankOutlined style={{ marginRight: 6, color: REDWOOD.info }} />{o.label}</span>
+                ),
+              }))}
+            />
           </Col>
           <Col xs={24} sm={5}>
             <Select
@@ -2555,10 +2575,10 @@ const TrialBalance: React.FC = () => {
         {/* Filters */}
         <Row gutter={12} style={{ marginBottom: 12 }}>
           <Col span={6}>
-            <Select placeholder="All Companies" allowClear style={{ width: '100%' }}
+            <Select placeholder="All Companies" allowClear showSearch optionFilterProp="label" style={{ width: '100%' }}
               value={tab.selectedCompany}
               onChange={v => updateTabFilter(tab.key, 'selectedCompany', v ?? null)}
-              options={tab.companies.map(c => ({ value: c, label: c }))}
+              options={allCompanies.length > 0 ? allCompanies : tab.companies.map(c => ({ value: c, label: c }))}
             />
           </Col>
           <Col span={6}>
