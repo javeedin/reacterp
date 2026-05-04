@@ -593,32 +593,34 @@ const AccountAnalysis: React.FC = () => {
       if (jeSourceFilter)    params.append('je_source',    jeSourceFilter);
       if (jeCategoryFilter)  params.append('je_category',  jeCategoryFilter);
 
-      const response = await fetch(`${API_BASE_URL}/accountanalysis?${params.toString()}`);
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      // Fetch journal lines — treat non-OK (e.g. 404 when period has no entries) as empty
+      let items: JournalLineSegment[] = [];
+      let totalCountFromApi = 0;
+      try {
+        const response = await fetch(`${API_BASE_URL}/accountanalysis?${params.toString()}`);
+        if (response.ok) {
+          const data = await response.json();
+          const seen = new Set<string>();
+          items = (data.items || []).flatMap((item: any, index: number) => {
+            const dedupKey = `${item.jeHeaderId ?? item.je_header_id}-${item.jeLineNumber ?? item.je_line_number}`;
+            if (seen.has(dedupKey)) return [];
+            seen.add(dedupKey);
+            return [{
+              ...item,
+              key: `${index}`,
+              concatenatedSegments: item.accountCombination || item.account_combination ||
+                `${item.company}-${item.lob}-${item.department}-${item.account}-${item.subAccount}-${item.analysis}-${item.intercompany}`,
+              accountDescription: item.accountDescription || item.account_description || item.ACCOUNT_DESCRIPTION || '',
+              jeLineDescription: item.description || item.DESCRIPTION || '',
+            }];
+          });
+          totalCountFromApi = data.totalCount || items.length;
+        }
+      } catch (journalErr) {
+        console.error('Journal lines fetch error:', journalErr);
       }
 
-      const data = await response.json();
-
-      // Map API response to component format, deduplicate by jeHeaderId+jeLineNumber
-      // (view's LEFT JOIN RR_VALUE_SET_VALUES may return duplicates if value set has multiple rows)
-      const seen = new Set<string>();
-      const items = (data.items || []).flatMap((item: any, index: number) => {
-        const dedupKey = `${item.jeHeaderId ?? item.je_header_id}-${item.jeLineNumber ?? item.je_line_number}`;
-        if (seen.has(dedupKey)) return [];
-        seen.add(dedupKey);
-        return [{
-          ...item,
-          key: `${index}`,
-          concatenatedSegments: item.accountCombination || item.account_combination ||
-            `${item.company}-${item.lob}-${item.department}-${item.account}-${item.subAccount}-${item.analysis}-${item.intercompany}`,
-          accountDescription: item.accountDescription || item.account_description || item.ACCOUNT_DESCRIPTION || '',
-          jeLineDescription: item.description || item.DESCRIPTION || '',
-        }];
-      });
-
-      // If searching a single account, prepend opening balance and append closing balance
+      // Always fetch opening/closing balance when an account is selected — even if no journal lines exist
       const finalItems: JournalLineSegment[] = [...items];
       if (accountFilter && selectedPeriods.length > 0) {
         const sortedPeriods = [...selectedPeriods].sort(
@@ -630,8 +632,8 @@ const AccountAnalysis: React.FC = () => {
       }
 
       setSearchData(finalItems);
-      setTotalCount(data.totalCount || items.length);
-      message.success(`Found ${items.length} records`);
+      setTotalCount(totalCountFromApi);
+      message.success(`Found ${items.length} journal line(s)`);
     } catch (error) {
       console.error('Error fetching data:', error);
       message.error('Failed to fetch data. Please try again.');
