@@ -330,13 +330,14 @@ interface InvoicesTabContentProps {
   invoices: InvoiceRecord[];
   invoicesLoading: boolean;
   supplierNumber: string;
+  apiUrl: string;
   onExport: (rows: InvoiceRecord[]) => void;
   onRefresh: () => void;
   onEdit: (invoice: InvoiceRecord) => void;
 }
 
 const InvoicesTabContent: React.FC<InvoicesTabContentProps> = ({
-  invoices, invoicesLoading, onExport, onRefresh, onEdit,
+  invoices, invoicesLoading, apiUrl, onExport, onRefresh, onEdit,
 }) => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'paid' | 'unpaid'>('all');
@@ -467,6 +468,9 @@ const InvoicesTabContent: React.FC<InvoicesTabContentProps> = ({
             <Text type="secondary" style={{ fontSize: 12 }}>{filtered.length} rows</Text>
             <Button icon={<FileExcelOutlined />} size="small" style={{ color: '#1D7B4D', borderColor: '#1D7B4D' }} onClick={() => onExport(filtered)}>Excel</Button>
             <Button icon={<ReloadOutlined />} size="small" onClick={onRefresh} loading={invoicesLoading}>Refresh</Button>
+            <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>{apiUrl}</span>} placement="bottomRight">
+              <ApiOutlined style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 14 }} />
+            </Tooltip>
           </Space>
         </Col>
       </Row>
@@ -523,6 +527,7 @@ const ManageSuppliers: React.FC = () => {
   // Balance tab state - stored per tab key
   const [balanceDataMap, setBalanceDataMap] = useState<Record<string, BalanceData | null>>({});
   const [invoicesMap, setInvoicesMap] = useState<Record<string, InvoiceRecord[]>>({});
+  const [invoicesUrlMap, setInvoicesUrlMap] = useState<Record<string, string>>({});
   const [paymentsMap, setPaymentsMap] = useState<Record<string, PaymentRecord[]>>({});
   const [balanceLoadingMap, setBalanceLoadingMap] = useState<Record<string, boolean>>({});
   const [invoicesLoadingMap, setInvoicesLoadingMap] = useState<Record<string, boolean>>({});
@@ -758,11 +763,12 @@ const ManageSuppliers: React.FC = () => {
   const fetchBalanceInvoices = async (supplierNumber: string, tabKey: string) => {
     setInvoicesLoadingMap(prev => ({ ...prev, [tabKey]: true }));
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices?supplier_number=${encodeURIComponent(supplierNumber)}&limit=500`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/${encodeURIComponent(supplierNumber)}?limit=500`;
+      setInvoicesUrlMap(prev => ({ ...prev, [tabKey]: url }));
       const response = await fetch(url);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
-      const items: any[] = data.items || [];
+      const items: any[] = data.invoices || data.items || [];
       setInvoicesMap(prev => ({
         ...prev,
         [tabKey]: items.map((item: any, index: number) => ({
@@ -770,12 +776,12 @@ const ManageSuppliers: React.FC = () => {
           invoiceId:      item.invoice_id,
           invoiceNumber:  item.invoice_number  || '',
           invoiceDate:    item.invoice_date    || '',
-          invoiceAmount:  Number(item.invoice_amount || 0),
-          amountPaid:     Number(item.amount_paid    || 0),
-          amountRemaining: Number(item.amount_remaining ?? (Number(item.invoice_amount || 0) - Number(item.amount_paid || 0))),
-          invoiceStatus:  item.validation_status || item.paid_status || '',
-          currency:       item.invoice_currency || 'AED',
-          description:    item.description     || '',
+          invoiceAmount:  Number(item.invoice_amount   || 0),
+          amountPaid:     Number(item.amount_paid      || 0),
+          amountRemaining: Number(item.amount_remaining ?? 0),
+          invoiceStatus:  item.invoice_status || item.validation_status || '',
+          currency:       item.currency || item.invoice_currency || 'AED',
+          description:    item.description || '',
         })),
       }));
     } catch (error) {
@@ -1902,6 +1908,7 @@ const ManageSuppliers: React.FC = () => {
                     invoices={invoices}
                     invoicesLoading={!!invoicesLoading}
                     supplierNumber={tab.supplier.supplierNumber}
+                    apiUrl={invoicesUrlMap[tabKey] || `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/${tab.supplier.supplierNumber}?limit=500`}
                     onExport={rows => exportInvoicesToExcel(tabKey, tab.supplier.supplierNumber, rows)}
                     onRefresh={() => fetchBalanceInvoices(tab.supplier.supplierNumber, tabKey)}
                     onEdit={record => { setEditInvoice({ ...record }); setEditInvoiceVisible(true); }}
