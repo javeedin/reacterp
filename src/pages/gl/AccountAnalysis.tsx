@@ -469,7 +469,7 @@ const AccountAnalysis: React.FC = () => {
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (!data) return;
-        const names: string[] = (data.items || []).map((i: any) => i.ledger_name).filter(Boolean);
+        const names: string[] = [...new Set((data.items || []).map((i: any) => i.ledger_name).filter(Boolean) as string[])];
         if (names.length > 0) {
           setLedgerOptions(names);
           if (!names.includes(selectedLedger)) setSelectedLedger(names[0]);
@@ -1872,16 +1872,6 @@ const AccountAnalysis: React.FC = () => {
       { title: 'Source', dataIndex: 'userJeSourceName', key: 'userJeSourceName', width: 100 },
       { title: 'Category', dataIndex: 'userJeCategoryName', key: 'userJeCategoryName', width: 120 },
       { title: 'Currency', dataIndex: 'currencyCode', key: 'currencyCode', width: 90 },
-      {
-        title: 'Ledger',
-        dataIndex: 'ledgerName',
-        key: 'ledgerName',
-        width: 150,
-        ellipsis: true,
-        filters: [...new Set(searchData.map(r => r.ledgerName).filter(Boolean))].map(v => ({ text: v, value: v })),
-        onFilter: (value, record) => record.ledgerName === value,
-        render: (v: string) => v ? <Tag style={{ fontSize: 10 }}>{v}</Tag> : null,
-      },
       {
         title: <span style={{ color: '#1677ff', fontWeight: 600 }}>Accounted</span>,
         onHeaderCell: () => ({ style: groupBorderLeft }),
