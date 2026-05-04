@@ -460,6 +460,7 @@ const ManagePayments: React.FC = () => {
   const [clearModalOpen, setClearModalOpen]             = useState(false);
   const [clearTargetPayment, setClearTargetPayment]     = useState<PaymentRecord | null>(null);
   const [clearStepsOpen, setClearStepsOpen]             = useState(false);
+  const [clearRunning, setClearRunning]                 = useState(false);
   const [clearExistingAcctLoading, setClearExistingAcctLoading] = useState(false);
   const [clearExistingAcctData, setClearExistingAcctData]       = useState<SlaGetResult | null>(null);
   type ClearStepKey = 'sla' | 'gl_create' | 'gl_post' | 'sla_stamp' | 'patch';
@@ -2368,6 +2369,20 @@ const ManagePayments: React.FC = () => {
     } catch (e: any) {
       setClearStep('patch', { status: 'error', error: e.message });
       return false;
+    }
+  };
+  // Auto-run all 5 clear steps sequentially
+  const runAllClearSteps = async () => {
+    setClearRunning(true);
+    setClearStepMap(initClearSteps());
+    try {
+      if (!await runClearStep_sla())       return;
+      if (!await runClearStep_glCreate())  return;
+      if (!await runClearStep_glPost())    return;
+      if (!await runClearStep_stamp())     return;
+      await runClearStep_patch();
+    } finally {
+      setClearRunning(false);
     }
   };
   // ────────────────────────────────────────────────────────────────────────
@@ -4710,20 +4725,25 @@ const ManagePayments: React.FC = () => {
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 10 }}>
-            <Button onClick={() => { setClearModalOpen(false); setClearStepMap(initClearSteps()); setClearStepsOpen(false); }}>
+            <Button
+              disabled={clearRunning}
+              onClick={() => { setClearModalOpen(false); setClearStepMap(initClearSteps()); setClearStepsOpen(false); }}
+            >
               Cancel
             </Button>
             <Button
               type="primary"
               style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
-              icon={<CheckCircleOutlined />}
+              icon={clearRunning ? <LoadingOutlined /> : <CheckCircleOutlined />}
+              loading={clearRunning}
               disabled={clearExistingAcctLoading || !clearExistingAcctData?.found}
-              onClick={() => { setClearStepMap(initClearSteps()); setClearStepsOpen(true); }}
+              onClick={runAllClearSteps}
             >
-              Proceed to Clear
+              {clearRunning ? 'Clearing…' : 'Clear Payment'}
             </Button>
           </div>
 
+          {/* Step log — collapsed by default, user expands to inspect */}
           <Collapse
             activeKey={clearStepsOpen ? ['steps'] : []}
             onChange={keys => setClearStepsOpen(Array.isArray(keys) ? keys.includes('steps') : keys === 'steps')}
@@ -4733,60 +4753,50 @@ const ManagePayments: React.FC = () => {
               label: (
                 <Space size={4}>
                   <ApiOutlined style={{ color: REDWOOD.info }} />
-                  <span style={{ fontWeight: 600 }}>API Steps — Clear Payment</span>
-                  {CLEAR_STEP_KEYS.map(k => clearStepMap[k].status).some(s => s === 'running') && <LoadingOutlined style={{ color: '#1677ff' }} spin />}
-                  {CLEAR_STEP_KEYS.every(k => clearStepMap[k].status === 'success') && <CheckCircleOutlined style={{ color: '#52c41a' }} />}
-                  {CLEAR_STEP_KEYS.some(k => clearStepMap[k].status === 'error') && <CloseCircleOutlined style={{ color: '#ff4d4f' }} />}
+                  <span style={{ fontWeight: 600 }}>Processing Log</span>
+                  {CLEAR_STEP_KEYS.map(k => clearStepMap[k].status).some(s => s === 'running') && (
+                    <><LoadingOutlined style={{ color: '#1677ff' }} spin /><Text style={{ fontSize: 12, color: '#1677ff' }}>Running…</Text></>
+                  )}
+                  {!clearRunning && CLEAR_STEP_KEYS.every(k => clearStepMap[k].status === 'success') && (
+                    <><CheckCircleOutlined style={{ color: '#52c41a' }} /><Text style={{ fontSize: 12, color: '#52c41a' }}>All steps completed</Text></>
+                  )}
+                  {!clearRunning && CLEAR_STEP_KEYS.some(k => clearStepMap[k].status === 'error') && (
+                    <><CloseCircleOutlined style={{ color: '#ff4d4f' }} /><Text style={{ fontSize: 12, color: '#ff4d4f' }}>Failed — expand for details</Text></>
+                  )}
                 </Space>
               ),
               children: (() => {
-                const stepCards: { key: ClearStepKey; step: number; method: string; methodColor: string; label: string; url: string; handler: () => Promise<boolean>; enabledAfter?: ClearStepKey }[] = [
-                  { key: 'sla',       step: 1, method: 'POST', methodColor: 'green',  label: 'Create SLA Clearing Accounting',
-                    url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/create`, handler: runClearStep_sla },
-                  { key: 'gl_create', step: 2, method: 'POST', methodColor: 'green',  label: 'Create GL Journal',
-                    url: `${APEX_DB_CONFIG.baseUrl}/journals/create`, handler: runClearStep_glCreate, enabledAfter: 'sla' },
-                  { key: 'gl_post',   step: 3, method: 'PUT',  methodColor: 'orange', label: 'Post GL Journal',
-                    url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/:batchId/post`, handler: runClearStep_glPost, enabledAfter: 'gl_create' },
-                  { key: 'sla_stamp', step: 4, method: 'POST', methodColor: 'green',  label: 'Stamp SLA as POSTED',
-                    url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`, handler: runClearStep_stamp, enabledAfter: 'gl_post' },
-                  { key: 'patch',     step: 5, method: 'PUT',  methodColor: 'orange', label: 'Update Payment Status → Cleared',
-                    url: `${APEX_PAYMENTS_URL}/clear`, handler: runClearStep_patch, enabledAfter: 'sla_stamp' },
+                const stepDefs = [
+                  { key: 'sla'       as ClearStepKey, step: 1, method: 'POST', methodColor: 'green',  label: 'Create SLA Clearing Accounting', url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/create` },
+                  { key: 'gl_create' as ClearStepKey, step: 2, method: 'POST', methodColor: 'green',  label: 'Create GL Journal',               url: `${APEX_DB_CONFIG.baseUrl}/journals/create` },
+                  { key: 'gl_post'   as ClearStepKey, step: 3, method: 'PUT',  methodColor: 'orange', label: 'Post GL Journal',                  url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/:batchId/post` },
+                  { key: 'sla_stamp' as ClearStepKey, step: 4, method: 'POST', methodColor: 'green',  label: 'Stamp SLA as POSTED',             url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/post` },
+                  { key: 'patch'     as ClearStepKey, step: 5, method: 'PUT',  methodColor: 'orange', label: 'Update Payment Status → Cleared',  url: `${APEX_PAYMENTS_URL}/clear` },
                 ];
-                return stepCards.map(card => {
+                return stepDefs.map(card => {
                   const st = clearStepMap[card.key];
-                  const isRunning = st.status === 'running';
-                  const enabled = !isRunning && (!card.enabledAfter || clearStepMap[card.enabledAfter]?.status === 'success');
-                  const borderColor = st.status === 'success' ? '#52c41a' : st.status === 'error' ? '#ff4d4f' : st.status === 'running' ? '#1677ff' : undefined;
+                  const borderColor = st.status === 'success' ? '#52c41a' : st.status === 'error' ? '#ff4d4f' : st.status === 'running' ? '#1677ff' : '#e8e8e8';
                   const statusIcon = st.status === 'running' ? <LoadingOutlined style={{ color: '#1677ff' }} spin />
                     : st.status === 'success' ? <CheckCircleOutlined style={{ color: '#52c41a' }} />
-                    : st.status === 'error'   ? <CloseCircleOutlined style={{ color: '#ff4d4f' }} /> : null;
+                    : st.status === 'error'   ? <CloseCircleOutlined style={{ color: '#ff4d4f' }} />
+                    : <span style={{ display: 'inline-block', width: 14, height: 14, borderRadius: '50%', background: '#d9d9d9', verticalAlign: 'middle' }} />;
                   return (
-                    <Card key={card.key} size="small" style={{ marginBottom: 10, borderColor }}
-                      title={
-                        <Space size={4}>
-                          <Tag color={card.methodColor} style={{ minWidth: 44, textAlign: 'center', margin: 0 }}>{card.method}</Tag>
+                    <div key={card.key} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 10px', borderLeft: `3px solid ${borderColor}`, background: st.status === 'idle' ? '#fafafa' : st.status === 'running' ? '#e6f4ff' : st.status === 'success' ? '#f6ffed' : '#fff2f0', marginBottom: 6, borderRadius: '0 4px 4px 0' }}>
+                      <span style={{ marginTop: 2, flexShrink: 0 }}>{statusIcon}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <Tag color={card.methodColor} style={{ fontSize: 10, margin: 0, lineHeight: '16px' }}>{card.method}</Tag>
                           <Text strong style={{ fontSize: 12 }}>Step {card.step}: {card.label}</Text>
-                          {statusIcon}
-                        </Space>
-                      }
-                      extra={
-                        <Button size="small" type="primary"
-                          style={card.key === 'patch' ? { background: REDWOOD.success, borderColor: REDWOOD.success } : undefined}
-                          icon={isRunning ? <LoadingOutlined /> : <PlayCircleOutlined />}
-                          loading={isRunning} disabled={!enabled} onClick={card.handler}
-                        >
-                          Run
-                        </Button>
-                      }
-                    >
-                      <code style={{ fontSize: 10, background: '#f0f0f0', padding: '2px 6px', borderRadius: 3, display: 'block', wordBreak: 'break-all', marginBottom: st.response || st.error ? 6 : 0 }}>{card.url}</code>
-                      {st.error && <Alert type="error" message={st.error} style={{ marginTop: 6, fontSize: 11 }} showIcon />}
-                      {st.response && (
-                        <pre style={{ fontSize: 10, background: '#1e1e1e', color: st.status === 'error' ? '#f48771' : '#b5cea8', padding: 8, borderRadius: 4, margin: '6px 0 0', maxHeight: 120, overflowY: 'auto' }}>
-                          {JSON.stringify(st.response, null, 2)}
-                        </pre>
-                      )}
-                    </Card>
+                        </div>
+                        <code style={{ fontSize: 10, color: '#888', display: 'block', marginTop: 2, wordBreak: 'break-all' }}>{card.url}</code>
+                        {st.error && <Alert type="error" message={st.error} style={{ marginTop: 4, fontSize: 11 }} showIcon />}
+                        {st.response && (
+                          <pre style={{ fontSize: 10, background: '#1e1e1e', color: st.status === 'error' ? '#f48771' : '#b5cea8', padding: 6, borderRadius: 4, margin: '4px 0 0', maxHeight: 100, overflowY: 'auto' }}>
+                            {JSON.stringify(st.response, null, 2)}
+                          </pre>
+                        )}
+                      </div>
+                    </div>
                   );
                 });
               })(),
