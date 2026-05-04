@@ -132,6 +132,8 @@ interface Payment {
   currentPayeeName: string;
   paymentDate: string;
   paidAmount: string;
+  amountPaidInvoiceCurrency: number;
+  discountTaken: number;
   address: string;
 }
 
@@ -332,6 +334,8 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
               }
             } catch { /* use what we have */ }
           }
+          const amountPaidInvCcy = Number(rel.amount_paid_invoice_currency ?? rel.AMOUNT_PAID_INVOICE_CURRENCY ?? rel.AmountPaidInvoiceCurrency ?? 0);
+          const discountTaken    = Number(rel.discount_taken              ?? rel.DISCOUNT_TAKEN              ?? rel.DiscountTaken              ?? 0);
           mappedPayments.push({
             key: (rel.invoice_payment_id || rel.INVOICE_PAYMENT_ID || mappedPayments.length + 1).toString(),
             number: (paymentDetails.payment_number || paymentDetails.PAYMENT_NUMBER || rel.check_id || rel.CHECK_ID || '').toString(),
@@ -341,6 +345,8 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
             currentPayeeName: paymentDetails.payee_name || paymentDetails.PAYEE_NAME || invoice.supplierOrParty || '',
             paymentDate: formatDate(paymentDetails.payment_date || paymentDetails.PAYMENT_DATE || ''),
             paidAmount: `${(rel.amount_paid_payment_currency || rel.AMOUNT_PAID_PAYMENT_CURRENCY || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })} ${rel.invoice_currency || rel.INVOICE_CURRENCY || invoice.invoiceCurrency}`,
+            amountPaidInvoiceCurrency: amountPaidInvCcy,
+            discountTaken,
             address: paymentDetails.payee_address || paymentDetails.PAYEE_ADDRESS || '',
           });
         }
@@ -847,7 +853,17 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
     { title: 'Reconciled', dataIndex: 'reconciled', key: 'reconciled', width: 90 },
     { title: 'Current Payee Name', dataIndex: 'currentPayeeName', key: 'currentPayeeName', width: 180 },
     { title: 'Payment Date', dataIndex: 'paymentDate', key: 'paymentDate', width: 110 },
-    { title: 'Paid Amount', dataIndex: 'paidAmount', key: 'paidAmount', width: 120 },
+    { title: 'Paid Amount', dataIndex: 'paidAmount', key: 'paidAmount', width: 140, align: 'right' as const },
+    {
+      title: 'Discount Taken',
+      dataIndex: 'discountTaken',
+      key: 'discountTaken',
+      width: 120,
+      align: 'right' as const,
+      render: (v: number) => v !== 0
+        ? <Text style={{ color: REDWOOD.success }}>{v.toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text>
+        : <Text type="secondary">—</Text>,
+    },
     {
       title: 'Address',
       dataIndex: 'address',
@@ -855,6 +871,11 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
       render: (value: string) => <span style={{ color: REDWOOD.info }}>{value}</span>,
     },
   ];
+
+  // Invoice balance calculation (considers payments + discounts taken)
+  const totalPaid           = payments.reduce((s, p) => s + (p.amountPaidInvoiceCurrency || 0), 0);
+  const totalDiscountTaken  = payments.reduce((s, p) => s + (p.discountTaken || 0), 0);
+  const invoiceBalance      = invoice.invoiceAmount - totalPaid - totalDiscountTaken;
 
   // Installments columns
   const installmentsColumns: ColumnsType<Installment> = [
@@ -1172,7 +1193,69 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
                     size="small"
                     bordered
                     locale={{ emptyText: 'No payments recorded for this invoice.' }}
+                    summary={() => payments.length === 0 ? undefined : (
+                      <Table.Summary fixed>
+                        <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 600 }}>
+                          <Table.Summary.Cell index={0} colSpan={6} align="right">
+                            <Text strong>Totals</Text>
+                          </Table.Summary.Cell>
+                          <Table.Summary.Cell index={6} align="right">
+                            <Text strong>
+                              {totalPaid.toLocaleString('en-US', { minimumFractionDigits: 2 })} {invoice.invoiceCurrency}
+                            </Text>
+                          </Table.Summary.Cell>
+                          <Table.Summary.Cell index={7} align="right">
+                            <Text strong style={{ color: REDWOOD.success }}>
+                              {totalDiscountTaken !== 0
+                                ? totalDiscountTaken.toLocaleString('en-US', { minimumFractionDigits: 2 })
+                                : '—'}
+                            </Text>
+                          </Table.Summary.Cell>
+                          <Table.Summary.Cell index={8} />
+                        </Table.Summary.Row>
+                      </Table.Summary>
+                    )}
                   />
+
+                  {/* Invoice Balance Summary */}
+                  {payments.length > 0 && (
+                    <div style={{
+                      marginTop: 12,
+                      padding: '10px 16px',
+                      background: '#f8f9fa',
+                      borderRadius: 6,
+                      border: '1px solid #e0e0e0',
+                    }}>
+                      <Row gutter={0}>
+                        <Col flex="1" style={{ textAlign: 'center', padding: '4px 12px', borderRight: '1px solid #e0e0e0' }}>
+                          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>Invoice Amount</Text>
+                          <Text strong style={{ fontSize: 14, color: REDWOOD.info }}>
+                            {invoice.invoiceAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })} {invoice.invoiceCurrency}
+                          </Text>
+                        </Col>
+                        <Col flex="1" style={{ textAlign: 'center', padding: '4px 12px', borderRight: '1px solid #e0e0e0' }}>
+                          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>Amount Paid</Text>
+                          <Text strong style={{ fontSize: 14, color: REDWOOD.primary }}>
+                            {totalPaid.toLocaleString('en-US', { minimumFractionDigits: 2 })} {invoice.invoiceCurrency}
+                          </Text>
+                        </Col>
+                        <Col flex="1" style={{ textAlign: 'center', padding: '4px 12px', borderRight: '1px solid #e0e0e0' }}>
+                          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>Discount Taken</Text>
+                          <Text strong style={{ fontSize: 14, color: REDWOOD.success }}>
+                            {totalDiscountTaken !== 0
+                              ? totalDiscountTaken.toLocaleString('en-US', { minimumFractionDigits: 2 })
+                              : '—'}
+                          </Text>
+                        </Col>
+                        <Col flex="1" style={{ textAlign: 'center', padding: '4px 12px' }}>
+                          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>Balance</Text>
+                          <Text strong style={{ fontSize: 14, color: Math.abs(invoiceBalance) < 0.01 ? REDWOOD.success : REDWOOD.warning }}>
+                            {invoiceBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })} {invoice.invoiceCurrency}
+                          </Text>
+                        </Col>
+                      </Row>
+                    </div>
+                  )}
                 </Card>
               </Spin>
             ),
