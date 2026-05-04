@@ -2593,8 +2593,9 @@ const ManagePayments: React.FC = () => {
                           </Form.Item>
                           <Form.Item label="Payment Status" name="paymentStatus">
                             <Select placeholder="Select Status" allowClear>
-                              <Option value="Cleared">Cleared</Option>
+                              <Option value="Issued">Issued</Option>
                               <Option value="Negotiable">Negotiable</Option>
+                              <Option value="Cleared">Cleared</Option>
                               <Option value="Voided">Voided</Option>
                               <Option value="Stopped">Stopped</Option>
                             </Select>
@@ -2611,7 +2612,14 @@ const ManagePayments: React.FC = () => {
                           <Form.Item label="Only PDC" name="onlyPdc" valuePropName="checked">
                             <Checkbox
                               checked={onlyPdc}
-                              onChange={e => setOnlyPdc(e.target.checked)}
+                              onChange={e => {
+                                setOnlyPdc(e.target.checked);
+                                if (e.target.checked) {
+                                  form.setFieldsValue({ paymentStatus: 'Issued' });
+                                } else {
+                                  form.setFieldsValue({ paymentStatus: undefined });
+                                }
+                              }}
                             >
                               <span style={{ fontSize: 12 }}>
                                 Show only Post-Dated Cheques
