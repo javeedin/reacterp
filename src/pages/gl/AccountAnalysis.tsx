@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import dayjs, { Dayjs } from 'dayjs';
+import { SearchTabPanel } from './SearchTabPanel';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import {
@@ -34,6 +35,7 @@ import {
   CheckSquareOutlined,
   BarChartOutlined,
   ReloadOutlined,
+  PlusOutlined,
   DownloadOutlined,
   TableOutlined,
   DragOutlined,
@@ -133,6 +135,7 @@ interface AccountTab {
   account: string;
   company: string;
   concatenatedSegments: string;
+  selectedPeriods: string[];
   data: JournalLineSegment[];
   loading: boolean;
 }
@@ -232,8 +235,11 @@ const getPreviousPeriod = (period: string): string => {
 
 const AccountAnalysis: React.FC = () => {
   // State
-  const [activeTabKey, setActiveTabKey] = useState('search');
+  const [activeTabKey, setActiveTabKey] = useState('search-1');
   const [accountTabs, setAccountTabs] = useState<AccountTab[]>([]);
+  const [searchTabInstances, setSearchTabInstances] = useState<Array<{ key: string; label: string }>>([
+    { key: 'search-1', label: 'Analysis 1' },
+  ]);
   const [loading, setLoading] = useState(false);
   const [searchData, setSearchData] = useState<JournalLineSegment[]>([]);
   const [openingBalanceRow, setOpeningBalanceRow] = useState<JournalLineSegment | null>(null);
@@ -843,7 +849,7 @@ const AccountAnalysis: React.FC = () => {
     (await fetchBalanceRows(account, company, period)).opening;
 
   // Fetch account data for drill-down
-  const fetchAccountData = async (account: string, company: string): Promise<JournalLineSegment[]> => {
+  const fetchAccountData = async (account: string, company: string, selectedPeriods: string[]): Promise<JournalLineSegment[]> => {
     try {
       // Fetch data for each period using the byaccount endpoint
       const allItems: JournalLineSegment[] = [];
@@ -944,7 +950,7 @@ const AccountAnalysis: React.FC = () => {
   };
 
   // Open account in new tab - re-query API
-  const openAccountTab = async (record: JournalLineSegment) => {
+  const openAccountTab = async (record: JournalLineSegment, tabSelectedPeriods: string[]) => {
     const concatenatedSegments = record.concatenatedSegments ||
       `${record.company}-${record.lob}-${record.department}-${record.account}-${record.subAccount}-${record.analysis}-${record.intercompany}`;
 
@@ -961,14 +967,15 @@ const AccountAnalysis: React.FC = () => {
         account: record.account,
         company: record.company,
         concatenatedSegments,
+        selectedPeriods: tabSelectedPeriods,
         data: [],
         loading: true,
       };
-      setAccountTabs([...accountTabs, newTab]);
+      setAccountTabs(prev => [...prev, newTab]);
       setActiveTabKey(tabKey);
 
       // Fetch fresh data for this account
-      const freshData = await fetchAccountData(record.account, record.company);
+      const freshData = await fetchAccountData(record.account, record.company, tabSelectedPeriods);
       setAccountTabs((prev) =>
         prev.map((tab) =>
           tab.key === tabKey ? { ...tab, data: freshData, loading: false } : tab
@@ -977,13 +984,32 @@ const AccountAnalysis: React.FC = () => {
     }
   };
 
+  // Add a new search tab
+  const addSearchTab = () => {
+    const idx = searchTabInstances.length + 1;
+    const key = `search-${Date.now()}`;
+    setSearchTabInstances(prev => [...prev, { key, label: `Analysis ${idx}` }]);
+    setActiveTabKey(key);
+  };
+
   // Close account tab
   const closeAccountTab = (targetKey: string) => {
     const newTabs = accountTabs.filter((tab) => tab.key !== targetKey);
     setAccountTabs(newTabs);
 
     if (activeTabKey === targetKey) {
-      setActiveTabKey(newTabs.length > 0 ? newTabs[newTabs.length - 1].key : 'search');
+      const lastSearch = searchTabInstances[searchTabInstances.length - 1];
+      setActiveTabKey(newTabs.length > 0 ? newTabs[newTabs.length - 1].key : (lastSearch?.key ?? 'search-1'));
+    }
+  };
+
+  // Close search tab
+  const closeSearchTab = (targetKey: string) => {
+    if (searchTabInstances.length <= 1) return; // always keep at least one
+    const newInstances = searchTabInstances.filter(t => t.key !== targetKey);
+    setSearchTabInstances(newInstances);
+    if (activeTabKey === targetKey) {
+      setActiveTabKey(newInstances[newInstances.length - 1]?.key ?? 'search-1');
     }
   };
 
@@ -995,8 +1021,8 @@ const AccountAnalysis: React.FC = () => {
   // Tab edit handler
   const onTabEdit = (targetKey: React.MouseEvent | React.KeyboardEvent | string, action: 'add' | 'remove') => {
     if (action === 'remove' && typeof targetKey === 'string') {
-      if (targetKey === 'all-accounts-pivot') {
-        closeAllAccountsPivot();
+      if (searchTabInstances.some(t => t.key === targetKey)) {
+        closeSearchTab(targetKey);
       } else {
         closeAccountTab(targetKey);
       }
@@ -1412,140 +1438,7 @@ const AccountAnalysis: React.FC = () => {
     return filter?.label || segment;
   };
 
-  // Pivot columns (dynamic based on dropped segments and selected periods)
-  const pivotColumns: ColumnsType<PivotDataRow> = [
-    // Segments before Account
-    ...segmentsBeforeAccount.map((segment) => ({
-      title: getSegmentLabel(segment),
-      dataIndex: segment,
-      key: segment,
-      width: 100,
-      fixed: 'left' as const,
-    })),
-    // Account column (always present)
-    {
-      title: 'Account',
-      dataIndex: 'account',
-      key: 'account',
-      width: 100,
-      fixed: 'left' as const,
-    },
-    // Segments after Account
-    ...segmentsAfterAccount.map((segment) => ({
-      title: getSegmentLabel(segment),
-      dataIndex: segment,
-      key: segment,
-      width: 100,
-      fixed: 'left' as const,
-    })),
-    // Dynamic period columns - Balance or Dr/Cr based on toggle
-    ...(showDrCrColumns
-      ? // Show Dr and Cr columns
-        selectedPeriods.flatMap((period) => [
-          {
-            title: `${period} Dr`,
-            dataIndex: `${period}_Dr`,
-            key: `${period}_Dr`,
-            width: 100,
-            align: 'right' as const,
-            render: (v: number) => (
-              <span style={{ color: REDWOOD.success }}>
-                {formatNumber(v || 0)}
-              </span>
-            ),
-          },
-          {
-            title: `${period} Cr`,
-            dataIndex: `${period}_Cr`,
-            key: `${period}_Cr`,
-            width: 100,
-            align: 'right' as const,
-            render: (v: number) => (
-              <span style={{ color: REDWOOD.primary }}>
-                {formatNumber(v || 0)}
-              </span>
-            ),
-          },
-        ])
-      : // Show Balance columns (Dr - Cr)
-        selectedPeriods.map((period) => ({
-          title: period,
-          key: `${period}_Balance`,
-          width: 110,
-          align: 'right' as const,
-          render: (_: any, record: PivotDataRow) => {
-            const dr = (record[`${period}_Dr`] as number) || 0;
-            const cr = (record[`${period}_Cr`] as number) || 0;
-            const balance = dr - cr;
-            return (
-              <span style={{ color: balance >= 0 ? REDWOOD.success : REDWOOD.primary }}>
-                {formatNumber(balance)}
-              </span>
-            );
-          },
-        }))),
-    // Total columns
-    ...(showDrCrColumns
-      ? [
-          {
-            title: 'Total Dr',
-            key: 'totalDr',
-            width: 110,
-            align: 'right' as const,
-            fixed: 'right' as const,
-            render: (_: any, record: PivotDataRow) => {
-              const totalDr = selectedPeriods.reduce(
-                (sum, period) => sum + ((record[`${period}_Dr`] as number) || 0),
-                0
-              );
-              return (
-                <Text strong style={{ color: REDWOOD.success }}>
-                  {formatNumber(totalDr)}
-                </Text>
-              );
-            },
-          },
-          {
-            title: 'Total Cr',
-            key: 'totalCr',
-            width: 110,
-            align: 'right' as const,
-            fixed: 'right' as const,
-            render: (_: any, record: PivotDataRow) => {
-              const totalCr = selectedPeriods.reduce(
-                (sum, period) => sum + ((record[`${period}_Cr`] as number) || 0),
-                0
-              );
-              return (
-                <Text strong style={{ color: REDWOOD.primary }}>
-                  {formatNumber(totalCr)}
-                </Text>
-              );
-            },
-          },
-        ]
-      : [
-          {
-            title: 'Total Balance',
-            key: 'totalBalance',
-            width: 120,
-            align: 'right' as const,
-            fixed: 'right' as const,
-            render: (_: any, record: PivotDataRow) => {
-              const totalBalance = selectedPeriods.reduce((sum, period) => {
-                const dr = (record[`${period}_Dr`] as number) || 0;
-                const cr = (record[`${period}_Cr`] as number) || 0;
-                return sum + (dr - cr);
-              }, 0);
-              return (
-                <Text strong style={{ color: totalBalance >= 0 ? REDWOOD.success : REDWOOD.primary }}>
-                  {formatNumber(totalBalance)}
-                </Text>
-              );
-            },
-          },
-        ]),
-  ];
+  // pivotColumns is now built inside renderAccountTab using tab.selectedPeriods
 
   // Create column title with filter input
   const createFilterableColumn = (
@@ -1834,7 +1727,7 @@ const AccountAnalysis: React.FC = () => {
             </Text>
           ) : (
             <a
-              onClick={() => openAccountTab(record)}
+              onClick={() => openAccountTab(record, selectedPeriods)}
               style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 10 }}
             >
               {text || `${record.company}-${record.lob}-${record.department}-${record.account}-${record.subAccount}-${record.analysis}-${record.intercompany}`}
@@ -2232,6 +2125,7 @@ const AccountAnalysis: React.FC = () => {
                         <Text strong style={{ fontSize: 10 }}>Totals</Text>
                       </Table.Summary.Cell>
                       {/* Accounted Dr */}
+                      {/* @ts-expect-error antd6 SummaryCell lacks style */}
                       <Table.Summary.Cell index={9} align="right" style={groupBorderLeft}>
                         <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(gridTotals.accountedDr)}</Text>
                       </Table.Summary.Cell>
@@ -2240,8 +2134,10 @@ const AccountAnalysis: React.FC = () => {
                         <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(gridTotals.accountedCr)}</Text>
                       </Table.Summary.Cell>
                       {/* Accounted Balance */}
+                      {/* @ts-expect-error antd6 SummaryCell lacks style */}
                       <Table.Summary.Cell index={11} align="right" style={groupBorderRight} />
                       {/* Entered Dr */}
+                      {/* @ts-expect-error antd6 SummaryCell lacks style */}
                       <Table.Summary.Cell index={12} align="right" style={groupBorderLeft}>
                         <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(gridTotals.enteredDr)}</Text>
                       </Table.Summary.Cell>
@@ -2250,6 +2146,7 @@ const AccountAnalysis: React.FC = () => {
                         <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(gridTotals.enteredCr)}</Text>
                       </Table.Summary.Cell>
                       {/* Entered Balance */}
+                      {/* @ts-expect-error antd6 SummaryCell lacks style */}
                       <Table.Summary.Cell index={14} align="right" style={groupBorderRight} />
                       <Table.Summary.Cell index={15} />
                     </Table.Summary.Row>
@@ -2350,8 +2247,56 @@ const AccountAnalysis: React.FC = () => {
 
   // Render Account Detail tab with pivot view
   const renderAccountTab = (tab: AccountTab) => {
+    const periods = tab.selectedPeriods;
     const pivotData = generatePivotData(tab.data);
     const totals = calculateTotals(tab.data);
+
+    // Build pivot columns using this tab's periods
+    const pivotColumns: ColumnsType<PivotDataRow> = [
+      ...segmentsBeforeAccount.map((segment) => ({
+        title: getSegmentLabel(segment),
+        dataIndex: segment,
+        key: segment,
+        width: 100,
+        fixed: 'left' as const,
+      })),
+      { title: 'Account', dataIndex: 'account', key: 'account', width: 100, fixed: 'left' as const },
+      ...segmentsAfterAccount.map((segment) => ({
+        title: getSegmentLabel(segment),
+        dataIndex: segment,
+        key: segment,
+        width: 100,
+        fixed: 'left' as const,
+      })),
+      ...(showDrCrColumns
+        ? periods.flatMap((period) => [
+            { title: `${period} Dr`, dataIndex: `${period}_Dr`, key: `${period}_Dr`, width: 100, align: 'right' as const,
+              render: (v: number) => <span style={{ color: REDWOOD.success }}>{formatNumber(v || 0)}</span> },
+            { title: `${period} Cr`, dataIndex: `${period}_Cr`, key: `${period}_Cr`, width: 100, align: 'right' as const,
+              render: (v: number) => <span style={{ color: REDWOOD.primary }}>{formatNumber(v || 0)}</span> },
+          ])
+        : periods.map((period) => ({
+            title: period, key: `${period}_Balance`, width: 110, align: 'right' as const,
+            render: (_: any, record: PivotDataRow) => {
+              const balance = ((record[`${period}_Dr`] as number) || 0) - ((record[`${period}_Cr`] as number) || 0);
+              return <span style={{ color: balance >= 0 ? REDWOOD.success : REDWOOD.primary }}>{formatNumber(balance)}</span>;
+            },
+          }))),
+      ...(showDrCrColumns
+        ? [
+            { title: 'Total Dr', key: 'totalDr', width: 110, align: 'right' as const, fixed: 'right' as const,
+              render: (_: any, record: PivotDataRow) => <Text strong style={{ color: REDWOOD.success }}>{formatNumber(periods.reduce((s, p) => s + ((record[`${p}_Dr`] as number) || 0), 0))}</Text> },
+            { title: 'Total Cr', key: 'totalCr', width: 110, align: 'right' as const, fixed: 'right' as const,
+              render: (_: any, record: PivotDataRow) => <Text strong style={{ color: REDWOOD.primary }}>{formatNumber(periods.reduce((s, p) => s + ((record[`${p}_Cr`] as number) || 0), 0))}</Text> },
+          ]
+        : [
+            { title: 'Total Balance', key: 'totalBalance', width: 120, align: 'right' as const, fixed: 'right' as const,
+              render: (_: any, record: PivotDataRow) => {
+                const bal = periods.reduce((s, p) => s + ((record[`${p}_Dr`] as number) || 0) - ((record[`${p}_Cr`] as number) || 0), 0);
+                return <Text strong style={{ color: bal >= 0 ? REDWOOD.success : REDWOOD.primary }}>{formatNumber(bal)}</Text>;
+              } },
+          ]),
+    ];
 
     return (
       <div style={{ padding: 16 }}>
@@ -2389,7 +2334,7 @@ const AccountAnalysis: React.FC = () => {
                 <Button
                   size="small"
                   onClick={() => {
-                    const endpoints = selectedPeriods.map((period) => {
+                    const endpoints = periods.map((period) => {
                       const params = new URLSearchParams();
                       params.append('P_ACCOUNT', tab.account);
                       params.append('P_PERIOD_NAME', period);
@@ -2414,7 +2359,7 @@ const AccountAnalysis: React.FC = () => {
                   size="small"
                   icon={<DownloadOutlined />}
                   disabled={tab.data.length === 0}
-                  onClick={() => exportToExcel(tab.data, `GL_Account_${tab.account}_${selectedPeriods.join('_') || 'All_Periods'}`)}
+                  onClick={() => exportToExcel(tab.data, `GL_Account_${tab.account}_${periods.join('_') || 'All_Periods'}`)}
                 >
                   Export
                 </Button>
@@ -2631,7 +2576,7 @@ const AccountAnalysis: React.FC = () => {
               <Text strong style={{ fontSize: 12 }}>Pivot View - Period Analysis</Text>
             </Space>
             <Text type="secondary" style={{ fontSize: 11 }}>
-              Periods: {selectedPeriods.join(', ')}
+              Periods: {periods.join(', ')}
             </Text>
           </div>
 
@@ -2645,7 +2590,7 @@ const AccountAnalysis: React.FC = () => {
               className="compact-table aa-grid"
               summary={() => {
                 const periodTotals: { [key: string]: number } = {};
-                selectedPeriods.forEach((period) => {
+                periods.forEach((period) => {
                   periodTotals[period] = pivotData.reduce(
                     (sum, row) => sum + ((row[period] as number) || 0),
                     0
@@ -2662,14 +2607,14 @@ const AccountAnalysis: React.FC = () => {
                       <Table.Summary.Cell index={0} colSpan={segmentColCount}>
                         <Text strong style={{ fontSize: 11 }}>PTD Totals</Text>
                       </Table.Summary.Cell>
-                      {selectedPeriods.map((period, idx) => (
+                      {periods.map((period, idx) => (
                         <Table.Summary.Cell key={period} index={segmentColCount + idx} align="right">
                           <Text strong style={{ fontSize: 11, color: periodTotals[period] >= 0 ? REDWOOD.success : REDWOOD.primary }}>
                             {formatNumber(periodTotals[period])}
                           </Text>
                         </Table.Summary.Cell>
                       ))}
-                      <Table.Summary.Cell index={segmentColCount + selectedPeriods.length} align="right">
+                      <Table.Summary.Cell index={segmentColCount + periods.length} align="right">
                         <Text strong style={{ fontSize: 11, color: grandTotal >= 0 ? REDWOOD.success : REDWOOD.primary }}>
                           {formatNumber(grandTotal)}
                         </Text>
@@ -3118,28 +3063,23 @@ const AccountAnalysis: React.FC = () => {
 
   // Build tabs
   const tabItems = [
-    {
-      key: 'search',
-      label: null,
-      children: renderSearchTab(),
-      closable: false,
-    },
-    // All accounts pivot tab (conditionally shown)
-    ...(allAccountsPivotOpen
-      ? [
-          {
-            key: 'all-accounts-pivot',
-            label: (
-              <span style={{ fontSize: 12 }}>
-                <PieChartOutlined style={{ marginRight: 6 }} />
-                All Accounts Pivot
-              </span>
-            ),
-            children: renderAllAccountsPivotTab(),
-            closable: true,
-          },
-        ]
-      : []),
+    ...searchTabInstances.map((instance) => ({
+      key: instance.key,
+      label: (
+        <span style={{ fontSize: 12 }}>
+          <SearchOutlined style={{ marginRight: 6 }} />
+          {instance.label}
+        </span>
+      ),
+      children: (
+        <SearchTabPanel
+          key={instance.key}
+          ledgerOptions={ledgerOptions}
+          onOpenAccountTab={openAccountTab}
+        />
+      ),
+      closable: searchTabInstances.length > 1,
+    })),
     ...accountTabs.map((tab) => ({
       key: tab.key,
       label: (
@@ -3179,14 +3119,6 @@ const AccountAnalysis: React.FC = () => {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
               <FundOutlined style={{ color: REDWOOD.primary, fontSize: 16 }} />
               <Text strong style={{ fontSize: 16, color: REDWOOD.neutral900 }}>Account Analysis</Text>
-              {selectedLedger && (
-                <Tag color="volcano" style={{ fontSize: 10 }}>{selectedLedger}</Tag>
-              )}
-              {selectedPeriods.length > 0 && (
-                <Tag color="blue" style={{ fontSize: 10 }}>
-                  {selectedPeriods.length === 1 ? selectedPeriods[0] : `${selectedPeriods.length} periods`}
-                </Tag>
-              )}
             </div>
           </div>
         </div>
@@ -3201,7 +3133,18 @@ const AccountAnalysis: React.FC = () => {
             hideAdd
             items={tabItems}
             style={{ marginTop: 8 }}
-            className="aa-search-tabs"
+            tabBarExtraContent={{
+              right: (
+                <Button
+                  size="small"
+                  icon={<PlusOutlined />}
+                  onClick={addSearchTab}
+                  style={{ marginRight: 8, fontSize: 12 }}
+                >
+                  New Analysis
+                </Button>
+              ),
+            }}
           />
         </div>
 

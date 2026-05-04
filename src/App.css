@@ -83,10 +83,7 @@
 }
 
 
-/* Hide the empty Search tab pill in Account Analysis */
-.aa-search-tabs > .ant-tabs-nav .ant-tabs-tab:first-child {
-  display: none !important;
-}
+/* Account Analysis search tabs */
 .aa-search-tabs > .ant-tabs-nav .ant-tabs-nav-add {
   display: none !important;
 }
