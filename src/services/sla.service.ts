@@ -224,6 +224,21 @@ export async function getAccountingLinesBySourceNumber(
   return apexGet<{ items: any[] }>(`${BASE}/sla/journals/lines?${qs}`);
 }
 
+/**
+ * Fetch ALL SLA lines for a specific sourceId (e.g. checkId) across all events.
+ * More precise than getAccountingLinesBySourceNumber — avoids cross-payment leakage.
+ */
+export async function getAccountingLinesBySourceId(
+  sourceId: number,
+  sourceTable?: string,
+  moduleName?: string,
+): Promise<{ items: any[] }> {
+  const qs = new URLSearchParams({ sourceId: String(sourceId), limit: '500' });
+  if (sourceTable) qs.set('sourceTable', sourceTable);
+  if (moduleName)  qs.set('moduleName', moduleName);
+  return apexGet<{ items: any[] }>(`${BASE}/sla/journals/lines?${qs}`);
+}
+
 // ── GL journal duplicate-check ─────────────────────────────────────────────
 
 export interface GlJournalExistsResult {

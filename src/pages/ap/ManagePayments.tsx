@@ -81,7 +81,7 @@ import {
   buildApPaymentSlaPayloads,
   getAccounting,
   getLinesByHeaderId,
-  getAccountingLinesBySourceNumber,
+  getAccountingLinesBySourceId,
   checkGLJournalExists,
   derivePeriodName,
 } from '../../services/sla.service';
@@ -2384,16 +2384,11 @@ const ManagePayments: React.FC = () => {
     setViewAcctData(null);
     setViewAcctAllEvents([]);
     try {
+      // Fetch all SLA lines for this specific payment (by checkId) and the primary header in parallel
       const [result, allLinesData] = await Promise.all([
         getAccounting('AP_PAYMENTS', record.checkId),
-        record.paymentNumber
-          ? getAccountingLinesBySourceNumber(String(record.paymentNumber), 'AP').catch(() => ({ items: [] }))
-          : Promise.resolve({ items: [] }),
+        getAccountingLinesBySourceId(record.checkId, 'AP_PAYMENTS', 'AP').catch(() => ({ items: [] })),
       ]);
-      // Filter to only lines belonging to this payment's checkId
-      allLinesData.items = (allLinesData.items || []).filter(
-        (l: any) => !l.sourceId || Number(l.sourceId) === Number(record.checkId)
-      );
       // Enrich main result lines with account descriptions
       if (result.headerId) {
         try {
@@ -2403,17 +2398,17 @@ const ManagePayments: React.FC = () => {
         } catch { /* non-critical */ }
       }
       setViewAcctData(result);
-      // Group all lines by headerId to build per-event sections
+      // Group all lines by headerId to build per-event sections (one section per event type)
       const eventsMap = new Map<number, { headerId: number; eventTypeCode: string; accountingStatus: string; accountingDate: string; lines: any[] }>();
       for (const line of (allLinesData.items || [])) {
         const hid = line.headerId as number;
         if (!eventsMap.has(hid)) {
           eventsMap.set(hid, {
-            headerId:        hid,
-            eventTypeCode:   (line as any).eventTypeCode || '',
-            accountingStatus:(line as any).accountingStatus || '',
-            accountingDate:  (line as any).accountingDate || '',
-            lines:           [],
+            headerId:         hid,
+            eventTypeCode:    (line as any).eventTypeCode || '',
+            accountingStatus: (line as any).accountingStatus || '',
+            accountingDate:   (line as any).accountingDate || '',
+            lines:            [],
           });
         }
         eventsMap.get(hid)!.lines.push(line);
