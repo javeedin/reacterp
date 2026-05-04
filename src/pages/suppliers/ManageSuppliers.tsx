@@ -546,7 +546,8 @@ const ManageSuppliers: React.FC = () => {
   const [lovSearch, setLovSearch] = useState('');
   const [lovResults, setLovResults] = useState<{ supplierNumber: string; supplier: string }[]>([]);
   const [lovLoading, setLovLoading] = useState(false);
-  const lovDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Cache — load once, filter client-side on every subsequent open
+  const lovCacheRef = useRef<{ supplierNumber: string; supplier: string }[]>([]);
 
   const displayedLovResults = React.useMemo(() => {
     const q = lovSearch.trim().toLowerCase();
@@ -559,12 +560,26 @@ const ManageSuppliers: React.FC = () => {
     return rows.map((r, i) => ({ ...r, key: i }));
   }, [lovSearch, lovResults]);
 
-  const openLov = (initialValue?: string) => {
-    const val = initialValue || '';
-    setLovSearch(val);
-    setLovResults([]);
+  const openLov = async () => {
+    setLovSearch('');
     setLovVisible(true);
-    fetchLovResults(val);   // always load — empty string returns all suppliers
+    if (lovCacheRef.current.length > 0) {
+      // Already loaded — use cache, no API call
+      setLovResults(lovCacheRef.current);
+      return;
+    }
+    // First open — fetch all suppliers and cache them
+    setLovLoading(true);
+    try {
+      const items = await fetchAllApexSuppliers(new URLSearchParams());
+      const mapped = items.map((item: any) => ({
+        supplierNumber: item.supplier_number || '',
+        supplier: item.supplier || '',
+      }));
+      lovCacheRef.current = mapped;
+      setLovResults(mapped);
+    } catch { /* ignore */ }
+    finally { setLovLoading(false); }
   };
 
   // Fetch ALL pages from the APEX suppliers endpoint (no artificial limit)
@@ -587,24 +602,6 @@ const ManageSuppliers: React.FC = () => {
     return all;
   };
 
-  const fetchLovResults = (q: string) => {
-    if (lovDebounceRef.current) clearTimeout(lovDebounceRef.current);
-    lovDebounceRef.current = setTimeout(async () => {
-      setLovLoading(true);
-      try {
-        const bu: string = form.getFieldValue('businessUnit') || '';
-        const params = new URLSearchParams();
-        if (q)  params.set('q', q);
-        if (bu) params.set('P_BUSINESS_UNIT', bu);
-        const items = await fetchAllApexSuppliers(params);
-        setLovResults(items.map((item: any) => ({
-          supplierNumber: item.supplier_number || '',
-          supplier: item.supplier || '',
-        })));
-      } catch { /* ignore */ }
-      finally { setLovLoading(false); }
-    }, 300);
-  };
 
   const onLovPick = (row: { supplierNumber: string; supplier: string }) => {
     form.setFieldsValue({ supplierNumber: row.supplierNumber, supplier: row.supplier });
@@ -1188,10 +1185,10 @@ const ManageSuppliers: React.FC = () => {
                       suffix={
                         <SearchOutlined
                           style={{ color: REDWOOD.info, cursor: 'pointer' }}
-                          onClick={() => openLov(form.getFieldValue('supplierNumber'))}
+                          onClick={() => openLov()}
                         />
                       }
-                      onPressEnter={() => openLov(form.getFieldValue('supplierNumber'))}
+                      onPressEnter={() => openLov()}
                     />
                   </Form.Item>
                 </Col>
@@ -2069,7 +2066,7 @@ const ManageSuppliers: React.FC = () => {
             placeholder="Search by supplier number or name..."
             prefix={<SearchOutlined />}
             value={lovSearch}
-            onChange={e => { setLovSearch(e.target.value); fetchLovResults(e.target.value); }}
+            onChange={e => setLovSearch(e.target.value)}
             allowClear
             autoFocus
             style={{ marginBottom: 12 }}
