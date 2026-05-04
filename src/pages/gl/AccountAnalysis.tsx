@@ -1824,17 +1824,17 @@ const AccountAnalysis: React.FC = () => {
         fixed: 'left',
         render: (text: string, record: JournalLineSegment) =>
           record.isOpeningBalance ? (
-            <Text strong style={{ fontSize: 13, color: REDWOOD.warning }}>
+            <Text strong style={{ fontSize: 10, color: REDWOOD.warning }}>
               {record.jeLineDescription}
             </Text>
           ) : record.isClosingBalance ? (
-            <Text strong style={{ fontSize: 13, color: REDWOOD.success }}>
+            <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>
               {record.jeLineDescription}
             </Text>
           ) : (
             <a
               onClick={() => openAccountTab(record)}
-              style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 11 }}
+              style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 10 }}
             >
               {text || `${record.company}-${record.lob}-${record.department}-${record.account}-${record.subAccount}-${record.analysis}-${record.intercompany}`}
             </a>
@@ -1848,7 +1848,7 @@ const AccountAnalysis: React.FC = () => {
         ellipsis: true,
         render: (text: string) => (
           <Tooltip title={text}>
-            <span style={{ fontSize: 11 }}>{text || '-'}</span>
+            <span style={{ fontSize: 10 }}>{text || '-'}</span>
           </Tooltip>
         ),
       },
@@ -1860,7 +1860,7 @@ const AccountAnalysis: React.FC = () => {
         ellipsis: true,
         render: (text: string, record: JournalLineSegment) => (
           <Tooltip title={text}>
-            <span style={{ fontSize: (record.isOpeningBalance || record.isClosingBalance) ? 13 : 11, fontWeight: (record.isOpeningBalance || record.isClosingBalance) ? 600 : undefined }}>
+            <span style={{ fontSize: 10, fontWeight: (record.isOpeningBalance || record.isClosingBalance) ? 600 : undefined }}>
               {text || '-'}
             </span>
           </Tooltip>
@@ -2252,25 +2252,25 @@ const AccountAnalysis: React.FC = () => {
                   <Table.Summary fixed>
                     <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
                       <Table.Summary.Cell index={0} colSpan={9}>
-                        <Text strong style={{ fontSize: 13 }}>Totals</Text>
+                        <Text strong style={{ fontSize: 10 }}>Totals</Text>
                       </Table.Summary.Cell>
                       {/* Accounted Dr */}
                       <Table.Summary.Cell index={9} align="right" style={groupBorderLeft}>
-                        <Text strong style={{ fontSize: 13, color: REDWOOD.success }}>{formatNumber(gridTotals.accountedDr)}</Text>
+                        <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(gridTotals.accountedDr)}</Text>
                       </Table.Summary.Cell>
                       {/* Accounted Cr */}
                       <Table.Summary.Cell index={10} align="right">
-                        <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>{formatNumber(gridTotals.accountedCr)}</Text>
+                        <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(gridTotals.accountedCr)}</Text>
                       </Table.Summary.Cell>
                       {/* Accounted Balance */}
                       <Table.Summary.Cell index={11} align="right" style={groupBorderRight} />
                       {/* Entered Dr */}
                       <Table.Summary.Cell index={12} align="right" style={groupBorderLeft}>
-                        <Text strong style={{ fontSize: 13, color: REDWOOD.success }}>{formatNumber(gridTotals.enteredDr)}</Text>
+                        <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(gridTotals.enteredDr)}</Text>
                       </Table.Summary.Cell>
                       {/* Entered Cr */}
                       <Table.Summary.Cell index={13} align="right">
-                        <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>{formatNumber(gridTotals.enteredCr)}</Text>
+                        <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(gridTotals.enteredCr)}</Text>
                       </Table.Summary.Cell>
                       {/* Entered Balance */}
                       <Table.Summary.Cell index={14} align="right" style={groupBorderRight} />
