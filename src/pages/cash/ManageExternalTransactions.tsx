@@ -161,7 +161,8 @@ const ExternalTxnForm: React.FC<{
   buBankMap: Record<string, string[]>;
   onSave: () => void;
   onCancel: () => void;
-}> = ({ initialValues, bankAccounts, businessUnits, bankAccountMap, bankAccountCurrencyMap, buBankMap, payeeOptions, onSave, onCancel }) => {
+  onPayeeCreated: (newOption: PayeeOption) => void;
+}> = ({ initialValues, bankAccounts, businessUnits, bankAccountMap, bankAccountCurrencyMap, buBankMap, payeeOptions, onSave, onCancel, onPayeeCreated }) => {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const [txnDirection, setTxnDirection] = useState<'DR' | 'CR'>('CR');
@@ -186,6 +187,9 @@ const ExternalTxnForm: React.FC<{
   const [saved, setSaved] = useState(false);
   const [savedExtId, setSavedExtId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [createPayeeVisible, setCreatePayeeVisible] = useState(false);
+  const [createPayeeForm] = Form.useForm();
+  const [createPayeeSaving, setCreatePayeeSaving] = useState(false);
   const isEdit = !!initialValues?.externalTransactionId;
   const buSelected = !!selectedBu;
   const [selectedBank, setSelectedBank] = useState<string | undefined>(initialValues?.bankAccountName);
@@ -684,23 +688,91 @@ const ExternalTxnForm: React.FC<{
                   rules={[{ required: true, message: 'Select a payee for Adhoc Payment' }]}
                   style={{ marginBottom: 0 }}
                 >
-                  <Select
-                    showSearch
-                    placeholder="Select payee..."
-                    disabled={isEdit || !bankSelected || saved}
-                    optionFilterProp="label"
-                    options={payeeOptions}
-                    onChange={(val: number) => {
-                      const p = payeeOptions.find(o => o.value === val);
-                      if (p) form.setFieldsValue({ payeeName: p.payeeName });
-                    }}
-                  />
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Select
+                      showSearch
+                      placeholder="Select payee..."
+                      disabled={isEdit || !bankSelected || saved}
+                      optionFilterProp="label"
+                      options={payeeOptions}
+                      style={{ flex: 1 }}
+                      onChange={(val: number) => {
+                        const p = payeeOptions.find(o => o.value === val);
+                        if (p) form.setFieldsValue({ payeeName: p.payeeName });
+                      }}
+                    />
+                    {!isEdit && !saved && (
+                      <Tooltip title="Create new payee">
+                        <Button
+                          icon={<PlusOutlined />}
+                          onClick={() => { createPayeeForm.resetFields(); setCreatePayeeVisible(true); }}
+                          style={{ flexShrink: 0 }}
+                        />
+                      </Tooltip>
+                    )}
+                  </div>
                 </Form.Item>
                 {/* hidden field keeps payeeName in sync */}
                 <Form.Item name="payeeName" hidden><Input /></Form.Item>
               </Col>
             </Row>
           )}
+
+          {/* ── Create Payee Modal ── */}
+          <Modal
+            title="Create New Payee"
+            open={createPayeeVisible}
+            onCancel={() => setCreatePayeeVisible(false)}
+            confirmLoading={createPayeeSaving}
+            onOk={async () => {
+              try {
+                const vals = await createPayeeForm.validateFields();
+                setCreatePayeeSaving(true);
+                const res = await fetch(`${APEX_BASE}/cash/payees`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                  body: JSON.stringify({
+                    payeeName: vals.payeeName,
+                    taxRegistrationNumber: vals.taxRegistrationNumber || null,
+                    description: vals.description || null,
+                    active: 'Y',
+                  }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data?.message || `HTTP ${res.status}`);
+                const newId = data.payee_id ?? data.payeeId ?? data.id;
+                const newName = vals.payeeName;
+                const newOption: PayeeOption = { label: newName, value: newId, payeeName: newName };
+                onPayeeCreated(newOption);
+                form.setFieldsValue({ payeeId: newId, payeeName: newName });
+                setCreatePayeeVisible(false);
+                message.success(`Payee "${newName}" created`);
+              } catch (err: any) {
+                if (err?.errorFields) return; // validation error, stay open
+                message.error(`Failed to create payee: ${err?.message ?? err}`);
+              } finally {
+                setCreatePayeeSaving(false);
+              }
+            }}
+            okText="Create Payee"
+            width={480}
+          >
+            <Form form={createPayeeForm} layout="vertical" style={{ marginTop: 8 }}>
+              <Form.Item
+                label="Payee Name"
+                name="payeeName"
+                rules={[{ required: true, message: 'Payee name is required' }]}
+              >
+                <Input placeholder="Enter payee name" />
+              </Form.Item>
+              <Form.Item label="Tax Registration Number" name="taxRegistrationNumber">
+                <Input placeholder="Optional" />
+              </Form.Item>
+              <Form.Item label="Description" name="description">
+                <Input.TextArea rows={3} placeholder="Optional" />
+              </Form.Item>
+            </Form>
+          </Modal>
         </Card>
 
         </Col>
@@ -2243,6 +2315,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
           bankAccountCurrencyMap={bankAccountCurrencyMap}
           buBankMap={buBankMap}
           payeeOptions={payeeOptions}
+          onPayeeCreated={(newOpt) => setPayeeOptions(prev => [...prev, newOpt].sort((a, b) => a.label.localeCompare(b.label)))}
           onSave={() => { closeTab(t.key); handleSearch(); loadLovs(); }}
           onCancel={() => closeTab(t.key)}
         />
