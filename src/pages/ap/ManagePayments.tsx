@@ -502,6 +502,7 @@ const ManagePayments: React.FC = () => {
   // Payment date filter state
   const [paymentDateMode, setPaymentDateMode]   = useState<string>('');
   const [paymentDateRange, setPaymentDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
+  const [onlyPdc, setOnlyPdc] = useState(false);
 
   const fetchBusinessUnits = async () => {
     setBusinessUnitsListLoading(true);
@@ -1421,6 +1422,7 @@ const ManagePayments: React.FC = () => {
         if (values.supplierNumber) params.append('supplier_number', values.supplierNumber);
         if (dateFrom) params.append('payment_date_from', dateFrom);
         if (dateTo)   params.append('payment_date_to',   dateTo);
+        if (onlyPdc)  params.append('only_pdc', 'Y');
 
         const queryString = params.toString();
         apiUrl = queryString ? `${APEX_PAYMENTS_URL}?${queryString}` : APEX_PAYMENTS_URL;
@@ -1502,6 +1504,10 @@ const ManagePayments: React.FC = () => {
             return true;
           });
         }
+        // Client-side PDC filter — keep only payments with a maturity date set
+        if (onlyPdc) {
+          mappedPayments = mappedPayments.filter(p => !!p.maturityDate && p.maturityDate !== '-');
+        }
         setPayments(mappedPayments);
         debugLog('MAPPED', `Mapped ${mappedPayments.length} payment records to UI model`);
         setLastApiResponse(`Success: ${mappedPayments.length} of ${totalCount} payments returned`);
@@ -1531,6 +1537,7 @@ const ManagePayments: React.FC = () => {
     form.resetFields();
     setPaymentDateMode('');
     setPaymentDateRange(null);
+    setOnlyPdc(false);
   };
 
   // Get payment status tag
@@ -2601,6 +2608,18 @@ const ManagePayments: React.FC = () => {
                         </Col>
                         {/* ── Column 3 ─────────────────────────────────── */}
                         <Col span={8}>
+                          <Form.Item label="Only PDC" name="onlyPdc" valuePropName="checked">
+                            <Checkbox
+                              checked={onlyPdc}
+                              onChange={e => setOnlyPdc(e.target.checked)}
+                            >
+                              <span style={{ fontSize: 12 }}>
+                                Show only Post-Dated Cheques
+                                <br />
+                                <Text type="secondary" style={{ fontSize: 11 }}>(payments with Maturity Date)</Text>
+                              </span>
+                            </Checkbox>
+                          </Form.Item>
                           <Text type="secondary" style={{ fontSize: 11 }}>
                             ** At least one is required
                           </Text>
