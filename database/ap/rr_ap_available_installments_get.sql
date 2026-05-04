@@ -82,7 +82,18 @@ WHERE NVL(i.CANCELED_FLAG, 'N') != 'Y'
   AND (UPPER(i.INVOICE_NUMBER) LIKE '%' || UPPER(:invoice_number) || '%'
        OR :invoice_number IS NULL)
   AND (i.INVOICE_ID      = :invoice_id       OR :invoice_id       IS NULL)
-  -- only rows with remaining balance
+  -- exclude invoices whose overall balance is zero:
+  -- invoice is fully settled when cash paid + discount_taken >= invoice_amount
+  AND NVL(i.INVOICE_AMOUNT, 0) > (
+        SELECT NVL(SUM(NVL(rel.AMOUNT_PAID_INVOICE_CURRENCY, 0)
+                       + NVL(rel.DISCOUNT_TAKEN, 0)), 0)
+        FROM   RR_AP_PAYMENTS_RELATED_INVOICES rel
+        JOIN   RR_AP_PAYMENTS_ALL              pmt ON pmt.CHECK_ID = rel.CHECK_ID
+        WHERE  rel.INVOICE_ID = i.INVOICE_ID
+          AND  NVL(pmt.PAYMENT_STATUS,          'Active') NOT IN ('Voided', 'Void')
+          AND  NVL(rel.INVOICE_PAYMENT_STATUS,  'Active') NOT IN ('Voided', 'Void')
+      )
+  -- only installments with remaining balance (installment-level check)
   AND GREATEST(0,
         NVL(inst.GROSS_AMOUNT, 0) -
         NVL((
