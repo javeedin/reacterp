@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import dayjs, { type Dayjs } from 'dayjs';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input, Select,
@@ -11,8 +11,10 @@ import {
   EditOutlined, CloseOutlined, DollarOutlined, ApiOutlined, FileTextOutlined,
   SwapOutlined, DownloadOutlined, CheckCircleOutlined, SyncOutlined,
   AccountBookOutlined, EyeOutlined, UploadOutlined, PaperClipOutlined, DeleteOutlined,
-  LockOutlined,
+  LockOutlined, PrinterOutlined,
 } from '@ant-design/icons';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
@@ -1782,6 +1784,146 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     if (activeTabKey === key) setActiveTabKey('search');
   };
 
+  // ── Voucher PDF ──────────────────────────────────────────────────────────
+  const [voucherPdfUrl, setVoucherPdfUrl] = useState<string | null>(null);
+  const [voucherModalOpen, setVoucherModalOpen] = useState(false);
+
+  const generateVoucherPdf = (r: ExternalTxnRecord) => {
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pageW = doc.internal.pageSize.getWidth();
+    const margin = 15;
+    const fmt = (n: number) => n.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    // ── Header ──────────────────────────────────────────────────────────────
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text('Buimerc Corporation Limited', pageW / 2, 18, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.text('DIFC, Dubai', pageW / 2, 24, { align: 'center' });
+
+    // ── "Payment Voucher" box ────────────────────────────────────────────────
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    const pvW = 70;
+    const pvX = (pageW - pvW) / 2;
+    doc.rect(pvX, 30, pvW, 9);
+    doc.text('Payment Voucher', pageW / 2, 36, { align: 'center' });
+
+    // ── Ref / Date (top-right) ───────────────────────────────────────────────
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text(`Ref No:  ${r.referenceText || r.transactionId}`, pageW - margin, 32, { align: 'right' });
+    doc.text(`Date:    ${dayjs(r.transactionDate).format('DD-MMM-YYYY')}`, pageW - margin, 38, { align: 'right' });
+
+    // ── Paid To / Chq row ───────────────────────────────────────────────────
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    let y = 48;
+    doc.text('Paid to', margin, y);
+    doc.setFont('helvetica', 'normal');
+    doc.text(r.payeeName || '', margin + 20, y);
+
+    y += 7;
+    doc.setFont('helvetica', 'bold');
+    doc.text('Chq #', margin, y);
+    doc.setFont('helvetica', 'normal');
+    doc.text(r.checkNumber || '', margin + 20, y);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Chq Date#', margin + 70, y);
+    doc.setFont('helvetica', 'normal');
+    doc.text('', margin + 95, y);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Drawn:', margin + 130, y);
+    doc.setFont('helvetica', 'normal');
+    doc.text(r.bankAccountName || '', margin + 145, y);
+
+    // ── Amount ───────────────────────────────────────────────────────────────
+    y += 8;
+    doc.setFont('helvetica', 'bold');
+    doc.text('Amount :', margin, y);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`${r.currencyCode || 'AED'} ${fmt(Math.abs(r.amount))}`, margin + 20, y);
+
+    y += 6;
+    doc.setFont('helvetica', 'bold');
+    doc.text('in words:', margin, y);
+    doc.setFont('helvetica', 'normal');
+    // simple number-to-words stub (just show the figure)
+    doc.text(`${r.currencyCode || 'AED'} ${fmt(Math.abs(r.amount))} Only`, margin + 20, y);
+
+    // ── Narration ────────────────────────────────────────────────────────────
+    y += 8;
+    doc.setFont('helvetica', 'bold');
+    doc.text('Narration', margin, y);
+    doc.setFont('helvetica', 'normal');
+    doc.text(r.description || '', margin + 22, y, { maxWidth: pageW - margin - 22 - margin });
+
+    // ── Account Details table ─────────────────────────────────────────────────
+    y += 10;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text('Account Details', margin, y);
+    y += 4;
+
+    const isDebit = r.amount > 0;
+    const rows: any[] = [
+      [
+        r.assetAccountCombination?.split('-')[3] || r.assetAccountCombination || '',
+        r.assetAccountCombination?.split('-')[4] || '0',
+        r.bankAccountName || '',
+        r.description || '',
+        isDebit ? fmt(Math.abs(r.amount)) : '',
+        !isDebit ? fmt(Math.abs(r.amount)) : '',
+      ],
+      [
+        r.offsetAccountCombination?.split('-')[3] || r.offsetAccountCombination || '',
+        r.offsetAccountCombination?.split('-')[4] || '0',
+        '',
+        r.description || '',
+        !isDebit ? fmt(Math.abs(r.amount)) : '',
+        isDebit ? fmt(Math.abs(r.amount)) : '',
+      ],
+    ];
+
+    autoTable(doc, {
+      startY: y,
+      margin: { left: margin, right: margin },
+      head: [['A/c #', 'Sub a/c', 'GL Name', 'Narration', 'Debit', 'Credit']],
+      body: rows,
+      foot: [['', '', '', 'Total', fmt(Math.abs(r.amount)), fmt(Math.abs(r.amount))]],
+      headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0], fontStyle: 'bold', lineWidth: 0.3, lineColor: [0, 0, 0] },
+      bodyStyles: { textColor: [0, 0, 0], lineWidth: 0.3, lineColor: [0, 0, 0] },
+      footStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0], fontStyle: 'bold', lineWidth: 0.3, lineColor: [0, 0, 0] },
+      columnStyles: {
+        0: { cellWidth: 22 },
+        1: { cellWidth: 18, halign: 'center' },
+        2: { cellWidth: 40 },
+        3: { cellWidth: 45 },
+        4: { cellWidth: 22, halign: 'right' },
+        5: { cellWidth: 22, halign: 'right' },
+      },
+      theme: 'grid',
+    });
+
+    // ── Signature row ────────────────────────────────────────────────────────
+    const finalY = (doc as any).lastAutoTable.finalY + 16;
+    const sigLabels = ['Prepared by', 'Checked by', 'Approved by', 'Received by'];
+    const sigW = (pageW - 2 * margin) / sigLabels.length;
+    sigLabels.forEach((label, i) => {
+      const x = margin + i * sigW;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.text(label, x + sigW / 2, finalY, { align: 'center' });
+      doc.line(x + 4, finalY + 12, x + sigW - 4, finalY + 12);
+    });
+
+    const pdfBlob = doc.output('blob');
+    const url = URL.createObjectURL(pdfBlob);
+    setVoucherPdfUrl(url);
+    setVoucherModalOpen(true);
+  };
+
   // ── Table columns ─────────────────────────────────────────────────────────
   const columns: ColumnsType<ExternalTxnRecord> = [
     {
@@ -1856,6 +1998,11 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       render: (_, r) => (
         <Space size={2}>
           <Tooltip title="Edit"><Button type="text" size="small" icon={<EditOutlined />} onClick={() => openEditTab(r)} /></Tooltip>
+          <Tooltip title="Print Voucher">
+            <Button type="text" size="small" icon={<PrinterOutlined />}
+              style={{ color: REDWOOD.info }}
+              onClick={() => generateVoucherPdf(r)} />
+          </Tooltip>
           {r.accountingFlag !== 'Y' && (
             <Tooltip title="Create Accounting">
               <Button type="text" size="small" icon={<AccountBookOutlined />}
@@ -2383,6 +2530,39 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
               {APEX_BASE}/cash/externaltransactions
             </Text>
           </div>
+        </Modal>
+
+        {/* ── Payment Voucher PDF Preview ──────────────────────────── */}
+        <Modal
+          title={<Space><PrinterOutlined style={{ color: REDWOOD.info }} /><span>Payment Voucher</span></Space>}
+          open={voucherModalOpen}
+          onCancel={() => { setVoucherModalOpen(false); if (voucherPdfUrl) URL.revokeObjectURL(voucherPdfUrl); setVoucherPdfUrl(null); }}
+          footer={[
+            <Button key="download" type="primary" icon={<DownloadOutlined />}
+              style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+              onClick={() => {
+                if (!voucherPdfUrl) return;
+                const a = document.createElement('a');
+                a.href = voucherPdfUrl;
+                a.download = 'payment-voucher.pdf';
+                a.click();
+              }}>
+              Download PDF
+            </Button>,
+            <Button key="close" onClick={() => { setVoucherModalOpen(false); if (voucherPdfUrl) URL.revokeObjectURL(voucherPdfUrl); setVoucherPdfUrl(null); }}>
+              Close
+            </Button>,
+          ]}
+          width={820}
+          styles={{ body: { padding: 0 } }}
+        >
+          {voucherPdfUrl && (
+            <iframe
+              src={voucherPdfUrl}
+              style={{ width: '100%', height: '70vh', border: 'none' }}
+              title="Payment Voucher Preview"
+            />
+          )}
         </Modal>
       </Content>
     </Layout>
