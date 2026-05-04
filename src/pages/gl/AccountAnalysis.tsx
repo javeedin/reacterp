@@ -1873,6 +1873,16 @@ const AccountAnalysis: React.FC = () => {
       { title: 'Category', dataIndex: 'userJeCategoryName', key: 'userJeCategoryName', width: 120 },
       { title: 'Currency', dataIndex: 'currencyCode', key: 'currencyCode', width: 90 },
       {
+        title: 'Ledger',
+        dataIndex: 'ledgerName',
+        key: 'ledgerName',
+        width: 150,
+        ellipsis: true,
+        filters: [...new Set(searchData.map(r => r.ledgerName).filter(Boolean))].map(v => ({ text: v, value: v })),
+        onFilter: (value, record) => record.ledgerName === value,
+        render: (v: string) => v ? <Tag style={{ fontSize: 10 }}>{v}</Tag> : null,
+      },
+      {
         title: <span style={{ color: '#1677ff', fontWeight: 600 }}>Accounted</span>,
         onHeaderCell: () => ({ style: groupBorderLeft }),
         children: [
