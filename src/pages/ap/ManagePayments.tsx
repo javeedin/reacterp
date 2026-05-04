@@ -2353,8 +2353,8 @@ const ManagePayments: React.FC = () => {
     setClearStep('patch', { status: 'running', response: undefined, error: undefined });
     try {
       const today = clearCtxRef.current.clearDate || dayjs().format('YYYY-MM-DD');
-      const url = `${APEX_PAYMENTS_URL}/${clearTargetPayment.checkId}`;
-      const body = { PaymentStatus: 'Cleared', ClearingDate: today };
+      const url = `${APEX_PAYMENTS_URL}/clear`;
+      const body = { CheckId: clearTargetPayment.checkId, PaymentStatus: 'Cleared', ClearingDate: today };
       const res = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data?.status === 'error') {
@@ -4750,7 +4750,7 @@ const ManagePayments: React.FC = () => {
                   { key: 'sla_stamp', step: 4, method: 'POST', methodColor: 'green',  label: 'Stamp SLA as POSTED',
                     url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`, handler: runClearStep_stamp, enabledAfter: 'gl_post' },
                   { key: 'patch',     step: 5, method: 'PUT',  methodColor: 'orange', label: 'Update Payment Status → Cleared',
-                    url: `${APEX_PAYMENTS_URL}/${clearTargetPayment?.checkId ?? ':id'}`, handler: runClearStep_patch, enabledAfter: 'sla_stamp' },
+                    url: `${APEX_PAYMENTS_URL}/clear`, handler: runClearStep_patch, enabledAfter: 'sla_stamp' },
                 ];
                 return stepCards.map(card => {
                   const st = clearStepMap[card.key];
