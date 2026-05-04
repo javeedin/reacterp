@@ -514,7 +514,7 @@ const ManageSuppliers: React.FC = () => {
     );
   }, [suppliers, gridFilter]);
   const [searchCollapsed, setSearchCollapsed] = useState(false);
-  const [dataSource, setDataSource] = useState<'fusion' | 'apex'>('apex');
+  const dataSource = 'apex';
 
   // Tab management state
   const [activeTab, setActiveTab] = useState('search');
@@ -876,21 +876,11 @@ const ManageSuppliers: React.FC = () => {
       key: tabKey,
       label: record.supplier,
       supplier: record,
-      loading: dataSource === 'fusion',
+      loading: false,
       tabType: 'detail',
     };
     setOpenTabs([...openTabs, newTab]);
     setActiveTab(tabKey);
-
-    // Fetch detail if Fusion mode
-    if (dataSource === 'fusion') {
-      const detail = await fetchSupplierDetail(record.supplierId);
-      setOpenTabs((prevTabs) =>
-        prevTabs.map((tab) =>
-          tab.key === tabKey ? { ...tab, detail: detail || undefined, loading: false } : tab
-        )
-      );
-    }
   };
 
   // Open supplier balance in new tab
@@ -962,39 +952,16 @@ const ManageSuppliers: React.FC = () => {
       const supplierName = formValues.supplier?.trim();
       const businessUnit = formValues.businessUnit?.trim();
 
-      let headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 
-      if (dataSource === 'fusion') {
-        // Fusion API - direct URL
-        let queryParams = 'limit=500&onlyData=true';
-
-        // Build query filters
-        const filters: string[] = [];
-        if (supplierNumber) {
-          filters.push(`SupplierNumber=${supplierNumber}`);
-        }
-        if (supplierName) {
-          filters.push(`Supplier LIKE *${supplierName}*`);
-        }
-
-        // Add q parameter if filters exist
-        if (filters.length > 0) {
-          queryParams += `&q=${encodeURIComponent(filters.join(';'))}`;
-        }
-
-        proxyUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/suppliers?${queryParams}`;
-        headers['Authorization'] = `Basic ${FUSION_AUTH}`;
-        mapFunction = mapFusionToSupplierRecord;
-      } else {
-        // APEX API - build params
-        const apexParams = new URLSearchParams();
-        if (supplierNumber) apexParams.set('supplier_number', supplierNumber);
-        if (supplierName)   apexParams.set('q', supplierName);
-        if (businessUnit)   apexParams.set('P_BUSINESS_UNIT', businessUnit);
-        const qs = apexParams.toString();
-        proxyUrl = `${APEX_DB_CONFIG.baseUrl}/suppliers${qs ? '?' + qs : ''}`;
-        mapFunction = mapApexToSupplierRecord;
-      }
+      // APEX API - build params
+      const apexParams = new URLSearchParams();
+      if (supplierNumber) apexParams.set('supplier_number', supplierNumber);
+      if (supplierName)   apexParams.set('q', supplierName);
+      if (businessUnit)   apexParams.set('P_BUSINESS_UNIT', businessUnit);
+      apexParams.set('limit', '500');
+      proxyUrl = `${APEX_DB_CONFIG.baseUrl}/suppliers?${apexParams.toString()}`;
+      mapFunction = mapApexToSupplierRecord;
 
       console.log('Fetching suppliers from:', proxyUrl);
 
@@ -1021,7 +988,7 @@ const ManageSuppliers: React.FC = () => {
       if (Array.isArray(items) && items.length > 0) {
         const mappedSuppliers = items.slice(0, 500).map(mapFunction);
         setSuppliers(mappedSuppliers);
-        message.success(`Found ${mappedSuppliers.length} suppliers from ${dataSource === 'fusion' ? 'Fusion' : 'APEX'}`);
+        message.success(`Found ${mappedSuppliers.length} suppliers`);
       } else {
         setSuppliers([]);
         message.info('No suppliers found');
@@ -1342,28 +1309,13 @@ const ManageSuppliers: React.FC = () => {
       >
         <Row justify="space-between" align="middle">
           <Col>
-            <Space size="large">
-              <Text strong>Data Source:</Text>
-              <Space>
-                <CloudOutlined style={{ color: dataSource === 'fusion' ? REDWOOD.info : REDWOOD.neutral600 }} />
-                <Text style={{ color: dataSource === 'fusion' ? REDWOOD.info : REDWOOD.neutral600 }}>Fusion</Text>
-                <Switch
-                  checked={dataSource === 'apex'}
-                  onChange={(checked) => {
-                    setDataSource(checked ? 'apex' : 'fusion');
-                    setSuppliers([]);
-                  }}
-                  style={{ margin: '0 8px' }}
-                />
-                <DatabaseOutlined style={{ color: dataSource === 'apex' ? REDWOOD.success : REDWOOD.neutral600 }} />
-                <Text style={{ color: dataSource === 'apex' ? REDWOOD.success : REDWOOD.neutral600 }}>APEX</Text>
-              </Space>
+            <Space>
+              <DatabaseOutlined style={{ color: REDWOOD.success }} />
+              <Text style={{ color: REDWOOD.success }}>APEX Database</Text>
             </Space>
           </Col>
           <Col>
-            <Text type="secondary">
-              {dataSource === 'fusion' ? 'Fetching live data from Oracle Fusion' : 'Fetching synced data from APEX database'}
-            </Text>
+            <Text type="secondary">Fetching synced data from APEX database</Text>
           </Col>
         </Row>
       </Card>
@@ -2165,102 +2117,6 @@ const ManageSuppliers: React.FC = () => {
           ]}
           width={900}
         >
-          <div style={{ marginBottom: 16 }}>
-            <Tag color="blue" style={{ marginRight: 8 }}>
-              Current Mode: {dataSource === 'fusion' ? 'Fusion' : 'APEX'}
-            </Tag>
-            <Text type="secondary">
-              Switch between Fusion and APEX using the toggle on the search page
-            </Text>
-          </div>
-
-          {/* Fusion APIs */}
-          <Card
-            size="small"
-            title={
-              <Space>
-                <CloudOutlined style={{ color: REDWOOD.info }} />
-                <Text strong>Fusion APIs</Text>
-                <Tag color={dataSource === 'fusion' ? 'green' : 'default'}>
-                  {dataSource === 'fusion' ? 'Active' : 'Inactive'}
-                </Tag>
-              </Space>
-            }
-            style={{ marginBottom: 16 }}
-          >
-            {PAGE_APIS.fusion.map((api, index) => (
-              <div
-                key={index}
-                style={{
-                  padding: '12px',
-                  background: REDWOOD.neutral100,
-                  borderRadius: 6,
-                  marginBottom: index < PAGE_APIS.fusion.length - 1 ? 12 : 0,
-                }}
-              >
-                <Row justify="space-between" align="middle" style={{ marginBottom: 8 }}>
-                  <Col>
-                    <Space>
-                      <Tag color="blue">{api.method}</Tag>
-                      <Text strong>{api.name}</Text>
-                    </Space>
-                  </Col>
-                </Row>
-                <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
-                  {api.description}
-                </Text>
-                <div style={{ marginBottom: 8 }}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>Proxy URL:</Text>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <code
-                      style={{
-                        background: '#f5f5f5',
-                        padding: '4px 8px',
-                        borderRadius: 4,
-                        fontSize: 12,
-                        flex: 1,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                      }}
-                    >
-                      {api.proxyUrl}{api.params ? `?${api.params}` : ''}
-                    </code>
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={copiedUrl === api.proxyUrl ? <CheckOutlined /> : <CopyOutlined />}
-                      onClick={() => copyToClipboard(api.proxyUrl + (api.params ? `?${api.params}` : ''))}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <Text type="secondary" style={{ fontSize: 12 }}>Actual URL:</Text>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <code
-                      style={{
-                        background: '#e6f7ff',
-                        padding: '4px 8px',
-                        borderRadius: 4,
-                        fontSize: 12,
-                        flex: 1,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                      }}
-                    >
-                      {api.actualUrl}{api.params ? `?${api.params}` : ''}
-                    </code>
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={copiedUrl === api.actualUrl ? <CheckOutlined /> : <CopyOutlined />}
-                      onClick={() => copyToClipboard(api.actualUrl + (api.params ? `?${api.params}` : ''))}
-                    />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </Card>
-
           {/* APEX APIs */}
           <Card
             size="small"
@@ -2268,9 +2124,7 @@ const ManageSuppliers: React.FC = () => {
               <Space>
                 <DatabaseOutlined style={{ color: REDWOOD.success }} />
                 <Text strong>APEX APIs</Text>
-                <Tag color={dataSource === 'apex' ? 'green' : 'default'}>
-                  {dataSource === 'apex' ? 'Active' : 'Inactive'}
-                </Tag>
+                <Tag color="green">Active</Tag>
               </Space>
             }
           >
