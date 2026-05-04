@@ -5204,15 +5204,29 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               );
             })()
           ) : isEditMode ? (
-            <Text strong style={{ fontSize: 15, color: invoiceBalance === 0 ? REDWOOD.success : REDWOOD.primary }}>
-              {invoiceBalanceLoading
-                ? 'Loading...'
-                : invoiceBalance !== null
-                  ? `Balance: ${formatAmount(invoiceBalance)} ${initialData?.invoiceCurrency || headerValues.invoiceCurrency || 'AED'}`
-                  : initialData?.unpaidAmount !== undefined
-                    ? `Unpaid: ${formatAmount(initialData.unpaidAmount)} ${initialData.invoiceCurrency || 'AED'}`
-                    : null}
-            </Text>
+            invoiceBalanceLoading
+              ? <Text type="secondary" style={{ fontSize: 13 }}>Loading balance...</Text>
+              : invoiceBalance !== null
+                ? (
+                  <Space size={4}>
+                    <Text strong style={{ fontSize: 15, color: invoiceBalance === 0 ? REDWOOD.success : REDWOOD.primary }}>
+                      {`Balance: ${formatAmount(invoiceBalance)} ${initialData?.invoiceCurrency || headerValues.invoiceCurrency || 'AED'}`}
+                    </Text>
+                    <Tooltip
+                      title={
+                        <span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>
+                          {`${APEX_DB_CONFIG.baseUrl}/ap/invoices/${initialData?.invoiceId}/net-balance`}
+                        </span>
+                      }
+                      placement="bottom"
+                    >
+                      <ApiOutlined style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 12 }} />
+                    </Tooltip>
+                  </Space>
+                )
+                : initialData?.unpaidAmount !== undefined
+                  ? <Text strong style={{ fontSize: 15, color: REDWOOD.primary }}>{`Unpaid: ${formatAmount(initialData.unpaidAmount)} ${initialData.invoiceCurrency || 'AED'}`}</Text>
+                  : null
           ) : null}
           {(isEditMode || !!savedInvoiceId) && (
             <Space size={4}>
