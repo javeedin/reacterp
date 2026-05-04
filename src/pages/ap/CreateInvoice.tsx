@@ -854,7 +854,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   }, [appliedPrepaymentsList, headerValues.invoiceAmount]);
 
   // Payments tab state (for edit mode)
-  const [invoicePayments, setInvoicePayments] = useState<{ key: string; checkId: number; number: string; paymentDocument: string; status: string; reconciled: string; currentPayeeName: string; paymentDate: string; paidAmount: number; currency: string; address: string; remitToAccount: string }[]>([]);
+  const [invoicePayments, setInvoicePayments] = useState<{ key: string; checkId: number; number: string; paymentDocument: string; status: string; reconciled: string; currentPayeeName: string; paymentDate: string; paidAmount: number; discountTaken: number; currency: string; address: string; remitToAccount: string }[]>([]);
   const [invoicePaymentsLoading, setInvoicePaymentsLoading] = useState(false);
   const [invoicePaymentsUrl, setInvoicePaymentsUrl] = useState('');
 
@@ -894,6 +894,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           currentPayeeName: item.invoice_business_unit ?? '',
           paymentDate:      formatDateStr(item.creation_date ?? ''),
           paidAmount:       Number(item.amount_paid_payment_currency ?? 0),
+          discountTaken:    Number(item.discount_taken ?? item.DISCOUNT_TAKEN ?? item.DiscountTaken ?? 0),
           currency:         item.invoice_currency ?? '',
           address:          '',
           remitToAccount:   '',
@@ -2749,6 +2750,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               currentPayeeName: item.invoice_business_unit ?? '',
               paymentDate: formatDateStr(item.creation_date ?? ''),
               paidAmount: Number(item.amount_paid_payment_currency ?? 0),
+              discountTaken: Number(item.discount_taken ?? item.DISCOUNT_TAKEN ?? item.DiscountTaken ?? 0),
               currency: item.invoice_currency ?? '', address: '', remitToAccount: '',
             })));
           } catch {} }
@@ -6340,6 +6342,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                         render: (amt: number, row: any) => (
                           <Text strong style={{ color: REDWOOD.success }}>{formatAmount(amt)}{row.currency ? ` ${row.currency}` : ''}</Text>
                         )},
+                      { title: 'Discount Taken',     dataIndex: 'discountTaken',    key: 'discountTaken',    width: 150, align: 'right' as const,
+                        render: (amt: number, row: any) => amt > 0
+                          ? <Text style={{ color: '#52c41a' }}>{formatAmount(amt)}{row.currency ? ` ${row.currency}` : ''}</Text>
+                          : <Text style={{ color: REDWOOD.neutral400 }}>—</Text>
+                      },
                       { title: 'Address',            dataIndex: 'address',          key: 'address',          ellipsis: true,
                         render: (v: string) => v || '—' },
                       { title: 'Remit-to Account',   dataIndex: 'remitToAccount',   key: 'remitToAccount',   width: 160, ellipsis: true,
@@ -6938,11 +6945,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   </Text>
                 </Row>
                 {isEditMode && invoicePayments.length > 0 && (() => {
-                  const paidTotal = invoicePayments
-                    .filter(p => p.status !== 'Voided')
-                    .reduce((sum, p) => sum + p.paidAmount, 0);
+                  const activePayments = invoicePayments.filter(p => !p.status?.toLowerCase().includes('void'));
+                  const paidTotal = activePayments.reduce((sum, p) => sum + p.paidAmount, 0);
+                  const discountTotal = activePayments.reduce((sum, p) => sum + p.discountTaken, 0);
                   const currency = invoicePayments[0]?.currency ?? '';
-                  const balance = computedTotal - paidTotal;
+                  const balance = computedTotal - paidTotal - discountTotal;
                   return (
                     <>
                       <Divider style={{ margin: '4px 0' }} />
@@ -6952,6 +6959,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           {formatAmount(paidTotal)}{currency ? ` ${currency}` : ''}
                         </Text>
                       </Row>
+                      {discountTotal > 0 && (
+                        <Row justify="space-between" align="middle">
+                          <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Discount Taken</Text>
+                          <Text style={{ fontSize: 13, color: '#52c41a' }}>
+                            {formatAmount(discountTotal)}{currency ? ` ${currency}` : ''}
+                          </Text>
+                        </Row>
+                      )}
                       <Row
                         justify="space-between"
                         align="middle"
