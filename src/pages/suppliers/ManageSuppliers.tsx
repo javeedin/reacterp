@@ -949,7 +949,6 @@ const ManageSuppliers: React.FC = () => {
       // APEX API - fetch all pages
       const apexParams = new URLSearchParams();
       if (supplierNumber) apexParams.set('supplier_number', supplierNumber);
-      if (supplierName)   apexParams.set('q', supplierName);
       if (businessUnit)   apexParams.set('P_BUSINESS_UNIT', businessUnit);
 
       const items = await fetchAllApexSuppliers(apexParams);
