@@ -449,9 +449,12 @@ const AccountAnalysis: React.FC = () => {
       if (valRes.ok) {
         const valData = await valRes.json();
         const items: any[] = valData.items || [];
-        const codes = items.map((i: any) => i.Value).filter(Boolean);
+        const codes = items.map((i: any) => i.value || i.Value).filter(Boolean);
         const nameMap: Record<string, string> = {};
-        items.forEach((i: any) => { if (i.Value) nameMap[i.Value] = i.Description || i.Value; });
+        items.forEach((i: any) => {
+          const code = i.value || i.Value;
+          if (code) nameMap[code] = i.description || i.Description || code;
+        });
         setSegmentValues(prev => ({ ...prev, companies: codes }));
         setCompanyNames(nameMap);
       }
