@@ -3120,12 +3120,7 @@ const AccountAnalysis: React.FC = () => {
   const tabItems = [
     {
       key: 'search',
-      label: (
-        <span style={{ fontSize: 12 }}>
-          <SearchOutlined style={{ marginRight: 6 }} />
-          Search
-        </span>
-      ),
+      label: null,
       children: renderSearchTab(),
       closable: false,
     },
@@ -3206,6 +3201,7 @@ const AccountAnalysis: React.FC = () => {
             hideAdd
             items={tabItems}
             style={{ marginTop: 8 }}
+            className="aa-search-tabs"
           />
         </div>
 
