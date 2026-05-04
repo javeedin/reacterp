@@ -2591,12 +2591,9 @@ const ManagePayments: React.FC = () => {
       setViewAcctData(refreshed);
       if (viewAcctRecord.paymentNumber) {
         try {
-          const allData = await getAccountingLinesBySourceNumber(String(viewAcctRecord.paymentNumber), 'AP');
-          const filteredItems = (allData.items || []).filter(
-            (l: any) => !l.sourceId || Number(l.sourceId) === Number(viewAcctRecord.checkId)
-          );
+          const allData = await getAccountingLinesBySourceId(viewAcctRecord.checkId, 'AP_PAYMENTS', 'AP');
           const eventsMap = new Map<number, any>();
-          for (const line of filteredItems) {
+          for (const line of (allData.items || [])) {
             const hid = line.headerId as number;
             if (!eventsMap.has(hid)) eventsMap.set(hid, { headerId: hid, eventTypeCode: (line as any).eventTypeCode || '', accountingStatus: (line as any).accountingStatus || '', accountingDate: (line as any).accountingDate || '', lines: [] });
             eventsMap.get(hid)!.lines.push(line);

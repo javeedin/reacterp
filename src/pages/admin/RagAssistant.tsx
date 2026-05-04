@@ -68,7 +68,7 @@ const StatCards:React.FC<{stats:StatItem[]}> = ({stats}) => (
 const ChartBlock:React.FC<{sec:ChartSection; onFullscreen:()=>void}> = ({sec, onFullscreen}) => {
   const h = 240;
   const chart = sec.chartType==='pie' ? (
-    <PieChart><Pie data={sec.data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label={({name,percent})=>`${name} ${(percent*100).toFixed(0)}%`}>
+    <PieChart><Pie data={sec.data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label={({name,percent})=>`${name} ${((percent??0)*100).toFixed(0)}%`}>
       {sec.data.map((_,i)=><Cell key={i} fill={CHART_COLORS[i%CHART_COLORS.length]}/>)}
     </Pie><RTooltip/><Legend/></PieChart>
   ) : sec.chartType==='line' ? (
@@ -251,7 +251,7 @@ const ReportMessage:React.FC<{report:ReportData; apiUrl?:string; recordCount?:nu
         {fsChart && (
           <ResponsiveContainer width="100%" height={420}>
             {fsChart.chartType==='pie'
-              ? <PieChart><Pie data={fsChart.data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={160} label={({name,percent})=>`${name} ${(percent*100).toFixed(1)}%`}>{fsChart.data.map((_,i)=><Cell key={i} fill={CHART_COLORS[i%CHART_COLORS.length]}/>)}</Pie><RTooltip/><Legend/></PieChart>
+              ? <PieChart><Pie data={fsChart.data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={160} label={({name,percent})=>`${name} ${((percent??0)*100).toFixed(1)}%`}>{fsChart.data.map((_,i)=><Cell key={i} fill={CHART_COLORS[i%CHART_COLORS.length]}/>)}</Pie><RTooltip/><Legend/></PieChart>
               : fsChart.chartType==='line'
               ? <LineChart data={fsChart.data}><CartesianGrid/><XAxis dataKey={fsChart.xKey||'name'}/><YAxis/><RTooltip/><Legend/>{Object.keys(fsChart.data[0]??{}).filter(k=>k!==fsChart.xKey&&k!=='name').map((k,i)=><Line key={k} dataKey={k} stroke={CHART_COLORS[i%CHART_COLORS.length]} strokeWidth={2} dot={false}/>)}</LineChart>
               : <BarChart data={fsChart.data}><CartesianGrid/><XAxis dataKey={fsChart.xKey||'name'}/><YAxis/><RTooltip/><Legend/>{Object.keys(fsChart.data[0]??{}).filter(k=>k!==fsChart.xKey&&k!=='name').map((k,i)=><Bar key={k} dataKey={k} fill={CHART_COLORS[i%CHART_COLORS.length]} radius={[4,4,0,0]}/>)}</BarChart>
