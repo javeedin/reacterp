@@ -214,7 +214,7 @@ const SupplierBalance: React.FC = () => {
         invoiceDate:      item.invoice_date     || '',
         invoiceAmount:    Number(item.invoice_amount  || 0),
         amountPaid:       Number(item.amount_paid     || 0),
-        amountRemaining:  Number(item.invoice_amount  || 0) - Number(item.amount_paid || 0),
+        amountRemaining:  Number(item.amount_remaining ?? (Number(item.invoice_amount || 0) - Number(item.amount_paid || 0))),
         validationStatus: item.validation_status || '',
         paidStatus:       item.paid_status       || '',
         currency:         item.invoice_currency  || 'AED',
