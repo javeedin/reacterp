@@ -64,15 +64,27 @@ all_combos AS (
 -- ────────────────────────────────────────────────────────────
 -- Step 3 — All distinct periods per ledger
 --
--- LEDGER_NAME is included so the JOIN in Step 5 keeps each
--- ledger's combos paired only with that ledger's own periods.
+-- Pulled from the fiscal calendar (RR_V_GL_FISCAL_PERIODS) so
+-- that periods with NO journal activity (e.g. May-26) are still
+-- included in the dense grid. Each ledger is paired with every
+-- calendar period via a CROSS JOIN on the distinct ledger list.
 -- ────────────────────────────────────────────────────────────
 all_periods AS (
     SELECT DISTINCT
-        LEDGER_NAME,
-        PERIOD_NAME
-    FROM RR_GL_JE_HEADERS
-    WHERE PERIOD_NAME IS NOT NULL
+        l.LEDGER_NAME,
+        fp.PERIOD_NAME
+    FROM (
+        SELECT DISTINCT LEDGER_NAME
+        FROM RR_GL_JE_HEADERS
+        WHERE LEDGER_NAME IS NOT NULL
+    ) l
+    CROSS JOIN (
+        SELECT DISTINCT PERIOD_NAME
+        FROM RR_V_GL_FISCAL_PERIODS
+        WHERE TO_CHAR(APPLICATION) = 'GL'
+          AND TO_CHAR(ADJ_FLAG)    = 'N'
+          AND PERIOD_NAME          IS NOT NULL
+    ) fp
 ),
 
 -- ────────────────────────────────────────────────────────────
