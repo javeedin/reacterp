@@ -2216,19 +2216,19 @@ const ManagePayments: React.FC = () => {
       const clearLines = [
         {
           lineNumber: 1, lineType: 'DR', accountingClass: 'PDC_CLEARING',
-          accountCombination: cashAccount,
+          accountCombination: pdcAccount,
           enteredDr: amt, enteredCr: 0,
           accountedDr: Math.round(amt * exRate * 100) / 100, accountedCr: 0,
           currencyCode: ccy, exchangeRate: exRate, sourceLineNumber: 1,
-          description: `PDC Clearing — Debit Cash Acct — Payment ${paymentNum}`,
+          description: `PDC Clearing — Debit PDC Acct — Payment ${paymentNum}`,
         },
         {
           lineNumber: 2, lineType: 'CR', accountingClass: 'PDC_CLEARING',
-          accountCombination: pdcAccount,
+          accountCombination: cashAccount,
           enteredDr: 0, enteredCr: amt,
           accountedDr: 0, accountedCr: Math.round(amt * exRate * 100) / 100,
           currencyCode: ccy, exchangeRate: exRate, sourceLineNumber: 2,
-          description: `PDC Clearing — Credit PDC Acct — Payment ${paymentNum}`,
+          description: `PDC Clearing — Credit Cash Acct — Payment ${paymentNum}`,
         },
       ];
 
@@ -4694,12 +4694,12 @@ const ManagePayments: React.FC = () => {
                     <tbody>
                       <tr>
                         <td><Tag color="blue" style={{ fontSize: 11 }}>DR</Tag></td>
-                        <td><code style={{ fontSize: 11 }}>{cash}</code><span style={{ marginLeft: 8, color: '#888', fontSize: 11 }}>Cash / Bank Account</span></td>
+                        <td><code style={{ fontSize: 11 }}>{pdc}</code><span style={{ marginLeft: 8, color: '#888', fontSize: 11 }}>PDC Account</span></td>
                         <td style={{ textAlign: 'right', fontWeight: 600, color: REDWOOD.info }}>{formatAmount(amt)}</td>
                       </tr>
                       <tr>
                         <td><Tag color="green" style={{ fontSize: 11 }}>CR</Tag></td>
-                        <td><code style={{ fontSize: 11 }}>{pdc}</code><span style={{ marginLeft: 8, color: '#888', fontSize: 11 }}>PDC Account</span></td>
+                        <td><code style={{ fontSize: 11 }}>{cash}</code><span style={{ marginLeft: 8, color: '#888', fontSize: 11 }}>Cash / Bank Account</span></td>
                         <td style={{ textAlign: 'right', fontWeight: 600, color: REDWOOD.success }}>{formatAmount(amt)}</td>
                       </tr>
                     </tbody>
