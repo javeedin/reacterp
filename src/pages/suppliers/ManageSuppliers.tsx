@@ -966,7 +966,7 @@ const ManageSuppliers: React.FC = () => {
 
       if (dataSource === 'fusion') {
         // Fusion API - direct URL
-        let queryParams = 'limit=25&onlyData=true';
+        let queryParams = 'limit=500&onlyData=true';
 
         // Build query filters
         const filters: string[] = [];
@@ -1019,7 +1019,7 @@ const ManageSuppliers: React.FC = () => {
       const items = data.items || data || [];
 
       if (Array.isArray(items) && items.length > 0) {
-        const mappedSuppliers = items.slice(0, 25).map(mapFunction);
+        const mappedSuppliers = items.slice(0, 500).map(mapFunction);
         setSuppliers(mappedSuppliers);
         message.success(`Found ${mappedSuppliers.length} suppliers from ${dataSource === 'fusion' ? 'Fusion' : 'APEX'}`);
       } else {
@@ -1412,8 +1412,9 @@ const ManageSuppliers: React.FC = () => {
           loading={loading}
           scroll={{ x: 1550 }}
           pagination={{
-            pageSize: 25,
+            pageSize: 50,
             showSizeChanger: true,
+            pageSizeOptions: ['25', '50', '100', '200'],
             showTotal: (total) => `${total} suppliers`,
           }}
           size="small"
