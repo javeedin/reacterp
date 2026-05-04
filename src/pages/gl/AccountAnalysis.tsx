@@ -235,6 +235,7 @@ const AccountAnalysis: React.FC = () => {
   const [accountTabs, setAccountTabs] = useState<AccountTab[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchData, setSearchData] = useState<JournalLineSegment[]>([]);
+  const [closingBalanceRow, setClosingBalanceRow] = useState<JournalLineSegment | null>(null);
   const [totalCount, setTotalCount] = useState(0);
 
   // Periods state - loaded from API
@@ -661,15 +662,17 @@ const AccountAnalysis: React.FC = () => {
 
       // Always fetch opening/closing balance when an account is selected — even if no journal lines exist
       const finalItems: JournalLineSegment[] = [...items];
+      let newClosingRow: JournalLineSegment | null = null;
       if (accountFilter && selectedPeriods.length > 0) {
         const sortedPeriods = [...selectedPeriods].sort(
           (a, b) => parsePeriodToDate(a).getTime() - parsePeriodToDate(b).getTime()
         );
         const { opening: openingRow, closing: closingRow } = await fetchBalanceRows(accountFilter, selectedCompany, sortedPeriods[0]);
         if (openingRow) finalItems.unshift(openingRow);
-        if (closingRow) finalItems.push(closingRow);
+        newClosingRow = closingRow;
       }
 
+      setClosingBalanceRow(newClosingRow);
       setSearchData(finalItems);
       setTotalCount(totalCountFromApi);
       message.success(`Found ${items.length} journal line(s)`);
@@ -677,6 +680,7 @@ const AccountAnalysis: React.FC = () => {
       console.error('Error fetching data:', error);
       message.error('Failed to fetch data. Please try again.');
       setSearchData([]);
+      setClosingBalanceRow(null);
       setTotalCount(0);
     } finally {
       setLoading(false);
@@ -2087,6 +2091,7 @@ const AccountAnalysis: React.FC = () => {
               summary={() =>
                 searchData.length > 0 ? (
                   <Table.Summary fixed>
+                    {/* PTD Totals row */}
                     <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
                       <Table.Summary.Cell index={0} colSpan={9}>
                         <Text strong style={{ fontSize: 11 }}>PTD Totals</Text>
@@ -2113,6 +2118,46 @@ const AccountAnalysis: React.FC = () => {
                       </Table.Summary.Cell>
                       <Table.Summary.Cell index={13} />
                     </Table.Summary.Row>
+                    {/* Closing Balance row — always last */}
+                    {closingBalanceRow && (
+                      <Table.Summary.Row style={{ background: '#f6ffed', borderTop: `2px solid ${REDWOOD.success}` }}>
+                        <Table.Summary.Cell index={0} colSpan={9}>
+                          <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>Closing Balance</Text>
+                          <Text type="secondary" style={{ fontSize: 10, marginLeft: 8 }}>
+                            {closingBalanceRow.defaultPeriodName}
+                          </Text>
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={9} align="right">
+                          {closingBalanceRow.enteredDr > 0 && (
+                            <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>
+                              {formatNumber(closingBalanceRow.enteredDr)}
+                            </Text>
+                          )}
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={10} align="right">
+                          {closingBalanceRow.enteredCr > 0 && (
+                            <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>
+                              {formatNumber(closingBalanceRow.enteredCr)}
+                            </Text>
+                          )}
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={11} align="right">
+                          {closingBalanceRow.accountedDr > 0 && (
+                            <Text strong style={{ fontSize: 11, color: REDWOOD.success }}>
+                              {formatNumber(closingBalanceRow.accountedDr)}
+                            </Text>
+                          )}
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={12} align="right">
+                          {closingBalanceRow.accountedCr > 0 && (
+                            <Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>
+                              {formatNumber(closingBalanceRow.accountedCr)}
+                            </Text>
+                          )}
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={13} />
+                      </Table.Summary.Row>
+                    )}
                   </Table.Summary>
                 ) : null
               }
