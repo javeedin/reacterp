@@ -2242,7 +2242,7 @@ const AccountAnalysis: React.FC = () => {
               pagination={{ pageSize: searchPageSize, size: 'small', showSizeChanger: true, pageSizeOptions: ['10','20','50','100','200'], onShowSizeChange: (_current, size) => setSearchPageSize(size), onChange: (_page, size) => size && setSearchPageSize(size), showTotal: (total) => `Total ${total} records` }}
               scroll={{ x: 1800 }}
               size="small"
-              className="compact-table"
+              className="compact-table aa-grid"
               rowClassName={(record: JournalLineSegment) =>
                 record.isOpeningBalance ? 'opening-balance-row' : ''
               }
@@ -2665,7 +2665,7 @@ const AccountAnalysis: React.FC = () => {
               pagination={false}
               scroll={{ x: 800 }}
               size="small"
-              className="compact-table"
+              className="compact-table aa-grid"
               summary={() => {
                 const periodTotals: { [key: string]: number } = {};
                 selectedPeriods.forEach((period) => {
