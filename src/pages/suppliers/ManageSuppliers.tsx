@@ -567,6 +567,26 @@ const ManageSuppliers: React.FC = () => {
     fetchLovResults(val);   // always load — empty string returns all suppliers
   };
 
+  // Fetch ALL pages from the APEX suppliers endpoint (no artificial limit)
+  const fetchAllApexSuppliers = async (extraParams: URLSearchParams): Promise<any[]> => {
+    const PAGE = 100;
+    let offset = 0;
+    let all: any[] = [];
+    while (true) {
+      const p = new URLSearchParams(extraParams);
+      p.set('limit', String(PAGE));
+      p.set('offset', String(offset));
+      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers?${p.toString()}`);
+      if (!res.ok) break;
+      const data = await res.json();
+      const items: any[] = Array.isArray(data) ? data : (data.items || []);
+      all = [...all, ...items];
+      if (!data.hasMore || items.length < PAGE) break;
+      offset += PAGE;
+    }
+    return all;
+  };
+
   const fetchLovResults = (q: string) => {
     if (lovDebounceRef.current) clearTimeout(lovDebounceRef.current);
     lovDebounceRef.current = setTimeout(async () => {
@@ -576,12 +596,7 @@ const ManageSuppliers: React.FC = () => {
         const params = new URLSearchParams();
         if (q)  params.set('q', q);
         if (bu) params.set('P_BUSINESS_UNIT', bu);
-        params.set('limit', '500');
-        const url = `${APEX_DB_CONFIG.baseUrl}/suppliers?${params.toString()}`;
-        const res = await fetch(url);
-        if (!res.ok) return;
-        const data = await res.json();
-        const items: any[] = Array.isArray(data) ? data : (data.items || []);
+        const items = await fetchAllApexSuppliers(params);
         setLovResults(items.map((item: any) => ({
           supplierNumber: item.supplier_number || '',
           supplier: item.supplier || '',
@@ -943,52 +958,24 @@ const ManageSuppliers: React.FC = () => {
   const handleSearch = async () => {
     setLoading(true);
     try {
-      let proxyUrl: string;
-      let mapFunction: (item: any, index: number) => SupplierRecord;
-
       // Get form values
       const formValues = form.getFieldsValue();
       const supplierNumber = formValues.supplierNumber?.trim();
       const supplierName = formValues.supplier?.trim();
       const businessUnit = formValues.businessUnit?.trim();
 
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-
-      // APEX API - build params
+      // APEX API - fetch all pages
       const apexParams = new URLSearchParams();
       if (supplierNumber) apexParams.set('supplier_number', supplierNumber);
       if (supplierName)   apexParams.set('q', supplierName);
       if (businessUnit)   apexParams.set('P_BUSINESS_UNIT', businessUnit);
-      apexParams.set('limit', '500');
-      proxyUrl = `${APEX_DB_CONFIG.baseUrl}/suppliers?${apexParams.toString()}`;
-      mapFunction = mapApexToSupplierRecord;
 
-      console.log('Fetching suppliers from:', proxyUrl);
+      const items = await fetchAllApexSuppliers(apexParams);
 
-      const response = await fetch(proxyUrl, {
-        method: 'GET',
-        headers,
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const rawText = await response.text();
-      if (!rawText || !rawText.trim()) {
-        setSuppliers([]);
-        message.info('No suppliers found');
-        return;
-      }
-      const data = JSON.parse(rawText);
-      console.log('API Response:', data);
-
-      const items = data.items || data || [];
-
-      if (Array.isArray(items) && items.length > 0) {
-        const mappedSuppliers = items.slice(0, 500).map(mapFunction);
+      if (items.length > 0) {
+        const mappedSuppliers = items.map(mapApexToSupplierRecord);
         setSuppliers(mappedSuppliers);
-        message.success(`Found ${mappedSuppliers.length} suppliers`);
+        message.success(`Found ${mappedSuppliers.length} supplier(s)`);
       } else {
         setSuppliers([]);
         message.info('No suppliers found');
@@ -2063,7 +2050,15 @@ const ManageSuppliers: React.FC = () => {
 
         {/* Supplier LOV Modal */}
         <Modal
-          title={<Space><SearchOutlined style={{ color: REDWOOD.info }} /><span>Supplier List of Values</span></Space>}
+          title={
+            <Space>
+              <SearchOutlined style={{ color: REDWOOD.info }} />
+              <span>Supplier List of Values</span>
+              {!lovLoading && lovResults.length > 0 && (
+                <Tag color="blue">{lovResults.length} suppliers</Tag>
+              )}
+            </Space>
+          }
           open={lovVisible}
           onCancel={() => setLovVisible(false)}
           footer={null}
@@ -2083,7 +2078,7 @@ const ManageSuppliers: React.FC = () => {
             size="small"
             loading={lovLoading}
             dataSource={displayedLovResults}
-            pagination={{ pageSize: 10, showTotal: t => `${t} suppliers`, size: 'small' }}
+            pagination={{ pageSize: 10, showTotal: t => `${t} of ${lovResults.length} suppliers`, size: 'small' }}
             locale={{ emptyText: 'Type to search suppliers' }}
             onRow={row => ({
               onClick: () => onLovPick(row),
