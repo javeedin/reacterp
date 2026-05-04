@@ -3,6 +3,7 @@ import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ConfigProvider, Spin } from 'antd';
 import { AuthProvider } from './context/AuthContext';
 import { GlValidationProvider } from './context/GlValidationContext';
+import { NotificationProvider } from './context/NotificationContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import MainLayout from './layouts/MainLayout';
 import { ShowAndTellProvider, ShowAndTellOverlay } from './features/showAndTell';
@@ -117,6 +118,7 @@ function App() {
       }}
     >
       <AuthProvider>
+        <NotificationProvider>
         <GlValidationProvider>
         <HashRouter>
           <ShowAndTellProvider>
@@ -256,6 +258,7 @@ function App() {
           </ShowAndTellProvider>
         </HashRouter>
         </GlValidationProvider>
+        </NotificationProvider>
       </AuthProvider>
     </ConfigProvider>
   );

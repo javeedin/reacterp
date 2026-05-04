@@ -23,11 +23,13 @@ import { Outlet, useNavigate, Link } from 'react-router-dom';
 import { ShowAndTellPanel } from '../features/showAndTell';
 import { useAuth } from '../context/AuthContext';
 import { useGlValidation } from '../context/GlValidationContext';
+import { useNotifications } from '../context/NotificationContext';
 import ProfileModal from '../components/ProfileModal';
 import SupportTicketButton from '../components/SupportTicketButton';
 import ScreenRecorder from '../components/ScreenRecorder';
 import GlValidationErrorsDrawer from '../components/GlValidationErrorsDrawer';
 import GlobalMenuSearch from '../components/GlobalMenuSearch';
+import NotificationPanel from '../components/NotificationPanel';
 import type { MenuProps } from 'antd';
 
 // Type for BeforeInstallPromptEvent
@@ -65,6 +67,8 @@ const MainLayout: React.FC = () => {
   const [showInstallButton, setShowInstallButton] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showAndTellOpen, setShowAndTellOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const { unreadCount } = useNotifications();
 
   // Listen for PWA install prompt
   useEffect(() => {
@@ -215,11 +219,12 @@ const MainLayout: React.FC = () => {
             />
           </Tooltip>
           <Tooltip title="Notifications">
-            <Badge count={99} size="small" offset={[-5, 5]} overflowCount={99}>
+            <Badge count={unreadCount} size="small" offset={[-5, 5]} overflowCount={99}>
               <Button
                 type="text"
                 icon={<BellOutlined style={{ fontSize: 18, color: '#fff' }} />}
-                style={{ color: '#fff' }}
+                style={{ color: '#fff', background: notifOpen ? 'rgba(255,255,255,0.2)' : undefined }}
+                onClick={() => setNotifOpen(true)}
               />
             </Badge>
           </Tooltip>
@@ -381,6 +386,7 @@ const MainLayout: React.FC = () => {
       <ProfileModal open={showProfile} onClose={() => setShowProfile(false)} />
       <ShowAndTellPanel open={showAndTellOpen} onClose={() => setShowAndTellOpen(false)} />
       <GlValidationErrorsDrawer />
+      <NotificationPanel open={notifOpen} onClose={() => setNotifOpen(false)} />
     </Layout>
   );
 };

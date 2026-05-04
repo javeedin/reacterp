@@ -87,6 +87,7 @@ import {
 } from '../../services/sla.service';
 import type { SlaGetResult, SlaCreatePayload } from '../../services/sla.service';
 import { eventTypeToRef5, postSlaToGL } from '../../services/glPosting.service';
+import { useNotifications } from '../../context/NotificationContext';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -419,6 +420,7 @@ const ManagePayments: React.FC = () => {
   const [createPaymentForm] = Form.useForm();
   const watchedConversionRate = Form.useWatch('conversionRate', createPaymentForm);
   const [voidForm] = Form.useForm();
+  const { checkPdcMaturity } = useNotifications();
   const [loading, setLoading] = useState(false);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
@@ -595,6 +597,7 @@ const ManagePayments: React.FC = () => {
   useEffect(() => {
     fetchBusinessUnits();
     fetchBankAccounts();
+    checkPdcMaturity(); // background PDC maturity check on AP page load
   }, []);
 
   // Load remaining LOV data when Create Payment tab opens
