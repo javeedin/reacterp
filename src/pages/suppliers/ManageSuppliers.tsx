@@ -734,6 +734,7 @@ const ManageSuppliers: React.FC = () => {
 
       const totalInvoiceAmount = invoiceItems.reduce((s: number, i: any) => s + Number(i.invoice_amount || 0), 0);
       const totalPaid          = invoiceItems.reduce((s: number, i: any) => s + Number(i.amount_paid    || 0), 0);
+      const totalRemaining     = invoiceItems.reduce((s: number, i: any) => s + Number(i.amount_remaining ?? (Number(i.invoice_amount || 0) - Number(i.amount_paid || 0))), 0);
       const totalPaymentAmount = paymentItems.reduce((s: number, p: any) => s + Number(p.PaymentAmount || p.payment_amount || 0), 0);
       const currency           = invoiceItems[0]?.invoice_currency || 'AED';
 
@@ -753,7 +754,7 @@ const ManageSuppliers: React.FC = () => {
           totalInvoiceAmount,
           totalPayments:      paymentItems.length,
           totalPaymentAmount,
-          balance:            totalInvoiceAmount - totalPaid,
+          balance:            totalRemaining,
           currency,
         },
         agingReport: [],
@@ -783,7 +784,7 @@ const ManageSuppliers: React.FC = () => {
           invoiceDate:    item.invoice_date    || '',
           invoiceAmount:  Number(item.invoice_amount || 0),
           amountPaid:     Number(item.amount_paid    || 0),
-          amountRemaining: Number(item.invoice_amount || 0) - Number(item.amount_paid || 0),
+          amountRemaining: Number(item.amount_remaining ?? (Number(item.invoice_amount || 0) - Number(item.amount_paid || 0))),
           invoiceStatus:  item.validation_status || item.paid_status || '',
           currency:       item.invoice_currency || 'AED',
           description:    item.description     || '',
