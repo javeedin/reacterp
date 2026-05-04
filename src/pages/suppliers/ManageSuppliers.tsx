@@ -576,13 +576,13 @@ const ManageSuppliers: React.FC = () => {
         const params = new URLSearchParams();
         if (q)  params.set('q', q);
         if (bu) params.set('P_BUSINESS_UNIT', bu);
-        const qs = params.toString();
-        const url = `${APEX_DB_CONFIG.baseUrl}/suppliers${qs ? '?' + qs : ''}`;
+        params.set('limit', '500');
+        const url = `${APEX_DB_CONFIG.baseUrl}/suppliers?${params.toString()}`;
         const res = await fetch(url);
         if (!res.ok) return;
         const data = await res.json();
         const items: any[] = Array.isArray(data) ? data : (data.items || []);
-        setLovResults(items.slice(0, 100).map((item: any) => ({
+        setLovResults(items.map((item: any) => ({
           supplierNumber: item.supplier_number || '',
           supplier: item.supplier || '',
         })));
