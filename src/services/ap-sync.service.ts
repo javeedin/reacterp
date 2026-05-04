@@ -414,10 +414,9 @@ const insertInvoiceToApex = async (
   verbose = true
 ): Promise<{ success: boolean; error?: string; response?: any; payload?: any }> => {
   try {
-    // Only send fields the APEX table knows — extra fields cause ORA-17270
-    const payload = {
-      items: [mapToApexInvoicePayload(invoice)]
-    };
+    // Send as a flat object — the PL/SQL handler reads $.InvoiceId etc. directly.
+    // Wrapping in {"items":[...]} causes JSON_VALUE to return NULL → ORA-01400.
+    const payload = mapToApexInvoicePayload(invoice);
 
     if (verbose) {
       log?.('step', `──── [POST] APEX - Invoice ${invoice.InvoiceNumber} (ID: ${invoice.InvoiceId}) ────`);
