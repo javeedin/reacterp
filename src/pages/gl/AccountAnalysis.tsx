@@ -795,21 +795,29 @@ const AccountAnalysis: React.FC = () => {
       const currencyCode = items[0].currency_code || 'AED';
       const accountDesc = items[0].account_desc || '';
 
-      const openingAmt: number = items.reduce((s: number, i: any) => s + (i.opening || 0), 0);
-      const closingAmt: number = items.reduce((s: number, i: any) => s + (i.closing || 0), 0);
+      const openingAmt:    number = items.reduce((s: number, i: any) => s + (i.opening          || 0), 0);
+      const closingAmt:    number = items.reduce((s: number, i: any) => s + (i.closing          || 0), 0);
+      const entOpeningAmt: number = items.reduce((s: number, i: any) => s + (i.entered_opening  || 0), 0);
+      const entClosingAmt: number = items.reduce((s: number, i: any) => s + (i.entered_closing  || 0), 0);
 
-      const makeRow = (amt: number, label: string, key: string, isOpen: boolean): JournalLineSegment | null => {
-        const effAmt = isRetainedEarnings && isOpen ? closingAmt : amt;
-        if (effAmt === 0) return null;
-        const dr = isDebitNormal && effAmt > 0 ? effAmt : (!isDebitNormal && effAmt < 0 ? Math.abs(effAmt) : 0);
-        const cr = !isDebitNormal && effAmt > 0 ? effAmt : (isDebitNormal && effAmt < 0 ? Math.abs(effAmt) : 0);
-        if (dr === 0 && cr === 0) return null;
+      const toDrCr = (amt: number) => ({
+        dr: isDebitNormal && amt > 0 ? amt : (!isDebitNormal && amt < 0 ? Math.abs(amt) : 0),
+        cr: !isDebitNormal && amt > 0 ? amt : (isDebitNormal && amt < 0 ? Math.abs(amt) : 0),
+      });
+
+      const makeRow = (accAmt: number, entAmt: number, label: string, key: string, isOpen: boolean): JournalLineSegment | null => {
+        const effAccAmt = isRetainedEarnings && isOpen ? closingAmt    : accAmt;
+        const effEntAmt = isRetainedEarnings && isOpen ? entClosingAmt : entAmt;
+        if (effAccAmt === 0 && effEntAmt === 0) return null;
+        const acc = toDrCr(effAccAmt);
+        const ent = toDrCr(effEntAmt);
+        if (acc.dr === 0 && acc.cr === 0 && ent.dr === 0 && ent.cr === 0) return null;
         return {
           key,
           batchId: 0, jeHeaderId: 0, jeLineNumber: 0,
           currencyCode, company: items[0].company || company,
           lob: '', department: '', account, subAccount: '', analysis: '', intercompany: '', future1: '', future2: '',
-          enteredDr: dr, enteredCr: cr, accountedDr: dr, accountedCr: cr,
+          enteredDr: ent.dr, enteredCr: ent.cr, accountedDr: acc.dr, accountedCr: acc.cr,
           chartOfAccountsName: '', accountingDate: '', defaultPeriodName: period,
           batchName: '', actualFlagMeaning: '', approvalStatusMeaning: '', userPeriodSetName: '',
           userJeSourceName: '', ledgerName: selectedLedger, legalEntityName: '', userJeCategoryName: '',
@@ -822,8 +830,8 @@ const AccountAnalysis: React.FC = () => {
 
       const openingLabel = isRetainedEarnings ? 'Current Year Balance' : 'Opening Balance';
       return {
-        opening: makeRow(openingAmt, openingLabel, 'opening-balance', true),
-        closing: makeRow(closingAmt, 'Closing Balance', 'closing-balance', false),
+        opening: makeRow(openingAmt, entOpeningAmt, openingLabel, 'opening-balance', true),
+        closing: makeRow(closingAmt, entClosingAmt, 'Closing Balance', 'closing-balance', false),
       };
     } catch {
       return none;
@@ -1401,36 +1409,46 @@ const AccountAnalysis: React.FC = () => {
     { title: 'Category', dataIndex: 'userJeCategoryName', key: 'userJeCategoryName', width: 120 },
     { title: 'Currency', dataIndex: 'currencyCode', key: 'currencyCode', width: 90 },
     {
-      title: 'Entered Dr',
-      dataIndex: 'enteredDr',
-      key: 'enteredDr',
-      width: 110,
-      align: 'right',
-      render: (v: number) => <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span>,
+      title: <span style={{ color: '#1677ff', fontWeight: 600 }}>Accounted</span>,
+      children: [
+        {
+          title: 'Dr',
+          dataIndex: 'accountedDr',
+          key: 'accountedDr',
+          width: 120,
+          align: 'right' as const,
+          render: (v: number) => <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span>,
+        },
+        {
+          title: 'Cr',
+          dataIndex: 'accountedCr',
+          key: 'accountedCr',
+          width: 120,
+          align: 'right' as const,
+          render: (v: number) => <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span>,
+        },
+      ],
     },
     {
-      title: 'Entered Cr',
-      dataIndex: 'enteredCr',
-      key: 'enteredCr',
-      width: 110,
-      align: 'right',
-      render: (v: number) => <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span>,
-    },
-    {
-      title: 'Accounted Dr',
-      dataIndex: 'accountedDr',
-      key: 'accountedDr',
-      width: 110,
-      align: 'right',
-      render: (v: number) => <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span>,
-    },
-    {
-      title: 'Accounted Cr',
-      dataIndex: 'accountedCr',
-      key: 'accountedCr',
-      width: 110,
-      align: 'right',
-      render: (v: number) => <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span>,
+      title: <span style={{ color: '#52c41a', fontWeight: 600 }}>Entered</span>,
+      children: [
+        {
+          title: 'Dr',
+          dataIndex: 'enteredDr',
+          key: 'enteredDr',
+          width: 120,
+          align: 'right' as const,
+          render: (v: number) => <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span>,
+        },
+        {
+          title: 'Cr',
+          dataIndex: 'enteredCr',
+          key: 'enteredCr',
+          width: 120,
+          align: 'right' as const,
+          render: (v: number) => <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span>,
+        },
+      ],
     },
     {
       title: '',
@@ -2135,16 +2153,16 @@ const AccountAnalysis: React.FC = () => {
                         <Text strong style={{ fontSize: 13 }}>Totals</Text>
                       </Table.Summary.Cell>
                       <Table.Summary.Cell index={9} align="right">
-                        <Text strong style={{ fontSize: 13, color: REDWOOD.success }}>{formatNumber(gridTotals.enteredDr)}</Text>
-                      </Table.Summary.Cell>
-                      <Table.Summary.Cell index={10} align="right">
-                        <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>{formatNumber(gridTotals.enteredCr)}</Text>
-                      </Table.Summary.Cell>
-                      <Table.Summary.Cell index={11} align="right">
                         <Text strong style={{ fontSize: 13, color: REDWOOD.success }}>{formatNumber(gridTotals.accountedDr)}</Text>
                       </Table.Summary.Cell>
-                      <Table.Summary.Cell index={12} align="right">
+                      <Table.Summary.Cell index={10} align="right">
                         <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>{formatNumber(gridTotals.accountedCr)}</Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={11} align="right">
+                        <Text strong style={{ fontSize: 13, color: REDWOOD.success }}>{formatNumber(gridTotals.enteredDr)}</Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={12} align="right">
+                        <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>{formatNumber(gridTotals.enteredCr)}</Text>
                       </Table.Summary.Cell>
                       <Table.Summary.Cell index={13} />
                     </Table.Summary.Row>
@@ -2156,49 +2174,86 @@ const AccountAnalysis: React.FC = () => {
 
           {/* Balance Summary Section */}
           {searchData.length > 0 && (
-            <div style={{
-              marginTop: 12,
-              padding: '12px 16px',
-              background: REDWOOD.neutral100,
-              borderRadius: 8,
-              border: `1px solid ${REDWOOD.neutral200}`,
-            }}>
-              <Row gutter={0} align="middle">
-                {/* Opening Balance */}
-                <Col flex="1" style={{ textAlign: 'center', padding: '8px 16px', borderRight: `1px solid ${REDWOOD.neutral300}` }}>
-                  <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Opening Balance</Text>
-                  <Text strong style={{ fontSize: 14, color: REDWOOD.warning }}>
-                    {openingBalanceRow
-                      ? formatNumber((openingBalanceRow.accountedDr || 0) - (openingBalanceRow.accountedCr || 0))
-                      : '—'}
-                  </Text>
-                </Col>
-                {/* PTD Debits */}
-                <Col flex="1" style={{ textAlign: 'center', padding: '8px 16px', borderRight: `1px solid ${REDWOOD.neutral300}` }}>
-                  <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>PTD Debits</Text>
-                  <Text strong style={{ fontSize: 14, color: REDWOOD.success }}>
-                    {formatNumber(totals.accountedDr)}
-                  </Text>
-                </Col>
-                {/* PTD Credits */}
-                <Col flex="1" style={{ textAlign: 'center', padding: '8px 16px', borderRight: `1px solid ${REDWOOD.neutral300}` }}>
-                  <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>PTD Credits</Text>
-                  <Text strong style={{ fontSize: 14, color: REDWOOD.primary }}>
-                    {formatNumber(totals.accountedCr)}
-                  </Text>
-                </Col>
-                {/* Closing Balance */}
-                <Col flex="1" style={{ textAlign: 'center', padding: '8px 16px' }}>
-                  <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Closing Balance</Text>
-                  <Text strong style={{ fontSize: 14, color: closingBalanceRow
-                    ? ((closingBalanceRow.accountedDr || 0) - (closingBalanceRow.accountedCr || 0)) >= 0 ? REDWOOD.success : REDWOOD.primary
-                    : REDWOOD.neutral600 }}>
-                    {closingBalanceRow
-                      ? formatNumber((closingBalanceRow.accountedDr || 0) - (closingBalanceRow.accountedCr || 0))
-                      : '—'}
-                  </Text>
-                </Col>
-              </Row>
+            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {/* ── Accounted section ── */}
+              <div style={{
+                padding: '10px 16px',
+                background: '#f0f5ff',
+                borderRadius: 8,
+                border: '1px solid #adc6ff',
+              }}>
+                <Text strong style={{ fontSize: 11, color: '#1677ff', display: 'block', marginBottom: 8 }}>
+                  Accounted
+                </Text>
+                <Row gutter={0} align="middle">
+                  <Col flex="1" style={{ textAlign: 'center', padding: '4px 12px', borderRight: `1px solid #adc6ff` }}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>Opening Balance</Text>
+                    <Text strong style={{ fontSize: 14, color: REDWOOD.warning }}>
+                      {openingBalanceRow
+                        ? formatNumber((openingBalanceRow.accountedDr || 0) - (openingBalanceRow.accountedCr || 0))
+                        : '—'}
+                    </Text>
+                  </Col>
+                  <Col flex="1" style={{ textAlign: 'center', padding: '4px 12px', borderRight: `1px solid #adc6ff` }}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>PTD Debits</Text>
+                    <Text strong style={{ fontSize: 14, color: REDWOOD.success }}>{formatNumber(totals.accountedDr)}</Text>
+                  </Col>
+                  <Col flex="1" style={{ textAlign: 'center', padding: '4px 12px', borderRight: `1px solid #adc6ff` }}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>PTD Credits</Text>
+                    <Text strong style={{ fontSize: 14, color: REDWOOD.primary }}>{formatNumber(totals.accountedCr)}</Text>
+                  </Col>
+                  <Col flex="1" style={{ textAlign: 'center', padding: '4px 12px' }}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>Closing Balance</Text>
+                    <Text strong style={{ fontSize: 14, color: closingBalanceRow
+                      ? ((closingBalanceRow.accountedDr || 0) - (closingBalanceRow.accountedCr || 0)) >= 0 ? REDWOOD.success : REDWOOD.primary
+                      : REDWOOD.neutral600 }}>
+                      {closingBalanceRow
+                        ? formatNumber((closingBalanceRow.accountedDr || 0) - (closingBalanceRow.accountedCr || 0))
+                        : '—'}
+                    </Text>
+                  </Col>
+                </Row>
+              </div>
+
+              {/* ── Entered section ── */}
+              <div style={{
+                padding: '10px 16px',
+                background: '#f6ffed',
+                borderRadius: 8,
+                border: '1px solid #b7eb8f',
+              }}>
+                <Text strong style={{ fontSize: 11, color: '#52c41a', display: 'block', marginBottom: 8 }}>
+                  Entered
+                </Text>
+                <Row gutter={0} align="middle">
+                  <Col flex="1" style={{ textAlign: 'center', padding: '4px 12px', borderRight: `1px solid #b7eb8f` }}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>Opening Balance</Text>
+                    <Text strong style={{ fontSize: 14, color: REDWOOD.warning }}>
+                      {openingBalanceRow
+                        ? formatNumber((openingBalanceRow.enteredDr || 0) - (openingBalanceRow.enteredCr || 0))
+                        : '—'}
+                    </Text>
+                  </Col>
+                  <Col flex="1" style={{ textAlign: 'center', padding: '4px 12px', borderRight: `1px solid #b7eb8f` }}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>PTD Debits</Text>
+                    <Text strong style={{ fontSize: 14, color: REDWOOD.success }}>{formatNumber(totals.enteredDr)}</Text>
+                  </Col>
+                  <Col flex="1" style={{ textAlign: 'center', padding: '4px 12px', borderRight: `1px solid #b7eb8f` }}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>PTD Credits</Text>
+                    <Text strong style={{ fontSize: 14, color: REDWOOD.primary }}>{formatNumber(totals.enteredCr)}</Text>
+                  </Col>
+                  <Col flex="1" style={{ textAlign: 'center', padding: '4px 12px' }}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>Closing Balance</Text>
+                    <Text strong style={{ fontSize: 14, color: closingBalanceRow
+                      ? ((closingBalanceRow.enteredDr || 0) - (closingBalanceRow.enteredCr || 0)) >= 0 ? REDWOOD.success : REDWOOD.primary
+                      : REDWOOD.neutral600 }}>
+                      {closingBalanceRow
+                        ? formatNumber((closingBalanceRow.enteredDr || 0) - (closingBalanceRow.enteredCr || 0))
+                        : '—'}
+                    </Text>
+                  </Col>
+                </Row>
+              </div>
             </div>
           )}
         </Card>
