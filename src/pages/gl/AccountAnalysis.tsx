@@ -167,9 +167,6 @@ const reportMenuItems: MenuItemType[] = [
   { key: 'account-analysis', icon: <FundOutlined />, label: 'Account Analysis', description: 'Account detail analysis', color: REDWOOD.warning, path: '/gl/account-analysis' },
 ];
 
-// Available ledgers
-const availableLedgers = ['BUIMERC LEDGER'];
-
 const VALUES_API = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/valuesets/getvalues';
 const COMPANY_VALUESET = 'BUIMERC_FIN_GLB_COA_CO';
 const COMPANY_LOV_URL  = `${VALUES_API}/${COMPANY_VALUESET}`;
@@ -249,6 +246,7 @@ const AccountAnalysis: React.FC = () => {
 
   // Search filters
   const [selectedLedger, setSelectedLedger] = useState<string>('BUIMERC LEDGER');
+  const [ledgerOptions, setLedgerOptions] = useState<string[]>(['BUIMERC LEDGER']);
   const [selectedCompany, setSelectedCompany] = useState<string>('');
   const [selectedPeriods, setSelectedPeriods] = useState<string[]>([]);
   const [fromDate, setFromDate] = useState<Dayjs | null>(null);
@@ -464,6 +462,21 @@ const AccountAnalysis: React.FC = () => {
   }, [selectedLedger]);
 
   useEffect(() => { fetchSegmentValues(); }, [fetchSegmentValues]);
+
+  // Fetch ledgers dynamically
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/getledgername`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return;
+        const names: string[] = (data.items || []).map((i: any) => i.ledger_name).filter(Boolean);
+        if (names.length > 0) {
+          setLedgerOptions(names);
+          if (!names.includes(selectedLedger)) setSelectedLedger(names[0]);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Fetch accounts list from APEX glaccountslist endpoint
   const fetchAccounts = useCallback(async () => {
@@ -1838,7 +1851,7 @@ const AccountAnalysis: React.FC = () => {
                 style={{ width: '100%' }}
                 size="small"
               >
-                {availableLedgers.map((l) => <Option key={l} value={l}>{l}</Option>)}
+                {ledgerOptions.map((l) => <Option key={l} value={l}>{l}</Option>)}
               </Select>
             </Col>
             <Col xs={24} md={8}>
