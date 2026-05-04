@@ -143,12 +143,17 @@ interface RrTBRecord {
   intercompany: string;
   account_type: string;   // A / L / O / R / E
   currency_code: string;
-  // Standard TB format (from /standard endpoint)
+  // Standard TB format (from /standard endpoint) — Accounted (functional) currency
   opening: number;
   debit: number;
   credit: number;
   closing: number;
   ytd_net: number;
+  // Entered (transaction) currency
+  entered_opening: number;
+  entered_debit: number;
+  entered_credit: number;
+  entered_closing: number;
 }
 
 interface TabData {
@@ -1266,8 +1271,10 @@ const TrialBalance: React.FC = () => {
   const handleRrExport = async (
     tab:       TabData,
     tableRows: { account: string; account_desc: string; account_type: string;
-                 opening: number; debit: number; credit: number; closing: number; ytd_net: number }[],
-    totals:    { opening: number; debit: number; credit: number; closing: number; ytd_net: number }
+                 opening: number; debit: number; credit: number; closing: number; ytd_net: number;
+                 entered_opening: number; entered_debit: number; entered_credit: number; entered_closing: number }[],
+    totals:    { opening: number; debit: number; credit: number; closing: number; ytd_net: number;
+                 entered_opening: number; entered_debit: number; entered_credit: number; entered_closing: number }
   ) => {
     if (!tableRows.length) { message.warning('No data to export'); return; }
     message.loading({ content: 'Building Excel…', key: 'xl', duration: 0 });
@@ -1320,25 +1327,41 @@ const TrialBalance: React.FC = () => {
       return true;
     });
     type GR = { account: string; account_desc: string; account_type: string;
-                opening: number; debit: number; credit: number; closing: number; ytd_net: number };
+                opening: number; debit: number; credit: number; closing: number; ytd_net: number;
+                entered_opening: number; entered_debit: number; entered_credit: number; entered_closing: number };
     const rrMap = new Map<string, GR>();
     rrFiltered.forEach(r => {
       if (!rrMap.has(r.account)) {
         rrMap.set(r.account, { account: r.account, account_desc: r.account_desc,
-          account_type: r.account_type, opening: 0, debit: 0, credit: 0, closing: 0, ytd_net: 0 });
+          account_type: r.account_type, opening: 0, debit: 0, credit: 0, closing: 0, ytd_net: 0,
+          entered_opening: 0, entered_debit: 0, entered_credit: 0, entered_closing: 0 });
       }
       const g = rrMap.get(r.account)!;
-      g.opening += r.opening || 0;  g.debit   += r.debit   || 0;
-      g.credit  += r.credit  || 0;  g.closing += r.closing || 0;
-      g.ytd_net += r.ytd_net || 0;
+      g.opening         += r.opening         || 0;
+      g.debit           += r.debit           || 0;
+      g.credit          += r.credit          || 0;
+      g.closing         += r.closing         || 0;
+      g.ytd_net         += r.ytd_net         || 0;
+      g.entered_opening += r.entered_opening || 0;
+      g.entered_debit   += r.entered_debit   || 0;
+      g.entered_credit  += r.entered_credit  || 0;
+      g.entered_closing += r.entered_closing || 0;
     });
     const rrRows   = Array.from(rrMap.values()).sort((a, b) => a.account.localeCompare(b.account));
     const rrTotals = rrRows.reduce(
       (acc, r) => ({
-        opening: acc.opening + r.opening, debit:   acc.debit   + r.debit,
-        credit:  acc.credit  + r.credit,  closing: acc.closing + r.closing, ytd_net: acc.ytd_net + r.ytd_net,
+        opening:         acc.opening         + r.opening,
+        debit:           acc.debit           + r.debit,
+        credit:          acc.credit          + r.credit,
+        closing:         acc.closing         + r.closing,
+        ytd_net:         acc.ytd_net         + r.ytd_net,
+        entered_opening: acc.entered_opening + r.entered_opening,
+        entered_debit:   acc.entered_debit   + r.entered_debit,
+        entered_credit:  acc.entered_credit  + r.entered_credit,
+        entered_closing: acc.entered_closing + r.entered_closing,
       }),
-      { opening: 0, debit: 0, credit: 0, closing: 0, ytd_net: 0 },
+      { opening: 0, debit: 0, credit: 0, closing: 0, ytd_net: 0,
+        entered_opening: 0, entered_debit: 0, entered_credit: 0, entered_closing: 0 },
     );
 
     message.loading({ content: 'Building combined Excel…', key: 'xl', duration: 0 });
@@ -2423,6 +2446,7 @@ const TrialBalance: React.FC = () => {
     type GroupRow = {
       account: string; account_desc: string; account_type: string;
       opening: number; debit: number; credit: number; closing: number; ytd_net: number;
+      entered_opening: number; entered_debit: number; entered_credit: number; entered_closing: number;
     };
     const grouped = new Map<string, GroupRow>();
     rows.forEach(r => {
@@ -2431,27 +2455,37 @@ const TrialBalance: React.FC = () => {
         grouped.set(k, {
           account: r.account, account_desc: r.account_desc, account_type: r.account_type,
           opening: 0, debit: 0, credit: 0, closing: 0, ytd_net: 0,
+          entered_opening: 0, entered_debit: 0, entered_credit: 0, entered_closing: 0,
         });
       }
       const g = grouped.get(k)!;
-      g.opening += r.opening   || 0;
-      g.debit   += r.debit     || 0;
-      g.credit  += r.credit    || 0;
-      g.closing += r.closing   || 0;
-      g.ytd_net += r.ytd_net   || 0;  // ytd_net absent from view — defaults to 0
+      g.opening         += r.opening         || 0;
+      g.debit           += r.debit           || 0;
+      g.credit          += r.credit          || 0;
+      g.closing         += r.closing         || 0;
+      g.ytd_net         += r.ytd_net         || 0;
+      g.entered_opening += r.entered_opening || 0;
+      g.entered_debit   += r.entered_debit   || 0;
+      g.entered_credit  += r.entered_credit  || 0;
+      g.entered_closing += r.entered_closing || 0;
     });
 
     const tableRows = Array.from(grouped.values()).sort((a, b) => a.account.localeCompare(b.account));
 
     const totals = tableRows.reduce(
       (acc, r) => ({
-        opening: acc.opening + r.opening,
-        debit:   acc.debit   + r.debit,
-        credit:  acc.credit  + r.credit,
-        closing: acc.closing + r.closing,
-        ytd_net: acc.ytd_net + r.ytd_net,
+        opening:         acc.opening         + r.opening,
+        debit:           acc.debit           + r.debit,
+        credit:          acc.credit          + r.credit,
+        closing:         acc.closing         + r.closing,
+        ytd_net:         acc.ytd_net         + r.ytd_net,
+        entered_opening: acc.entered_opening + r.entered_opening,
+        entered_debit:   acc.entered_debit   + r.entered_debit,
+        entered_credit:  acc.entered_credit  + r.entered_credit,
+        entered_closing: acc.entered_closing + r.entered_closing,
       }),
-      { opening: 0, debit: 0, credit: 0, closing: 0, ytd_net: 0 }
+      { opening: 0, debit: 0, credit: 0, closing: 0, ytd_net: 0,
+        entered_opening: 0, entered_debit: 0, entered_credit: 0, entered_closing: 0 }
     );
 
     const columns = [
@@ -2503,28 +2537,62 @@ const TrialBalance: React.FC = () => {
         render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text>,
       },
       {
-        title: 'Opening', dataIndex: 'opening', key: 'opening',
-        align: 'right' as const, width: 130,
-        sorter: (a: GroupRow, b: GroupRow) => a.opening - b.opening,
-        render: fmtNet,
+        title: <span style={{ color: '#1677ff' }}>Accounted</span>,
+        children: [
+          {
+            title: 'Opening', dataIndex: 'opening', key: 'opening',
+            align: 'right' as const, width: 130,
+            sorter: (a: GroupRow, b: GroupRow) => a.opening - b.opening,
+            render: fmtNet,
+          },
+          {
+            title: 'Debit', dataIndex: 'debit', key: 'debit',
+            align: 'right' as const, width: 130,
+            sorter: (a: GroupRow, b: GroupRow) => a.debit - b.debit,
+            render: fmtDr,
+          },
+          {
+            title: 'Credit', dataIndex: 'credit', key: 'credit',
+            align: 'right' as const, width: 130,
+            sorter: (a: GroupRow, b: GroupRow) => a.credit - b.credit,
+            render: fmtCr,
+          },
+          {
+            title: 'Closing', dataIndex: 'closing', key: 'closing',
+            align: 'right' as const, width: 130,
+            sorter: (a: GroupRow, b: GroupRow) => a.closing - b.closing,
+            render: fmtNet,
+          },
+        ],
       },
       {
-        title: 'Debit', dataIndex: 'debit', key: 'debit',
-        align: 'right' as const, width: 130,
-        sorter: (a: GroupRow, b: GroupRow) => a.debit - b.debit,
-        render: fmtDr,
-      },
-      {
-        title: 'Credit', dataIndex: 'credit', key: 'credit',
-        align: 'right' as const, width: 130,
-        sorter: (a: GroupRow, b: GroupRow) => a.credit - b.credit,
-        render: fmtCr,
-      },
-      {
-        title: 'Closing', dataIndex: 'closing', key: 'closing',
-        align: 'right' as const, width: 130,
-        sorter: (a: GroupRow, b: GroupRow) => a.closing - b.closing,
-        render: fmtNet,
+        title: <span style={{ color: '#52c41a' }}>Entered</span>,
+        children: [
+          {
+            title: 'Opening', dataIndex: 'entered_opening', key: 'entered_opening',
+            align: 'right' as const, width: 130,
+            sorter: (a: GroupRow, b: GroupRow) => a.entered_opening - b.entered_opening,
+            render: fmtNet,
+          },
+          {
+            title: 'Debit', dataIndex: 'entered_debit', key: 'entered_debit',
+            align: 'right' as const, width: 130,
+            sorter: (a: GroupRow, b: GroupRow) => a.entered_debit - b.entered_debit,
+            render: fmtDr,
+          },
+          {
+            title: 'Credit', dataIndex: 'entered_credit', key: 'entered_credit',
+            align: 'right' as const, width: 130,
+            sorter: (a: GroupRow, b: GroupRow) => a.entered_credit - b.entered_credit,
+            render: fmtCr,
+          },
+          {
+            title: 'Closing', dataIndex: 'entered_closing', key: 'entered_closing',
+            align: 'right' as const, width: 130,
+            sorter: (a: GroupRow, b: GroupRow) => a.entered_closing - b.entered_closing,
+            render: fmtNet,
+          },
+        ],
       },
       {
         title: 'YTD Net', dataIndex: 'ytd_net', key: 'ytd_net',
@@ -2534,22 +2602,34 @@ const TrialBalance: React.FC = () => {
       },
     ];
 
-    const summaryRow = () => (
-      <Table.Summary fixed>
-        <Table.Summary.Row style={{ background: '#f0f0f0', fontWeight: 700 }}>
-          <Table.Summary.Cell index={0} colSpan={3} align="right">
-            <Text strong style={{ fontSize: 12 }}>TOTAL</Text>
-          </Table.Summary.Cell>
-          {[totals.opening, totals.debit, totals.credit, totals.closing, totals.ytd_net].map((v, i) => (
-            <Table.Summary.Cell key={i} index={i + 3} align="right">
-              <Text strong style={{ fontFamily: 'monospace', fontSize: 11 }}>
-                {new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v)}
-              </Text>
+    const summaryRow = () => {
+      const fmt = (v: number) =>
+        new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
+      const accValues   = [totals.opening, totals.debit, totals.credit, totals.closing];
+      const entValues   = [totals.entered_opening, totals.entered_debit, totals.entered_credit, totals.entered_closing];
+      return (
+        <Table.Summary fixed>
+          <Table.Summary.Row style={{ background: '#f0f0f0', fontWeight: 700 }}>
+            <Table.Summary.Cell index={0} colSpan={3} align="right">
+              <Text strong style={{ fontSize: 12 }}>TOTAL</Text>
             </Table.Summary.Cell>
-          ))}
-        </Table.Summary.Row>
-      </Table.Summary>
-    );
+            {accValues.map((v, i) => (
+              <Table.Summary.Cell key={`acc-${i}`} index={i + 3} align="right">
+                <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: '#1677ff' }}>{fmt(v)}</Text>
+              </Table.Summary.Cell>
+            ))}
+            {entValues.map((v, i) => (
+              <Table.Summary.Cell key={`ent-${i}`} index={i + 7} align="right">
+                <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: '#52c41a' }}>{fmt(v)}</Text>
+              </Table.Summary.Cell>
+            ))}
+            <Table.Summary.Cell index={11} align="right">
+              <Text strong style={{ fontFamily: 'monospace', fontSize: 11 }}>{fmt(totals.ytd_net)}</Text>
+            </Table.Summary.Cell>
+          </Table.Summary.Row>
+        </Table.Summary>
+      );
+    };
 
     return (
       <div>
@@ -2647,7 +2727,7 @@ const TrialBalance: React.FC = () => {
           rowKey="account"
           size="small"
           pagination={false}
-          scroll={{ x: 900 }}
+          scroll={{ x: 1600 }}
           summary={summaryRow}
           onRow={(r: any) => ({ style: { background: accountTypeColor[r.account_type] || '#fff' } })}
         />

@@ -186,18 +186,23 @@ function writeTotalsRow(
 // Public types
 // ─────────────────────────────────────────────────────────────────────────────
 export interface RrTBRow {
-  account_type: string;
-  account:      string;
-  account_desc: string;
-  opening:      number;
-  debit:        number;
-  credit:       number;
-  closing:      number;
-  ytd_net:      number;
+  account_type:    string;
+  account:         string;
+  account_desc:    string;
+  opening:         number;
+  debit:           number;
+  credit:          number;
+  closing:         number;
+  ytd_net:         number;
+  entered_opening: number;
+  entered_debit:   number;
+  entered_credit:  number;
+  entered_closing: number;
 }
 
 export interface RrTBTotals {
   opening: number; debit: number; credit: number; closing: number; ytd_net: number;
+  entered_opening: number; entered_debit: number; entered_credit: number; entered_closing: number;
 }
 
 export interface FusionTBRow {
@@ -280,11 +285,16 @@ function writeRrSheet(
   rows:   RrTBRow[],
   totals: RrTBTotals,
 ) {
-  const HEADERS  = ['Type', 'Account', 'Description', 'Opening', 'Debit', 'Credit', 'Closing', 'YTD Net'];
+  const HEADERS  = [
+    'Type', 'Account', 'Description',
+    'Acc Opening', 'Acc Debit', 'Acc Credit', 'Acc Closing',
+    'Ent Opening', 'Ent Debit', 'Ent Credit', 'Ent Closing',
+    'YTD Net',
+  ];
   const NUM_COL  = 4;
   const NUM_COLS = HEADERS.length;
 
-  const COL_WIDTHS = [12, 14, 42, 18, 18, 18, 18, 18];
+  const COL_WIDTHS = [12, 14, 42, 18, 18, 18, 18, 18, 18, 18, 18, 18];
   COL_WIDTHS.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
 
   writeHeader(ws, NUM_COLS, 'REERP TRIAL BALANCE', info);
@@ -296,7 +306,9 @@ function writeRrSheet(
       TYPE_LABEL[r.account_type] || r.account_type,
       r.account,
       r.account_desc || '',
-      r.opening, r.debit, r.credit, r.closing, r.ytd_net,
+      r.opening, r.debit, r.credit, r.closing,
+      r.entered_opening || 0, r.entered_debit || 0, r.entered_credit || 0, r.entered_closing || 0,
+      r.ytd_net,
     ]);
     row.height = 16;
     row.eachCell({ includeEmpty: true }, (cell, c) => {
@@ -310,7 +322,10 @@ function writeRrSheet(
   });
 
   writeTotalsRow(ws,
-    ['', '', 'TOTAL', totals.opening, totals.debit, totals.credit, totals.closing, totals.ytd_net],
+    ['', '', 'TOTAL',
+     totals.opening, totals.debit, totals.credit, totals.closing,
+     totals.entered_opening || 0, totals.entered_debit || 0, totals.entered_credit || 0, totals.entered_closing || 0,
+     totals.ytd_net],
     NUM_COL,
   );
 }

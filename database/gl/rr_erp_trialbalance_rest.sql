@@ -441,7 +441,11 @@ SELECT
     opening,
     debit,
     credit,
-    closing
+    closing,
+    entered_opening,
+    entered_debit,
+    entered_credit,
+    entered_closing
 FROM RR_V_STANDARD_TB
 WHERE ledger_name          = :ledger_name
   AND (:period_name   IS NULL OR period_name          = :period_name)

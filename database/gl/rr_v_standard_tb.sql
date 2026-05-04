@@ -2,7 +2,8 @@
 -- RR_V_STANDARD_TB — Oracle view wrapper for the trial balance
 -- ============================================================
 -- Returns Opening | Debit | Credit | Closing for every
--- (ledger, period, account_combination, currency).
+-- (ledger, period, account_combination, currency) in both
+-- Accounted (functional) and Entered (transaction) currency.
 --
 -- No bind variables — filter on the view:
 --   SELECT * FROM RR_V_STANDARD_TB
@@ -89,6 +90,7 @@ all_periods AS (
 
 -- ────────────────────────────────────────────────────────────
 -- Step 4 — Actual PTD activity per (ledger, combination, period)
+--          Both Accounted (functional) and Entered (transaction)
 -- ────────────────────────────────────────────────────────────
 ptd_actual AS (
     SELECT
@@ -97,7 +99,9 @@ ptd_actual AS (
         NVL(lin.CURRENCY_CODE, hdr.LEDGER_CURRENCY_CODE)  AS CURRENCY_CODE,
         lin.ACCOUNT_COMBINATION,
         SUM(NVL(lin.ACCOUNTED_DR, 0))                     AS PTD_DR,
-        SUM(NVL(lin.ACCOUNTED_CR, 0))                     AS PTD_CR
+        SUM(NVL(lin.ACCOUNTED_CR, 0))                     AS PTD_CR,
+        SUM(NVL(lin.ENTERED_DR,   0))                     AS PTD_ENTERED_DR,
+        SUM(NVL(lin.ENTERED_CR,   0))                     AS PTD_ENTERED_CR
     FROM RR_GL_JE_LINES_ALL  lin
     JOIN RR_GL_JE_HEADERS    hdr
       ON hdr.JE_HEADER_ID = lin.JE_HEADER_ID
@@ -128,8 +132,10 @@ ptd AS (
         ap.PERIOD_NAME,
         ac.CURRENCY_CODE,
         ac.ACCOUNT_COMBINATION,
-        NVL(pa.PTD_DR, 0)  AS PTD_DR,
-        NVL(pa.PTD_CR, 0)  AS PTD_CR
+        NVL(pa.PTD_DR,         0)  AS PTD_DR,
+        NVL(pa.PTD_CR,         0)  AS PTD_CR,
+        NVL(pa.PTD_ENTERED_DR, 0)  AS PTD_ENTERED_DR,
+        NVL(pa.PTD_ENTERED_CR, 0)  AS PTD_ENTERED_CR
     FROM       all_combos  ac
     JOIN       all_periods ap  ON ap.LEDGER_NAME = ac.LEDGER_NAME
     LEFT JOIN  ptd_actual  pa
@@ -169,7 +175,10 @@ enriched AS (
 
         p.PTD_DR,
         p.PTD_CR,
-        p.PTD_DR - p.PTD_CR  AS PTD_NET
+        p.PTD_DR - p.PTD_CR          AS PTD_NET,
+        p.PTD_ENTERED_DR,
+        p.PTD_ENTERED_CR,
+        p.PTD_ENTERED_DR - p.PTD_ENTERED_CR  AS PTD_ENTERED_NET
 
     FROM ptd p
     JOIN accounts acc
@@ -207,7 +216,19 @@ calc AS (
                          e.FISCAL_YEAR
             ORDER BY e.FISCAL_PERIOD
             ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
-        ), 0)  AS PL_OPENING
+        ), 0)  AS PL_OPENING,
+        -- Entered currency equivalents (same partition logic)
+        NVL(SUM(e.PTD_ENTERED_NET) OVER (
+            PARTITION BY e.LEDGER_NAME, e.ACCOUNT_COMBINATION, e.CURRENCY_CODE
+            ORDER BY (e.FISCAL_YEAR * 100 + e.FISCAL_PERIOD)
+            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+        ), 0)  AS BS_ENTERED_OPENING,
+        NVL(SUM(e.PTD_ENTERED_NET) OVER (
+            PARTITION BY e.LEDGER_NAME, e.ACCOUNT_COMBINATION, e.CURRENCY_CODE,
+                         e.FISCAL_YEAR
+            ORDER BY e.FISCAL_PERIOD
+            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+        ), 0)  AS PL_ENTERED_OPENING
     FROM enriched e
 )
 
@@ -234,14 +255,25 @@ SELECT
     c.ACCOUNT_DESC,
 
     CASE WHEN c.ACCOUNT_TYPE IN ('A','L','O')
-         THEN c.BS_OPENING ELSE c.PL_OPENING END        AS OPENING,
+         THEN c.BS_OPENING ELSE c.PL_OPENING END                    AS OPENING,
 
-    c.PTD_DR                                            AS DEBIT,
-    c.PTD_CR                                            AS CREDIT,
+    c.PTD_DR                                                        AS DEBIT,
+    c.PTD_CR                                                        AS CREDIT,
 
     CASE WHEN c.ACCOUNT_TYPE IN ('A','L','O')
          THEN c.BS_OPENING + c.PTD_NET
-         ELSE c.PL_OPENING + c.PTD_NET END              AS CLOSING
+         ELSE c.PL_OPENING + c.PTD_NET END                          AS CLOSING,
+
+    -- Entered (transaction) currency equivalents
+    CASE WHEN c.ACCOUNT_TYPE IN ('A','L','O')
+         THEN c.BS_ENTERED_OPENING ELSE c.PL_ENTERED_OPENING END    AS ENTERED_OPENING,
+
+    c.PTD_ENTERED_DR                                                AS ENTERED_DEBIT,
+    c.PTD_ENTERED_CR                                                AS ENTERED_CREDIT,
+
+    CASE WHEN c.ACCOUNT_TYPE IN ('A','L','O')
+         THEN c.BS_ENTERED_OPENING + c.PTD_ENTERED_NET
+         ELSE c.PL_ENTERED_OPENING + c.PTD_ENTERED_NET END          AS ENTERED_CLOSING
 
 FROM calc c
 WHERE (
