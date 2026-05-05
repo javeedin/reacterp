@@ -48,7 +48,7 @@ import {
   MinusCircleOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import { SYNC_OBJECTS, PROXY_CONFIG, APEX_DB_CONFIG, type SyncObjectConfig, type ApiType } from '../../config/api.config';
+import { SYNC_OBJECTS, PROXY_CONFIG, APEX_DB_CONFIG, ORACLE_FUSION_CONFIG, type SyncObjectConfig, type ApiType } from '../../config/api.config';
 import { syncGLJournals, syncGLBatchesOnly, syncGLHeadersOnly, syncGLLinesOnly, testGLConnection, fetchGLJournalBatches, processSingleGLBatch, type SyncProgress, type BatchOnlySyncProgress, type HeadersOnlySyncProgress, type LinesOnlySyncProgress, type LogCallback, type BatchPayloadCallback, type SingleBatchResult } from '../../services/gl-sync.service';
 import { syncAPInvoices, testAPConnection, type APSyncProgress, type InvoicePayloadCallback } from '../../services/ap-sync.service';
 import { syncAPPayments, testAPPaymentsConnection, type APPaymentsSyncProgress, type PaymentPayloadCallback } from '../../services/ap-payments-sync.service';
@@ -206,6 +206,10 @@ const SyncData: React.FC = () => {
 
   // Payment payload state (for AP Payments debug - reserved for future use)
   const [, setPaymentPayloads] = useState<PaymentPayloadLog[]>([]);
+
+  // GL Headers API debug popup
+  const [glHeadersApiVisible, setGlHeadersApiVisible] = useState(false);
+  const [glHeadersApiTestResults, setGlHeadersApiTestResults] = useState<Record<string, { loading: boolean; result?: string; error?: string }>>({});
 
   // Electron notifications and background sync
   const {
@@ -4226,6 +4230,17 @@ const SyncData: React.FC = () => {
                 </Row>
               ) : isGLHeadersOnly ? (
                 /* GL Headers Only KPI Cards */
+                <>
+                <Row justify="end" style={{ marginBottom: 8 }}>
+                  <Button
+                    size="small"
+                    icon={<ApiOutlined />}
+                    onClick={() => setGlHeadersApiVisible(true)}
+                    style={{ borderRadius: 6 }}
+                  >
+                    View API Calls
+                  </Button>
+                </Row>
                 <Row gutter={16} style={{ marginBottom: 16 }}>
                   {/* Headers Card */}
                   <Col xs={24} sm={8}>
@@ -4314,6 +4329,7 @@ const SyncData: React.FC = () => {
                     </Card>
                   </Col>
                 </Row>
+                </>
               ) : isGLLinesOnly ? (
                 /* GL Lines Only KPI Cards */
                 <Row gutter={16} style={{ marginBottom: 16 }}>
@@ -6382,6 +6398,129 @@ const SyncData: React.FC = () => {
 
       {/* Autopilot Assistant */}
       <Autopilot />
+
+      {/* GL Headers API Debug Modal */}
+      <Modal
+        title={
+          <Space>
+            <ApiOutlined style={{ color: REDWOOD.primary }} />
+            <span>GL Headers Sync — API Calls</span>
+          </Space>
+        }
+        open={glHeadersApiVisible}
+        onCancel={() => setGlHeadersApiVisible(false)}
+        footer={<Button onClick={() => setGlHeadersApiVisible(false)}>Close</Button>}
+        width={820}
+      >
+        {(() => {
+          const params = getParameters();
+          const periodName = params.DefaultPeriodName || '';
+          const apexBatchUrl = `${APEX_DB_CONFIG.baseUrl}/SYNC/jebatches${periodName ? `?PERIOD_NAME=${encodeURIComponent(periodName)}` : ''}`;
+          const sampleBatchId = glHeadersOnlyProgress.currentBatchId || '{batchId}';
+          const oracleHeadersUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/journalBatches/${sampleBatchId}/child/journalHeaders`;
+          const proxyOracleUrl = `${PROXY_CONFIG.baseUrl}/oracle-url?url=${encodeURIComponent(oracleHeadersUrl)}`;
+          const apexPostUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/headers`;
+
+          const testEndpoint = async (key: string, url: string, useProxy = false) => {
+            setGlHeadersApiTestResults(prev => ({ ...prev, [key]: { loading: true } }));
+            try {
+              const fetchUrl = useProxy ? `${PROXY_CONFIG.baseUrl}/oracle-url?url=${encodeURIComponent(url)}` : url;
+              const resp = await fetch(fetchUrl);
+              const text = await resp.text();
+              let parsed: any;
+              try { parsed = JSON.parse(text); } catch { parsed = text; }
+              const preview = typeof parsed === 'object'
+                ? JSON.stringify(parsed, null, 2).substring(0, 600)
+                : String(parsed).substring(0, 600);
+              setGlHeadersApiTestResults(prev => ({ ...prev, [key]: { loading: false, result: `HTTP ${resp.status}\n${preview}` } }));
+            } catch (e: any) {
+              setGlHeadersApiTestResults(prev => ({ ...prev, [key]: { loading: false, error: e.message } }));
+            }
+          };
+
+          const endpoints = [
+            {
+              key: 'apex-batches',
+              step: '1',
+              label: 'GET Batch IDs from APEX DB',
+              method: 'GET',
+              url: apexBatchUrl,
+              description: `Fetches synced batch IDs to process. Filtered by period: ${periodName || '(all)'}`,
+              testFn: () => testEndpoint('apex-batches', apexBatchUrl),
+            },
+            {
+              key: 'oracle-headers',
+              step: '2',
+              label: 'GET Journal Headers from Oracle Fusion',
+              method: 'GET',
+              url: oracleHeadersUrl,
+              description: `Fetches all headers for a batch via proxy. Current batch: ${sampleBatchId}`,
+              testFn: () => testEndpoint('oracle-headers', oracleHeadersUrl, true),
+              proxyUrl: proxyOracleUrl,
+            },
+            {
+              key: 'apex-post',
+              step: '3',
+              label: 'POST Headers to APEX DB',
+              method: 'POST',
+              url: apexPostUrl,
+              description: 'Inserts/merges each header into RR_GL_HEADERS table. Body: { batchId, items: [...] }',
+              testFn: null,
+            },
+          ];
+
+          return (
+            <div>
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 16, borderRadius: 8 }}
+                message={`GL Headers sync runs ${endpoints.length} steps per batch. ${glHeadersOnlyProgress.errors > 0 ? `⚠ ${glHeadersOnlyProgress.errors} errors detected — check step 2 for Oracle 404s.` : ''}`}
+              />
+              {endpoints.map(ep => {
+                const testResult = glHeadersApiTestResults[ep.key];
+                return (
+                  <div key={ep.key} style={{ marginBottom: 20, padding: 14, background: '#fafafa', borderRadius: 8, border: '1px solid #e8e8e8' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <Tag color={ep.method === 'GET' ? 'blue' : 'green'} style={{ borderRadius: 4, fontFamily: 'monospace', fontSize: 11 }}>{ep.method}</Tag>
+                      <Tag style={{ borderRadius: 10, background: REDWOOD.primary, color: '#fff', border: 'none', fontSize: 11 }}>Step {ep.step}</Tag>
+                      <span style={{ fontWeight: 600, fontSize: 13 }}>{ep.label}</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: '#666', marginBottom: 8 }}>{ep.description}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: ep.proxyUrl ? 4 : 0 }}>
+                      <code style={{ flex: 1, fontSize: 11, background: '#fff', border: '1px solid #d9d9d9', borderRadius: 4, padding: '4px 8px', wordBreak: 'break-all', display: 'block' }}>
+                        {ep.url}
+                      </code>
+                      <Button size="small" icon={<CopyOutlined />} onClick={() => navigator.clipboard.writeText(ep.url)} />
+                      {ep.testFn && (
+                        <Button size="small" type="primary" loading={testResult?.loading} onClick={ep.testFn} style={{ background: REDWOOD.primary }}>
+                          Test
+                        </Button>
+                      )}
+                    </div>
+                    {ep.proxyUrl && (
+                      <div style={{ fontSize: 10, color: '#999', marginBottom: 6 }}>
+                        Proxy: <code style={{ fontSize: 10 }}>{ep.proxyUrl.substring(0, 120)}…</code>
+                      </div>
+                    )}
+                    {testResult && !testResult.loading && (
+                      <div style={{ marginTop: 8 }}>
+                        {testResult.error ? (
+                          <Alert type="error" showIcon message={testResult.error} style={{ borderRadius: 6 }} />
+                        ) : (
+                          <pre style={{ fontSize: 11, background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 6, padding: 8, maxHeight: 160, overflow: 'auto', margin: 0 }}>
+                            {testResult.result}
+                          </pre>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
+      </Modal>
 
       {/* Log Detail Modal */}
       <Modal
