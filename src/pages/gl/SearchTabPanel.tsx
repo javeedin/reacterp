@@ -274,8 +274,8 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
       const entClosingAmt = allItems.reduce((s: number, i: any) => s + (i.entered_closing || 0), 0);
       const toDrCr = (amt: number) =>
         isDebitNormal
-          ? { dr: amt, cr: 0 }
-          : { dr: 0, cr: amt };
+          ? { dr: amt, cr: 0 }    // debit-normal: preserve sign in Dr (neg = unusual credit balance)
+          : { dr: 0, cr: -amt };  // credit-normal: negate into Cr (neg opening → positive Cr = normal credit balance)
       const makeRow = (accAmt: number, entAmt: number, label: string, key: string, isOpen: boolean): JournalLineSegment | null => {
         const eA = isRetainedEarnings && isOpen ? closingAmt    : accAmt;
         const eE = isRetainedEarnings && isOpen ? entClosingAmt : entAmt;
