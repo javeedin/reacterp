@@ -2963,11 +2963,15 @@ const ManageJournals: React.FC = () => {
               key="search"
               style={{ borderRadius: 8 }}
             >
+              <style>{`.mj-search-form .ant-form-item { margin-bottom: 8px; } .mj-search-form .ant-form-item-label { padding-bottom: 0; }`}</style>
               <Form
                 form={form}
                 layout="horizontal"
-                labelCol={{ span: 8 }}
-                wrapperCol={{ span: 16 }}
+                labelCol={{ span: 7 }}
+                wrapperCol={{ span: 17 }}
+                size="small"
+                className="mj-search-form"
+                style={{ fontSize: 12 }}
                 initialValues={{
                   journalOperator: 'Starts with',
                   batchOperator: 'Starts with',
@@ -2975,7 +2979,7 @@ const ManageJournals: React.FC = () => {
                   journalNameOperator: 'Starts with',
                 }}
               >
-                <Row gutter={24}>
+                <Row gutter={12}>
                   <Col span={12}>
                     {/* Ledger - Required */}
                     <Form.Item
@@ -3016,7 +3020,7 @@ const ManageJournals: React.FC = () => {
                     <Form.Item label="Batch Name">
                       <Space.Compact style={{ width: '100%' }}>
                         <Form.Item name="batchOperator" noStyle>
-                          <Select style={{ width: 120 }}>
+                          <Select style={{ width: 105 }}>
                             {operators.map(op => <Option key={op} value={op}>{op}</Option>)}
                           </Select>
                         </Form.Item>
@@ -3030,7 +3034,7 @@ const ManageJournals: React.FC = () => {
                     <Form.Item label="Batch Desc">
                       <Space.Compact style={{ width: '100%' }}>
                         <Form.Item name="batchDescOperator" noStyle>
-                          <Select style={{ width: 120 }}>
+                          <Select style={{ width: 105 }}>
                             {operators.map(op => <Option key={op} value={op}>{op}</Option>)}
                           </Select>
                         </Form.Item>
@@ -3089,7 +3093,7 @@ const ManageJournals: React.FC = () => {
                     <Form.Item label="Journal Name">
                       <Space.Compact style={{ width: '100%' }}>
                         <Form.Item name="journalNameOperator" noStyle>
-                          <Select style={{ width: 120 }}>
+                          <Select style={{ width: 105 }}>
                             {operators.map(op => <Option key={op} value={op}>{op}</Option>)}
                           </Select>
                         </Form.Item>
@@ -3103,7 +3107,7 @@ const ManageJournals: React.FC = () => {
                     <Form.Item label="Journal Desc">
                       <Space.Compact style={{ width: '100%' }}>
                         <Form.Item name="journalOperator" noStyle>
-                          <Select style={{ width: 120 }}>
+                          <Select style={{ width: 105 }}>
                             {operators.map(op => <Option key={op} value={op}>{op}</Option>)}
                           </Select>
                         </Form.Item>
