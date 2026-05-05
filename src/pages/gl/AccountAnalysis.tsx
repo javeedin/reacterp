@@ -3124,7 +3124,7 @@ const AccountAnalysis: React.FC = () => {
         </div>
 
         {/* Tabbed Content */}
-        <div style={{ padding: '0 16px 16px 16px', paddingRight: 80 }}>
+        <div style={{ padding: '0 16px 16px 16px' }}>
           <Tabs
             type="editable-card"
             activeKey={activeTabKey}
@@ -3146,65 +3146,6 @@ const AccountAnalysis: React.FC = () => {
               ),
             }}
           />
-        </div>
-
-        {/* Floating Connected Icons */}
-        <div
-          ref={floatingIconsRef}
-          style={{
-            position: 'fixed',
-            right: 20,
-            top: '50%',
-            transform: 'translateY(-50%)',
-            zIndex: 1000,
-            display: 'flex',
-            flexDirection: 'column',
-          }}
-        >
-          <FloatingIcon
-            icon={<CheckSquareOutlined />}
-            label="Tasks"
-            color={REDWOOD.taskBlue}
-            isActive={activePanel === 'tasks'}
-            onClick={() => togglePanel('tasks')}
-            position="top"
-          />
-          <div style={{ width: 48, height: 2, background: REDWOOD.neutral200 }} />
-          <FloatingIcon
-            icon={<BarChartOutlined />}
-            label="Reports"
-            color={REDWOOD.reportGreen}
-            isActive={activePanel === 'reports'}
-            onClick={() => togglePanel('reports')}
-            position="bottom"
-          />
-        </div>
-
-        {/* Backdrop Overlay */}
-        {activePanel !== 'none' && (
-          <div
-            onClick={closePanel}
-            style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              background: 'rgba(0,0,0,0.3)',
-              zIndex: 1000,
-              animation: isClosing ? 'fadeOut 0.25s ease forwards' : 'fadeIn 0.3s ease forwards',
-            }}
-          />
-        )}
-
-        {/* Slide-out Panels */}
-        <div ref={panelRef}>
-          {activePanel === 'tasks' && (
-            <SlidePanel title="Tasks" items={taskMenuItems} color={REDWOOD.taskBlue} />
-          )}
-          {activePanel === 'reports' && (
-            <SlidePanel title="Reports" items={reportMenuItems} color={REDWOOD.reportGreen} />
-          )}
         </div>
 
         {/* Journal Detail Modal */}
