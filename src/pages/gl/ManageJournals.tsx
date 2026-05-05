@@ -313,6 +313,10 @@ const ManageJournals: React.FC = () => {
   const [pageApiModalVisible, setPageApiModalVisible] = useState(false);
   const [pageApiExecResults, setPageApiExecResults] = useState<Record<number, { loading: boolean; response: string | null }>>({});
 
+  // Stores the base search params (without offset/limit) for export re-fetch
+  const lastBaseParamsRef = React.useRef<URLSearchParams | null>(null);
+  const [exportLoading, setExportLoading] = useState(false);
+
   // Journal panel expanded/collapsed state per tab (for Show More/Show Less)
   const [journalExpandedState, setJournalExpandedState] = useState<Record<string, boolean>>({});
   const [activeDetailTabState, setActiveDetailTabState] = useState<Record<string, string>>({});
@@ -770,6 +774,9 @@ const ManageJournals: React.FC = () => {
       const { from: acctFrom, to: acctTo } = getAcctDateRange();
       if (acctFrom) baseParams.append('from_date', acctFrom.format('YYYY-MM-DD'));
       if (acctTo)   baseParams.append('to_date',   acctTo.format('YYYY-MM-DD'));
+
+      // Save for export re-fetch
+      lastBaseParamsRef.current = new URLSearchParams(baseParams.toString());
 
       // Fetch with pagination - get ALL records
       const PAGE_SIZE = 500; // ORDS default max
@@ -1346,44 +1353,108 @@ const ManageJournals: React.FC = () => {
     }
   };
 
-  // Export journals to Excel
-  const handleExportExcel = () => {
-    if (journals.length === 0) {
-      message.warning('No journals to export. Run a search first.');
+  // Export journals to Excel — fetches ALL pages fresh from the API
+  const handleExportExcel = async () => {
+    if (!lastBaseParamsRef.current) {
+      message.warning('No search results to export. Run a search first.');
       return;
     }
 
-    const rows = journals.map(j => ({
-      'JE Batch ID':         j.jeBatchId,
-      'Batch Name':          j.batchName || '',
-      'Batch Description':   j.batchDescription || '',
-      'Status':              j.statusMeaning || '',
-      'Source':              j.source || '',
-      'Period':              j.periodName || '',
-      'Ledger':              j.ledgerName || '',
-      'Journal Name':        j.journalName || '',
-      'Journal Description': j.journalDescription || '',
-      'Category':            j.category || '',
-      'Currency':            j.currencyCode || '',
-      'Conversion Rate':     j.conversionRate ?? '',
-      'Accounting Date':     j.effectiveDate || '',
-      'Creation Date':       j.creationDate || '',
-      'Entered Debit':       j.enteredDebit ?? 0,
-      'Entered Credit':      j.enteredCredit ?? 0,
-      'Accounted Debit':     j.accountedDebit ?? 0,
-      'Accounted Credit':    j.accountedCredit ?? 0,
-    }));
+    setExportLoading(true);
+    const key = 'excel-export';
+    message.loading({ content: 'Fetching all journals for export…', key, duration: 0 });
 
-    const ws = XLSX.utils.json_to_sheet(rows);
-    // Auto-width: approximate column widths from header length
-    const colWidths = Object.keys(rows[0] || {}).map(k => ({ wch: Math.max(k.length + 2, 12) }));
-    ws['!cols'] = colWidths;
+    try {
+      const PAGE_SIZE = 1000;
+      let offset = 0;
+      let allRows: JournalRecord[] = [];
+      let hasMore = true;
 
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Journals');
-    const fileName = `Journals_${(form.getFieldValue('accountingPeriod') || 'export').replace(/[^a-zA-Z0-9-]/g, '_')}_${dayjs().format('YYYYMMDD_HHmmss')}.xlsx`;
-    XLSX.writeFile(wb, fileName);
-    message.success(`Exported ${journals.length} journals to ${fileName}`);
+      while (hasMore) {
+        const params = new URLSearchParams(lastBaseParamsRef.current.toString());
+        params.set('offset', offset.toString());
+        params.set('limit', PAGE_SIZE.toString());
+        const url = `${API_BASE_URL}/headers?${params.toString()}`;
+
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const text = await res.text();
+        if (text.trimStart().startsWith('<')) throw new Error('ORDS returned HTML — endpoint error');
+        const data: ApiResponse = JSON.parse(text);
+        if (!data.success) throw new Error(data.error || 'API returned success=false');
+
+        const items: JournalRecord[] = (data.items || []).map((item: any, idx: number) => ({
+          key: `export-${offset}-${idx}`,
+          batchId: item.batchId, jeBatchId: item.jeBatchId,
+          batchName: item.batchName, batchDescription: item.batchDescription || '',
+          source: item.source || '', status: item.status || '',
+          statusMeaning: item.statusMeaning || '', approvalStatusMeaning: item.approvalStatusMeaning || '',
+          postedDate: item.postedDate || null, headerId: item.headerId, jeHeaderId: item.jeHeaderId,
+          journalName: item.journalName || '', journalDescription: item.journalDescription || '',
+          periodName: item.periodName || '', category: item.category || '',
+          ledgerName: item.ledgerName || '', legalEntityName: item.legalEntityName || '',
+          currencyCode: item.currencyCode || '', conversionRate: item.conversionRate ?? 1,
+          conversionRateType: item.conversionRateType || '',
+          enteredDebit: item.enteredDebit ?? 0, enteredCredit: item.enteredCredit ?? 0,
+          accountedDebit: item.accountedDebit ?? 0, accountedCredit: item.accountedCredit ?? 0,
+          effectiveDate: item.effectiveDate || '', externalReference: item.externalReference || '',
+          creationDate: item.creationDate || '', lines: [],
+        }));
+
+        allRows = [...allRows, ...items];
+        message.loading({ content: `Fetching… ${allRows.length} journals loaded`, key, duration: 0 });
+
+        if (items.length < PAGE_SIZE) {
+          hasMore = false;
+        } else {
+          offset += PAGE_SIZE;
+        }
+      }
+
+      if (allRows.length === 0) {
+        message.warning({ content: 'No data returned from API.', key });
+        return;
+      }
+
+      const rows = allRows.map(j => ({
+        'JE Batch ID':         j.jeBatchId,
+        'Batch Name':          j.batchName,
+        'Batch Description':   j.batchDescription,
+        'Status':              j.statusMeaning,
+        'Source':              j.source,
+        'Period':              j.periodName,
+        'Ledger':              j.ledgerName,
+        'Journal Name':        j.journalName,
+        'Journal Description': j.journalDescription,
+        'Category':            j.category,
+        'Currency':            j.currencyCode,
+        'Conversion Rate':     j.conversionRate,
+        'Accounting Date':     j.effectiveDate,
+        'Posted Date':         j.postedDate || '',
+        'Creation Date':       j.creationDate,
+        'Entered Debit':       j.enteredDebit,
+        'Entered Credit':      j.enteredCredit,
+        'Accounted Debit':     j.accountedDebit,
+        'Accounted Credit':    j.accountedCredit,
+        'Legal Entity':        j.legalEntityName,
+        'External Reference':  j.externalReference,
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const colWidths = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 14) }));
+      ws['!cols'] = colWidths;
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Journals');
+      const period = (lastBaseParamsRef.current.get('period') || 'export').replace(/[^a-zA-Z0-9-]/g, '_');
+      const fileName = `Journals_${period}_${dayjs().format('YYYYMMDD_HHmmss')}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+      message.success({ content: `Exported ${allRows.length} journals to ${fileName}`, key, duration: 4 });
+    } catch (e: any) {
+      message.error({ content: `Export failed: ${e.message}`, key, duration: 5 });
+    } finally {
+      setExportLoading(false);
+    }
   };
 
   const handleOpenBulkPost = () => {
@@ -2946,10 +3017,11 @@ const ManageJournals: React.FC = () => {
                   <Button
                     icon={<ExportOutlined />}
                     onClick={handleExportExcel}
-                    disabled={journals.length === 0}
-                    style={journals.length > 0 ? { background: '#1D7B4D', borderColor: '#1D7B4D', color: '#fff' } : {}}
+                    loading={exportLoading}
+                    disabled={!lastBaseParamsRef.current}
+                    style={lastBaseParamsRef.current ? { background: '#1D7B4D', borderColor: '#1D7B4D', color: '#fff' } : {}}
                   >
-                    Export Excel ({journals.length})
+                    Export Excel {journals.length > 0 ? `(${journals.length})` : ''}
                   </Button>
                   <Button
                     icon={<BugOutlined />}
