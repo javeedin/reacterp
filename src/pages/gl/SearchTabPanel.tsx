@@ -636,13 +636,13 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
       const accCr  = rows.reduce((s, r) => s + (r.accountedCr || 0), 0);
       const entDr  = rows.reduce((s, r) => s + (r.enteredDr   || 0), 0);
       const entCr  = rows.reduce((s, r) => s + (r.enteredCr   || 0), 0);
+      rows.forEach(r => result.push(r));
       result.push({
-        ...rows[0], key: `grphdr-${acct}`, isGroupHeader: true,
+        ...rows[0], key: `grpftr-${acct}`, isGroupHeader: true,
         groupCount: rows.length,
         groupDr: accDr, groupCr: accCr,
         groupEnteredDr: entDr, groupEnteredCr: entCr,
       });
-      rows.forEach(r => result.push(r));
     });
     result.push(...closing);
     return result;
@@ -656,7 +656,8 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
       render: (text: string, record: JournalLineSegment) =>
         record.isGroupHeader ? (
           <Space size={6}>
-            <Text strong style={{ fontSize: 11 }}>{text || `${record.company}-${record.lob}-${record.department}-${record.account}-${record.subAccount}-${record.analysis}-${record.intercompany}`}</Text>
+            <Text strong style={{ fontSize: 10, color: REDWOOD.neutral600 }}>Subtotal —</Text>
+            <Text strong style={{ fontSize: 10 }}>{text || `${record.company}-${record.lob}-${record.department}-${record.account}-${record.subAccount}-${record.analysis}-${record.intercompany}`}</Text>
             <Tag style={{ fontSize: 10, lineHeight: '16px', padding: '0 5px' }}>{record.groupCount} lines</Tag>
           </Space>
         ) : record.isOpeningBalance ? (
@@ -1002,41 +1003,32 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
               // When filtering: keep group headers whose groups have matching rows,
               // keep opening/closing balance rows, keep matching detail rows
               if (groupByAccount) {
+                // Footer is now at the bottom: detail rows come first, then isGroupHeader footer
                 const result: JournalLineSegment[] = [];
-                let i = 0;
-                while (i < base.length) {
-                  const row = base[i];
-                  if (row.isOpeningBalance || row.isClosingBalance) { result.push(row); i++; continue; }
+                let pending: JournalLineSegment[] = [];
+                base.forEach(row => {
+                  if (row.isOpeningBalance || row.isClosingBalance) { result.push(row); return; }
                   if (row.isGroupHeader) {
-                    // Collect all detail rows for this group
-                    const details: JournalLineSegment[] = [];
-                    let j = i + 1;
-                    while (j < base.length && !base[j].isGroupHeader && !base[j].isClosingBalance) {
-                      details.push(base[j]); j++;
-                    }
-                    const matchingDetails = details.filter(r =>
+                    // End of group — filter pending detail rows then push footer with recalculated totals
+                    const matched = pending.filter(r =>
                       [r.concatenatedSegments, r.accountDescription, r.jeLineDescription,
                        r.batchName, r.userJeSourceName, r.userJeCategoryName, r.defaultPeriodName, r.currencyCode]
                       .some(v => (v || '').toLowerCase().includes(q))
                     );
-                    if (matchingDetails.length > 0) {
-                      result.push({ ...row, groupCount: matchingDetails.length,
-                        groupDr: matchingDetails.reduce((s, r) => s + (r.accountedDr || 0), 0),
-                        groupCr: matchingDetails.reduce((s, r) => s + (r.accountedCr || 0), 0),
-                        groupEnteredDr: matchingDetails.reduce((s, r) => s + (r.enteredDr || 0), 0),
-                        groupEnteredCr: matchingDetails.reduce((s, r) => s + (r.enteredCr || 0), 0),
+                    if (matched.length > 0) {
+                      matched.forEach(r => result.push(r));
+                      result.push({ ...row, groupCount: matched.length,
+                        groupDr:        matched.reduce((s, r) => s + (r.accountedDr || 0), 0),
+                        groupCr:        matched.reduce((s, r) => s + (r.accountedCr || 0), 0),
+                        groupEnteredDr: matched.reduce((s, r) => s + (r.enteredDr   || 0), 0),
+                        groupEnteredCr: matched.reduce((s, r) => s + (r.enteredCr   || 0), 0),
                       });
-                      matchingDetails.forEach(r => result.push(r));
                     }
-                    i = j;
-                    continue;
+                    pending = [];
+                  } else {
+                    pending.push(row);
                   }
-                  const matches = [row.concatenatedSegments, row.accountDescription, row.jeLineDescription,
-                    row.batchName, row.userJeSourceName, row.userJeCategoryName, row.defaultPeriodName, row.currencyCode]
-                    .some(v => (v || '').toLowerCase().includes(q));
-                  if (matches) result.push(row);
-                  i++;
-                }
+                });
                 return result;
               }
               return base.filter(r =>
