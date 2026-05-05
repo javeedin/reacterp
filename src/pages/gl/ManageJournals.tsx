@@ -320,6 +320,7 @@ const ManageJournals: React.FC = () => {
   // Stores the base search params (without offset/limit) for export re-fetch
   const lastBaseParamsRef = React.useRef<URLSearchParams | null>(null);
   const [exportLoading, setExportLoading] = useState(false);
+  const [gridFilter, setGridFilter] = useState('');
 
   // Journal panel expanded/collapsed state per tab (for Show More/Show Less)
   const [journalExpandedState, setJournalExpandedState] = useState<Record<string, boolean>>({});
@@ -3116,7 +3117,9 @@ const ManageJournals: React.FC = () => {
                     <Form.Item label="Category" name="category">
                       <Select placeholder="Select category" allowClear showSearch optionFilterProp="children">
                         {glCategories.map(c => (
-                          <Option key={c.jeCategoryName} value={c.jeCategoryName}>{c.userJeCategoryName || c.jeCategoryName}</Option>
+                          <Option key={c.jeCategoryName} value={c.userJeCategoryName || c.jeCategoryName}>
+                            {c.userJeCategoryName || c.jeCategoryName}
+                          </Option>
                         ))}
                       </Select>
                     </Form.Item>
@@ -3324,11 +3327,54 @@ const ManageJournals: React.FC = () => {
               </Space>
             </div>
 
+            {/* Quick filter bar */}
+            {journals.length > 0 && (
+              <div style={{
+                padding: '6px 12px',
+                borderBottom: `1px solid ${REDWOOD.neutral200}`,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                background: '#fff',
+              }}>
+                <FilterOutlined style={{ color: REDWOOD.neutral600, fontSize: 12 }} />
+                <Input
+                  size="small"
+                  placeholder="Filter results — type to search across Batch Name, Journal Name, Description, Category, Source…"
+                  prefix={<SearchOutlined style={{ color: REDWOOD.neutral300 }} />}
+                  allowClear
+                  value={gridFilter}
+                  onChange={e => setGridFilter(e.target.value)}
+                  style={{ maxWidth: 520, fontSize: 12 }}
+                />
+                {gridFilter && (
+                  <Text type="secondary" style={{ fontSize: 11 }}>
+                    {(() => {
+                      const q = gridFilter.toLowerCase();
+                      const count = journals.filter(j =>
+                        [j.batchName, j.batchDescription, j.journalName, j.journalDescription,
+                         j.category, j.source, j.statusMeaning, j.periodName, j.ledgerName]
+                        .some(v => (v || '').toLowerCase().includes(q))
+                      ).length;
+                      return `${count} of ${journals.length} shown`;
+                    })()}
+                  </Text>
+                )}
+              </div>
+            )}
+
             {/* Table */}
             <Table
               rowSelection={rowSelection}
               columns={columns}
-              dataSource={journals}
+              dataSource={gridFilter
+                ? journals.filter(j => {
+                    const q = gridFilter.toLowerCase();
+                    return [j.batchName, j.batchDescription, j.journalName, j.journalDescription,
+                            j.category, j.source, j.statusMeaning, j.periodName, j.ledgerName]
+                      .some(v => (v || '').toLowerCase().includes(q));
+                  })
+                : journals}
               loading={loading}
               pagination={{
                 total: totalCount,
