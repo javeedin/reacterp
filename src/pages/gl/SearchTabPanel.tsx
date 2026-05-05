@@ -673,25 +673,34 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
     {
       title: 'Description', dataIndex: 'accountDescription', key: 'accountDescription',
       width: 180, ellipsis: true,
-      render: (text: string) => <Tooltip title={text}><span style={{ fontSize: 10 }}>{text || '-'}</span></Tooltip>,
+      render: (text: string, record: JournalLineSegment) =>
+        record.isGroupHeader ? null :
+        <Tooltip title={text}><span style={{ fontSize: 10 }}>{text || '-'}</span></Tooltip>,
     },
     {
       title: 'Line Description', dataIndex: 'jeLineDescription', key: 'jeLineDescription',
       width: 200, ellipsis: true,
-      render: (text: string, record: JournalLineSegment) => (
-        <Tooltip title={text}>
-          <span style={{ fontSize: 10, fontWeight: (record.isOpeningBalance || record.isClosingBalance) ? 600 : undefined }}>
-            {text || '-'}
-          </span>
-        </Tooltip>
-      ),
+      render: (text: string, record: JournalLineSegment) =>
+        record.isGroupHeader ? null : (
+          <Tooltip title={text}>
+            <span style={{ fontSize: 10, fontWeight: (record.isOpeningBalance || record.isClosingBalance) ? 600 : undefined }}>
+              {text || '-'}
+            </span>
+          </Tooltip>
+        ),
     },
-    { title: 'Period',    dataIndex: 'defaultPeriodName',  key: 'defaultPeriodName',  width: 80 },
-    { title: 'Acctg Date', dataIndex: 'accountingDate',    key: 'accountingDate',     width: 100 },
-    { title: 'Batch',     dataIndex: 'batchName',          key: 'batchName',          width: 150, ellipsis: true },
-    { title: 'Source',    dataIndex: 'userJeSourceName',   key: 'userJeSourceName',   width: 100 },
-    { title: 'Category',  dataIndex: 'userJeCategoryName', key: 'userJeCategoryName', width: 120 },
-    { title: 'Currency',  dataIndex: 'currencyCode',       key: 'currencyCode',       width: 90 },
+    { title: 'Period',    dataIndex: 'defaultPeriodName',  key: 'defaultPeriodName',  width: 80,
+      render: (v: string, r: JournalLineSegment) => r.isGroupHeader ? null : v },
+    { title: 'Acctg Date', dataIndex: 'accountingDate',   key: 'accountingDate',     width: 100,
+      render: (v: string, r: JournalLineSegment) => r.isGroupHeader ? null : v },
+    { title: 'Batch',     dataIndex: 'batchName',          key: 'batchName',          width: 150, ellipsis: true,
+      render: (v: string, r: JournalLineSegment) => r.isGroupHeader ? null : v },
+    { title: 'Source',    dataIndex: 'userJeSourceName',   key: 'userJeSourceName',   width: 100,
+      render: (v: string, r: JournalLineSegment) => r.isGroupHeader ? null : v },
+    { title: 'Category',  dataIndex: 'userJeCategoryName', key: 'userJeCategoryName', width: 120,
+      render: (v: string, r: JournalLineSegment) => r.isGroupHeader ? null : v },
+    { title: 'Currency',  dataIndex: 'currencyCode',       key: 'currencyCode',       width: 90,
+      render: (v: string, r: JournalLineSegment) => r.isGroupHeader ? null : v },
     {
       title: <span style={{ color: '#1677ff', fontWeight: 600 }}>Accounted</span>,
       onHeaderCell: () => ({ style: groupBorderLeft }),
@@ -739,14 +748,15 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
     },
     {
       title: '', key: 'drillDown', width: 36, fixed: 'right' as const,
-      render: (_: any, record: JournalLineSegment) => (
-        <Tooltip title={`View Journal (Header ${record.jeHeaderId})`}>
-          <Button type="text" size="small"
-            icon={<AuditOutlined style={{ color: REDWOOD.info }} />}
-            onClick={(e) => { e.stopPropagation(); setJournalDrillRecord(record); setJournalDrillVisible(true); }}
-          />
-        </Tooltip>
-      ),
+      render: (_: any, record: JournalLineSegment) =>
+        record.isGroupHeader ? null : (
+          <Tooltip title={`View Journal (Header ${record.jeHeaderId})`}>
+            <Button type="text" size="small"
+              icon={<AuditOutlined style={{ color: REDWOOD.info }} />}
+              onClick={(e) => { e.stopPropagation(); setJournalDrillRecord(record); setJournalDrillVisible(true); }}
+            />
+          </Tooltip>
+        ),
     },
   ];
 
