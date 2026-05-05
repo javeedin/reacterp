@@ -76,6 +76,7 @@ import type { ColumnsType } from 'antd/es/table';
 import Autopilot from '../../components/Autopilot';
 import { validateAccountCode } from '../../components/AccountSelector';
 import CreateJournal from './CreateJournal';
+import * as XLSX from 'xlsx';
 
 const { Content } = Layout;
 const { Text } = Typography;
@@ -746,11 +747,19 @@ const ManageJournals: React.FC = () => {
       baseParams.append('ledger', values.ledger);
       baseParams.append('period', values.accountingPeriod);
 
+      const opToCode = (op: string) => {
+        if (op === 'Starts with') return 'S';
+        if (op === 'Ends with')   return 'E';
+        if (op === 'Equals')      return 'X';
+        return 'C'; // Contains (default)
+      };
       if (values.journalBatch) {
         baseParams.append('batchName', values.journalBatch);
+        baseParams.append('batchOp', opToCode(values.batchOperator || 'Contains'));
       }
       if (values.journalDescription) {
         baseParams.append('journalDesc', values.journalDescription);
+        baseParams.append('journalOp', opToCode(values.journalOperator || 'Contains'));
       }
       if (values.source) {
         baseParams.append('source', values.source);
@@ -1335,6 +1344,46 @@ const ManageJournals: React.FC = () => {
     } finally {
       setDeleteBatchLoading(false);
     }
+  };
+
+  // Export journals to Excel
+  const handleExportExcel = () => {
+    if (journals.length === 0) {
+      message.warning('No journals to export. Run a search first.');
+      return;
+    }
+
+    const rows = journals.map(j => ({
+      'JE Batch ID':         j.jeBatchId,
+      'Batch Name':          j.batchName || '',
+      'Batch Description':   j.batchDescription || '',
+      'Status':              j.statusMeaning || '',
+      'Source':              j.source || '',
+      'Period':              j.periodName || '',
+      'Ledger':              j.ledgerName || '',
+      'Journal Name':        j.journalName || '',
+      'Journal Description': j.journalDescription || '',
+      'Category':            j.category || '',
+      'Currency':            j.currencyCode || '',
+      'Conversion Rate':     j.conversionRate ?? '',
+      'Accounting Date':     j.effectiveDate || '',
+      'Creation Date':       j.creationDate || '',
+      'Entered Debit':       j.enteredDebit ?? 0,
+      'Entered Credit':      j.enteredCredit ?? 0,
+      'Accounted Debit':     j.accountedDebit ?? 0,
+      'Accounted Credit':    j.accountedCredit ?? 0,
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+    // Auto-width: approximate column widths from header length
+    const colWidths = Object.keys(rows[0] || {}).map(k => ({ wch: Math.max(k.length + 2, 12) }));
+    ws['!cols'] = colWidths;
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Journals');
+    const fileName = `Journals_${(form.getFieldValue('accountingPeriod') || 'export').replace(/[^a-zA-Z0-9-]/g, '_')}_${dayjs().format('YYYYMMDD_HHmmss')}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+    message.success(`Exported ${journals.length} journals to ${fileName}`);
   };
 
   const handleOpenBulkPost = () => {
@@ -2893,6 +2942,14 @@ const ManageJournals: React.FC = () => {
                   </Button>
                   <Button icon={<SaveOutlined />}>
                     Save...
+                  </Button>
+                  <Button
+                    icon={<ExportOutlined />}
+                    onClick={handleExportExcel}
+                    disabled={journals.length === 0}
+                    style={journals.length > 0 ? { background: '#1D7B4D', borderColor: '#1D7B4D', color: '#fff' } : {}}
+                  >
+                    Export Excel ({journals.length})
                   </Button>
                   <Button
                     icon={<BugOutlined />}
