@@ -1070,7 +1070,9 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
                       <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(gridTotals.accountedCr)}</Text>
                     </Table.Summary.Cell>
                     {/* @ts-expect-error antd6 SummaryCell lacks style */}
-                    <Table.Summary.Cell index={11} align="right" style={groupBorderRight} />
+                    <Table.Summary.Cell index={11} align="right" style={groupBorderRight}>
+                      <Text strong style={{ fontSize: 10 }}>{fmtBalance(gridTotals.accountedDr - gridTotals.accountedCr)}</Text>
+                    </Table.Summary.Cell>
                     {/* @ts-expect-error antd6 SummaryCell lacks style */}
                     <Table.Summary.Cell index={12} align="right" style={groupBorderLeft}>
                       <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(gridTotals.enteredDr)}</Text>
@@ -1079,7 +1081,9 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
                       <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(gridTotals.enteredCr)}</Text>
                     </Table.Summary.Cell>
                     {/* @ts-expect-error antd6 SummaryCell lacks style */}
-                    <Table.Summary.Cell index={14} align="right" style={groupBorderRight} />
+                    <Table.Summary.Cell index={14} align="right" style={groupBorderRight}>
+                      <Text strong style={{ fontSize: 10 }}>{fmtBalance(gridTotals.enteredDr - gridTotals.enteredCr)}</Text>
+                    </Table.Summary.Cell>
                     <Table.Summary.Cell index={15} />
                   </Table.Summary.Row>
                 </Table.Summary>
@@ -1095,15 +1099,14 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
               <Text strong style={{ fontSize: 11, color: '#1677ff', display: 'block', marginBottom: 8 }}>Accounted</Text>
               <Row gutter={0} align="middle">
                 {[
-                  { label: 'Opening Balance', value: openingBalanceRow ? (openingBalanceRow.accountedDr||0)-(openingBalanceRow.accountedCr||0) : null, border: true, color: REDWOOD.warning },
-                  { label: 'PTD Debits',      value: totals.accountedDr, border: true, color: REDWOOD.success },
-                  { label: 'PTD Credits',     value: totals.accountedCr, border: true, color: REDWOOD.primary },
-                  { label: 'Closing Balance', value: closingBalanceRow ? (closingBalanceRow.accountedDr||0)-(closingBalanceRow.accountedCr||0) : null, border: false,
-                    color: closingBalanceRow ? ((closingBalanceRow.accountedDr||0)-(closingBalanceRow.accountedCr||0))>=0 ? REDWOOD.success : REDWOOD.primary : REDWOOD.neutral600 },
-                ].map(({ label, value, border, color }) => (
+                  { label: 'Opening Balance', value: openingBalanceRow ? (openingBalanceRow.accountedDr||0)-(openingBalanceRow.accountedCr||0) : null, border: true },
+                  { label: 'PTD Debits',      value: totals.accountedDr, border: true },
+                  { label: 'PTD Credits',     value: totals.accountedCr, border: true },
+                  { label: 'Closing Balance', value: closingBalanceRow ? (closingBalanceRow.accountedDr||0)-(closingBalanceRow.accountedCr||0) : null, border: false },
+                ].map(({ label, value, border }) => (
                   <Col key={label} flex="1" style={{ textAlign: 'center', padding: '4px 12px', borderRight: border ? '1px solid #adc6ff' : undefined }}>
                     <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>{label}</Text>
-                    <Text strong style={{ fontSize: 14, color }}>{value != null ? formatNumber(value) : '—'}</Text>
+                    <Text strong style={{ fontSize: 14 }}>{value != null ? fmtBalance(value) : '—'}</Text>
                   </Col>
                 ))}
               </Row>
@@ -1112,15 +1115,14 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
               <Text strong style={{ fontSize: 11, color: '#52c41a', display: 'block', marginBottom: 8 }}>Entered</Text>
               <Row gutter={0} align="middle">
                 {[
-                  { label: 'Opening Balance', value: openingBalanceRow ? (openingBalanceRow.enteredDr||0)-(openingBalanceRow.enteredCr||0) : null, border: true, color: REDWOOD.warning },
-                  { label: 'PTD Debits',      value: totals.enteredDr, border: true, color: REDWOOD.success },
-                  { label: 'PTD Credits',     value: totals.enteredCr, border: true, color: REDWOOD.primary },
-                  { label: 'Closing Balance', value: closingBalanceRow ? (closingBalanceRow.enteredDr||0)-(closingBalanceRow.enteredCr||0) : null, border: false,
-                    color: closingBalanceRow ? ((closingBalanceRow.enteredDr||0)-(closingBalanceRow.enteredCr||0))>=0 ? REDWOOD.success : REDWOOD.primary : REDWOOD.neutral600 },
-                ].map(({ label, value, border, color }) => (
+                  { label: 'Opening Balance', value: openingBalanceRow ? (openingBalanceRow.enteredDr||0)-(openingBalanceRow.enteredCr||0) : null, border: true },
+                  { label: 'PTD Debits',      value: totals.enteredDr, border: true },
+                  { label: 'PTD Credits',     value: totals.enteredCr, border: true },
+                  { label: 'Closing Balance', value: closingBalanceRow ? (closingBalanceRow.enteredDr||0)-(closingBalanceRow.enteredCr||0) : null, border: false },
+                ].map(({ label, value, border }) => (
                   <Col key={label} flex="1" style={{ textAlign: 'center', padding: '4px 12px', borderRight: border ? '1px solid #b7eb8f' : undefined }}>
                     <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>{label}</Text>
-                    <Text strong style={{ fontSize: 14, color }}>{value != null ? formatNumber(value) : '—'}</Text>
+                    <Text strong style={{ fontSize: 14 }}>{value != null ? fmtBalance(value) : '—'}</Text>
                   </Col>
                 ))}
               </Row>
