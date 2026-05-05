@@ -2505,7 +2505,7 @@ const ManageJournals: React.FC = () => {
               },
               { title: 'Currency', dataIndex: 'currency', key: 'currency', width: 70 },
               {
-                title: 'Entered Dr',
+                title: `Entered Dr (${journal.currencyCode || headerFields.currencyCode || 'Entered'})`,
                 dataIndex: 'enteredDr',
                 key: 'enteredDr',
                 width: isEditable ? 120 : 100,
@@ -2527,7 +2527,7 @@ const ManageJournals: React.FC = () => {
                 },
               },
               {
-                title: 'Entered Cr',
+                title: `Entered Cr (${journal.currencyCode || headerFields.currencyCode || 'Entered'})`,
                 dataIndex: 'enteredCr',
                 key: 'enteredCr',
                 width: isEditable ? 120 : 100,
@@ -2548,8 +2548,8 @@ const ManageJournals: React.FC = () => {
                   return v > 0 ? formatNumber(v) : '';
                 },
               },
-              { title: 'Acc Dr', dataIndex: 'accountedDr', key: 'accountedDr', width: 90, align: 'right' as const, render: (v: number) => v > 0 ? formatNumber(v) : '' },
-              { title: 'Acc Cr', dataIndex: 'accountedCr', key: 'accountedCr', width: 90, align: 'right' as const, render: (v: number) => v > 0 ? formatNumber(v) : '' },
+              { title: `Acc Dr (${selectedLedger?.currency_code || 'Accounted'})`, dataIndex: 'accountedDr', key: 'accountedDr', width: 90, align: 'right' as const, render: (v: number) => v > 0 ? formatNumber(v) : '' },
+              { title: `Acc Cr (${selectedLedger?.currency_code || 'Accounted'})`, dataIndex: 'accountedCr', key: 'accountedCr', width: 90, align: 'right' as const, render: (v: number) => v > 0 ? formatNumber(v) : '' },
               ...(!isEditable && (journal.source || '').toLowerCase() === 'payables' ? [{
                 title: 'Transaction',
                 key: 'viewTransaction',
