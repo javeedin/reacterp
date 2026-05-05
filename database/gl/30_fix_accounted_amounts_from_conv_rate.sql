@@ -94,9 +94,19 @@ AS
     END;
 
     FUNCTION safe_get_number(p_obj JSON_OBJECT_T, p_key VARCHAR2) RETURN NUMBER IS
+        v_elem JSON_ELEMENT_T;
     BEGIN
-        IF p_obj.has(p_key) AND NOT p_obj.get(p_key).is_null() THEN
-            RETURN p_obj.get_number(p_key);
+        IF p_obj.has(p_key) THEN
+            v_elem := p_obj.get(p_key);
+            IF v_elem.is_null() THEN
+                RETURN NULL;
+            END IF;
+            IF v_elem.is_number() THEN
+                RETURN p_obj.get_number(p_key);
+            ELSIF v_elem.is_string() THEN
+                -- Handle quoted numbers: "1.35" → 1.35
+                RETURN TO_NUMBER(p_obj.get_string(p_key));
+            END IF;
         END IF;
         RETURN NULL;
     EXCEPTION
