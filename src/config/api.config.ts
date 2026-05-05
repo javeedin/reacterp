@@ -425,6 +425,14 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
     ],
   },
   {
+    id: 'gl-categories',
+    name: 'GL Categories',
+    description: 'Sync GL Journal Categories from Oracle Fusion',
+    oracleEndpoint: 'journalCategoriesLOV',
+    apexEndpoint: 'gl/categories/sync',
+    parameters: [],
+  },
+  {
     id: 'banks',
     name: 'Banks',
     description: 'Sync Banks from Oracle Fusion',
