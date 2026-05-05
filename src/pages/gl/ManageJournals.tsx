@@ -1808,7 +1808,7 @@ const ManageJournals: React.FC = () => {
                             ))}
                           </Select>
                         ) : (
-                          <Text style={{ fontSize: 13 }}>User</Text>
+                          <Text style={{ fontSize: 13 }}>{headerFields.conversionRateType || journal.conversionRateType || 'User'}</Text>
                         )}
                       </Col>
 
@@ -1824,16 +1824,17 @@ const ManageJournals: React.FC = () => {
                             onChange={v => handleHeaderFieldChange('conversionRate', v || 1)}
                           />
                         ) : (
-                          <Text style={{ fontSize: 13 }}>1</Text>
+                          <Text style={{ fontSize: 13 }}>{headerFields.conversionRate ?? journal.conversionRate ?? 1}</Text>
                         )}
                       </Col>
 
                       <Col span={10}><Text type="secondary" style={{ fontSize: 13 }}>Inverse Rate</Text></Col>
                       <Col span={14}>
                         <Text style={{ fontSize: 13 }}>
-                          {isEditable && headerFields.conversionRate > 0
-                            ? (1 / headerFields.conversionRate).toFixed(6)
-                            : '1'}
+                          {(() => {
+                            const rate = headerFields.conversionRate ?? journal.conversionRate;
+                            return rate && rate > 0 ? (1 / rate).toFixed(6) : '1';
+                          })()}
                         </Text>
                       </Col>
 
@@ -2043,7 +2044,7 @@ const ManageJournals: React.FC = () => {
                             ))}
                           </Select>
                         ) : (
-                          <Text style={{ fontSize: 13 }}>User</Text>
+                          <Text style={{ fontSize: 13 }}>{headerFields.conversionRateType || journal.conversionRateType || 'User'}</Text>
                         )}
                       </Col>
 
@@ -2059,16 +2060,17 @@ const ManageJournals: React.FC = () => {
                             onChange={v => handleHeaderFieldChange('conversionRate', v || 1)}
                           />
                         ) : (
-                          <Text style={{ fontSize: 13 }}>1</Text>
+                          <Text style={{ fontSize: 13 }}>{headerFields.conversionRate ?? journal.conversionRate ?? 1}</Text>
                         )}
                       </Col>
 
                       <Col span={10}><Text type="secondary" style={{ fontSize: 13 }}>Inverse Rate</Text></Col>
                       <Col span={14}>
                         <Text style={{ fontSize: 13 }}>
-                          {isEditable && headerFields.conversionRate > 0
-                            ? (1 / headerFields.conversionRate).toFixed(6)
-                            : '1'}
+                          {(() => {
+                            const rate = headerFields.conversionRate ?? journal.conversionRate;
+                            return rate && rate > 0 ? (1 / rate).toFixed(6) : '1';
+                          })()}
                         </Text>
                       </Col>
                     </Row>
