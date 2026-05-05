@@ -679,14 +679,13 @@ const APModule: React.FC = () => {
                 <Table.Summary.Cell index={0} colSpan={3}>
                   <Text strong>Total ({visible.length} suppliers)</Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={3} />
-                <Table.Summary.Cell index={4} />
-                <Table.Summary.Cell index={5}>
+                <Table.Summary.Cell index={3} align="right" />
+                <Table.Summary.Cell index={4} align="right">
                   <Text strong style={{ color: REDWOOD.primary }}>
                     AED {totalOut.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                   </Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={6} />
+                <Table.Summary.Cell index={5} />
               </Table.Summary.Row>
             );
           }}
