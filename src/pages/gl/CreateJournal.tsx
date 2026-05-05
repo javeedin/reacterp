@@ -80,9 +80,8 @@ const REDWOOD = {
 
 // Currency interface from API
 interface Currency {
-  currency_code: string;
+  code: string;
   name: string;
-  enabled_flag: string;
 }
 
 // Ledger interface from API
@@ -456,7 +455,7 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
   useEffect(() => {
     const fetchCurrencies = async () => {
       try {
-        const response = await fetch(`${APEX_DB_CONFIG.baseUrl}/currencies?enabled=Y`);
+        const response = await fetch(`${APEX_DB_CONFIG.baseUrl}/currencies`);
         const data = await response.json();
         if (data.items && data.items.length > 0) {
           setCurrencies(data.items);
@@ -1813,8 +1812,8 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
                       >
                         {currencies.length > 0
                           ? currencies.map(c => (
-                              <Option key={c.currency_code} value={c.currency_code}>
-                                {c.currency_code}
+                              <Option key={c.code} value={c.code}>
+                                {c.code}
                               </Option>
                             ))
                           : (
