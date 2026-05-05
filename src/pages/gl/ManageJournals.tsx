@@ -3871,7 +3871,7 @@ const ManageJournals: React.FC = () => {
               </div>
 
               {/* Batch details */}
-              <div style={{ background: REDWOOD.surfaceSecondary || '#f7f7f7', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 13 }}>
+              <div style={{ background: '#f7f7f7', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 13 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '4px 8px' }}>
                   <Typography.Text type="secondary">Batch Name</Typography.Text>
                   <Typography.Text strong>{deleteBatchTarget.batchName}</Typography.Text>
