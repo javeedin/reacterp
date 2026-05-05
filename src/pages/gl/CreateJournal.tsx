@@ -77,6 +77,13 @@ const REDWOOD = {
   surface: '#FFFFFF',
 };
 
+// Currency interface from API
+interface Currency {
+  currency_code: string;
+  name: string;
+  enabled_flag: string;
+}
+
 // Ledger interface from API
 interface Ledger {
   ledger_id: number;
@@ -321,6 +328,10 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
   const [loadingLedgers, setLoadingLedgers] = useState(false);
   const [loadingPeriods, setLoadingPeriods] = useState(false);
 
+  // Currency list
+  const [currencies, setCurrencies] = useState<Currency[]>([]);
+  const [deleteBatchModalVisible, setDeleteBatchModalVisible] = useState(false);
+
   // Collapsible states
   const [batchExpanded, setBatchExpanded] = useState(true);
   const [journalExpanded, setJournalExpanded] = useState(true);
@@ -434,6 +445,22 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
       }
     };
     fetchLedgers();
+  }, []);
+
+  // Fetch currencies on mount
+  useEffect(() => {
+    const fetchCurrencies = async () => {
+      try {
+        const response = await fetch(`${APEX_DB_CONFIG.baseUrl}/currencies?enabled=Y`);
+        const data = await response.json();
+        if (data.items && data.items.length > 0) {
+          setCurrencies(data.items);
+        }
+      } catch (error) {
+        console.error('Error fetching currencies:', error);
+      }
+    };
+    fetchCurrencies();
   }, []);
 
   // Fetch periods when ledger changes
@@ -569,6 +596,13 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
       balanceType: 'Actual',
       accountingPeriod: batchData.accountingPeriod,
     });
+  };
+
+  // Delete entire batch (reset form)
+  const handleDeleteBatch = () => {
+    handleResetForNewJournal();
+    setDeleteBatchModalVisible(false);
+    message.success('Journal batch deleted');
   };
 
   // Open account selector for a line
@@ -1383,7 +1417,7 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
       ],
     },
     {
-      title: `Accounted (${journalData.currency})`,
+      title: `Accounted (${selectedLedger?.currency_code || journalData.currency})`,
       children: [
         {
           title: 'Debit',
@@ -1708,10 +1742,25 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
                         onChange={(val) => setJournalData({ ...journalData, currency: val })}
                         size="small"
                         style={{ width: '100%' }}
+                        showSearch
+                        filterOption={(input, option) =>
+                          String(option?.children ?? '').toLowerCase().includes(input.toLowerCase())
+                        }
                       >
-                        <Option value="AED">AED UAE Dirham</Option>
-                        <Option value="USD">USD US Dollar</Option>
-                        <Option value="INR">INR Indian Rupee</Option>
+                        {currencies.length > 0
+                          ? currencies.map(c => (
+                              <Option key={c.currency_code} value={c.currency_code}>
+                                {c.currency_code}{c.name ? ` ${c.name}` : ''}
+                              </Option>
+                            ))
+                          : (
+                            <>
+                              <Option value="AED">AED UAE Dirham</Option>
+                              <Option value="USD">USD US Dollar</Option>
+                              <Option value="INR">INR Indian Rupee</Option>
+                            </>
+                          )
+                        }
                       </Select>
                     </Col>
 
@@ -2036,6 +2085,16 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
                   {batchExpanded ? 'Show Less' : 'Show More'}
                 </Text>
               </Space>
+              <Tooltip title="Delete this journal batch">
+                <Button
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  onClick={e => { e.stopPropagation(); setDeleteBatchModalVisible(true); }}
+                >
+                  Delete Batch
+                </Button>
+              </Tooltip>
             </div>
 
             <div style={{ display: batchExpanded ? 'block' : 'none' }}>
@@ -2266,6 +2325,24 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
           .ant-dropdown-button > .ant-btn:first-child { background: ${REDWOOD.warning}; border-color: ${REDWOOD.warning}; }
           .ant-dropdown-button > .ant-btn:last-child { background: ${REDWOOD.warning}; border-color: ${REDWOOD.warning}; border-left-color: rgba(255,255,255,0.3); }
         `}</style>
+
+        {/* Delete Batch Confirmation Modal */}
+        <Modal
+          title={<Space><DeleteOutlined style={{ color: REDWOOD.primary }} /><span>Delete Journal Batch</span></Space>}
+          open={deleteBatchModalVisible}
+          onCancel={() => setDeleteBatchModalVisible(false)}
+          footer={
+            <Space>
+              <Button onClick={() => setDeleteBatchModalVisible(false)}>Cancel</Button>
+              <Button danger type="primary" icon={<DeleteOutlined />} onClick={handleDeleteBatch}>
+                Delete Batch
+              </Button>
+            </Space>
+          }
+          width={420}
+        >
+          <Text>Are you sure you want to delete journal batch <Text strong>{batchData.batchName}</Text>? This will clear all journal entries.</Text>
+        </Modal>
 
         {/* Account Selector Modal */}
         <AccountSelector
